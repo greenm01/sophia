@@ -142,17 +142,18 @@ Split policy from the compositor process.
 Design and prototype compositor-first input for X11 clients.
 
 **Specification**
-- [ ] Define the smallest XLibre routed-input extension request.
-- [ ] Include target XID, local coordinates, device identity, event kind, and
+- [x] Define the smallest XLibre routed-input extension request.
+- [x] Include target XID, local coordinates, device identity, event kind, and
   serial.
-- [ ] Preserve X11 grabs, focus, XI2 semantics, and Xnamespace checks inside
+- [x] Preserve X11 grabs, focus, XI2 semantics, and Xnamespace checks inside
   XLibre.
-- [ ] Reject any design that sends arbitrary events directly to clients.
+- [x] Reject any design that sends arbitrary events directly to clients.
 
 **Prototype**
-- [ ] Deliver flat, untransformed pointer events first.
+- [x] Build flat, untransformed routed-input request adapter.
+- [ ] Deliver flat, untransformed pointer events through an XLibre extension.
 - [ ] Add transformed hit-test routes once the flat path is proven.
-- [ ] Add tests for stale target windows, denied namespaces, grabs, and focus.
+- [x] Add tests for stale target windows, denied namespaces, grabs, and focus.
 
 ---
 

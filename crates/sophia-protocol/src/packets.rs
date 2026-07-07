@@ -241,6 +241,34 @@ pub enum InputRouteOutcome {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct XLibreRoutedInputRequest {
+    pub serial: u64,
+    pub seat: SeatId,
+    pub device: DeviceId,
+    pub time_msec: u64,
+    pub target_window: XWindowId,
+    pub local_position: Point,
+    pub kind: InputEventKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct XLibreRoutedInputDecision {
+    pub serial: u64,
+    pub target_window: XWindowId,
+    pub outcome: XLibreRoutedInputOutcome,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum XLibreRoutedInputOutcome {
+    Accepted,
+    RejectedStaleTarget,
+    RejectedDeniedNamespace,
+    RejectedActiveGrab,
+    RejectedFocusPolicy,
+    RejectedUnsupportedEvent,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct LayoutTransaction {
     pub transaction: TransactionId,
     pub requested_sizes: Vec<SurfaceSizeRequest>,
@@ -556,5 +584,48 @@ mod tests {
         assert_eq!(transaction.render_positions.len(), 1);
         assert_eq!(transaction.render_positions[0].z_index, 3);
         assert_eq!(transaction.timeout_msec, 250);
+    }
+
+    #[test]
+    fn xlibre_routed_input_request_is_targeted_but_not_direct_delivery() {
+        let request = XLibreRoutedInputRequest {
+            serial: 99,
+            seat: SeatId::from_raw(1),
+            device: DeviceId::from_raw(2),
+            time_msec: 1_000,
+            target_window: XWindowId::new(0x42, 1),
+            local_position: Point { x: 12.5, y: 9.0 },
+            kind: InputEventKind::PointerButton {
+                button: 1,
+                pressed: true,
+            },
+        };
+
+        assert_eq!(request.serial, 99);
+        assert_eq!(request.target_window, XWindowId::new(0x42, 1));
+        assert_eq!(request.local_position.x, 12.5);
+        assert_eq!(request.device, DeviceId::from_raw(2));
+        assert_eq!(
+            request.kind,
+            InputEventKind::PointerButton {
+                button: 1,
+                pressed: true,
+            }
+        );
+    }
+
+    #[test]
+    fn xlibre_routed_input_decision_carries_server_side_rejection() {
+        let decision = XLibreRoutedInputDecision {
+            serial: 100,
+            target_window: XWindowId::new(0x55, 3),
+            outcome: XLibreRoutedInputOutcome::RejectedDeniedNamespace,
+        };
+
+        assert_eq!(decision.serial, 100);
+        assert_eq!(
+            decision.outcome,
+            XLibreRoutedInputOutcome::RejectedDeniedNamespace
+        );
     }
 }

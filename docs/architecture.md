@@ -177,6 +177,28 @@ The extension must not become "send arbitrary event directly to client." XLibre
 still owns X11 delivery semantics. Sophia only supplies the visual target and
 local coordinates that XLibre cannot compute by itself.
 
+The smallest useful extension request is:
+
+```text
+XLibreRoutedInput {
+    serial,
+    seat,
+    device,
+    time_msec,
+    target_xid,
+    local_x,
+    local_y,
+    event_kind
+}
+```
+
+This request is an alternate target selection path, not a delivery bypass.
+XLibre must still reject stale XIDs, namespace violations, active grabs, focus
+policy violations, and unsupported event forms before entering normal DIX
+delivery. The first Sophia prototype only builds this request for flat,
+identity-transform routes. Transformed hit-test delivery remains unsupported
+until the flat route is proven against XLibre.
+
 ### Xnamespace Portals
 
 Namespaces are private by default. Cross-namespace operations go through portal

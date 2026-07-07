@@ -243,12 +243,18 @@ integration test also starts the WM process twice around the same
 `HeadlessEngine`, proving the engine can preserve committed layers while the WM
 is absent and then accept a new transaction after the WM restarts.
 
+The routed-input seam now has its first data contract. `XLibreRoutedInputRequest`
+carries serial, seat, device, time, target XID, local coordinates, and event
+kind. `XLibreRoutedInputDecision` keeps the server-side decision explicit:
+accepted, stale target, denied namespace, active grab, focus policy, or
+unsupported event. Sophia X Bridge can build the request only for flat,
+identity-transform routes today; transformed input remains intentionally
+unsupported until the flat path is proven against an XLibre extension.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new
   XLibre DDX backend during the first prototype?
-- What is the smallest routed-input extension that preserves X11 grabs, focus,
-  XI2, and Xnamespace checks?
 - How much frame-perfect resize can be achieved with XComposite/Damage alone?
 - Where should the X11 WM facade live: Sophia WM, Sophia X Bridge, or a separate
   helper?

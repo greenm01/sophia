@@ -4,8 +4,10 @@ use std::thread;
 use std::time::Duration;
 
 use sophia_protocol::{
-    BufferSource, DamageFrame, LayerSnapshot, NamespaceId, OutputId, Rect, Region, Size, SurfaceId,
-    SurfaceSnapshot, Transform, XWindowId, XWindowMirror,
+    BufferSource, DamageFrame, InputEventPacket, InputRoute, InputRouteOutcome, LayerSnapshot,
+    NamespaceId, OutputId, Rect, Region, Size, SurfaceId, SurfaceSnapshot, Transform,
+    XLibreRoutedInputDecision, XLibreRoutedInputOutcome, XLibreRoutedInputRequest, XWindowId,
+    XWindowMirror,
 };
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
@@ -19,6 +21,59 @@ use x11rb::protocol::xproto::{
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct XMirrorState {
     windows: Vec<XWindowMirror>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RoutedInputAdapterError {
+    SerialMismatch,
+    NoTarget,
+    StaleTarget,
+    Denied,
+    MissingTargetWindow,
+    MissingLocalPosition,
+    UnsupportedTransform,
+}
+
+pub fn build_flat_routed_input_request(
+    event: &InputEventPacket,
+    route: &InputRoute,
+) -> Result<XLibreRoutedInputRequest, RoutedInputAdapterError> {
+    if event.serial != route.input_serial {
+        return Err(RoutedInputAdapterError::SerialMismatch);
+    }
+
+    match route.outcome {
+        InputRouteOutcome::Routed => {}
+        InputRouteOutcome::NoTarget => return Err(RoutedInputAdapterError::NoTarget),
+        InputRouteOutcome::StaleTarget => return Err(RoutedInputAdapterError::StaleTarget),
+        InputRouteOutcome::Denied => return Err(RoutedInputAdapterError::Denied),
+    }
+
+    if route.transform != Transform::IDENTITY {
+        return Err(RoutedInputAdapterError::UnsupportedTransform);
+    }
+
+    let target_window = route
+        .target_window
+        .filter(|window| window.is_valid())
+        .ok_or(RoutedInputAdapterError::MissingTargetWindow)?;
+    let local_position = route
+        .local_position
+        .ok_or(RoutedInputAdapterError::MissingLocalPosition)?;
+
+    Ok(XLibreRoutedInputRequest {
+        serial: event.serial,
+        seat: event.seat,
+        device: event.device,
+        time_msec: event.time_msec,
+        target_window,
+        local_position,
+        kind: event.kind,
+    })
+}
+
+pub fn routed_input_decision_allows_delivery(decision: &XLibreRoutedInputDecision) -> bool {
+    decision.outcome == XLibreRoutedInputOutcome::Accepted
 }
 
 impl XMirrorState {
@@ -1646,6 +1701,7 @@ fn nonzero_window(window: Window) -> Option<Window> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sophia_protocol::{DeviceId, InputEventKind, Point, SeatId};
 
     fn status(extension: RequiredExtension, present: bool) -> ExtensionStatus {
         ExtensionStatus {
@@ -2272,5 +2328,136 @@ mod tests {
                 update: CompositeUpdateMode::Manual,
             }]
         );
+    }
+
+    #[test]
+    fn builds_flat_routed_input_request_for_xlibre() {
+        let event = input_event(10);
+        let route = input_route(
+            10,
+            InputRouteOutcome::Routed,
+            Some(wrap_xid(0x30)),
+            Some(Point { x: 12.0, y: 8.0 }),
+            Transform::IDENTITY,
+        );
+
+        let request = build_flat_routed_input_request(&event, &route).unwrap();
+
+        assert_eq!(request.serial, 10);
+        assert_eq!(request.seat, SeatId::from_raw(1));
+        assert_eq!(request.device, DeviceId::from_raw(2));
+        assert_eq!(request.target_window, wrap_xid(0x30));
+        assert_eq!(request.local_position, Point { x: 12.0, y: 8.0 });
+        assert_eq!(
+            request.kind,
+            InputEventKind::PointerButton {
+                button: 1,
+                pressed: true,
+            }
+        );
+    }
+
+    #[test]
+    fn flat_routed_input_rejects_transformed_routes() {
+        let event = input_event(11);
+        let route = input_route(
+            11,
+            InputRouteOutcome::Routed,
+            Some(wrap_xid(0x30)),
+            Some(Point { x: 1.0, y: 2.0 }),
+            Transform {
+                matrix: [
+                    2.0, 0.0, 0.0, //
+                    0.0, 2.0, 0.0, //
+                    0.0, 0.0, 1.0,
+                ],
+            },
+        );
+
+        assert_eq!(
+            build_flat_routed_input_request(&event, &route),
+            Err(RoutedInputAdapterError::UnsupportedTransform)
+        );
+    }
+
+    #[test]
+    fn flat_routed_input_rejects_stale_target_before_xlibre_request() {
+        let event = input_event(12);
+        let route = input_route(
+            12,
+            InputRouteOutcome::StaleTarget,
+            Some(wrap_xid(0x30)),
+            Some(Point { x: 1.0, y: 2.0 }),
+            Transform::IDENTITY,
+        );
+
+        assert_eq!(
+            build_flat_routed_input_request(&event, &route),
+            Err(RoutedInputAdapterError::StaleTarget)
+        );
+    }
+
+    #[test]
+    fn xlibre_decision_blocks_denied_namespace_grab_and_focus_cases() {
+        for outcome in [
+            XLibreRoutedInputOutcome::RejectedDeniedNamespace,
+            XLibreRoutedInputOutcome::RejectedActiveGrab,
+            XLibreRoutedInputOutcome::RejectedFocusPolicy,
+            XLibreRoutedInputOutcome::RejectedStaleTarget,
+        ] {
+            let decision = XLibreRoutedInputDecision {
+                serial: 13,
+                target_window: wrap_xid(0x30),
+                outcome,
+            };
+
+            assert!(!routed_input_decision_allows_delivery(&decision));
+        }
+    }
+
+    #[test]
+    fn xlibre_decision_accepts_only_server_accepted_delivery() {
+        let decision = XLibreRoutedInputDecision {
+            serial: 14,
+            target_window: wrap_xid(0x30),
+            outcome: XLibreRoutedInputOutcome::Accepted,
+        };
+
+        assert!(routed_input_decision_allows_delivery(&decision));
+    }
+
+    fn input_event(serial: u64) -> InputEventPacket {
+        InputEventPacket {
+            serial,
+            seat: SeatId::from_raw(1),
+            device: DeviceId::from_raw(2),
+            time_msec: 1_000,
+            kind: InputEventKind::PointerButton {
+                button: 1,
+                pressed: true,
+            },
+            global_position: Some(Point { x: 100.0, y: 200.0 }),
+            target_surface: Some(SurfaceId::new(3, 1)),
+            target_window: Some(wrap_xid(0x30)),
+            local_position: Some(Point { x: 12.0, y: 8.0 }),
+        }
+    }
+
+    fn input_route(
+        serial: u64,
+        outcome: InputRouteOutcome,
+        target_window: Option<XWindowId>,
+        local_position: Option<Point>,
+        transform: Transform,
+    ) -> InputRoute {
+        InputRoute {
+            input_serial: serial,
+            target_surface: Some(SurfaceId::new(3, 1)),
+            target_window,
+            global_position: Point { x: 100.0, y: 200.0 },
+            local_position,
+            transform,
+            outcome,
+        }
     }
 }

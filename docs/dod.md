@@ -218,6 +218,40 @@ Fields should describe:
 This packet is Sophia Engine authority, but final X11 delivery remains XLibre
 authority.
 
+### XLibreRoutedInputRequest
+
+The routed-input request is the smallest data packet Sophia should send to an
+XLibre routed-input extension.
+
+Fields should describe:
+
+- input serial
+- seat and device
+- event time
+- target XID
+- local X/Y coordinates in the target
+- event kind
+
+It must not include a client connection, destination socket, or arbitrary
+serialized X event. XLibre uses this packet to replace only the visual
+hit-test target that legacy X11 cannot compute after compositor transforms.
+Grabs, focus policy, XI2 semantics, and Xnamespace checks remain XLibre
+authority.
+
+### XLibreRoutedInputDecision
+
+XLibre's answer is a decision packet.
+
+Fields should describe:
+
+- input serial
+- target XID
+- accepted or rejected outcome
+
+Expected rejection outcomes include stale target, denied namespace, active grab,
+focus policy, and unsupported event. Sophia treats every rejection as a closed
+route and never falls back to direct client delivery.
+
 ### LayoutTransaction
 
 The WM emits layout transactions, not one-off mutations.
