@@ -54,6 +54,30 @@ portal     namespace-crossing transfer policy
 Types do not perform work. State owns storage. Systems transform data. Protocols
 move data. Bridges translate authority from one domain to another.
 
+## TEA Where It Applies
+
+The Elm Architecture is a good fit for policy processes, not for every part of
+Sophia.
+
+Use this shape for Sophia WM and portals:
+
+```text
+Model + Event/Snapshot -> update -> Command Packet
+```
+
+Examples:
+
+- WM model plus `LayoutNodeSnapshot` values produces a `LayoutTransaction`.
+- Portal transfer state plus user or policy events produces allow, deny, revoke,
+  or handoff packets.
+
+Do not force Sophia Engine into a global TEA loop. The compositor is the
+security and performance authority. It should keep explicit state tables,
+generation-checked IDs, spatial indexes, damage queues, frame plans, and
+renderer/backend systems. Its public boundaries may still speak in snapshots and
+commands, but its inner loops should stay allocation-light, cache-conscious, and
+auditable.
+
 ## Candidate IDs
 
 Typed IDs prevent one domain's integer from masquerading as another.
@@ -326,6 +350,8 @@ The hot paths are:
 Keep them allocation-light and branch-obvious. Slow policy work belongs in the
 WM or portal processes. X11 protocol complexity belongs in XLibre or Sophia X
 Bridge, not inside the compositor's inner frame path.
+
+Policy can be TEA-style. Compositor hot paths should be table/system style.
 
 ## Invariants
 

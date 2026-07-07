@@ -39,6 +39,25 @@ Sophia WM              Sophia X Bridge
 
 ## Load-Bearing Boundaries
 
+### TEA Boundary Rule
+
+Sophia uses The Elm Architecture as a policy-boundary discipline where it fits:
+snapshots and events enter a policy process, that process updates its private
+model, and it emits explicit command packets back to the authority that can
+execute them.
+
+This applies strongly to Sophia WM and portals. The WM consumes opaque layout
+node snapshots and focus/workspace events, updates its layout model, and emits
+`LayoutTransaction` commands. Portals consume transfer requests and policy
+events, update transfer state, and emit allow, deny, revoke, or handoff
+commands.
+
+This does not apply as a universal compositor architecture. Sophia Engine is
+performance and security centric: it owns libinput, scene graph state,
+hit-testing, damage tracking, frame scheduling, and final scanout. Its hot paths
+should be data-oriented systems over owned tables and precomputed snapshots, not
+a single app-wide message loop.
+
 ### Compositor Strategy
 
 Sophia Engine should follow Smithay-style compositor structure, using niri as a

@@ -45,6 +45,37 @@ The same data/logic split applies in Rust:
 Avoid placing behavior on data records unless it is a pure helper such as
 validation, conversion, or formatting.
 
+## TEA Policy Style
+
+Use TEA-style structure for policy components:
+
+```text
+model + event/snapshot -> update -> command
+```
+
+Good fits:
+
+- Sophia WM layout, workspace, and focus policy.
+- Portal transfer policy.
+- Session or launcher policy hints.
+
+Poor fits:
+
+- compositor hit-testing
+- frame scheduling
+- damage aggregation
+- renderer/backend execution
+- XLibre event mirroring
+
+For TEA-style modules, keep update functions deterministic where practical.
+They should consume passive packets and emit command packets. They should not
+reach into compositor, XLibre, or portal-owned state through callbacks.
+
+For compositor code, prefer explicit data-oriented systems over a global message
+loop. The engine is a security boundary and a hot path; clarity of authority,
+bounded allocation, and predictable control flow matter more than architectural
+uniformity.
+
 ## Naming
 
 Use ordinary Rust naming:

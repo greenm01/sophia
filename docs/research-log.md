@@ -108,6 +108,18 @@ state are rendered by the compositor or compositor shell from sanitized chrome
 descriptors. This keeps complex layout policy useful without granting it X11
 god-mode or namespace visibility.
 
+## 2026-07-07: TEA Boundary Discipline
+
+Sophia will use The Elm Architecture where it matches the authority boundary:
+policy components consume snapshots/events, update private policy state, and
+emit command packets. This is the default style for Sophia WM, portals, and
+session policy.
+
+Sophia Engine is not a global TEA application. It is the compositor authority
+and must stay performance and security centric: owned tables, typed IDs,
+generation checks, spatial indexes, damage queues, renderer systems, and
+auditable hot paths.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new
