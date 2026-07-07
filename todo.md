@@ -90,7 +90,7 @@ snapshots.
 
 **Composite and damage**
 - [x] Redirect relevant windows with XComposite.
-- [ ] Name or otherwise access redirected pixmaps.
+- [x] Name or otherwise access redirected pixmaps.
 - [ ] Track Damage events per surface.
 - [ ] Convert X damage into Sophia `DamageFrame` inputs.
 

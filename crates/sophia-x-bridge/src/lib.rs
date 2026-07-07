@@ -91,7 +91,11 @@ impl XMirrorState {
         }
     }
 
-    pub fn emit_surfaces(&self, surfaces: &mut SurfaceIdMap) -> Vec<SurfaceSnapshot> {
+    pub fn emit_surfaces(
+        &self,
+        surfaces: &mut SurfaceIdMap,
+        pixmaps: &CompositePixmapMap,
+    ) -> Vec<SurfaceSnapshot> {
         self.windows
             .iter()
             .filter(|mirror| mirror.client.is_some())
@@ -104,15 +108,21 @@ impl XMirrorState {
                 mapped: mirror.mapped,
                 stack_rank: mirror.stack_rank,
                 geometry: mirror.geometry,
-                source: BufferSource::None,
+                source: mirror.client.map_or(BufferSource::None, |client| {
+                    pixmaps.source_for_window(client)
+                }),
                 damage: Region::single(mirror.geometry),
                 generation: mirror.stale_metadata,
             })
             .collect()
     }
 
-    pub fn emit_layers(&self, surfaces: &mut SurfaceIdMap) -> Vec<LayerSnapshot> {
-        self.emit_surfaces(surfaces)
+    pub fn emit_layers(
+        &self,
+        surfaces: &mut SurfaceIdMap,
+        pixmaps: &CompositePixmapMap,
+    ) -> Vec<LayerSnapshot> {
+        self.emit_surfaces(surfaces, pixmaps)
             .into_iter()
             .filter(|surface| surface.mapped && !surface.geometry.is_empty())
             .map(|surface| LayerSnapshot {
@@ -279,6 +289,32 @@ impl SurfaceIdMap {
     }
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct CompositePixmapMap {
+    pixmaps: BTreeMap<XWindowId, u32>,
+}
+
+impl CompositePixmapMap {
+    pub fn pixmap_for_window(&self, window: XWindowId) -> Option<u32> {
+        self.pixmaps.get(&window).copied()
+    }
+
+    pub fn insert_named_pixmap(&mut self, window: XWindowId, pixmap: u32) -> Option<u32> {
+        self.pixmaps.insert(window, pixmap)
+    }
+
+    pub fn remove_window(&mut self, window: XWindowId) -> Option<u32> {
+        self.pixmaps.remove(&window)
+    }
+
+    pub fn source_for_window(&self, window: XWindowId) -> BufferSource {
+        self.pixmap_for_window(window)
+            .map_or(BufferSource::None, |pixmap| BufferSource::XPixmap {
+                pixmap,
+            })
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum XMirrorEvent {
     Map {
@@ -406,6 +442,14 @@ pub enum XBridgeError {
         window: u32,
         message: String,
     },
+    CompositeNamePixmap {
+        window: u32,
+        pixmap: u32,
+        message: String,
+    },
+    GenerateId {
+        message: String,
+    },
 }
 
 impl fmt::Display for XBridgeError {
@@ -459,6 +503,19 @@ impl fmt::Display for XBridgeError {
                     f,
                     "failed to redirect X window {window:#x} with XComposite: {message}"
                 )
+            }
+            Self::CompositeNamePixmap {
+                window,
+                pixmap,
+                message,
+            } => {
+                write!(
+                    f,
+                    "failed to name XComposite pixmap {pixmap:#x} for X window {window:#x}: {message}"
+                )
+            }
+            Self::GenerateId { message } => {
+                write!(f, "failed to allocate an X resource ID: {message}")
             }
         }
     }
@@ -644,6 +701,45 @@ where
                 window: target.window.xid(),
                 message: error.to_string(),
             })?;
+    }
+
+    Ok(())
+}
+
+pub fn name_composite_pixmaps<C>(
+    connection: &C,
+    targets: &[CompositeRedirectTarget],
+    pixmaps: &mut CompositePixmapMap,
+) -> Result<(), XBridgeError>
+where
+    C: Connection,
+{
+    for target in targets {
+        if pixmaps.pixmap_for_window(target.window).is_some() {
+            continue;
+        }
+
+        let pixmap = connection
+            .generate_id()
+            .map_err(|error| XBridgeError::GenerateId {
+                message: error.to_string(),
+            })?;
+
+        connection
+            .composite_name_window_pixmap(target.window.xid(), pixmap)
+            .map_err(|error| XBridgeError::CompositeNamePixmap {
+                window: target.window.xid(),
+                pixmap,
+                message: error.to_string(),
+            })?
+            .check()
+            .map_err(|error| XBridgeError::CompositeNamePixmap {
+                window: target.window.xid(),
+                pixmap,
+                message: error.to_string(),
+            })?;
+
+        pixmaps.insert_named_pixmap(target.window, pixmap);
     }
 
     Ok(())
@@ -1114,6 +1210,23 @@ mod tests {
     }
 
     #[test]
+    fn composite_pixmap_map_returns_buffer_sources() {
+        let mut pixmaps = CompositePixmapMap::default();
+        let window = wrap_xid(0x20);
+
+        assert_eq!(pixmaps.source_for_window(window), BufferSource::None);
+
+        pixmaps.insert_named_pixmap(window, 0x9000);
+
+        assert_eq!(
+            pixmaps.source_for_window(window),
+            BufferSource::XPixmap { pixmap: 0x9000 }
+        );
+        assert_eq!(pixmaps.remove_window(window), Some(0x9000));
+        assert_eq!(pixmaps.pixmap_for_window(window), None);
+    }
+
+    #[test]
     fn emits_surface_and_layer_snapshots_for_detected_clients() {
         let mut state = XMirrorState::default();
         let mut window = mirror(0x20, None, 4);
@@ -1129,8 +1242,9 @@ mod tests {
         state.ingest_window(window);
 
         let mut surfaces = SurfaceIdMap::default();
-        let snapshots = state.emit_surfaces(&mut surfaces);
-        let layers = state.emit_layers(&mut surfaces);
+        let pixmaps = CompositePixmapMap::default();
+        let snapshots = state.emit_surfaces(&mut surfaces, &pixmaps);
+        let layers = state.emit_layers(&mut surfaces, &pixmaps);
 
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].window, wrap_xid(0x20));
@@ -1138,6 +1252,29 @@ mod tests {
         assert_eq!(layers.len(), 1);
         assert_eq!(layers[0].surface, snapshots[0].surface);
         assert_eq!(layers[0].source, BufferSource::None);
+    }
+
+    #[test]
+    fn emits_named_pixmap_sources_for_detected_clients() {
+        let mut state = XMirrorState::default();
+        let mut frame = mirror(0x20, None, 4);
+        frame.mapped = true;
+        frame.client = Some(wrap_xid(0x30));
+        frame.toplevel = Some(wrap_xid(0x20));
+        state.ingest_window(frame);
+
+        let mut surfaces = SurfaceIdMap::default();
+        let mut pixmaps = CompositePixmapMap::default();
+        pixmaps.insert_named_pixmap(wrap_xid(0x30), 0x9000);
+
+        let snapshots = state.emit_surfaces(&mut surfaces, &pixmaps);
+        let layers = state.emit_layers(&mut surfaces, &pixmaps);
+
+        assert_eq!(
+            snapshots[0].source,
+            BufferSource::XPixmap { pixmap: 0x9000 }
+        );
+        assert_eq!(layers[0].source, BufferSource::XPixmap { pixmap: 0x9000 });
     }
 
     #[test]

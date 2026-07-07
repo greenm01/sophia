@@ -157,6 +157,13 @@ mirror and redirects them with XComposite manual updates. The bridge negotiates
 the Composite version before redirecting. Naming redirected pixmaps and wiring
 those pixmap IDs into `SurfaceSnapshot` remains the next Composite step.
 
+The bridge can now name redirected client windows with XComposite
+`NameWindowPixmap` and store the resulting pixmap IDs in a compositor-owned
+`CompositePixmapMap`. Mirrored surfaces use the visible/toplevel mirror window
+for stable Sophia surface identity, but use the detected client XID to resolve
+their `BufferSource::XPixmap`. Importing or reading those pixmaps into a real
+renderer texture remains Phase 4 work.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new
