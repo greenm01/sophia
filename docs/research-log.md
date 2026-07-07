@@ -136,6 +136,12 @@ wraps raw XIDs as `XWindowId` values with an initial mirror generation, and
 records map state from `GetWindowAttributes`. Event tracking, ICCCM/EWMH
 top-level detection, and Composite/Damage redirection are still pending.
 
+Mirror event tracking now normalizes X11 notify events into Sophia-owned
+`XMirrorEvent` values. Applying those events updates map state, parent/child
+links, destroy cleanup, stack rank, and metadata staleness without exposing raw
+X11 event objects to the rest of Sophia. Live event selection and dispatch are
+still separate bridge-loop work.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

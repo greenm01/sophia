@@ -1,9 +1,10 @@
 use core::fmt;
 use std::collections::{BTreeSet, VecDeque};
 
-use sophia_protocol::{LayerSnapshot, NamespaceId, XWindowId, XWindowMirror};
+use sophia_protocol::{LayerSnapshot, NamespaceId, Rect, XWindowId, XWindowMirror};
 use x11rb::connection::Connection;
-use x11rb::protocol::xproto::{ConnectionExt as _, MapState, Window};
+use x11rb::protocol::Event;
+use x11rb::protocol::xproto::{ConnectionExt as _, MapState, Place, Window};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct XMirrorState {
@@ -19,8 +20,196 @@ impl XMirrorState {
         &self.windows
     }
 
+    pub fn apply_event(&mut self, event: XMirrorEvent) {
+        match event {
+            XMirrorEvent::Map { window } => {
+                if let Some(mirror) = self.window_mut(window) {
+                    mirror.mapped = true;
+                }
+            }
+            XMirrorEvent::Unmap { window } => {
+                if let Some(mirror) = self.window_mut(window) {
+                    mirror.mapped = false;
+                }
+            }
+            XMirrorEvent::Destroy { window } => {
+                self.remove_window(window);
+            }
+            XMirrorEvent::Configure {
+                window,
+                above_sibling,
+                ..
+            } => {
+                self.apply_restack(window, above_sibling);
+                self.mark_metadata_stale(window);
+            }
+            XMirrorEvent::Reparent { window, parent } => {
+                self.reparent_window(window, parent);
+                self.mark_metadata_stale(window);
+            }
+            XMirrorEvent::Property { window, .. } => {
+                self.mark_metadata_stale(window);
+            }
+            XMirrorEvent::Restack { window, place } => {
+                self.apply_circulate(window, place);
+                self.mark_metadata_stale(window);
+            }
+        }
+    }
+
     pub fn emit_layers(&self) -> Vec<LayerSnapshot> {
         Vec::new()
+    }
+
+    fn window_mut(&mut self, window: XWindowId) -> Option<&mut XWindowMirror> {
+        self.windows
+            .iter_mut()
+            .find(|mirror| mirror.window == window)
+    }
+
+    fn remove_window(&mut self, window: XWindowId) {
+        self.windows.retain(|mirror| mirror.window != window);
+        for mirror in &mut self.windows {
+            mirror.children.retain(|child| *child != window);
+        }
+    }
+
+    fn reparent_window(&mut self, window: XWindowId, parent: Option<XWindowId>) {
+        for mirror in &mut self.windows {
+            mirror.children.retain(|child| *child != window);
+        }
+
+        if let Some(mirror) = self.window_mut(window) {
+            mirror.parent = parent;
+        }
+
+        if let Some(parent) = parent {
+            if let Some(parent) = self.window_mut(parent) {
+                if !parent.children.contains(&window) {
+                    parent.children.push(window);
+                }
+            }
+        }
+    }
+
+    fn apply_restack(&mut self, window: XWindowId, above_sibling: Option<XWindowId>) {
+        let stack_rank = above_sibling
+            .and_then(|sibling| self.windows.iter().find(|mirror| mirror.window == sibling))
+            .map_or(0, |sibling| sibling.stack_rank.saturating_add(1));
+
+        if let Some(mirror) = self.window_mut(window) {
+            mirror.stack_rank = stack_rank;
+        }
+    }
+
+    fn apply_circulate(&mut self, window: XWindowId, place: RestackPlace) {
+        let rank = match place {
+            RestackPlace::OnTop => self
+                .windows
+                .iter()
+                .map(|mirror| mirror.stack_rank)
+                .max()
+                .unwrap_or(0)
+                .saturating_add(1),
+            RestackPlace::OnBottom => 0,
+        };
+
+        if let Some(mirror) = self.window_mut(window) {
+            mirror.stack_rank = rank;
+        }
+    }
+
+    fn mark_metadata_stale(&mut self, window: XWindowId) {
+        if let Some(mirror) = self.window_mut(window) {
+            mirror.stale_metadata = mirror.stale_metadata.saturating_add(1);
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum XMirrorEvent {
+    Map {
+        window: XWindowId,
+    },
+    Unmap {
+        window: XWindowId,
+    },
+    Destroy {
+        window: XWindowId,
+    },
+    Configure {
+        window: XWindowId,
+        geometry: Rect,
+        above_sibling: Option<XWindowId>,
+    },
+    Reparent {
+        window: XWindowId,
+        parent: Option<XWindowId>,
+    },
+    Property {
+        window: XWindowId,
+        atom: u32,
+        deleted: bool,
+    },
+    Restack {
+        window: XWindowId,
+        place: RestackPlace,
+    },
+}
+
+impl XMirrorEvent {
+    pub fn from_x11_event(event: &Event) -> Option<Self> {
+        match event {
+            Event::MapNotify(event) => Some(Self::Map {
+                window: wrap_xid(event.window),
+            }),
+            Event::UnmapNotify(event) => Some(Self::Unmap {
+                window: wrap_xid(event.window),
+            }),
+            Event::DestroyNotify(event) => Some(Self::Destroy {
+                window: wrap_xid(event.window),
+            }),
+            Event::ConfigureNotify(event) => Some(Self::Configure {
+                window: wrap_xid(event.window),
+                geometry: Rect {
+                    x: i32::from(event.x),
+                    y: i32::from(event.y),
+                    width: i32::from(event.width),
+                    height: i32::from(event.height),
+                },
+                above_sibling: nonzero_window(event.above_sibling).map(wrap_xid),
+            }),
+            Event::ReparentNotify(event) => Some(Self::Reparent {
+                window: wrap_xid(event.window),
+                parent: nonzero_window(event.parent).map(wrap_xid),
+            }),
+            Event::PropertyNotify(event) => Some(Self::Property {
+                window: wrap_xid(event.window),
+                atom: event.atom,
+                deleted: u8::from(event.state) == 1,
+            }),
+            Event::CirculateNotify(event) => Some(Self::Restack {
+                window: wrap_xid(event.window),
+                place: RestackPlace::from_x11(event.place),
+            }),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RestackPlace {
+    OnTop,
+    OnBottom,
+}
+
+impl RestackPlace {
+    fn from_x11(place: Place) -> Self {
+        if u8::from(place) == u8::from(Place::ON_BOTTOM) {
+            Self::OnBottom
+        } else {
+            Self::OnTop
+        }
     }
 }
 
@@ -311,6 +500,10 @@ fn wrap_xid(window: Window) -> XWindowId {
     XWindowId::new(window, 1)
 }
 
+fn nonzero_window(window: Window) -> Option<Window> {
+    (window != 0).then_some(window)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -357,5 +550,119 @@ mod tests {
     #[test]
     fn wraps_imported_xids_with_initial_generation() {
         assert_eq!(wrap_xid(0x1200042), XWindowId::new(0x1200042, 1));
+    }
+
+    fn mirror(window: u32, parent: Option<u32>, stack_rank: u32) -> XWindowMirror {
+        XWindowMirror {
+            window: wrap_xid(window),
+            parent: parent.map(wrap_xid),
+            children: Vec::new(),
+            toplevel: None,
+            client: None,
+            mapped: false,
+            stack_rank,
+            namespace: None,
+            stale_metadata: 0,
+        }
+    }
+
+    #[test]
+    fn mirror_events_update_map_state() {
+        let mut state = XMirrorState::default();
+        state.ingest_window(mirror(0x10, None, 0));
+
+        state.apply_event(XMirrorEvent::Map {
+            window: wrap_xid(0x10),
+        });
+        assert!(state.windows()[0].mapped);
+
+        state.apply_event(XMirrorEvent::Unmap {
+            window: wrap_xid(0x10),
+        });
+        assert!(!state.windows()[0].mapped);
+    }
+
+    #[test]
+    fn mirror_events_remove_destroyed_windows_from_parent_children() {
+        let mut state = XMirrorState::default();
+        let mut parent = mirror(0x10, None, 0);
+        parent.children.push(wrap_xid(0x20));
+        state.ingest_window(parent);
+        state.ingest_window(mirror(0x20, Some(0x10), 0));
+
+        state.apply_event(XMirrorEvent::Destroy {
+            window: wrap_xid(0x20),
+        });
+
+        assert_eq!(state.windows().len(), 1);
+        assert!(state.windows()[0].children.is_empty());
+    }
+
+    #[test]
+    fn mirror_events_reparent_windows() {
+        let mut state = XMirrorState::default();
+        let mut old_parent = mirror(0x10, None, 0);
+        old_parent.children.push(wrap_xid(0x30));
+        state.ingest_window(old_parent);
+        state.ingest_window(mirror(0x20, None, 1));
+        state.ingest_window(mirror(0x30, Some(0x10), 0));
+
+        state.apply_event(XMirrorEvent::Reparent {
+            window: wrap_xid(0x30),
+            parent: Some(wrap_xid(0x20)),
+        });
+
+        let old_parent = state
+            .windows()
+            .iter()
+            .find(|mirror| mirror.window == wrap_xid(0x10))
+            .unwrap();
+        let new_parent = state
+            .windows()
+            .iter()
+            .find(|mirror| mirror.window == wrap_xid(0x20))
+            .unwrap();
+        let child = state
+            .windows()
+            .iter()
+            .find(|mirror| mirror.window == wrap_xid(0x30))
+            .unwrap();
+
+        assert!(old_parent.children.is_empty());
+        assert_eq!(new_parent.children, vec![wrap_xid(0x30)]);
+        assert_eq!(child.parent, Some(wrap_xid(0x20)));
+        assert_eq!(child.stale_metadata, 1);
+    }
+
+    #[test]
+    fn mirror_events_track_restack_and_property_staleness() {
+        let mut state = XMirrorState::default();
+        state.ingest_window(mirror(0x10, None, 3));
+        state.ingest_window(mirror(0x20, None, 5));
+
+        state.apply_event(XMirrorEvent::Configure {
+            window: wrap_xid(0x10),
+            geometry: Rect {
+                x: 1,
+                y: 2,
+                width: 300,
+                height: 200,
+            },
+            above_sibling: Some(wrap_xid(0x20)),
+        });
+        state.apply_event(XMirrorEvent::Property {
+            window: wrap_xid(0x10),
+            atom: 42,
+            deleted: false,
+        });
+
+        let window = state
+            .windows()
+            .iter()
+            .find(|mirror| mirror.window == wrap_xid(0x10))
+            .unwrap();
+
+        assert_eq!(window.stack_rank, 6);
+        assert_eq!(window.stale_metadata, 2);
     }
 }

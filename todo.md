@@ -82,7 +82,7 @@ snapshots.
 
 **Window mirror**
 - [x] Import the root window tree with async-safe ordering.
-- [ ] Track map, unmap, destroy, configure, reparent, property, and restack
+- [x] Track map, unmap, destroy, configure, reparent, property, and restack
   events.
 - [ ] Detect top-level and client windows using ICCCM/EWMH hints.
 - [x] Wrap XIDs in `XWindowId` and track generation.
