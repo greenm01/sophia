@@ -101,8 +101,8 @@ snapshots.
 Put one real X11 client surface into Sophia Engine.
 
 **Rendering path**
-- [ ] Run an XLibre instance suitable for offscreen or test rendering.
-- [ ] Launch one simple X11 client in one namespace.
+- [x] Run an XLibre instance suitable for offscreen or test rendering.
+- [x] Launch one simple X11 client in one namespace.
 - [x] Run a system Xvfb smoke display for the generic X11 path.
 - [x] Add a Sophia-owned simple X11 test client command.
 - [x] Add a CPU readback fallback for named XComposite pixmaps.
@@ -112,8 +112,8 @@ Put one real X11 client surface into Sophia Engine.
 
 **Policy**
 - [x] Move and resize the surface through Sophia-side policy.
-- [ ] Keep XLibre as the source of truth for X11 resource identity.
-- [ ] Verify Xnamespace isolation still blocks cross-namespace visibility.
+- [x] Keep XLibre as the source of truth for X11 resource identity.
+- [x] Verify Xnamespace isolation still blocks cross-namespace visibility.
 
 ---
 

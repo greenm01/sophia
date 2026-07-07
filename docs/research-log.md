@@ -208,10 +208,25 @@ layout nodes, asks the demo WM to tile them, applies the resulting
 smoke produced one placement, focus assignment, one render command, one replay
 step, and two damage rectangles covering the old and new geometry.
 
-The local `~/src/xserver` tree documents `-namespace <conf>` startup support,
-but no built XLibre server artifact was present in the source tree during this
-slice. XLibre namespace startup and token-based client launch remain separate
-unchecked Phase 4 items.
+The first local XLibre namespace smoke now passes. A minimal XLibre `Xvfb` was
+built from `~/src/xserver` into `/tmp/sophia-xlibre-build` with Xnamespace
+enabled and XDM-AUTH-1 disabled for the local build. MIT-MAGIC-COOKIE-1 auth is
+still used for the root and namespaced clients. Started with
+`-namespace /tmp/sophia-xlibre-smoke/ns.conf`, the server reports Composite,
+DAMAGE, and X-NAMESPACE support.
+
+With one `sophia x-test-client` launched under the `sophia_untrusted`
+namespace, the root-authorized Sophia bridge successfully ran
+`sophia x-smoke-policy-frame`: four mirrored windows, one surface, one
+placement, a focus assignment, one render command, one replay step, and two
+damage rectangles. Running the same bridge smoke with the untrusted namespace
+credentials failed with an X Access error on `GetWindowAttributes`; the XLibre
+server log reported that access to the real root window was blocked. This keeps
+XLibre as the XID/resource authority while confirming that namespace credentials
+cannot perform global tree inspection.
+
+`tools/xlibre_namespace_smoke.sh` captures this manual proof as a repeatable
+smoke harness.
 
 ## Open Questions
 
