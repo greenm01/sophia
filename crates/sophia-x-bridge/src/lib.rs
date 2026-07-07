@@ -4,7 +4,7 @@ use std::collections::{BTreeSet, VecDeque};
 use sophia_protocol::{LayerSnapshot, NamespaceId, Rect, XWindowId, XWindowMirror};
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
-use x11rb::protocol::xproto::{ConnectionExt as _, MapState, Place, Window};
+use x11rb::protocol::xproto::{Atom, AtomEnum, ConnectionExt as _, MapState, Place, Window};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct XMirrorState {
@@ -53,6 +53,29 @@ impl XMirrorState {
             XMirrorEvent::Restack { window, place } => {
                 self.apply_circulate(window, place);
                 self.mark_metadata_stale(window);
+            }
+        }
+    }
+
+    pub fn apply_client_hints(&mut self, hints: &XClientHints) {
+        let client_windows = hints
+            .ewmh_clients
+            .iter()
+            .chain(hints.icccm_clients.iter())
+            .copied()
+            .collect::<BTreeSet<_>>();
+
+        for client in client_windows {
+            let toplevel = self.toplevel_for_client(client).unwrap_or(client);
+
+            if let Some(client_mirror) = self.window_mut(client) {
+                client_mirror.client = Some(client);
+                client_mirror.toplevel = Some(toplevel);
+            }
+
+            if let Some(toplevel_mirror) = self.window_mut(toplevel) {
+                toplevel_mirror.client = Some(client);
+                toplevel_mirror.toplevel = Some(toplevel);
             }
         }
     }
@@ -122,6 +145,30 @@ impl XMirrorState {
     fn mark_metadata_stale(&mut self, window: XWindowId) {
         if let Some(mirror) = self.window_mut(window) {
             mirror.stale_metadata = mirror.stale_metadata.saturating_add(1);
+        }
+    }
+
+    fn toplevel_for_client(&self, client: XWindowId) -> Option<XWindowId> {
+        let mut current = client;
+
+        loop {
+            let mirror = self
+                .windows
+                .iter()
+                .find(|mirror| mirror.window == current)?;
+            let Some(parent) = mirror.parent else {
+                return Some(current);
+            };
+            let Some(parent_mirror) = self.windows.iter().find(|mirror| mirror.window == parent)
+            else {
+                return Some(current);
+            };
+
+            if parent_mirror.parent.is_none() {
+                return Some(current);
+            }
+
+            current = parent;
         }
     }
 }
@@ -233,6 +280,15 @@ pub enum XBridgeError {
         window: u32,
         message: String,
     },
+    InternAtom {
+        atom: String,
+        message: String,
+    },
+    GetProperty {
+        window: u32,
+        property: u32,
+        message: String,
+    },
 }
 
 impl fmt::Display for XBridgeError {
@@ -257,6 +313,19 @@ impl fmt::Display for XBridgeError {
                 write!(
                     f,
                     "failed to query X window attributes for {window:#x}: {message}"
+                )
+            }
+            Self::InternAtom { atom, message } => {
+                write!(f, "failed to intern X atom {atom}: {message}")
+            }
+            Self::GetProperty {
+                window,
+                property,
+                message,
+            } => {
+                write!(
+                    f,
+                    "failed to get X property {property:#x} from {window:#x}: {message}"
                 )
             }
         }
@@ -359,6 +428,18 @@ pub struct XRootImport {
     pub mirror: XMirrorState,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XAtoms {
+    pub wm_state: Atom,
+    pub net_client_list: Atom,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct XClientHints {
+    pub ewmh_clients: Vec<XWindowId>,
+    pub icccm_clients: Vec<XWindowId>,
+}
+
 pub fn probe_display(
     display_name: Option<&str>,
     namespaces: StaticNamespaceConfig,
@@ -386,7 +467,10 @@ pub fn import_root_window_tree(
             message: error.to_string(),
         })?;
     let required_extensions = query_required_extensions(&connection)?;
-    let mirror = import_root_window_tree_from_connection(&connection, screen_num)?;
+    let mut mirror = import_root_window_tree_from_connection(&connection, screen_num)?;
+    let atoms = intern_client_hint_atoms(&connection)?;
+    let hints = detect_client_hints(&connection, screen_num, &mirror, atoms)?;
+    mirror.apply_client_hints(&hints);
 
     Ok(XRootImport {
         probe: XConnectionProbe {
@@ -428,6 +512,115 @@ where
     }
 
     Ok(required_extensions)
+}
+
+fn intern_client_hint_atoms<C>(connection: &C) -> Result<XAtoms, XBridgeError>
+where
+    C: Connection,
+{
+    Ok(XAtoms {
+        wm_state: intern_atom(connection, "WM_STATE")?,
+        net_client_list: intern_atom(connection, "_NET_CLIENT_LIST")?,
+    })
+}
+
+fn intern_atom<C>(connection: &C, name: &str) -> Result<Atom, XBridgeError>
+where
+    C: Connection,
+{
+    connection
+        .intern_atom(false, name.as_bytes())
+        .map_err(|error| XBridgeError::InternAtom {
+            atom: name.to_owned(),
+            message: error.to_string(),
+        })?
+        .reply()
+        .map(|reply| reply.atom)
+        .map_err(|error| XBridgeError::InternAtom {
+            atom: name.to_owned(),
+            message: error.to_string(),
+        })
+}
+
+fn detect_client_hints<C>(
+    connection: &C,
+    screen_num: usize,
+    mirror: &XMirrorState,
+    atoms: XAtoms,
+) -> Result<XClientHints, XBridgeError>
+where
+    C: Connection,
+{
+    let root = connection
+        .setup()
+        .roots
+        .get(screen_num)
+        .ok_or(XBridgeError::InvalidScreen { screen_num })?
+        .root;
+    let ewmh_clients = read_window_list_property(connection, root, atoms.net_client_list)?
+        .into_iter()
+        .map(wrap_xid)
+        .collect();
+    let mut icccm_clients = Vec::new();
+
+    for mirror in mirror.windows() {
+        if has_property(connection, mirror.window.xid(), atoms.wm_state)? {
+            icccm_clients.push(mirror.window);
+        }
+    }
+
+    Ok(XClientHints {
+        ewmh_clients,
+        icccm_clients,
+    })
+}
+
+fn read_window_list_property<C>(
+    connection: &C,
+    window: Window,
+    property: Atom,
+) -> Result<Vec<Window>, XBridgeError>
+where
+    C: Connection,
+{
+    let reply = connection
+        .get_property(false, window, property, AtomEnum::WINDOW, 0, u32::MAX / 4)
+        .map_err(|error| XBridgeError::GetProperty {
+            window,
+            property,
+            message: error.to_string(),
+        })?
+        .reply()
+        .map_err(|error| XBridgeError::GetProperty {
+            window,
+            property,
+            message: error.to_string(),
+        })?;
+
+    Ok(reply
+        .value32()
+        .map(|values| values.collect::<Vec<_>>())
+        .unwrap_or_default())
+}
+
+fn has_property<C>(connection: &C, window: Window, property: Atom) -> Result<bool, XBridgeError>
+where
+    C: Connection,
+{
+    connection
+        .get_property(false, window, property, AtomEnum::ANY, 0, 0)
+        .map_err(|error| XBridgeError::GetProperty {
+            window,
+            property,
+            message: error.to_string(),
+        })?
+        .reply()
+        .map(|reply| reply.type_ != 0)
+        .map_err(|error| XBridgeError::GetProperty {
+            window,
+            property,
+            message: error.to_string(),
+        })
 }
 
 fn import_root_window_tree_from_connection<C>(
@@ -664,5 +857,59 @@ mod tests {
 
         assert_eq!(window.stack_rank, 6);
         assert_eq!(window.stale_metadata, 2);
+    }
+
+    #[test]
+    fn client_hints_mark_root_child_as_toplevel() {
+        let mut state = XMirrorState::default();
+        state.ingest_window(mirror(0x01, None, 0));
+        state.ingest_window(mirror(0x20, Some(0x01), 0));
+
+        state.apply_client_hints(&XClientHints {
+            ewmh_clients: vec![wrap_xid(0x20)],
+            icccm_clients: Vec::new(),
+        });
+
+        let client = state
+            .windows()
+            .iter()
+            .find(|mirror| mirror.window == wrap_xid(0x20))
+            .unwrap();
+
+        assert_eq!(client.client, Some(wrap_xid(0x20)));
+        assert_eq!(client.toplevel, Some(wrap_xid(0x20)));
+    }
+
+    #[test]
+    fn client_hints_promote_reparented_frame_as_toplevel() {
+        let mut state = XMirrorState::default();
+        let mut root = mirror(0x01, None, 0);
+        root.children.push(wrap_xid(0x20));
+        let mut frame = mirror(0x20, Some(0x01), 0);
+        frame.children.push(wrap_xid(0x30));
+        state.ingest_window(root);
+        state.ingest_window(frame);
+        state.ingest_window(mirror(0x30, Some(0x20), 0));
+
+        state.apply_client_hints(&XClientHints {
+            ewmh_clients: Vec::new(),
+            icccm_clients: vec![wrap_xid(0x30)],
+        });
+
+        let frame = state
+            .windows()
+            .iter()
+            .find(|mirror| mirror.window == wrap_xid(0x20))
+            .unwrap();
+        let client = state
+            .windows()
+            .iter()
+            .find(|mirror| mirror.window == wrap_xid(0x30))
+            .unwrap();
+
+        assert_eq!(frame.client, Some(wrap_xid(0x30)));
+        assert_eq!(frame.toplevel, Some(wrap_xid(0x20)));
+        assert_eq!(client.client, Some(wrap_xid(0x30)));
+        assert_eq!(client.toplevel, Some(wrap_xid(0x20)));
     }
 }

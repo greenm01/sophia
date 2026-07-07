@@ -142,6 +142,11 @@ links, destroy cleanup, stack rank, and metadata staleness without exposing raw
 X11 event objects to the rest of Sophia. Live event selection and dispatch are
 still separate bridge-loop work.
 
+Client detection now combines EWMH `_NET_CLIENT_LIST` with ICCCM `WM_STATE`.
+The bridge annotates mirrored windows with the detected client window and the
+nearest root child as the toplevel frame. It does not classify window type yet;
+that remains later EWMH metadata work.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

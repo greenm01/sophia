@@ -84,7 +84,7 @@ snapshots.
 - [x] Import the root window tree with async-safe ordering.
 - [x] Track map, unmap, destroy, configure, reparent, property, and restack
   events.
-- [ ] Detect top-level and client windows using ICCCM/EWMH hints.
+- [x] Detect top-level and client windows using ICCCM/EWMH hints.
 - [x] Wrap XIDs in `XWindowId` and track generation.
 - [ ] Emit `XWindowMirror`, `SurfaceSnapshot`, and `LayerSnapshot` values.
 
