@@ -8,6 +8,7 @@ use sophia_protocol::{
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
 use x11rb::protocol::composite::{ConnectionExt as CompositeConnectionExt, Redirect};
+use x11rb::protocol::damage::{ConnectionExt as DamageConnectionExt, ReportLevel};
 use x11rb::protocol::xproto::{Atom, AtomEnum, ConnectionExt as _, MapState, Place, Window};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -315,6 +316,110 @@ impl CompositePixmapMap {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DamageRecord {
+    pub window: XWindowId,
+    pub damage: u32,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DamageTracker {
+    damage_by_window: BTreeMap<XWindowId, u32>,
+    window_by_damage: BTreeMap<u32, XWindowId>,
+    pending_by_window: BTreeMap<XWindowId, Region>,
+}
+
+impl DamageTracker {
+    pub fn insert_damage(&mut self, window: XWindowId, damage: u32) -> Option<u32> {
+        let old_damage = self.damage_by_window.insert(window, damage);
+        if let Some(old_damage) = old_damage {
+            self.window_by_damage.remove(&old_damage);
+        }
+        self.window_by_damage.insert(damage, window);
+        old_damage
+    }
+
+    pub fn damage_for_window(&self, window: XWindowId) -> Option<u32> {
+        self.damage_by_window.get(&window).copied()
+    }
+
+    pub fn window_for_damage(&self, damage: u32) -> Option<XWindowId> {
+        self.window_by_damage.get(&damage).copied()
+    }
+
+    pub fn record_for_window(&self, window: XWindowId) -> Option<DamageRecord> {
+        self.damage_for_window(window)
+            .map(|damage| DamageRecord { window, damage })
+    }
+
+    pub fn pending_damage(&self, window: XWindowId) -> Option<&Region> {
+        self.pending_by_window.get(&window)
+    }
+
+    pub fn drain_damage(&mut self, window: XWindowId) -> Region {
+        self.pending_by_window
+            .remove(&window)
+            .unwrap_or_else(Region::empty)
+    }
+
+    pub fn remove_window(&mut self, window: XWindowId) -> Option<u32> {
+        self.pending_by_window.remove(&window);
+        let damage = self.damage_by_window.remove(&window)?;
+        self.window_by_damage.remove(&damage);
+        Some(damage)
+    }
+
+    pub fn apply_event(&mut self, event: XDamageEvent) -> bool {
+        if self.window_for_damage(event.damage) != Some(event.window) {
+            return false;
+        }
+
+        self.pending_by_window
+            .entry(event.window)
+            .or_insert_with(Region::empty)
+            .push(event.area);
+        true
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct XDamageEvent {
+    pub window: XWindowId,
+    pub damage: u32,
+    pub drawable: XWindowId,
+    pub timestamp: u32,
+    pub area: Rect,
+    pub drawable_geometry: Rect,
+}
+
+impl XDamageEvent {
+    pub fn from_x11_event(event: &Event, tracker: &DamageTracker) -> Option<Self> {
+        let Event::DamageNotify(event) = event else {
+            return None;
+        };
+        let window = tracker.window_for_damage(event.damage)?;
+
+        Some(Self {
+            window,
+            damage: event.damage,
+            drawable: wrap_xid(event.drawable),
+            timestamp: event.timestamp,
+            area: Rect {
+                x: i32::from(event.area.x),
+                y: i32::from(event.area.y),
+                width: i32::from(event.area.width),
+                height: i32::from(event.area.height),
+            },
+            drawable_geometry: Rect {
+                x: i32::from(event.geometry.x),
+                y: i32::from(event.geometry.y),
+                width: i32::from(event.geometry.width),
+                height: i32::from(event.geometry.height),
+            },
+        })
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum XMirrorEvent {
     Map {
@@ -450,6 +555,14 @@ pub enum XBridgeError {
     GenerateId {
         message: String,
     },
+    DamageVersion {
+        message: String,
+    },
+    DamageCreate {
+        window: u32,
+        damage: u32,
+        message: String,
+    },
 }
 
 impl fmt::Display for XBridgeError {
@@ -516,6 +629,19 @@ impl fmt::Display for XBridgeError {
             }
             Self::GenerateId { message } => {
                 write!(f, "failed to allocate an X resource ID: {message}")
+            }
+            Self::DamageVersion { message } => {
+                write!(f, "failed to negotiate X Damage version: {message}")
+            }
+            Self::DamageCreate {
+                window,
+                damage,
+                message,
+            } => {
+                write!(
+                    f,
+                    "failed to create X Damage object {damage:#x} for X window {window:#x}: {message}"
+                )
             }
         }
     }
@@ -740,6 +866,55 @@ where
             })?;
 
         pixmaps.insert_named_pixmap(target.window, pixmap);
+    }
+
+    Ok(())
+}
+
+pub fn create_damage_trackers<C>(
+    connection: &C,
+    targets: &[CompositeRedirectTarget],
+    tracker: &mut DamageTracker,
+) -> Result<(), XBridgeError>
+where
+    C: Connection,
+{
+    connection
+        .damage_query_version(1, 1)
+        .map_err(|error| XBridgeError::DamageVersion {
+            message: error.to_string(),
+        })?
+        .reply()
+        .map_err(|error| XBridgeError::DamageVersion {
+            message: error.to_string(),
+        })?;
+
+    for target in targets {
+        if tracker.damage_for_window(target.window).is_some() {
+            continue;
+        }
+
+        let damage = connection
+            .generate_id()
+            .map_err(|error| XBridgeError::GenerateId {
+                message: error.to_string(),
+            })?;
+
+        connection
+            .damage_create(damage, target.window.xid(), ReportLevel::BOUNDING_BOX)
+            .map_err(|error| XBridgeError::DamageCreate {
+                window: target.window.xid(),
+                damage,
+                message: error.to_string(),
+            })?
+            .check()
+            .map_err(|error| XBridgeError::DamageCreate {
+                window: target.window.xid(),
+                damage,
+                message: error.to_string(),
+            })?;
+
+        tracker.insert_damage(target.window, damage);
     }
 
     Ok(())
@@ -1224,6 +1399,105 @@ mod tests {
         );
         assert_eq!(pixmaps.remove_window(window), Some(0x9000));
         assert_eq!(pixmaps.pixmap_for_window(window), None);
+    }
+
+    #[test]
+    fn damage_tracker_maps_damage_handles_to_windows() {
+        let mut tracker = DamageTracker::default();
+        let window = wrap_xid(0x20);
+
+        tracker.insert_damage(window, 0x5000);
+
+        assert_eq!(tracker.damage_for_window(window), Some(0x5000));
+        assert_eq!(tracker.window_for_damage(0x5000), Some(window));
+        assert_eq!(
+            tracker.record_for_window(window),
+            Some(DamageRecord {
+                window,
+                damage: 0x5000
+            })
+        );
+    }
+
+    #[test]
+    fn damage_tracker_accumulates_and_drains_regions() {
+        let mut tracker = DamageTracker::default();
+        let window = wrap_xid(0x20);
+        tracker.insert_damage(window, 0x5000);
+
+        let applied = tracker.apply_event(XDamageEvent {
+            window,
+            damage: 0x5000,
+            drawable: window,
+            timestamp: 42,
+            area: Rect {
+                x: 5,
+                y: 6,
+                width: 70,
+                height: 80,
+            },
+            drawable_geometry: Rect {
+                x: 0,
+                y: 0,
+                width: 640,
+                height: 480,
+            },
+        });
+
+        assert!(applied);
+        assert_eq!(
+            tracker.pending_damage(window).unwrap().rects,
+            vec![Rect {
+                x: 5,
+                y: 6,
+                width: 70,
+                height: 80,
+            }]
+        );
+        assert_eq!(tracker.drain_damage(window).rects.len(), 1);
+        assert_eq!(tracker.pending_damage(window), None);
+    }
+
+    #[test]
+    fn x_damage_event_converts_known_x11_damage_notify() {
+        let mut tracker = DamageTracker::default();
+        let window = wrap_xid(0x20);
+        tracker.insert_damage(window, 0x5000);
+
+        let event = Event::DamageNotify(x11rb::protocol::damage::NotifyEvent {
+            response_type: 0,
+            level: ReportLevel::BOUNDING_BOX,
+            sequence: 1,
+            drawable: 0x20,
+            damage: 0x5000,
+            timestamp: 42,
+            area: x11rb::protocol::xproto::Rectangle {
+                x: 5,
+                y: 6,
+                width: 70,
+                height: 80,
+            },
+            geometry: x11rb::protocol::xproto::Rectangle {
+                x: 0,
+                y: 0,
+                width: 640,
+                height: 480,
+            },
+        });
+
+        let converted = XDamageEvent::from_x11_event(&event, &tracker).unwrap();
+
+        assert_eq!(converted.window, window);
+        assert_eq!(converted.damage, 0x5000);
+        assert_eq!(
+            converted.area,
+            Rect {
+                x: 5,
+                y: 6,
+                width: 70,
+                height: 80,
+            }
+        );
     }
 
     #[test]

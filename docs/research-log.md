@@ -164,6 +164,12 @@ for stable Sophia surface identity, but use the detected client XID to resolve
 their `BufferSource::XPixmap`. Importing or reading those pixmaps into a real
 renderer texture remains Phase 4 work.
 
+Damage tracking now has a bridge-owned `DamageTracker` that creates X Damage
+objects for redirected client windows, maps Damage notify events back to client
+XIDs, and accumulates pending Sophia `Region` values per window. This is still
+surface-local damage; converting it into output/frame `DamageFrame` packets is
+the next Phase 3 step.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new
