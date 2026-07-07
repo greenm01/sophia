@@ -11,28 +11,60 @@ adds a modern display engine and an external policy layer around that authority.
 
 ```mermaid
 flowchart TB
-    kernel["kernel input + DRM/KMS"]
-    engine["Sophia Engine<br/>libinput / scene graph / frame timing / scanout"]
-    wm["Sophia WM<br/>blind policy model / TEA update / layout commands"]
-    portal["Sophia Portals<br/>TEA policy for intentional namespace crossing"]
-    chrome["Metadata broker + compositor chrome<br/>redacted presentation metadata"]
-    bridge["Sophia X Bridge<br/>XComposite / Damage / X11 mirror / routed-input adapter"]
-    xlibre["XLibre<br/>X11 protocol + resources + Xnamespace enforcement"]
-    clients["Xnamespace-isolated X11 clients"]
+    subgraph hardware["Hardware & Kernel Layer"]
+        input["Physical input devices"]
+        kernel["Linux kernel<br/>libinput + DRM/KMS"]
+        display["Display output<br/>GPU scanout"]
+    end
 
-    kernel -->|"input and output devices"| engine
+    subgraph compositor["Compositor Layer: Security Broker"]
+        engine["Sophia Engine<br/>scene graph / spatial hit-testing / damage tracking / frame scheduling"]
+        wm["Sophia WM<br/>blind policy model / TEA update"]
+        portal["Sophia Portals<br/>cross-namespace policy / TEA update"]
+        bridge["Sophia X Bridge<br/>XComposite / Damage / X11 mirror / routed-input adapter"]
+        chrome["Metadata Broker + Compositor Chrome<br/>redacted labels / icon tokens / trust badges"]
+    end
+
+    subgraph authority["Legacy Authority & Isolation Layer"]
+        xlibre["XLibre Server<br/>XID registry / Xnamespace enforcement / X11 semantics"]
+    end
+
+    subgraph trusted["Namespace A: Trusted"]
+        terminal["Terminal"]
+        password["Password manager"]
+    end
+
+    subgraph untrusted["Namespace B: Untrusted"]
+        browser["Web browser"]
+        chat["Chat app"]
+    end
+
+    input -->|"raw input"| kernel
+    kernel -->|"libinput events"| engine
+    engine -->|"DRM/KMS scanout"| display
+
     engine -->|"opaque snapshots + events"| wm
     wm -->|"command packets"| engine
     engine -->|"portal prompts / transfer events"| portal
     portal -->|"allow / deny / revoke / handoff"| engine
-    bridge -->|"sanitized chrome descriptors"| chrome
-    chrome -->|"compositor-owned UI data"| engine
+
+    engine -->|"routed input request<br/>target XID + local coordinates"| bridge
     bridge -->|"surface and layer snapshots"| engine
-    engine -->|"focus and routed-input requests"| bridge
-    bridge -->|"privileged X11 requests"| xlibre
-    xlibre -->|"window tree, pixmaps, damage"| bridge
-    clients -->|"standard X11 protocol"| xlibre
+    bridge -->|"sanitized ChromeDescriptor"| chrome
+    chrome -->|"compositor-owned UI data"| engine
+
+    bridge -->|"privileged requests"| xlibre
+    xlibre -->|"window tree / pixmaps / damage"| bridge
+
+    terminal -->|"standard X11 protocol"| xlibre
+    password -->|"standard X11 protocol"| xlibre
+    browser -->|"standard X11 protocol"| xlibre
+    chat -->|"standard X11 protocol"| xlibre
 ```
+
+The critical split is that surface and layer snapshots flow from Sophia X Bridge
+to Sophia Engine, while sanitized chrome descriptors flow to the metadata
+broker. The WM receives only opaque policy data and returns command packets.
 
 ## Load-Bearing Boundaries
 
