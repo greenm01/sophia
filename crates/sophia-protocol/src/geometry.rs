@@ -45,6 +45,17 @@ impl Region {
     pub fn is_empty(&self) -> bool {
         self.rects.is_empty()
     }
+
+    pub fn extend(&mut self, other: &Region) {
+        self.rects
+            .extend(other.rects.iter().copied().filter(|rect| !rect.is_empty()));
+    }
+
+    pub fn push(&mut self, rect: Rect) {
+        if !rect.is_empty() {
+            self.rects.push(rect);
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -65,5 +76,29 @@ impl Transform {
 impl Default for Transform {
     fn default() -> Self {
         Self::IDENTITY
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn region_drops_empty_rectangles() {
+        let mut region = Region::empty();
+        region.push(Rect {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 10,
+        });
+        region.push(Rect {
+            x: 1,
+            y: 2,
+            width: 3,
+            height: 4,
+        });
+
+        assert_eq!(region.rects.len(), 1);
     }
 }

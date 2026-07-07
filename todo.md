@@ -58,13 +58,13 @@ Prove Sophia Engine can consume frame data before any XLibre integration.
 **Headless compositor**
 - [ ] Use Smithay/niri-inspired backend structure as the reference.
 - [ ] Add a headless output with deterministic size and scale.
-- [ ] Accept mock `LayerSnapshot` data and build a frame plan.
-- [ ] Render or simulate render commands without a real X client.
-- [ ] Capture `FrameSnapshot` data for tests.
+- [x] Accept mock `LayerSnapshot` data and build a frame plan.
+- [x] Render or simulate render commands without a real X client.
+- [x] Capture `FrameSnapshot` data for tests.
 
 **Verification**
-- [ ] Test stable layer ordering.
-- [ ] Test damage aggregation for moved, resized, added, and removed layers.
+- [x] Test stable layer ordering.
+- [x] Test damage aggregation for moved, resized, added, and removed layers.
 - [ ] Test frame snapshot replay with mock surfaces.
 
 ---

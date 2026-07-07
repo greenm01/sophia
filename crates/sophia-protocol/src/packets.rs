@@ -50,6 +50,15 @@ pub struct DamageFrame {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct FrameSnapshot {
+    pub output: OutputId,
+    pub frame_serial: u64,
+    pub layers: Vec<LayerSnapshot>,
+    pub commands: Vec<RenderCommand>,
+    pub damage: Region,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct RenderCommand {
     pub kind: RenderCommandKind,
     pub source: Option<SurfaceId>,
