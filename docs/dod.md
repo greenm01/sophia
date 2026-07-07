@@ -237,6 +237,41 @@ Fields should describe:
 Sophia Engine commits the transaction as a unit when possible. If clients lag,
 the engine may fall back after the transaction timeout.
 
+### WM Request and Response Packets
+
+The external WM boundary uses explicit request and response packets.
+
+Request packets should describe:
+
+- transaction ID
+- manage, relayout, or remove event kind
+- opaque layout node snapshots
+- output and workspace IDs
+- workspace bounds
+
+Response packets should describe command intent:
+
+- workspace assignment
+- configure size
+- focus
+- render placement
+
+The response can be reduced into a `LayoutTransaction` for Sophia Engine. The
+WM remains outside the compositor's per-frame and per-input hot paths; it only
+receives coarse manage/relayout events and returns policy commands.
+
+### TransactionCommit
+
+A committed or rejected transaction is reported as data.
+
+Fields should describe:
+
+- transaction ID
+- committed, rejected, stale, or timed-out outcome
+- surfaces actually applied
+
+Rejected transactions must preserve the last committed compositor state.
+
 ### LayoutNodeSnapshot
 
 The WM receives opaque layout nodes, not X11 windows.

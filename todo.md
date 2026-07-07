@@ -123,11 +123,11 @@ Split policy from the compositor process.
 
 **Protocol**
 - [x] Add blind-WM layout node and compositor-owned chrome packet shapes.
-- [ ] Define the first manage sequence: new surface, configure size, focus,
+- [x] Define the first manage sequence: new surface, configure size, focus,
   workspace assignment.
-- [ ] Define the first render sequence: position, z-order, crop, transform.
-- [ ] Add transaction IDs and outcomes.
-- [ ] Keep the WM off the per-frame and per-input hot path.
+- [x] Define the first render sequence: position, z-order, crop, transform.
+- [x] Add transaction IDs and outcomes.
+- [x] Keep the WM off the per-frame and per-input hot path.
 
 **Demo WM**
 - [ ] Implement a tiny external WM process.

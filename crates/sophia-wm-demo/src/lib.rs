@@ -1,6 +1,7 @@
 use sophia_protocol::{
     LayoutNodeSnapshot, LayoutTransaction, Rect, Size, SurfacePlacement, SurfaceSizeRequest,
-    TransactionId, Transform, WorkspaceId,
+    TransactionId, Transform, WmCommand, WmRequestKind, WmRequestPacket, WmResponsePacket,
+    WorkspaceId,
 };
 
 pub fn empty_transaction(transaction: TransactionId) -> LayoutTransaction {
@@ -70,6 +71,7 @@ pub fn tile_workspace(
             surface: node.surface,
             geometry,
             z_index: index,
+            crop: None,
             transform: Transform::IDENTITY,
         });
     }
@@ -80,6 +82,76 @@ pub fn tile_workspace(
         focus,
         render_positions,
         timeout_msec: 300,
+    }
+}
+
+pub fn handle_wm_request(request: WmRequestPacket) -> WmResponsePacket {
+    match request.kind {
+        WmRequestKind::ManageSurface(manage) => {
+            let transaction = tile_workspace(
+                request.transaction,
+                manage.workspace,
+                manage.bounds,
+                &[manage.node],
+            );
+            response_from_layout_transaction(transaction, Some(manage.workspace))
+        }
+        WmRequestKind::RelayoutWorkspace(relayout) => {
+            let transaction = tile_workspace(
+                request.transaction,
+                relayout.workspace,
+                relayout.bounds,
+                &relayout.nodes,
+            );
+            response_from_layout_transaction(transaction, None)
+        }
+        WmRequestKind::SurfaceRemoved { .. } => WmResponsePacket {
+            transaction: request.transaction,
+            commands: Vec::new(),
+            timeout_msec: 300,
+        },
+    }
+}
+
+pub fn response_from_layout_transaction(
+    transaction: LayoutTransaction,
+    assigned_workspace: Option<WorkspaceId>,
+) -> WmResponsePacket {
+    let mut commands = Vec::new();
+
+    if let Some(workspace) = assigned_workspace {
+        for placement in &transaction.render_positions {
+            commands.push(WmCommand::AssignWorkspace {
+                surface: placement.surface,
+                workspace,
+            });
+        }
+    }
+
+    commands.extend(
+        transaction
+            .requested_sizes
+            .iter()
+            .copied()
+            .map(WmCommand::ConfigureSurface),
+    );
+
+    if let Some(focus) = transaction.focus {
+        commands.push(WmCommand::FocusSurface(focus));
+    }
+
+    commands.extend(
+        transaction
+            .render_positions
+            .iter()
+            .copied()
+            .map(WmCommand::RenderSurface),
+    );
+
+    WmResponsePacket {
+        transaction: transaction.transaction,
+        commands,
+        timeout_msec: transaction.timeout_msec,
     }
 }
 
@@ -105,6 +177,7 @@ mod tests {
     use super::*;
     use sophia_protocol::{
         LayoutNodeCapabilities, LayoutNodeKind, LayoutNodeState, SurfaceConstraints, SurfaceId,
+        WmManageSurface, WmRelayoutWorkspace,
     };
 
     fn node(index: u32, workspace: WorkspaceId) -> LayoutNodeSnapshot {
@@ -171,5 +244,76 @@ mod tests {
             transaction.render_positions[0].surface,
             SurfaceId::new(1, 1)
         );
+    }
+
+    #[test]
+    fn handles_manage_request_with_first_external_wm_sequence() {
+        let workspace = WorkspaceId::from_raw(1);
+        let surface = SurfaceId::new(3, 1);
+        let request = WmRequestPacket {
+            transaction: TransactionId::from_raw(12),
+            kind: WmRequestKind::ManageSurface(WmManageSurface {
+                node: node(3, workspace),
+                output: sophia_protocol::OutputId::from_raw(1),
+                workspace,
+                bounds: Rect {
+                    x: 0,
+                    y: 0,
+                    width: 800,
+                    height: 600,
+                },
+            }),
+        };
+
+        let response = handle_wm_request(request);
+        let transaction = response.clone().into_layout_transaction();
+
+        assert_eq!(response.transaction, TransactionId::from_raw(12));
+        assert!(
+            response
+                .commands
+                .contains(&WmCommand::AssignWorkspace { surface, workspace })
+        );
+        assert!(
+            response
+                .commands
+                .contains(&WmCommand::FocusSurface(surface))
+        );
+        assert_eq!(transaction.render_positions.len(), 1);
+        assert_eq!(transaction.render_positions[0].geometry.width, 800);
+        assert_eq!(transaction.render_positions[0].crop, None);
+    }
+
+    #[test]
+    fn handles_relayout_request_without_workspace_assignment() {
+        let workspace = WorkspaceId::from_raw(1);
+        let request = WmRequestPacket {
+            transaction: TransactionId::from_raw(13),
+            kind: WmRequestKind::RelayoutWorkspace(WmRelayoutWorkspace {
+                output: sophia_protocol::OutputId::from_raw(1),
+                workspace,
+                bounds: Rect {
+                    x: 0,
+                    y: 0,
+                    width: 1000,
+                    height: 500,
+                },
+                nodes: vec![node(0, workspace), node(1, workspace)],
+            }),
+        };
+
+        let response = handle_wm_request(request);
+        let transaction = response.clone().into_layout_transaction();
+
+        assert_eq!(
+            response
+                .commands
+                .iter()
+                .filter(|command| matches!(command, WmCommand::AssignWorkspace { .. }))
+                .count(),
+            0
+        );
+        assert_eq!(transaction.render_positions.len(), 2);
+        assert_eq!(transaction.render_positions[1].geometry.x, 500);
     }
 }

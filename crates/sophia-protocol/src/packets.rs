@@ -249,6 +249,96 @@ pub struct LayoutTransaction {
     pub timeout_msec: u32,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WmRequestPacket {
+    pub transaction: TransactionId,
+    pub kind: WmRequestKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum WmRequestKind {
+    ManageSurface(WmManageSurface),
+    RelayoutWorkspace(WmRelayoutWorkspace),
+    SurfaceRemoved {
+        surface: SurfaceId,
+        workspace: WorkspaceId,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WmManageSurface {
+    pub node: LayoutNodeSnapshot,
+    pub output: OutputId,
+    pub workspace: WorkspaceId,
+    pub bounds: Rect,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WmRelayoutWorkspace {
+    pub output: OutputId,
+    pub workspace: WorkspaceId,
+    pub bounds: Rect,
+    pub nodes: Vec<LayoutNodeSnapshot>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct WmResponsePacket {
+    pub transaction: TransactionId,
+    pub commands: Vec<WmCommand>,
+    pub timeout_msec: u32,
+}
+
+impl WmResponsePacket {
+    pub fn into_layout_transaction(self) -> LayoutTransaction {
+        let mut requested_sizes = Vec::new();
+        let mut focus = None;
+        let mut render_positions = Vec::new();
+
+        for command in self.commands {
+            match command {
+                WmCommand::ConfigureSurface(request) => requested_sizes.push(request),
+                WmCommand::FocusSurface(surface) => focus = Some(surface),
+                WmCommand::AssignWorkspace { .. } => {}
+                WmCommand::RenderSurface(placement) => render_positions.push(placement),
+            }
+        }
+
+        LayoutTransaction {
+            transaction: self.transaction,
+            requested_sizes,
+            focus,
+            render_positions,
+            timeout_msec: self.timeout_msec,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum WmCommand {
+    ConfigureSurface(SurfaceSizeRequest),
+    FocusSurface(SurfaceId),
+    AssignWorkspace {
+        surface: SurfaceId,
+        workspace: WorkspaceId,
+    },
+    RenderSurface(SurfacePlacement),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TransactionCommit {
+    pub transaction: TransactionId,
+    pub outcome: TransactionOutcome,
+    pub applied_surfaces: Vec<SurfaceId>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TransactionOutcome {
+    Committed,
+    RejectedStaleSurface,
+    RejectedInvalidSurface,
+    TimedOut,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SurfaceSizeRequest {
     pub surface: SurfaceId,
@@ -260,6 +350,7 @@ pub struct SurfacePlacement {
     pub surface: SurfaceId,
     pub geometry: Rect,
     pub z_index: i32,
+    pub crop: Option<Rect>,
     pub transform: Transform,
 }
 
@@ -379,5 +470,91 @@ mod tests {
             Some(true)
         );
         assert_eq!(chrome.icon, Some(IconTokenId::from_raw(4)));
+    }
+
+    #[test]
+    fn wm_manage_request_contains_only_blind_policy_data() {
+        let surface = SurfaceId::new(2, 1);
+        let workspace = WorkspaceId::from_raw(1);
+        let request = WmRequestPacket {
+            transaction: TransactionId::from_raw(5),
+            kind: WmRequestKind::ManageSurface(WmManageSurface {
+                node: LayoutNodeSnapshot {
+                    surface,
+                    workspace,
+                    kind: LayoutNodeKind::Toplevel,
+                    capabilities: LayoutNodeCapabilities::STANDARD_TOPLEVEL,
+                    state: LayoutNodeState::NORMAL,
+                    constraints: SurfaceConstraints {
+                        min_size: None,
+                        max_size: None,
+                    },
+                    geometry: Rect {
+                        x: 0,
+                        y: 0,
+                        width: 320,
+                        height: 200,
+                    },
+                    generation: 1,
+                },
+                output: OutputId::from_raw(1),
+                workspace,
+                bounds: Rect {
+                    x: 0,
+                    y: 0,
+                    width: 1280,
+                    height: 720,
+                },
+            }),
+        };
+
+        assert_eq!(request.transaction, TransactionId::from_raw(5));
+        let WmRequestKind::ManageSurface(manage) = request.kind else {
+            panic!("expected manage request");
+        };
+        assert_eq!(manage.node.surface, surface);
+        assert_eq!(manage.workspace, workspace);
+    }
+
+    #[test]
+    fn wm_response_converts_to_layout_transaction() {
+        let surface = SurfaceId::new(2, 1);
+        let workspace = WorkspaceId::from_raw(1);
+        let response = WmResponsePacket {
+            transaction: TransactionId::from_raw(5),
+            commands: vec![
+                WmCommand::AssignWorkspace { surface, workspace },
+                WmCommand::ConfigureSurface(SurfaceSizeRequest {
+                    surface,
+                    size: Size {
+                        width: 640,
+                        height: 480,
+                    },
+                }),
+                WmCommand::FocusSurface(surface),
+                WmCommand::RenderSurface(SurfacePlacement {
+                    surface,
+                    geometry: Rect {
+                        x: 10,
+                        y: 20,
+                        width: 640,
+                        height: 480,
+                    },
+                    z_index: 3,
+                    crop: None,
+                    transform: Transform::IDENTITY,
+                }),
+            ],
+            timeout_msec: 250,
+        };
+
+        let transaction = response.into_layout_transaction();
+
+        assert_eq!(transaction.transaction, TransactionId::from_raw(5));
+        assert_eq!(transaction.requested_sizes.len(), 1);
+        assert_eq!(transaction.focus, Some(surface));
+        assert_eq!(transaction.render_positions.len(), 1);
+        assert_eq!(transaction.render_positions[0].z_index, 3);
+        assert_eq!(transaction.timeout_msec, 250);
     }
 }

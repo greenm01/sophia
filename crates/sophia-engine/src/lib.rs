@@ -3,7 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use sophia_protocol::{
     BufferSource, ChromeDescriptor, FrameSnapshot, LayerSnapshot, LayoutTransaction, OutputId,
-    Rect, Region, RenderCommand, RenderCommandKind, Size, SurfaceId,
+    Rect, Region, RenderCommand, RenderCommandKind, Size, SurfaceId, TransactionCommit,
+    TransactionOutcome,
 };
 use sophia_runtime::{SophiaErrorExt, SophiaErrorKind};
 use tracing::instrument;
@@ -272,12 +273,46 @@ impl HeadlessEngine {
             layer.geometry = placement.geometry;
             layer.stack_rank = u32::try_from(placement.z_index.max(0))
                 .expect("non-negative z-index should fit u32");
+            layer.crop = placement.crop;
             layer.transform = placement.transform;
             layer.damage = moved_damage(old_geometry, placement.geometry);
             layer.generation = layer.generation.saturating_add(1);
         }
 
         Ok(layers)
+    }
+
+    pub fn commit_layout_transaction(
+        &self,
+        transaction: &LayoutTransaction,
+        layers: &mut Vec<LayerSnapshot>,
+    ) -> TransactionCommit {
+        let applied_surfaces = transaction
+            .render_positions
+            .iter()
+            .map(|placement| placement.surface)
+            .collect::<Vec<_>>();
+
+        match self.apply_layout_transaction(transaction, layers.clone()) {
+            Ok(committed) => {
+                *layers = committed;
+                TransactionCommit {
+                    transaction: transaction.transaction,
+                    outcome: TransactionOutcome::Committed,
+                    applied_surfaces,
+                }
+            }
+            Err(EngineError::InvalidSurface) => TransactionCommit {
+                transaction: transaction.transaction,
+                outcome: TransactionOutcome::RejectedInvalidSurface,
+                applied_surfaces: Vec::new(),
+            },
+            Err(_) => TransactionCommit {
+                transaction: transaction.transaction,
+                outcome: TransactionOutcome::RejectedStaleSurface,
+                applied_surfaces: Vec::new(),
+            },
+        }
     }
 
     fn validate_output(&self, output: OutputId) -> Result<(), EngineError> {
@@ -508,6 +543,7 @@ mod tests {
                     height: 300,
                 },
                 z_index: 7,
+                crop: None,
                 transform: Transform::IDENTITY,
             }],
             timeout_msec: 300,
@@ -540,6 +576,7 @@ mod tests {
                     height: 10,
                 },
                 z_index: 0,
+                crop: None,
                 transform: Transform::IDENTITY,
             }],
             timeout_msec: 300,
@@ -549,6 +586,51 @@ mod tests {
             engine
                 .apply_layout_transaction(&transaction, vec![test_layer(0, 0, 0, Region::empty())]),
             Err(EngineError::InvalidSurface)
+        );
+    }
+
+    #[test]
+    fn commit_layout_transaction_reports_outcome() {
+        let engine = HeadlessEngine::default();
+        let surface = SurfaceId::new(0, 1);
+        let mut layers = vec![test_layer(0, 0, 0, Region::empty())];
+        let transaction = LayoutTransaction {
+            transaction: TransactionId::from_raw(44),
+            requested_sizes: Vec::new(),
+            focus: Some(surface),
+            render_positions: vec![SurfacePlacement {
+                surface,
+                geometry: Rect {
+                    x: 0,
+                    y: 0,
+                    width: 500,
+                    height: 400,
+                },
+                z_index: 1,
+                crop: Some(Rect {
+                    x: 0,
+                    y: 0,
+                    width: 250,
+                    height: 200,
+                }),
+                transform: Transform::IDENTITY,
+            }],
+            timeout_msec: 300,
+        };
+
+        let commit = engine.commit_layout_transaction(&transaction, &mut layers);
+
+        assert_eq!(commit.transaction, TransactionId::from_raw(44));
+        assert_eq!(commit.outcome, TransactionOutcome::Committed);
+        assert_eq!(commit.applied_surfaces, vec![surface]);
+        assert_eq!(
+            layers[0].crop,
+            Some(Rect {
+                x: 0,
+                y: 0,
+                width: 250,
+                height: 200,
+            })
         );
     }
 
