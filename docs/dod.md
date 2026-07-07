@@ -71,6 +71,92 @@ foreign identifiers and should be wrapped, not reused as Sophia-owned IDs.
 
 ## Core Packets
 
+### XWindowMirror
+
+Sophia X Bridge keeps a mirror of the XLibre window tree. This is cache data,
+not authority.
+
+Fields should describe:
+
+- X window ID and generation
+- parent and children relationships
+- top-level/client relationship
+- map state
+- stacking rank
+- namespace identity when known
+- stale metadata flags
+
+Picom's window-tree mirror is the reference shape, but Sophia's mirror should
+emit snapshots instead of owning render policy.
+
+### LayerSnapshot
+
+A layer snapshot is the bridge between XLibre state and Sophia Engine render
+planning.
+
+Fields should describe:
+
+- Sophia surface ID
+- X window ID
+- namespace ID
+- stack rank
+- geometry in compositor coordinates
+- source pixmap or buffer handle
+- damage region
+- opacity, crop, and transform state
+
+The snapshot is flat and immutable for the frame that consumes it.
+
+### DamageFrame
+
+Damage is a frame artifact. It describes what changed between one committed
+layout and another, not a mutable property of a window object.
+
+Fields should describe:
+
+- output ID
+- frame serial
+- buffer age
+- root/background generation
+- affected layers
+- screen-space damage regions
+
+Picom's buffer-age damage math is the reference idea. Sophia should keep the
+calculation over layer snapshots, not live windows.
+
+### RenderCommand
+
+Render commands are the final planned compositor work for one frame.
+
+Fields should describe:
+
+- operation kind
+- source surface or buffer
+- destination output
+- target region
+- clip
+- transform
+- alpha or effect parameters
+
+The command stream is Sophia Engine authority. XLibre does not own this data.
+
+### CompositorSurface
+
+A compositor surface is Sophia Engine's stable handle for visual placement and
+render scheduling.
+
+Fields should describe:
+
+- surface ID
+- current layer snapshot generation
+- committed geometry
+- active buffer handle
+- output assignment
+- visibility state
+- damage accumulator
+
+The surface may refer back to an X window, but it is not an X window.
+
 ### InputEventPacket
 
 The compositor-side input packet is the value Sophia Engine produces after
@@ -89,6 +175,24 @@ Fields should describe:
 
 For X11 clients, the packet is not delivered directly to the client. It becomes
 input to XLibre's routed-input extension, which still applies X11 semantics.
+
+### InputRoute
+
+An input route is the compositor's answer to "what visual surface did this event
+hit?"
+
+Fields should describe:
+
+- input event serial
+- target surface ID
+- target X window ID when the target is X11
+- global coordinates
+- local coordinates
+- transform used for inversion
+- route confidence or rejection reason
+
+This packet is Sophia Engine authority, but final X11 delivery remains XLibre
+authority.
 
 ### LayoutTransaction
 
@@ -189,7 +293,9 @@ Bridge, not inside the compositor's inner frame path.
 ## Invariants
 
 - XLibre is the source of truth for X11 resources.
+- Sophia X Bridge mirrors XLibre state; it does not become XLibre.
 - Sophia Engine is the source of truth for visual placement.
+- Layer snapshots are frame values, not mutable windows.
 - The WM proposes policy; the engine commits renderable state.
 - Namespace crossings require portal packets.
 - A frame plan is immutable once rendering begins.

@@ -92,9 +92,29 @@ presents coherent frames.
 - **Sophia Portals** mediate intentional namespace crossing for clipboard,
   drag-and-drop, file access, screenshots, and notifications.
 
+## Reference Map
+
+Sophia should borrow from existing systems at the right boundary, not copy any
+one project wholesale.
+
+- **niri** is the Rust compositor reference: Smithay backend structure,
+  KMS/libinput integration, frame-clock behavior, transaction timeouts, headless
+  test patterns, and visual-test style.
+- **picom** is the X-side compositor reference: XComposite, Damage, X window
+  tree mirroring, top-level/client detection, layer snapshots, render command
+  planning, and buffer-age damage calculation.
+- **river** is the policy split reference: the compositor keeps the hot path and
+  the external WM receives only policy-relevant sequences.
+- **XLibre** is the server authority: X11 protocol, Xnamespace, selections,
+  resources, grabs, and the future routed-input extension target.
+
+The first implementation should combine these lessons without becoming any of
+them. Sophia is not a niri fork, not picom with KMS, and not Xwayland.
+
 ## Documentation
 
 - `docs/architecture.md` maps processes and load-bearing boundaries.
 - `docs/dod.md` defines Sophia's data-oriented design rules.
 - `docs/style-guide.md` records implementation discipline.
 - `docs/research-log.md` captures early decisions and open research questions.
+- `todo.md` tracks build phases and research milestones.

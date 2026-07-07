@@ -62,6 +62,31 @@ Observed facts:
 Implication: rendering has a plausible existing seam. Compositor-routed input
 needs explicit XLibre protocol/server work.
 
+## 2026-07-07: Compositor References
+
+Niri is a reference, not a base. Use it for Rust/Smithay compositor mechanics:
+backend structure, frame clock, KMS/libinput patterns, renderer integration,
+transaction timeouts, and headless or visual test ideas.
+
+Do not fork niri for Sophia. Niri's central state combines compositor and WM
+policy, while Sophia needs an external WM policy process.
+
+Picom is the X-side reference. Use it for XComposite/Damage handling, X window
+tree mirroring, top-level/client detection, layer snapshots, render command
+planning, and damage calculation across buffered layouts.
+
+Do not copy picom's process architecture. Picom renders back into X. Sophia
+should hand X-derived layer snapshots to a compositor that owns scanout.
+
+## 2026-07-07: Roadmap Direction
+
+The next implementation step after docs is a Rust workspace skeleton with passive
+types and protocol packets. Do not start with XLibre patches.
+
+The first rendering proof should use mock layer snapshots before connecting to
+XLibre. The first XLibre proof should mirror windows and emit snapshots before
+routed input work begins.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

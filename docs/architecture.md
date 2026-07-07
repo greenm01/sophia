@@ -39,6 +39,25 @@ Sophia WM              Sophia X Bridge
 
 ## Load-Bearing Boundaries
 
+### Compositor Strategy
+
+Sophia Engine should follow Smithay-style compositor structure, using niri as a
+read-only reference for how a production Rust compositor organizes backends,
+renderers, outputs, frame clocks, input devices, and headless tests.
+
+Sophia should not fork niri. Niri combines compositor and window-management
+policy in one central state object, while Sophia deliberately splits policy into
+Sophia WM. The reusable idea is the compositor machinery, not the process model.
+
+Sophia X Bridge should follow picom conceptually for the X side. Picom imports
+the X window tree, tracks top-levels and stacking, redirects windows with
+XComposite, consumes Damage, builds flat layer snapshots, and computes damage
+across buffered layouts. Sophia needs those same data products, but it must hand
+them to Sophia Engine instead of rendering back into the X root.
+
+Do not turn Sophia into a traditional X compositor. XLibre remains the X11
+authority, but Sophia owns final scanout and physical input.
+
 ### Engine to WM
 
 The WM protocol is a policy boundary. The WM receives state changes that need
@@ -161,3 +180,16 @@ The first useful proof is not a full desktop. It is a vertical slice:
 
 That slice proves the rendering seam and the process split. Routed input is the
 next research milestone.
+
+## Reference Boundaries
+
+Use each reference at the boundary where it is strongest:
+
+- niri: Rust/Smithay backend patterns, frame scheduling, renderer integration,
+  headless test scaffolding.
+- picom: XComposite/Damage flow, X window mirror, layer snapshots, render
+  command planning, damage over buffer age.
+- river: external WM protocol shape, manage/render sequence thinking, crash
+  isolation for policy.
+- XLibre: namespace enforcement, X11 delivery semantics, future routed-input
+  protocol.
