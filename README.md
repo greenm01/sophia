@@ -14,51 +14,46 @@ while preserving X11 client compatibility.
 
 ## The Modernized X11 Architecture
 
-```text
-       [ Physical Input Devices / Kernel ]
-                       │
-                       │ (1) Raw Input Events (Mouse clicks, Keystrokes)
-                       ▼
- ┌───────────────────────────────────────────┐
- │             MODERN COMPOSITOR             │◄───┐
- └─────────────────────┬─────────────────────┘    │
-                       │                          │ (5) Atomic Layout Updates
-                       │ (2) WM Keybindings       │     & Window Frames
-                       ▼                          │
- ┌───────────────────────────────────────────┐    │
- │       WINDOW MANAGER (Policy Engine)      ├────┘
- └───────────────────────────────────────────┘
-         │
-         │ (3) Spawns apps with Namespace env tokens
-         ▼
- ┌────────────────────────────────────────────────────────────────────────┐
- │                      XNAMESPACES SANDBOX LAYER                         │
- │                                                                        │
- │  ┌──────────────────────────────────┐  ┌────────────────────────────┐  │
- │  │      NAMESPACE A (Trusted)       │  │   NAMESPACE B (Untrusted)  │  │
- │  │                                  │  │                            │  │
- │  │  [Terminal]        [File Manager]│  │  [Untrusted Web Browser]   │  │
- │  └──────┬───────────────────┬───────┘  └─────────────┬──────────────┘  │
- └─────────┼───────────────────┼────────────────────────┼─────────────────┘
-           │                   │                        │
-           │ (4) Standard X11 Protocol Traffic          │
-           ▼                   ▼                        ▼
- ┌────────────────────────────────────────────────────────────────────────┐
- │                        MODIFIED XSERVER (XLibre)                       │
- │                                                                        │
- │  [XID Virtualization Registry]                                         │
- │   ├── Namespace A Matrix: Maps local XIDs -> Compositor surfaces       │
- │   └── Namespace B Matrix: Isolated from Namespace A completely         │
- └─────────────────────────────────┬──────────────────────────────────────┘
-                                   │
-                                   │ (6) Redirected Offscreen Pixmaps
-                                   │     (via XComposite Extension)
-                                   ▼
-                       [ Back to Modern Compositor ]
-                       [ (Combines buffers frame-perfectly) ]
-                                   │
-                                   ▼
-                           [ Display Screen ]
+```mermaid
+flowchart TB
+    input["Physical input devices<br/>keyboard / pointer"]
+    kernel["Linux kernel<br/>libinput + DRM/KMS"]
+    display["Display output<br/>GPU scanout"]
+
+    engine["Sophia Engine<br/>compositor authority<br/>scene graph / spatial index / frame loop"]
+    chrome["Metadata broker + compositor chrome<br/>redacted labels / icon tokens / trust badges"]
+    wm["Sophia WM<br/>blind TEA policy process<br/>layout / focus / workspaces"]
+    bridge["Sophia X Bridge<br/>privileged XLibre mirror<br/>Composite / Damage / XFixes / routed input"]
+    xlibre["XLibre<br/>X11 + Xnamespace authority<br/>resources / grabs / selections"]
+
+    subgraph ns_a["Namespace A: trusted clients"]
+        terminal["Terminal"]
+        files["File manager"]
+    end
+
+    subgraph ns_b["Namespace B: untrusted clients"]
+        browser["Web browser"]
+        webapp["Web app"]
+    end
+
+    input -->|"raw device events"| kernel
+    kernel -->|"input events"| engine
+    engine -->|"GPU composition"| display
+
+    engine -->|"LayoutNodeSnapshot + policy events"| wm
+    wm -->|"LayoutTransaction commands"| engine
+
+    xlibre -->|"window tree + XComposite pixmaps + Damage"| bridge
+    bridge -->|"LayerSnapshot + SurfaceSnapshot"| engine
+    bridge -->|"sanitized ChromeDescriptor"| chrome
+    chrome -->|"compositor-owned presentation"| engine
+    engine -->|"focus / routed-input request"| bridge
+    bridge -->|"privileged XLibre request"| xlibre
+
+    terminal -->|"standard X11 protocol"| xlibre
+    files -->|"standard X11 protocol"| xlibre
+    browser -->|"standard X11 protocol"| xlibre
+    webapp -->|"standard X11 protocol"| xlibre
 ```
 
 ## Data Path

@@ -9,32 +9,29 @@ adds a modern display engine and an external policy layer around that authority.
 
 ## Processes
 
-```text
-kernel input / DRM
-        |
-        v
-Sophia Engine
-  - libinput devices
-  - scene graph
-  - compositor timing
-  - output/scanout
-        |
-        +--------------------+
-        |                    |
-        v                    v
-Sophia WM              Sophia X Bridge
-  - layout policy        - XComposite/Damage watcher
-  - focus policy         - X11 window metadata
-  - keybindings          - XLibre privileged requests
-  - app launch           - routed-input adapter
-        |                    |
-        +---------+----------+
-                  |
-                  v
-                XLibre
-                  |
-                  v
-        Xnamespace-isolated X11 clients
+```mermaid
+flowchart TB
+    kernel["kernel input + DRM/KMS"]
+    engine["Sophia Engine<br/>libinput / scene graph / frame timing / scanout"]
+    wm["Sophia WM<br/>blind policy model / TEA update / layout commands"]
+    portal["Sophia Portals<br/>TEA policy for intentional namespace crossing"]
+    chrome["Metadata broker + compositor chrome<br/>redacted presentation metadata"]
+    bridge["Sophia X Bridge<br/>XComposite / Damage / X11 mirror / routed-input adapter"]
+    xlibre["XLibre<br/>X11 protocol + resources + Xnamespace enforcement"]
+    clients["Xnamespace-isolated X11 clients"]
+
+    kernel -->|"input and output devices"| engine
+    engine -->|"opaque snapshots + events"| wm
+    wm -->|"command packets"| engine
+    engine -->|"portal prompts / transfer events"| portal
+    portal -->|"allow / deny / revoke / handoff"| engine
+    bridge -->|"sanitized chrome descriptors"| chrome
+    chrome -->|"compositor-owned UI data"| engine
+    bridge -->|"surface and layer snapshots"| engine
+    engine -->|"focus and routed-input requests"| bridge
+    bridge -->|"privileged X11 requests"| xlibre
+    xlibre -->|"window tree, pixmaps, damage"| bridge
+    clients -->|"standard X11 protocol"| xlibre
 ```
 
 ## Load-Bearing Boundaries
