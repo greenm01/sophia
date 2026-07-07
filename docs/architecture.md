@@ -64,6 +64,15 @@ The WM protocol is a policy boundary. The WM receives state changes that need
 policy decisions: new windows, destroyed windows, output changes, keybindings,
 workspace changes, and focus-affecting events.
 
+The WM is blind to X11 identity and namespace identity. It manages opaque layout
+nodes keyed by Sophia `SurfaceId`, not XIDs. The protocol must not expose raw
+window titles, classes, icons, PIDs, namespace IDs, or X11 resource IDs.
+
+User-facing chrome such as titles, icons, attention indicators, and trust badges
+belongs to Sophia Engine or a compositor-shell component fed by a metadata
+broker. The broker may consume X metadata from Sophia X Bridge, but it exports
+sanitized compositor chrome data separately from WM layout data.
+
 The WM is not on the per-frame or per-input hot path. Sophia Engine keeps the
 last committed policy state if the WM crashes or restarts.
 
@@ -73,6 +82,9 @@ The protocol should be sequence-oriented:
   workspace assignment, activation.
 - **Render sequence** for compositor-only state: position, z-order, crop,
   decoration geometry, opacity, transforms.
+- **Chrome sequence** for compositor-owned presentation metadata: redacted
+  display labels, icon tokens, trust badges, and attention state. This sequence
+  is not consumed by the WM.
 
 ### Engine to XLibre Rendering
 

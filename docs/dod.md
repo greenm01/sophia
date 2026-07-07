@@ -213,6 +213,43 @@ Fields should describe:
 Sophia Engine commits the transaction as a unit when possible. If clients lag,
 the engine may fall back after the transaction timeout.
 
+### LayoutNodeSnapshot
+
+The WM receives opaque layout nodes, not X11 windows.
+
+Fields should describe:
+
+- Sophia `SurfaceId`
+- workspace/tag identity
+- broad surface kind
+- move/resize/focus/close/fullscreen capabilities
+- focus, urgency, fullscreen, floating, and visibility state
+- size constraints
+- current compositor geometry
+- serial/generation
+
+Fields must not include `XWindowId`, `NamespaceId`, raw title, app class, PID,
+or icon pixels. App-specific behavior should come later from launch/session
+policy hints, not WM sniffing of client metadata.
+
+### ChromeDescriptor
+
+Chrome descriptors are compositor-owned presentation metadata. They are separate
+from WM layout state.
+
+Fields should describe:
+
+- Sophia `SurfaceId`
+- optional redacted display label
+- compositor-owned icon token
+- trust level
+- attention state
+- serial/generation
+
+The compositor may use this data to draw title bars, top bars, tab strips, and
+security badges. The external WM should not need this packet to tile or focus
+surfaces.
+
 ### SurfaceSnapshot
 
 Sophia X Bridge emits surface snapshots from XLibre state.

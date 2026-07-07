@@ -1,8 +1,9 @@
 use core::fmt;
+use std::collections::{BTreeMap, BTreeSet};
 
 use sophia_protocol::{
-    BufferSource, FrameSnapshot, LayerSnapshot, OutputId, Region, RenderCommand, RenderCommandKind,
-    Size, SurfaceId,
+    BufferSource, ChromeDescriptor, FrameSnapshot, LayerSnapshot, OutputId, Region, RenderCommand,
+    RenderCommandKind, Size, SurfaceId,
 };
 use sophia_runtime::{SophiaErrorExt, SophiaErrorKind};
 use tracing::instrument;
@@ -104,6 +105,33 @@ pub struct HeadlessEngine {
     output: HeadlessOutput,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct ChromeBroker {
+    descriptors: BTreeMap<SurfaceId, ChromeDescriptor>,
+}
+
+impl ChromeBroker {
+    pub fn upsert(&mut self, descriptor: ChromeDescriptor) {
+        self.descriptors.insert(descriptor.surface, descriptor);
+    }
+
+    pub fn get(&self, surface: SurfaceId) -> Option<&ChromeDescriptor> {
+        self.descriptors.get(&surface)
+    }
+
+    pub fn remove_surface(&mut self, surface: SurfaceId) -> Option<ChromeDescriptor> {
+        self.descriptors.remove(&surface)
+    }
+
+    pub fn len(&self) -> usize {
+        self.descriptors.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.descriptors.is_empty()
+    }
+}
+
 impl HeadlessEngine {
     pub fn new(output: HeadlessOutput) -> Self {
         Self { output }
@@ -187,7 +215,7 @@ impl HeadlessEngine {
             .layers
             .iter()
             .map(|layer| layer.surface)
-            .collect::<std::collections::BTreeSet<_>>();
+            .collect::<BTreeSet<_>>();
         let mut steps = Vec::with_capacity(frame.commands.len());
 
         for (command_index, command) in frame.commands.iter().enumerate() {
@@ -280,7 +308,7 @@ fn test_layer(surface_index: u32, stack_rank: u32, x: i32, damage: Region) -> La
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sophia_protocol::{Rect, SurfaceId};
+    use sophia_protocol::{AttentionState, DisplayLabel, IconTokenId, Rect, SurfaceId, TrustLevel};
 
     #[test]
     fn headless_engine_exposes_deterministic_output() {
@@ -437,5 +465,52 @@ mod tests {
             engine.replay_frame(&frame),
             Err(EngineError::InvalidSurface)
         );
+    }
+
+    #[test]
+    fn chrome_broker_keeps_metadata_separate_from_layout() {
+        let mut broker = ChromeBroker::default();
+        let surface = SurfaceId::new(3, 1);
+
+        broker.upsert(ChromeDescriptor {
+            surface,
+            label: Some(DisplayLabel {
+                text: "Redacted Title".to_owned(),
+                redacted: true,
+            }),
+            icon: Some(IconTokenId::from_raw(12)),
+            trust_level: TrustLevel::Isolated,
+            attention: AttentionState::None,
+            generation: 4,
+        });
+
+        let descriptor = broker.get(surface).unwrap();
+
+        assert_eq!(broker.len(), 1);
+        assert_eq!(
+            descriptor.label.as_ref().map(|label| label.redacted),
+            Some(true)
+        );
+        assert_eq!(descriptor.icon, Some(IconTokenId::from_raw(12)));
+        assert_eq!(descriptor.trust_level, TrustLevel::Isolated);
+    }
+
+    #[test]
+    fn chrome_broker_removes_surface_metadata() {
+        let mut broker = ChromeBroker::default();
+        let surface = SurfaceId::new(4, 1);
+
+        broker.upsert(ChromeDescriptor {
+            surface,
+            label: None,
+            icon: None,
+            trust_level: TrustLevel::Unknown,
+            attention: AttentionState::None,
+            generation: 1,
+        });
+
+        assert!(broker.remove_surface(surface).is_some());
+        assert!(broker.get(surface).is_none());
+        assert!(broker.is_empty());
     }
 }

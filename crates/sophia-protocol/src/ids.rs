@@ -29,6 +29,8 @@ simple_id!(SeatId);
 simple_id!(DeviceId);
 simple_id!(TransactionId);
 simple_id!(PortalTransferId);
+simple_id!(WorkspaceId);
+simple_id!(IconTokenId);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SurfaceId {
@@ -128,6 +130,8 @@ allocator_next!(SeatId);
 allocator_next!(DeviceId);
 allocator_next!(TransactionId);
 allocator_next!(PortalTransferId);
+allocator_next!(WorkspaceId);
+allocator_next!(IconTokenId);
 
 #[cfg(test)]
 mod tests {

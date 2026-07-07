@@ -1,6 +1,7 @@
 use crate::geometry::{Point, Rect, Region, Size, Transform};
 use crate::ids::{
-    DeviceId, NamespaceId, OutputId, PortalTransferId, SeatId, SurfaceId, TransactionId, XWindowId,
+    DeviceId, IconTokenId, NamespaceId, OutputId, PortalTransferId, SeatId, SurfaceId,
+    TransactionId, WorkspaceId, XWindowId,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -87,6 +88,101 @@ pub struct CompositorSurface {
     pub output: Option<OutputId>,
     pub visible: bool,
     pub damage: Region,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LayoutNodeSnapshot {
+    pub surface: SurfaceId,
+    pub workspace: WorkspaceId,
+    pub kind: LayoutNodeKind,
+    pub capabilities: LayoutNodeCapabilities,
+    pub state: LayoutNodeState,
+    pub constraints: SurfaceConstraints,
+    pub geometry: Rect,
+    pub generation: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LayoutNodeKind {
+    Toplevel,
+    Dialog,
+    Utility,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LayoutNodeCapabilities {
+    pub movable: bool,
+    pub resizable: bool,
+    pub focusable: bool,
+    pub closable: bool,
+    pub fullscreenable: bool,
+}
+
+impl LayoutNodeCapabilities {
+    pub const STANDARD_TOPLEVEL: Self = Self {
+        movable: true,
+        resizable: true,
+        focusable: true,
+        closable: true,
+        fullscreenable: true,
+    };
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LayoutNodeState {
+    pub focused: bool,
+    pub urgent: bool,
+    pub fullscreen: bool,
+    pub floating: bool,
+    pub visible: bool,
+}
+
+impl LayoutNodeState {
+    pub const NORMAL: Self = Self {
+        focused: false,
+        urgent: false,
+        fullscreen: false,
+        floating: false,
+        visible: true,
+    };
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SurfaceConstraints {
+    pub min_size: Option<Size>,
+    pub max_size: Option<Size>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ChromeDescriptor {
+    pub surface: SurfaceId,
+    pub label: Option<DisplayLabel>,
+    pub icon: Option<IconTokenId>,
+    pub trust_level: TrustLevel,
+    pub attention: AttentionState,
+    pub generation: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DisplayLabel {
+    pub text: String,
+    pub redacted: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TrustLevel {
+    Unknown,
+    Trusted,
+    Untrusted,
+    Isolated,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AttentionState {
+    None,
+    Notice,
+    Critical,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -215,5 +311,57 @@ mod tests {
 
         assert_eq!(cloned.surface, surface);
         assert_eq!(cloned.damage.rects.len(), 1);
+    }
+
+    #[test]
+    fn layout_node_snapshot_carries_only_opaque_policy_data() {
+        let node = LayoutNodeSnapshot {
+            surface: SurfaceId::new(7, 1),
+            workspace: WorkspaceId::from_raw(2),
+            kind: LayoutNodeKind::Toplevel,
+            capabilities: LayoutNodeCapabilities::STANDARD_TOPLEVEL,
+            state: LayoutNodeState::NORMAL,
+            constraints: SurfaceConstraints {
+                min_size: Some(Size {
+                    width: 320,
+                    height: 200,
+                }),
+                max_size: None,
+            },
+            geometry: Rect {
+                x: 0,
+                y: 0,
+                width: 640,
+                height: 480,
+            },
+            generation: 3,
+        };
+
+        assert_eq!(node.surface, SurfaceId::new(7, 1));
+        assert_eq!(node.workspace, WorkspaceId::from_raw(2));
+        assert!(node.capabilities.resizable);
+        assert!(node.state.visible);
+    }
+
+    #[test]
+    fn chrome_descriptor_carries_redacted_metadata_separately() {
+        let chrome = ChromeDescriptor {
+            surface: SurfaceId::new(9, 1),
+            label: Some(DisplayLabel {
+                text: "Private Window".to_owned(),
+                redacted: true,
+            }),
+            icon: Some(IconTokenId::from_raw(4)),
+            trust_level: TrustLevel::Untrusted,
+            attention: AttentionState::Notice,
+            generation: 1,
+        };
+
+        assert_eq!(chrome.surface, SurfaceId::new(9, 1));
+        assert_eq!(
+            chrome.label.as_ref().map(|label| label.redacted),
+            Some(true)
+        );
+        assert_eq!(chrome.icon, Some(IconTokenId::from_raw(4)));
     }
 }

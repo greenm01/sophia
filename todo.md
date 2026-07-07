@@ -119,6 +119,7 @@ Put one real X11 client surface into Sophia Engine.
 Split policy from the compositor process.
 
 **Protocol**
+- [x] Add blind-WM layout node and compositor-owned chrome packet shapes.
 - [ ] Define the first manage sequence: new surface, configure size, focus,
   workspace assignment.
 - [ ] Define the first render sequence: position, z-order, crop, transform.
