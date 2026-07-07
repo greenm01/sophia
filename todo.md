@@ -103,9 +103,11 @@ Put one real X11 client surface into Sophia Engine.
 **Rendering path**
 - [ ] Run an XLibre instance suitable for offscreen or test rendering.
 - [ ] Launch one simple X11 client in one namespace.
+- [x] Run a system Xvfb smoke display for the generic X11 path.
+- [x] Add a Sophia-owned simple X11 test client command.
 - [x] Add a CPU readback fallback for named XComposite pixmaps.
-- [ ] Import or read back one XComposite pixmap.
-- [ ] Convert the pixmap into a compositor texture or temporary CPU buffer.
+- [x] Import or read back one XComposite pixmap.
+- [x] Convert the pixmap into a compositor texture or temporary CPU buffer.
 - [ ] Display it in the headless or simple real-output engine.
 
 **Policy**

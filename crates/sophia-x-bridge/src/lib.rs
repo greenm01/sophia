@@ -1,5 +1,7 @@
 use core::fmt;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::thread;
+use std::time::Duration;
 
 use sophia_protocol::{
     BufferSource, DamageFrame, LayerSnapshot, NamespaceId, OutputId, Rect, Region, Size, SurfaceId,
@@ -10,7 +12,8 @@ use x11rb::protocol::Event;
 use x11rb::protocol::composite::{ConnectionExt as CompositeConnectionExt, Redirect};
 use x11rb::protocol::damage::{ConnectionExt as DamageConnectionExt, ReportLevel};
 use x11rb::protocol::xproto::{
-    Atom, AtomEnum, ConnectionExt as _, ImageFormat, MapState, Place, Window,
+    Atom, AtomEnum, ConnectionExt as _, CreateGCAux, CreateWindowAux, EventMask, ImageFormat,
+    MapState, Place, Rectangle, Window, WindowClass,
 };
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -90,6 +93,33 @@ impl XMirrorState {
             if let Some(toplevel_mirror) = self.window_mut(toplevel) {
                 toplevel_mirror.client = Some(client);
                 toplevel_mirror.toplevel = Some(toplevel);
+            }
+        }
+    }
+
+    pub fn apply_unmanaged_client_fallback(&mut self) {
+        let root_windows = self
+            .windows
+            .iter()
+            .filter(|mirror| mirror.parent.is_none())
+            .map(|mirror| mirror.window)
+            .collect::<BTreeSet<_>>();
+        let fallback_clients = self
+            .windows
+            .iter()
+            .filter(|mirror| mirror.client.is_none() && mirror.mapped)
+            .filter(|mirror| {
+                mirror
+                    .parent
+                    .is_some_and(|parent| root_windows.contains(&parent))
+            })
+            .map(|mirror| mirror.window)
+            .collect::<Vec<_>>();
+
+        for client in fallback_clients {
+            if let Some(mirror) = self.window_mut(client) {
+                mirror.client = Some(client);
+                mirror.toplevel = Some(client);
             }
         }
     }
@@ -657,6 +687,9 @@ pub enum XBridgeError {
         pixmap: u32,
         message: String,
     },
+    TestClient {
+        message: String,
+    },
 }
 
 impl fmt::Display for XBridgeError {
@@ -745,6 +778,9 @@ impl fmt::Display for XBridgeError {
             }
             Self::PixmapReadback { pixmap, message } => {
                 write!(f, "failed to read X pixmap {pixmap:#x}: {message}")
+            }
+            Self::TestClient { message } => {
+                write!(f, "failed to run Sophia X test client: {message}")
             }
         }
     }
@@ -846,6 +882,42 @@ pub struct XRootImport {
     pub mirror: XMirrorState,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TestClientConfig {
+    pub display_name: Option<String>,
+    pub size: Size,
+    pub hold_millis: u64,
+}
+
+impl Default for TestClientConfig {
+    fn default() -> Self {
+        Self {
+            display_name: None,
+            size: Size {
+                width: 320,
+                height: 200,
+            },
+            hold_millis: 5_000,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TestClientWindow {
+    pub window: XWindowId,
+    pub size: Size,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SmokeReadbackReport {
+    pub display_name: Option<String>,
+    pub mirrored_windows: usize,
+    pub surfaces: usize,
+    pub redirect_targets: usize,
+    pub readbacks: usize,
+    pub total_bytes: usize,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct XAtoms {
     pub wm_state: Atom,
@@ -898,6 +970,150 @@ pub fn import_root_window_tree(
             namespaces,
         },
         mirror,
+    })
+}
+
+pub fn run_test_client_window(config: TestClientConfig) -> Result<TestClientWindow, XBridgeError> {
+    let width = u16::try_from(config.size.width.max(1)).unwrap_or(u16::MAX);
+    let height = u16::try_from(config.size.height.max(1)).unwrap_or(u16::MAX);
+    let (connection, screen_num) =
+        x11rb::connect(config.display_name.as_deref()).map_err(|error| XBridgeError::Connect {
+            message: error.to_string(),
+        })?;
+    let screen = connection
+        .setup()
+        .roots
+        .get(screen_num)
+        .ok_or(XBridgeError::InvalidScreen { screen_num })?;
+    let window = connection
+        .generate_id()
+        .map_err(|error| XBridgeError::GenerateId {
+            message: error.to_string(),
+        })?;
+    let gc = connection
+        .generate_id()
+        .map_err(|error| XBridgeError::GenerateId {
+            message: error.to_string(),
+        })?;
+    let window_aux = CreateWindowAux::new()
+        .background_pixel(screen.white_pixel)
+        .event_mask(EventMask::EXPOSURE | EventMask::STRUCTURE_NOTIFY);
+
+    connection
+        .create_window(
+            screen.root_depth,
+            window,
+            screen.root,
+            0,
+            0,
+            width,
+            height,
+            0,
+            WindowClass::INPUT_OUTPUT,
+            screen.root_visual,
+            &window_aux,
+        )
+        .map_err(|error| XBridgeError::TestClient {
+            message: error.to_string(),
+        })?
+        .check()
+        .map_err(|error| XBridgeError::TestClient {
+            message: error.to_string(),
+        })?;
+    connection
+        .create_gc(
+            gc,
+            window,
+            &CreateGCAux::new()
+                .foreground(screen.black_pixel)
+                .background(screen.white_pixel),
+        )
+        .map_err(|error| XBridgeError::TestClient {
+            message: error.to_string(),
+        })?
+        .check()
+        .map_err(|error| XBridgeError::TestClient {
+            message: error.to_string(),
+        })?;
+    connection
+        .map_window(window)
+        .map_err(|error| XBridgeError::TestClient {
+            message: error.to_string(),
+        })?
+        .check()
+        .map_err(|error| XBridgeError::TestClient {
+            message: error.to_string(),
+        })?;
+    connection
+        .poly_fill_rectangle(
+            window,
+            gc,
+            &[Rectangle {
+                x: 24,
+                y: 24,
+                width: width.saturating_sub(48),
+                height: height.saturating_sub(48),
+            }],
+        )
+        .map_err(|error| XBridgeError::TestClient {
+            message: error.to_string(),
+        })?
+        .check()
+        .map_err(|error| XBridgeError::TestClient {
+            message: error.to_string(),
+        })?;
+    connection
+        .flush()
+        .map_err(|error| XBridgeError::TestClient {
+            message: error.to_string(),
+        })?;
+
+    thread::sleep(Duration::from_millis(config.hold_millis));
+
+    Ok(TestClientWindow {
+        window: wrap_xid(window),
+        size: Size {
+            width: i32::from(width),
+            height: i32::from(height),
+        },
+    })
+}
+
+pub fn smoke_readback_display(
+    display_name: Option<&str>,
+) -> Result<SmokeReadbackReport, XBridgeError> {
+    let (connection, screen_num) =
+        x11rb::connect(display_name).map_err(|error| XBridgeError::Connect {
+            message: error.to_string(),
+        })?;
+    let mut mirror = import_root_window_tree_from_connection(&connection, screen_num)?;
+    let atoms = intern_client_hint_atoms(&connection)?;
+    let hints = detect_client_hints(&connection, screen_num, &mirror, atoms)?;
+    mirror.apply_client_hints(&hints);
+    mirror.apply_unmanaged_client_fallback();
+
+    let targets = mirror.composite_redirect_targets();
+    redirect_composite_targets(&connection, &targets)?;
+
+    let mut pixmaps = CompositePixmapMap::default();
+    name_composite_pixmaps(&connection, &targets, &mut pixmaps)?;
+
+    let mut surface_ids = SurfaceIdMap::default();
+    let mut surfaces = mirror.emit_surfaces(&mut surface_ids, &pixmaps);
+    let mut buffers = CpuBufferStore::default();
+    let readbacks = readback_surface_pixmaps(&connection, &mut surfaces, &mut buffers)?;
+    let total_bytes = readbacks
+        .iter()
+        .map(|readback| readback.bytes.len())
+        .sum::<usize>();
+
+    Ok(SmokeReadbackReport {
+        display_name: display_name.map(str::to_owned),
+        mirrored_windows: mirror.windows().len(),
+        surfaces: surfaces.len(),
+        redirect_targets: targets.len(),
+        readbacks: readbacks.len(),
+        total_bytes,
     })
 }
 
@@ -1429,6 +1645,15 @@ mod tests {
     }
 
     #[test]
+    fn test_client_config_has_bounded_defaults() {
+        let config = TestClientConfig::default();
+
+        assert!(config.size.width > 0);
+        assert!(config.size.height > 0);
+        assert!(config.hold_millis > 0);
+    }
+
+    #[test]
     fn wraps_imported_xids_with_initial_generation() {
         assert_eq!(wrap_xid(0x1200042), XWindowId::new(0x1200042, 1));
     }
@@ -1572,6 +1797,35 @@ mod tests {
 
         assert_eq!(client.client, Some(wrap_xid(0x20)));
         assert_eq!(client.toplevel, Some(wrap_xid(0x20)));
+    }
+
+    #[test]
+    fn unmanaged_client_fallback_marks_mapped_root_children() {
+        let mut state = XMirrorState::default();
+        state.ingest_window(mirror(0x01, None, 0));
+        let mut client = mirror(0x20, Some(0x01), 0);
+        client.mapped = true;
+        state.ingest_window(client);
+        let mut nested = mirror(0x30, Some(0x20), 0);
+        nested.mapped = true;
+        state.ingest_window(nested);
+
+        state.apply_unmanaged_client_fallback();
+
+        let client = state
+            .windows()
+            .iter()
+            .find(|mirror| mirror.window == wrap_xid(0x20))
+            .unwrap();
+        let nested = state
+            .windows()
+            .iter()
+            .find(|mirror| mirror.window == wrap_xid(0x30))
+            .unwrap();
+
+        assert_eq!(client.client, Some(wrap_xid(0x20)));
+        assert_eq!(client.toplevel, Some(wrap_xid(0x20)));
+        assert_eq!(nested.client, None);
     }
 
     #[test]

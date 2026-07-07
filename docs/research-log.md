@@ -183,6 +183,18 @@ rewrite `SurfaceSnapshot` sources from `XPixmap` to `CpuBuffer`. This is not the
 final renderer path, but it gives the first real-client proof a simple handoff
 before GPU texture import exists.
 
+Sophia now includes a minimal `sophia x-test-client` command that connects to an
+X display, creates a mapped input/output window, draws a simple filled rectangle,
+and holds the connection open for a bounded duration. This avoids depending on
+external clients like `xterm` or `xclock` during Phase 4 smoke tests.
+
+The first live readback smoke passed against system `Xvfb` on `:119`. With
+`sophia x-test-client --seconds=30` holding one mapped window,
+`sophia x-smoke-readback` mirrored two windows, produced one surface, redirected
+one Composite target, read back one named pixmap, and captured 256000 bytes into
+the CPU buffer path. This validates the generic X11 path; XLibre-specific
+namespace startup remains a separate unchecked Phase 4 item.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new
