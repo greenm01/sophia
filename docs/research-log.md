@@ -170,6 +170,12 @@ XIDs, and accumulates pending Sophia `Region` values per window. This is still
 surface-local damage; converting it into output/frame `DamageFrame` packets is
 the next Phase 3 step.
 
+X damage can now be drained into Sophia `DamageFrame` values using the current
+surface snapshots. The first conversion translates client-local damage
+rectangles by the snapshot geometry and records affected Sophia surfaces. This
+is enough for the headless engine path; precise frame/client offset handling
+should be measured once real decorated X11 clients are imported.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

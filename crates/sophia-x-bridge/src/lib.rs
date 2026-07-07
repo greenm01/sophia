@@ -2,8 +2,8 @@ use core::fmt;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use sophia_protocol::{
-    BufferSource, LayerSnapshot, NamespaceId, Rect, Region, SurfaceId, SurfaceSnapshot, Transform,
-    XWindowId, XWindowMirror,
+    BufferSource, DamageFrame, LayerSnapshot, NamespaceId, OutputId, Rect, Region, SurfaceId,
+    SurfaceSnapshot, Transform, XWindowId, XWindowMirror,
 };
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
@@ -920,6 +920,62 @@ where
     Ok(())
 }
 
+pub fn emit_damage_frame(
+    tracker: &mut DamageTracker,
+    output: OutputId,
+    frame_serial: u64,
+    buffer_age: u32,
+    root_generation: u64,
+    surfaces: &[SurfaceSnapshot],
+) -> DamageFrame {
+    let mut affected_surfaces = Vec::new();
+    let mut seen_surfaces = BTreeSet::new();
+    let mut damage = Region::empty();
+
+    for surface in surfaces {
+        let Some(client) = surface.client else {
+            continue;
+        };
+
+        let local_damage = tracker.drain_damage(client);
+        if local_damage.is_empty() || !surface.mapped {
+            continue;
+        }
+
+        let translated = translate_region(&local_damage, surface.geometry.x, surface.geometry.y);
+        if translated.is_empty() {
+            continue;
+        }
+
+        if seen_surfaces.insert(surface.surface) {
+            affected_surfaces.push(surface.surface);
+        }
+        damage.extend(&translated);
+    }
+
+    DamageFrame {
+        output,
+        frame_serial,
+        buffer_age,
+        root_generation,
+        affected_surfaces,
+        damage,
+    }
+}
+
+fn translate_region(region: &Region, dx: i32, dy: i32) -> Region {
+    let mut translated = Region::empty();
+    for rect in &region.rects {
+        translated.push(Rect {
+            x: rect.x.saturating_add(dx),
+            y: rect.y.saturating_add(dy),
+            width: rect.width,
+            height: rect.height,
+        });
+    }
+    translated
+}
+
 fn query_required_extensions<C>(connection: &C) -> Result<Vec<ExtensionStatus>, XBridgeError>
 where
     C: Connection,
@@ -1498,6 +1554,105 @@ mod tests {
                 height: 80,
             }
         );
+    }
+
+    #[test]
+    fn emits_damage_frame_from_tracked_client_damage() {
+        let mut state = XMirrorState::default();
+        let mut frame = mirror(0x20, None, 4);
+        frame.mapped = true;
+        frame.client = Some(wrap_xid(0x30));
+        frame.toplevel = Some(wrap_xid(0x20));
+        frame.geometry = Rect {
+            x: 100,
+            y: 200,
+            width: 640,
+            height: 480,
+        };
+        state.ingest_window(frame);
+
+        let mut surfaces = SurfaceIdMap::default();
+        let pixmaps = CompositePixmapMap::default();
+        let snapshots = state.emit_surfaces(&mut surfaces, &pixmaps);
+
+        let mut tracker = DamageTracker::default();
+        tracker.insert_damage(wrap_xid(0x30), 0x5000);
+        assert!(tracker.apply_event(XDamageEvent {
+            window: wrap_xid(0x30),
+            damage: 0x5000,
+            drawable: wrap_xid(0x30),
+            timestamp: 42,
+            area: Rect {
+                x: 5,
+                y: 6,
+                width: 70,
+                height: 80,
+            },
+            drawable_geometry: Rect {
+                x: 0,
+                y: 0,
+                width: 640,
+                height: 480,
+            },
+        }));
+
+        let frame = emit_damage_frame(&mut tracker, OutputId::from_raw(1), 9, 2, 3, &snapshots);
+
+        assert_eq!(frame.output, OutputId::from_raw(1));
+        assert_eq!(frame.frame_serial, 9);
+        assert_eq!(frame.buffer_age, 2);
+        assert_eq!(frame.root_generation, 3);
+        assert_eq!(frame.affected_surfaces, vec![snapshots[0].surface]);
+        assert_eq!(
+            frame.damage.rects,
+            vec![Rect {
+                x: 105,
+                y: 206,
+                width: 70,
+                height: 80,
+            }]
+        );
+        assert!(tracker.pending_damage(wrap_xid(0x30)).is_none());
+    }
+
+    #[test]
+    fn damage_frame_drops_unmapped_surface_damage() {
+        let mut state = XMirrorState::default();
+        let mut window = mirror(0x20, None, 4);
+        window.client = Some(wrap_xid(0x20));
+        window.toplevel = Some(wrap_xid(0x20));
+        state.ingest_window(window);
+
+        let mut surfaces = SurfaceIdMap::default();
+        let pixmaps = CompositePixmapMap::default();
+        let snapshots = state.emit_surfaces(&mut surfaces, &pixmaps);
+
+        let mut tracker = DamageTracker::default();
+        tracker.insert_damage(wrap_xid(0x20), 0x5000);
+        assert!(tracker.apply_event(XDamageEvent {
+            window: wrap_xid(0x20),
+            damage: 0x5000,
+            drawable: wrap_xid(0x20),
+            timestamp: 42,
+            area: Rect {
+                x: 5,
+                y: 6,
+                width: 70,
+                height: 80,
+            },
+            drawable_geometry: Rect {
+                x: 0,
+                y: 0,
+                width: 640,
+                height: 480,
+            },
+        }));
+
+        let frame = emit_damage_frame(&mut tracker, OutputId::from_raw(1), 9, 2, 3, &snapshots);
+
+        assert!(frame.affected_surfaces.is_empty());
+        assert!(frame.damage.is_empty());
+        assert!(tracker.pending_damage(wrap_xid(0x20)).is_none());
     }
 
     #[test]
