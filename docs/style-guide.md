@@ -1,0 +1,147 @@
+# Style Guide
+
+This guide defines implementation discipline for Sophia. It is intentionally
+small because the project is still a research prototype. The rules here defend
+the data model in `dod.md`.
+
+## Languages
+
+Sophia user-space components are Rust by default.
+
+- Rust: Sophia Engine, Sophia X Bridge, portals, CLI tools, reference WM.
+- C: narrow XLibre patches and protocol extensions.
+- Nim: optional experimental WMs or policy prototypes.
+- Zig: optional probes or small C-adjacent helpers, not the main architecture.
+
+Do not mix languages inside one component without a concrete boundary reason.
+
+## Rust Layout
+
+Prefer subsystem directories over large files:
+
+```text
+src/
+  types/
+  state/
+  protocol/
+  systems/
+  bridge/
+  portal/
+  wm/
+  engine/
+```
+
+The same data/logic split applies in Rust:
+
+- `types` contains passive records, IDs, enums, and flags.
+- `state` owns tables and lifetimes.
+- `protocol` serializes packets and validates wire data.
+- `systems` transforms data.
+- `bridge` talks to XLibre.
+- `portal` owns cross-namespace transfer policy.
+- `engine` owns compositor state and hot-path scheduling.
+- `wm` owns policy examples.
+
+Avoid placing behavior on data records unless it is a pure helper such as
+validation, conversion, or formatting.
+
+## Naming
+
+Use ordinary Rust naming:
+
+- Types and traits: `PascalCase`
+- Functions and variables: `snake_case`
+- Modules: `snake_case`
+- Constants: `SCREAMING_SNAKE_CASE`
+
+IDs should make ownership clear:
+
+- `SurfaceId`, not `WindowId`
+- `XWindowId`, not raw `u32`
+- `NamespaceId`, not raw string in hot paths
+- `TransactionId`, not `Serial` unless it is truly protocol-local
+
+Raw XIDs should be wrapped at the boundary where they enter Sophia.
+
+## Ownership
+
+State has one owner. Other components receive snapshots, IDs, or handles.
+
+Prefer:
+
+- dense tables with typed IDs
+- generation checks for long-lived references
+- immutable snapshots across process boundaries
+- explicit handle ownership
+
+Avoid:
+
+- global registries with mutable aliases
+- shared object graphs
+- callbacks that mutate state hidden behind another component
+- stringly typed IDs in hot paths
+
+## Errors
+
+Errors should name the boundary that failed.
+
+Good examples:
+
+- `XBridgeError::BadWindow`
+- `InputRouteError::StaleSurface`
+- `PortalError::PolicyDenied`
+- `TransactionError::TimedOut`
+
+Policy denial is not an internal error. Treat it as an expected outcome with a
+clear status.
+
+## Allocation
+
+The compositor hot path should not allocate casually. It may resize capacity at
+controlled boundaries, but input processing and frame planning should reuse
+buffers where practical.
+
+Allowed edge allocations:
+
+- connecting to XLibre
+- discovering outputs
+- creating or destroying surfaces
+- resizing dense tables
+- capturing test snapshots
+- portal transfer setup
+
+Suspicious allocations:
+
+- every input event
+- every damage region merge
+- every frame for stable surface lists
+- every hit-test walk
+
+## XLibre Patches
+
+XLibre changes are C and should stay narrow.
+
+Patch goals:
+
+- add explicit protocol seams;
+- preserve X11 semantics;
+- keep access control auditable;
+- make changes upstreamable.
+
+Avoid server patches that make Sophia the only possible compositor. XLibre
+should gain a useful extension, not a private dependency.
+
+## Verification
+
+Docs-only changes need inspection, not a build.
+
+For code, each component needs a concrete check:
+
+- Rust units for packet validation and table invariants.
+- Integration tests for XLibre bridge behavior.
+- Headless compositor tests for frame plans.
+- Portal tests for allow, deny, revoke, and stale-transfer cases.
+- XLibre protocol tests for new extension behavior.
+
+When a test cannot exist yet, document the missing harness in the research log
+instead of pretending manual testing is enough.
