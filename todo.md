@@ -86,7 +86,7 @@ snapshots.
   events.
 - [x] Detect top-level and client windows using ICCCM/EWMH hints.
 - [x] Wrap XIDs in `XWindowId` and track generation.
-- [ ] Emit `XWindowMirror`, `SurfaceSnapshot`, and `LayerSnapshot` values.
+- [x] Emit `XWindowMirror`, `SurfaceSnapshot`, and `LayerSnapshot` values.
 
 **Composite and damage**
 - [ ] Redirect relevant windows with XComposite.

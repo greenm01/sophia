@@ -147,6 +147,11 @@ The bridge annotates mirrored windows with the detected client window and the
 nearest root child as the toplevel frame. It does not classify window type yet;
 that remains later EWMH metadata work.
 
+The bridge now emits cloned `XWindowMirror` values, protocol `SurfaceSnapshot`
+values, and preliminary `LayerSnapshot` values. X geometry is read during tree
+import and updated from configure events. Layer snapshots intentionally use
+`BufferSource::None` until XComposite pixmap redirection/import is implemented.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

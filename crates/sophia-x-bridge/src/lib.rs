@@ -1,7 +1,10 @@
 use core::fmt;
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use sophia_protocol::{LayerSnapshot, NamespaceId, Rect, XWindowId, XWindowMirror};
+use sophia_protocol::{
+    BufferSource, LayerSnapshot, NamespaceId, Rect, Region, SurfaceId, SurfaceSnapshot, Transform,
+    XWindowId, XWindowMirror,
+};
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
 use x11rb::protocol::xproto::{Atom, AtomEnum, ConnectionExt as _, MapState, Place, Window};
@@ -18,6 +21,10 @@ impl XMirrorState {
 
     pub fn windows(&self) -> &[XWindowMirror] {
         &self.windows
+    }
+
+    pub fn emit_mirrors(&self) -> Vec<XWindowMirror> {
+        self.windows.clone()
     }
 
     pub fn apply_event(&mut self, event: XMirrorEvent) {
@@ -37,9 +44,12 @@ impl XMirrorState {
             }
             XMirrorEvent::Configure {
                 window,
+                geometry,
                 above_sibling,
-                ..
             } => {
+                if let Some(mirror) = self.window_mut(window) {
+                    mirror.geometry = geometry;
+                }
                 self.apply_restack(window, above_sibling);
                 self.mark_metadata_stale(window);
             }
@@ -80,8 +90,44 @@ impl XMirrorState {
         }
     }
 
-    pub fn emit_layers(&self) -> Vec<LayerSnapshot> {
-        Vec::new()
+    pub fn emit_surfaces(&self, surfaces: &mut SurfaceIdMap) -> Vec<SurfaceSnapshot> {
+        self.windows
+            .iter()
+            .filter(|mirror| mirror.client.is_some())
+            .map(|mirror| SurfaceSnapshot {
+                surface: surfaces.surface_for_window(mirror.window),
+                window: mirror.window,
+                toplevel: mirror.toplevel,
+                client: mirror.client,
+                namespace: mirror.namespace,
+                mapped: mirror.mapped,
+                stack_rank: mirror.stack_rank,
+                geometry: mirror.geometry,
+                source: BufferSource::None,
+                damage: Region::single(mirror.geometry),
+                generation: mirror.stale_metadata,
+            })
+            .collect()
+    }
+
+    pub fn emit_layers(&self, surfaces: &mut SurfaceIdMap) -> Vec<LayerSnapshot> {
+        self.emit_surfaces(surfaces)
+            .into_iter()
+            .filter(|surface| surface.mapped && !surface.geometry.is_empty())
+            .map(|surface| LayerSnapshot {
+                surface: surface.surface,
+                window: Some(surface.window),
+                namespace: surface.namespace,
+                stack_rank: surface.stack_rank,
+                geometry: surface.geometry,
+                source: surface.source,
+                damage: surface.damage,
+                opacity: 1.0,
+                crop: None,
+                transform: Transform::IDENTITY,
+                generation: surface.generation,
+            })
+            .collect()
     }
 
     fn window_mut(&mut self, window: XWindowId) -> Option<&mut XWindowMirror> {
@@ -170,6 +216,30 @@ impl XMirrorState {
 
             current = parent;
         }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct SurfaceIdMap {
+    next_index: u32,
+    surfaces: BTreeMap<XWindowId, SurfaceId>,
+}
+
+impl SurfaceIdMap {
+    pub fn surface_for_window(&mut self, window: XWindowId) -> SurfaceId {
+        if let Some(surface) = self.surfaces.get(&window) {
+            return *surface;
+        }
+
+        let index = self.next_index;
+        self.next_index = self
+            .next_index
+            .checked_add(1)
+            .filter(|next| *next != u32::MAX)
+            .expect("Sophia surface ID map overflow");
+        let surface = SurfaceId::new(index, window.generation());
+        self.surfaces.insert(window, surface);
+        surface
     }
 }
 
@@ -280,6 +350,10 @@ pub enum XBridgeError {
         window: u32,
         message: String,
     },
+    WindowGeometry {
+        window: u32,
+        message: String,
+    },
     InternAtom {
         atom: String,
         message: String,
@@ -313,6 +387,12 @@ impl fmt::Display for XBridgeError {
                 write!(
                     f,
                     "failed to query X window attributes for {window:#x}: {message}"
+                )
+            }
+            Self::WindowGeometry { window, message } => {
+                write!(
+                    f,
+                    "failed to query X window geometry for {window:#x}: {message}"
                 )
             }
             Self::InternAtom { atom, message } => {
@@ -667,6 +747,17 @@ where
                 window,
                 message: error.to_string(),
             })?;
+        let geometry = connection
+            .get_geometry(window)
+            .map_err(|error| XBridgeError::WindowGeometry {
+                window,
+                message: error.to_string(),
+            })?
+            .reply()
+            .map_err(|error| XBridgeError::WindowGeometry {
+                window,
+                message: error.to_string(),
+            })?;
 
         for (rank, child) in tree.children.iter().copied().enumerate() {
             let rank = u32::try_from(rank).expect("X child stack rank overflow");
@@ -681,6 +772,12 @@ where
             client: None,
             mapped: u8::from(attributes.map_state) == u8::from(MapState::VIEWABLE),
             stack_rank,
+            geometry: Rect {
+                x: i32::from(geometry.x),
+                y: i32::from(geometry.y),
+                width: i32::from(geometry.width),
+                height: i32::from(geometry.height),
+            },
             namespace: None,
             stale_metadata: 0,
         });
@@ -754,6 +851,12 @@ mod tests {
             client: None,
             mapped: false,
             stack_rank,
+            geometry: Rect {
+                x: i32::try_from(window).unwrap_or(0),
+                y: 0,
+                width: 100,
+                height: 50,
+            },
             namespace: None,
             stale_metadata: 0,
         }
@@ -911,5 +1014,43 @@ mod tests {
         assert_eq!(frame.toplevel, Some(wrap_xid(0x20)));
         assert_eq!(client.client, Some(wrap_xid(0x30)));
         assert_eq!(client.toplevel, Some(wrap_xid(0x20)));
+    }
+
+    #[test]
+    fn surface_id_map_returns_stable_surface_ids() {
+        let mut surfaces = SurfaceIdMap::default();
+        let window = wrap_xid(0x20);
+        let first = surfaces.surface_for_window(window);
+        let second = surfaces.surface_for_window(window);
+
+        assert_eq!(first, second);
+        assert!(first.is_valid());
+    }
+
+    #[test]
+    fn emits_surface_and_layer_snapshots_for_detected_clients() {
+        let mut state = XMirrorState::default();
+        let mut window = mirror(0x20, None, 4);
+        window.mapped = true;
+        window.client = Some(wrap_xid(0x20));
+        window.toplevel = Some(wrap_xid(0x20));
+        window.geometry = Rect {
+            x: 10,
+            y: 20,
+            width: 640,
+            height: 480,
+        };
+        state.ingest_window(window);
+
+        let mut surfaces = SurfaceIdMap::default();
+        let snapshots = state.emit_surfaces(&mut surfaces);
+        let layers = state.emit_layers(&mut surfaces);
+
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].window, wrap_xid(0x20));
+        assert_eq!(snapshots[0].geometry.width, 640);
+        assert_eq!(layers.len(), 1);
+        assert_eq!(layers[0].surface, snapshots[0].surface);
+        assert_eq!(layers[0].source, BufferSource::None);
     }
 }

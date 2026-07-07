@@ -13,8 +13,24 @@ pub struct XWindowMirror {
     pub client: Option<XWindowId>,
     pub mapped: bool,
     pub stack_rank: u32,
+    pub geometry: Rect,
     pub namespace: Option<NamespaceId>,
     pub stale_metadata: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SurfaceSnapshot {
+    pub surface: SurfaceId,
+    pub window: XWindowId,
+    pub toplevel: Option<XWindowId>,
+    pub client: Option<XWindowId>,
+    pub namespace: Option<NamespaceId>,
+    pub mapped: bool,
+    pub stack_rank: u32,
+    pub geometry: Rect,
+    pub source: BufferSource,
+    pub damage: Region,
+    pub generation: u64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
