@@ -120,6 +120,22 @@ and must stay performance and security centric: owned tables, typed IDs,
 generation checks, spatial indexes, damage queues, renderer systems, and
 auditable hot paths.
 
+## 2026-07-07: X Bridge Probe Start
+
+Sophia X Bridge uses `x11rb` for the first read-only X11 probe. The initial
+probe connects to the configured display, queries Composite, Damage, XFixes,
+Shape, and Render with `QueryExtension`, and carries static Xnamespace records
+until XLibre exposes namespace discovery data through a reliable protocol.
+
+This does not redirect windows or mutate X server state yet. Window-tree import,
+event selection, Composite redirection, and Damage tracking remain separate
+Phase 3 steps.
+
+The first root-tree importer remains read-only. It walks the tree breadth-first,
+wraps raw XIDs as `XWindowId` values with an initial mirror generation, and
+records map state from `GetWindowAttributes`. Event tracking, ICCCM/EWMH
+top-level detection, and Composite/Damage redirection are still pending.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

@@ -75,17 +75,17 @@ Connect to XLibre as an X client and mirror enough state to produce Sophia
 snapshots.
 
 **X connection**
-- [ ] Connect with XCB or Rust X11 bindings.
-- [ ] Confirm required extensions: Composite, Damage, XFixes, Shape, Render.
-- [ ] Start with static Xnamespace config.
+- [x] Connect with XCB or Rust X11 bindings.
+- [x] Confirm required extensions: Composite, Damage, XFixes, Shape, Render.
+- [x] Start with static Xnamespace config.
 - [ ] Record namespace information when discoverable.
 
 **Window mirror**
-- [ ] Import the root window tree with async-safe ordering.
+- [x] Import the root window tree with async-safe ordering.
 - [ ] Track map, unmap, destroy, configure, reparent, property, and restack
   events.
 - [ ] Detect top-level and client windows using ICCCM/EWMH hints.
-- [ ] Wrap XIDs in `XWindowId` and track generation.
+- [x] Wrap XIDs in `XWindowId` and track generation.
 - [ ] Emit `XWindowMirror`, `SurfaceSnapshot`, and `LayerSnapshot` values.
 
 **Composite and damage**
