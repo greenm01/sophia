@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use sophia_protocol::{
     BufferSource, ChromeDescriptor, FrameSnapshot, LayerSnapshot, LayoutTransaction, OutputId,
     Rect, Region, RenderCommand, RenderCommandKind, Size, SurfaceId, TransactionCommit,
-    TransactionOutcome,
+    TransactionId, TransactionOutcome,
 };
 use sophia_runtime::{SophiaErrorExt, SophiaErrorKind};
 use tracing::instrument;
@@ -312,6 +312,18 @@ impl HeadlessEngine {
                 outcome: TransactionOutcome::RejectedStaleSurface,
                 applied_surfaces: Vec::new(),
             },
+        }
+    }
+
+    pub fn preserve_layout_on_wm_absent(
+        &self,
+        transaction: TransactionId,
+        _layers: &[LayerSnapshot],
+    ) -> TransactionCommit {
+        TransactionCommit {
+            transaction,
+            outcome: TransactionOutcome::TimedOut,
+            applied_surfaces: Vec::new(),
         }
     }
 
@@ -632,6 +644,20 @@ mod tests {
                 height: 200,
             })
         );
+    }
+
+    #[test]
+    fn absent_wm_preserves_committed_layers() {
+        let engine = HeadlessEngine::default();
+        let layers = vec![test_layer(0, 0, 0, Region::empty())];
+        let before = layers.clone();
+
+        let commit = engine.preserve_layout_on_wm_absent(TransactionId::from_raw(45), &layers);
+
+        assert_eq!(commit.transaction, TransactionId::from_raw(45));
+        assert_eq!(commit.outcome, TransactionOutcome::TimedOut);
+        assert!(commit.applied_surfaces.is_empty());
+        assert_eq!(layers, before);
     }
 
     #[test]

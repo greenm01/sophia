@@ -228,6 +228,21 @@ cannot perform global tree inspection.
 `tools/xlibre_namespace_smoke.sh` captures this manual proof as a repeatable
 smoke harness.
 
+The first external WM process boundary is now concrete. The `sophia-wm-demo`
+binary accepts a small argument protocol for manage, relayout, and remove
+requests, runs the same blind policy code as the library, and writes a command
+response that Sophia can reduce into a `LayoutTransaction`. The process sees
+opaque surface IDs, workspace/output IDs, bounds, and geometry; it still does
+not receive XIDs, namespace IDs, titles, classes, PIDs, or icon pixels.
+
+`sophia x-smoke-external-wm` captures X-derived surfaces, sends their opaque
+layout nodes through the external WM process, commits the returned transaction
+in Sophia Engine, and replays a headless frame. The repeatable XLibre namespace
+smoke now runs this external-WM path after the in-process policy smoke. An
+integration test also starts the WM process twice around the same
+`HeadlessEngine`, proving the engine can preserve committed layers while the WM
+is absent and then accept a new transaction after the WM restarts.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

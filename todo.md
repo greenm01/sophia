@@ -130,10 +130,10 @@ Split policy from the compositor process.
 - [x] Keep the WM off the per-frame and per-input hot path.
 
 **Demo WM**
-- [ ] Implement a tiny external WM process.
-- [ ] Tile or stack mock and X-derived surfaces.
-- [ ] Restart the WM without killing Sophia Engine.
-- [ ] Preserve the last committed state while the WM is absent.
+- [x] Implement a tiny external WM process.
+- [x] Tile or stack mock and X-derived surfaces.
+- [x] Restart the WM without killing Sophia Engine.
+- [x] Preserve the last committed state while the WM is absent.
 
 ---
 

@@ -39,6 +39,11 @@ fi
 
 ninja -C "$BUILD_DIR" hw/vfb/Xvfb
 
+(
+    cd "$ROOT_DIR"
+    cargo build -q -p sophia-wm-demo
+)
+
 mkdir -p "$WORK_DIR"
 rm -f "$WORK_DIR/root.xauth" "$WORK_DIR/client.xauth" "$WORK_DIR/client-denied.log"
 touch "$WORK_DIR/root.xauth" "$WORK_DIR/client.xauth"
@@ -87,6 +92,13 @@ echo "root bridge smoke:"
     cd "$ROOT_DIR"
     env DISPLAY="$DISPLAY_NAME" XAUTHORITY="$WORK_DIR/root.xauth" \
         cargo run -q -p sophia-cli -- x-smoke-policy-frame
+)
+
+echo "root external-wm bridge smoke:"
+(
+    cd "$ROOT_DIR"
+    env DISPLAY="$DISPLAY_NAME" XAUTHORITY="$WORK_DIR/root.xauth" \
+        cargo run -q -p sophia-cli -- x-smoke-external-wm --wm="$ROOT_DIR/target/debug/sophia-wm-demo"
 )
 
 echo "namespace isolation smoke:"
