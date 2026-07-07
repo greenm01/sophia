@@ -268,6 +268,119 @@ pub enum XLibreRoutedInputOutcome {
     RejectedUnsupportedEvent,
 }
 
+pub const XLIBRE_ROUTED_INPUT_EXTENSION_NAME: &str = "SOPHIA-ROUTED-INPUT";
+pub const XLIBRE_ROUTED_INPUT_MAJOR_VERSION: u16 = 0;
+pub const XLIBRE_ROUTED_INPUT_MINOR_VERSION: u16 = 1;
+pub const XLIBRE_ROUTED_INPUT_ROUTE_EVENT_OPCODE: u8 = 1;
+pub const XLIBRE_ROUTED_INPUT_ROUTE_EVENT_LENGTH: u16 = 11;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XLibreRoutedInputWireRequest {
+    pub serial_hi: u32,
+    pub serial_lo: u32,
+    pub target_xid: u32,
+    pub seat: u32,
+    pub device: u32,
+    pub time_msec: u32,
+    pub local_x_24_8: i32,
+    pub local_y_24_8: i32,
+    pub event_code: u16,
+    pub detail: u16,
+    pub flags: u32,
+}
+
+impl XLibreRoutedInputRequest {
+    pub fn to_wire_request(&self) -> XLibreRoutedInputWireRequest {
+        let (event_code, detail, flags) = encode_routed_input_kind(self.kind);
+
+        XLibreRoutedInputWireRequest {
+            serial_hi: (self.serial >> 32) as u32,
+            serial_lo: self.serial as u32,
+            target_xid: self.target_window.xid(),
+            seat: self.seat.raw() as u32,
+            device: self.device.raw() as u32,
+            time_msec: self.time_msec as u32,
+            local_x_24_8: fixed_24_8(self.local_position.x),
+            local_y_24_8: fixed_24_8(self.local_position.y),
+            event_code,
+            detail,
+            flags,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum XLibreRoutedInputWireError {
+    UnsupportedEventCode,
+    InvalidTarget,
+    InvalidSeat,
+    InvalidDevice,
+}
+
+impl XLibreRoutedInputWireRequest {
+    pub fn to_request(self) -> Result<XLibreRoutedInputRequest, XLibreRoutedInputWireError> {
+        let target_window = XWindowId::new(self.target_xid, 1);
+        let seat = SeatId::from_raw(u64::from(self.seat));
+        let device = DeviceId::from_raw(u64::from(self.device));
+
+        if !target_window.is_valid() {
+            return Err(XLibreRoutedInputWireError::InvalidTarget);
+        }
+        if !seat.is_valid() {
+            return Err(XLibreRoutedInputWireError::InvalidSeat);
+        }
+        if !device.is_valid() {
+            return Err(XLibreRoutedInputWireError::InvalidDevice);
+        }
+
+        Ok(XLibreRoutedInputRequest {
+            serial: (u64::from(self.serial_hi) << 32) | u64::from(self.serial_lo),
+            seat,
+            device,
+            time_msec: u64::from(self.time_msec),
+            target_window,
+            local_position: Point {
+                x: f64::from(self.local_x_24_8) / 256.0,
+                y: f64::from(self.local_y_24_8) / 256.0,
+            },
+            kind: decode_routed_input_kind(self.event_code, self.detail, self.flags)?,
+        })
+    }
+}
+
+fn encode_routed_input_kind(kind: InputEventKind) -> (u16, u16, u32) {
+    match kind {
+        InputEventKind::PointerMotion => (1, 0, 0),
+        InputEventKind::PointerButton { button, pressed } => (2, button as u16, u32::from(pressed)),
+        InputEventKind::Key { keycode, pressed } => (3, keycode as u16, u32::from(pressed)),
+    }
+}
+
+fn decode_routed_input_kind(
+    event_code: u16,
+    detail: u16,
+    flags: u32,
+) -> Result<InputEventKind, XLibreRoutedInputWireError> {
+    let pressed = (flags & 1) != 0;
+
+    match event_code {
+        1 => Ok(InputEventKind::PointerMotion),
+        2 => Ok(InputEventKind::PointerButton {
+            button: u32::from(detail),
+            pressed,
+        }),
+        3 => Ok(InputEventKind::Key {
+            keycode: u32::from(detail),
+            pressed,
+        }),
+        _ => Err(XLibreRoutedInputWireError::UnsupportedEventCode),
+    }
+}
+
+fn fixed_24_8(value: f64) -> i32 {
+    (value * 256.0).round() as i32
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct LayoutTransaction {
     pub transaction: TransactionId,
@@ -626,6 +739,84 @@ mod tests {
         assert_eq!(
             decision.outcome,
             XLibreRoutedInputOutcome::RejectedDeniedNamespace
+        );
+    }
+
+    #[test]
+    fn xlibre_routed_input_request_has_stable_wire_shape() {
+        let request = XLibreRoutedInputRequest {
+            serial: 0x0000_0001_0000_0002,
+            seat: SeatId::from_raw(3),
+            device: DeviceId::from_raw(4),
+            time_msec: 5,
+            target_window: XWindowId::new(0x1200_0042, 1),
+            local_position: Point { x: 12.5, y: 9.25 },
+            kind: InputEventKind::PointerButton {
+                button: 1,
+                pressed: true,
+            },
+        };
+
+        let wire = request.to_wire_request();
+
+        assert_eq!(XLIBRE_ROUTED_INPUT_EXTENSION_NAME, "SOPHIA-ROUTED-INPUT");
+        assert_eq!(XLIBRE_ROUTED_INPUT_ROUTE_EVENT_OPCODE, 1);
+        assert_eq!(XLIBRE_ROUTED_INPUT_ROUTE_EVENT_LENGTH, 11);
+        assert_eq!(wire.serial_hi, 1);
+        assert_eq!(wire.serial_lo, 2);
+        assert_eq!(wire.target_xid, 0x1200_0042);
+        assert_eq!(wire.seat, 3);
+        assert_eq!(wire.device, 4);
+        assert_eq!(wire.local_x_24_8, 3200);
+        assert_eq!(wire.local_y_24_8, 2368);
+        assert_eq!(wire.event_code, 2);
+        assert_eq!(wire.detail, 1);
+        assert_eq!(wire.flags, 1);
+    }
+
+    #[test]
+    fn xlibre_routed_input_wire_request_decodes_to_packet() {
+        let wire = XLibreRoutedInputWireRequest {
+            serial_hi: 7,
+            serial_lo: 8,
+            target_xid: 0x44,
+            seat: 1,
+            device: 2,
+            time_msec: 10,
+            local_x_24_8: 512,
+            local_y_24_8: 768,
+            event_code: 1,
+            detail: 0,
+            flags: 0,
+        };
+
+        let request = wire.to_request().unwrap();
+
+        assert_eq!(request.serial, 0x0000_0007_0000_0008);
+        assert_eq!(request.target_window, XWindowId::new(0x44, 1));
+        assert_eq!(request.local_position, Point { x: 2.0, y: 3.0 });
+        assert_eq!(request.kind, InputEventKind::PointerMotion);
+    }
+
+    #[test]
+    fn xlibre_routed_input_wire_request_rejects_unknown_event_code() {
+        let wire = XLibreRoutedInputWireRequest {
+            serial_hi: 0,
+            serial_lo: 1,
+            target_xid: 0x44,
+            seat: 1,
+            device: 2,
+            time_msec: 10,
+            local_x_24_8: 0,
+            local_y_24_8: 0,
+            event_code: 99,
+            detail: 0,
+            flags: 0,
+        };
+
+        assert_eq!(
+            wire.to_request(),
+            Err(XLibreRoutedInputWireError::UnsupportedEventCode)
         );
     }
 }

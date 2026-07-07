@@ -251,6 +251,13 @@ unsupported event. Sophia X Bridge can build the request only for flat,
 identity-transform routes today; transformed input remains intentionally
 unsupported until the flat path is proven against an XLibre extension.
 
+The protocol crate also carries a fixed wire request body for the future
+`SOPHIA-ROUTED-INPUT` extension. The patch target is documented in
+`docs/xlibre-routed-input-extension.md`, based on local XLibre touch points:
+`AddExtension` dispatch under `Xext`, namespace visibility/access hooks under
+`Xext/namespace`, and event delivery/grab/focus behavior under `dix/events.c`
+and `Xext/xinput/exevents.c`.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

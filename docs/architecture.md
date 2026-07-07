@@ -199,6 +199,8 @@ delivery. The first Sophia prototype only builds this request for flat,
 identity-transform routes. Transformed hit-test delivery remains unsupported
 until the flat route is proven against XLibre.
 
+The patch target is tracked in `docs/xlibre-routed-input-extension.md`.
+
 ### Xnamespace Portals
 
 Namespaces are private by default. Cross-namespace operations go through portal
