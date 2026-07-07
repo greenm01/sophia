@@ -195,6 +195,12 @@ one Composite target, read back one named pixmap, and captured 256000 bytes into
 the CPU buffer path. This validates the generic X11 path; XLibre-specific
 namespace startup remains a separate unchecked Phase 4 item.
 
+The CPU-buffer-backed X surface now reaches Sophia Engine's headless frame path.
+`sophia x-smoke-frame` captures the XComposite pixmap, converts the surface into
+a renderable layer, plans a headless frame, and replays it. The live `Xvfb`
+smoke produced one layer, one render command, one replay step, and one damage
+rectangle from the same 256000-byte readback.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

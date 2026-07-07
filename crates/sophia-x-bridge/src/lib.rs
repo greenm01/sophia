@@ -913,9 +913,18 @@ pub struct SmokeReadbackReport {
     pub display_name: Option<String>,
     pub mirrored_windows: usize,
     pub surfaces: usize,
+    pub renderable_layers: usize,
     pub redirect_targets: usize,
     pub readbacks: usize,
     pub total_bytes: usize,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SmokeReadbackCapture {
+    pub report: SmokeReadbackReport,
+    pub surfaces: Vec<SurfaceSnapshot>,
+    pub layers: Vec<LayerSnapshot>,
+    pub readbacks: Vec<CpuBufferSnapshot>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1082,6 +1091,12 @@ pub fn run_test_client_window(config: TestClientConfig) -> Result<TestClientWind
 pub fn smoke_readback_display(
     display_name: Option<&str>,
 ) -> Result<SmokeReadbackReport, XBridgeError> {
+    capture_readback_display(display_name).map(|capture| capture.report)
+}
+
+pub fn capture_readback_display(
+    display_name: Option<&str>,
+) -> Result<SmokeReadbackCapture, XBridgeError> {
     let (connection, screen_num) =
         x11rb::connect(display_name).map_err(|error| XBridgeError::Connect {
             message: error.to_string(),
@@ -1102,18 +1117,25 @@ pub fn smoke_readback_display(
     let mut surfaces = mirror.emit_surfaces(&mut surface_ids, &pixmaps);
     let mut buffers = CpuBufferStore::default();
     let readbacks = readback_surface_pixmaps(&connection, &mut surfaces, &mut buffers)?;
+    let layers = layers_from_surfaces(&surfaces);
     let total_bytes = readbacks
         .iter()
         .map(|readback| readback.bytes.len())
         .sum::<usize>();
 
-    Ok(SmokeReadbackReport {
-        display_name: display_name.map(str::to_owned),
-        mirrored_windows: mirror.windows().len(),
-        surfaces: surfaces.len(),
-        redirect_targets: targets.len(),
-        readbacks: readbacks.len(),
-        total_bytes,
+    Ok(SmokeReadbackCapture {
+        report: SmokeReadbackReport {
+            display_name: display_name.map(str::to_owned),
+            mirrored_windows: mirror.windows().len(),
+            surfaces: surfaces.len(),
+            renderable_layers: layers.len(),
+            redirect_targets: targets.len(),
+            readbacks: readbacks.len(),
+            total_bytes,
+        },
+        surfaces,
+        layers,
+        readbacks,
     })
 }
 
@@ -1355,6 +1377,26 @@ where
     }
 
     Ok(readbacks)
+}
+
+pub fn layers_from_surfaces(surfaces: &[SurfaceSnapshot]) -> Vec<LayerSnapshot> {
+    surfaces
+        .iter()
+        .filter(|surface| surface.mapped && !surface.geometry.is_empty())
+        .map(|surface| LayerSnapshot {
+            surface: surface.surface,
+            window: Some(surface.window),
+            namespace: surface.namespace,
+            stack_rank: surface.stack_rank,
+            geometry: surface.geometry,
+            source: surface.source,
+            damage: surface.damage.clone(),
+            opacity: 1.0,
+            crop: None,
+            transform: Transform::IDENTITY,
+            generation: surface.generation,
+        })
+        .collect()
 }
 
 fn translate_region(region: &Region, dx: i32, dy: i32) -> Region {
@@ -1918,6 +1960,40 @@ mod tests {
         assert_eq!(store.get(first.handle).unwrap().bytes, vec![5, 6, 7, 8]);
         assert_eq!(store.remove_pixmap(0x9000).unwrap().handle, first.handle);
         assert!(store.is_empty());
+    }
+
+    #[test]
+    fn layers_from_surfaces_keeps_cpu_buffer_sources_renderable() {
+        let surface = SurfaceSnapshot {
+            surface: SurfaceId::new(1, 1),
+            window: wrap_xid(0x20),
+            toplevel: Some(wrap_xid(0x20)),
+            client: Some(wrap_xid(0x20)),
+            namespace: None,
+            mapped: true,
+            stack_rank: 7,
+            geometry: Rect {
+                x: 10,
+                y: 20,
+                width: 320,
+                height: 200,
+            },
+            source: BufferSource::CpuBuffer { handle: 9 },
+            damage: Region::single(Rect {
+                x: 10,
+                y: 20,
+                width: 320,
+                height: 200,
+            }),
+            generation: 3,
+        };
+
+        let layers = layers_from_surfaces(&[surface]);
+
+        assert_eq!(layers.len(), 1);
+        assert_eq!(layers[0].source, BufferSource::CpuBuffer { handle: 9 });
+        assert_eq!(layers[0].stack_rank, 7);
+        assert_eq!(layers[0].damage.rects.len(), 1);
     }
 
     #[test]

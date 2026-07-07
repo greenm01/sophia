@@ -1,6 +1,7 @@
+use sophia_engine::{FramePlanRequest, HeadlessEngine};
 use sophia_protocol::Size;
 use sophia_runtime::{TraceLevel, init_tracing};
-use sophia_x_bridge::{TestClientConfig, run_test_client_window, smoke_readback_display};
+use sophia_x_bridge::{TestClientConfig, capture_readback_display, run_test_client_window};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
@@ -41,15 +42,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if args.iter().any(|arg| arg == "x-smoke-readback") {
         let display = arg_value(&args, "--display");
-        let report = smoke_readback_display(display.as_deref())?;
+        let report = capture_readback_display(display.as_deref())?.report;
         println!(
-            "x-smoke-readback display={} windows={} surfaces={} targets={} readbacks={} bytes={}",
+            "x-smoke-readback display={} windows={} surfaces={} layers={} targets={} readbacks={} bytes={}",
             report.display_name.as_deref().unwrap_or("<default>"),
             report.mirrored_windows,
             report.surfaces,
+            report.renderable_layers,
             report.redirect_targets,
             report.readbacks,
             report.total_bytes
+        );
+        return Ok(());
+    }
+
+    if args.iter().any(|arg| arg == "x-smoke-frame") {
+        let display = arg_value(&args, "--display");
+        let capture = capture_readback_display(display.as_deref())?;
+        let engine = HeadlessEngine::default();
+        let frame = engine.plan_frame(
+            FramePlanRequest {
+                output: engine.output().id,
+                frame_serial: 1,
+            },
+            capture.layers,
+        )?;
+        let replay = engine.replay_frame(&frame)?;
+        println!(
+            "x-smoke-frame display={} windows={} surfaces={} layers={} readbacks={} bytes={} commands={} replay_steps={} damage_rects={}",
+            capture
+                .report
+                .display_name
+                .as_deref()
+                .unwrap_or("<default>"),
+            capture.report.mirrored_windows,
+            capture.report.surfaces,
+            capture.report.renderable_layers,
+            capture.report.readbacks,
+            capture.report.total_bytes,
+            frame.commands.len(),
+            replay.steps.len(),
+            replay.damage.rects.len()
         );
         return Ok(());
     }
@@ -58,6 +91,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("components: engine, x-bridge, protocol, wm-demo");
     println!("commands: x-test-client [--display=:99] [--seconds=5] [--width=320] [--height=200]");
     println!("commands: x-smoke-readback [--display=:99]");
+    println!("commands: x-smoke-frame [--display=:99]");
 
     if verbose {
         tracing::debug!("verbose tracing enabled");

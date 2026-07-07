@@ -108,7 +108,7 @@ Put one real X11 client surface into Sophia Engine.
 - [x] Add a CPU readback fallback for named XComposite pixmaps.
 - [x] Import or read back one XComposite pixmap.
 - [x] Convert the pixmap into a compositor texture or temporary CPU buffer.
-- [ ] Display it in the headless or simple real-output engine.
+- [x] Display it in the headless or simple real-output engine.
 
 **Policy**
 - [ ] Move and resize the surface through Sophia-side policy.
