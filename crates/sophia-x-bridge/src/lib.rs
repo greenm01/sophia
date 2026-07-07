@@ -7,6 +7,7 @@ use sophia_protocol::{
 };
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
+use x11rb::protocol::composite::{ConnectionExt as CompositeConnectionExt, Redirect};
 use x11rb::protocol::xproto::{Atom, AtomEnum, ConnectionExt as _, MapState, Place, Window};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -130,6 +131,20 @@ impl XMirrorState {
             .collect()
     }
 
+    pub fn composite_redirect_targets(&self) -> Vec<CompositeRedirectTarget> {
+        self.windows
+            .iter()
+            .filter(|mirror| mirror.mapped)
+            .filter_map(|mirror| mirror.client)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|window| CompositeRedirectTarget {
+                window,
+                update: CompositeUpdateMode::Manual,
+            })
+            .collect()
+    }
+
     fn window_mut(&mut self, window: XWindowId) -> Option<&mut XWindowMirror> {
         self.windows
             .iter_mut()
@@ -215,6 +230,27 @@ impl XMirrorState {
             }
 
             current = parent;
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CompositeRedirectTarget {
+    pub window: XWindowId,
+    pub update: CompositeUpdateMode,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CompositeUpdateMode {
+    Automatic,
+    Manual,
+}
+
+impl CompositeUpdateMode {
+    fn to_x11(self) -> Redirect {
+        match self {
+            Self::Automatic => Redirect::AUTOMATIC,
+            Self::Manual => Redirect::MANUAL,
         }
     }
 }
@@ -363,6 +399,13 @@ pub enum XBridgeError {
         property: u32,
         message: String,
     },
+    CompositeVersion {
+        message: String,
+    },
+    CompositeRedirect {
+        window: u32,
+        message: String,
+    },
 }
 
 impl fmt::Display for XBridgeError {
@@ -406,6 +449,15 @@ impl fmt::Display for XBridgeError {
                 write!(
                     f,
                     "failed to get X property {property:#x} from {window:#x}: {message}"
+                )
+            }
+            Self::CompositeVersion { message } => {
+                write!(f, "failed to negotiate XComposite version: {message}")
+            }
+            Self::CompositeRedirect { window, message } => {
+                write!(
+                    f,
+                    "failed to redirect X window {window:#x} with XComposite: {message}"
                 )
             }
         }
@@ -561,6 +613,40 @@ pub fn import_root_window_tree(
         },
         mirror,
     })
+}
+
+pub fn redirect_composite_targets<C>(
+    connection: &C,
+    targets: &[CompositeRedirectTarget],
+) -> Result<(), XBridgeError>
+where
+    C: Connection,
+{
+    connection
+        .composite_query_version(0, 4)
+        .map_err(|error| XBridgeError::CompositeVersion {
+            message: error.to_string(),
+        })?
+        .reply()
+        .map_err(|error| XBridgeError::CompositeVersion {
+            message: error.to_string(),
+        })?;
+
+    for target in targets {
+        connection
+            .composite_redirect_window(target.window.xid(), target.update.to_x11())
+            .map_err(|error| XBridgeError::CompositeRedirect {
+                window: target.window.xid(),
+                message: error.to_string(),
+            })?
+            .check()
+            .map_err(|error| XBridgeError::CompositeRedirect {
+                window: target.window.xid(),
+                message: error.to_string(),
+            })?;
+    }
+
+    Ok(())
 }
 
 fn query_required_extensions<C>(connection: &C) -> Result<Vec<ExtensionStatus>, XBridgeError>
@@ -1052,5 +1138,34 @@ mod tests {
         assert_eq!(layers.len(), 1);
         assert_eq!(layers[0].surface, snapshots[0].surface);
         assert_eq!(layers[0].source, BufferSource::None);
+    }
+
+    #[test]
+    fn composite_redirect_targets_use_unique_mapped_clients() {
+        let mut state = XMirrorState::default();
+        let mut frame = mirror(0x20, None, 0);
+        frame.mapped = true;
+        frame.client = Some(wrap_xid(0x30));
+        frame.toplevel = Some(wrap_xid(0x20));
+        let mut client = mirror(0x30, Some(0x20), 0);
+        client.mapped = true;
+        client.client = Some(wrap_xid(0x30));
+        client.toplevel = Some(wrap_xid(0x20));
+        let mut unmapped = mirror(0x40, None, 0);
+        unmapped.client = Some(wrap_xid(0x40));
+        unmapped.toplevel = Some(wrap_xid(0x40));
+        state.ingest_window(frame);
+        state.ingest_window(client);
+        state.ingest_window(unmapped);
+
+        let targets = state.composite_redirect_targets();
+
+        assert_eq!(
+            targets,
+            vec![CompositeRedirectTarget {
+                window: wrap_xid(0x30),
+                update: CompositeUpdateMode::Manual,
+            }]
+        );
     }
 }

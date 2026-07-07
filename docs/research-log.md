@@ -152,6 +152,11 @@ values, and preliminary `LayerSnapshot` values. X geometry is read during tree
 import and updated from configure events. Layer snapshots intentionally use
 `BufferSource::None` until XComposite pixmap redirection/import is implemented.
 
+Composite redirection support now selects unique mapped client windows from the
+mirror and redirects them with XComposite manual updates. The bridge negotiates
+the Composite version before redirecting. Naming redirected pixmaps and wiring
+those pixmap IDs into `SurfaceSnapshot` remains the next Composite step.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new
