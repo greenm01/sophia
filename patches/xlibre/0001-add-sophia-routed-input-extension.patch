@@ -1,0 +1,350 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Sophia Prototype <sophia@example.invalid>
+Date: Tue, 7 Jul 2026 00:00:00 -0400
+Subject: [PATCH] Add SOPHIA-ROUTED-INPUT extension shell
+
+Add a small extension shell for compositor-routed input. The initial
+RouteEvent request validates the fixed wire packet and target window through
+normal DIX lookup so Xnamespace resource checks still run, then returns an
+explicit unsupported-event outcome until the DIX delivery entry point is wired.
+
+This patch intentionally does not inject client events directly.
+---
+ Xext/meson.build                              |   1 +
+ Xext/namespace/hook-ext-access.c             |   4 +
+ Xext/sophia-routed-input/meson.build         |   9 +
+ .../sophia-routed-input/sophia-routed-input.c | 243 ++++++++++++++++++
+ meson.build                                  |   2 +
+ mi/miinitext.c                               |   1 +
+ miext/extinit_priv.h                         |   1 +
+ 7 files changed, 261 insertions(+)
+ create mode 100644 Xext/sophia-routed-input/meson.build
+ create mode 100644 Xext/sophia-routed-input/sophia-routed-input.c
+
+diff --git a/Xext/meson.build b/Xext/meson.build
+index 0000000000..0000000000 100644
+--- a/Xext/meson.build
++++ b/Xext/meson.build
+@@ -41,3 +41,4 @@ subdir('shm')
+ subdir('xv')
+ subdir('xres')
+ subdir('xtest')
++subdir('sophia-routed-input')
+diff --git a/Xext/namespace/hook-ext-access.c b/Xext/namespace/hook-ext-access.c
+index 0000000000..0000000000 100644
+--- a/Xext/namespace/hook-ext-access.c
++++ b/Xext/namespace/hook-ext-access.c
+@@ -24,6 +24,10 @@ void hookExtAccess(CallbackListPtr *pcbl, void *unused, void *calldata)
+     if (streq(param->ext->name, XNS_EXTENSION_NAME))
+         goto reject;
+ 
++    /* compositor-only extension: hidden outside the privileged root namespace */
++    if (streq(param->ext->name, "SOPHIA-ROUTED-INPUT"))
++        goto reject;
++
+     switch (param->ext->index + EXTENSION_BASE) {
+         /* unrestricted access */
+         case EXTENSION_MAJOR_BIG_REQUESTS:
+diff --git a/Xext/sophia-routed-input/meson.build b/Xext/sophia-routed-input/meson.build
+new file mode 100644
+index 0000000000..0000000000
+--- /dev/null
++++ b/Xext/sophia-routed-input/meson.build
+@@ -0,0 +1,9 @@
++srcs_sophia_routed_input = [
++    'sophia-routed-input.c',
++]
++
++libxserver_sophia_routed_input = static_library('xserver_sophia_routed_input',
++    srcs_sophia_routed_input,
++    include_directories: inc,
++    dependencies: common_dep,
++)
+diff --git a/Xext/sophia-routed-input/sophia-routed-input.c b/Xext/sophia-routed-input/sophia-routed-input.c
+new file mode 100644
+index 0000000000..0000000000
+--- /dev/null
++++ b/Xext/sophia-routed-input/sophia-routed-input.c
+@@ -0,0 +1,243 @@
++/*
++ * Copyright 2026 Sophia contributors
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++
++#include <dix-config.h>
++
++#include <X11/X.h>
++#include <X11/Xmd.h>
++#include <X11/Xproto.h>
++
++#include "dix/dix_priv.h"
++#include "dix/request_priv.h"
++#include "include/dixaccess.h"
++#include "include/windowstr.h"
++#include "miext/extinit_priv.h"
++
++#define SOPHIA_ROUTED_INPUT_NAME "SOPHIA-ROUTED-INPUT"
++#define SOPHIA_ROUTED_INPUT_MAJOR_VERSION 0
++#define SOPHIA_ROUTED_INPUT_MINOR_VERSION 1
++
++#define X_SophiaRoutedInputQueryVersion 0
++#define X_SophiaRoutedInputRouteEvent 1
++
++#define SophiaRoutedInputOutcomeAccepted 0
++#define SophiaRoutedInputOutcomeRejectedStaleTarget 1
++#define SophiaRoutedInputOutcomeRejectedDeniedNamespace 2
++#define SophiaRoutedInputOutcomeRejectedActiveGrab 3
++#define SophiaRoutedInputOutcomeRejectedFocusPolicy 4
++#define SophiaRoutedInputOutcomeRejectedUnsupportedEvent 5
++
++#define SophiaRoutedInputEventMotion 1
++#define SophiaRoutedInputEventButton 2
++#define SophiaRoutedInputEventKey 3
++
++typedef struct {
++    CARD8 reqType;
++    CARD8 routedReqType;
++    CARD16 length;
++    CARD16 majorVersion;
++    CARD16 minorVersion;
++} xSophiaRoutedInputQueryVersionReq;
++
++typedef struct {
++    BYTE type;
++    BYTE pad0;
++    CARD16 sequenceNumber;
++    CARD32 length;
++    CARD16 majorVersion;
++    CARD16 minorVersion;
++    CARD32 pad1;
++    CARD32 pad2;
++    CARD32 pad3;
++    CARD32 pad4;
++    CARD32 pad5;
++} xSophiaRoutedInputQueryVersionReply;
++
++typedef struct {
++    CARD8 reqType;
++    CARD8 routedReqType;
++    CARD16 length;
++    CARD32 serial_hi;
++    CARD32 serial_lo;
++    CARD32 target_xid;
++    CARD32 seat;
++    CARD32 device;
++    CARD32 time_msec;
++    INT32 local_x_24_8;
++    INT32 local_y_24_8;
++    CARD16 event_code;
++    CARD16 detail;
++    CARD32 flags;
++} xSophiaRoutedInputRouteEventReq;
++
++typedef struct {
++    BYTE type;
++    BYTE pad0;
++    CARD16 sequenceNumber;
++    CARD32 length;
++    CARD32 serial_hi;
++    CARD32 serial_lo;
++    CARD32 target_xid;
++    CARD16 outcome;
++    CARD16 pad1;
++    CARD32 pad2;
++    CARD32 pad3;
++} xSophiaRoutedInputRouteEventReply;
++
++static int ProcSophiaRoutedInputDispatch(ClientPtr client);
++
++static int
++ProcSophiaRoutedInputQueryVersion(ClientPtr client)
++{
++    X_REQUEST_HEAD_STRUCT(xSophiaRoutedInputQueryVersionReq);
++    X_REQUEST_FIELD_CARD16(majorVersion);
++    X_REQUEST_FIELD_CARD16(minorVersion);
++
++    xSophiaRoutedInputQueryVersionReply reply = {
++        .majorVersion = SOPHIA_ROUTED_INPUT_MAJOR_VERSION,
++        .minorVersion = SOPHIA_ROUTED_INPUT_MINOR_VERSION,
++    };
++
++    X_REPLY_FIELD_CARD16(majorVersion);
++    X_REPLY_FIELD_CARD16(minorVersion);
++
++    return X_SEND_REPLY_SIMPLE(client, reply);
++}
++
++static int
++send_route_reply(ClientPtr client,
++                 const xSophiaRoutedInputRouteEventReq *stuff,
++                 CARD16 outcome)
++{
++    xSophiaRoutedInputRouteEventReply reply = {
++        .serial_hi = stuff->serial_hi,
++        .serial_lo = stuff->serial_lo,
++        .target_xid = stuff->target_xid,
++        .outcome = outcome,
++    };
++
++    X_REPLY_FIELD_CARD32(serial_hi);
++    X_REPLY_FIELD_CARD32(serial_lo);
++    X_REPLY_FIELD_CARD32(target_xid);
++    X_REPLY_FIELD_CARD16(outcome);
++
++    return X_SEND_REPLY_SIMPLE(client, reply);
++}
++
++static int
++validate_route_event_kind(const xSophiaRoutedInputRouteEventReq *stuff)
++{
++    switch (stuff->event_code) {
++    case SophiaRoutedInputEventMotion:
++        if (stuff->detail != 0)
++            return BadValue;
++        return Success;
++    case SophiaRoutedInputEventButton:
++        if (stuff->detail == 0)
++            return BadValue;
++        return Success;
++    case SophiaRoutedInputEventKey:
++        return BadImplementation;
++    default:
++        return BadValue;
++    }
++}
++
++static int
++ProcSophiaRoutedInputRouteEvent(ClientPtr client)
++{
++    X_REQUEST_HEAD_STRUCT(xSophiaRoutedInputRouteEventReq);
++    X_REQUEST_FIELD_CARD32(serial_hi);
++    X_REQUEST_FIELD_CARD32(serial_lo);
++    X_REQUEST_FIELD_CARD32(target_xid);
++    X_REQUEST_FIELD_CARD32(seat);
++    X_REQUEST_FIELD_CARD32(device);
++    X_REQUEST_FIELD_CARD32(time_msec);
++    X_REQUEST_FIELD_CARD32(local_x_24_8);
++    X_REQUEST_FIELD_CARD32(local_y_24_8);
++    X_REQUEST_FIELD_CARD16(event_code);
++    X_REQUEST_FIELD_CARD16(detail);
++    X_REQUEST_FIELD_CARD32(flags);
++
++    WindowPtr pWin = NULL;
++    int rc;
++
++    if (stuff->seat == 0 || stuff->device == 0) {
++        client->errorValue = 0;
++        return BadValue;
++    }
++
++    rc = validate_route_event_kind(stuff);
++    if (rc == BadImplementation)
++        return send_route_reply(client, stuff,
++                                SophiaRoutedInputOutcomeRejectedUnsupportedEvent);
++    if (rc != Success) {
++        client->errorValue = stuff->event_code;
++        return rc;
++    }
++
++    rc = dixLookupWindow(&pWin, stuff->target_xid, client, DixSendAccess);
++    if (rc == BadAccess)
++        return send_route_reply(client, stuff,
++                                SophiaRoutedInputOutcomeRejectedDeniedNamespace);
++    if (rc != Success)
++        return send_route_reply(client, stuff,
++                                SophiaRoutedInputOutcomeRejectedStaleTarget);
++
++    if (!pWin->realized)
++        return send_route_reply(client, stuff,
++                                SophiaRoutedInputOutcomeRejectedStaleTarget);
++
++    /*
++     * Deliberately stop here for the first patch. The next patch must enter
++     * DIX event delivery with pWin as the compositor-supplied target while
++     * preserving active grabs, passive grabs, focus, XI2 masks, and namespace
++     * checks. This extension must never behave like SendEvent or XTEST.
++     */
++    return send_route_reply(client, stuff,
++                            SophiaRoutedInputOutcomeRejectedUnsupportedEvent);
++}
++
++static int
++ProcSophiaRoutedInputDispatch(ClientPtr client)
++{
++    REQUEST(xReq);
++
++    switch (stuff->data) {
++    case X_SophiaRoutedInputQueryVersion:
++        return ProcSophiaRoutedInputQueryVersion(client);
++    case X_SophiaRoutedInputRouteEvent:
++        return ProcSophiaRoutedInputRouteEvent(client);
++    default:
++        return BadRequest;
++    }
++}
++
++void
++SophiaRoutedInputExtensionInit(void)
++{
++    if (!AddExtension(SOPHIA_ROUTED_INPUT_NAME, 0, 0,
++                      ProcSophiaRoutedInputDispatch,
++                      ProcSophiaRoutedInputDispatch,
++                      NULL, StandardMinorOpcode))
++        FatalError("SophiaRoutedInputExtensionInit: AddExtension failed.\n");
++}
+diff --git a/meson.build b/meson.build
+index 0000000000..0000000000 100644
+--- a/meson.build
++++ b/meson.build
+@@ -831,7 +831,8 @@ if build_xserver
+         libxserver_shape,
+         libxserver_saver,
+         libxserver_bigreq,
+-        libxserver_geext
++        libxserver_geext,
++        libxserver_sophia_routed_input
+     ]
+ 
+     if build_xselinux
+diff --git a/mi/miinitext.c b/mi/miinitext.c
+index 0000000000..0000000000 100644
+--- a/mi/miinitext.c
++++ b/mi/miinitext.c
+@@ -113,6 +113,7 @@ static const ExtensionModule staticExtensions[] = {
+ #ifdef CONFIG_NAMESPACE
+     {NamespaceExtensionInit, "NAMESPACE", &noNamespaceExtension},
+ #endif
++    {SophiaRoutedInputExtensionInit, "SOPHIA-ROUTED-INPUT", NULL},
+ #ifdef XINERAMA
+     {PanoramiXExtensionInit, "XINERAMA", &noPanoramiXExtension},
+ #endif /* XINERAMA */
+diff --git a/miext/extinit_priv.h b/miext/extinit_priv.h
+index 0000000000..0000000000 100644
+--- a/miext/extinit_priv.h
++++ b/miext/extinit_priv.h
+@@ -62,5 +62,6 @@ void dri3_extension_init(void);
+ void PseudoramiXExtensionInit(void);
+ void present_extension_init(void);
+ void NamespaceExtensionInit(void);
++void SophiaRoutedInputExtensionInit(void);
+ 
+ #endif /* _XSERVER_EXTINIT_PRIV_H */
+-- 
+2.50.0

@@ -48,6 +48,18 @@ CARD32  flags            bit 0 means pressed
 Sophia owns the dynamic extension opcode lookup. The packet body is represented
 in `sophia-protocol` as `XLibreRoutedInputWireRequest`.
 
+The current patch artifact is:
+
+```text
+patches/xlibre/0001-add-sophia-routed-input-extension.patch
+```
+
+It is intentionally a shell patch. It registers the extension, restricts
+namespace visibility, validates `RouteEvent`, and resolves target windows
+through DIX access checks, but it does not yet deliver events. Use
+`tools/check_xlibre_routed_input_patch.sh` to apply the patch to a temporary
+XLibre tree and compile `hw/vfb/Xvfb`.
+
 ## Required XLibre Touch Points
 
 - Add a new `Xext/sophia-routed-input/` extension with a small dispatch file.

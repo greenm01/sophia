@@ -258,6 +258,16 @@ The protocol crate also carries a fixed wire request body for the future
 `Xext/namespace`, and event delivery/grab/focus behavior under `dix/events.c`
 and `Xext/xinput/exevents.c`.
 
+The first XLibre patch artifact now lives at
+`patches/xlibre/0001-add-sophia-routed-input-extension.patch`. It adds an
+git-applyable `SOPHIA-ROUTED-INPUT` extension shell that registers with XLibre,
+hides the extension from non-superPower namespaces, validates `RouteEvent`
+packets, resolves the target window through normal DIX access checks, and then
+returns `RejectedUnsupportedEvent`. That stop point is deliberate: the patch is
+for proving the privileged protocol seam and build integration before wiring
+real DIX event delivery. `tools/check_xlibre_routed_input_patch.sh` applies the
+patch to a temporary XLibre copy and builds `hw/vfb/Xvfb`.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new
