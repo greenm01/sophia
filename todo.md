@@ -22,7 +22,7 @@ Capture the architecture, reference map, and first roadmap before code starts.
 
 **Next documentation checks**
 - [x] Add an agent guide once code exists and build/test commands are known.
-- [ ] Keep docs updated when a research question turns into a decision.
+- [x] Keep docs updated when a research question turns into a decision.
 
 ---
 
@@ -35,7 +35,7 @@ touching compositor or XLibre code yet.
 - [x] Create a Cargo workspace.
 - [x] Add crates or modules for Sophia Engine, Sophia X Bridge, Sophia protocol,
   and a demo Sophia WM.
-- [ ] Add common tracing and error handling.
+- [x] Add common tracing and error handling.
 - [x] Add a small CLI that can print version and planned component names.
 
 **Data model**
@@ -56,8 +56,8 @@ touching compositor or XLibre code yet.
 Prove Sophia Engine can consume frame data before any XLibre integration.
 
 **Headless compositor**
-- [ ] Use Smithay/niri-inspired backend structure as the reference.
-- [ ] Add a headless output with deterministic size and scale.
+- [x] Use Smithay/niri-inspired backend structure as the reference.
+- [x] Add a headless output with deterministic size and scale.
 - [x] Accept mock `LayerSnapshot` data and build a frame plan.
 - [x] Render or simulate render commands without a real X client.
 - [x] Capture `FrameSnapshot` data for tests.
@@ -65,7 +65,7 @@ Prove Sophia Engine can consume frame data before any XLibre integration.
 **Verification**
 - [x] Test stable layer ordering.
 - [x] Test damage aggregation for moved, resized, added, and removed layers.
-- [ ] Test frame snapshot replay with mock surfaces.
+- [x] Test frame snapshot replay with mock surfaces.
 
 ---
 

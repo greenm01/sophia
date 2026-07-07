@@ -87,6 +87,16 @@ The first rendering proof should use mock layer snapshots before connecting to
 XLibre. The first XLibre proof should mirror windows and emit snapshots before
 routed input work begins.
 
+## 2026-07-07: Engine Backend Boundary
+
+Use niri and Smithay as references for compositor backend boundaries, not as a
+base or dependency.
+
+Sophia Engine now treats the headless compositor as the first backend behind a
+small `EngineBackend` trait. This keeps backend mechanics separate from passive
+protocol packets and leaves room for real output, XComposite import, and test
+backends without changing the WM or X Bridge packet shapes.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

@@ -6,6 +6,8 @@ rust-version.workspace = true
 
 [dependencies]
 sophia-protocol = { path = "../sophia-protocol" }
+sophia-runtime = { path = "../sophia-runtime" }
+tracing.workspace = true
 
 [lints]
 workspace = true

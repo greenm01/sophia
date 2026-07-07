@@ -3,6 +3,7 @@ members = [
     "crates/sophia-cli",
     "crates/sophia-engine",
     "crates/sophia-protocol",
+    "crates/sophia-runtime",
     "crates/sophia-wm-demo",
     "crates/sophia-x-bridge",
 ]
@@ -18,3 +19,7 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 new_without_default = "allow"
+
+[workspace.dependencies]
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

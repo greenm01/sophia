@@ -52,6 +52,8 @@ pub struct DamageFrame {
 #[derive(Clone, Debug, PartialEq)]
 pub struct FrameSnapshot {
     pub output: OutputId,
+    pub output_size: Size,
+    pub output_scale: u32,
     pub frame_serial: u64,
     pub layers: Vec<LayerSnapshot>,
     pub commands: Vec<RenderCommand>,

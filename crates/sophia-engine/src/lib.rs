@@ -2,12 +2,16 @@ use core::fmt;
 
 use sophia_protocol::{
     BufferSource, FrameSnapshot, LayerSnapshot, OutputId, Region, RenderCommand, RenderCommandKind,
+    Size, SurfaceId,
 };
+use sophia_runtime::{SophiaErrorExt, SophiaErrorKind};
+use tracing::instrument;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EngineError {
     InvalidOutput,
     InvalidSurface,
+    InvalidFrame,
 }
 
 impl fmt::Display for EngineError {
@@ -15,11 +19,22 @@ impl fmt::Display for EngineError {
         match self {
             Self::InvalidOutput => f.write_str("invalid output ID"),
             Self::InvalidSurface => f.write_str("invalid surface ID"),
+            Self::InvalidFrame => f.write_str("invalid frame snapshot"),
         }
     }
 }
 
 impl std::error::Error for EngineError {}
+
+impl SophiaErrorExt for EngineError {
+    fn kind(&self) -> SophiaErrorKind {
+        match self {
+            Self::InvalidOutput => SophiaErrorKind::InvalidOutput,
+            Self::InvalidSurface => SophiaErrorKind::InvalidSurface,
+            Self::InvalidFrame => SophiaErrorKind::InvalidFrame,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct FramePlanRequest {
@@ -27,18 +42,88 @@ pub struct FramePlanRequest {
     pub frame_serial: u64,
 }
 
-#[derive(Default)]
-pub struct HeadlessEngine;
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HeadlessOutput {
+    pub id: OutputId,
+    pub size: Size,
+    pub scale: u32,
+}
+
+impl HeadlessOutput {
+    pub const fn deterministic() -> Self {
+        Self {
+            id: OutputId::from_raw(1),
+            size: Size {
+                width: 1280,
+                height: 720,
+            },
+            scale: 1,
+        }
+    }
+}
+
+impl Default for HeadlessOutput {
+    fn default() -> Self {
+        Self::deterministic()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReplayStep {
+    pub command_index: usize,
+    pub kind: RenderCommandKind,
+    pub source: Option<SurfaceId>,
+    pub target: Region,
+    pub alpha: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReplayReport {
+    pub output: OutputId,
+    pub output_size: Size,
+    pub output_scale: u32,
+    pub frame_serial: u64,
+    pub steps: Vec<ReplayStep>,
+    pub damage: Region,
+}
+
+pub trait EngineBackend {
+    fn output(&self) -> HeadlessOutput;
+
+    fn plan_frame(
+        &self,
+        request: FramePlanRequest,
+        layers: Vec<LayerSnapshot>,
+    ) -> Result<FrameSnapshot, EngineError>;
+
+    fn replay_frame(&self, frame: &FrameSnapshot) -> Result<ReplayReport, EngineError>;
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct HeadlessEngine {
+    output: HeadlessOutput,
+}
 
 impl HeadlessEngine {
+    pub fn new(output: HeadlessOutput) -> Self {
+        Self { output }
+    }
+
+    pub fn output(&self) -> HeadlessOutput {
+        self.output
+    }
+
+    #[instrument(skip_all, fields(
+        output = request.output.raw(),
+        frame_serial = request.frame_serial,
+        layer_count = layers.len()
+    ))]
     pub fn plan_frame(
         &self,
         request: FramePlanRequest,
         mut layers: Vec<LayerSnapshot>,
     ) -> Result<FrameSnapshot, EngineError> {
-        if !request.output.is_valid() {
-            return Err(EngineError::InvalidOutput);
-        }
+        self.validate_output(request.output)?;
 
         layers.sort_by_key(|layer| layer.stack_rank);
 
@@ -77,11 +162,88 @@ impl HeadlessEngine {
 
         Ok(FrameSnapshot {
             output: request.output,
+            output_size: self.output.size,
+            output_scale: self.output.scale,
             frame_serial: request.frame_serial,
             layers,
             commands,
             damage,
         })
+    }
+
+    #[instrument(skip_all, fields(
+        output = frame.output.raw(),
+        frame_serial = frame.frame_serial,
+        command_count = frame.commands.len()
+    ))]
+    pub fn replay_frame(&self, frame: &FrameSnapshot) -> Result<ReplayReport, EngineError> {
+        self.validate_output(frame.output)?;
+
+        if frame.output_size != self.output.size || frame.output_scale != self.output.scale {
+            return Err(EngineError::InvalidFrame);
+        }
+
+        let surfaces = frame
+            .layers
+            .iter()
+            .map(|layer| layer.surface)
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut steps = Vec::with_capacity(frame.commands.len());
+
+        for (command_index, command) in frame.commands.iter().enumerate() {
+            if command.output != frame.output {
+                return Err(EngineError::InvalidOutput);
+            }
+
+            if let Some(source) = command.source {
+                if !source.is_valid() || !surfaces.contains(&source) {
+                    return Err(EngineError::InvalidSurface);
+                }
+            }
+
+            steps.push(ReplayStep {
+                command_index,
+                kind: command.kind,
+                source: command.source,
+                target: command.target.clone(),
+                alpha: command.alpha,
+            });
+        }
+
+        Ok(ReplayReport {
+            output: frame.output,
+            output_size: frame.output_size,
+            output_scale: frame.output_scale,
+            frame_serial: frame.frame_serial,
+            steps,
+            damage: frame.damage.clone(),
+        })
+    }
+
+    fn validate_output(&self, output: OutputId) -> Result<(), EngineError> {
+        if output.is_valid() && output == self.output.id {
+            Ok(())
+        } else {
+            Err(EngineError::InvalidOutput)
+        }
+    }
+}
+
+impl EngineBackend for HeadlessEngine {
+    fn output(&self) -> HeadlessOutput {
+        HeadlessEngine::output(self)
+    }
+
+    fn plan_frame(
+        &self,
+        request: FramePlanRequest,
+        layers: Vec<LayerSnapshot>,
+    ) -> Result<FrameSnapshot, EngineError> {
+        HeadlessEngine::plan_frame(self, request, layers)
+    }
+
+    fn replay_frame(&self, frame: &FrameSnapshot) -> Result<ReplayReport, EngineError> {
+        HeadlessEngine::replay_frame(self, frame)
     }
 }
 
@@ -121,15 +283,34 @@ mod tests {
     use sophia_protocol::{Rect, SurfaceId};
 
     #[test]
+    fn headless_engine_exposes_deterministic_output() {
+        let engine = HeadlessEngine::default();
+        let output = engine.output();
+
+        assert_eq!(output.id, OutputId::from_raw(1));
+        assert_eq!(
+            output.size,
+            Size {
+                width: 1280,
+                height: 720,
+            }
+        );
+        assert_eq!(output.scale, 1);
+    }
+
+    #[test]
     fn headless_engine_returns_frame_value() {
-        let engine = HeadlessEngine;
+        let engine = HeadlessEngine::default();
+        let output = engine.output();
         let request = FramePlanRequest {
-            output: OutputId::from_raw(1),
+            output: output.id,
             frame_serial: 7,
         };
         let frame = engine.plan_frame(request, Vec::new()).unwrap();
 
         assert_eq!(frame.output, request.output);
+        assert_eq!(frame.output_size, output.size);
+        assert_eq!(frame.output_scale, output.scale);
         assert_eq!(frame.frame_serial, 7);
         assert!(frame.layers.is_empty());
         assert!(frame.commands.is_empty());
@@ -137,9 +318,9 @@ mod tests {
 
     #[test]
     fn frame_plan_sorts_layers_by_stack_rank() {
-        let engine = HeadlessEngine;
+        let engine = HeadlessEngine::default();
         let request = FramePlanRequest {
-            output: OutputId::from_raw(1),
+            output: engine.output().id,
             frame_serial: 1,
         };
         let frame = engine
@@ -159,9 +340,9 @@ mod tests {
 
     #[test]
     fn frame_plan_aggregates_layer_damage() {
-        let engine = HeadlessEngine;
+        let engine = HeadlessEngine::default();
         let request = FramePlanRequest {
-            output: OutputId::from_raw(1),
+            output: engine.output().id,
             frame_serial: 1,
         };
         let frame = engine
@@ -199,9 +380,9 @@ mod tests {
 
     #[test]
     fn frame_plan_rejects_stale_surface() {
-        let engine = HeadlessEngine;
+        let engine = HeadlessEngine::default();
         let request = FramePlanRequest {
-            output: OutputId::from_raw(1),
+            output: engine.output().id,
             frame_serial: 1,
         };
         let mut layer = test_layer(0, 0, 0, Region::empty());
@@ -209,6 +390,51 @@ mod tests {
 
         assert_eq!(
             engine.plan_frame(request, vec![layer]),
+            Err(EngineError::InvalidSurface)
+        );
+    }
+
+    #[test]
+    fn frame_snapshot_replays_with_mock_surfaces() {
+        let engine = HeadlessEngine::default();
+        let request = FramePlanRequest {
+            output: engine.output().id,
+            frame_serial: 11,
+        };
+        let frame = engine
+            .plan_frame(
+                request,
+                vec![
+                    test_layer(0, 0, 0, Region::empty()),
+                    test_layer(1, 1, 100, Region::empty()),
+                ],
+            )
+            .unwrap();
+
+        let replay = engine.replay_frame(&frame).unwrap();
+
+        assert_eq!(replay.output, engine.output().id);
+        assert_eq!(replay.output_size, engine.output().size);
+        assert_eq!(replay.output_scale, engine.output().scale);
+        assert_eq!(replay.frame_serial, 11);
+        assert_eq!(replay.steps.len(), 2);
+        assert_eq!(replay.steps[0].source, Some(frame.layers[0].surface));
+    }
+
+    #[test]
+    fn frame_snapshot_replay_rejects_unknown_surface() {
+        let engine = HeadlessEngine::default();
+        let request = FramePlanRequest {
+            output: engine.output().id,
+            frame_serial: 12,
+        };
+        let mut frame = engine
+            .plan_frame(request, vec![test_layer(0, 0, 0, Region::empty())])
+            .unwrap();
+        frame.commands[0].source = Some(SurfaceId::new(99, 1));
+
+        assert_eq!(
+            engine.replay_frame(&frame),
             Err(EngineError::InvalidSurface)
         );
     }

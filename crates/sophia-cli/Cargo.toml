@@ -11,8 +11,10 @@ path = "src/main.rs"
 [dependencies]
 sophia-engine = { path = "../sophia-engine" }
 sophia-protocol = { path = "../sophia-protocol" }
+sophia-runtime = { path = "../sophia-runtime" }
 sophia-wm-demo = { path = "../sophia-wm-demo" }
 sophia-x-bridge = { path = "../sophia-x-bridge" }
+tracing.workspace = true
 
 [lints]
 workspace = true
