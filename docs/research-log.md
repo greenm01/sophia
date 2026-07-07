@@ -201,6 +201,18 @@ a renderable layer, plans a headless frame, and replays it. The live `Xvfb`
 smoke produced one layer, one render command, one replay step, and one damage
 rectangle from the same 256000-byte readback.
 
+Sophia-side policy can now move and resize the captured X surface before frame
+planning. `sophia x-smoke-policy-frame` converts captured layers into opaque
+layout nodes, asks the demo WM to tile them, applies the resulting
+`LayoutTransaction` in Sophia Engine, and replays the frame. The live `Xvfb`
+smoke produced one placement, focus assignment, one render command, one replay
+step, and two damage rectangles covering the old and new geometry.
+
+The local `~/src/xserver` tree documents `-namespace <conf>` startup support,
+but no built XLibre server artifact was present in the source tree during this
+slice. XLibre namespace startup and token-based client launch remain separate
+unchecked Phase 4 items.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

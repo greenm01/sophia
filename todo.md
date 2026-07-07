@@ -111,7 +111,7 @@ Put one real X11 client surface into Sophia Engine.
 - [x] Display it in the headless or simple real-output engine.
 
 **Policy**
-- [ ] Move and resize the surface through Sophia-side policy.
+- [x] Move and resize the surface through Sophia-side policy.
 - [ ] Keep XLibre as the source of truth for X11 resource identity.
 - [ ] Verify Xnamespace isolation still blocks cross-namespace visibility.
 

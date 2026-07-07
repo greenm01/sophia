@@ -2,8 +2,8 @@ use core::fmt;
 use std::collections::{BTreeMap, BTreeSet};
 
 use sophia_protocol::{
-    BufferSource, ChromeDescriptor, FrameSnapshot, LayerSnapshot, OutputId, Region, RenderCommand,
-    RenderCommandKind, Size, SurfaceId,
+    BufferSource, ChromeDescriptor, FrameSnapshot, LayerSnapshot, LayoutTransaction, OutputId,
+    Rect, Region, RenderCommand, RenderCommandKind, Size, SurfaceId,
 };
 use sophia_runtime::{SophiaErrorExt, SophiaErrorKind};
 use tracing::instrument;
@@ -248,6 +248,38 @@ impl HeadlessEngine {
         })
     }
 
+    pub fn apply_layout_transaction(
+        &self,
+        transaction: &LayoutTransaction,
+        mut layers: Vec<LayerSnapshot>,
+    ) -> Result<Vec<LayerSnapshot>, EngineError> {
+        let layer_indexes = layers
+            .iter()
+            .enumerate()
+            .map(|(index, layer)| (layer.surface, index))
+            .collect::<BTreeMap<_, _>>();
+
+        for placement in &transaction.render_positions {
+            if !placement.surface.is_valid() {
+                return Err(EngineError::InvalidSurface);
+            }
+            let Some(index) = layer_indexes.get(&placement.surface).copied() else {
+                return Err(EngineError::InvalidSurface);
+            };
+            let layer = &mut layers[index];
+            let old_geometry = layer.geometry;
+
+            layer.geometry = placement.geometry;
+            layer.stack_rank = u32::try_from(placement.z_index.max(0))
+                .expect("non-negative z-index should fit u32");
+            layer.transform = placement.transform;
+            layer.damage = moved_damage(old_geometry, placement.geometry);
+            layer.generation = layer.generation.saturating_add(1);
+        }
+
+        Ok(layers)
+    }
+
     fn validate_output(&self, output: OutputId) -> Result<(), EngineError> {
         if output.is_valid() && output == self.output.id {
             Ok(())
@@ -279,6 +311,12 @@ fn should_render(layer: &LayerSnapshot) -> bool {
     layer.opacity > 0.0 && !layer.geometry.is_empty() && layer.source != BufferSource::None
 }
 
+fn moved_damage(old_geometry: Rect, new_geometry: Rect) -> Region {
+    let mut damage = Region::single(old_geometry);
+    damage.extend(&Region::single(new_geometry));
+    damage
+}
+
 #[cfg(test)]
 fn test_layer(surface_index: u32, stack_rank: u32, x: i32, damage: Region) -> LayerSnapshot {
     use sophia_protocol::{Rect, SurfaceId, Transform};
@@ -308,7 +346,10 @@ fn test_layer(surface_index: u32, stack_rank: u32, x: i32, damage: Region) -> La
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sophia_protocol::{AttentionState, DisplayLabel, IconTokenId, Rect, SurfaceId, TrustLevel};
+    use sophia_protocol::{
+        AttentionState, DisplayLabel, IconTokenId, Rect, SurfaceId, SurfacePlacement,
+        TransactionId, Transform, TrustLevel,
+    };
 
     #[test]
     fn headless_engine_exposes_deterministic_output() {
@@ -447,6 +488,68 @@ mod tests {
         assert_eq!(replay.frame_serial, 11);
         assert_eq!(replay.steps.len(), 2);
         assert_eq!(replay.steps[0].source, Some(frame.layers[0].surface));
+    }
+
+    #[test]
+    fn layout_transaction_moves_and_resizes_layers_atomically() {
+        let engine = HeadlessEngine::default();
+        let surface = SurfaceId::new(0, 1);
+        let layers = vec![test_layer(0, 0, 0, Region::empty())];
+        let transaction = LayoutTransaction {
+            transaction: TransactionId::from_raw(1),
+            requested_sizes: Vec::new(),
+            focus: Some(surface),
+            render_positions: vec![SurfacePlacement {
+                surface,
+                geometry: Rect {
+                    x: 25,
+                    y: 30,
+                    width: 400,
+                    height: 300,
+                },
+                z_index: 7,
+                transform: Transform::IDENTITY,
+            }],
+            timeout_msec: 300,
+        };
+
+        let committed = engine
+            .apply_layout_transaction(&transaction, layers)
+            .unwrap();
+
+        assert_eq!(committed[0].geometry.x, 25);
+        assert_eq!(committed[0].geometry.width, 400);
+        assert_eq!(committed[0].stack_rank, 7);
+        assert_eq!(committed[0].generation, 2);
+        assert_eq!(committed[0].damage.rects.len(), 2);
+    }
+
+    #[test]
+    fn layout_transaction_rejects_unknown_surfaces() {
+        let engine = HeadlessEngine::default();
+        let transaction = LayoutTransaction {
+            transaction: TransactionId::from_raw(1),
+            requested_sizes: Vec::new(),
+            focus: None,
+            render_positions: vec![SurfacePlacement {
+                surface: SurfaceId::new(99, 1),
+                geometry: Rect {
+                    x: 0,
+                    y: 0,
+                    width: 10,
+                    height: 10,
+                },
+                z_index: 0,
+                transform: Transform::IDENTITY,
+            }],
+            timeout_msec: 300,
+        };
+
+        assert_eq!(
+            engine
+                .apply_layout_transaction(&transaction, vec![test_layer(0, 0, 0, Region::empty())]),
+            Err(EngineError::InvalidSurface)
+        );
     }
 
     #[test]

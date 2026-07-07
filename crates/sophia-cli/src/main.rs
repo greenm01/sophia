@@ -1,6 +1,10 @@
 use sophia_engine::{FramePlanRequest, HeadlessEngine};
-use sophia_protocol::Size;
+use sophia_protocol::{
+    LayoutNodeCapabilities, LayoutNodeKind, LayoutNodeSnapshot, LayoutNodeState, Rect, Size,
+    SurfaceConstraints, TransactionId, WorkspaceId,
+};
 use sophia_runtime::{TraceLevel, init_tracing};
+use sophia_wm_demo::tile_workspace;
 use sophia_x_bridge::{TestClientConfig, capture_readback_display, run_test_client_window};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -87,11 +91,73 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    if args.iter().any(|arg| arg == "x-smoke-policy-frame") {
+        let display = arg_value(&args, "--display");
+        let capture = capture_readback_display(display.as_deref())?;
+        let engine = HeadlessEngine::default();
+        let output = engine.output();
+        let workspace = WorkspaceId::from_raw(1);
+        let nodes = capture
+            .layers
+            .iter()
+            .map(|layer| LayoutNodeSnapshot {
+                surface: layer.surface,
+                workspace,
+                kind: LayoutNodeKind::Toplevel,
+                capabilities: LayoutNodeCapabilities::STANDARD_TOPLEVEL,
+                state: LayoutNodeState::NORMAL,
+                constraints: SurfaceConstraints {
+                    min_size: None,
+                    max_size: None,
+                },
+                geometry: layer.geometry,
+                generation: layer.generation,
+            })
+            .collect::<Vec<_>>();
+        let transaction = tile_workspace(
+            TransactionId::from_raw(1),
+            workspace,
+            Rect {
+                x: 0,
+                y: 0,
+                width: output.size.width,
+                height: output.size.height,
+            },
+            &nodes,
+        );
+        let layers = engine.apply_layout_transaction(&transaction, capture.layers)?;
+        let frame = engine.plan_frame(
+            FramePlanRequest {
+                output: output.id,
+                frame_serial: 2,
+            },
+            layers,
+        )?;
+        let replay = engine.replay_frame(&frame)?;
+        println!(
+            "x-smoke-policy-frame display={} windows={} surfaces={} placements={} focus={} commands={} replay_steps={} damage_rects={}",
+            capture
+                .report
+                .display_name
+                .as_deref()
+                .unwrap_or("<default>"),
+            capture.report.mirrored_windows,
+            capture.report.surfaces,
+            transaction.render_positions.len(),
+            transaction.focus.is_some(),
+            frame.commands.len(),
+            replay.steps.len(),
+            replay.damage.rects.len()
+        );
+        return Ok(());
+    }
+
     println!("sophia {}", env!("CARGO_PKG_VERSION"));
     println!("components: engine, x-bridge, protocol, wm-demo");
     println!("commands: x-test-client [--display=:99] [--seconds=5] [--width=320] [--height=200]");
     println!("commands: x-smoke-readback [--display=:99]");
     println!("commands: x-smoke-frame [--display=:99]");
+    println!("commands: x-smoke-policy-frame [--display=:99]");
 
     if verbose {
         tracing::debug!("verbose tracing enabled");
