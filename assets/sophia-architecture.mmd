@@ -1,0 +1,89 @@
+flowchart TD
+    %% Styling to match the block-diagram format
+    classDef core fill:#f1f5f9,stroke:#334155,stroke-width:2px,color:#0f172a,font-weight:bold
+    classDef hardware fill:#e2e8f0,stroke:#64748b,stroke-width:2px,color:#334155
+    classDef bridge fill:#fefce8,stroke:#ca8a04,stroke-width:2px,color:#854d0e
+    classDef xserver fill:#fef2f2,stroke:#b91c1c,stroke-width:2px,color:#7f1d1d
+    classDef client fill:#ffffff,stroke:#94a3b8,stroke-width:2px,color:#0f172a,rx:5,ry:5
+    classDef boundary fill:none,stroke:#cbd5e1,stroke-width:2px,stroke-dasharray: 5 5
+
+    %% 1. HARDWARE LAYER
+    subgraph KERNEL ["LINUX KERNEL (DRM/KMS)"]
+        direction LR
+        INPUT["⌨️ 🖱️ Physical Input Devices<br/>(Keyboard / Mouse)"]
+        OUTPUT["🖥️ Display Output<br/>(GPU Scanout)"]
+    end
+    class KERNEL boundary
+    class INPUT,OUTPUT hardware
+
+    %% 2. COMPOSITOR LAYER
+    subgraph ENGINE ["SOPHIA ENGINE (Compositor-First Input & Render Hub)"]
+        direction LR
+        SG["Scene Graph<br/>Management"]
+        HIT["Spatial Index<br/>(GPU Hit-Testing & Transforms)"]
+        SYNC["Frame-Perfect Rendering<br/>(Layout Epoch Waits)"]
+    end
+    class ENGINE,SG,HIT,SYNC core
+
+    %% 3. POLICY LAYER
+    subgraph POLICY ["DECOUPLED POLICY (Namespace-Blind)"]
+        direction LR
+        WM["Sophia WM<br/>(Niri-style Layout Logic via Opaque Handles)"]
+        PORTALS["Sophia Portals<br/>(Explicit Cross-Namespace Policy)"]
+    end
+    class POLICY,WM,PORTALS core
+
+    %% 4. TRANSLATION & AUTHORITY
+    subgraph X11_STACK ["X11 TRANSLATION & LEGACY AUTHORITY"]
+        direction TB
+        XBRIDGE["Sophia X Bridge<br/>(XComposite, Damage, Routed Input Adapter)"]
+        META["Metadata Broker<br/>(Sanitized Chrome & Decor)"]
+        XLIBRE["Modified XServer (XLibre)<br/>XNamespaces Registry (XID Virtualization)"]
+    end
+    class X11_STACK boundary
+    class XBRIDGE,META bridge
+    class XLIBRE xserver
+
+    %% 5. NAMESPACES
+    subgraph NAMESPACES ["ISOLATED CLIENT APPLICATIONS (XNamespaces)"]
+        direction LR
+        subgraph NSA ["NAMESPACE A (System Apps)"]
+            direction TB
+            TERM["Terminal (Zellij / Helix)"]
+            FILE["File Manager"]
+        end
+        subgraph NSB ["NAMESPACE B (Untrusted)"]
+            direction TB
+            WEB["Web Browser (Chromium fork)"]
+            ZOOM["Web App (Zoom)"]
+        end
+    end
+    class NAMESPACES boundary
+    class NSA,NSB boundary
+    class TERM,FILE,WEB,ZOOM client
+
+    %% --- ROUTING & EDGES ---
+
+    %% Input flow
+    INPUT -- "1. Raw libinput Events" --> HIT
+    HIT -- "2. Target XID + Local Coords<br/>(Routed Input)" --> XBRIDGE
+    XBRIDGE -- "Privileged Event Injection" --> XLIBRE
+
+    %% Render flow
+    XLIBRE <--> |"Strictly Sandboxed X11 Protocol"| NSA
+    XLIBRE <--> |"Strictly Sandboxed X11 Protocol"| NSB
+    NSA & NSB -- "3. XComposite Pixmaps" --> XBRIDGE
+    XBRIDGE -- "Damage Regions & Buffers" --> SYNC
+    SYNC -- "Final Scanout" --> OUTPUT
+
+    %% WM Policy flow
+    SG -- "Opaque Focus & Layout Nodes" --> WM
+    WM -- "Atomic Layout Updates" --> SYNC
+
+    %% Metadata flow
+    XBRIDGE -. "Sanitized UI Metadata" .-> META
+    META -. "Redacted Presentation Data" .-> SG
+
+    %% Portal flow
+    SG -. "Transfer Prompts (e.g. Copy/Paste)" .-> PORTALS
+    PORTALS -. "Allow / Deny / Handoff" .-> SG
