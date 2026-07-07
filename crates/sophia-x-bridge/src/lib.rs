@@ -2,14 +2,16 @@ use core::fmt;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use sophia_protocol::{
-    BufferSource, DamageFrame, LayerSnapshot, NamespaceId, OutputId, Rect, Region, SurfaceId,
+    BufferSource, DamageFrame, LayerSnapshot, NamespaceId, OutputId, Rect, Region, Size, SurfaceId,
     SurfaceSnapshot, Transform, XWindowId, XWindowMirror,
 };
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
 use x11rb::protocol::composite::{ConnectionExt as CompositeConnectionExt, Redirect};
 use x11rb::protocol::damage::{ConnectionExt as DamageConnectionExt, ReportLevel};
-use x11rb::protocol::xproto::{Atom, AtomEnum, ConnectionExt as _, MapState, Place, Window};
+use x11rb::protocol::xproto::{
+    Atom, AtomEnum, ConnectionExt as _, ImageFormat, MapState, Place, Window,
+};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct XMirrorState {
@@ -316,6 +318,90 @@ impl CompositePixmapMap {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CpuBufferSnapshot {
+    pub handle: u64,
+    pub pixmap: u32,
+    pub size: Size,
+    pub depth: u8,
+    pub visual: u32,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CpuBufferStore {
+    next_handle: u64,
+    buffers: BTreeMap<u64, CpuBufferSnapshot>,
+    handle_by_pixmap: BTreeMap<u32, u64>,
+}
+
+impl Default for CpuBufferStore {
+    fn default() -> Self {
+        Self {
+            next_handle: 1,
+            buffers: BTreeMap::new(),
+            handle_by_pixmap: BTreeMap::new(),
+        }
+    }
+}
+
+impl CpuBufferStore {
+    pub fn upsert_pixmap(
+        &mut self,
+        pixmap: u32,
+        size: Size,
+        depth: u8,
+        visual: u32,
+        bytes: Vec<u8>,
+    ) -> CpuBufferSnapshot {
+        let handle = self
+            .handle_by_pixmap
+            .get(&pixmap)
+            .copied()
+            .unwrap_or_else(|| {
+                let handle = self.next_handle;
+                self.next_handle = self
+                    .next_handle
+                    .checked_add(1)
+                    .filter(|next| *next != 0)
+                    .expect("Sophia CPU buffer handle overflow");
+                self.handle_by_pixmap.insert(pixmap, handle);
+                handle
+            });
+        let snapshot = CpuBufferSnapshot {
+            handle,
+            pixmap,
+            size,
+            depth,
+            visual,
+            bytes,
+        };
+        self.buffers.insert(handle, snapshot.clone());
+        snapshot
+    }
+
+    pub fn get(&self, handle: u64) -> Option<&CpuBufferSnapshot> {
+        self.buffers.get(&handle)
+    }
+
+    pub fn handle_for_pixmap(&self, pixmap: u32) -> Option<u64> {
+        self.handle_by_pixmap.get(&pixmap).copied()
+    }
+
+    pub fn remove_pixmap(&mut self, pixmap: u32) -> Option<CpuBufferSnapshot> {
+        let handle = self.handle_by_pixmap.remove(&pixmap)?;
+        self.buffers.remove(&handle)
+    }
+
+    pub fn len(&self) -> usize {
+        self.buffers.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.buffers.is_empty()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DamageRecord {
     pub window: XWindowId,
@@ -563,6 +649,14 @@ pub enum XBridgeError {
         damage: u32,
         message: String,
     },
+    PixmapGeometry {
+        pixmap: u32,
+        message: String,
+    },
+    PixmapReadback {
+        pixmap: u32,
+        message: String,
+    },
 }
 
 impl fmt::Display for XBridgeError {
@@ -642,6 +736,15 @@ impl fmt::Display for XBridgeError {
                     f,
                     "failed to create X Damage object {damage:#x} for X window {window:#x}: {message}"
                 )
+            }
+            Self::PixmapGeometry { pixmap, message } => {
+                write!(
+                    f,
+                    "failed to query X pixmap geometry for {pixmap:#x}: {message}"
+                )
+            }
+            Self::PixmapReadback { pixmap, message } => {
+                write!(f, "failed to read X pixmap {pixmap:#x}: {message}")
             }
         }
     }
@@ -961,6 +1064,81 @@ pub fn emit_damage_frame(
         affected_surfaces,
         damage,
     }
+}
+
+pub fn readback_composite_pixmap<C>(
+    connection: &C,
+    pixmap: u32,
+    buffers: &mut CpuBufferStore,
+) -> Result<CpuBufferSnapshot, XBridgeError>
+where
+    C: Connection,
+{
+    let geometry = connection
+        .get_geometry(pixmap)
+        .map_err(|error| XBridgeError::PixmapGeometry {
+            pixmap,
+            message: error.to_string(),
+        })?
+        .reply()
+        .map_err(|error| XBridgeError::PixmapGeometry {
+            pixmap,
+            message: error.to_string(),
+        })?;
+    let image = connection
+        .get_image(
+            ImageFormat::Z_PIXMAP,
+            pixmap,
+            0,
+            0,
+            geometry.width,
+            geometry.height,
+            u32::MAX,
+        )
+        .map_err(|error| XBridgeError::PixmapReadback {
+            pixmap,
+            message: error.to_string(),
+        })?
+        .reply()
+        .map_err(|error| XBridgeError::PixmapReadback {
+            pixmap,
+            message: error.to_string(),
+        })?;
+
+    Ok(buffers.upsert_pixmap(
+        pixmap,
+        Size {
+            width: i32::from(geometry.width),
+            height: i32::from(geometry.height),
+        },
+        image.depth,
+        image.visual,
+        image.data,
+    ))
+}
+
+pub fn readback_surface_pixmaps<C>(
+    connection: &C,
+    surfaces: &mut [SurfaceSnapshot],
+    buffers: &mut CpuBufferStore,
+) -> Result<Vec<CpuBufferSnapshot>, XBridgeError>
+where
+    C: Connection,
+{
+    let mut readbacks = Vec::new();
+
+    for surface in surfaces {
+        let BufferSource::XPixmap { pixmap } = surface.source else {
+            continue;
+        };
+        let readback = readback_composite_pixmap(connection, pixmap, buffers)?;
+        surface.source = BufferSource::CpuBuffer {
+            handle: readback.handle,
+        };
+        readbacks.push(readback);
+    }
+
+    Ok(readbacks)
 }
 
 fn translate_region(region: &Region, dx: i32, dy: i32) -> Region {
@@ -1455,6 +1633,37 @@ mod tests {
         );
         assert_eq!(pixmaps.remove_window(window), Some(0x9000));
         assert_eq!(pixmaps.pixmap_for_window(window), None);
+    }
+
+    #[test]
+    fn cpu_buffer_store_reuses_handles_for_pixmap_updates() {
+        let mut store = CpuBufferStore::default();
+        let first = store.upsert_pixmap(
+            0x9000,
+            Size {
+                width: 2,
+                height: 2,
+            },
+            24,
+            0x21,
+            vec![1, 2, 3, 4],
+        );
+        let second = store.upsert_pixmap(
+            0x9000,
+            Size {
+                width: 2,
+                height: 2,
+            },
+            24,
+            0x21,
+            vec![5, 6, 7, 8],
+        );
+
+        assert_eq!(first.handle, second.handle);
+        assert_eq!(store.handle_for_pixmap(0x9000), Some(first.handle));
+        assert_eq!(store.get(first.handle).unwrap().bytes, vec![5, 6, 7, 8]);
+        assert_eq!(store.remove_pixmap(0x9000).unwrap().handle, first.handle);
+        assert!(store.is_empty());
     }
 
     #[test]

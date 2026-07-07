@@ -176,6 +176,13 @@ rectangles by the snapshot geometry and records affected Sophia surfaces. This
 is enough for the headless engine path; precise frame/client offset handling
 should be measured once real decorated X11 clients are imported.
 
+Phase 4 starts with a conservative CPU readback fallback. Sophia X Bridge can
+query a named XComposite pixmap's geometry, read it with X11 `GetImage` in
+`ZPixmap` format, store the bytes in a bridge-owned `CpuBufferStore`, and
+rewrite `SurfaceSnapshot` sources from `XPixmap` to `CpuBuffer`. This is not the
+final renderer path, but it gives the first real-client proof a simple handoff
+before GPU texture import exists.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new
