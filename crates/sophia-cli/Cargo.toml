@@ -1,0 +1,18 @@
+[package]
+name = "sophia-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "sophia"
+path = "src/main.rs"
+
+[dependencies]
+sophia-engine = { path = "../sophia-engine" }
+sophia-protocol = { path = "../sophia-protocol" }
+sophia-wm-demo = { path = "../sophia-wm-demo" }
+sophia-x-bridge = { path = "../sophia-x-bridge" }
+
+[lints]
+workspace = true

@@ -1,0 +1,11 @@
+[package]
+name = "sophia-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sophia-protocol = { path = "../sophia-protocol" }
+
+[lints]
+workspace = true

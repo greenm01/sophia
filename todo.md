@@ -21,7 +21,7 @@ Capture the architecture, reference map, and first roadmap before code starts.
 - [x] Add this roadmap.
 
 **Next documentation checks**
-- [ ] Add an agent guide once code exists and build/test commands are known.
+- [x] Add an agent guide once code exists and build/test commands are known.
 - [ ] Keep docs updated when a research question turns into a decision.
 
 ---
@@ -32,21 +32,21 @@ Create the minimum Rust workspace needed to make data shapes executable without
 touching compositor or XLibre code yet.
 
 **Workspace**
-- [ ] Create a Cargo workspace.
-- [ ] Add crates or modules for Sophia Engine, Sophia X Bridge, Sophia protocol,
+- [x] Create a Cargo workspace.
+- [x] Add crates or modules for Sophia Engine, Sophia X Bridge, Sophia protocol,
   and a demo Sophia WM.
 - [ ] Add common tracing and error handling.
-- [ ] Add a small CLI that can print version and planned component names.
+- [x] Add a small CLI that can print version and planned component names.
 
 **Data model**
-- [ ] Add typed IDs: `SurfaceId`, `XWindowId`, `NamespaceId`, `OutputId`,
+- [x] Add typed IDs: `SurfaceId`, `XWindowId`, `NamespaceId`, `OutputId`,
   `SeatId`, `DeviceId`, `TransactionId`, and `PortalTransferId`.
-- [ ] Add passive packet structs for `LayerSnapshot`, `DamageFrame`,
+- [x] Add passive packet structs for `LayerSnapshot`, `DamageFrame`,
   `RenderCommand`, `CompositorSurface`, `InputEventPacket`, `InputRoute`,
   `LayoutTransaction`, and `PortalTransfer`.
-- [ ] Add dense-table helpers with generation checks where stale references are
+- [x] Add dense-table helpers with generation checks where stale references are
   plausible.
-- [ ] Add unit tests for ID allocation, stale-ID rejection, and snapshot
+- [x] Add unit tests for ID allocation, stale-ID rejection, and snapshot
   immutability.
 
 ---
