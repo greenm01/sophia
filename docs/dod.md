@@ -110,6 +110,10 @@ Fields should describe:
 - namespace identity when known
 - stale metadata flags
 
+Namespace identity may start from static configuration and later be replaced by
+server-discovered records. X Bridge should treat discovered namespace ownership
+as mirror metadata, not authority; XLibre remains the enforcement point.
+
 Picom's window-tree mirror is the reference shape, but Sophia's mirror should
 emit snapshots instead of owning render policy.
 

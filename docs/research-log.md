@@ -127,6 +127,12 @@ probe connects to the configured display, queries Composite, Damage, XFixes,
 Shape, and Render with `QueryExtension`, and carries static Xnamespace records
 until XLibre exposes namespace discovery data through a reliable protocol.
 
+The bridge now has the stable discovery seam: server-discovered namespace
+records can replace static records, and discovered window ownership can annotate
+the X mirror for frames and clients. A live X-NAMESPACE query remains protocol
+specific work, but Sophia can record discovered namespace information once a
+query source provides it.
+
 This does not redirect windows or mutate X server state yet. Window-tree import,
 event selection, Composite redirection, and Damage tracking remain separate
 Phase 3 steps.

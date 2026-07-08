@@ -78,7 +78,7 @@ snapshots.
 - [x] Connect with XCB or Rust X11 bindings.
 - [x] Confirm required extensions: Composite, Damage, XFixes, Shape, Render.
 - [x] Start with static Xnamespace config.
-- [ ] Record namespace information when discoverable.
+- [x] Record namespace information when discoverable.
 
 **Window mirror**
 - [x] Import the root window tree with async-safe ordering.

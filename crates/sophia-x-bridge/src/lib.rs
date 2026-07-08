@@ -507,6 +507,24 @@ impl XMirrorState {
             .and_then(|mirror| mirror.namespace)
     }
 
+    pub fn apply_namespace_ownership(&mut self, ownership: &[NamespaceOwnership]) {
+        for ownership in ownership {
+            if !ownership.window.is_valid() || !ownership.namespace.is_valid() {
+                continue;
+            }
+
+            for mirror in &mut self.windows {
+                if mirror.window == ownership.window
+                    || mirror.client == Some(ownership.window)
+                    || mirror.toplevel == Some(ownership.window)
+                {
+                    mirror.namespace = Some(ownership.namespace);
+                    mirror.stale_metadata = mirror.stale_metadata.saturating_add(1);
+                }
+            }
+        }
+    }
+
     pub fn apply_event(&mut self, event: XMirrorEvent) {
         match event {
             XMirrorEvent::Map { window } => {
@@ -1399,6 +1417,33 @@ impl StaticNamespaceConfig {
     pub fn namespaces(&self) -> &[NamespaceRecord] {
         &self.namespaces
     }
+
+    pub fn record_namespace(&mut self, record: NamespaceRecord) {
+        if let Some(existing) = self
+            .namespaces
+            .iter_mut()
+            .find(|existing| existing.namespace == record.namespace)
+        {
+            *existing = record;
+            return;
+        }
+
+        self.namespaces.push(record);
+    }
+
+    pub fn with_discovered(mut self, records: impl IntoIterator<Item = NamespaceRecord>) -> Self {
+        for record in records {
+            self.record_namespace(record);
+        }
+
+        self
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NamespaceOwnership {
+    pub window: XWindowId,
+    pub namespace: NamespaceId,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

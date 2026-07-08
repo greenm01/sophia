@@ -49,6 +49,55 @@ mod tests {
     }
 
     #[test]
+    fn discovered_namespace_records_replace_static_records() {
+        let config = StaticNamespaceConfig::new(vec![NamespaceRecord {
+            namespace: NamespaceId::from_raw(1),
+            label: "trusted-static".to_owned(),
+            source: NamespaceSource::StaticConfig,
+        }])
+        .with_discovered(vec![
+            NamespaceRecord {
+                namespace: NamespaceId::from_raw(1),
+                label: "trusted-server".to_owned(),
+                source: NamespaceSource::XServer,
+            },
+            NamespaceRecord {
+                namespace: NamespaceId::from_raw(2),
+                label: "browser".to_owned(),
+                source: NamespaceSource::XServer,
+            },
+        ]);
+
+        assert_eq!(config.namespaces().len(), 2);
+        assert_eq!(config.namespaces()[0].label, "trusted-server");
+        assert_eq!(config.namespaces()[0].source, NamespaceSource::XServer);
+        assert_eq!(config.namespaces()[1].label, "browser");
+    }
+
+    #[test]
+    fn mirror_records_discovered_namespace_ownership() {
+        let mut state = XMirrorState::default();
+        let mut frame = mirror(0x20, None, 0);
+        frame.client = Some(xid(0x30));
+        frame.toplevel = Some(xid(0x20));
+        let mut client = mirror(0x30, Some(0x20), 0);
+        client.client = Some(xid(0x30));
+        client.toplevel = Some(xid(0x20));
+        state.ingest_window(frame);
+        state.ingest_window(client);
+
+        state.apply_namespace_ownership(&[NamespaceOwnership {
+            window: xid(0x30),
+            namespace: NamespaceId::from_raw(7),
+        }]);
+
+        for mirror in state.windows() {
+            assert_eq!(mirror.namespace, Some(NamespaceId::from_raw(7)));
+            assert_eq!(mirror.stale_metadata, 1);
+        }
+    }
+
+    #[test]
     fn selection_monitor_attributes_owner_to_namespace() {
         let mut state = XMirrorState::default();
         let mut owner = mirror(0x20, None, 0);
