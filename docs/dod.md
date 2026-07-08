@@ -209,12 +209,14 @@ Fields should describe:
 - original buffer source
 - requested import path
 - path actually used
+- imported buffer handle used by the renderer
 - whether a fallback path was used
 
-The headless renderer always uses CPU readback as the execution path, including
-as fallback for `XPixmap` or `DmaBuf` sources. A GPU renderer should keep the
-same report shape so tests can distinguish "requested import path" from "used
-path" without inspecting renderer-private state.
+The default headless renderer always uses CPU readback as the execution path,
+including as fallback for `XPixmap` or `DmaBuf` sources. Import-capable
+renderers may use native `XPixmap` or `DmaBuf` handles when supported. A GPU
+renderer should keep the same report shape so tests can distinguish "requested
+import path" from "used path" without inspecting renderer-private state.
 
 ### CompositorSurface
 

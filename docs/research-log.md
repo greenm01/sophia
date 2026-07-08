@@ -509,6 +509,12 @@ imports while using CPU readback as the deterministic fallback execution path.
 This keeps proof-grade rendering intact while isolating the future GPU import
 backend behind a small interface.
 
+Rendering has moved one step past CPU-readback-only reports. Import reports now
+carry an explicit `ImportedBufferHandle`, and `ImportCapableRenderer` can use
+native `XPixmap` and `DmaBuf` handles when those paths are enabled. Unsupported
+handle types remain visible as CPU-readback fallbacks instead of being hidden in
+renderer-private state.
+
 The DRM/KMS backend now has a data-only output skeleton. `DrmKmsMode`,
 `DrmKmsOutputDescriptor`, and `DrmKmsOutputRegistry` track connector/CRTC IDs,
 mode, scale, and Sophia output IDs without opening real DRM devices. The

@@ -1,15 +1,15 @@
 use sophia_engine::{
     BufferImportPath, ChromeActionDecision, ChromeActionRejectReason, ChromeBroker,
     DeterministicFrameClock, DrmKmsMode, DrmKmsOutputDescriptor, DrmKmsOutputRegistry, EngineError,
-    FrameClock, FramePlanRequest, HeadlessEngine, LastCommittedLayout, LibinputDeviceDescriptor,
-    LibinputDeviceKind, LibinputEventIngest, LibinputEventSource, MetadataChromeRejectReason,
-    MetadataChromeUpdate, NotificationChromePresenter, NotificationChromeRejectReason,
-    NotificationChromeUpdate, RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction,
-    RoutedInputRequestError, SanitizedChromeMetadata, SessionCommand, SessionEvent,
-    SessionLayerSource, SessionTickRequest, WmIpcError, WmRestartReason, WmRuntimeAction,
-    notification_chrome_command_from_portal, request_wm_over_stream,
-    routed_input_request_from_physical_event, routed_input_requests_from_flush,
-    update_wm_supervisor_from_runtime_action,
+    FrameClock, FramePlanRequest, HeadlessEngine, ImportCapableRenderer, ImportedBufferHandle,
+    LastCommittedLayout, LibinputDeviceDescriptor, LibinputDeviceKind, LibinputEventIngest,
+    LibinputEventSource, MetadataChromeRejectReason, MetadataChromeUpdate,
+    NotificationChromePresenter, NotificationChromeRejectReason, NotificationChromeUpdate,
+    RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction, RoutedInputRequestError,
+    SanitizedChromeMetadata, SessionCommand, SessionEvent, SessionLayerSource, SessionTickRequest,
+    WmIpcError, WmRestartReason, WmRuntimeAction, notification_chrome_command_from_portal,
+    request_wm_over_stream, routed_input_request_from_physical_event,
+    routed_input_requests_from_flush, update_wm_supervisor_from_runtime_action,
 };
 use sophia_portal::{NotificationRequest, NotificationUrgency, PortalCommand};
 use sophia_protocol::{
@@ -435,10 +435,83 @@ fn render_frame_reports_cpu_fallback_imports() {
     assert_eq!(rendered.imports.len(), 2);
     assert_eq!(rendered.imports[0].requested, BufferImportPath::CpuReadback);
     assert_eq!(rendered.imports[0].used, BufferImportPath::CpuReadback);
+    assert_eq!(
+        rendered.imports[0].handle,
+        ImportedBufferHandle::CpuReadback {
+            source: rendered.imports[0].source
+        }
+    );
     assert!(!rendered.imports[0].used_fallback);
     assert_eq!(rendered.imports[1].requested, BufferImportPath::DmaBuf);
     assert_eq!(rendered.imports[1].used, BufferImportPath::CpuReadback);
+    assert_eq!(
+        rendered.imports[1].handle,
+        ImportedBufferHandle::CpuReadback {
+            source: BufferSource::DmaBuf { handle: 99 }
+        }
+    );
     assert!(rendered.imports[1].used_fallback);
+}
+
+#[test]
+fn import_capable_renderer_uses_native_buffer_handles_when_supported() {
+    let engine = HeadlessEngine::default();
+    let request = FramePlanRequest {
+        output: engine.output().id,
+        frame_serial: 15,
+    };
+    let mut xpixmap_layer = test_layer(0, 0, 0, Region::empty());
+    xpixmap_layer.source = BufferSource::XPixmap { pixmap: 44 };
+    let mut dmabuf_layer = test_layer(1, 1, 100, Region::empty());
+    dmabuf_layer.source = BufferSource::DmaBuf { handle: 99 };
+    let renderer = ImportCapableRenderer::new(true, true);
+
+    let frame = engine
+        .plan_frame(request, vec![xpixmap_layer, dmabuf_layer])
+        .unwrap();
+    let rendered = engine.render_frame_with(&renderer, &frame).unwrap();
+
+    assert_eq!(rendered.imports.len(), 2);
+    assert_eq!(rendered.imports[0].requested, BufferImportPath::XPixmap);
+    assert_eq!(rendered.imports[0].used, BufferImportPath::XPixmap);
+    assert_eq!(
+        rendered.imports[0].handle,
+        ImportedBufferHandle::XPixmap { pixmap: 44 }
+    );
+    assert!(!rendered.imports[0].used_fallback);
+    assert_eq!(rendered.imports[1].requested, BufferImportPath::DmaBuf);
+    assert_eq!(rendered.imports[1].used, BufferImportPath::DmaBuf);
+    assert_eq!(
+        rendered.imports[1].handle,
+        ImportedBufferHandle::DmaBuf { handle: 99 }
+    );
+    assert!(!rendered.imports[1].used_fallback);
+}
+
+#[test]
+fn import_capable_renderer_falls_back_for_unsupported_handles() {
+    let engine = HeadlessEngine::default();
+    let request = FramePlanRequest {
+        output: engine.output().id,
+        frame_serial: 16,
+    };
+    let mut xpixmap_layer = test_layer(0, 0, 0, Region::empty());
+    xpixmap_layer.source = BufferSource::XPixmap { pixmap: 44 };
+    let mut dmabuf_layer = test_layer(1, 1, 100, Region::empty());
+    dmabuf_layer.source = BufferSource::DmaBuf { handle: 99 };
+    let renderer = ImportCapableRenderer::new(false, true);
+
+    let frame = engine
+        .plan_frame(request, vec![xpixmap_layer, dmabuf_layer])
+        .unwrap();
+    let rendered = engine.render_frame_with(&renderer, &frame).unwrap();
+
+    assert_eq!(rendered.imports[0].requested, BufferImportPath::XPixmap);
+    assert_eq!(rendered.imports[0].used, BufferImportPath::CpuReadback);
+    assert!(rendered.imports[0].used_fallback);
+    assert_eq!(rendered.imports[1].requested, BufferImportPath::DmaBuf);
+    assert_eq!(rendered.imports[1].used, BufferImportPath::DmaBuf);
+    assert!(!rendered.imports[1].used_fallback);
 }
 
 #[test]

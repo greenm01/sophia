@@ -166,10 +166,12 @@ those pixmaps, tracks damage, and hands frame packets to Sophia Engine.
 Sophia Engine separates frame validation from renderer/import execution. The
 headless path validates `FrameSnapshot` commands, replays them into a
 deterministic report, and then hands the validated frame to a `FrameRenderer`.
-The first renderer is deliberately conservative: it reports the requested source
-path (`XPixmap`, `DmaBuf`, or CPU buffer) but uses CPU readback as the fallback
-execution path. A production renderer can replace that implementation with GPU
-import while preserving the same command-stream contract.
+The conservative default renderer still uses CPU readback, but the renderer
+contract now carries explicit imported buffer handles. `ImportCapableRenderer`
+can report native `XPixmap` and `DmaBuf` handles when those import paths are
+enabled, and falls back to CPU readback when a handle type is unsupported. A
+production renderer can replace the skeleton import behavior while preserving
+the same command-stream and import-report contract.
 
 This seam exists today in broad shape. It needs measurement and glue, not a new
 theory.
