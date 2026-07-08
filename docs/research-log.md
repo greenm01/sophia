@@ -698,6 +698,12 @@ session tick plus final runtime state. The new
 `headless-session-driver-smoke` proves this path without requiring live X or
 real broker sockets.
 
+The generic runtime tick smoke and damage-epoch smoke now also use
+`HeadlessSessionDriver`, removing their local command mini-loops. Remaining
+direct observation-loop usage is limited to adapter-specific smokes where a full
+session tick would obscure the purpose: broker health packet routing and
+external WM transaction observation.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

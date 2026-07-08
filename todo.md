@@ -34,8 +34,10 @@ Close the gap between existing reducers/protocols and a running session loop.
   chrome presenter, and renderer reports to `SessionRuntimeObservation` batches.
 - [x] Add a single headless session-driver smoke that executes runtime commands
   through the concrete adapters instead of each smoke owning its own mini-loop.
-- [ ] Replace remaining per-smoke runtime command execution with the reusable
+- [x] Replace remaining per-smoke runtime command execution with the reusable
   headless session driver where the smoke does not need custom setup.
+- [ ] Add a runtime driver adapter trait so live X, WM, broker, portal, chrome,
+  and renderer sources can plug into one command executor.
 
 ---
 

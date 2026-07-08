@@ -141,6 +141,11 @@ blocking file-descriptor polling, libinput intake, DRM/KMS commits, X socket
 dispatch, broker socket dispatch, and process supervision remain outside this
 headless test driver.
 
+CLI smokes that exercise a complete runtime tick should use
+`HeadlessSessionDriver`. Direct `SessionRuntimeLoop` use in CLI code should be
+reserved for narrow adapter checks where no frame should be planned, such as
+broker health packet routing or isolated WM transaction observation.
+
 Process-supervised portal and metadata broker placeholders are runtime
 ownership records. They prove that the runtime can start, poll, and terminate
 the intended broker process kinds before the real broker IPC protocols exist.

@@ -1,9 +1,8 @@
 use sophia_engine::{
     FrameClockTick, FramePlanRequest, FrameScheduleDecision, HeadlessEngine, HeadlessSessionDriver,
-    HeadlessSessionDriverTick, LastCommittedLayout, LayoutEpochState, SessionLayerSource,
-    SessionTickRequest, WmSocketTransport, WmSocketTransportConfig, WmTransactionUpdate,
-    runtime_observation_from_portal_commands, runtime_observation_from_session_tick_report,
-    runtime_observation_from_wm_transaction_update, schedule_frame_from_damage,
+    HeadlessSessionDriverTick, LayoutEpochState, WmSocketTransport, WmSocketTransportConfig,
+    WmTransactionUpdate, runtime_observation_from_wm_transaction_update,
+    schedule_frame_from_damage,
 };
 use sophia_portal::{ClipboardPortal, ClipboardTarget, ClipboardTransferRequest, PortalCommand};
 use sophia_protocol::{
@@ -179,65 +178,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if args.iter().any(|arg| arg == "x-smoke-runtime-tick") {
         let display = arg_value(&args, "--display");
-        let mut runtime = SessionRuntimeLoop::default();
-        let mut runtime_commands = Vec::new();
-        runtime_commands.extend(
-            runtime
-                .step_observations([SessionRuntimeObservation::TickStarted])?
-                .commands,
-        );
-
         let capture = capture_readback_display(display.as_deref())?;
-        let x_report = runtime.step_observations([SessionRuntimeObservation::XEventsPolled {
-            count: u32::try_from(capture.report.mirrored_windows).unwrap_or(u32::MAX),
-        }])?;
-        let should_request_wm_layout = x_report
-            .commands
-            .contains(&SessionRuntimeCommand::RequestWmLayout);
-        runtime_commands.extend(x_report.commands);
-        if should_request_wm_layout {
-            runtime_commands.extend(
-                runtime
-                    .step_observations([SessionRuntimeObservation::WmLayoutReady])?
-                    .commands,
-            );
-        }
-
         let engine = HeadlessEngine::default();
         let output = engine.output();
-        let mut last_committed = LastCommittedLayout::default();
         let frame_serial = 4;
-        runtime_commands.extend(
-            runtime
-                .step_observations([SessionRuntimeObservation::FrameScheduled { frame_serial }])?
-                .commands,
-        );
-
-        let session_report = engine.run_session_tick(
-            SessionTickRequest {
-                output: output.id,
-                frame_serial,
-                layers: SessionLayerSource::Fresh(capture.layers),
-            },
-            &mut last_committed,
-        )?;
-        runtime_commands.extend(
-            runtime
-                .step_observations([runtime_observation_from_session_tick_report(
-                    &session_report,
-                )])?
-                .commands,
-        );
-        runtime_commands.extend(
-            runtime
-                .step_observations([runtime_observation_from_portal_commands(&[])])?
-                .commands,
-        );
-        runtime_commands.extend(
-            runtime
-                .step_observations([SessionRuntimeObservation::ChromeCommandsReady { count: 0 }])?
-                .commands,
-        );
+        let mut driver = HeadlessSessionDriver::new(engine);
+        let report = driver.run_tick(HeadlessSessionDriverTick {
+            output: output.id,
+            frame_serial,
+            x_event_count: u32::try_from(capture.report.mirrored_windows).unwrap_or(u32::MAX),
+            layers: capture.layers,
+            wm_update: None,
+            portal_commands: Vec::new(),
+            chrome_command_count: 0,
+        })?;
+        let session_tick = report
+            .session_tick
+            .as_ref()
+            .ok_or("runtime tick did not render a frame")?;
 
         println!(
             "x-smoke-runtime-tick display={} windows={} surfaces={} layers={} readbacks={} bytes={} restored={} commands={} replay_steps={} damage_rects={} cached_layers={} runtime_phase={:?} runtime_commands={} runtime_frames={} runtime_x_events={} runtime_portal={} runtime_chrome={}",
@@ -248,20 +206,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap_or("<default>"),
             capture.report.mirrored_windows,
             capture.report.surfaces,
-            session_report.frame.layers.len(),
+            session_tick.frame.layers.len(),
             capture.report.readbacks,
             capture.report.total_bytes,
-            session_report.restored_last_committed,
-            session_report.frame.commands.len(),
-            session_report.replay.steps.len(),
-            session_report.replay.damage.rects.len(),
-            last_committed.layers().len(),
-            runtime.state().phase,
-            runtime_commands.len(),
-            runtime.state().frames_rendered,
-            runtime.state().x_events_polled,
-            runtime.state().portal_commands_drained,
-            runtime.state().chrome_commands_presented
+            session_tick.restored_last_committed,
+            session_tick.frame.commands.len(),
+            session_tick.replay.steps.len(),
+            session_tick.replay.damage.rects.len(),
+            report.cached_layers,
+            report.runtime_state.phase,
+            report.runtime_commands.len(),
+            report.runtime_state.frames_rendered,
+            report.runtime_state.x_events_polled,
+            report.runtime_state.portal_commands_drained,
+            report.runtime_state.chrome_commands_presented
         );
         return Ok(());
     }
@@ -305,22 +263,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        let mut runtime = SessionRuntimeLoop::default();
-        let mut runtime_commands = Vec::new();
-        let runtime_report = runtime.step_observations([
-            SessionRuntimeObservation::TickStarted,
-            SessionRuntimeObservation::XEventsPolled { count: 1 },
-            SessionRuntimeObservation::WmLayoutReady,
-            SessionRuntimeObservation::FrameScheduled {
-                frame_serial: scheduled_frame_serial,
-            },
-            SessionRuntimeObservation::FrameRendered {
-                frame_serial: scheduled_frame_serial,
-            },
-            runtime_observation_from_portal_commands(&[]),
-            SessionRuntimeObservation::ChromeCommandsReady { count: 0 },
-        ])?;
-        runtime_commands.extend(runtime_report.commands);
+        let mut driver = HeadlessSessionDriver::new(engine);
+        let report = driver.run_tick(HeadlessSessionDriverTick {
+            output: output.id,
+            frame_serial: scheduled_frame_serial,
+            x_event_count: 1,
+            layers: synthetic_layers(),
+            wm_update: None,
+            portal_commands: Vec::new(),
+            chrome_command_count: 0,
+        })?;
 
         println!(
             "runtime-damage-epoch-smoke output={} frame_serial={} completed_epoch={:?} pending_surfaces={} runtime_phase={:?} runtime_commands={} runtime_frames={} runtime_x_events={}",
@@ -328,10 +280,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             scheduled_frame_serial,
             completed_epoch,
             epoch.pending_surfaces().len(),
-            runtime.state().phase,
-            runtime_commands.len(),
-            runtime.state().frames_rendered,
-            runtime.state().x_events_polled
+            report.runtime_state.phase,
+            report.runtime_commands.len(),
+            report.runtime_state.frames_rendered,
+            report.runtime_state.x_events_polled
         );
         return Ok(());
     }

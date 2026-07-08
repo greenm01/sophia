@@ -473,6 +473,12 @@ and chrome command counting. It is still not the production compositor loop: it
 does not block on file descriptors, supervise processes, or own real libinput,
 DRM/KMS, X sockets, or broker sockets.
 
+The generic runtime tick and damage-epoch CLI smokes now use this driver instead
+of hand-rolling command reduction. Broker-health smokes and the external-WM
+smoke still call the observation seam directly because they are intentionally
+adapter-level checks: health packet decoding and WM transaction observation,
+not full session ticks.
+
 The headless runtime tick smoke now drives this reducer around the existing
 capture -> session tick -> replay path. It executes the reducer's X polling,
 WM policy, frame scheduling, render, portal drain, and chrome presentation
