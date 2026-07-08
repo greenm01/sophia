@@ -502,6 +502,13 @@ output-scoped frame ticks, and `DeterministicFrameClock` drives the headless
 session tick without wall-clock dependence. This keeps the session runtime
 repeatable while leaving a clean replacement point for a future DRM/KMS clock.
 
+Renderer/import work now has the same kind of replacement point. Sophia Engine
+validates and replays a frame before giving it to a `FrameRenderer`; the initial
+`CpuFallbackRenderer` reports requested `XPixmap`, `DmaBuf`, or CPU-buffer
+imports while using CPU readback as the deterministic fallback execution path.
+This keeps proof-grade rendering intact while isolating the future GPU import
+backend behind a small interface.
+
 Notification portal commands now have a compositor chrome presentation seam.
 `NotificationChromePresenter` stages bounded notification requests, presents
 them only after a `DeliverNotification` command, and dismisses pending or

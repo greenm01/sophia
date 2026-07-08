@@ -1,12 +1,12 @@
 use sophia_engine::{
-    ChromeActionDecision, ChromeActionRejectReason, ChromeBroker, DeterministicFrameClock,
-    EngineError, FrameClock, FramePlanRequest, HeadlessEngine, LastCommittedLayout,
-    MetadataChromeRejectReason, MetadataChromeUpdate, NotificationChromePresenter,
-    NotificationChromeRejectReason, NotificationChromeUpdate, RoutedInputCoalescer,
-    RoutedInputFlushReason, RoutedInputQueueAction, SanitizedChromeMetadata, SessionCommand,
-    SessionEvent, SessionLayerSource, SessionTickRequest, WmIpcError, WmRestartReason,
-    WmRuntimeAction, notification_chrome_command_from_portal, request_wm_over_stream,
-    update_wm_supervisor_from_runtime_action,
+    BufferImportPath, ChromeActionDecision, ChromeActionRejectReason, ChromeBroker,
+    DeterministicFrameClock, EngineError, FrameClock, FramePlanRequest, HeadlessEngine,
+    LastCommittedLayout, MetadataChromeRejectReason, MetadataChromeUpdate,
+    NotificationChromePresenter, NotificationChromeRejectReason, NotificationChromeUpdate,
+    RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction, SanitizedChromeMetadata,
+    SessionCommand, SessionEvent, SessionLayerSource, SessionTickRequest, WmIpcError,
+    WmRestartReason, WmRuntimeAction, notification_chrome_command_from_portal,
+    request_wm_over_stream, update_wm_supervisor_from_runtime_action,
 };
 use sophia_portal::{NotificationRequest, NotificationUrgency, PortalCommand};
 use sophia_protocol::{
@@ -299,6 +299,51 @@ fn frame_snapshot_replay_rejects_unknown_surface() {
 
     assert_eq!(
         engine.replay_frame(&frame),
+        Err(EngineError::InvalidSurface)
+    );
+}
+
+#[test]
+fn render_frame_reports_cpu_fallback_imports() {
+    let engine = HeadlessEngine::default();
+    let request = FramePlanRequest {
+        output: engine.output().id,
+        frame_serial: 13,
+    };
+    let cpu_layer = test_layer(0, 0, 0, Region::empty());
+    let mut dma_layer = test_layer(1, 1, 100, Region::empty());
+    dma_layer.source = BufferSource::DmaBuf { handle: 99 };
+
+    let frame = engine
+        .plan_frame(request, vec![cpu_layer, dma_layer])
+        .unwrap();
+    let rendered = engine.render_frame(&frame).unwrap();
+
+    assert_eq!(rendered.replay.frame_serial, 13);
+    assert_eq!(rendered.replay.steps.len(), 2);
+    assert_eq!(rendered.imports.len(), 2);
+    assert_eq!(rendered.imports[0].requested, BufferImportPath::CpuReadback);
+    assert_eq!(rendered.imports[0].used, BufferImportPath::CpuReadback);
+    assert!(!rendered.imports[0].used_fallback);
+    assert_eq!(rendered.imports[1].requested, BufferImportPath::DmaBuf);
+    assert_eq!(rendered.imports[1].used, BufferImportPath::CpuReadback);
+    assert!(rendered.imports[1].used_fallback);
+}
+
+#[test]
+fn render_frame_reuses_replay_validation() {
+    let engine = HeadlessEngine::default();
+    let request = FramePlanRequest {
+        output: engine.output().id,
+        frame_serial: 14,
+    };
+    let mut frame = engine
+        .plan_frame(request, vec![test_layer(0, 0, 0, Region::empty())])
+        .unwrap();
+    frame.commands[0].source = Some(SurfaceId::new(99, 1));
+
+    assert_eq!(
+        engine.render_frame(&frame).map(|report| report.imports),
         Err(EngineError::InvalidSurface)
     );
 }

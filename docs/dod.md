@@ -182,6 +182,24 @@ Fields should describe:
 
 The command stream is Sophia Engine authority. XLibre does not own this data.
 
+### BufferImportReport
+
+A buffer import report describes how the renderer attempted to consume a layer's
+buffer source for one validated frame.
+
+Fields should describe:
+
+- surface ID
+- original buffer source
+- requested import path
+- path actually used
+- whether a fallback path was used
+
+The headless renderer always uses CPU readback as the execution path, including
+as fallback for `XPixmap` or `DmaBuf` sources. A GPU renderer should keep the
+same report shape so tests can distinguish "requested import path" from "used
+path" without inspecting renderer-private state.
+
 ### CompositorSurface
 
 A compositor surface is Sophia Engine's stable handle for visual placement and

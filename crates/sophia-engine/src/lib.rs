@@ -512,6 +512,57 @@ pub struct ReplayReport {
     pub damage: Region,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BufferImportPath {
+    CpuReadback,
+    XPixmap,
+    DmaBuf,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BufferImportReport {
+    pub surface: SurfaceId,
+    pub source: BufferSource,
+    pub requested: BufferImportPath,
+    pub used: BufferImportPath,
+    pub used_fallback: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RenderFrameReport {
+    pub replay: ReplayReport,
+    pub imports: Vec<BufferImportReport>,
+}
+
+pub trait FrameRenderer {
+    fn render_frame(
+        &self,
+        frame: &FrameSnapshot,
+        replay: ReplayReport,
+    ) -> Result<RenderFrameReport, EngineError>;
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CpuFallbackRenderer;
+
+impl FrameRenderer for CpuFallbackRenderer {
+    fn render_frame(
+        &self,
+        frame: &FrameSnapshot,
+        replay: ReplayReport,
+    ) -> Result<RenderFrameReport, EngineError> {
+        let imports = collect_buffer_imports(frame);
+        trace!(
+            output = frame.output.raw(),
+            frame_serial = frame.frame_serial,
+            import_count = imports.len(),
+            "rendered frame with CPU fallback renderer"
+        );
+
+        Ok(RenderFrameReport { replay, imports })
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ChromeActionDecision {
     RequestPoliteClose { surface: SurfaceId },
@@ -1113,6 +1164,19 @@ impl HeadlessEngine {
         })
     }
 
+    pub fn render_frame_with(
+        &self,
+        renderer: &impl FrameRenderer,
+        frame: &FrameSnapshot,
+    ) -> Result<RenderFrameReport, EngineError> {
+        let replay = self.replay_frame(frame)?;
+        renderer.render_frame(frame, replay)
+    }
+
+    pub fn render_frame(&self, frame: &FrameSnapshot) -> Result<RenderFrameReport, EngineError> {
+        self.render_frame_with(&CpuFallbackRenderer, frame)
+    }
+
     #[instrument(skip_all, fields(
         transaction = transaction.transaction.raw(),
         placements = transaction.render_positions.len(),
@@ -1446,6 +1510,50 @@ impl EngineBackend for HeadlessEngine {
 
 fn should_render(layer: &LayerSnapshot) -> bool {
     layer.opacity > 0.0 && !layer.geometry.is_empty() && layer.source != BufferSource::None
+}
+
+fn collect_buffer_imports(frame: &FrameSnapshot) -> Vec<BufferImportReport> {
+    let layers_by_surface = frame
+        .layers
+        .iter()
+        .map(|layer| (layer.surface, layer))
+        .collect::<BTreeMap<_, _>>();
+    let mut seen = BTreeSet::new();
+    let mut imports = Vec::new();
+
+    for command in &frame.commands {
+        let Some(surface) = command.source else {
+            continue;
+        };
+        if !seen.insert(surface) {
+            continue;
+        }
+        if let Some(layer) = layers_by_surface.get(&surface) {
+            if let Some(import) = buffer_import_report(layer) {
+                imports.push(import);
+            }
+        }
+    }
+
+    imports
+}
+
+fn buffer_import_report(layer: &LayerSnapshot) -> Option<BufferImportReport> {
+    let requested = match layer.source {
+        BufferSource::None => return None,
+        BufferSource::CpuBuffer { .. } => BufferImportPath::CpuReadback,
+        BufferSource::XPixmap { .. } => BufferImportPath::XPixmap,
+        BufferSource::DmaBuf { .. } => BufferImportPath::DmaBuf,
+    };
+    let used = BufferImportPath::CpuReadback;
+
+    Some(BufferImportReport {
+        surface: layer.surface,
+        source: layer.source,
+        requested,
+        used,
+        used_fallback: requested != used,
+    })
 }
 
 fn chrome_descriptor_from_metadata(

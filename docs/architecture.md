@@ -163,6 +163,14 @@ XComposite and Damage are the first render seam. XLibre redirects windows to
 offscreen pixmaps and reports changed regions. Sophia X Bridge names or imports
 those pixmaps, tracks damage, and hands frame packets to Sophia Engine.
 
+Sophia Engine separates frame validation from renderer/import execution. The
+headless path validates `FrameSnapshot` commands, replays them into a
+deterministic report, and then hands the validated frame to a `FrameRenderer`.
+The first renderer is deliberately conservative: it reports the requested source
+path (`XPixmap`, `DmaBuf`, or CPU buffer) but uses CPU readback as the fallback
+execution path. A production renderer can replace that implementation with GPU
+import while preserving the same command-stream contract.
+
 This seam exists today in broad shape. It needs measurement and glue, not a new
 theory.
 
