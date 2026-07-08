@@ -45,6 +45,33 @@ The same data/logic split applies in Rust:
 Avoid placing behavior on data records unless it is a pure helper such as
 validation, conversion, or formatting.
 
+## Test Placement
+
+Rust tests live outside production source files.
+
+Use crate-level integration tests:
+
+```text
+crates/<crate>/tests/
+  behavior.rs
+  support/
+    mod.rs
+```
+
+Rules:
+
+- Do not add `#[cfg(test)] mod tests` to files under `src/`.
+- Do not add `#[test]` functions to files under `src/`.
+- Put shared fixtures, builders, and mock data under `tests/support/` or inside
+  the integration test module that uses them.
+- Test through public APIs. Do not make private helpers public only so tests can
+  reach them.
+- If a private invariant truly cannot be tested through public behavior, record
+  the exception in this guide before adding an inline test.
+
+This keeps production modules readable and forces tests to exercise the same
+crate boundary that downstream Sophia components use.
+
 ## TEA Policy Style
 
 Use TEA-style structure for policy components:

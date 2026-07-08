@@ -78,27 +78,3 @@ impl Default for Transform {
         Self::IDENTITY
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn region_drops_empty_rectangles() {
-        let mut region = Region::empty();
-        region.push(Rect {
-            x: 0,
-            y: 0,
-            width: 0,
-            height: 10,
-        });
-        region.push(Rect {
-            x: 1,
-            y: 2,
-            width: 3,
-            height: 4,
-        });
-
-        assert_eq!(region.rects.len(), 1);
-    }
-}

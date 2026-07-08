@@ -132,28 +132,3 @@ allocator_next!(TransactionId);
 allocator_next!(PortalTransferId);
 allocator_next!(WorkspaceId);
 allocator_next!(IconTokenId);
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn simple_ids_start_after_zero() {
-        let mut alloc = IdAllocator::<NamespaceId>::new();
-        let first = alloc.next_id();
-        let second = alloc.next_id();
-
-        assert!(first.is_valid());
-        assert_eq!(first.raw(), 1);
-        assert_eq!(second.raw(), 2);
-    }
-
-    #[test]
-    fn foreign_xids_keep_generation() {
-        let id = XWindowId::new(0x1200042, 7);
-
-        assert!(id.is_valid());
-        assert_eq!(id.xid(), 0x1200042);
-        assert_eq!(id.generation(), 7);
-    }
-}

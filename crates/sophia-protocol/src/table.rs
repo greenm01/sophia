@@ -91,22 +91,3 @@ impl<T> Default for SurfaceTable<T> {
         Self::new()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn stale_surface_id_fails_closed() {
-        let mut table = SurfaceTable::new();
-        let first = table.insert("first");
-
-        assert_eq!(table.remove(first), Ok("first"));
-
-        let second = table.insert("second");
-
-        assert_ne!(first, second);
-        assert_eq!(table.get(first), None);
-        assert_eq!(table.get(second), Some(&"second"));
-    }
-}
