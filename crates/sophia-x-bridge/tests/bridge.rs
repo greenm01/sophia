@@ -1010,6 +1010,7 @@ mod tests {
                 height: 200,
             }),
             generation: 3,
+            resize_sync: ResizeSyncCapability::ImplicitOnly,
         };
 
         let layers = layers_from_surfaces(&[surface]);
@@ -1244,6 +1245,96 @@ mod tests {
         assert_eq!(layers.len(), 1);
         assert_eq!(layers[0].surface, snapshots[0].surface);
         assert_eq!(layers[0].source, BufferSource::None);
+    }
+
+    #[test]
+    fn wm_protocols_advertisement_maps_to_resize_sync_capability() {
+        let sync_atom = 0x200;
+
+        assert_eq!(
+            sync_capability_from_wm_protocols(&[0x100, sync_atom], sync_atom),
+            ResizeSyncCapability::ExplicitSync
+        );
+        assert_eq!(
+            sync_capability_from_wm_protocols(&[0x100], sync_atom),
+            ResizeSyncCapability::ImplicitOnly
+        );
+    }
+
+    #[test]
+    fn sync_registry_marks_advertised_clients_explicit_until_reputation_downgrade() {
+        let class = ClientClassKey::new("slow-browser").unwrap();
+        let mut registry = SurfaceSyncRegistry::new(SyncReputationTracker::new(3));
+        registry.upsert_profile(ClientSyncProfile {
+            window: xid(0x30),
+            namespace: Some(NamespaceId::from_raw(7)),
+            class_key: Some(class),
+            advertised_sync: true,
+        });
+
+        assert_eq!(
+            registry.capability_for_window(xid(0x30)),
+            ResizeSyncCapability::ExplicitSync
+        );
+        assert!(registry.record_timeout_for_window(xid(0x30)));
+        assert!(registry.record_timeout_for_window(xid(0x30)));
+        assert_eq!(
+            registry.capability_for_window(xid(0x30)),
+            ResizeSyncCapability::ExplicitSync
+        );
+        assert!(registry.record_timeout_for_window(xid(0x30)));
+        assert_eq!(
+            registry.capability_for_window(xid(0x30)),
+            ResizeSyncCapability::ImplicitOnly
+        );
+    }
+
+    #[test]
+    fn sync_registry_does_not_blacklist_clients_without_valid_class_key() {
+        let mut registry = SurfaceSyncRegistry::new(SyncReputationTracker::new(1));
+        registry.upsert_profile(ClientSyncProfile {
+            window: xid(0x30),
+            namespace: Some(NamespaceId::from_raw(7)),
+            class_key: None,
+            advertised_sync: true,
+        });
+
+        assert!(!registry.record_timeout_for_window(xid(0x30)));
+        assert_eq!(
+            registry.capability_for_window(xid(0x30)),
+            ResizeSyncCapability::ExplicitSync
+        );
+        assert_eq!(ClientClassKey::new(""), None);
+        assert_eq!(ClientClassKey::new("bad\nclass"), None);
+    }
+
+    #[test]
+    fn sync_registry_feeds_snapshots_without_leaking_class_metadata() {
+        let mut state = XMirrorState::default();
+        let mut frame = mirror(0x20, None, 4);
+        frame.mapped = true;
+        frame.client = Some(xid(0x30));
+        frame.toplevel = Some(xid(0x20));
+        frame.namespace = Some(NamespaceId::from_raw(7));
+        state.ingest_window(frame);
+
+        let class = ClientClassKey::new("private-class").unwrap();
+        let mut registry = SurfaceSyncRegistry::new(SyncReputationTracker::new(3));
+        registry.upsert_profile(ClientSyncProfile {
+            window: xid(0x30),
+            namespace: Some(NamespaceId::from_raw(7)),
+            class_key: Some(class),
+            advertised_sync: true,
+        });
+        let mut surfaces = SurfaceIdMap::default();
+        let pixmaps = CompositePixmapMap::default();
+
+        let snapshots = state.emit_surfaces_with_sync(&mut surfaces, &pixmaps, Some(&registry));
+        let layers = layers_from_surfaces(&snapshots);
+
+        assert_eq!(snapshots[0].resize_sync, ResizeSyncCapability::ExplicitSync);
+        assert_eq!(layers[0].resize_sync, ResizeSyncCapability::ExplicitSync);
+        assert!(!format!("{:?}", snapshots[0]).contains("private-class"));
     }
 
     #[test]

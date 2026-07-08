@@ -11,7 +11,8 @@ use sophia_engine::{
     NotificationChromeUpdate, RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction,
     RoutedInputRequestError, SanitizedChromeMetadata, SessionCommand, SessionEvent,
     SessionLayerSource, SessionTickRequest, WmIpcError, WmRestartReason, WmRuntimeAction,
-    WmTransactionUpdate, hit_test_scene_for_input, measure_resize_behavior,
+    WmTransactionUpdate, explicit_sync_surfaces, hit_test_scene_for_input,
+    layout_epoch_for_explicit_sync, measure_resize_behavior,
     notification_chrome_command_from_portal, request_wm_over_stream,
     routed_input_request_from_physical_event, routed_input_requests_from_flush,
     runtime_observation_from_metadata_chrome_updates,
@@ -27,10 +28,11 @@ use sophia_protocol::{
     IconTokenId, InputEventKind, InputEventPacket, InputRoute, InputRouteOutcome, IpcCodecError,
     LayerSnapshot, LayoutNodeCapabilities, LayoutNodeKind, LayoutNodeSnapshot, LayoutNodeState,
     LayoutTransaction, NamespaceId, OutputId, Point, PortalTransferId, Rect, Region,
-    SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAGIC, SOPHIA_IPC_MAX_PAYLOAD_LEN, SOPHIA_IPC_VERSION,
-    SeatId, SurfaceConstraints, SurfaceId, SurfacePlacement, TransactionCommit, TransactionId,
-    TransactionOutcome, Transform, TrustLevel, WmCommand, WmRequestKind, WmRequestPacket,
-    WmResponsePacket, WorkspaceId, XWindowId, decode_wm_request_frame, encode_wm_response_frame,
+    ResizeSyncCapability, SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAGIC, SOPHIA_IPC_MAX_PAYLOAD_LEN,
+    SOPHIA_IPC_VERSION, SeatId, SurfaceConstraints, SurfaceId, SurfacePlacement, TransactionCommit,
+    TransactionId, TransactionOutcome, Transform, TrustLevel, WmCommand, WmRequestKind,
+    WmRequestPacket, WmResponsePacket, WorkspaceId, XWindowId, decode_wm_request_frame,
+    encode_wm_response_frame,
 };
 use sophia_runtime::{
     RestartPolicy, SessionRuntimeCommand, SessionRuntimeObservation, SessionRuntimePhase,
@@ -1218,6 +1220,49 @@ fn frame_scheduler_renders_when_damage_completes_layout_epoch() {
 }
 
 #[test]
+fn layout_epoch_for_explicit_sync_uses_only_cooperative_layers() {
+    let mut explicit = test_layer(1, 0, 0, Region::empty());
+    explicit.resize_sync = ResizeSyncCapability::ExplicitSync;
+    let implicit = test_layer(2, 1, 100, Region::empty());
+
+    let surfaces = explicit_sync_surfaces(&[explicit.clone(), implicit.clone()]);
+    let epoch = layout_epoch_for_explicit_sync(12, 100, 250, &[explicit, implicit])
+        .expect("explicit layer should create layout epoch");
+
+    assert_eq!(surfaces, vec![SurfaceId::new(1, 1)]);
+    assert_eq!(epoch.epoch, 12);
+    assert_eq!(epoch.started_msec(), 100);
+    assert_eq!(epoch.timeout_msec(), 250);
+    assert_eq!(epoch.pending_surfaces(), vec![SurfaceId::new(1, 1)]);
+}
+
+#[test]
+fn layout_epoch_for_explicit_sync_skips_implicit_only_layers() {
+    let layers = [test_layer(1, 0, 0, Region::empty())];
+
+    assert_eq!(explicit_sync_surfaces(&layers), Vec::<SurfaceId>::new());
+    assert_eq!(layout_epoch_for_explicit_sync(13, 100, 250, &layers), None);
+}
+
+#[test]
+fn layout_epoch_timeout_expiration_clears_pending_surfaces() {
+    let surface = SurfaceId::new(1, 1);
+    let mut epoch = LayoutEpochState::with_timing(14, [surface], 100, 250);
+
+    assert_eq!(epoch.expire_if_timed_out(349), None);
+    let timeout = epoch
+        .expire_if_timed_out(350)
+        .expect("epoch should time out at timeout boundary");
+
+    assert_eq!(timeout.epoch, 14);
+    assert_eq!(timeout.elapsed_msec, 250);
+    assert_eq!(timeout.timeout_msec, 250);
+    assert_eq!(timeout.pending_surfaces, vec![surface]);
+    assert!(epoch.is_complete());
+    assert_eq!(epoch.expire_if_timed_out(351), None);
+}
+
+#[test]
 fn resize_behavior_sample_reports_completed_epoch() {
     let surface = SurfaceId::new(1, 1);
     let mut epoch = LayoutEpochState::with_timing(11, [surface], 100, 300);
@@ -2035,6 +2080,7 @@ fn test_layer(surface_index: u32, stack_rank: u32, x: i32, damage: Region) -> La
         crop: None,
         transform: Transform::IDENTITY,
         generation: 1,
+        resize_sync: ResizeSyncCapability::ImplicitOnly,
     }
 }
 

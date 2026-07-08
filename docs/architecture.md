@@ -189,6 +189,19 @@ The first implementation should accept ordinary X11 limitations:
 - Frame-perfect resize needs heuristics at first.
 - Slow or non-cooperative clients may force a timeout frame.
 
+Sophia models resize synchronization as a tiered X11 compromise. The X bridge
+reduces client state to `ResizeSyncCapability`: `ExplicitSync` for clients that
+advertise `_NET_WM_SYNC_REQUEST` and have not earned a bridge-local downgrade,
+or `ImplicitOnly` for legacy, unknown, or downgraded clients. The engine only
+adds explicit-sync surfaces to `LayoutEpochState`; implicit-only surfaces skip
+epoch freezing and rely on ordinary X Damage.
+
+Timeouts remain engine-owned. `LayoutEpochState::expire_if_timed_out` closes a
+stalled epoch and reports the pending surfaces. The bridge can turn those
+timeout reports into class-level reputation strikes keyed by namespace and
+bounded `WM_CLASS`, but that class metadata never leaves the bridge in surface
+or layer snapshots.
+
 ### Engine to XLibre Input
 
 This is the hard seam.
@@ -553,6 +566,12 @@ records start time and timeout policy, and `measure_resize_behavior` reports
 elapsed time, pending surfaces, completion, and timeout status. Slow or
 non-cooperative clients therefore become explicit samples instead of implicit
 black frames or hidden scheduler stalls.
+
+Only layers marked `ResizeSyncCapability::ExplicitSync` participate in a layout
+epoch. Mixed resize transactions therefore wait for cooperative clients without
+letting legacy clients hold the whole frame hostage. If the epoch times out,
+Sophia clears the pending set, renders the fallback frame, and leaves the bridge
+to decide whether the client class should be downgraded for future snapshots.
 
 The DRM/KMS output backend starts as a data-only skeleton. `DrmKmsMode`,
 `DrmKmsOutputDescriptor`, and `DrmKmsOutputRegistry` preserve connector ID,

@@ -78,12 +78,14 @@ fn layer_snapshot_is_cloneable_frame_data() {
         crop: None,
         transform: Transform::IDENTITY,
         generation: 3,
+        resize_sync: ResizeSyncCapability::ExplicitSync,
     };
 
     let cloned = snapshot.clone();
 
     assert_eq!(cloned.surface, surface);
     assert_eq!(cloned.damage.rects.len(), 1);
+    assert_eq!(cloned.resize_sync, ResizeSyncCapability::ExplicitSync);
 }
 
 #[test]

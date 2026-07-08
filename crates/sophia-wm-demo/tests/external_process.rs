@@ -1,8 +1,9 @@
 use sophia_engine::HeadlessEngine;
 use sophia_protocol::{
     BufferSource, LayerSnapshot, LayoutNodeCapabilities, LayoutNodeKind, LayoutNodeSnapshot,
-    LayoutNodeState, OutputId, Rect, Region, SurfaceConstraints, SurfaceId, TransactionId,
-    TransactionOutcome, WmRelayoutWorkspace, WmRequestKind, WmRequestPacket, WorkspaceId,
+    LayoutNodeState, OutputId, Rect, Region, ResizeSyncCapability, SurfaceConstraints, SurfaceId,
+    TransactionId, TransactionOutcome, WmRelayoutWorkspace, WmRequestKind, WmRequestPacket,
+    WorkspaceId,
 };
 use sophia_wm_demo::ExternalWmClient;
 
@@ -111,5 +112,6 @@ fn layer(index: u32) -> LayerSnapshot {
         crop: None,
         transform: sophia_protocol::Transform::IDENTITY,
         generation: 1,
+        resize_sync: ResizeSyncCapability::ImplicitOnly,
     }
 }

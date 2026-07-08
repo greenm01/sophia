@@ -14,10 +14,10 @@ use sophia_protocol::{
     ChromeDescriptor, DamageFrame, DeviceId, DisplayLabel, FrameSnapshot, IconTokenId,
     InputEventKind, InputEventPacket, InputRoute, InputRouteOutcome, IpcCodecError, LayerSnapshot,
     LayoutNodeSnapshot, LayoutTransaction, OutputId, Point, PortalTransferId, Rect, Region,
-    RenderCommand, RenderCommandKind, SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAX_PAYLOAD_LEN, SeatId,
-    Size, SurfaceId, TransactionCommit, TransactionId, TransactionOutcome, TrustLevel,
-    WmRequestKind, WmRequestPacket, WmResponsePacket, WorkspaceId, XLibreRoutedInputRequest,
-    XWindowId, decode_wm_response_frame, encode_wm_request_frame,
+    RenderCommand, RenderCommandKind, ResizeSyncCapability, SOPHIA_IPC_HEADER_LEN,
+    SOPHIA_IPC_MAX_PAYLOAD_LEN, SeatId, Size, SurfaceId, TransactionCommit, TransactionId,
+    TransactionOutcome, TrustLevel, WmRequestKind, WmRequestPacket, WmResponsePacket, WorkspaceId,
+    XLibreRoutedInputRequest, XWindowId, decode_wm_response_frame, encode_wm_request_frame,
 };
 use sophia_runtime::{
     RestartPolicy, SessionRuntimeCommand, SessionRuntimeLoop, SessionRuntimeObservation,
@@ -1199,6 +1199,30 @@ impl LayoutEpochState {
     pub fn is_timed_out(&self, now_msec: u64) -> bool {
         !self.is_complete() && self.elapsed_msec(now_msec) >= u64::from(self.timeout_msec)
     }
+
+    pub fn expire_if_timed_out(&mut self, now_msec: u64) -> Option<LayoutEpochTimeout> {
+        if !self.is_timed_out(now_msec) {
+            return None;
+        }
+
+        let pending_surfaces = self.pending_surfaces();
+        self.pending_surfaces.clear();
+
+        Some(LayoutEpochTimeout {
+            epoch: self.epoch,
+            elapsed_msec: self.elapsed_msec(now_msec),
+            timeout_msec: self.timeout_msec,
+            pending_surfaces,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LayoutEpochTimeout {
+    pub epoch: u64,
+    pub elapsed_msec: u64,
+    pub timeout_msec: u32,
+    pub pending_surfaces: Vec<SurfaceId>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1220,6 +1244,36 @@ pub fn measure_resize_behavior(epoch: &LayoutEpochState, now_msec: u64) -> Resiz
         timed_out: epoch.is_timed_out(now_msec),
         pending_surfaces: epoch.pending_surfaces(),
     }
+}
+
+pub fn explicit_sync_surfaces(layers: &[LayerSnapshot]) -> Vec<SurfaceId> {
+    layers
+        .iter()
+        .filter(|layer| layer.resize_sync == ResizeSyncCapability::ExplicitSync)
+        .map(|layer| layer.surface)
+        .filter(|surface| surface.is_valid())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+pub fn layout_epoch_for_explicit_sync(
+    epoch: u64,
+    started_msec: u64,
+    timeout_msec: u32,
+    layers: &[LayerSnapshot],
+) -> Option<LayoutEpochState> {
+    let surfaces = explicit_sync_surfaces(layers);
+    if surfaces.is_empty() {
+        return None;
+    }
+
+    Some(LayoutEpochState::with_timing(
+        epoch,
+        surfaces,
+        started_msec,
+        timeout_msec,
+    ))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

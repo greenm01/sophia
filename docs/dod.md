@@ -263,6 +263,8 @@ Fields should describe:
 
 - epoch serial
 - pending surface IDs
+- start timestamp
+- timeout policy
 
 X Damage events retire pending surfaces from the epoch. The frame scheduler may
 render only when damage exists for the output and the active epoch has no
@@ -272,6 +274,11 @@ Resize behavior samples are derived from the same epoch state. They should
 record elapsed time, timeout policy, completion, timeout status, and remaining
 pending surfaces so slow clients can be measured without reaching into renderer
 or X bridge internals.
+
+Epochs should be created only for surfaces marked
+`ResizeSyncCapability::ExplicitSync`. Timed-out epochs may be expired by the
+engine, which returns the pending surfaces as a bounded timeout report for the
+bridge to score.
 
 ### DrmKmsOutputDescriptor
 
@@ -597,12 +604,16 @@ Fields should describe:
 - Sophia `SurfaceId`
 - X11 `XWindowId`
 - `NamespaceId`
-- window class/title metadata
 - current geometry
 - mapped/unmapped state
 - buffer or pixmap handle
 - damage region
 - serial/generation
+- resize sync capability
+
+Window titles, app classes, and sync reputation keys are bridge-local metadata.
+They must not be copied into `SurfaceSnapshot` or `LayerSnapshot`; the snapshot
+may carry only the reduced `ResizeSyncCapability`.
 
 The snapshot is immutable once handed to Sophia Engine.
 

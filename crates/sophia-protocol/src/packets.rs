@@ -31,6 +31,7 @@ pub struct SurfaceSnapshot {
     pub source: BufferSource,
     pub damage: Region,
     pub generation: u64,
+    pub resize_sync: ResizeSyncCapability,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -46,6 +47,14 @@ pub struct LayerSnapshot {
     pub crop: Option<Rect>,
     pub transform: Transform,
     pub generation: u64,
+    pub resize_sync: ResizeSyncCapability,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ResizeSyncCapability {
+    #[default]
+    ImplicitOnly,
+    ExplicitSync,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

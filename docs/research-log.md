@@ -532,6 +532,14 @@ epoch state. `measure_resize_behavior` reports elapsed time, timeout policy,
 completion, timeout status, and pending surfaces. This gives future live slow
 client smokes a concrete metric target instead of ad hoc visual inspection.
 
+Sophia now models the XSync compromise without requiring a live XSync client.
+`ResizeSyncCapability` marks each surface/layer as explicit-sync capable or
+implicit-only. The engine creates layout epochs only for explicit-sync layers
+and can expire a timed-out epoch into a bounded timeout report. The X bridge
+owns the class-level reputation tracker that downgrades future snapshots after
+repeated timeout strikes; `WM_CLASS` stays bridge-local and is not emitted in
+surface or layer snapshots.
+
 Routed-input grab/focus edges now have deterministic smoke coverage.
 `smoke_routed_input_edges` reports active-grab and focus-policy rejection
 decisions as closed routes, and `sophia-cli x-smoke-routed-input-edges` exposes

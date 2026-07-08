@@ -8,10 +8,10 @@ use sophia_portal::{ClipboardPortal, ClipboardTarget, ClipboardTransferRequest, 
 use sophia_protocol::{
     BrokerHealthPacket, BrokerHealthState, BrokerKind, BufferSource, DamageFrame, LayerSnapshot,
     LayoutNodeCapabilities, LayoutNodeKind, LayoutNodeSnapshot, LayoutNodeState, NamespaceId,
-    PortalTransferId, Rect, Region, Size, SurfaceConstraints, SurfaceId, TransactionCommit,
-    TransactionId, TransactionOutcome, Transform, WmRelayoutWorkspace, WmRequestKind,
-    WmRequestPacket, WorkspaceId, XWindowId, XWindowMirror, decode_broker_health_frame,
-    encode_broker_health_frame,
+    PortalTransferId, Rect, Region, ResizeSyncCapability, Size, SurfaceConstraints, SurfaceId,
+    TransactionCommit, TransactionId, TransactionOutcome, Transform, WmRelayoutWorkspace,
+    WmRequestKind, WmRequestPacket, WorkspaceId, XWindowId, XWindowMirror,
+    decode_broker_health_frame, encode_broker_health_frame,
 };
 use sophia_runtime::{
     ProcessLaunchSpec, ProcessSupervisor, RestartPolicy, RuntimeBrokerSupervisors,
@@ -1149,6 +1149,7 @@ fn synthetic_layers() -> Vec<LayerSnapshot> {
         crop: None,
         transform: Transform::IDENTITY,
         generation: 1,
+        resize_sync: ResizeSyncCapability::ImplicitOnly,
     }]
 }
 
