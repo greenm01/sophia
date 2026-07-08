@@ -501,6 +501,14 @@ WM policy, frame scheduling, render, portal drain, and chrome presentation
 commands in order and reports the resulting runtime counters beside the frame
 snapshot/replay counts.
 
+`x-smoke-live-runtime-wm-socket` is the first combined live command-executor
+smoke. Under the XLibre/Xvfb smoke script it captures real XComposite layers,
+requests a relayout from the long-lived WM socket server, commits that
+transaction into layer snapshots, and then lets `HeadlessSessionDriver` execute
+the runtime commands through `LiveRuntimeDriverAdapter`. This proves the live
+X bridge and WM socket can feed the shared executor without a per-smoke
+runtime mini-loop.
+
 `runtime-damage-epoch-smoke` exercises the next runtime seam without requiring a
 live slow-resize client. It creates an X-shaped `DamageFrame`, completes a
 layout epoch through `schedule_frame_from_damage`, then drives the runtime

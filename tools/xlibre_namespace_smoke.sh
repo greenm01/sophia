@@ -138,6 +138,13 @@ echo "root external-wm bridge smoke:"
         cargo run -q -p sophia-cli -- x-smoke-external-wm --wm="$ROOT_DIR/target/debug/sophia-wm-demo"
 )
 
+echo "live runtime wm socket smoke:"
+(
+    cd "$ROOT_DIR"
+    env DISPLAY="$DISPLAY_NAME" XAUTHORITY="$WORK_DIR/root.xauth" \
+        cargo run -q -p sophia-cli -- x-smoke-live-runtime-wm-socket --wm="$ROOT_DIR/target/debug/sophia-wm-demo"
+)
+
 echo "supervised wm socket smoke:"
 (
     cd "$ROOT_DIR"

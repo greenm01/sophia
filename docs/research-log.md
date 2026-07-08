@@ -713,6 +713,12 @@ snapshots, and renderer frame reports. The live adapters now expose
 non-blocking constructors over those reduced facts, while file-descriptor
 polling remains owned by the future session loop.
 
+`x-smoke-live-runtime-wm-socket` now combines the live X capture seam and the
+long-lived WM socket seam with that shared executor. The smoke runs inside the
+XLibre/Xvfb script, captures real layer snapshots, requests layout from
+`sophia-wm-demo serve-socket`, and renders through `LiveRuntimeDriverAdapter`
+instead of hand-writing runtime command sequencing.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

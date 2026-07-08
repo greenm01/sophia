@@ -53,7 +53,7 @@ harnesses, or stay explicitly measurement-gated.
   renderer facts.
 - [x] Replace live adapter skeleton inputs with non-blocking X bridge, WM socket,
   broker IPC, portal execution, chrome presenter, and renderer intake.
-- [ ] Add one live command-executor smoke that runs against Xvfb and the WM
+- [x] Add one live command-executor smoke that runs against Xvfb and the WM
   socket without hand-written command sequencing.
 - [ ] Keep SHM routed input deferred until stress measurements exceed the
   documented threshold.
