@@ -1,7 +1,9 @@
 use sophia_engine::{
     FrameClockTick, FramePlanRequest, FrameScheduleDecision, HeadlessEngine, LastCommittedLayout,
     LayoutEpochState, SessionLayerSource, SessionTickRequest, WmSocketTransport,
-    WmSocketTransportConfig, schedule_frame_from_damage,
+    WmSocketTransportConfig, WmTransactionUpdate, runtime_observation_from_portal_commands,
+    runtime_observation_from_session_tick_report, runtime_observation_from_wm_transaction_update,
+    schedule_frame_from_damage,
 };
 use sophia_portal::{ClipboardPortal, ClipboardTarget, ClipboardTransferRequest, PortalCommand};
 use sophia_protocol::{
@@ -13,8 +15,8 @@ use sophia_protocol::{
 };
 use sophia_runtime::{
     ProcessLaunchSpec, ProcessSupervisor, RestartPolicy, RuntimeBrokerSupervisors,
-    SessionRuntimeCommand, SessionRuntimeEvent, SessionRuntimeState, SupervisedProcessKind,
-    SupervisorEvent, TraceLevel, init_tracing, update_session_runtime, update_supervisor,
+    SessionRuntimeCommand, SessionRuntimeLoop, SessionRuntimeObservation, SupervisedProcessKind,
+    SupervisorEvent, TraceLevel, init_tracing, update_supervisor,
 };
 use sophia_wm_demo::{ExternalWmClient, tile_workspace};
 use sophia_x_bridge::{
@@ -176,41 +178,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if args.iter().any(|arg| arg == "x-smoke-runtime-tick") {
         let display = arg_value(&args, "--display");
-        let mut runtime = SessionRuntimeState::default();
+        let mut runtime = SessionRuntimeLoop::default();
         let mut runtime_commands = Vec::new();
-        let (next_runtime, command) =
-            update_session_runtime(runtime, SessionRuntimeEvent::TickStarted);
-        runtime = next_runtime;
-        runtime_commands.push(command);
+        runtime_commands.extend(
+            runtime
+                .step_observations([SessionRuntimeObservation::TickStarted])?
+                .commands,
+        );
 
         let capture = capture_readback_display(display.as_deref())?;
-        let (next_runtime, command) = update_session_runtime(
-            runtime,
-            SessionRuntimeEvent::XEventsPolled {
-                count: u32::try_from(capture.report.mirrored_windows).unwrap_or(u32::MAX),
-            },
-        );
-        runtime = next_runtime;
-        runtime_commands.push(command);
-        if command == SessionRuntimeCommand::RequestWmLayout {
-            let (next_runtime, command) =
-                update_session_runtime(runtime, SessionRuntimeEvent::WmLayoutReady);
-            runtime = next_runtime;
-            runtime_commands.push(command);
+        let x_report = runtime.step_observations([SessionRuntimeObservation::XEventsPolled {
+            count: u32::try_from(capture.report.mirrored_windows).unwrap_or(u32::MAX),
+        }])?;
+        let should_request_wm_layout = x_report
+            .commands
+            .contains(&SessionRuntimeCommand::RequestWmLayout);
+        runtime_commands.extend(x_report.commands);
+        if should_request_wm_layout {
+            runtime_commands.extend(
+                runtime
+                    .step_observations([SessionRuntimeObservation::WmLayoutReady])?
+                    .commands,
+            );
         }
 
         let engine = HeadlessEngine::default();
         let output = engine.output();
         let mut last_committed = LastCommittedLayout::default();
         let frame_serial = 4;
-        let (next_runtime, command) = update_session_runtime(
-            runtime,
-            SessionRuntimeEvent::FrameScheduled { frame_serial },
+        runtime_commands.extend(
+            runtime
+                .step_observations([SessionRuntimeObservation::FrameScheduled { frame_serial }])?
+                .commands,
         );
-        runtime = next_runtime;
-        runtime_commands.push(command);
 
-        let report = engine.run_session_tick(
+        let session_report = engine.run_session_tick(
             SessionTickRequest {
                 output: output.id,
                 frame_serial,
@@ -218,22 +220,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             &mut last_committed,
         )?;
-        let (next_runtime, command) =
-            update_session_runtime(runtime, SessionRuntimeEvent::FrameRendered { frame_serial });
-        runtime = next_runtime;
-        runtime_commands.push(command);
-        let (next_runtime, command) = update_session_runtime(
-            runtime,
-            SessionRuntimeEvent::PortalCommandsReady { count: 0 },
+        runtime_commands.extend(
+            runtime
+                .step_observations([runtime_observation_from_session_tick_report(
+                    &session_report,
+                )])?
+                .commands,
         );
-        runtime = next_runtime;
-        runtime_commands.push(command);
-        let (next_runtime, command) = update_session_runtime(
-            runtime,
-            SessionRuntimeEvent::ChromeCommandsReady { count: 0 },
+        runtime_commands.extend(
+            runtime
+                .step_observations([runtime_observation_from_portal_commands(&[])])?
+                .commands,
         );
-        runtime = next_runtime;
-        runtime_commands.push(command);
+        runtime_commands.extend(
+            runtime
+                .step_observations([SessionRuntimeObservation::ChromeCommandsReady { count: 0 }])?
+                .commands,
+        );
 
         println!(
             "x-smoke-runtime-tick display={} windows={} surfaces={} layers={} readbacks={} bytes={} restored={} commands={} replay_steps={} damage_rects={} cached_layers={} runtime_phase={:?} runtime_commands={} runtime_frames={} runtime_x_events={} runtime_portal={} runtime_chrome={}",
@@ -244,20 +247,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap_or("<default>"),
             capture.report.mirrored_windows,
             capture.report.surfaces,
-            report.frame.layers.len(),
+            session_report.frame.layers.len(),
             capture.report.readbacks,
             capture.report.total_bytes,
-            report.restored_last_committed,
-            report.frame.commands.len(),
-            report.replay.steps.len(),
-            report.replay.damage.rects.len(),
+            session_report.restored_last_committed,
+            session_report.frame.commands.len(),
+            session_report.replay.steps.len(),
+            session_report.replay.damage.rects.len(),
             last_committed.layers().len(),
-            runtime.phase,
+            runtime.state().phase,
             runtime_commands.len(),
-            runtime.frames_rendered,
-            runtime.x_events_polled,
-            runtime.portal_commands_drained,
-            runtime.chrome_commands_presented
+            runtime.state().frames_rendered,
+            runtime.state().x_events_polled,
+            runtime.state().portal_commands_drained,
+            runtime.state().chrome_commands_presented
         );
         return Ok(());
     }
@@ -301,25 +304,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        let mut runtime = SessionRuntimeState::default();
+        let mut runtime = SessionRuntimeLoop::default();
         let mut runtime_commands = Vec::new();
-        for event in [
-            SessionRuntimeEvent::TickStarted,
-            SessionRuntimeEvent::XEventsPolled { count: 1 },
-            SessionRuntimeEvent::WmLayoutReady,
-            SessionRuntimeEvent::FrameScheduled {
+        let runtime_report = runtime.step_observations([
+            SessionRuntimeObservation::TickStarted,
+            SessionRuntimeObservation::XEventsPolled { count: 1 },
+            SessionRuntimeObservation::WmLayoutReady,
+            SessionRuntimeObservation::FrameScheduled {
                 frame_serial: scheduled_frame_serial,
             },
-            SessionRuntimeEvent::FrameRendered {
+            SessionRuntimeObservation::FrameRendered {
                 frame_serial: scheduled_frame_serial,
             },
-            SessionRuntimeEvent::PortalCommandsReady { count: 0 },
-            SessionRuntimeEvent::ChromeCommandsReady { count: 0 },
-        ] {
-            let (next_runtime, command) = update_session_runtime(runtime, event);
-            runtime = next_runtime;
-            runtime_commands.push(command);
-        }
+            runtime_observation_from_portal_commands(&[]),
+            SessionRuntimeObservation::ChromeCommandsReady { count: 0 },
+        ])?;
+        runtime_commands.extend(runtime_report.commands);
 
         println!(
             "runtime-damage-epoch-smoke output={} frame_serial={} completed_epoch={:?} pending_surfaces={} runtime_phase={:?} runtime_commands={} runtime_frames={} runtime_x_events={}",
@@ -327,10 +327,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             scheduled_frame_serial,
             completed_epoch,
             epoch.pending_surfaces().len(),
-            runtime.phase,
+            runtime.state().phase,
             runtime_commands.len(),
-            runtime.frames_rendered,
-            runtime.x_events_polled
+            runtime.state().frames_rendered,
+            runtime.state().x_events_polled
         );
         return Ok(());
     }
@@ -384,15 +384,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let decoded = decode_broker_health_frame(&frame)
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
         let message_len = decoded.message.as_deref().map(str::len).unwrap_or(0);
-        let (runtime, runtime_command) = update_session_runtime(
-            SessionRuntimeState::default(),
-            SessionRuntimeEvent::BrokerHealthChanged {
+        let mut runtime = SessionRuntimeLoop::default();
+        let runtime_report =
+            runtime.step_observations([SessionRuntimeObservation::BrokerHealthChanged {
                 broker: decoded.broker,
                 state: decoded.state,
                 generation: decoded.generation,
                 status_message_len: message_len,
-            },
-        );
+            }])?;
 
         println!(
             "portal-broker-health-smoke broker={:?} state={:?} generation={} message_len={} frame_bytes={} runtime_health={:?} runtime_command={:?}",
@@ -401,8 +400,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             decoded.generation,
             message_len,
             frame.len(),
-            runtime.portal_broker_health,
-            runtime_command
+            runtime.state().portal_broker_health,
+            runtime_report
+                .commands
+                .first()
+                .copied()
+                .unwrap_or(SessionRuntimeCommand::None)
         );
         return Ok(());
     }
@@ -420,15 +423,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let decoded = decode_broker_health_frame(&frame)
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
         let message_len = decoded.message.as_deref().map(str::len).unwrap_or(0);
-        let (runtime, runtime_command) = update_session_runtime(
-            SessionRuntimeState::default(),
-            SessionRuntimeEvent::BrokerHealthChanged {
+        let mut runtime = SessionRuntimeLoop::default();
+        let runtime_report =
+            runtime.step_observations([SessionRuntimeObservation::BrokerHealthChanged {
                 broker: decoded.broker,
                 state: decoded.state,
                 generation: decoded.generation,
                 status_message_len: message_len,
-            },
-        );
+            }])?;
 
         println!(
             "metadata-broker-health-smoke broker={:?} state={:?} generation={} message_len={} frame_bytes={} runtime_health={:?} runtime_command={:?}",
@@ -437,8 +439,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             decoded.generation,
             message_len,
             frame.len(),
-            runtime.metadata_broker_health,
-            runtime_command
+            runtime.state().metadata_broker_health,
+            runtime_report
+                .commands
+                .first()
+                .copied()
+                .unwrap_or(SessionRuntimeCommand::None)
         );
         return Ok(());
     }
@@ -473,6 +479,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let transaction = response.into_layout_transaction();
         let mut layers = capture.layers;
         let commit = engine.commit_layout_transaction(&transaction, &mut layers);
+        let update = WmTransactionUpdate {
+            commit: commit.clone(),
+            ipc_error: None,
+        };
+        let mut runtime = SessionRuntimeLoop::default();
+        let runtime_report =
+            runtime.step_observations([runtime_observation_from_wm_transaction_update(&update)])?;
         let frame = engine.plan_frame(
             FramePlanRequest {
                 output: output.id,
@@ -482,7 +495,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
         let replay = engine.replay_frame(&frame)?;
         println!(
-            "x-smoke-external-wm display={} wm={} windows={} surfaces={} placements={} focus={} outcome={:?} commands={} replay_steps={} damage_rects={}",
+            "x-smoke-external-wm display={} wm={} windows={} surfaces={} placements={} focus={} outcome={:?} commands={} replay_steps={} damage_rects={} runtime_phase={:?} runtime_commands={}",
             capture
                 .report
                 .display_name
@@ -496,7 +509,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             commit.outcome,
             frame.commands.len(),
             replay.steps.len(),
-            replay.damage.rects.len()
+            replay.damage.rects.len(),
+            runtime.state().phase,
+            runtime_report.commands.len()
         );
         return Ok(());
     }

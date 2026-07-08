@@ -128,6 +128,12 @@ tokens, metadata strings, portal payload bytes, icon bytes, buffers, or file
 paths. `SessionRuntimeEventBatch` enforces the maximum observation count before
 the runtime loop sees the events.
 
+Concrete producer adapters may live beside the data they reduce. For example,
+Sophia Engine may map WM transaction updates, frame/render reports, portal
+commands, and chrome updates into observations because it already owns those
+types. Such adapters must remain pure translation helpers: no socket polling,
+no X mutation, no rendering, no process supervision, and no payload retention.
+
 Process-supervised portal and metadata broker placeholders are runtime
 ownership records. They prove that the runtime can start, poll, and terminate
 the intended broker process kinds before the real broker IPC protocols exist.

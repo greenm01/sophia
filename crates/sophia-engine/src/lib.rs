@@ -20,8 +20,8 @@ use sophia_protocol::{
     XWindowId, decode_wm_response_frame, encode_wm_request_frame,
 };
 use sophia_runtime::{
-    RestartPolicy, SophiaErrorExt, SophiaErrorKind, SupervisedProcessKind, SupervisorCommand,
-    SupervisorEvent, SupervisorState, update_supervisor,
+    RestartPolicy, SessionRuntimeObservation, SophiaErrorExt, SophiaErrorKind,
+    SupervisedProcessKind, SupervisorCommand, SupervisorEvent, SupervisorState, update_supervisor,
 };
 use tracing::{debug, instrument, trace, warn};
 
@@ -167,6 +167,76 @@ pub fn update_wm_supervisor_from_runtime_action(
             );
             update_supervisor(state, SupervisorEvent::RestartRequested, policy)
         }
+    }
+}
+
+pub fn runtime_observation_from_wm_transaction_update(
+    update: &WmTransactionUpdate,
+) -> SessionRuntimeObservation {
+    match update.runtime_action() {
+        WmRuntimeAction::KeepRunning => SessionRuntimeObservation::WmLayoutReady,
+        WmRuntimeAction::RestartWm { .. } => SessionRuntimeObservation::WmRestartRequested,
+    }
+}
+
+pub fn runtime_observation_from_session_tick_report(
+    report: &SessionTickReport,
+) -> SessionRuntimeObservation {
+    SessionRuntimeObservation::FrameRendered {
+        frame_serial: report.frame.frame_serial,
+    }
+}
+
+pub fn runtime_observation_from_render_frame_report(
+    report: &RenderFrameReport,
+) -> SessionRuntimeObservation {
+    SessionRuntimeObservation::FrameRendered {
+        frame_serial: report.replay.frame_serial,
+    }
+}
+
+pub fn runtime_observation_from_portal_commands(
+    commands: &[PortalCommand],
+) -> SessionRuntimeObservation {
+    SessionRuntimeObservation::PortalCommandsReady {
+        count: u32::try_from(commands.len()).unwrap_or(u32::MAX),
+    }
+}
+
+pub fn runtime_observation_from_notification_chrome_updates<'a>(
+    updates: impl IntoIterator<Item = &'a NotificationChromeUpdate>,
+) -> SessionRuntimeObservation {
+    let count = updates
+        .into_iter()
+        .filter(|update| {
+            matches!(
+                update,
+                NotificationChromeUpdate::Presented { .. }
+                    | NotificationChromeUpdate::Dismissed { .. }
+            )
+        })
+        .count();
+
+    SessionRuntimeObservation::ChromeCommandsReady {
+        count: u32::try_from(count).unwrap_or(u32::MAX),
+    }
+}
+
+pub fn runtime_observation_from_metadata_chrome_updates<'a>(
+    updates: impl IntoIterator<Item = &'a MetadataChromeUpdate>,
+) -> SessionRuntimeObservation {
+    let count = updates
+        .into_iter()
+        .filter(|update| {
+            matches!(
+                update,
+                MetadataChromeUpdate::Upserted { .. } | MetadataChromeUpdate::Removed { .. }
+            )
+        })
+        .count();
+
+    SessionRuntimeObservation::ChromeCommandsReady {
+        count: u32::try_from(count).unwrap_or(u32::MAX),
     }
 }
 

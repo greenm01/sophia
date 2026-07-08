@@ -455,6 +455,15 @@ status-message length. `SessionRuntimeEventBatch` rejects batches larger than
 the broker health packet cap. It does not carry raw X events, XIDs, namespace
 tokens, clipboard bytes, labels, icons, or renderer buffers.
 
+Concrete producer wiring now follows that rule. Sophia Engine exposes helper
+conversions from `WmTransactionUpdate`, `SessionTickReport`,
+`RenderFrameReport`, portal command slices, metadata chrome updates, and
+notification chrome updates into `SessionRuntimeObservation` values. The CLI
+runtime smokes use the same intake path for X capture counts, broker health
+decode results, WM transaction results, portal drain counts, chrome presentation
+counts, and rendered frame reports. These helpers translate facts; they do not
+poll file descriptors or execute runtime commands themselves.
+
 The headless runtime tick smoke now drives this reducer around the existing
 capture -> session tick -> replay path. It executes the reducer's X polling,
 WM policy, frame scheduling, render, portal drain, and chrome presentation

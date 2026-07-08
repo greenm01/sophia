@@ -30,8 +30,10 @@ Close the gap between existing reducers/protocols and a running session loop.
   commands without polling file descriptors inside policy code.
 - [x] Add a bounded runtime observation adapter for X, broker, WM, portal,
   chrome, and renderer facts.
-- [ ] Connect concrete X bridge, WM transport, broker IPC, portal execution,
+- [x] Connect concrete X bridge, WM transport, broker IPC, portal execution,
   chrome presenter, and renderer reports to `SessionRuntimeObservation` batches.
+- [ ] Add a single headless session-driver smoke that executes runtime commands
+  through the concrete adapters instead of each smoke owning its own mini-loop.
 
 ---
 

@@ -683,6 +683,14 @@ checking batch size and broker status length. This gives concrete X bridge, WM
 transport, broker IPC, portal, chrome, and renderer code a shared intake seam
 without creating a general payload bus through the security broker.
 
+Concrete producer wiring now reaches that seam. Sophia Engine maps WM
+transaction updates, session/render reports, portal commands, and chrome updates
+into runtime observations; the CLI runtime smokes feed X capture counts, broker
+health packets, WM transaction observations, portal drain observations, chrome
+counts, and rendered frame observations through `SessionRuntimeLoop`. The next
+step is to collapse the per-smoke mini-loops into a reusable headless session
+driver that executes runtime commands through these adapters.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

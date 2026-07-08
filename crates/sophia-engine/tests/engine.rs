@@ -10,7 +10,10 @@ use sophia_engine::{
     SessionLayerSource, SessionTickRequest, WmIpcError, WmRestartReason, WmRuntimeAction,
     hit_test_scene_for_input, measure_resize_behavior, notification_chrome_command_from_portal,
     request_wm_over_stream, routed_input_request_from_physical_event,
-    routed_input_requests_from_flush, schedule_frame_from_damage,
+    routed_input_requests_from_flush, runtime_observation_from_metadata_chrome_updates,
+    runtime_observation_from_notification_chrome_updates, runtime_observation_from_portal_commands,
+    runtime_observation_from_render_frame_report, runtime_observation_from_session_tick_report,
+    runtime_observation_from_wm_transaction_update, schedule_frame_from_damage,
     update_wm_supervisor_from_runtime_action,
 };
 use sophia_portal::{NotificationRequest, NotificationUrgency, PortalCommand};
@@ -25,7 +28,10 @@ use sophia_protocol::{
     WmRequestKind, WmRequestPacket, WmResponsePacket, WorkspaceId, XWindowId,
     decode_wm_request_frame, encode_wm_response_frame,
 };
-use sophia_runtime::{RestartPolicy, SupervisedProcessKind, SupervisorCommand, SupervisorState};
+use sophia_runtime::{
+    RestartPolicy, SessionRuntimeObservation, SupervisedProcessKind, SupervisorCommand,
+    SupervisorState,
+};
 use std::io::{Cursor, Read, Result as IoResult, Write};
 use std::time::Duration;
 
@@ -1302,6 +1308,117 @@ fn wm_runtime_action_does_not_restart_for_valid_rejected_layout() {
         TransactionOutcome::RejectedInvalidSurface
     );
     assert_eq!(update.runtime_action(), WmRuntimeAction::KeepRunning);
+}
+
+#[test]
+fn wm_transaction_update_maps_to_runtime_observation() {
+    let engine = HeadlessEngine::default();
+    let request = wm_request(TransactionId::from_raw(63));
+    let response = WmResponsePacket {
+        transaction: request.transaction,
+        commands: Vec::new(),
+        timeout_msec: 250,
+    };
+    let mut stream = TestDuplex::new(encode_wm_response_frame(&response).unwrap());
+    let mut layers = vec![test_layer(0, 0, 0, Region::empty())];
+
+    let update = engine.request_and_commit_wm_transaction(&mut stream, &request, &mut layers);
+
+    assert_eq!(
+        runtime_observation_from_wm_transaction_update(&update),
+        SessionRuntimeObservation::WmLayoutReady
+    );
+
+    let mut closed_stream = TestDuplex::new(Vec::new());
+    let restart_update =
+        engine.request_and_commit_wm_transaction(&mut closed_stream, &request, &mut layers);
+
+    assert_eq!(
+        runtime_observation_from_wm_transaction_update(&restart_update),
+        SessionRuntimeObservation::WmRestartRequested
+    );
+}
+
+#[test]
+fn frame_reports_map_to_runtime_render_observations() {
+    let engine = HeadlessEngine::default();
+    let output = engine.output();
+    let mut last_committed = LastCommittedLayout::default();
+    let session_report = engine
+        .run_session_tick(
+            SessionTickRequest {
+                output: output.id,
+                frame_serial: 77,
+                layers: SessionLayerSource::Fresh(vec![test_layer(0, 0, 0, Region::empty())]),
+            },
+            &mut last_committed,
+        )
+        .unwrap();
+
+    assert_eq!(
+        runtime_observation_from_session_tick_report(&session_report),
+        SessionRuntimeObservation::FrameRendered { frame_serial: 77 }
+    );
+
+    let render_report = engine.render_frame(&session_report.frame).unwrap();
+
+    assert_eq!(
+        runtime_observation_from_render_frame_report(&render_report),
+        SessionRuntimeObservation::FrameRendered { frame_serial: 77 }
+    );
+}
+
+#[test]
+fn portal_commands_map_to_runtime_portal_observation() {
+    let commands = [
+        PortalCommand::DropNotification {
+            transfer: PortalTransferId::from_raw(1),
+        },
+        PortalCommand::DeliverNotification {
+            transfer: PortalTransferId::from_raw(2),
+        },
+    ];
+
+    assert_eq!(
+        runtime_observation_from_portal_commands(&commands),
+        SessionRuntimeObservation::PortalCommandsReady { count: 2 }
+    );
+}
+
+#[test]
+fn chrome_updates_map_to_runtime_chrome_observations() {
+    let notification_updates = [
+        NotificationChromeUpdate::Staged {
+            transfer: PortalTransferId::from_raw(1),
+        },
+        NotificationChromeUpdate::Presented {
+            transfer: PortalTransferId::from_raw(1),
+        },
+        NotificationChromeUpdate::Dismissed {
+            transfer: PortalTransferId::from_raw(1),
+        },
+        NotificationChromeUpdate::Ignored,
+    ];
+
+    assert_eq!(
+        runtime_observation_from_notification_chrome_updates(&notification_updates),
+        SessionRuntimeObservation::ChromeCommandsReady { count: 2 }
+    );
+
+    let metadata_updates = [
+        MetadataChromeUpdate::Upserted {
+            surface: SurfaceId::new(1, 1),
+        },
+        MetadataChromeUpdate::Removed {
+            surface: SurfaceId::new(2, 1),
+        },
+        MetadataChromeUpdate::Rejected(MetadataChromeRejectReason::InvalidLabel),
+    ];
+
+    assert_eq!(
+        runtime_observation_from_metadata_chrome_updates(&metadata_updates),
+        SessionRuntimeObservation::ChromeCommandsReady { count: 2 }
+    );
 }
 
 #[test]
