@@ -84,6 +84,35 @@ pub struct WmTransactionUpdate {
     pub ipc_error: Option<WmIpcError>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LastCommittedLayout {
+    layers: Vec<LayerSnapshot>,
+}
+
+impl LastCommittedLayout {
+    pub fn new(layers: Vec<LayerSnapshot>) -> Self {
+        Self { layers }
+    }
+
+    pub fn layers(&self) -> &[LayerSnapshot] {
+        &self.layers
+    }
+
+    pub fn replace(&mut self, layers: &[LayerSnapshot]) {
+        self.layers.clear();
+        self.layers.extend_from_slice(layers);
+    }
+
+    pub fn restore_into(&self, layers: &mut Vec<LayerSnapshot>) {
+        layers.clear();
+        layers.extend_from_slice(&self.layers);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.layers.is_empty()
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WmRuntimeAction {
     KeepRunning,
@@ -687,6 +716,27 @@ impl HeadlessEngine {
                 ipc_error: Some(error),
             },
         }
+    }
+
+    pub fn request_and_cache_wm_transaction<S>(
+        &self,
+        stream: &mut S,
+        request: &WmRequestPacket,
+        layers: &mut Vec<LayerSnapshot>,
+        last_committed: &mut LastCommittedLayout,
+    ) -> WmTransactionUpdate
+    where
+        S: Read + Write,
+    {
+        let update = self.request_and_commit_wm_transaction(stream, request, layers);
+        match update.commit.outcome {
+            TransactionOutcome::Committed => last_committed.replace(layers),
+            TransactionOutcome::TimedOut if !last_committed.is_empty() => {
+                last_committed.restore_into(layers);
+            }
+            _ => {}
+        }
+        update
     }
 
     pub fn validate_chrome_action(

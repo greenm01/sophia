@@ -233,7 +233,7 @@ runtime without weakening the existing process boundaries.
   processes.
 - [x] Wire `WmRuntimeAction::RestartWm` into the runtime supervisor reducer.
 - [x] Add process spawning with bounded restart backoff.
-- [ ] Preserve the last committed layout while the WM process is absent.
+- [x] Preserve the last committed layout while the WM process is absent.
 
 **Broker wiring**
 - [ ] Convert XFixes selection owner changes into portal reducer events.

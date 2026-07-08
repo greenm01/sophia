@@ -343,6 +343,11 @@ spawns the configured child process after the bounded delay, polls for process
 exit, and terminates owned children during cleanup. It does not mint restart
 decisions or inspect compositor/session state.
 
+The compositor preserves a last-committed layout cache across WM absence. A
+successful WM transaction replaces the cache. If the WM socket is missing,
+malformed, timed out, or being restarted, Sophia restores that cache before
+planning the next frame. Rejected layout proposals do not replace the cache.
+
 ## XLibre Responsibilities
 
 XLibre remains responsible for:

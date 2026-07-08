@@ -465,6 +465,13 @@ the configured program, and reports `ProcessStarted`; `poll` reports
 executor does not decide restart budgets, inspect WM state, or touch compositor
 input/rendering paths.
 
+WM absence now has an explicit layout cache. `LastCommittedLayout` stores the
+last successfully committed layer set. Successful WM transactions replace the
+cache, while timed-out or missing WM responses restore the cache into the active
+layer list. This makes the restart behavior concrete: while the WM is gone,
+Sophia keeps scanning out the last committed layout instead of accepting
+uncommitted or partially updated layout state.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

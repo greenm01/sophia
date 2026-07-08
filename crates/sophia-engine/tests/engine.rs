@@ -1,8 +1,8 @@
 use sophia_engine::{
     ChromeActionDecision, ChromeActionRejectReason, ChromeBroker, EngineError, FramePlanRequest,
-    HeadlessEngine, RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction,
-    SessionCommand, SessionEvent, WmIpcError, WmRestartReason, WmRuntimeAction,
-    request_wm_over_stream, update_wm_supervisor_from_runtime_action,
+    HeadlessEngine, LastCommittedLayout, RoutedInputCoalescer, RoutedInputFlushReason,
+    RoutedInputQueueAction, SessionCommand, SessionEvent, WmIpcError, WmRestartReason,
+    WmRuntimeAction, request_wm_over_stream, update_wm_supervisor_from_runtime_action,
 };
 use sophia_protocol::{
     AttentionState, BufferSource, ChromeActionKind, ChromeActionRequest, ChromeDescriptor,
@@ -611,6 +611,57 @@ fn wm_transaction_helper_preserves_layout_on_missing_response() {
     assert_eq!(update.commit.outcome, TransactionOutcome::TimedOut);
     assert!(matches!(update.ipc_error, Some(WmIpcError::Io(_))));
     assert_eq!(layers, before);
+}
+
+#[test]
+fn wm_transaction_cache_records_committed_layout() {
+    let engine = HeadlessEngine::default();
+    let request = wm_request(TransactionId::from_raw(53));
+    let surface = SurfaceId::new(0, 1);
+    let response = WmResponsePacket {
+        transaction: request.transaction,
+        commands: vec![WmCommand::RenderSurface(SurfacePlacement {
+            surface,
+            geometry: Rect {
+                x: 90,
+                y: 100,
+                width: 640,
+                height: 480,
+            },
+            z_index: 4,
+            crop: None,
+            transform: Transform::IDENTITY,
+        })],
+        timeout_msec: 250,
+    };
+    let mut stream = TestDuplex::new(encode_wm_response_frame(&response).unwrap());
+    let mut layers = vec![test_layer(0, 0, 0, Region::empty())];
+    let mut cache = LastCommittedLayout::default();
+
+    let update =
+        engine.request_and_cache_wm_transaction(&mut stream, &request, &mut layers, &mut cache);
+
+    assert_eq!(update.commit.outcome, TransactionOutcome::Committed);
+    assert_eq!(cache.layers()[0].geometry.x, 90);
+    assert_eq!(cache.layers()[0].geometry.width, 640);
+}
+
+#[test]
+fn wm_transaction_cache_restores_last_committed_layout_when_wm_is_absent() {
+    let engine = HeadlessEngine::default();
+    let cached = test_layer(0, 0, 9, Region::empty());
+    let mut cache = LastCommittedLayout::new(vec![cached.clone()]);
+    let request = wm_request(TransactionId::from_raw(54));
+    let mut stream = TestDuplex::new(Vec::new());
+    let mut layers = vec![test_layer(0, 0, 0, Region::empty())];
+
+    let update =
+        engine.request_and_cache_wm_transaction(&mut stream, &request, &mut layers, &mut cache);
+
+    assert_eq!(update.commit.outcome, TransactionOutcome::TimedOut);
+    assert!(matches!(update.ipc_error, Some(WmIpcError::Io(_))));
+    assert_eq!(layers, vec![cached]);
+    assert_eq!(cache.layers(), layers.as_slice());
 }
 
 #[test]
