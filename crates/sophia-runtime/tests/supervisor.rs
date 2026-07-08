@@ -2,9 +2,9 @@ use std::time::Duration;
 
 use sophia_runtime::{
     ProcessLaunchSpec, ProcessSupervisor, ProcessSupervisorError, RestartPolicy,
-    SessionRuntimeCommand, SessionRuntimeEvent, SessionRuntimePhase, SessionRuntimeState,
-    SupervisedProcessKind, SupervisorCommand, SupervisorEvent, SupervisorState,
-    update_session_runtime, update_supervisor,
+    RuntimeBrokerSupervisors, SessionRuntimeCommand, SessionRuntimeEvent, SessionRuntimePhase,
+    SessionRuntimeState, SupervisedProcessKind, SupervisorCommand, SupervisorEvent,
+    SupervisorState, update_session_runtime, update_supervisor,
 };
 
 #[test]
@@ -220,6 +220,38 @@ fn process_supervisor_spawns_and_observes_process_exit() {
 
     assert_eq!(observed, Some(SupervisorEvent::ProcessExited));
     assert_eq!(supervisor.child_id(), None);
+}
+
+#[test]
+fn runtime_broker_supervisors_start_and_observe_placeholder_exits() {
+    let mut supervisors = RuntimeBrokerSupervisors::new(
+        ProcessLaunchSpec::new("/usr/bin/true"),
+        ProcessLaunchSpec::new("/usr/bin/true"),
+    );
+
+    let report = supervisors.start_placeholders().unwrap();
+
+    assert_eq!(report.portal_start, Some(SupervisorEvent::ProcessStarted));
+    assert_eq!(report.metadata_start, Some(SupervisorEvent::ProcessStarted));
+
+    let mut portal_exit = report.portal_poll;
+    let mut metadata_exit = report.metadata_poll;
+    for _ in 0..100 {
+        if portal_exit == Some(SupervisorEvent::ProcessExited)
+            && metadata_exit == Some(SupervisorEvent::ProcessExited)
+        {
+            break;
+        }
+        let (portal, metadata) = supervisors.poll_all().unwrap();
+        portal_exit = portal_exit.or(portal);
+        metadata_exit = metadata_exit.or(metadata);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+
+    assert_eq!(portal_exit, Some(SupervisorEvent::ProcessExited));
+    assert_eq!(metadata_exit, Some(SupervisorEvent::ProcessExited));
+    assert_eq!(supervisors.portal.child_id(), None);
+    assert_eq!(supervisors.metadata.child_id(), None);
 }
 
 #[test]

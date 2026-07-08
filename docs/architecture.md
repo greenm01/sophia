@@ -426,6 +426,12 @@ reducer through frame scheduling, rendering, portal drain, and chrome
 presentation. The full XLibre smoke script runs this check alongside the live X
 capture smokes.
 
+Portal and metadata brokers now have process-supervised placeholders.
+`RuntimeBrokerSupervisors` owns one `ProcessSupervisor` for `PortalBroker` and
+one for `MetadataBroker`; `runtime-brokers-smoke` starts both placeholder
+processes and observes their exits. This proves restart/supervision ownership
+without claiming the broker IPC protocols or UI surfaces are implemented.
+
 Frame scheduling now has an explicit seam. `FrameClock` produces output-scoped
 frame ticks, and the deterministic headless implementation advances serials
 without depending on wall-clock time. A real DRM/KMS backend should implement

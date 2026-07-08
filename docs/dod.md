@@ -114,6 +114,10 @@ The reducer may emit commands to poll X, request WM policy, schedule or render a
 frame, drain portals, present chrome, or restart the WM. It must not poll file
 descriptors, render, or mutate X11 state directly.
 
+Process-supervised portal and metadata broker placeholders are runtime
+ownership records. They prove that the runtime can start, poll, and terminate
+the intended broker process kinds before the real broker IPC protocols exist.
+
 ### XWindowMirror
 
 Sophia X Bridge keeps a mirror of the XLibre window tree. This is cache data,

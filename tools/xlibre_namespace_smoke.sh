@@ -125,6 +125,12 @@ echo "runtime damage epoch smoke:"
     cargo run -q -p sophia-cli -- runtime-damage-epoch-smoke
 )
 
+echo "runtime broker placeholder smoke:"
+(
+    cd "$ROOT_DIR"
+    cargo run -q -p sophia-cli -- runtime-brokers-smoke
+)
+
 echo "root external-wm bridge smoke:"
 (
     cd "$ROOT_DIR"

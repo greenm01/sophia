@@ -69,7 +69,7 @@ hot paths.
   scheduling, portal drain, and chrome presentation phases.
 - [x] Connect the reducer to the headless session tick smoke.
 - [x] Add a runtime smoke that schedules from X Damage and layout epochs.
-- [ ] Add process-supervised portal and metadata broker placeholders.
+- [x] Add process-supervised portal and metadata broker placeholders.
 
 ## Deferred / Measurement-Gated
 

@@ -11,9 +11,9 @@ use sophia_protocol::{
     WmRequestPacket, WorkspaceId,
 };
 use sophia_runtime::{
-    ProcessLaunchSpec, ProcessSupervisor, RestartPolicy, SessionRuntimeCommand,
-    SessionRuntimeEvent, SessionRuntimeState, SupervisedProcessKind, SupervisorEvent, TraceLevel,
-    init_tracing, update_session_runtime, update_supervisor,
+    ProcessLaunchSpec, ProcessSupervisor, RestartPolicy, RuntimeBrokerSupervisors,
+    SessionRuntimeCommand, SessionRuntimeEvent, SessionRuntimeState, SupervisedProcessKind,
+    SupervisorEvent, TraceLevel, init_tracing, update_session_runtime, update_supervisor,
 };
 use sophia_wm_demo::{ExternalWmClient, tile_workspace};
 use sophia_x_bridge::{
@@ -330,6 +330,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    if args.iter().any(|arg| arg == "runtime-brokers-smoke") {
+        let portal = arg_value(&args, "--portal").unwrap_or_else(|| "/usr/bin/true".to_owned());
+        let metadata = arg_value(&args, "--metadata").unwrap_or_else(|| "/usr/bin/true".to_owned());
+        let mut supervisors = RuntimeBrokerSupervisors::new(
+            ProcessLaunchSpec::new(&portal),
+            ProcessLaunchSpec::new(&metadata),
+        );
+        let report = supervisors.start_placeholders()?;
+        let mut portal_exit = report.portal_poll;
+        let mut metadata_exit = report.metadata_poll;
+
+        for _ in 0..100 {
+            if portal_exit == Some(SupervisorEvent::ProcessExited)
+                && metadata_exit == Some(SupervisorEvent::ProcessExited)
+            {
+                break;
+            }
+            let (portal_event, metadata_event) = supervisors.poll_all()?;
+            portal_exit = portal_exit.or(portal_event);
+            metadata_exit = metadata_exit.or(metadata_event);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        supervisors.terminate_all()?;
+
+        println!(
+            "runtime-brokers-smoke portal={} metadata={} portal_start={:?} metadata_start={:?} portal_exit={:?} metadata_exit={:?}",
+            portal,
+            metadata,
+            report.portal_start,
+            report.metadata_start,
+            portal_exit,
+            metadata_exit
+        );
+        return Ok(());
+    }
+
     if args.iter().any(|arg| arg == "x-smoke-external-wm") {
         let display = arg_value(&args, "--display");
         let wm_path = arg_value(&args, "--wm")
@@ -593,6 +629,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("commands: x-smoke-policy-frame [--display=:99]");
     println!("commands: x-smoke-runtime-tick [--display=:99]");
     println!("commands: runtime-damage-epoch-smoke");
+    println!("commands: runtime-brokers-smoke [--portal=/usr/bin/true] [--metadata=/usr/bin/true]");
     println!("commands: x-smoke-external-wm [--display=:99] [--wm=target/debug/sophia-wm-demo]");
     println!("commands: wm-supervisor-smoke [--wm=target/debug/sophia-wm-demo]");
     println!("commands: portal-clipboard-deny-smoke");

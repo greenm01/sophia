@@ -566,6 +566,12 @@ a layout epoch through the frame scheduler, and drives the runtime reducer
 through render, portal drain, and chrome presentation phases. The XLibre smoke
 script runs it beside the live capture smokes.
 
+Portal and metadata brokers now have process-supervised placeholders.
+`RuntimeBrokerSupervisors` starts and polls `PortalBroker` and `MetadataBroker`
+process supervisors, and `sophia-cli runtime-brokers-smoke` exposes the check.
+The placeholders use ordinary process supervision only; real broker IPC remains
+future work.
+
 The DRM/KMS backend now has a data-only output skeleton. `DrmKmsMode`,
 `DrmKmsOutputDescriptor`, and `DrmKmsOutputRegistry` track connector/CRTC IDs,
 mode, scale, and Sophia output IDs without opening real DRM devices. The
