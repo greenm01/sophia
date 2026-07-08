@@ -1,19 +1,23 @@
 use sophia_engine::{
     ChromeActionDecision, ChromeActionRejectReason, ChromeBroker, EngineError, FramePlanRequest,
-    HeadlessEngine, LastCommittedLayout, RoutedInputCoalescer, RoutedInputFlushReason,
-    RoutedInputQueueAction, SessionCommand, SessionEvent, SessionLayerSource, SessionTickRequest,
-    WmIpcError, WmRestartReason, WmRuntimeAction, request_wm_over_stream,
+    HeadlessEngine, LastCommittedLayout, NotificationChromePresenter,
+    NotificationChromeRejectReason, NotificationChromeUpdate, RoutedInputCoalescer,
+    RoutedInputFlushReason, RoutedInputQueueAction, SessionCommand, SessionEvent,
+    SessionLayerSource, SessionTickRequest, WmIpcError, WmRestartReason, WmRuntimeAction,
+    notification_chrome_command_from_portal, request_wm_over_stream,
     update_wm_supervisor_from_runtime_action,
 };
+use sophia_portal::{NotificationRequest, NotificationUrgency, PortalCommand};
 use sophia_protocol::{
     AttentionState, BufferSource, ChromeActionKind, ChromeActionRequest, ChromeDescriptor,
     DeviceId, DisplayLabel, IconTokenId, InputEventKind, InputEventPacket, InputRoute,
     InputRouteOutcome, IpcCodecError, LayerSnapshot, LayoutNodeCapabilities, LayoutNodeKind,
-    LayoutNodeSnapshot, LayoutNodeState, LayoutTransaction, OutputId, Point, Rect, Region,
-    SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAGIC, SOPHIA_IPC_MAX_PAYLOAD_LEN, SOPHIA_IPC_VERSION,
-    SeatId, SurfaceConstraints, SurfaceId, SurfacePlacement, TransactionId, TransactionOutcome,
-    Transform, TrustLevel, WmCommand, WmRequestKind, WmRequestPacket, WmResponsePacket,
-    WorkspaceId, XWindowId, decode_wm_request_frame, encode_wm_response_frame,
+    LayoutNodeSnapshot, LayoutNodeState, LayoutTransaction, NamespaceId, OutputId, Point,
+    PortalTransferId, Rect, Region, SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAGIC,
+    SOPHIA_IPC_MAX_PAYLOAD_LEN, SOPHIA_IPC_VERSION, SeatId, SurfaceConstraints, SurfaceId,
+    SurfacePlacement, TransactionId, TransactionOutcome, Transform, TrustLevel, WmCommand,
+    WmRequestKind, WmRequestPacket, WmResponsePacket, WorkspaceId, XWindowId,
+    decode_wm_request_frame, encode_wm_response_frame,
 };
 use sophia_runtime::{RestartPolicy, SupervisedProcessKind, SupervisorCommand, SupervisorState};
 use std::io::{Cursor, Read, Result as IoResult, Write};
@@ -343,6 +347,66 @@ fn chrome_broker_removes_surface_metadata() {
     assert!(broker.remove_surface(surface).is_some());
     assert!(broker.get(surface).is_none());
     assert!(broker.is_empty());
+}
+
+#[test]
+fn notification_chrome_presents_only_after_delivery_command() {
+    let mut presenter = NotificationChromePresenter::new();
+    let request = notification_request(42);
+    let transfer = request.transfer;
+
+    assert_eq!(
+        presenter.stage_request(&request),
+        NotificationChromeUpdate::Staged { transfer }
+    );
+    assert!(presenter.pending(transfer).is_some());
+    assert!(presenter.visible(transfer).is_none());
+
+    let update = presenter.apply_portal_command(&PortalCommand::DeliverNotification { transfer });
+
+    assert_eq!(update, NotificationChromeUpdate::Presented { transfer });
+    assert!(presenter.pending(transfer).is_none());
+    let visible = presenter.visible(transfer).unwrap();
+    assert_eq!(visible.summary, "Build finished");
+    assert_eq!(visible.body.as_deref(), Some("Sophia smoke completed"));
+    assert_eq!(visible.urgency, NotificationUrgency::Normal);
+}
+
+#[test]
+fn notification_chrome_drop_dismisses_pending_notification() {
+    let mut presenter = NotificationChromePresenter::new();
+    let request = notification_request(43);
+    let transfer = request.transfer;
+
+    presenter.stage_request(&request);
+    let update = presenter.apply_portal_command(&PortalCommand::DropNotification { transfer });
+
+    assert_eq!(update, NotificationChromeUpdate::Dismissed { transfer });
+    assert!(presenter.pending(transfer).is_none());
+    assert!(presenter.visible(transfer).is_none());
+}
+
+#[test]
+fn notification_chrome_rejects_unknown_delivery() {
+    let mut presenter = NotificationChromePresenter::new();
+    let transfer = PortalTransferId::from_raw(99);
+
+    let update = presenter.apply_portal_command(&PortalCommand::DeliverNotification { transfer });
+
+    assert_eq!(
+        update,
+        NotificationChromeUpdate::Rejected(NotificationChromeRejectReason::UnknownTransfer)
+    );
+}
+
+#[test]
+fn notification_chrome_ignores_unrelated_portal_commands() {
+    let transfer = PortalTransferId::from_raw(12);
+
+    assert_eq!(
+        notification_chrome_command_from_portal(&PortalCommand::HandoffClipboard { transfer }),
+        None
+    );
 }
 
 #[test]
@@ -982,6 +1046,19 @@ fn wm_request(transaction: TransactionId) -> WmRequestPacket {
             surface: SurfaceId::new(1, 1),
             workspace: WorkspaceId::from_raw(1),
         },
+    }
+}
+
+fn notification_request(raw_transfer: u64) -> NotificationRequest {
+    NotificationRequest {
+        transfer: PortalTransferId::from_raw(raw_transfer),
+        source_namespace: NamespaceId::from_raw(1),
+        target_namespace: NamespaceId::from_raw(2),
+        summary: "Build finished".to_owned(),
+        body: Some("Sophia smoke completed".to_owned()),
+        urgency: NotificationUrgency::Normal,
+        actions: vec!["Open log".to_owned()],
+        generation: 7,
     }
 }
 

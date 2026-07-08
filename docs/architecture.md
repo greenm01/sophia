@@ -307,8 +307,11 @@ commands. Until the protocol grows a dedicated URI kind, URI requests use a
 
 Notification requests complete the first portal policy set. The reducer stores
 bounded summary/body/action text, urgency, and generation-bound approval state.
-Compositor presentation, notification history, action dispatch, and rate
-limiting remain runtime policy outside the portal reducer.
+Approved `DeliverNotification` commands now pass through an Engine chrome
+presenter before becoming compositor-visible notification state. Denied or
+revoked `DropNotification` commands dismiss pending or visible chrome state.
+Notification history, action dispatch, and rate limiting remain runtime policy
+outside the portal reducer.
 
 ### Metadata Broker And Chrome Actions
 

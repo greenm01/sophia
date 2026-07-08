@@ -462,8 +462,11 @@ small scheme allowlist before creating pending policy state; the runtime owns
 the actual launcher/browser handoff.
 
 Notification policy stores bounded text/action metadata and urgency only. It
-emits abstract deliver/drop commands; the compositor shell owns presentation and
-action execution.
+emits abstract deliver/drop commands. Sophia Engine maps those commands into
+bounded compositor chrome notification state: deliver presents a staged
+notification, while drop dismisses pending or visible state. The compositor
+shell still owns drawing, notification action execution, history, and rate
+limits.
 
 X Bridge owns selection monitoring data. It should reduce XFixes owner-change
 events into records keyed by selection atom and namespace, then pass only the

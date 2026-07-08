@@ -497,6 +497,12 @@ cache, plans a headless frame, and replays it. The XLibre namespace smoke runs
 this command as the first integrated proof of capture -> session tick -> frame
 replay. It is still a one-shot coordinator, not the final continuous event loop.
 
+Notification portal commands now have a compositor chrome presentation seam.
+`NotificationChromePresenter` stages bounded notification requests, presents
+them only after a `DeliverNotification` command, and dismisses pending or
+visible state after `DropNotification`. This keeps approval/revocation in the
+portal reducer while making compositor-owned presentation state concrete.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

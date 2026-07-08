@@ -182,6 +182,7 @@ dependencies = [
 name = "sophia-engine"
 version = "0.1.0"
 dependencies = [
+ "sophia-portal",
  "sophia-protocol",
  "sophia-runtime",
  "tracing",
