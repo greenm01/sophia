@@ -163,6 +163,7 @@ Design and prototype compositor-first input for X11 clients.
 - [x] Measure routed-input dispatch cost before replacing the X11 request path.
 - [x] Coalesce stable pure-motion routes at frame boundaries.
 - [x] Flush immediately for button, key, crossing, drag, grab, and focus events.
+- [x] Gate SHM route-ring work on measured dispatch samples.
 - [ ] Prototype a unidirectional Engine-to-XLibre SHM route ring only if needed.
 - [ ] Keep the X11 request path as fallback for SHM failures.
 

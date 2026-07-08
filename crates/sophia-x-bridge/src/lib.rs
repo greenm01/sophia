@@ -121,6 +121,69 @@ pub struct RoutedInputSmokeReport {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RoutedInputOptimizationRecommendation {
+    KeepX11RequestPath,
+    ConsiderSharedMemoryRing,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RoutedInputDispatchStats {
+    samples: Vec<Duration>,
+}
+
+impl RoutedInputDispatchStats {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn from_samples(samples: impl IntoIterator<Item = Duration>) -> Self {
+        Self {
+            samples: samples.into_iter().collect(),
+        }
+    }
+
+    pub fn record(&mut self, elapsed: Duration) {
+        self.samples.push(elapsed);
+    }
+
+    pub fn sample_count(&self) -> usize {
+        self.samples.len()
+    }
+
+    pub fn min(&self) -> Option<Duration> {
+        self.samples.iter().copied().min()
+    }
+
+    pub fn max(&self) -> Option<Duration> {
+        self.samples.iter().copied().max()
+    }
+
+    pub fn average(&self) -> Option<Duration> {
+        if self.samples.is_empty() {
+            return None;
+        }
+
+        let total_nanos: u128 = self.samples.iter().map(|sample| sample.as_nanos()).sum();
+        let average_nanos = total_nanos / self.samples.len() as u128;
+        let average_nanos = average_nanos.min(u128::from(u64::MAX)) as u64;
+
+        Some(Duration::from_nanos(average_nanos))
+    }
+
+    pub fn recommendation(
+        &self,
+        max_dispatch_threshold: Duration,
+    ) -> RoutedInputOptimizationRecommendation {
+        match self.max() {
+            Some(max) if max > max_dispatch_threshold => {
+                RoutedInputOptimizationRecommendation::ConsiderSharedMemoryRing
+            }
+            _ => RoutedInputOptimizationRecommendation::KeepX11RequestPath,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct SophiaRoutedInputDispatch {
     reply: SophiaRoutedInputRouteReply,
     elapsed: Duration,

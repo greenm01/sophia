@@ -153,6 +153,11 @@ and the elapsed time from serialized `RouteEvent` request dispatch through
 XLibre's reply. This is a round-trip smoke measurement, not a full input-latency
 benchmark.
 
+`RoutedInputDispatchStats` records those dispatch samples and produces a
+conservative optimization recommendation. Empty samples and samples within the
+chosen threshold keep the X11 request path. Only measured dispatch times above
+the threshold should justify prototyping the shared-memory route ring.
+
 The first optimization belongs in Sophia Engine: coalesce pure motion events at
 frame boundaries when the route target is unchanged. State-changing events must
 flush immediately, including button press/release, key events, target crossing,
@@ -176,6 +181,11 @@ Engine-to-XLibre ring and wakes XLibre with `eventfd` or equivalent. Decision
 and rejection reporting should initially stay on the existing request/reply
 control path. A second XLibre-to-Engine status ring is deferred until measured
 latency requires it.
+
+The X11 `RouteEvent` request path remains mandatory fallback for any SHM
+prototype. If shared memory setup fails, the ring overflows, or XLibre rejects
+the fast path, Sophia must keep routing through the existing request path rather
+than dropping input or bypassing XLibre delivery semantics.
 
 ## Expected Rejections
 

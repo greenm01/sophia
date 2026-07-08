@@ -999,6 +999,43 @@ mod tests {
         assert_eq!(routed_input_request_wire_len(), 44);
     }
 
+    #[test]
+    fn routed_input_dispatch_stats_summarize_samples() {
+        let stats = RoutedInputDispatchStats::from_samples([
+            std::time::Duration::from_micros(50),
+            std::time::Duration::from_micros(100),
+            std::time::Duration::from_micros(150),
+        ]);
+
+        assert_eq!(stats.sample_count(), 3);
+        assert_eq!(stats.min(), Some(std::time::Duration::from_micros(50)));
+        assert_eq!(stats.max(), Some(std::time::Duration::from_micros(150)));
+        assert_eq!(stats.average(), Some(std::time::Duration::from_micros(100)));
+    }
+
+    #[test]
+    fn routed_input_dispatch_stats_keep_x11_path_until_threshold_is_exceeded() {
+        let mut stats = RoutedInputDispatchStats::new();
+
+        assert_eq!(
+            stats.recommendation(std::time::Duration::from_micros(500)),
+            RoutedInputOptimizationRecommendation::KeepX11RequestPath
+        );
+
+        stats.record(std::time::Duration::from_micros(250));
+        stats.record(std::time::Duration::from_micros(500));
+        assert_eq!(
+            stats.recommendation(std::time::Duration::from_micros(500)),
+            RoutedInputOptimizationRecommendation::KeepX11RequestPath
+        );
+
+        stats.record(std::time::Duration::from_micros(501));
+        assert_eq!(
+            stats.recommendation(std::time::Duration::from_micros(500)),
+            RoutedInputOptimizationRecommendation::ConsiderSharedMemoryRing
+        );
+    }
+
     fn input_event(serial: u64) -> InputEventPacket {
         InputEventPacket {
             serial,
