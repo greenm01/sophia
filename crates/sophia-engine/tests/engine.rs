@@ -1,14 +1,17 @@
 use sophia_engine::{
     ChromeActionDecision, ChromeActionRejectReason, ChromeBroker, EngineError, FramePlanRequest,
-    HeadlessEngine, SessionCommand, SessionEvent,
+    HeadlessEngine, SessionCommand, SessionEvent, WmIpcError, request_wm_over_stream,
 };
 use sophia_protocol::{
     AttentionState, BufferSource, ChromeActionKind, ChromeActionRequest, ChromeDescriptor,
-    DisplayLabel, IconTokenId, LayerSnapshot, LayoutNodeCapabilities, LayoutNodeKind,
-    LayoutNodeSnapshot, LayoutNodeState, LayoutTransaction, OutputId, Rect, Region,
+    DisplayLabel, IconTokenId, IpcCodecError, LayerSnapshot, LayoutNodeCapabilities,
+    LayoutNodeKind, LayoutNodeSnapshot, LayoutNodeState, LayoutTransaction, OutputId, Rect, Region,
+    SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAGIC, SOPHIA_IPC_MAX_PAYLOAD_LEN, SOPHIA_IPC_VERSION,
     SurfaceConstraints, SurfaceId, SurfacePlacement, TransactionId, TransactionOutcome, Transform,
-    TrustLevel, WmRequestKind, WorkspaceId,
+    TrustLevel, WmCommand, WmRequestKind, WmRequestPacket, WmResponsePacket, WorkspaceId,
+    decode_wm_request_frame, encode_wm_response_frame,
 };
+use std::io::{Cursor, Read, Result as IoResult, Write};
 
 #[test]
 fn headless_engine_exposes_deterministic_output() {
@@ -475,6 +478,62 @@ fn session_event_notifies_wm_only_after_surface_removed() {
     );
 }
 
+#[test]
+fn wm_socket_transport_roundtrips_one_engine_minted_transaction() {
+    let request = wm_request(TransactionId::from_raw(42));
+    let response = WmResponsePacket {
+        transaction: request.transaction,
+        commands: vec![WmCommand::FocusSurface(SurfaceId::new(1, 1))],
+        timeout_msec: 250,
+    };
+    let mut stream = TestDuplex::new(encode_wm_response_frame(&response).unwrap());
+
+    let decoded = request_wm_over_stream(&mut stream, &request).unwrap();
+
+    assert_eq!(decoded, response);
+    assert_eq!(decode_wm_request_frame(&stream.written).unwrap(), request);
+}
+
+#[test]
+fn wm_socket_transport_rejects_transaction_mismatch() {
+    let request = wm_request(TransactionId::from_raw(42));
+    let response = WmResponsePacket {
+        transaction: TransactionId::from_raw(43),
+        commands: Vec::new(),
+        timeout_msec: 250,
+    };
+    let mut stream = TestDuplex::new(encode_wm_response_frame(&response).unwrap());
+
+    assert_eq!(
+        request_wm_over_stream(&mut stream, &request),
+        Err(WmIpcError::TransactionMismatch {
+            expected: TransactionId::from_raw(42),
+            actual: TransactionId::from_raw(43),
+        })
+    );
+}
+
+#[test]
+fn wm_socket_transport_rejects_oversized_response_before_payload_read() {
+    let request = wm_request(TransactionId::from_raw(42));
+    let mut response = Vec::new();
+    push_u32(&mut response, SOPHIA_IPC_MAGIC);
+    push_u16(&mut response, SOPHIA_IPC_VERSION);
+    push_u16(&mut response, 2);
+    push_u64(&mut response, 42);
+    push_u32(&mut response, (SOPHIA_IPC_MAX_PAYLOAD_LEN as u32) + 1);
+    push_u32(&mut response, 0);
+    assert_eq!(response.len(), SOPHIA_IPC_HEADER_LEN);
+    let mut stream = TestDuplex::new(response);
+
+    assert_eq!(
+        request_wm_over_stream(&mut stream, &request),
+        Err(WmIpcError::Codec(IpcCodecError::PayloadTooLarge(
+            SOPHIA_IPC_MAX_PAYLOAD_LEN + 1
+        )))
+    );
+}
+
 fn test_layer(surface_index: u32, stack_rank: u32, x: i32, damage: Region) -> LayerSnapshot {
     LayerSnapshot {
         surface: SurfaceId::new(surface_index, 1),
@@ -496,6 +555,59 @@ fn test_layer(surface_index: u32, stack_rank: u32, x: i32, damage: Region) -> La
         transform: Transform::IDENTITY,
         generation: 1,
     }
+}
+
+fn wm_request(transaction: TransactionId) -> WmRequestPacket {
+    WmRequestPacket {
+        transaction,
+        kind: WmRequestKind::SurfaceRemoved {
+            surface: SurfaceId::new(1, 1),
+            workspace: WorkspaceId::from_raw(1),
+        },
+    }
+}
+
+struct TestDuplex {
+    read: Cursor<Vec<u8>>,
+    written: Vec<u8>,
+}
+
+impl TestDuplex {
+    fn new(read: Vec<u8>) -> Self {
+        Self {
+            read: Cursor::new(read),
+            written: Vec::new(),
+        }
+    }
+}
+
+impl Read for TestDuplex {
+    fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
+        self.read.read(buf)
+    }
+}
+
+impl Write for TestDuplex {
+    fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
+        self.written.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> IoResult<()> {
+        Ok(())
+    }
+}
+
+fn push_u16(out: &mut Vec<u8>, value: u16) {
+    out.extend_from_slice(&value.to_le_bytes());
+}
+
+fn push_u32(out: &mut Vec<u8>, value: u32) {
+    out.extend_from_slice(&value.to_le_bytes());
+}
+
+fn push_u64(out: &mut Vec<u8>, value: u64) {
+    out.extend_from_slice(&value.to_le_bytes());
 }
 
 fn layout_node(surface: SurfaceId, generation: u64, closable: bool) -> LayoutNodeSnapshot {

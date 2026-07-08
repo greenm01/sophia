@@ -1,11 +1,17 @@
 use core::fmt;
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::{Read, Write};
+#[cfg(unix)]
+use std::os::unix::net::UnixStream;
+use std::time::Duration;
 
 use sophia_protocol::{
     BufferSource, ChromeActionKind, ChromeActionRequest, ChromeDescriptor, FrameSnapshot,
-    LayerSnapshot, LayoutNodeSnapshot, LayoutTransaction, OutputId, Rect, Region, RenderCommand,
-    RenderCommandKind, Size, SurfaceId, TransactionCommit, TransactionId, TransactionOutcome,
-    WmRequestKind, WmRequestPacket, WorkspaceId,
+    IpcCodecError, LayerSnapshot, LayoutNodeSnapshot, LayoutTransaction, OutputId, Rect, Region,
+    RenderCommand, RenderCommandKind, SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAX_PAYLOAD_LEN, Size,
+    SurfaceId, TransactionCommit, TransactionId, TransactionOutcome, WmRequestKind,
+    WmRequestPacket, WmResponsePacket, WorkspaceId, decode_wm_response_frame,
+    encode_wm_request_frame,
 };
 use sophia_runtime::{SophiaErrorExt, SophiaErrorKind};
 use tracing::instrument;
@@ -15,6 +21,7 @@ pub enum EngineError {
     InvalidOutput,
     InvalidSurface,
     InvalidFrame,
+    WmIpc(WmIpcError),
 }
 
 impl fmt::Display for EngineError {
@@ -23,6 +30,7 @@ impl fmt::Display for EngineError {
             Self::InvalidOutput => f.write_str("invalid output ID"),
             Self::InvalidSurface => f.write_str("invalid surface ID"),
             Self::InvalidFrame => f.write_str("invalid frame snapshot"),
+            Self::WmIpc(error) => write!(f, "WM IPC failed: {error}"),
         }
     }
 }
@@ -35,8 +43,124 @@ impl SophiaErrorExt for EngineError {
             Self::InvalidOutput => SophiaErrorKind::InvalidOutput,
             Self::InvalidSurface => SophiaErrorKind::InvalidSurface,
             Self::InvalidFrame => SophiaErrorKind::InvalidFrame,
+            Self::WmIpc(_) => SophiaErrorKind::ExternalProcess,
         }
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum WmIpcError {
+    Codec(IpcCodecError),
+    Io(String),
+    TransactionMismatch {
+        expected: TransactionId,
+        actual: TransactionId,
+    },
+}
+
+impl fmt::Display for WmIpcError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Codec(error) => write!(f, "codec error: {error:?}"),
+            Self::Io(error) => f.write_str(error),
+            Self::TransactionMismatch { expected, actual } => write!(
+                f,
+                "transaction mismatch, expected {}, got {}",
+                expected.raw(),
+                actual.raw()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for WmIpcError {}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WmSocketTransportConfig {
+    pub response_timeout: Duration,
+}
+
+impl Default for WmSocketTransportConfig {
+    fn default() -> Self {
+        Self {
+            response_timeout: Duration::from_millis(250),
+        }
+    }
+}
+
+#[cfg(unix)]
+pub struct WmSocketTransport {
+    stream: UnixStream,
+    config: WmSocketTransportConfig,
+}
+
+#[cfg(unix)]
+impl WmSocketTransport {
+    pub fn new(stream: UnixStream, config: WmSocketTransportConfig) -> Self {
+        Self { stream, config }
+    }
+
+    pub fn request(&mut self, request: &WmRequestPacket) -> Result<WmResponsePacket, WmIpcError> {
+        self.stream
+            .set_read_timeout(Some(self.config.response_timeout))
+            .map_err(|error| WmIpcError::Io(error.to_string()))?;
+        request_wm_over_stream(&mut self.stream, request)
+    }
+}
+
+pub fn request_wm_over_stream<S>(
+    stream: &mut S,
+    request: &WmRequestPacket,
+) -> Result<WmResponsePacket, WmIpcError>
+where
+    S: Read + Write,
+{
+    let frame = encode_wm_request_frame(request).map_err(WmIpcError::Codec)?;
+    stream
+        .write_all(&frame)
+        .map_err(|error| WmIpcError::Io(error.to_string()))?;
+    stream
+        .flush()
+        .map_err(|error| WmIpcError::Io(error.to_string()))?;
+
+    let response = read_wm_response_frame(stream)?;
+    if response.transaction != request.transaction {
+        return Err(WmIpcError::TransactionMismatch {
+            expected: request.transaction,
+            actual: response.transaction,
+        });
+    }
+
+    Ok(response)
+}
+
+pub fn read_wm_response_frame<R>(reader: &mut R) -> Result<WmResponsePacket, WmIpcError>
+where
+    R: Read,
+{
+    let mut header = [0; SOPHIA_IPC_HEADER_LEN];
+    reader
+        .read_exact(&mut header)
+        .map_err(|error| WmIpcError::Io(error.to_string()))?;
+    let payload_len = u32::from_le_bytes(
+        header[16..20]
+            .try_into()
+            .expect("fixed IPC header payload range should be present"),
+    ) as usize;
+    if payload_len > SOPHIA_IPC_MAX_PAYLOAD_LEN {
+        return Err(WmIpcError::Codec(IpcCodecError::PayloadTooLarge(
+            payload_len,
+        )));
+    }
+
+    let mut frame = Vec::with_capacity(SOPHIA_IPC_HEADER_LEN + payload_len);
+    frame.extend_from_slice(&header);
+    frame.resize(SOPHIA_IPC_HEADER_LEN + payload_len, 0);
+    reader
+        .read_exact(&mut frame[SOPHIA_IPC_HEADER_LEN..])
+        .map_err(|error| WmIpcError::Io(error.to_string()))?;
+
+    decode_wm_response_frame(&frame).map_err(WmIpcError::Codec)
 }
 
 #[derive(Clone, Copy, Debug)]

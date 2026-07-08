@@ -134,6 +134,9 @@ interpolation, cancellation, and final commit.
 The socket protocol is a versioned, length-prefixed binary frame. Integers are
 little-endian and decoded with explicit fixed-offset parsing, not `repr(C)`
 casts or generic serializers. Payloads are bounded before allocation.
+Sophia Engine owns the request/response transport: it writes exactly one
+`WmRequestPacket`, reads one bounded `WmResponsePacket`, and rejects a response
+whose transaction ID does not match the Engine-minted request transaction.
 
 The protocol should be sequence-oriented:
 

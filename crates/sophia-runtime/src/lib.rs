@@ -14,6 +14,7 @@ pub enum SophiaErrorKind {
     InvalidOutput,
     InvalidSurface,
     InvalidFrame,
+    ExternalProcess,
     RuntimeAlreadyInitialized,
 }
 

@@ -335,6 +335,11 @@ The WM is notified only from the later lifecycle consequence:
 This keeps close intent and layout policy separated; the WM wakes after actual
 surface removal, not after a compositor chrome click.
 
+Phase 6.5 now has the first Engine-owned WM socket transport. The transport
+writes one bounded `WmRequestPacket`, reads one bounded `WmResponsePacket`, and
+rejects transaction mismatches before the response can be applied. Timeout
+recovery and WM restart policy remain separate runtime work.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new
