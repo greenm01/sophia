@@ -54,9 +54,9 @@ The current patch artifact is:
 patches/xlibre/0001-add-sophia-routed-input-extension.patch
 ```
 
-It is intentionally a shell patch. It registers the extension, restricts
-namespace visibility, validates `RouteEvent`, and resolves target windows
-through DIX access checks, but it does not yet deliver events. Use
+It registers the extension, restricts namespace visibility, validates
+`RouteEvent`, resolves target windows through DIX access checks, and delivers
+flat pointer motion/button events through normal XLibre event delivery. Use
 `tools/check_xlibre_routed_input_patch.sh` to apply the patch to a temporary
 XLibre tree and compile `hw/vfb/Xvfb`.
 
@@ -84,8 +84,8 @@ XLibre tree and compile `hw/vfb/Xvfb`.
 2. Require the calling client to be privileged in Xnamespace terms.
 3. Resolve `target_xid` as a window with DIX access checks enabled.
 4. Reject stale or unmapped targets.
-5. Resolve the requested device; for the first prototype, support pointer
-   motion and button events only.
+5. Resolve the requested device; the first prototype supports master and
+   floating pointer motion/button events only.
 6. Convert `local_x_24_8` and `local_y_24_8` into event coordinates relative to
    `target_xid`.
 7. Enter normal XLibre event delivery with the target window supplied by the
@@ -99,10 +99,26 @@ The key design constraint is that this extension replaces target selection
 only. It must not behave like XTEST, `SendEvent`, or "write this event directly
 to this client."
 
+## Implemented Prototype Behavior
+
+The first routed-input patch is deliberately flat:
+
+- It accepts motion and button routes for master or floating pointer devices.
+- It rejects key, touch, tablet, transformed, and slave-device routes.
+- It converts target-local 24.8 coordinates into desktop coordinates before
+  using XLibre's existing pointer event builder.
+- It suppresses raw XI2 events with `POINTER_NORAW`; clients should see the
+  delivered window-relative event, not compositor-internal raw motion.
+- It installs a routed sprite trace for the supplied target window, then enters
+  the normal XI/DIX event path.
+- It rejects a device that is already sync-frozen, but ordinary active grabs
+  still follow XLibre grab semantics and may redirect delivery to the grab
+  owner.
+
 ## First Prototype Boundary
 
-The first XLibre patch should only accept flat, untransformed pointer routes.
-Sophia already rejects transformed routes in `build_flat_routed_input_request`.
+The first XLibre patch only accepts flat, untransformed pointer routes. Sophia
+already rejects transformed routes in `build_flat_routed_input_request`.
 
 Unsupported in the first patch:
 
@@ -118,7 +134,7 @@ The extension should return or expose distinct failure reasons for:
 
 - stale target XID
 - denied namespace access
-- active grab conflict
+- sync-frozen device state
 - focus policy conflict
 - unsupported event type
 

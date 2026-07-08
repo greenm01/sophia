@@ -1,41 +1,17 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: Sophia Prototype <sophia@example.invalid>
-Date: Tue, 7 Jul 2026 00:00:00 -0400
-Subject: [PATCH] Add SOPHIA-ROUTED-INPUT extension shell
-
-Add a small extension shell for compositor-routed input. The initial
-RouteEvent request validates the fixed wire packet and target window through
-normal DIX lookup so Xnamespace resource checks still run, then returns an
-explicit unsupported-event outcome until the DIX delivery entry point is wired.
-
-This patch intentionally does not inject client events directly.
----
- Xext/meson.build                              |   1 +
- Xext/namespace/hook-ext-access.c             |   4 +
- Xext/namespace/hook-ext-dispatch.c           |   4 +
- Xext/sophia-routed-input/meson.build         |   9 +
- .../sophia-routed-input/sophia-routed-input.c | 243 ++++++++++++++++++
- meson.build                                  |   2 +
- mi/miinitext.c                               |   1 +
- miext/extinit_priv.h                         |   1 +
- 8 files changed, 265 insertions(+)
- create mode 100644 Xext/sophia-routed-input/meson.build
- create mode 100644 Xext/sophia-routed-input/sophia-routed-input.c
-
 diff --git a/Xext/meson.build b/Xext/meson.build
-index 0000000000..0000000000 100644
+index 7f8034c14..96ed5b248 100644
 --- a/Xext/meson.build
 +++ b/Xext/meson.build
-@@ -41,3 +41,4 @@ subdir('shm')
+@@ -49,3 +49,4 @@ subdir('shm')
  subdir('xv')
  subdir('xres')
  subdir('xtest')
 +subdir('sophia-routed-input')
 diff --git a/Xext/namespace/hook-ext-access.c b/Xext/namespace/hook-ext-access.c
-index 0000000000..0000000000 100644
+index 624d3caef..15d86cf49 100644
 --- a/Xext/namespace/hook-ext-access.c
 +++ b/Xext/namespace/hook-ext-access.c
-@@ -24,6 +24,10 @@ void hookExtAccess(CallbackListPtr *pcbl, void *unused, void *calldata)
+@@ -25,6 +25,10 @@ void hookExtAccess(CallbackListPtr *pcbl, void *unused, void *calldata)
      if (streq(param->ext->name, XNS_EXTENSION_NAME))
          goto reject;
  
@@ -47,7 +23,7 @@ index 0000000000..0000000000 100644
          /* unrestricted access */
          case EXTENSION_MAJOR_BIG_REQUESTS:
 diff --git a/Xext/namespace/hook-ext-dispatch.c b/Xext/namespace/hook-ext-dispatch.c
-index 0000000000..0000000000 100644
+index 6cd4b69fc..9d30625dd 100644
 --- a/Xext/namespace/hook-ext-dispatch.c
 +++ b/Xext/namespace/hook-ext-dispatch.c
 @@ -32,6 +32,10 @@ void hookExtDispatch(CallbackListPtr *pcbl, void *unused, void *calldata)
@@ -63,7 +39,7 @@ index 0000000000..0000000000 100644
          case EXTENSION_MAJOR_BIG_REQUESTS:
 diff --git a/Xext/sophia-routed-input/meson.build b/Xext/sophia-routed-input/meson.build
 new file mode 100644
-index 0000000000..0000000000
+index 000000000..2966f02a3
 --- /dev/null
 +++ b/Xext/sophia-routed-input/meson.build
 @@ -0,0 +1,9 @@
@@ -78,10 +54,10 @@ index 0000000000..0000000000
 +)
 diff --git a/Xext/sophia-routed-input/sophia-routed-input.c b/Xext/sophia-routed-input/sophia-routed-input.c
 new file mode 100644
-index 0000000000..0000000000
+index 000000000..6e0ae0364
 --- /dev/null
 +++ b/Xext/sophia-routed-input/sophia-routed-input.c
-@@ -0,0 +1,243 @@
+@@ -0,0 +1,348 @@
 +/*
 + * Copyright 2026 Sophia contributors
 + *
@@ -111,10 +87,16 @@ index 0000000000..0000000000
 +#include <X11/Xproto.h>
 +
 +#include "dix/dix_priv.h"
++#include "dix/exevents_priv.h"
++#include "dix/input_priv.h"
 +#include "dix/request_priv.h"
 +#include "include/dixaccess.h"
++#include "include/input.h"
++#include "include/inputstr.h"
 +#include "include/windowstr.h"
 +#include "miext/extinit_priv.h"
++
++#include "eventstr.h"
 +
 +#define SOPHIA_ROUTED_INPUT_NAME "SOPHIA-ROUTED-INPUT"
 +#define SOPHIA_ROUTED_INPUT_MAJOR_VERSION 0
@@ -190,6 +172,19 @@ index 0000000000..0000000000
 +static int ProcSophiaRoutedInputDispatch(ClientPtr client);
 +
 +static int
++route_event_type(const xSophiaRoutedInputRouteEventReq *stuff)
++{
++    switch (stuff->event_code) {
++    case SophiaRoutedInputEventMotion:
++        return MotionNotify;
++    case SophiaRoutedInputEventButton:
++        return (stuff->flags & 1) ? ButtonPress : ButtonRelease;
++    default:
++        return 0;
++    }
++}
++
++static int
 +ProcSophiaRoutedInputQueryVersion(ClientPtr client)
 +{
 +    X_REQUEST_HEAD_STRUCT(xSophiaRoutedInputQueryVersionReq);
@@ -263,6 +258,16 @@ index 0000000000..0000000000
 +    X_REQUEST_FIELD_CARD32(flags);
 +
 +    WindowPtr pWin = NULL;
++    DeviceIntPtr dev = NULL;
++    InternalEvent *events = NULL;
++    ValuatorMask *mask = NULL;
++    double local_x;
++    double local_y;
++    double desktop_x;
++    double desktop_y;
++    int button = 0;
++    int type;
++    int nevents;
 +    int rc;
 +
 +    if (stuff->seat == 0 || stuff->device == 0) {
@@ -291,14 +296,90 @@ index 0000000000..0000000000
 +        return send_route_reply(client, stuff,
 +                                SophiaRoutedInputOutcomeRejectedStaleTarget);
 +
-+    /*
-+     * Deliberately stop here for the first patch. The next patch must enter
-+     * DIX event delivery with pWin as the compositor-supplied target while
-+     * preserving active grabs, passive grabs, focus, XI2 masks, and namespace
-+     * checks. This extension must never behave like SendEvent or XTEST.
-+     */
-+    return send_route_reply(client, stuff,
-+                            SophiaRoutedInputOutcomeRejectedUnsupportedEvent);
++    rc = dixLookupDevice(&dev, stuff->device, client, DixWriteAccess);
++    if (rc != Success)
++        return send_route_reply(client, stuff,
++                                SophiaRoutedInputOutcomeRejectedUnsupportedEvent);
++
++    if (!IsPointerDevice(dev) ||
++        (!InputDevIsMaster(dev) && !InputDevIsFloating(dev)) ||
++        !dev->valuator || !dev->button)
++        return send_route_reply(client, stuff,
++                                SophiaRoutedInputOutcomeRejectedUnsupportedEvent);
++
++    if (dev->deviceGrab.sync.frozen)
++        return send_route_reply(client, stuff,
++                                SophiaRoutedInputOutcomeRejectedActiveGrab);
++
++    local_x = (double) stuff->local_x_24_8 / 256.0;
++    local_y = (double) stuff->local_y_24_8 / 256.0;
++
++    if (local_x < 0 || local_y < 0 ||
++        local_x >= pWin->drawable.width ||
++        local_y >= pWin->drawable.height)
++        return send_route_reply(client, stuff,
++                                SophiaRoutedInputOutcomeRejectedStaleTarget);
++
++    type = route_event_type(stuff);
++    if (type == 0)
++        return send_route_reply(client, stuff,
++                                SophiaRoutedInputOutcomeRejectedUnsupportedEvent);
++
++    if (type == ButtonPress || type == ButtonRelease) {
++        button = stuff->detail;
++        if (button <= 0 || button >= MAX_BUTTONS) {
++            client->errorValue = stuff->detail;
++            return BadValue;
++        }
++    }
++
++    desktop_x = pWin->drawable.pScreen->x + pWin->drawable.x + local_x;
++    desktop_y = pWin->drawable.pScreen->y + pWin->drawable.y + local_y;
++
++    mask = valuator_mask_new(2);
++    events = InitEventList(GetMaximumEventsNum());
++    if (!mask || !events) {
++        valuator_mask_free(&mask);
++        FreeEventList(events, GetMaximumEventsNum());
++        return BadAlloc;
++    }
++
++    valuator_mask_set_double(mask, 0, desktop_x);
++    valuator_mask_set_double(mask, 1, desktop_y);
++
++    nevents = GetPointerEvents(events, dev, type, button,
++                               POINTER_ABSOLUTE | POINTER_DESKTOP | POINTER_NORAW,
++                               mask);
++
++    for (int i = 0; i < nevents; i++) {
++        switch (events[i].any.type) {
++        case ET_Motion:
++        case ET_ButtonPress:
++        case ET_ButtonRelease:
++            if (stuff->time_msec != 0)
++                events[i].device_event.time = stuff->time_msec;
++
++            rc = ProcessRoutedPointerEvent(dev, pWin, &events[i]);
++            if (rc != Success) {
++                valuator_mask_free(&mask);
++                FreeEventList(events, GetMaximumEventsNum());
++                return send_route_reply(client, stuff,
++                                        SophiaRoutedInputOutcomeRejectedUnsupportedEvent);
++            }
++            break;
++        default:
++            break;
++        }
++    }
++
++    valuator_mask_free(&mask);
++    FreeEventList(events, GetMaximumEventsNum());
++
++    if (nevents <= 0)
++        return send_route_reply(client, stuff,
++                                SophiaRoutedInputOutcomeRejectedUnsupportedEvent);
++
++    return send_route_reply(client, stuff, SophiaRoutedInputOutcomeAccepted);
 +}
 +
 +static int
@@ -325,8 +406,178 @@ index 0000000000..0000000000
 +                      NULL, StandardMinorOpcode))
 +        FatalError("SophiaRoutedInputExtensionInit: AddExtension failed.\n");
 +}
+diff --git a/Xext/xinput/exevents.c b/Xext/xinput/exevents.c
+index bfb8ce8e0..015b06f50 100644
+--- a/Xext/xinput/exevents.c
++++ b/Xext/xinput/exevents.c
+@@ -1826,7 +1826,8 @@ ProcessGestureEvent(InternalEvent *ev, DeviceIntPtr dev)
+  * Process DeviceEvents and DeviceChangedEvents.
+  */
+ static void
+-ProcessDeviceEvent(InternalEvent *ev, DeviceIntPtr device)
++ProcessDeviceEventForWindow(InternalEvent *ev, DeviceIntPtr device,
++                            WindowPtr routedWin)
+ {
+     GrabPtr grab;
+     Bool deactivateDeviceGrab = FALSE;
+@@ -1859,8 +1860,12 @@ ProcessDeviceEvent(InternalEvent *ev, DeviceIntPtr device)
+ 
+     b = device->button;
+ 
+-    if (InputDevIsMaster(device) || InputDevIsFloating(device))
+-        CheckMotion(event, device);
++    if (InputDevIsMaster(device) || InputDevIsFloating(device)) {
++        if (routedWin)
++            CheckMotionWithWindow(event, device, routedWin);
++        else
++            CheckMotion(event, device);
++    }
+ 
+     switch (event->type) {
+     case ET_Motion:
+@@ -1969,6 +1974,27 @@ ProcessDeviceEvent(InternalEvent *ev, DeviceIntPtr device)
+     event->detail.key = key;
+ }
+ 
++static void
++ProcessDeviceEvent(InternalEvent *ev, DeviceIntPtr device)
++{
++    ProcessDeviceEventForWindow(ev, device, NullWindow);
++}
++
++int
++ProcessRoutedPointerEvent(DeviceIntPtr device, WindowPtr routedWin,
++                          InternalEvent *ev)
++{
++    if (!device || !routedWin || !IsPointerDevice(device) ||
++        (!InputDevIsMaster(device) && !InputDevIsFloating(device)))
++        return BadDevice;
++
++    if (!IsPointerEvent(ev))
++        return BadValue;
++
++    ProcessDeviceEventForWindow(ev, device, routedWin);
++    return Success;
++}
++
+ /**
+  * Main device event processing function.
+  * Called from when processing the events from the event queue.
+diff --git a/dix/dix_priv.h b/dix/dix_priv.h
+index 2b333f15c..db405b379 100644
+--- a/dix/dix_priv.h
++++ b/dix/dix_priv.h
+@@ -252,6 +252,7 @@ void DeleteWindowFromAnyEvents(WindowPtr pWin, Bool freeResources);
+ Mask EventMaskForClient(WindowPtr pWin, ClientPtr client);
+ 
+ Bool CheckMotion(DeviceEvent *ev, DeviceIntPtr pDev);
++Bool CheckMotionWithWindow(DeviceEvent *ev, DeviceIntPtr pDev, WindowPtr pWin);
+ 
+ int SetClientPointer(ClientPtr client, DeviceIntPtr device);
+ 
+diff --git a/dix/events.c b/dix/events.c
+index 80128fef2..98f0c8599 100644
+--- a/dix/events.c
++++ b/dix/events.c
+@@ -3151,8 +3151,44 @@ ActivateEnterGrab(DeviceIntPtr dev, WindowPtr old, WindowPtr win)
+  *
+  * @return TRUE if the sprite has moved or FALSE otherwise.
+  */
+-Bool
+-CheckMotion(DeviceEvent *ev, DeviceIntPtr pDev)
++static Bool
++SetSpriteTraceToWindow(SpritePtr pSprite, WindowPtr pWin)
++{
++    WindowPtr walk;
++    int depth = 0;
++    int i;
++
++    if (!pWin || !pWin->realized)
++        return FALSE;
++
++    for (walk = pWin; walk; walk = walk->parent)
++        depth++;
++
++    if (depth <= 0)
++        return FALSE;
++
++    if (depth > pSprite->spriteTraceSize) {
++        WindowPtr *trace = reallocarray(pSprite->spriteTrace,
++                                        depth, sizeof(*trace));
++        if (!trace)
++            return FALSE;
++
++        pSprite->spriteTrace = trace;
++        pSprite->spriteTraceSize = depth;
++    }
++
++    i = depth - 1;
++    for (walk = pWin; walk; walk = walk->parent)
++        pSprite->spriteTrace[i--] = walk;
++
++    pSprite->spriteTraceGood = depth;
++    pSprite->hot.pScreen = pWin->drawable.pScreen;
++    pSprite->hotPhys.pScreen = pWin->drawable.pScreen;
++    return TRUE;
++}
++
++static Bool
++CheckMotionToWindow(DeviceEvent *ev, DeviceIntPtr pDev, WindowPtr routedWin)
+ {
+     WindowPtr prevSpriteWin, newSpriteWin;
+     SpritePtr pSprite = pDev->spriteInfo->sprite;
+@@ -3236,7 +3272,15 @@ CheckMotion(DeviceEvent *ev, DeviceIntPtr pDev)
+         ev->root_y = pSprite->hot.y;
+     }
+ 
+-    newSpriteWin = XYToWindow(pSprite, pSprite->hot.x, pSprite->hot.y);
++    if (routedWin) {
++        if (!SetSpriteTraceToWindow(pSprite, routedWin))
++            return FALSE;
++
++        newSpriteWin = routedWin;
++    }
++    else {
++        newSpriteWin = XYToWindow(pSprite, pSprite->hot.x, pSprite->hot.y);
++    }
+ 
+     if (newSpriteWin != prevSpriteWin) {
+         int sourceid;
+@@ -3263,6 +3307,18 @@ CheckMotion(DeviceEvent *ev, DeviceIntPtr pDev)
+     return TRUE;
+ }
+ 
++Bool
++CheckMotion(DeviceEvent *ev, DeviceIntPtr pDev)
++{
++    return CheckMotionToWindow(ev, pDev, NullWindow);
++}
++
++Bool
++CheckMotionWithWindow(DeviceEvent *ev, DeviceIntPtr pDev, WindowPtr pWin)
++{
++    return CheckMotionToWindow(ev, pDev, pWin);
++}
++
+ /**
+  * Windows have restructured, we need to update the sprite position and the
+  * sprite's cursor.
+diff --git a/dix/exevents_priv.h b/dix/exevents_priv.h
+index ce55ad0e7..1b60ece52 100644
+--- a/dix/exevents_priv.h
++++ b/dix/exevents_priv.h
+@@ -32,6 +32,9 @@ typedef struct _GrabParameters {
+ int UpdateDeviceState(DeviceIntPtr device, DeviceEvent *xE);
+ 
+ void ProcessOtherEvent(InternalEvent *ev, DeviceIntPtr other);
++int ProcessRoutedPointerEvent(DeviceIntPtr device,
++                              WindowPtr routedWin,
++                              InternalEvent *ev);
+ 
+ int CheckGrabValues(ClientPtr client, GrabParameters *param);
+ 
 diff --git a/meson.build b/meson.build
-index 0000000000..0000000000 100644
+index 833b499ce..7b351bd9e 100644
 --- a/meson.build
 +++ b/meson.build
 @@ -831,7 +831,8 @@ if build_xserver
@@ -340,10 +591,10 @@ index 0000000000..0000000000 100644
  
      if build_xselinux
 diff --git a/mi/miinitext.c b/mi/miinitext.c
-index 0000000000..0000000000 100644
+index e4fddfa86..1f18ed867 100644
 --- a/mi/miinitext.c
 +++ b/mi/miinitext.c
-@@ -113,6 +113,7 @@ static const ExtensionModule staticExtensions[] = {
+@@ -115,6 +115,7 @@ static const ExtensionModule staticExtensions[] = {
  #ifdef CONFIG_NAMESPACE
      {NamespaceExtensionInit, "NAMESPACE", &noNamespaceExtension},
  #endif
@@ -352,15 +603,13 @@ index 0000000000..0000000000 100644
      {PanoramiXExtensionInit, "XINERAMA", &noPanoramiXExtension},
  #endif /* XINERAMA */
 diff --git a/miext/extinit_priv.h b/miext/extinit_priv.h
-index 0000000000..0000000000 100644
+index 2f3eaeca3..7b315a1b9 100644
 --- a/miext/extinit_priv.h
 +++ b/miext/extinit_priv.h
-@@ -62,5 +62,6 @@ void dri3_extension_init(void);
+@@ -69,5 +69,6 @@ void dri3_extension_init(void);
  void PseudoramiXExtensionInit(void);
  void present_extension_init(void);
  void NamespaceExtensionInit(void);
 +void SophiaRoutedInputExtensionInit(void);
  
  #endif /* _XSERVER_EXTINIT_PRIV_H */
--- 
-2.50.0

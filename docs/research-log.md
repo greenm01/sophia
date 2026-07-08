@@ -246,9 +246,9 @@ is absent and then accept a new transaction after the WM restarts.
 The routed-input seam now has its first data contract. `XLibreRoutedInputRequest`
 carries serial, seat, device, time, target XID, local coordinates, and event
 kind. `XLibreRoutedInputDecision` keeps the server-side decision explicit:
-accepted, stale target, denied namespace, active grab, focus policy, or
-unsupported event. Sophia X Bridge can build the request only for flat,
-identity-transform routes today; transformed input remains intentionally
+accepted, stale target, denied namespace, sync-frozen device state, focus
+policy, or unsupported event. Sophia X Bridge can build the request only for
+flat, identity-transform routes today; transformed input remains intentionally
 unsupported until the flat path is proven against an XLibre extension.
 
 The protocol crate also carries a fixed wire request body for the future
@@ -259,20 +259,29 @@ The protocol crate also carries a fixed wire request body for the future
 and `Xext/xinput/exevents.c`.
 
 The first XLibre patch artifact now lives at
-`patches/xlibre/0001-add-sophia-routed-input-extension.patch`. It adds an
-git-applyable `SOPHIA-ROUTED-INPUT` extension shell that registers with XLibre,
-hides the extension from non-superPower namespaces, validates `RouteEvent`
-packets, resolves the target window through normal DIX access checks, and then
-returns `RejectedUnsupportedEvent`. That stop point is deliberate: the patch is
-for proving the privileged protocol seam and build integration before wiring
-real DIX event delivery. `tools/check_xlibre_routed_input_patch.sh` applies the
-patch to a temporary XLibre copy and builds `hw/vfb/Xvfb`.
+`patches/xlibre/0001-add-sophia-routed-input-extension.patch`. It adds a
+git-applyable `SOPHIA-ROUTED-INPUT` extension that registers with XLibre, hides
+the extension from non-superPower namespaces, validates `RouteEvent` packets,
+resolves the target window through normal DIX access checks, and enters normal
+pointer delivery with the compositor-supplied target window.
+`tools/check_xlibre_routed_input_patch.sh` applies the patch to a temporary
+XLibre copy and builds `hw/vfb/Xvfb`.
 
-After creating the private `greenm01/sophia-xserver` fork, the extension shell
-was applied directly to that fork. The fork version gates both
-`hook-ext-access.c` and `hook-ext-dispatch.c`, so sandboxed clients cannot
-discover the extension via `QueryExtension` and cannot invoke it by hard-coding
-the major opcode.
+After creating the private `greenm01/sophia-xserver` fork, the extension was
+applied directly to that fork. The fork version gates both `hook-ext-access.c`
+and `hook-ext-dispatch.c`, so sandboxed clients cannot discover the extension
+via `QueryExtension` and cannot invoke it by hard-coding the major opcode.
+
+The flat routed-pointer prototype now builds in the fork. The extension accepts
+motion and button routes for master or floating pointer devices, rejects key,
+touch, tablet, transformed, and slave-device routes, converts target-local 24.8
+coordinates to desktop coordinates, and asks XLibre to build pointer events
+with `POINTER_NORAW`. DIX now has a routed-window variant of the motion check:
+it installs the target window's sprite trace instead of using `XYToWindow`, then
+continues through the existing XI/DIX grab, focus, mask, and delivery path. A
+sync-frozen device returns `RejectedActiveGrab`; ordinary active grabs remain
+normal XLibre authority and can redirect accepted routes according to X11 grab
+semantics.
 
 ## Open Questions
 

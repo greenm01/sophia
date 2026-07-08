@@ -248,9 +248,11 @@ Fields should describe:
 - target XID
 - accepted or rejected outcome
 
-Expected rejection outcomes include stale target, denied namespace, active grab,
-focus policy, and unsupported event. Sophia treats every rejection as a closed
-route and never falls back to direct client delivery.
+Expected rejection outcomes include stale target, denied namespace,
+sync-frozen device state, focus policy, and unsupported event. Ordinary active
+grabs are still XLibre authority; accepted routes may be redirected by normal
+grab semantics. Sophia treats every rejection as a closed route and never falls
+back to direct client delivery.
 
 ### LayoutTransaction
 
