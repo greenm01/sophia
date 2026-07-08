@@ -268,6 +268,12 @@ for proving the privileged protocol seam and build integration before wiring
 real DIX event delivery. `tools/check_xlibre_routed_input_patch.sh` applies the
 patch to a temporary XLibre copy and builds `hw/vfb/Xvfb`.
 
+After creating the private `greenm01/sophia-xserver` fork, the extension shell
+was applied directly to that fork. The fork version gates both
+`hook-ext-access.c` and `hook-ext-dispatch.c`, so sandboxed clients cannot
+discover the extension via `QueryExtension` and cannot invoke it by hard-coding
+the major opcode.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

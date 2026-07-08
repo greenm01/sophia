@@ -69,6 +69,9 @@ XLibre tree and compile `hw/vfb/Xvfb`.
 - Add namespace extension visibility policy in
   `Xext/namespace/hook-ext-access.c`: only the privileged compositor/root
   namespace should be able to query or call this extension.
+- Add namespace extension dispatch policy in
+  `Xext/namespace/hook-ext-dispatch.c`: hard-coded extension opcodes from
+  non-privileged namespaces must still be rejected.
 - Resolve `target_xid` with normal DIX resource lookup so
   `Xext/namespace/hook-resource.c` can reject cross-namespace access.
 - Reuse existing input delivery machinery from `dix/events.c` and

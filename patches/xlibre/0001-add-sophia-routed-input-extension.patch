@@ -12,12 +12,13 @@ This patch intentionally does not inject client events directly.
 ---
  Xext/meson.build                              |   1 +
  Xext/namespace/hook-ext-access.c             |   4 +
+ Xext/namespace/hook-ext-dispatch.c           |   4 +
  Xext/sophia-routed-input/meson.build         |   9 +
  .../sophia-routed-input/sophia-routed-input.c | 243 ++++++++++++++++++
  meson.build                                  |   2 +
  mi/miinitext.c                               |   1 +
  miext/extinit_priv.h                         |   1 +
- 7 files changed, 261 insertions(+)
+ 8 files changed, 265 insertions(+)
  create mode 100644 Xext/sophia-routed-input/meson.build
  create mode 100644 Xext/sophia-routed-input/sophia-routed-input.c
 
@@ -44,6 +45,21 @@ index 0000000000..0000000000 100644
 +
      switch (param->ext->index + EXTENSION_BASE) {
          /* unrestricted access */
+         case EXTENSION_MAJOR_BIG_REQUESTS:
+diff --git a/Xext/namespace/hook-ext-dispatch.c b/Xext/namespace/hook-ext-dispatch.c
+index 0000000000..0000000000 100644
+--- a/Xext/namespace/hook-ext-dispatch.c
++++ b/Xext/namespace/hook-ext-dispatch.c
+@@ -32,6 +32,10 @@ void hookExtDispatch(CallbackListPtr *pcbl, void *unused, void *calldata)
+     if (streq(param->ext->name, XNS_EXTENSION_NAME))
+         goto reject;
+ 
++    /* compositor-only extension: reject hard-coded opcodes from sandboxes */
++    if (streq(param->ext->name, "SOPHIA-ROUTED-INPUT"))
++        goto reject;
++
+     switch (client->majorOp) {
+         /* unrestricted access to these */
          case EXTENSION_MAJOR_BIG_REQUESTS:
 diff --git a/Xext/sophia-routed-input/meson.build b/Xext/sophia-routed-input/meson.build
 new file mode 100644
