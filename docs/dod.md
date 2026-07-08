@@ -146,6 +146,13 @@ CLI smokes that exercise a complete runtime tick should use
 reserved for narrow adapter checks where no frame should be planned, such as
 broker health packet routing or isolated WM transaction observation.
 
+`RuntimeDriverAdapter` is the command-execution seam between the reducer and
+external sources. Implementations must answer runtime commands with reduced
+observations or existing frame reports. Live adapters may wrap X bridge, WM
+socket, broker, portal, chrome, and renderer sources, but they must not expose
+raw X events, namespace tokens, metadata strings, portal payload bytes, icon
+bytes, or unbounded buffers through the runtime loop.
+
 Process-supervised portal and metadata broker placeholders are runtime
 ownership records. They prove that the runtime can start, poll, and terminate
 the intended broker process kinds before the real broker IPC protocols exist.

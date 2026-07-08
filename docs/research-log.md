@@ -704,6 +704,14 @@ direct observation-loop usage is limited to adapter-specific smokes where a full
 session tick would obscure the purpose: broker health packet routing and
 external WM transaction observation.
 
+`RuntimeDriverAdapter` now turns the headless driver into a shared command
+executor rather than a hard-coded synthetic loop. `HeadlessRuntimeAdapter`
+preserves deterministic tests, and live skeleton adapters cover the intended
+replacement sources: X event counts, WM layout/restart observations, broker
+health facts, portal command drains, chrome presentation counts, and renderer
+frame reports. These skeletons still do not poll real file descriptors; they
+define the shape for replacing synthetic values with live intake.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

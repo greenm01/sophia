@@ -36,8 +36,27 @@ Close the gap between existing reducers/protocols and a running session loop.
   through the concrete adapters instead of each smoke owning its own mini-loop.
 - [x] Replace remaining per-smoke runtime command execution with the reusable
   headless session driver where the smoke does not need custom setup.
-- [ ] Add a runtime driver adapter trait so live X, WM, broker, portal, chrome,
+- [x] Add a runtime driver adapter trait so live X, WM, broker, portal, chrome,
   and renderer sources can plug into one command executor.
+
+---
+
+## Synthetic-To-Live Completion Track
+
+Synthetic seams should either become live adapters, remain deterministic test
+harnesses, or stay explicitly measurement-gated.
+
+- [x] Keep `HeadlessSessionDriver` as the deterministic session executor.
+- [x] Add a `RuntimeDriverAdapter` trait for command execution sources.
+- [x] Add a headless adapter implementation for deterministic tests and smokes.
+- [x] Add live adapter skeletons for X, WM, broker health, portal, chrome, and
+  renderer facts.
+- [ ] Replace live adapter skeleton inputs with non-blocking X bridge, WM socket,
+  broker IPC, portal execution, chrome presenter, and renderer intake.
+- [ ] Add one live command-executor smoke that runs against Xvfb and the WM
+  socket without hand-written command sequencing.
+- [ ] Keep SHM routed input deferred until stress measurements exceed the
+  documented threshold.
 
 ---
 

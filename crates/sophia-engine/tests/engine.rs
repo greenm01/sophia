@@ -1,10 +1,12 @@
 use sophia_engine::{
     BufferImportPath, ChromeActionDecision, ChromeActionRejectReason, ChromeBroker,
     DeterministicFrameClock, DrmKmsMode, DrmKmsOutputDescriptor, DrmKmsOutputRegistry, EngineError,
-    FrameClock, FramePlanRequest, FrameScheduleDecision, HeadlessEngine, HeadlessSessionDriver,
-    HeadlessSessionDriverTick, ImportCapableRenderer, ImportedBufferHandle, LastCommittedLayout,
-    LayoutEpochState, LibinputDeviceDescriptor, LibinputDeviceKind, LibinputEventIngest,
-    LibinputEventSource, MetadataChromeRejectReason, MetadataChromeUpdate,
+    FrameClock, FramePlanRequest, FrameScheduleDecision, HeadlessEngine, HeadlessRuntimeAdapter,
+    HeadlessSessionDriver, HeadlessSessionDriverTick, ImportCapableRenderer, ImportedBufferHandle,
+    LastCommittedLayout, LayoutEpochState, LibinputDeviceDescriptor, LibinputDeviceKind,
+    LibinputEventIngest, LibinputEventSource, LiveBrokerRuntimeAdapter, LiveChromeRuntimeAdapter,
+    LivePortalRuntimeAdapter, LiveRendererRuntimeAdapter, LiveRuntimeDriverAdapter,
+    LiveWmRuntimeAdapter, LiveXRuntimeAdapter, MetadataChromeRejectReason, MetadataChromeUpdate,
     NotificationChromePresenter, NotificationChromeRejectReason, NotificationChromeUpdate,
     RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction, RoutedInputRequestError,
     SanitizedChromeMetadata, SessionCommand, SessionEvent, SessionLayerSource, SessionTickRequest,
@@ -19,15 +21,15 @@ use sophia_engine::{
 };
 use sophia_portal::{NotificationRequest, NotificationUrgency, PortalCommand};
 use sophia_protocol::{
-    AttentionState, BufferSource, ChromeActionKind, ChromeActionRequest, ChromeDescriptor,
-    DamageFrame, DeviceId, DisplayLabel, IconTokenId, InputEventKind, InputEventPacket, InputRoute,
-    InputRouteOutcome, IpcCodecError, LayerSnapshot, LayoutNodeCapabilities, LayoutNodeKind,
-    LayoutNodeSnapshot, LayoutNodeState, LayoutTransaction, NamespaceId, OutputId, Point,
-    PortalTransferId, Rect, Region, SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAGIC,
-    SOPHIA_IPC_MAX_PAYLOAD_LEN, SOPHIA_IPC_VERSION, SeatId, SurfaceConstraints, SurfaceId,
-    SurfacePlacement, TransactionCommit, TransactionId, TransactionOutcome, Transform, TrustLevel,
-    WmCommand, WmRequestKind, WmRequestPacket, WmResponsePacket, WorkspaceId, XWindowId,
-    decode_wm_request_frame, encode_wm_response_frame,
+    AttentionState, BrokerHealthPacket, BrokerHealthState, BrokerKind, BufferSource,
+    ChromeActionKind, ChromeActionRequest, ChromeDescriptor, DamageFrame, DeviceId, DisplayLabel,
+    IconTokenId, InputEventKind, InputEventPacket, InputRoute, InputRouteOutcome, IpcCodecError,
+    LayerSnapshot, LayoutNodeCapabilities, LayoutNodeKind, LayoutNodeSnapshot, LayoutNodeState,
+    LayoutTransaction, NamespaceId, OutputId, Point, PortalTransferId, Rect, Region,
+    SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAGIC, SOPHIA_IPC_MAX_PAYLOAD_LEN, SOPHIA_IPC_VERSION,
+    SeatId, SurfaceConstraints, SurfaceId, SurfacePlacement, TransactionCommit, TransactionId,
+    TransactionOutcome, Transform, TrustLevel, WmCommand, WmRequestKind, WmRequestPacket,
+    WmResponsePacket, WorkspaceId, XWindowId, decode_wm_request_frame, encode_wm_response_frame,
 };
 use sophia_runtime::{
     RestartPolicy, SessionRuntimeCommand, SessionRuntimeObservation, SessionRuntimePhase,
@@ -1477,6 +1479,72 @@ fn headless_session_driver_executes_runtime_commands_to_idle() {
 }
 
 #[test]
+fn headless_session_driver_executes_through_runtime_adapter_trait() {
+    let engine = HeadlessEngine::default();
+    let output = engine.output();
+    let mut driver = HeadlessSessionDriver::new(engine);
+    let mut adapter = HeadlessRuntimeAdapter {
+        x_event_count: 1,
+        layers: vec![test_layer(1, 0, 0, Region::empty())],
+        wm_update: None,
+        portal_commands: Vec::new(),
+        chrome_command_count: 0,
+    };
+
+    let report = driver
+        .run_with_adapter(output.id, 92, &mut adapter)
+        .expect("headless adapter should drive one runtime tick");
+
+    assert_eq!(report.runtime_state.phase, SessionRuntimePhase::Idle);
+    assert_eq!(report.runtime_state.frames_rendered, 1);
+    assert_eq!(
+        report
+            .session_tick
+            .as_ref()
+            .map(|tick| tick.frame.frame_serial),
+        Some(92)
+    );
+}
+
+#[test]
+fn live_runtime_driver_adapter_executes_through_shared_command_executor() {
+    let engine = HeadlessEngine::default();
+    let output = engine.output();
+    let mut driver = HeadlessSessionDriver::new(engine);
+    let mut adapter = LiveRuntimeDriverAdapter {
+        x: LiveXRuntimeAdapter {
+            pending_event_count: 1,
+        },
+        wm: LiveWmRuntimeAdapter { update: None },
+        portal: LivePortalRuntimeAdapter {
+            commands: vec![PortalCommand::DropNotification {
+                transfer: PortalTransferId::from_raw(3),
+            }],
+        },
+        chrome: LiveChromeRuntimeAdapter { command_count: 1 },
+        renderer: LiveRendererRuntimeAdapter {
+            layers: vec![test_layer(1, 0, 0, Region::empty())],
+        },
+    };
+
+    let report = driver
+        .run_with_adapter(output.id, 93, &mut adapter)
+        .expect("live adapter skeleton should drive one runtime tick");
+
+    assert_eq!(report.runtime_state.phase, SessionRuntimePhase::Idle);
+    assert_eq!(report.runtime_state.x_events_polled, 1);
+    assert_eq!(report.runtime_state.portal_commands_drained, 1);
+    assert_eq!(report.runtime_state.chrome_commands_presented, 1);
+    assert_eq!(
+        report
+            .session_tick
+            .as_ref()
+            .map(|tick| tick.frame.frame_serial),
+        Some(93)
+    );
+}
+
+#[test]
 fn headless_session_driver_stops_before_rendering_when_wm_restart_is_requested() {
     let engine = HeadlessEngine::default();
     let output = engine.output();
@@ -1516,6 +1584,96 @@ fn headless_session_driver_stops_before_rendering_when_wm_restart_is_requested()
     );
     assert_eq!(report.runtime_state.frames_rendered, 0);
     assert!(report.session_tick.is_none());
+}
+
+#[test]
+fn live_x_runtime_adapter_emits_bounded_event_count_observation() {
+    let adapter = LiveXRuntimeAdapter {
+        pending_event_count: 12,
+    };
+
+    assert_eq!(
+        adapter.poll_observation(),
+        SessionRuntimeObservation::XEventsPolled { count: 12 }
+    );
+}
+
+#[test]
+fn live_wm_runtime_adapter_maps_restart_update_to_observation() {
+    let adapter = LiveWmRuntimeAdapter {
+        update: Some(WmTransactionUpdate {
+            commit: TransactionCommit {
+                transaction: TransactionId::from_raw(82),
+                outcome: TransactionOutcome::TimedOut,
+                applied_surfaces: Vec::new(),
+            },
+            ipc_error: Some(WmIpcError::Io("closed".to_owned())),
+        }),
+    };
+
+    assert_eq!(
+        adapter.layout_observation(),
+        SessionRuntimeObservation::WmRestartRequested
+    );
+}
+
+#[test]
+fn live_broker_runtime_adapter_routes_health_without_message_payload() {
+    let packet = BrokerHealthPacket::new(
+        BrokerKind::Portal,
+        BrokerHealthState::Ready,
+        44,
+        Some("ready".to_owned()),
+    )
+    .unwrap();
+
+    assert_eq!(
+        LiveBrokerRuntimeAdapter::health_observation(&packet),
+        SessionRuntimeObservation::BrokerHealthChanged {
+            broker: BrokerKind::Portal,
+            state: BrokerHealthState::Ready,
+            generation: 44,
+            status_message_len: 5,
+        }
+    );
+}
+
+#[test]
+fn live_portal_chrome_and_renderer_adapters_emit_counts_and_frame_serials() {
+    let portal = LivePortalRuntimeAdapter {
+        commands: vec![
+            PortalCommand::DropNotification {
+                transfer: PortalTransferId::from_raw(1),
+            },
+            PortalCommand::DeliverNotification {
+                transfer: PortalTransferId::from_raw(2),
+            },
+        ],
+    };
+    let chrome = LiveChromeRuntimeAdapter { command_count: 3 };
+    let engine = HeadlessEngine::default();
+    let output = engine.output();
+    let mut last_committed = LastCommittedLayout::default();
+    let mut renderer = LiveRendererRuntimeAdapter {
+        layers: vec![test_layer(1, 0, 0, Region::empty())],
+    };
+
+    let report = renderer
+        .render_frame(&engine, output.id, 94, &mut last_committed)
+        .unwrap();
+
+    assert_eq!(
+        portal.drain_observation(),
+        SessionRuntimeObservation::PortalCommandsReady { count: 2 }
+    );
+    assert_eq!(
+        chrome.present_observation(),
+        SessionRuntimeObservation::ChromeCommandsReady { count: 3 }
+    );
+    assert_eq!(
+        LiveRendererRuntimeAdapter::rendered_observation(&report),
+        SessionRuntimeObservation::FrameRendered { frame_serial: 94 }
+    );
 }
 
 #[test]

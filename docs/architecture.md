@@ -479,6 +479,14 @@ smoke still call the observation seam directly because they are intentionally
 adapter-level checks: health packet decoding and WM transaction observation,
 not full session ticks.
 
+`RuntimeDriverAdapter` is the live-source seam for the same executor. The
+driver asks an adapter to answer each runtime command with a reduced
+observation or concrete frame report: X event count, WM layout/restart result,
+frame scheduling/rendering, portal drain count, and chrome presentation count.
+`HeadlessRuntimeAdapter` preserves deterministic test behavior, while live
+skeleton adapters model X bridge, WM socket, broker health, portal, chrome, and
+renderer intake without blocking on file descriptors yet.
+
 The headless runtime tick smoke now drives this reducer around the existing
 capture -> session tick -> replay path. It executes the reducer's X polling,
 WM policy, frame scheduling, render, portal drain, and chrome presentation
