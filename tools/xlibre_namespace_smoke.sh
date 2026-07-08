@@ -150,6 +150,13 @@ echo "portal clipboard deny smoke:"
     cargo run -q -p sophia-cli -- portal-clipboard-deny-smoke
 )
 
+echo "root live clipboard portal smoke:"
+(
+    cd "$ROOT_DIR"
+    env DISPLAY="$DISPLAY_NAME" XAUTHORITY="$WORK_DIR/root.xauth" \
+        cargo run -q -p sophia-cli -- x-smoke-live-clipboard-portal
+)
+
 echo "routed-input grab/focus edge smoke:"
 (
     cd "$ROOT_DIR"

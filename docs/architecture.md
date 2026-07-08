@@ -334,6 +334,13 @@ property payload and a successful `SelectionNotify` whose property is the
 request property rather than `None`. This is the data artifact a live X path
 must later apply with `ChangeProperty` before sending the notify event.
 
+The live X smoke now exercises both branches against an X server. It creates
+selection owner/requestor windows, calls `ConvertSelection`, dispatches the real
+`SelectionRequest` through the portal reducer, sends denial as
+`SelectionNotify(property=None)`, then approves a second request by writing the
+bounded text property with `ChangeProperty` and sending a successful
+`SelectionNotify`.
+
 The first drag-and-drop portal reducer follows the same rule. It records a
 bounded list of offered transfer types, keeps the handoff pending/private until
 explicit approval, binds approval to a source generation, and emits abstract
@@ -518,8 +525,9 @@ transfers. X11 `SelectionRequest` context can now become a bounded clipboard
 portal import request and native failure reply context, and the X bridge can
 dispatch the real `Event::SelectionRequest` into the clipboard portal reducer.
 Approved text handoff now produces a bounded property payload and success
-notify artifact. Full live paste import still requires wiring those artifacts
-to real X property writes and event delivery.
+notify artifact. The live smoke verifies those artifacts against real X
+property writes and event delivery for one text target. General target
+negotiation and full clipboard ownership brokering remain future work.
 
 ## XLibre Responsibilities
 

@@ -21,8 +21,8 @@ use sophia_x_bridge::{
     ClipboardSelectionFailureRequest, TestClientConfig, XMirrorState, XSelectionChangeKind,
     XSelectionEvent, XSelectionMonitor, capture_readback_display,
     clipboard_selection_failure_notify, clipboard_selection_text_handoff_notify,
-    dispatch_clipboard_selection_request_event, run_test_client_window, smoke_routed_input,
-    smoke_routed_input_edges, stress_routed_input,
+    dispatch_clipboard_selection_request_event, run_test_client_window,
+    smoke_live_clipboard_portal, smoke_routed_input, smoke_routed_input_edges, stress_routed_input,
 };
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -768,6 +768,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    if args
+        .iter()
+        .any(|arg| arg == "x-smoke-live-clipboard-portal")
+    {
+        let display = arg_value(&args, "--display");
+        let report = smoke_live_clipboard_portal(display.as_deref())?;
+
+        println!(
+            "x-smoke-live-clipboard-portal display={} owner={:#x} requestor={:#x} selection={:#x} target={:#x} denied_property={:#x} approved_property={:#x} failure_property={:#x} success_property={:#x} handoff_bytes={} observed_handoff_bytes={}",
+            report.display_name.as_deref().unwrap_or("<default>"),
+            report.owner.xid(),
+            report.requestor.xid(),
+            report.selection,
+            report.target,
+            report.denied_property,
+            report.approved_property,
+            report.failure_property,
+            report.success_property,
+            report.handoff_bytes,
+            report.observed_handoff_bytes,
+        );
+        return Ok(());
+    }
+
     if args.iter().any(|arg| arg == "x-smoke-routed-input") {
         let display = arg_value(&args, "--display");
         let report = smoke_routed_input(display.as_deref())?;
@@ -850,6 +874,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("commands: portal-clipboard-deny-smoke");
     println!("commands: portal-clipboard-request-smoke");
     println!("commands: portal-clipboard-handoff-smoke");
+    println!("commands: x-smoke-live-clipboard-portal [--display=:99]");
     println!("commands: x-smoke-routed-input [--display=:99]");
     println!("commands: x-smoke-routed-input-edges");
     println!(

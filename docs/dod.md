@@ -624,6 +624,11 @@ requires a non-`None` request property, rejects non-text targets, caps UTF-8
 payload bytes with `MAX_CLIPBOARD_TEXT_HANDOFF_BYTES`, and emits a property
 payload plus successful `SelectionNotify` artifact.
 
+The live clipboard portal smoke applies those artifacts to X: denial sends only
+the failure notify, while approval writes the bounded text property before
+sending the success notify. The smoke must read the requestor property back to
+prove the bytes reached X.
+
 Drag-and-drop follows the same reducer shape. Offered MIME/protocol targets are
 bounded before storage, approval is generation-bound, denial or stale ownership
 becomes an abstract cancel command, and Xdnd-specific protocol mechanics stay

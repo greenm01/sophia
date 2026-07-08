@@ -640,6 +640,13 @@ original request, caps the UTF-8 payload, and produces the property bytes plus a
 successful `SelectionNotify` with the request property. Live X property writes
 and send-event delivery remain the next portal execution step.
 
+The live X clipboard portal smoke now covers request -> deny and request ->
+approved handoff: `sophia-cli x-smoke-live-clipboard-portal`. Against Xvfb it
+creates owner/requestor windows, receives real `SelectionRequest` events from
+`ConvertSelection`, verifies denial returns `SelectionNotify(property=None)`,
+then approves a second request, writes the bounded UTF-8 property, sends success
+notify, and reads the property bytes back from X.
+
 Broker IPC now has its first bounded packet contract. `BrokerHealthPacket`
 covers only portal/metadata broker identity, coarse health state, generation,
 and an optional short status message. It deliberately excludes raw client
