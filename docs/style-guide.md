@@ -153,6 +153,30 @@ Good examples:
 Policy denial is not an internal error. Treat it as an expected outcome with a
 clear status.
 
+## Logging
+
+Sophia libraries use `tracing` for structured diagnostics. Binaries and runtime
+entrypoints install subscribers; libraries do not.
+
+Default logs must not expose sandbox-sensitive identity or payload data:
+
+- no raw XIDs, namespace IDs, window titles, app classes, PIDs, or icon pixels;
+- no clipboard, drag-and-drop, file, URI, notification body, or pixel payloads;
+- no raw portal payload handles unless the handle is explicitly opaque and
+  already user-approved for that log context.
+
+Prefer opaque Sophia IDs, generations, counts, enum outcomes, and durations.
+Engine logs should describe compositor/session decisions, not user data.
+
+Levels:
+
+- `trace`: per-layer, per-command, or hot-path counters.
+- `debug`: normal state transitions and accepted reducer outcomes.
+- `warn`: rejected, stale, invalid, timed-out, or fallback outcomes that are
+  expected but security-relevant.
+- `error`: only when a library cannot return the failure to its caller. Most
+  engine failures should be returned as typed errors instead.
+
 ## Allocation
 
 The compositor hot path should not allocate casually. It may resize capacity at

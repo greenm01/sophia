@@ -492,6 +492,14 @@ No process should hold a mutable reference into another process's table. Cross a
 boundary by serializing a packet or by passing an OS handle with explicit
 ownership.
 
+## Observability
+
+Logs are another boundary. Engine diagnostics may carry opaque Sophia IDs,
+generations, counts, outcomes, and timing data, but default logs must not carry
+raw XIDs, namespace IDs, titles, classes, PIDs, icon pixels, portal payloads, or
+buffer contents. Structured `tracing` spans and events should explain decisions
+without weakening namespace isolation.
+
 ## Hot Paths
 
 The hot paths are:

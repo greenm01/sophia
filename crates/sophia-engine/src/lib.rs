@@ -22,7 +22,7 @@ use sophia_runtime::{
     RestartPolicy, SophiaErrorExt, SophiaErrorKind, SupervisedProcessKind, SupervisorCommand,
     SupervisorEvent, SupervisorState, update_supervisor,
 };
-use tracing::instrument;
+use tracing::{debug, instrument, trace, warn};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EngineError {
@@ -148,8 +148,22 @@ pub fn update_wm_supervisor_from_runtime_action(
     debug_assert_eq!(state.process, SupervisedProcessKind::WindowManager);
 
     match action {
-        WmRuntimeAction::KeepRunning => (state, SupervisorCommand::None),
+        WmRuntimeAction::KeepRunning => {
+            debug!(
+                process = ?state.process,
+                running = state.running,
+                restart_attempts = state.restart_attempts,
+                "WM runtime action keeps supervisor state"
+            );
+            (state, SupervisorCommand::None)
+        }
         WmRuntimeAction::RestartWm { .. } => {
+            warn!(
+                process = ?state.process,
+                running = state.running,
+                restart_attempts = state.restart_attempts,
+                "WM runtime action requests supervisor restart"
+            );
             update_supervisor(state, SupervisorEvent::RestartRequested, policy)
         }
     }
@@ -327,6 +341,11 @@ where
     S: Read + Write,
 {
     let frame = encode_wm_request_frame(request).map_err(WmIpcError::Codec)?;
+    debug!(
+        transaction = request.transaction.raw(),
+        request_bytes = frame.len(),
+        "sending WM request frame"
+    );
     stream
         .write_all(&frame)
         .map_err(|error| WmIpcError::Io(error.to_string()))?;
@@ -336,11 +355,21 @@ where
 
     let response = read_wm_response_frame(stream)?;
     if response.transaction != request.transaction {
+        warn!(
+            expected_transaction = request.transaction.raw(),
+            actual_transaction = response.transaction.raw(),
+            "rejected WM response with mismatched transaction"
+        );
         return Err(WmIpcError::TransactionMismatch {
             expected: request.transaction,
             actual: response.transaction,
         });
     }
+    debug!(
+        transaction = response.transaction.raw(),
+        response_commands = response.commands.len(),
+        "received WM response frame"
+    );
 
     Ok(response)
 }
@@ -359,6 +388,11 @@ where
             .expect("fixed IPC header payload range should be present"),
     ) as usize;
     if payload_len > SOPHIA_IPC_MAX_PAYLOAD_LEN {
+        warn!(
+            payload_len,
+            max_payload_len = SOPHIA_IPC_MAX_PAYLOAD_LEN,
+            "rejected oversized WM response frame"
+        );
         return Err(WmIpcError::Codec(IpcCodecError::PayloadTooLarge(
             payload_len,
         )));
@@ -532,15 +566,39 @@ pub enum MetadataChromeRejectReason {
 
 impl ChromeBroker {
     pub fn upsert(&mut self, descriptor: ChromeDescriptor) {
+        debug!(
+            surface_index = descriptor.surface.index(),
+            surface_generation = descriptor.surface.generation(),
+            descriptor_generation = descriptor.generation,
+            has_label = descriptor.label.is_some(),
+            has_icon = descriptor.icon.is_some(),
+            trust_level = ?descriptor.trust_level,
+            attention = ?descriptor.attention,
+            "upserting chrome descriptor"
+        );
         self.descriptors.insert(descriptor.surface, descriptor);
     }
 
     pub fn apply_metadata(&mut self, metadata: SanitizedChromeMetadata) -> MetadataChromeUpdate {
+        let surface = metadata.surface;
+        let generation = metadata.generation;
         let Ok(descriptor) = chrome_descriptor_from_metadata(metadata) else {
+            warn!(
+                surface_index = surface.index(),
+                surface_generation = surface.generation(),
+                metadata_generation = generation,
+                "rejected sanitized chrome metadata with invalid label"
+            );
             return MetadataChromeUpdate::Rejected(MetadataChromeRejectReason::InvalidLabel);
         };
 
         if !descriptor.surface.is_valid() {
+            warn!(
+                surface_index = descriptor.surface.index(),
+                surface_generation = descriptor.surface.generation(),
+                metadata_generation = descriptor.generation,
+                "rejected sanitized chrome metadata with invalid surface"
+            );
             return MetadataChromeUpdate::Rejected(MetadataChromeRejectReason::InvalidSurface);
         }
 
@@ -548,6 +606,12 @@ impl ChromeBroker {
             .get(descriptor.surface)
             .is_some_and(|existing| existing.generation > descriptor.generation)
         {
+            warn!(
+                surface_index = descriptor.surface.index(),
+                surface_generation = descriptor.surface.generation(),
+                metadata_generation = descriptor.generation,
+                "rejected stale sanitized chrome metadata"
+            );
             return MetadataChromeUpdate::Rejected(MetadataChromeRejectReason::StaleGeneration);
         }
 
@@ -558,6 +622,12 @@ impl ChromeBroker {
 
     pub fn remove_metadata(&mut self, surface: SurfaceId, generation: u64) -> MetadataChromeUpdate {
         if !surface.is_valid() {
+            warn!(
+                surface_index = surface.index(),
+                surface_generation = surface.generation(),
+                metadata_generation = generation,
+                "rejected chrome descriptor removal with invalid surface"
+            );
             return MetadataChromeUpdate::Rejected(MetadataChromeRejectReason::InvalidSurface);
         }
 
@@ -565,10 +635,22 @@ impl ChromeBroker {
             .get(surface)
             .is_some_and(|existing| existing.generation > generation)
         {
+            warn!(
+                surface_index = surface.index(),
+                surface_generation = surface.generation(),
+                metadata_generation = generation,
+                "rejected stale chrome descriptor removal"
+            );
             return MetadataChromeUpdate::Rejected(MetadataChromeRejectReason::StaleGeneration);
         }
 
         self.remove_surface(surface);
+        debug!(
+            surface_index = surface.index(),
+            surface_generation = surface.generation(),
+            metadata_generation = generation,
+            "removed chrome descriptor metadata"
+        );
         MetadataChromeUpdate::Removed { surface }
     }
 
@@ -638,6 +720,10 @@ impl NotificationChromePresenter {
 
     pub fn stage_request(&mut self, request: &NotificationRequest) -> NotificationChromeUpdate {
         if !request.transfer.is_valid() {
+            warn!(
+                transfer = request.transfer.raw(),
+                "rejected notification chrome request with invalid transfer"
+            );
             return NotificationChromeUpdate::Rejected(
                 NotificationChromeRejectReason::InvalidTransfer,
             );
@@ -652,10 +738,22 @@ impl NotificationChromePresenter {
                 .iter()
                 .any(|action| !valid_notification_chrome_text(action, MAX_NOTIFICATION_ACTION_LEN))
         {
+            warn!(
+                transfer = request.transfer.raw(),
+                generation = request.generation,
+                action_count = request.actions.len(),
+                "rejected notification chrome request with invalid text"
+            );
             return NotificationChromeUpdate::Rejected(NotificationChromeRejectReason::InvalidText);
         }
 
         if request.actions.len() > MAX_NOTIFICATION_ACTIONS {
+            warn!(
+                transfer = request.transfer.raw(),
+                generation = request.generation,
+                action_count = request.actions.len(),
+                "rejected notification chrome request with too many actions"
+            );
             return NotificationChromeUpdate::Rejected(
                 NotificationChromeRejectReason::TooManyActions,
             );
@@ -671,6 +769,14 @@ impl NotificationChromePresenter {
         };
 
         self.pending.insert(request.transfer, notification);
+        debug!(
+            transfer = request.transfer.raw(),
+            generation = request.generation,
+            urgency = ?request.urgency,
+            action_count = request.actions.len(),
+            pending_count = self.pending.len(),
+            "staged notification chrome request"
+        );
         NotificationChromeUpdate::Staged {
             transfer: request.transfer,
         }
@@ -712,6 +818,10 @@ impl NotificationChromePresenter {
 
     fn present(&mut self, transfer: PortalTransferId) -> NotificationChromeUpdate {
         let Some(notification) = self.pending.remove(&transfer) else {
+            warn!(
+                transfer = transfer.raw(),
+                "rejected notification chrome present for unknown transfer"
+            );
             return NotificationChromeUpdate::Rejected(
                 NotificationChromeRejectReason::UnknownTransfer,
             );
@@ -719,12 +829,24 @@ impl NotificationChromePresenter {
 
         if self.visible.len() >= MAX_CHROME_NOTIFICATIONS && !self.visible.contains_key(&transfer) {
             self.pending.insert(transfer, notification);
+            warn!(
+                transfer = transfer.raw(),
+                visible_count = self.visible.len(),
+                max_visible = MAX_CHROME_NOTIFICATIONS,
+                "rejected notification chrome present because visible set is full"
+            );
             return NotificationChromeUpdate::Rejected(
                 NotificationChromeRejectReason::TooManyVisibleNotifications,
             );
         }
 
         self.visible.insert(transfer, notification);
+        debug!(
+            transfer = transfer.raw(),
+            pending_count = self.pending.len(),
+            visible_count = self.visible.len(),
+            "presented notification chrome"
+        );
         NotificationChromeUpdate::Presented { transfer }
     }
 
@@ -733,8 +855,20 @@ impl NotificationChromePresenter {
         let removed_visible = self.visible.remove(&transfer).is_some();
 
         if removed_pending || removed_visible {
+            debug!(
+                transfer = transfer.raw(),
+                removed_pending,
+                removed_visible,
+                pending_count = self.pending.len(),
+                visible_count = self.visible.len(),
+                "dismissed notification chrome"
+            );
             NotificationChromeUpdate::Dismissed { transfer }
         } else {
+            warn!(
+                transfer = transfer.raw(),
+                "rejected notification chrome dismiss for unknown transfer"
+            );
             NotificationChromeUpdate::Rejected(NotificationChromeRejectReason::UnknownTransfer)
         }
     }
@@ -781,13 +915,21 @@ impl HeadlessEngine {
 
         let mut commands = Vec::new();
         let mut damage = Region::empty();
+        let mut skipped_layers = 0usize;
+        let mut empty_targets = 0usize;
 
         for layer in &layers {
             if !layer.surface.is_valid() {
+                warn!(
+                    output = request.output.raw(),
+                    frame_serial = request.frame_serial,
+                    "rejected frame plan with invalid surface"
+                );
                 return Err(EngineError::InvalidSurface);
             }
 
             if !should_render(layer) {
+                skipped_layers += 1;
                 continue;
             }
 
@@ -797,6 +939,7 @@ impl HeadlessEngine {
             );
 
             if target.is_empty() {
+                empty_targets += 1;
                 continue;
             }
 
@@ -811,6 +954,24 @@ impl HeadlessEngine {
                 alpha: layer.opacity,
             });
         }
+        let rendered_layers = commands.len();
+        trace!(
+            output = request.output.raw(),
+            frame_serial = request.frame_serial,
+            layer_count = layers.len(),
+            rendered_layers,
+            skipped_layers,
+            empty_targets,
+            "frame planning layer filter summary"
+        );
+        debug!(
+            output = request.output.raw(),
+            frame_serial = request.frame_serial,
+            layer_count = layers.len(),
+            render_commands = commands.len(),
+            damage_rects = damage.rects.len(),
+            "planned frame"
+        );
 
         Ok(FrameSnapshot {
             output: request.output,
@@ -832,6 +993,11 @@ impl HeadlessEngine {
         self.validate_output(frame.output)?;
 
         if frame.output_size != self.output.size || frame.output_scale != self.output.scale {
+            warn!(
+                output = frame.output.raw(),
+                frame_serial = frame.frame_serial,
+                "rejected frame replay with mismatched output shape"
+            );
             return Err(EngineError::InvalidFrame);
         }
 
@@ -844,11 +1010,25 @@ impl HeadlessEngine {
 
         for (command_index, command) in frame.commands.iter().enumerate() {
             if command.output != frame.output {
+                warn!(
+                    output = frame.output.raw(),
+                    frame_serial = frame.frame_serial,
+                    command_index,
+                    command_output = command.output.raw(),
+                    "rejected frame replay with command for different output"
+                );
                 return Err(EngineError::InvalidOutput);
             }
 
             if let Some(source) = command.source {
                 if !source.is_valid() || !surfaces.contains(&source) {
+                    warn!(
+                        output = frame.output.raw(),
+                        frame_serial = frame.frame_serial,
+                        command_index,
+                        has_source = command.source.is_some(),
+                        "rejected frame replay with invalid command source"
+                    );
                     return Err(EngineError::InvalidSurface);
                 }
             }
@@ -861,6 +1041,14 @@ impl HeadlessEngine {
                 alpha: command.alpha,
             });
         }
+        debug!(
+            output = frame.output.raw(),
+            frame_serial = frame.frame_serial,
+            command_count = frame.commands.len(),
+            replay_steps = steps.len(),
+            damage_rects = frame.damage.rects.len(),
+            "replayed frame"
+        );
 
         Ok(ReplayReport {
             output: frame.output,
@@ -872,6 +1060,11 @@ impl HeadlessEngine {
         })
     }
 
+    #[instrument(skip_all, fields(
+        transaction = transaction.transaction.raw(),
+        placements = transaction.render_positions.len(),
+        layer_count = layers.len()
+    ))]
     pub fn apply_layout_transaction(
         &self,
         transaction: &LayoutTransaction,
@@ -885,9 +1078,19 @@ impl HeadlessEngine {
 
         for placement in &transaction.render_positions {
             if !placement.surface.is_valid() {
+                warn!(
+                    transaction = transaction.transaction.raw(),
+                    "rejected layout transaction with invalid placement surface"
+                );
                 return Err(EngineError::InvalidSurface);
             }
             let Some(index) = layer_indexes.get(&placement.surface).copied() else {
+                warn!(
+                    transaction = transaction.transaction.raw(),
+                    surface_index = placement.surface.index(),
+                    surface_generation = placement.surface.generation(),
+                    "rejected layout transaction for unknown surface"
+                );
                 return Err(EngineError::InvalidSurface);
             };
             let layer = &mut layers[index];
@@ -905,6 +1108,11 @@ impl HeadlessEngine {
         Ok(layers)
     }
 
+    #[instrument(skip_all, fields(
+        transaction = transaction.transaction.raw(),
+        placements = transaction.render_positions.len(),
+        layer_count = layers.len()
+    ))]
     pub fn commit_layout_transaction(
         &self,
         transaction: &LayoutTransaction,
@@ -919,22 +1127,42 @@ impl HeadlessEngine {
         match self.apply_layout_transaction(transaction, layers.clone()) {
             Ok(committed) => {
                 *layers = committed;
+                debug!(
+                    transaction = transaction.transaction.raw(),
+                    applied_surfaces = applied_surfaces.len(),
+                    outcome = ?TransactionOutcome::Committed,
+                    "committed layout transaction"
+                );
                 TransactionCommit {
                     transaction: transaction.transaction,
                     outcome: TransactionOutcome::Committed,
                     applied_surfaces,
                 }
             }
-            Err(EngineError::InvalidSurface) => TransactionCommit {
-                transaction: transaction.transaction,
-                outcome: TransactionOutcome::RejectedInvalidSurface,
-                applied_surfaces: Vec::new(),
-            },
-            Err(_) => TransactionCommit {
-                transaction: transaction.transaction,
-                outcome: TransactionOutcome::RejectedStaleSurface,
-                applied_surfaces: Vec::new(),
-            },
+            Err(EngineError::InvalidSurface) => {
+                warn!(
+                    transaction = transaction.transaction.raw(),
+                    outcome = ?TransactionOutcome::RejectedInvalidSurface,
+                    "rejected layout transaction"
+                );
+                TransactionCommit {
+                    transaction: transaction.transaction,
+                    outcome: TransactionOutcome::RejectedInvalidSurface,
+                    applied_surfaces: Vec::new(),
+                }
+            }
+            Err(_) => {
+                warn!(
+                    transaction = transaction.transaction.raw(),
+                    outcome = ?TransactionOutcome::RejectedStaleSurface,
+                    "rejected layout transaction"
+                );
+                TransactionCommit {
+                    transaction: transaction.transaction,
+                    outcome: TransactionOutcome::RejectedStaleSurface,
+                    applied_surfaces: Vec::new(),
+                }
+            }
         }
     }
 
@@ -943,6 +1171,11 @@ impl HeadlessEngine {
         transaction: TransactionId,
         _layers: &[LayerSnapshot],
     ) -> TransactionCommit {
+        warn!(
+            transaction = transaction.raw(),
+            outcome = ?TransactionOutcome::TimedOut,
+            "preserving layout because WM transaction is absent"
+        );
         TransactionCommit {
             transaction,
             outcome: TransactionOutcome::TimedOut,
@@ -959,18 +1192,38 @@ impl HeadlessEngine {
     where
         S: Read + Write,
     {
+        debug!(
+            transaction = request.transaction.raw(),
+            request_kind = wm_request_kind_name(&request.kind),
+            node_count = wm_request_node_count(&request.kind),
+            layer_count = layers.len(),
+            "requesting WM transaction"
+        );
         match request_wm_over_stream(stream, request) {
             Ok(response) => {
+                debug!(
+                    transaction = request.transaction.raw(),
+                    response_commands = response.commands.len(),
+                    response_timeout_msec = response.timeout_msec,
+                    "received WM transaction response"
+                );
                 let transaction = response.into_layout_transaction();
                 WmTransactionUpdate {
                     commit: self.commit_layout_transaction(&transaction, layers),
                     ipc_error: None,
                 }
             }
-            Err(error) => WmTransactionUpdate {
-                commit: self.preserve_layout_on_wm_absent(request.transaction, layers),
-                ipc_error: Some(error),
-            },
+            Err(error) => {
+                warn!(
+                    transaction = request.transaction.raw(),
+                    error = %error,
+                    "WM transaction IPC failed; preserving layout"
+                );
+                WmTransactionUpdate {
+                    commit: self.preserve_layout_on_wm_absent(request.transaction, layers),
+                    ipc_error: Some(error),
+                }
+            }
         }
     }
 
@@ -986,11 +1239,30 @@ impl HeadlessEngine {
     {
         let update = self.request_and_commit_wm_transaction(stream, request, layers);
         match update.commit.outcome {
-            TransactionOutcome::Committed => last_committed.replace(layers),
+            TransactionOutcome::Committed => {
+                last_committed.replace(layers);
+                debug!(
+                    transaction = request.transaction.raw(),
+                    cached_layers = last_committed.layers().len(),
+                    "updated last committed layout cache"
+                );
+            }
             TransactionOutcome::TimedOut if !last_committed.is_empty() => {
                 last_committed.restore_into(layers);
+                warn!(
+                    transaction = request.transaction.raw(),
+                    restored_layers = layers.len(),
+                    "restored last committed layout after WM timeout"
+                );
             }
-            _ => {}
+            _ => {
+                debug!(
+                    transaction = request.transaction.raw(),
+                    outcome = ?update.commit.outcome,
+                    cached_layers = last_committed.layers().len(),
+                    "left last committed layout cache unchanged"
+                );
+            }
         }
         update
     }
@@ -1018,12 +1290,24 @@ impl HeadlessEngine {
     ) -> Result<SessionTickReport, EngineError> {
         let (layers, restored_last_committed) = match request.layers {
             SessionLayerSource::Fresh(layers) => {
+                debug!(
+                    output = request.output.raw(),
+                    frame_serial = request.frame_serial,
+                    layer_count = layers.len(),
+                    "running session tick from fresh layers"
+                );
                 last_committed.replace(&layers);
                 (layers, false)
             }
             SessionLayerSource::RestoreLastCommitted => {
                 let mut layers = Vec::new();
                 last_committed.restore_into(&mut layers);
+                warn!(
+                    output = request.output.raw(),
+                    frame_serial = request.frame_serial,
+                    restored_layers = layers.len(),
+                    "running session tick from last committed layout"
+                );
                 (layers, true)
             }
         };
@@ -1035,6 +1319,14 @@ impl HeadlessEngine {
             layers,
         )?;
         let replay = self.replay_frame(&frame)?;
+        debug!(
+            output = request.output.raw(),
+            frame_serial = request.frame_serial,
+            restored_last_committed,
+            render_commands = frame.commands.len(),
+            replay_steps = replay.steps.len(),
+            "completed session tick"
+        );
 
         Ok(SessionTickReport {
             frame,
@@ -1047,6 +1339,11 @@ impl HeadlessEngine {
         if output.is_valid() && output == self.output.id {
             Ok(())
         } else {
+            warn!(
+                output = output.raw(),
+                expected_output = self.output.id.raw(),
+                "rejected engine operation with invalid output"
+            );
             Err(EngineError::InvalidOutput)
         }
     }
@@ -1115,25 +1412,70 @@ fn moved_damage(old_geometry: Rect, new_geometry: Rect) -> Region {
     damage
 }
 
+fn wm_request_kind_name(kind: &WmRequestKind) -> &'static str {
+    match kind {
+        WmRequestKind::ManageSurface(_) => "manage_surface",
+        WmRequestKind::RelayoutWorkspace(_) => "relayout_workspace",
+        WmRequestKind::SurfaceRemoved { .. } => "surface_removed",
+    }
+}
+
+fn wm_request_node_count(kind: &WmRequestKind) -> usize {
+    match kind {
+        WmRequestKind::ManageSurface(_) => 1,
+        WmRequestKind::RelayoutWorkspace(relayout) => relayout.nodes.len(),
+        WmRequestKind::SurfaceRemoved { .. } => 0,
+    }
+}
+
 pub fn validate_chrome_action(
     request: &ChromeActionRequest,
     nodes: &[LayoutNodeSnapshot],
 ) -> ChromeActionDecision {
     let Some(node) = nodes.iter().find(|node| node.surface == request.surface) else {
+        warn!(
+            surface_index = request.surface.index(),
+            surface_generation = request.surface.generation(),
+            request_generation = request.generation,
+            action = ?request.kind,
+            "rejected chrome action for unknown surface"
+        );
         return ChromeActionDecision::Rejected(ChromeActionRejectReason::UnknownSurface);
     };
 
     if node.generation != request.generation {
+        warn!(
+            surface_index = request.surface.index(),
+            surface_generation = request.surface.generation(),
+            request_generation = request.generation,
+            current_generation = node.generation,
+            action = ?request.kind,
+            "rejected stale chrome action"
+        );
         return ChromeActionDecision::Rejected(ChromeActionRejectReason::StaleGeneration);
     }
 
     match request.kind {
         ChromeActionKind::CloseSurfaceRequested => {
             if node.capabilities.closable {
+                debug!(
+                    surface_index = request.surface.index(),
+                    surface_generation = request.surface.generation(),
+                    request_generation = request.generation,
+                    action = ?request.kind,
+                    "accepted chrome action"
+                );
                 ChromeActionDecision::RequestPoliteClose {
                     surface: request.surface,
                 }
             } else {
+                warn!(
+                    surface_index = request.surface.index(),
+                    surface_generation = request.surface.generation(),
+                    request_generation = request.generation,
+                    action = ?request.kind,
+                    "rejected chrome action for non-closable surface"
+                );
                 ChromeActionDecision::Rejected(ChromeActionRejectReason::NotClosable)
             }
         }
@@ -1144,12 +1486,20 @@ pub fn handle_session_event(event: SessionEvent, nodes: &[LayoutNodeSnapshot]) -
     match event {
         SessionEvent::ChromeAction(request) => {
             let decision = validate_chrome_action(&request, nodes);
-            let commands = match decision {
+            let commands = match &decision {
                 ChromeActionDecision::RequestPoliteClose { surface } => {
-                    vec![SessionCommand::RequestPoliteClose { surface }]
+                    vec![SessionCommand::RequestPoliteClose { surface: *surface }]
                 }
                 ChromeActionDecision::Rejected(_) => Vec::new(),
             };
+            debug!(
+                surface_index = request.surface.index(),
+                surface_generation = request.surface.generation(),
+                action = ?request.kind,
+                decision = ?decision,
+                command_count = commands.len(),
+                "handled chrome session event"
+            );
 
             SessionUpdate {
                 chrome_decision: Some(decision),
@@ -1160,12 +1510,21 @@ pub fn handle_session_event(event: SessionEvent, nodes: &[LayoutNodeSnapshot]) -
             transaction,
             surface,
             workspace,
-        } => SessionUpdate {
-            chrome_decision: None,
-            commands: vec![SessionCommand::SendWmRequest(WmRequestPacket {
-                transaction,
-                kind: WmRequestKind::SurfaceRemoved { surface, workspace },
-            })],
-        },
+        } => {
+            debug!(
+                transaction = transaction.raw(),
+                surface_index = surface.index(),
+                surface_generation = surface.generation(),
+                workspace = workspace.raw(),
+                "handled surface removed session event"
+            );
+            SessionUpdate {
+                chrome_decision: None,
+                commands: vec![SessionCommand::SendWmRequest(WmRequestPacket {
+                    transaction,
+                    kind: WmRequestKind::SurfaceRemoved { surface, workspace },
+                })],
+            }
+        }
     }
 }
