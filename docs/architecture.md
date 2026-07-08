@@ -119,7 +119,10 @@ window titles, classes, icons, PIDs, namespace IDs, or X11 resource IDs.
 User-facing chrome such as titles, icons, attention indicators, and trust badges
 belongs to Sophia Engine or a compositor-shell component fed by a metadata
 broker. The broker may consume X metadata from Sophia X Bridge, but it exports
-sanitized compositor chrome data separately from WM layout data.
+sanitized compositor chrome data separately from WM layout data. Sophia Engine
+accepts that broker output as generation-checked sanitized metadata and applies
+it to `ChromeDescriptor` state; raw XIDs, namespace IDs, titles, classes, PIDs,
+and icon pixels do not cross this boundary.
 
 The WM is not on the per-frame or per-input hot path. Sophia Engine keeps the
 last committed policy state if the WM crashes or restarts.
@@ -151,7 +154,8 @@ The protocol should be sequence-oriented:
   decoration geometry, opacity, transforms.
 - **Chrome sequence** for compositor-owned presentation metadata: redacted
   display labels, icon tokens, trust badges, and attention state. This sequence
-  is not consumed by the WM.
+  is not consumed by the WM. Stale metadata generations are rejected so older
+  broker output cannot overwrite newer chrome state.
 
 ### Engine to XLibre Rendering
 
@@ -327,6 +331,13 @@ The first session seam is a reducer inside Sophia Engine. A
 close requests emit `SessionCommand::RequestPoliteClose`, which the runtime
 dispatches to Sophia X Bridge. Rejected chrome actions emit no command. This
 keeps close intent out of the blind WM protocol.
+
+Metadata broker output follows the same ownership split. The runtime gives
+Sophia Engine only `SanitizedChromeMetadata`: surface identity, optional bounded
+display label, redaction bit, compositor icon token, trust level, attention
+state, and generation. `ChromeBroker` turns accepted updates into
+`ChromeDescriptor` values and removes descriptors only when the removal
+generation is not stale.
 
 The WM notification is a separate lifecycle event. Only after XLibre/X Bridge
 reports that the surface was actually removed does Sophia Engine process

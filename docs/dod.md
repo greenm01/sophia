@@ -368,6 +368,13 @@ The compositor may use this data to draw title bars, top bars, tab strips, and
 security badges. The external WM should not need this packet to tile or focus
 surfaces.
 
+Sanitized metadata broker output enters Sophia Engine as a bounded metadata
+packet, not raw X properties. It may contain only `SurfaceId`, optional bounded
+display label, redaction bit, icon token, trust level, attention state, and
+generation. `ChromeBroker` maps accepted packets into `ChromeDescriptor`
+entries and rejects invalid labels, invalid surfaces, and stale generations.
+Descriptor removal follows the same generation rule.
+
 Chrome actions are not WM commands. A compositor close button produces a
 `ChromeActionRequest` owned by Engine/session policy, validated against surface
 generation and capabilities, then translated by Sophia X Bridge into normal X11

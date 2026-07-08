@@ -10,11 +10,12 @@ use sophia_portal::{
     MAX_NOTIFICATION_SUMMARY_LEN, NotificationRequest, NotificationUrgency, PortalCommand,
 };
 use sophia_protocol::{
-    BufferSource, ChromeActionKind, ChromeActionRequest, ChromeDescriptor, FrameSnapshot,
-    InputEventKind, InputEventPacket, InputRoute, InputRouteOutcome, IpcCodecError, LayerSnapshot,
-    LayoutNodeSnapshot, LayoutTransaction, OutputId, PortalTransferId, Rect, Region, RenderCommand,
-    RenderCommandKind, SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAX_PAYLOAD_LEN, Size, SurfaceId,
-    TransactionCommit, TransactionId, TransactionOutcome, WmRequestKind, WmRequestPacket,
+    AttentionState, BufferSource, ChromeActionKind, ChromeActionRequest, ChromeDescriptor,
+    DisplayLabel, FrameSnapshot, IconTokenId, InputEventKind, InputEventPacket, InputRoute,
+    InputRouteOutcome, IpcCodecError, LayerSnapshot, LayoutNodeSnapshot, LayoutTransaction,
+    OutputId, PortalTransferId, Rect, Region, RenderCommand, RenderCommandKind,
+    SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAX_PAYLOAD_LEN, Size, SurfaceId, TransactionCommit,
+    TransactionId, TransactionOutcome, TrustLevel, WmRequestKind, WmRequestPacket,
     WmResponsePacket, WorkspaceId, XWindowId, decode_wm_response_frame, encode_wm_request_frame,
 };
 use sophia_runtime::{
@@ -502,9 +503,73 @@ pub struct ChromeBroker {
     descriptors: BTreeMap<SurfaceId, ChromeDescriptor>,
 }
 
+pub const MAX_CHROME_LABEL_LEN: usize = 128;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SanitizedChromeMetadata {
+    pub surface: SurfaceId,
+    pub label: Option<String>,
+    pub label_redacted: bool,
+    pub icon: Option<IconTokenId>,
+    pub trust_level: TrustLevel,
+    pub attention: AttentionState,
+    pub generation: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum MetadataChromeUpdate {
+    Upserted { surface: SurfaceId },
+    Removed { surface: SurfaceId },
+    Rejected(MetadataChromeRejectReason),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MetadataChromeRejectReason {
+    InvalidSurface,
+    InvalidLabel,
+    StaleGeneration,
+}
+
 impl ChromeBroker {
     pub fn upsert(&mut self, descriptor: ChromeDescriptor) {
         self.descriptors.insert(descriptor.surface, descriptor);
+    }
+
+    pub fn apply_metadata(&mut self, metadata: SanitizedChromeMetadata) -> MetadataChromeUpdate {
+        let Ok(descriptor) = chrome_descriptor_from_metadata(metadata) else {
+            return MetadataChromeUpdate::Rejected(MetadataChromeRejectReason::InvalidLabel);
+        };
+
+        if !descriptor.surface.is_valid() {
+            return MetadataChromeUpdate::Rejected(MetadataChromeRejectReason::InvalidSurface);
+        }
+
+        if self
+            .get(descriptor.surface)
+            .is_some_and(|existing| existing.generation > descriptor.generation)
+        {
+            return MetadataChromeUpdate::Rejected(MetadataChromeRejectReason::StaleGeneration);
+        }
+
+        let surface = descriptor.surface;
+        self.upsert(descriptor);
+        MetadataChromeUpdate::Upserted { surface }
+    }
+
+    pub fn remove_metadata(&mut self, surface: SurfaceId, generation: u64) -> MetadataChromeUpdate {
+        if !surface.is_valid() {
+            return MetadataChromeUpdate::Rejected(MetadataChromeRejectReason::InvalidSurface);
+        }
+
+        if self
+            .get(surface)
+            .is_some_and(|existing| existing.generation > generation)
+        {
+            return MetadataChromeUpdate::Rejected(MetadataChromeRejectReason::StaleGeneration);
+        }
+
+        self.remove_surface(surface);
+        MetadataChromeUpdate::Removed { surface }
     }
 
     pub fn get(&self, surface: SurfaceId) -> Option<&ChromeDescriptor> {
@@ -1007,6 +1072,37 @@ impl EngineBackend for HeadlessEngine {
 
 fn should_render(layer: &LayerSnapshot) -> bool {
     layer.opacity > 0.0 && !layer.geometry.is_empty() && layer.source != BufferSource::None
+}
+
+fn chrome_descriptor_from_metadata(
+    metadata: SanitizedChromeMetadata,
+) -> Result<ChromeDescriptor, MetadataChromeRejectReason> {
+    let label = metadata
+        .label
+        .map(|text| {
+            if valid_chrome_label(&text) {
+                Ok(DisplayLabel {
+                    text,
+                    redacted: metadata.label_redacted,
+                })
+            } else {
+                Err(MetadataChromeRejectReason::InvalidLabel)
+            }
+        })
+        .transpose()?;
+
+    Ok(ChromeDescriptor {
+        surface: metadata.surface,
+        label,
+        icon: metadata.icon,
+        trust_level: metadata.trust_level,
+        attention: metadata.attention,
+        generation: metadata.generation,
+    })
+}
+
+fn valid_chrome_label(text: &str) -> bool {
+    !text.is_empty() && text.len() <= MAX_CHROME_LABEL_LEN && !text.chars().any(char::is_control)
 }
 
 fn valid_notification_chrome_text(text: &str, max_len: usize) -> bool {

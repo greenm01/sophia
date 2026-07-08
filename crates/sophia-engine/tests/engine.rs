@@ -1,11 +1,11 @@
 use sophia_engine::{
     ChromeActionDecision, ChromeActionRejectReason, ChromeBroker, EngineError, FramePlanRequest,
-    HeadlessEngine, LastCommittedLayout, NotificationChromePresenter,
-    NotificationChromeRejectReason, NotificationChromeUpdate, RoutedInputCoalescer,
-    RoutedInputFlushReason, RoutedInputQueueAction, SessionCommand, SessionEvent,
-    SessionLayerSource, SessionTickRequest, WmIpcError, WmRestartReason, WmRuntimeAction,
-    notification_chrome_command_from_portal, request_wm_over_stream,
-    update_wm_supervisor_from_runtime_action,
+    HeadlessEngine, LastCommittedLayout, MetadataChromeRejectReason, MetadataChromeUpdate,
+    NotificationChromePresenter, NotificationChromeRejectReason, NotificationChromeUpdate,
+    RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction, SanitizedChromeMetadata,
+    SessionCommand, SessionEvent, SessionLayerSource, SessionTickRequest, WmIpcError,
+    WmRestartReason, WmRuntimeAction, notification_chrome_command_from_portal,
+    request_wm_over_stream, update_wm_supervisor_from_runtime_action,
 };
 use sophia_portal::{NotificationRequest, NotificationUrgency, PortalCommand};
 use sophia_protocol::{
@@ -347,6 +347,95 @@ fn chrome_broker_removes_surface_metadata() {
     assert!(broker.remove_surface(surface).is_some());
     assert!(broker.get(surface).is_none());
     assert!(broker.is_empty());
+}
+
+#[test]
+fn metadata_broker_output_updates_chrome_descriptor() {
+    let mut broker = ChromeBroker::default();
+    let surface = SurfaceId::new(5, 1);
+
+    assert_eq!(
+        broker.apply_metadata(SanitizedChromeMetadata {
+            surface,
+            label: Some("Untrusted Browser".to_owned()),
+            label_redacted: true,
+            icon: Some(IconTokenId::from_raw(7)),
+            trust_level: TrustLevel::Untrusted,
+            attention: AttentionState::Notice,
+            generation: 3,
+        }),
+        MetadataChromeUpdate::Upserted { surface }
+    );
+
+    let descriptor = broker.get(surface).unwrap();
+    assert_eq!(descriptor.surface, surface);
+    assert_eq!(
+        descriptor.label.as_ref(),
+        Some(&DisplayLabel {
+            text: "Untrusted Browser".to_owned(),
+            redacted: true,
+        })
+    );
+    assert_eq!(descriptor.icon, Some(IconTokenId::from_raw(7)));
+    assert_eq!(descriptor.trust_level, TrustLevel::Untrusted);
+    assert_eq!(descriptor.attention, AttentionState::Notice);
+    assert_eq!(descriptor.generation, 3);
+}
+
+#[test]
+fn metadata_broker_output_rejects_stale_generation() {
+    let mut broker = ChromeBroker::default();
+    let surface = SurfaceId::new(6, 1);
+
+    broker.apply_metadata(metadata(surface, "Current", 9));
+    let update = broker.apply_metadata(metadata(surface, "Old", 8));
+
+    assert_eq!(
+        update,
+        MetadataChromeUpdate::Rejected(MetadataChromeRejectReason::StaleGeneration)
+    );
+    assert_eq!(
+        broker
+            .get(surface)
+            .and_then(|descriptor| descriptor.label.as_ref())
+            .map(|label| label.text.as_str()),
+        Some("Current")
+    );
+}
+
+#[test]
+fn metadata_broker_output_rejects_unsanitized_label() {
+    let mut broker = ChromeBroker::default();
+    let surface = SurfaceId::new(7, 1);
+    let mut metadata = metadata(surface, "Bad\nTitle", 1);
+    metadata.label_redacted = false;
+
+    let update = broker.apply_metadata(metadata);
+
+    assert_eq!(
+        update,
+        MetadataChromeUpdate::Rejected(MetadataChromeRejectReason::InvalidLabel)
+    );
+    assert!(broker.get(surface).is_none());
+}
+
+#[test]
+fn metadata_broker_removal_clears_descriptor_with_generation_check() {
+    let mut broker = ChromeBroker::default();
+    let surface = SurfaceId::new(8, 1);
+
+    broker.apply_metadata(metadata(surface, "Visible", 4));
+    assert_eq!(
+        broker.remove_metadata(surface, 3),
+        MetadataChromeUpdate::Rejected(MetadataChromeRejectReason::StaleGeneration)
+    );
+    assert!(broker.get(surface).is_some());
+
+    assert_eq!(
+        broker.remove_metadata(surface, 4),
+        MetadataChromeUpdate::Removed { surface }
+    );
+    assert!(broker.get(surface).is_none());
 }
 
 #[test]
@@ -1046,6 +1135,18 @@ fn wm_request(transaction: TransactionId) -> WmRequestPacket {
             surface: SurfaceId::new(1, 1),
             workspace: WorkspaceId::from_raw(1),
         },
+    }
+}
+
+fn metadata(surface: SurfaceId, label: &str, generation: u64) -> SanitizedChromeMetadata {
+    SanitizedChromeMetadata {
+        surface,
+        label: Some(label.to_owned()),
+        label_redacted: true,
+        icon: None,
+        trust_level: TrustLevel::Unknown,
+        attention: AttentionState::None,
+        generation,
     }
 }
 

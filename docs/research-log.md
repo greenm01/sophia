@@ -503,6 +503,13 @@ them only after a `DeliverNotification` command, and dismisses pending or
 visible state after `DropNotification`. This keeps approval/revocation in the
 portal reducer while making compositor-owned presentation state concrete.
 
+Sanitized metadata broker output now has a concrete Engine endpoint.
+`SanitizedChromeMetadata` contains only compositor-safe fields and
+`ChromeBroker` converts it into `ChromeDescriptor` state with label validation
+and generation checks. This makes the metadata/chrome path useful without
+exposing XIDs, namespace IDs, raw titles, classes, PIDs, or icon pixels to the
+WM protocol.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new
