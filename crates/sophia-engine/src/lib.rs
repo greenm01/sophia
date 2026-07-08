@@ -103,6 +103,22 @@ pub enum ChromeActionRejectReason {
     UnsupportedAction,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SessionEvent {
+    ChromeAction(ChromeActionRequest),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionUpdate {
+    pub chrome_decision: Option<ChromeActionDecision>,
+    pub commands: Vec<SessionCommand>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SessionCommand {
+    RequestPoliteClose { surface: SurfaceId },
+}
+
 pub trait EngineBackend {
     fn output(&self) -> HeadlessOutput;
 
@@ -349,6 +365,14 @@ impl HeadlessEngine {
         validate_chrome_action(request, nodes)
     }
 
+    pub fn handle_session_event(
+        &self,
+        event: SessionEvent,
+        nodes: &[LayoutNodeSnapshot],
+    ) -> SessionUpdate {
+        handle_session_event(event, nodes)
+    }
+
     fn validate_output(&self, output: OutputId) -> Result<(), EngineError> {
         if output.is_valid() && output == self.output.id {
             Ok(())
@@ -406,6 +430,25 @@ pub fn validate_chrome_action(
                 }
             } else {
                 ChromeActionDecision::Rejected(ChromeActionRejectReason::NotClosable)
+            }
+        }
+    }
+}
+
+pub fn handle_session_event(event: SessionEvent, nodes: &[LayoutNodeSnapshot]) -> SessionUpdate {
+    match event {
+        SessionEvent::ChromeAction(request) => {
+            let decision = validate_chrome_action(&request, nodes);
+            let commands = match decision {
+                ChromeActionDecision::RequestPoliteClose { surface } => {
+                    vec![SessionCommand::RequestPoliteClose { surface }]
+                }
+                ChromeActionDecision::Rejected(_) => Vec::new(),
+            };
+
+            SessionUpdate {
+                chrome_decision: Some(decision),
+                commands,
             }
         }
     }

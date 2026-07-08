@@ -369,6 +369,10 @@ Chrome actions are not WM commands. A compositor close button produces a
 generation and capabilities, then translated by Sophia X Bridge into normal X11
 close semantics. The WM receives only later layout consequences.
 
+Session events are compositor/session inputs that may produce privileged
+commands. For chrome close, `SessionEvent::ChromeAction` can produce
+`SessionCommand::RequestPoliteClose`; it must not produce a WM command.
+
 ### SurfaceSnapshot
 
 Sophia X Bridge emits surface snapshots from XLibre state.

@@ -325,6 +325,11 @@ socket request path is the bottleneck. The first ring should be unidirectional;
 bidirectional rejection/status rings are deferred until measurement justifies
 the added coupling and memory-ordering complexity.
 
+The first Phase 8 session seam is implemented as an engine reducer:
+`SessionEvent::ChromeAction` validates a `ChromeActionRequest` and emits
+`SessionCommand::RequestPoliteClose` only for accepted close requests. This
+command is meant for Sophia X Bridge dispatch, not WM IPC.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

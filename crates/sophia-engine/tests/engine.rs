@@ -1,6 +1,6 @@
 use sophia_engine::{
     ChromeActionDecision, ChromeActionRejectReason, ChromeBroker, EngineError, FramePlanRequest,
-    HeadlessEngine,
+    HeadlessEngine, SessionCommand, SessionEvent,
 };
 use sophia_protocol::{
     AttentionState, BufferSource, ChromeActionKind, ChromeActionRequest, ChromeDescriptor,
@@ -400,6 +400,51 @@ fn chrome_close_request_rejects_non_closable_surface() {
         engine.validate_chrome_action(&request, &nodes),
         ChromeActionDecision::Rejected(ChromeActionRejectReason::NotClosable)
     );
+}
+
+#[test]
+fn session_event_routes_accepted_chrome_close_to_x_bridge_command() {
+    let engine = HeadlessEngine::default();
+    let surface = SurfaceId::new(12, 1);
+    let nodes = vec![layout_node(surface, 4, true)];
+    let request = ChromeActionRequest {
+        surface,
+        generation: 4,
+        kind: ChromeActionKind::CloseSurfaceRequested,
+    };
+
+    let update = engine.handle_session_event(SessionEvent::ChromeAction(request), &nodes);
+
+    assert_eq!(
+        update.chrome_decision,
+        Some(ChromeActionDecision::RequestPoliteClose { surface })
+    );
+    assert_eq!(
+        update.commands,
+        vec![SessionCommand::RequestPoliteClose { surface }]
+    );
+}
+
+#[test]
+fn session_event_does_not_emit_close_command_for_rejected_chrome_action() {
+    let engine = HeadlessEngine::default();
+    let surface = SurfaceId::new(13, 1);
+    let nodes = vec![layout_node(surface, 8, true)];
+    let request = ChromeActionRequest {
+        surface,
+        generation: 7,
+        kind: ChromeActionKind::CloseSurfaceRequested,
+    };
+
+    let update = engine.handle_session_event(SessionEvent::ChromeAction(request), &nodes);
+
+    assert_eq!(
+        update.chrome_decision,
+        Some(ChromeActionDecision::Rejected(
+            ChromeActionRejectReason::StaleGeneration
+        ))
+    );
+    assert!(update.commands.is_empty());
 }
 
 fn test_layer(surface_index: u32, stack_rank: u32, x: i32, damage: Region) -> LayerSnapshot {

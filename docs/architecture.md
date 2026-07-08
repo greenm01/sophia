@@ -262,6 +262,12 @@ policy validates the request and asks Sophia X Bridge to perform the polite X11
 close path first, such as `WM_DELETE_WINDOW` when available. The WM sees only
 the later consequence through `SurfaceRemoved` or relayout requests.
 
+The first session seam is a reducer inside Sophia Engine. A
+`SessionEvent::ChromeAction` is validated against current layout nodes. Accepted
+close requests emit `SessionCommand::RequestPoliteClose`, which the runtime
+dispatches to Sophia X Bridge. Rejected chrome actions emit no command. This
+keeps close intent out of the blind WM protocol.
+
 ## XLibre Responsibilities
 
 XLibre remains responsible for:

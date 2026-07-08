@@ -215,5 +215,5 @@ Keep chrome rendering and lifecycle actions out of the blind WM.
 - [x] Add `CloseSurfaceRequested(surface, generation)` packet shape.
 - [x] Validate surface generation and `closable` before dispatch.
 - [x] Add Sophia X Bridge helper for polite `WM_DELETE_WINDOW` close requests.
-- [ ] Wire accepted chrome close decisions into the session event loop.
+- [x] Wire accepted chrome close decisions into the session event loop.
 - [ ] Notify WM only through follow-up remove/relayout requests.
