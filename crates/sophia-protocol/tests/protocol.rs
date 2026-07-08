@@ -139,6 +139,51 @@ fn chrome_descriptor_carries_redacted_metadata_separately() {
 }
 
 #[test]
+fn broker_health_packet_accepts_bounded_status_message() {
+    let packet = BrokerHealthPacket::new(
+        BrokerKind::Portal,
+        BrokerHealthState::Ready,
+        3,
+        Some("ready".to_owned()),
+    )
+    .unwrap();
+
+    assert_eq!(packet.broker, BrokerKind::Portal);
+    assert_eq!(packet.state, BrokerHealthState::Ready);
+    assert_eq!(packet.generation, 3);
+    assert_eq!(packet.message.as_deref(), Some("ready"));
+}
+
+#[test]
+fn broker_health_packet_accepts_empty_status_message() {
+    let packet =
+        BrokerHealthPacket::new(BrokerKind::Metadata, BrokerHealthState::Starting, 1, None)
+            .unwrap();
+
+    assert_eq!(packet.broker, BrokerKind::Metadata);
+    assert_eq!(packet.state, BrokerHealthState::Starting);
+    assert_eq!(packet.message, None);
+}
+
+#[test]
+fn broker_health_packet_rejects_unbounded_status_message() {
+    let message = "x".repeat(SOPHIA_BROKER_HEALTH_MAX_MESSAGE_LEN + 1);
+
+    assert_eq!(
+        BrokerHealthPacket::new(
+            BrokerKind::Portal,
+            BrokerHealthState::Degraded,
+            4,
+            Some(message)
+        ),
+        Err(BrokerHealthError::MessageTooLong {
+            len: SOPHIA_BROKER_HEALTH_MAX_MESSAGE_LEN + 1,
+            max: SOPHIA_BROKER_HEALTH_MAX_MESSAGE_LEN,
+        })
+    );
+}
+
+#[test]
 fn chrome_action_request_is_surface_scoped() {
     let request = ChromeActionRequest {
         surface: SurfaceId::new(9, 4),

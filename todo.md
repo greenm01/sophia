@@ -71,6 +71,17 @@ hot paths.
 - [x] Add a runtime smoke that schedules from X Damage and layout epochs.
 - [x] Add process-supervised portal and metadata broker placeholders.
 
+## Broker IPC Track
+
+The broker processes are supervised placeholders. The next work is turning them
+into bounded, data-only peers without exposing client metadata or payload bytes
+to runtime policy.
+
+- [x] Add a bounded broker health/control packet contract.
+- [ ] Wire portal broker placeholder to a bounded IPC health smoke.
+- [ ] Wire metadata broker placeholder to a bounded IPC health smoke.
+- [ ] Route broker health into `SessionRuntimeState`.
+
 ## Deferred / Measurement-Gated
 
 - [ ] Prototype a unidirectional Engine-to-XLibre SHM route ring only if

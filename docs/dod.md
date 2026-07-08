@@ -118,6 +118,14 @@ Process-supervised portal and metadata broker placeholders are runtime
 ownership records. They prove that the runtime can start, poll, and terminate
 the intended broker process kinds before the real broker IPC protocols exist.
 
+Broker health is a bounded control packet, not a general metadata channel.
+`BrokerHealthPacket` may name only the broker kind, coarse health state,
+generation, and an optional short status message. It must not contain client
+titles, XIDs, namespace IDs, portal payload bytes, file paths, URIs, or icon
+data. The message is capped by
+`SOPHIA_BROKER_HEALTH_MAX_MESSAGE_LEN` so a supervised broker cannot force
+unbounded allocation in Sophia Engine or runtime.
+
 ### XWindowMirror
 
 Sophia X Bridge keeps a mirror of the XLibre window tree. This is cache data,

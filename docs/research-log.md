@@ -618,6 +618,13 @@ uses Sophia X Bridge to produce a native `SelectionNotify` failure with
 `property = None`. This proves the denial maps to normal X11 selection failure;
 full live paste handling still needs SelectionRequest/requestor dispatch.
 
+Broker IPC now has its first bounded packet contract. `BrokerHealthPacket`
+covers only portal/metadata broker identity, coarse health state, generation,
+and an optional short status message. It deliberately excludes raw client
+metadata, namespace IDs, XIDs, portal payloads, paths, URIs, and icon bytes.
+This gives the supervised placeholder processes a safe first IPC target before
+the real portal and metadata broker protocols are wired.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

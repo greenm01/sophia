@@ -432,6 +432,14 @@ one for `MetadataBroker`; `runtime-brokers-smoke` starts both placeholder
 processes and observes their exits. This proves restart/supervision ownership
 without claiming the broker IPC protocols or UI surfaces are implemented.
 
+The first broker IPC contract is health/control only.
+`BrokerHealthPacket` is intentionally small: broker kind, coarse health state,
+generation, and an optional bounded status message. It cannot carry raw client
+metadata, namespace labels, XIDs, portal payloads, URIs, file paths, or icon
+bytes. Runtime may later consume this packet to mark a broker ready, degraded,
+or stopped, but real portal execution and sanitized chrome metadata remain
+separate protocols with their own validation.
+
 Frame scheduling now has an explicit seam. `FrameClock` produces output-scoped
 frame ticks, and the deterministic headless implementation advances serials
 without depending on wall-clock time. A real DRM/KMS backend should implement
