@@ -348,6 +348,18 @@ successful WM transaction replaces the cache. If the WM socket is missing,
 malformed, timed out, or being restarted, Sophia restores that cache before
 planning the next frame. Rejected layout proposals do not replace the cache.
 
+The first session runtime step is a headless tick over existing engine data. A
+tick consumes either fresh layer snapshots or an explicit restore request for
+the last committed layout, then produces a frame snapshot and replay report.
+This is not the final event loop; it is the smallest executable coordinator
+between X-derived layer state, cached layout state, and frame planning.
+
+XFixes selection owner updates are the first portal execution input. Sophia X
+Bridge converts owner-generation changes into source-namespace clipboard events;
+the clipboard portal reducer uses those events to revoke stale pending
+transfers. Full paste import still requires later SelectionRequest/requestor
+translation.
+
 ## XLibre Responsibilities
 
 XLibre remains responsible for:

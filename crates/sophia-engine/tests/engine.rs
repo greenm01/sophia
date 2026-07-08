@@ -1,8 +1,9 @@
 use sophia_engine::{
     ChromeActionDecision, ChromeActionRejectReason, ChromeBroker, EngineError, FramePlanRequest,
     HeadlessEngine, LastCommittedLayout, RoutedInputCoalescer, RoutedInputFlushReason,
-    RoutedInputQueueAction, SessionCommand, SessionEvent, WmIpcError, WmRestartReason,
-    WmRuntimeAction, request_wm_over_stream, update_wm_supervisor_from_runtime_action,
+    RoutedInputQueueAction, SessionCommand, SessionEvent, SessionLayerSource, SessionTickRequest,
+    WmIpcError, WmRestartReason, WmRuntimeAction, request_wm_over_stream,
+    update_wm_supervisor_from_runtime_action,
 };
 use sophia_protocol::{
     AttentionState, BufferSource, ChromeActionKind, ChromeActionRequest, ChromeDescriptor,
@@ -662,6 +663,53 @@ fn wm_transaction_cache_restores_last_committed_layout_when_wm_is_absent() {
     assert!(matches!(update.ipc_error, Some(WmIpcError::Io(_))));
     assert_eq!(layers, vec![cached]);
     assert_eq!(cache.layers(), layers.as_slice());
+}
+
+#[test]
+fn session_tick_records_fresh_layers_and_replays_frame() {
+    let engine = HeadlessEngine::default();
+    let output = engine.output();
+    let layers = vec![test_layer(0, 0, 0, Region::empty())];
+    let mut cache = LastCommittedLayout::default();
+
+    let report = engine
+        .run_session_tick(
+            SessionTickRequest {
+                output: output.id,
+                frame_serial: 70,
+                layers: SessionLayerSource::Fresh(layers.clone()),
+            },
+            &mut cache,
+        )
+        .unwrap();
+
+    assert!(!report.restored_last_committed);
+    assert_eq!(report.frame.frame_serial, 70);
+    assert_eq!(report.replay.steps.len(), 1);
+    assert_eq!(cache.layers(), layers.as_slice());
+}
+
+#[test]
+fn session_tick_restores_cached_layout_when_requested() {
+    let engine = HeadlessEngine::default();
+    let output = engine.output();
+    let cached = vec![test_layer(0, 0, 5, Region::empty())];
+    let mut cache = LastCommittedLayout::new(cached.clone());
+
+    let report = engine
+        .run_session_tick(
+            SessionTickRequest {
+                output: output.id,
+                frame_serial: 71,
+                layers: SessionLayerSource::RestoreLastCommitted,
+            },
+            &mut cache,
+        )
+        .unwrap();
+
+    assert!(report.restored_last_committed);
+    assert_eq!(report.frame.layers, cached);
+    assert_eq!(report.replay.steps.len(), 1);
 }
 
 #[test]

@@ -162,6 +162,95 @@ mod tests {
     }
 
     #[test]
+    fn selection_owner_update_converts_to_clipboard_portal_owner_change() {
+        let mut state = XMirrorState::default();
+        let mut owner = mirror(0x20, None, 0);
+        owner.namespace = Some(NamespaceId::from_raw(7));
+        state.ingest_window(owner);
+        let mut monitor = XSelectionMonitor::new();
+
+        let update = monitor.apply_event(
+            XSelectionEvent {
+                selection: 0x100,
+                owner: Some(xid(0x20)),
+                timestamp: 11,
+                selection_timestamp: 10,
+                kind: XSelectionChangeKind::SetOwner,
+            },
+            &state,
+        );
+
+        assert_eq!(
+            clipboard_portal_owner_change_from_selection_update(&update),
+            Some(ClipboardPortalOwnerChange {
+                source_namespace: NamespaceId::from_raw(7),
+                generation: 1
+            })
+        );
+    }
+
+    #[test]
+    fn selection_owner_loss_uses_previous_known_namespace_for_portal_change() {
+        let mut state = XMirrorState::default();
+        let mut owner = mirror(0x20, None, 0);
+        owner.namespace = Some(NamespaceId::from_raw(7));
+        state.ingest_window(owner);
+        let mut monitor = XSelectionMonitor::new();
+        monitor.apply_event(
+            XSelectionEvent {
+                selection: 0x100,
+                owner: Some(xid(0x20)),
+                timestamp: 11,
+                selection_timestamp: 10,
+                kind: XSelectionChangeKind::SetOwner,
+            },
+            &state,
+        );
+
+        let update = monitor.apply_event(
+            XSelectionEvent {
+                selection: 0x100,
+                owner: None,
+                timestamp: 13,
+                selection_timestamp: 12,
+                kind: XSelectionChangeKind::OwnerClientClosed,
+            },
+            &state,
+        );
+
+        assert_eq!(update.current.namespace, Some(NamespaceId::from_raw(7)));
+        assert_eq!(
+            clipboard_portal_owner_change_from_selection_update(&update),
+            Some(ClipboardPortalOwnerChange {
+                source_namespace: NamespaceId::from_raw(7),
+                generation: 2
+            })
+        );
+    }
+
+    #[test]
+    fn unknown_selection_owner_update_does_not_emit_portal_owner_change() {
+        let state = XMirrorState::default();
+        let mut monitor = XSelectionMonitor::new();
+
+        let update = monitor.apply_event(
+            XSelectionEvent {
+                selection: 0x100,
+                owner: None,
+                timestamp: 13,
+                selection_timestamp: 12,
+                kind: XSelectionChangeKind::Unknown,
+            },
+            &state,
+        );
+
+        assert_eq!(
+            clipboard_portal_owner_change_from_selection_update(&update),
+            None
+        );
+    }
+
+    #[test]
     fn selection_monitor_records_unknown_namespace_for_owner_loss() {
         let state = XMirrorState::default();
         let mut monitor = XSelectionMonitor::new();

@@ -1806,6 +1806,30 @@ pub struct XSelectionOwnerUpdate {
     pub kind: XSelectionChangeKind,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ClipboardPortalOwnerChange {
+    pub source_namespace: NamespaceId,
+    pub generation: u64,
+}
+
+pub fn clipboard_portal_owner_change_from_selection_update(
+    update: &XSelectionOwnerUpdate,
+) -> Option<ClipboardPortalOwnerChange> {
+    if update.kind == XSelectionChangeKind::Unknown {
+        return None;
+    }
+
+    let source_namespace = update
+        .current
+        .namespace
+        .or_else(|| update.previous.and_then(|record| record.namespace))?;
+
+    Some(ClipboardPortalOwnerChange {
+        source_namespace,
+        generation: update.current.generation,
+    })
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct XSelectionMonitor {
     owners: BTreeMap<(Atom, Option<NamespaceId>), XSelectionOwnerRecord>,
@@ -1829,9 +1853,11 @@ impl XSelectionMonitor {
         event: XSelectionEvent,
         mirror: &XMirrorState,
     ) -> XSelectionOwnerUpdate {
-        let namespace = event
+        let namespace_from_owner = event
             .owner
             .and_then(|owner| mirror.namespace_for_window(owner));
+        let namespace =
+            namespace_from_owner.or_else(|| self.namespace_for_existing_selection(event.selection));
         let key = (event.selection, namespace);
         let previous = self.owners.get(&key).copied();
         let generation = previous
@@ -1853,6 +1879,18 @@ impl XSelectionMonitor {
             current,
             kind: event.kind,
         }
+    }
+
+    fn namespace_for_existing_selection(&self, selection: Atom) -> Option<NamespaceId> {
+        self.owners
+            .iter()
+            .find_map(|((record_selection, namespace), record)| {
+                if *record_selection == selection && record.owner.is_some() {
+                    *namespace
+                } else {
+                    None
+                }
+            })
     }
 }
 

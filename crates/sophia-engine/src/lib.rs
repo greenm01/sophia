@@ -456,6 +456,26 @@ pub enum SessionCommand {
     SendWmRequest(WmRequestPacket),
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum SessionLayerSource {
+    Fresh(Vec<LayerSnapshot>),
+    RestoreLastCommitted,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SessionTickRequest {
+    pub output: OutputId,
+    pub frame_serial: u64,
+    pub layers: SessionLayerSource,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SessionTickReport {
+    pub frame: FrameSnapshot,
+    pub replay: ReplayReport,
+    pub restored_last_committed: bool,
+}
+
 pub trait EngineBackend {
     fn output(&self) -> HeadlessOutput;
 
@@ -753,6 +773,38 @@ impl HeadlessEngine {
         nodes: &[LayoutNodeSnapshot],
     ) -> SessionUpdate {
         handle_session_event(event, nodes)
+    }
+
+    pub fn run_session_tick(
+        &self,
+        request: SessionTickRequest,
+        last_committed: &mut LastCommittedLayout,
+    ) -> Result<SessionTickReport, EngineError> {
+        let (layers, restored_last_committed) = match request.layers {
+            SessionLayerSource::Fresh(layers) => {
+                last_committed.replace(&layers);
+                (layers, false)
+            }
+            SessionLayerSource::RestoreLastCommitted => {
+                let mut layers = Vec::new();
+                last_committed.restore_into(&mut layers);
+                (layers, true)
+            }
+        };
+        let frame = self.plan_frame(
+            FramePlanRequest {
+                output: request.output,
+                frame_serial: request.frame_serial,
+            },
+            layers,
+        )?;
+        let replay = self.replay_frame(&frame)?;
+
+        Ok(SessionTickReport {
+            frame,
+            replay,
+            restored_last_committed,
+        })
     }
 
     fn validate_output(&self, output: OutputId) -> Result<(), EngineError> {

@@ -472,6 +472,24 @@ layer list. This makes the restart behavior concrete: while the WM is gone,
 Sophia keeps scanning out the last committed layout instead of accepting
 uncommitted or partially updated layout state.
 
+The active roadmap is now gap-oriented instead of a long historical checklist.
+Completed phase detail stays in this research log; `todo.md` now tracks current
+runtime assembly, backend work, rendering work, routed-input work, and compact
+completed milestones.
+
+The first session-runtime assembly seam is executable in the engine crate as a
+headless session tick. The tick accepts either fresh layer snapshots or an
+explicit request to restore the last committed layout, then produces a
+`FrameSnapshot` and `ReplayReport`. This keeps runtime-loop semantics testable
+before real DRM/KMS, libinput, or a full X event loop exists.
+
+Clipboard portal execution now has its first bridge seam. XFixes selection owner
+updates can be converted into source-namespace generation events, including
+owner-loss events that carry forward the previous known namespace. The portal
+side applies those events to revoke stale pending clipboard transfers. This is
+owner-generation/revocation wiring only; full paste import still needs X11
+SelectionRequest/requestor context.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

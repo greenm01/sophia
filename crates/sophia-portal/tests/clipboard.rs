@@ -1,5 +1,6 @@
 use sophia_portal::{
-    ClipboardPortal, ClipboardTarget, ClipboardTransferRequest, PortalCommand, PortalError,
+    ClipboardPortal, ClipboardSourceOwnerChanged, ClipboardTarget, ClipboardTransferRequest,
+    PortalCommand, PortalError,
 };
 use sophia_protocol::{NamespaceId, PortalDecision, PortalTransferId};
 
@@ -122,6 +123,32 @@ fn source_owner_change_revokes_pending_transfers() {
             .unwrap()
             .decision,
         PortalDecision::Revoked
+    );
+    assert_eq!(
+        portal
+            .transfer(PortalTransferId::from_raw(2))
+            .unwrap()
+            .decision,
+        PortalDecision::Pending
+    );
+}
+
+#[test]
+fn bridge_owner_change_event_revokes_stale_pending_transfers() {
+    let mut portal = ClipboardPortal::new();
+    portal.request_import(request(1, 7)).unwrap();
+    portal.request_import(request(2, 9)).unwrap();
+
+    let commands = portal.apply_owner_changed(ClipboardSourceOwnerChanged {
+        source_namespace: NamespaceId::from_raw(10),
+        generation: 9,
+    });
+
+    assert_eq!(
+        commands,
+        vec![PortalCommand::FailSelection {
+            transfer: PortalTransferId::from_raw(1)
+        }]
     );
     assert_eq!(
         portal

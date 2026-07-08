@@ -1,246 +1,77 @@
-# Sophia Build Phases
+# Sophia Active Roadmap
 
-Each phase should leave behind either a working artifact, a testable prototype,
-or a sharper research answer. Sophia is a research prototype, so failed
-approaches are acceptable when they produce evidence and update the docs.
-
----
-
-## Phase 0 - Documentation And Repository Shape
-
-Capture the architecture, reference map, and first roadmap before code starts.
-
-**Project shape**
-- [x] Seed `README.md` with the original architecture diagram and data path.
-- [x] Add `docs/architecture.md`, `docs/dod.md`, `docs/style-guide.md`, and
-  `docs/research-log.md`.
-- [x] Record that Sophia is XLibre-centered, not Xwayland-centered.
-- [x] Record Rust as the user-space implementation language and C as the XLibre
-  patch language.
-- [x] Add the reference map: niri, picom, river, XLibre.
-- [x] Add this roadmap.
-
-**Next documentation checks**
-- [x] Add an agent guide once code exists and build/test commands are known.
-- [x] Keep docs updated when a research question turns into a decision.
+Sophia is a research prototype. This file tracks active architecture work and
+keeps completed milestones compact. Detailed rationale and historical evidence
+belong in `docs/research-log.md`.
 
 ---
 
-## Phase 1 - Rust Skeleton
+## Active Focus - Session Runtime Assembly
 
-Create the minimum Rust workspace needed to make data shapes executable without
-touching compositor or XLibre code yet.
+Close the gap between existing reducers/protocols and a running session loop.
 
-**Workspace**
-- [x] Create a Cargo workspace.
-- [x] Add crates or modules for Sophia Engine, Sophia X Bridge, Sophia protocol,
-  and a demo Sophia WM.
-- [x] Add common tracing and error handling.
-- [x] Add a small CLI that can print version and planned component names.
-
-**Data model**
-- [x] Add typed IDs: `SurfaceId`, `XWindowId`, `NamespaceId`, `OutputId`,
-  `SeatId`, `DeviceId`, `TransactionId`, and `PortalTransferId`.
-- [x] Add passive packet structs for `LayerSnapshot`, `DamageFrame`,
-  `RenderCommand`, `CompositorSurface`, `InputEventPacket`, `InputRoute`,
-  `LayoutTransaction`, and `PortalTransfer`.
-- [x] Add dense-table helpers with generation checks where stale references are
-  plausible.
-- [x] Add unit tests for ID allocation, stale-ID rejection, and snapshot
-  immutability.
-
----
-
-## Phase 2 - Headless Engine Prototype
-
-Prove Sophia Engine can consume frame data before any XLibre integration.
-
-**Headless compositor**
-- [x] Use Smithay/niri-inspired backend structure as the reference.
-- [x] Add a headless output with deterministic size and scale.
-- [x] Accept mock `LayerSnapshot` data and build a frame plan.
-- [x] Render or simulate render commands without a real X client.
-- [x] Capture `FrameSnapshot` data for tests.
-
-**Verification**
-- [x] Test stable layer ordering.
-- [x] Test damage aggregation for moved, resized, added, and removed layers.
-- [x] Test frame snapshot replay with mock surfaces.
-
----
-
-## Phase 3 - XLibre Mirror Probe
-
-Connect to XLibre as an X client and mirror enough state to produce Sophia
-snapshots.
-
-**X connection**
-- [x] Connect with XCB or Rust X11 bindings.
-- [x] Confirm required extensions: Composite, Damage, XFixes, Shape, Render.
-- [x] Start with static Xnamespace config.
-- [x] Record namespace information when discoverable.
-
-**Window mirror**
-- [x] Import the root window tree with async-safe ordering.
-- [x] Track map, unmap, destroy, configure, reparent, property, and restack
+**Now**
+- [x] Add a headless session tick that turns layer snapshots into frame/replay
+  reports while preserving the last committed layout.
+- [x] Convert XFixes selection owner updates into clipboard portal owner-change
   events.
-- [x] Detect top-level and client windows using ICCCM/EWMH hints.
-- [x] Wrap XIDs in `XWindowId` and track generation.
-- [x] Emit `XWindowMirror`, `SurfaceSnapshot`, and `LayerSnapshot` values.
+- [x] Route clipboard owner-change events into `ClipboardPortal` revocation
+  commands.
+- [ ] Add a headless runtime smoke that performs: X capture -> session tick ->
+  frame replay.
 
-**Composite and damage**
-- [x] Redirect relevant windows with XComposite.
-- [x] Name or otherwise access redirected pixmaps.
-- [x] Track Damage events per surface.
-- [x] Convert X damage into Sophia `DamageFrame` inputs.
-
----
-
-## Phase 4 - First X11 Surface On Screen
-
-Put one real X11 client surface into Sophia Engine.
-
-**Rendering path**
-- [x] Run an XLibre instance suitable for offscreen or test rendering.
-- [x] Launch one simple X11 client in one namespace.
-- [x] Run a system Xvfb smoke display for the generic X11 path.
-- [x] Add a Sophia-owned simple X11 test client command.
-- [x] Add a CPU readback fallback for named XComposite pixmaps.
-- [x] Import or read back one XComposite pixmap.
-- [x] Convert the pixmap into a compositor texture or temporary CPU buffer.
-- [x] Display it in the headless or simple real-output engine.
-
-**Policy**
-- [x] Move and resize the surface through Sophia-side policy.
-- [x] Keep XLibre as the source of truth for X11 resource identity.
-- [x] Verify Xnamespace isolation still blocks cross-namespace visibility.
-
----
-
-## Phase 5 - External WM Protocol
-
-Split policy from the compositor process.
-
-**Protocol**
-- [x] Add blind-WM layout node and compositor-owned chrome packet shapes.
-- [x] Define the first manage sequence: new surface, configure size, focus,
-  workspace assignment.
-- [x] Define the first render sequence: position, z-order, crop, transform.
-- [x] Add transaction IDs and outcomes.
-- [x] Keep the WM off the per-frame and per-input hot path.
-
-**Demo WM**
-- [x] Implement a tiny external WM process.
-- [x] Tile or stack mock and X-derived surfaces.
-- [x] Restart the WM without killing Sophia Engine.
-- [x] Preserve the last committed state while the WM is absent.
-
----
-
-## Phase 6 - Routed Input Research
-
-Design and prototype compositor-first input for X11 clients.
-
-**Specification**
-- [x] Define the smallest XLibre routed-input extension request.
-- [x] Include target XID, local coordinates, device identity, event kind, and
-  serial.
-- [x] Preserve X11 grabs, focus, XI2 semantics, and Xnamespace checks inside
-  XLibre.
-- [x] Reject any design that sends arbitrary events directly to clients.
-
-**Prototype**
-- [x] Build flat, untransformed routed-input request adapter.
-- [x] Add wire request body and XLibre patch target notes.
-- [x] Add a git-applyable XLibre routed-input patch and build check.
-- [x] Land the extension shell in the private `sophia-xserver` fork.
-- [x] Deliver flat, untransformed pointer events through an XLibre extension.
-- [x] Add an end-to-end Xvfb smoke that observes a routed button event.
-- [x] Add transformed hit-test routes once the flat path is proven.
-- [x] Add tests for stale target windows, denied namespaces, grabs, and focus.
-
-**Later optimization**
-- [x] Measure routed-input dispatch cost before replacing the X11 request path.
-- [x] Add a repeated routed-input stress command for X11 request-path latency.
-- [x] Run patched Xvfb routed-input stress and record the first threshold result.
-- [x] Coalesce stable pure-motion routes at frame boundaries.
-- [x] Flush immediately for button, key, crossing, drag, grab, and focus events.
-- [x] Gate SHM route-ring work on measured dispatch samples.
-- [ ] Prototype a unidirectional Engine-to-XLibre SHM route ring only if needed.
-- [x] Keep the X11 request path as fallback for SHM failures.
-
----
-
-## Phase 6.5 - WM IPC Socket
-
-Replace the demo argv/stdout WM transport with a bounded Unix socket protocol.
-
-**Codec**
-- [x] Add versioned length-prefixed WM request/response frames.
-- [x] Decode with explicit little-endian parsing, not `repr(C)` casts.
-- [x] Reject oversized payloads, excessive vector counts, malformed headers,
-  and trailing bytes.
-
-**Runtime**
-- [x] Add Engine-owned Unix socket request/response transport.
-- [x] Enforce one Engine-minted transaction per request.
-- [x] Preserve last committed layout on timeout or malformed response.
-- [x] Restart the WM process after timeout or protocol violation.
-
----
-
-## Phase 7 - Portals
-
-Add intentional namespace crossing without weakening Xnamespace.
-
-**Clipboard first**
-- [x] Monitor namespaced selections.
-- [x] Keep clipboard private by default.
-- [x] Add explicit export/import policy.
-- [x] Support text targets first.
-- [x] Invalidate transfers when the source owner changes.
-- [x] Fail denied paste as normal X11 selection failure.
-- [x] Bind approval to a single source generation.
-
-**Later portals**
-- [x] Drag-and-drop.
-- [x] File open and save handoff.
-- [x] Screenshots and screen recording.
-- [x] URI open requests.
-- [x] Notifications.
-
----
-
-## Phase 8 - Compositor Chrome Actions
-
-Keep chrome rendering and lifecycle actions out of the blind WM.
-
-- [x] Add `CloseSurfaceRequested(surface, generation)` packet shape.
-- [x] Validate surface generation and `closable` before dispatch.
-- [x] Add Sophia X Bridge helper for polite `WM_DELETE_WINDOW` close requests.
-- [x] Wire accepted chrome close decisions into the session event loop.
-- [x] Notify WM only through follow-up remove/relayout requests.
-
----
-
-## Phase 9 - Runtime Supervision And Broker Wiring
-
-Turn the completed reducers and bridge helpers into a restartable session
-runtime without weakening the existing process boundaries.
-
-**Supervisor policy**
-- [x] Add data-only restart policy for WM, portal broker, and metadata broker
-  processes.
-- [x] Wire `WmRuntimeAction::RestartWm` into the runtime supervisor reducer.
-- [x] Add process spawning with bounded restart backoff.
-- [x] Preserve the last committed layout while the WM process is absent.
-
-**Broker wiring**
-- [ ] Convert XFixes selection owner changes into portal reducer events.
+**Next**
 - [ ] Route notification delivery commands to compositor chrome presentation.
 - [ ] Route sanitized metadata broker output into compositor chrome descriptors.
-
-**Verification**
-- [ ] Add a supervisor smoke where the WM process is killed and restarted.
-- [ ] Add a portal smoke that proves denied cross-namespace clipboard transfer
+- [ ] Add a supervised long-lived WM socket smoke with kill/restart behavior.
+- [ ] Add a portal smoke proving denied cross-namespace clipboard transfer
   becomes normal X11 selection failure.
+
+---
+
+## Backend Track - Real Compositor Work
+
+Do this after the runtime loop has a clear shape.
+
+- [ ] Add frame-clock abstraction while preserving headless determinism.
+- [ ] Add renderer/import abstraction with CPU readback kept as fallback.
+- [ ] Add DRM/KMS output skeleton.
+- [ ] Add libinput event source skeleton.
+- [ ] Integrate physical input with routed-input request generation.
+
+---
+
+## Rendering Track - Move Beyond Proof Grade
+
+- [ ] Replace CPU-readback-only rendering with import-capable buffer handles.
+- [ ] Track buffer lifetime explicitly across XComposite pixmap updates.
+- [ ] Add frame scheduling around X Damage and layout epochs.
+- [ ] Measure resize behavior under slow or non-cooperative X11 clients.
+
+---
+
+## Routed Input Track
+
+The current X11 `RouteEvent` request path is the correctness baseline.
+
+- [x] Measure routed-input dispatch cost before replacing the X11 request path.
+- [x] Keep the X11 request path as fallback for any future SHM work.
+- [ ] Add routed-input grab/focus edge smokes.
+- [ ] Add transformed scene hit-test integration once physical input exists.
+- [ ] Prototype a unidirectional Engine-to-XLibre SHM route ring only if
+  repeated measurements justify it.
+
+---
+
+## Completed Milestones
+
+- [x] Phase 0-2: repository shape, Rust skeleton, protocol/data model, headless
+  engine.
+- [x] Phase 3-4: XLibre mirror probe, XComposite/Damage capture, CPU readback,
+  first X11 surface in headless frames.
+- [x] Phase 5-6.5: blind WM protocol, bounded IPC codec, external WM demo,
+  routed-input XLibre patch and smoke/stress coverage.
+- [x] Phase 7-8: portal reducers, compositor chrome action reducer, polite X11
+  close helper.
+- [x] Phase 9 supervisor work: restart policy, process supervisor, WM restart
+  adapter, last committed layout cache.

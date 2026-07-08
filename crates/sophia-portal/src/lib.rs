@@ -20,6 +20,12 @@ pub struct ClipboardTransferRequest {
     pub generation: u64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ClipboardSourceOwnerChanged {
+    pub source_namespace: NamespaceId,
+    pub generation: u64,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DragAndDropTransferRequest {
     pub transfer: PortalTransferId,
@@ -247,6 +253,13 @@ impl ClipboardPortal {
         }
 
         commands
+    }
+
+    pub fn apply_owner_changed(
+        &mut self,
+        event: ClipboardSourceOwnerChanged,
+    ) -> Vec<PortalCommand> {
+        self.source_owner_changed(event.source_namespace, event.generation)
     }
 
     pub fn transfer(&self, transfer: PortalTransferId) -> Option<&PortalTransfer> {
