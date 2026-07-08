@@ -107,6 +107,48 @@ pub fn routed_input_decision_allows_delivery(decision: &XLibreRoutedInputDecisio
     decision.outcome == XLibreRoutedInputOutcome::Accepted
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RoutedInputEdgeKind {
+    ActiveGrab,
+    FocusPolicy,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RoutedInputEdgeSmokeReport {
+    pub edge: RoutedInputEdgeKind,
+    pub decision: XLibreRoutedInputDecision,
+    pub delivery_allowed: bool,
+}
+
+pub fn smoke_routed_input_edge(
+    edge: RoutedInputEdgeKind,
+    serial: u64,
+    target_window: XWindowId,
+) -> RoutedInputEdgeSmokeReport {
+    let outcome = match edge {
+        RoutedInputEdgeKind::ActiveGrab => XLibreRoutedInputOutcome::RejectedActiveGrab,
+        RoutedInputEdgeKind::FocusPolicy => XLibreRoutedInputOutcome::RejectedFocusPolicy,
+    };
+    let decision = XLibreRoutedInputDecision {
+        serial,
+        target_window,
+        outcome,
+    };
+
+    RoutedInputEdgeSmokeReport {
+        edge,
+        delivery_allowed: routed_input_decision_allows_delivery(&decision),
+        decision,
+    }
+}
+
+pub fn smoke_routed_input_edges(target_window: XWindowId) -> [RoutedInputEdgeSmokeReport; 2] {
+    [
+        smoke_routed_input_edge(RoutedInputEdgeKind::ActiveGrab, 1, target_window),
+        smoke_routed_input_edge(RoutedInputEdgeKind::FocusPolicy, 2, target_window),
+    ]
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RoutedInputSmokeReport {
     pub display_name: Option<String>,

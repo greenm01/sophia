@@ -362,6 +362,10 @@ grabs are still XLibre authority; accepted routes may be redirected by normal
 grab semantics. Sophia treats every rejection as a closed route and never falls
 back to direct client delivery.
 
+Grab/focus edge smoke reports should record the edge kind, XLibre decision, and
+whether delivery is allowed. Rejected active-grab and focus-policy outcomes must
+always report `delivery_allowed = false`.
+
 ### LayoutTransaction
 
 The WM emits layout transactions, not one-off mutations.

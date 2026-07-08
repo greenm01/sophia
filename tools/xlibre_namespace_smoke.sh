@@ -138,6 +138,12 @@ echo "portal clipboard deny smoke:"
     cargo run -q -p sophia-cli -- portal-clipboard-deny-smoke
 )
 
+echo "routed-input grab/focus edge smoke:"
+(
+    cd "$ROOT_DIR"
+    cargo run -q -p sophia-cli -- x-smoke-routed-input-edges
+)
+
 echo "root routed-input smoke:"
 (
     cd "$ROOT_DIR"

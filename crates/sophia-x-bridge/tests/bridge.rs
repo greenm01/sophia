@@ -1130,6 +1130,25 @@ mod tests {
     }
 
     #[test]
+    fn routed_input_edge_smoke_reports_grab_and_focus_as_closed_routes() {
+        let reports = smoke_routed_input_edges(xid(0x30));
+
+        assert_eq!(reports.len(), 2);
+        assert_eq!(reports[0].edge, RoutedInputEdgeKind::ActiveGrab);
+        assert_eq!(
+            reports[0].decision.outcome,
+            XLibreRoutedInputOutcome::RejectedActiveGrab
+        );
+        assert!(!reports[0].delivery_allowed);
+        assert_eq!(reports[1].edge, RoutedInputEdgeKind::FocusPolicy);
+        assert_eq!(
+            reports[1].decision.outcome,
+            XLibreRoutedInputOutcome::RejectedFocusPolicy
+        );
+        assert!(!reports[1].delivery_allowed);
+    }
+
+    #[test]
     fn routed_input_wire_length_is_fixed_for_dispatch_measurement() {
         assert_eq!(routed_input_request_wire_len(), 44);
     }

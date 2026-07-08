@@ -532,6 +532,12 @@ epoch state. `measure_resize_behavior` reports elapsed time, timeout policy,
 completion, timeout status, and pending surfaces. This gives future live slow
 client smokes a concrete metric target instead of ad hoc visual inspection.
 
+Routed-input grab/focus edges now have deterministic smoke coverage.
+`smoke_routed_input_edges` reports active-grab and focus-policy rejection
+decisions as closed routes, and `sophia-cli x-smoke-routed-input-edges` exposes
+the check for repeatable smoke scripts. This does not replace live DIX grab
+testing; it proves Sophia's bridge side refuses rejected delivery.
+
 The DRM/KMS backend now has a data-only output skeleton. `DrmKmsMode`,
 `DrmKmsOutputDescriptor`, and `DrmKmsOutputRegistry` track connector/CRTC IDs,
 mode, scale, and Sophia output IDs without opening real DRM devices. The

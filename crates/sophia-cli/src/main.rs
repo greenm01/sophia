@@ -17,7 +17,7 @@ use sophia_wm_demo::{ExternalWmClient, tile_workspace};
 use sophia_x_bridge::{
     ClipboardSelectionFailureRequest, TestClientConfig, capture_readback_display,
     clipboard_selection_failure_notify, run_test_client_window, smoke_routed_input,
-    stress_routed_input,
+    smoke_routed_input_edges, stress_routed_input,
 };
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -411,6 +411,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    if args.iter().any(|arg| arg == "x-smoke-routed-input-edges") {
+        let reports = smoke_routed_input_edges(sophia_protocol::XWindowId::new(0x30, 1));
+        for report in reports {
+            println!(
+                "x-smoke-routed-input-edges edge={:?} target={:#x} outcome={:?} delivery_allowed={}",
+                report.edge,
+                report.decision.target_window.xid(),
+                report.decision.outcome,
+                report.delivery_allowed
+            );
+        }
+        return Ok(());
+    }
+
     if args.iter().any(|arg| arg == "x-stress-routed-input") {
         let display = arg_value(&args, "--display");
         let iterations = arg_value(&args, "--iterations")
@@ -455,6 +469,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("commands: wm-supervisor-smoke [--wm=target/debug/sophia-wm-demo]");
     println!("commands: portal-clipboard-deny-smoke");
     println!("commands: x-smoke-routed-input [--display=:99]");
+    println!("commands: x-smoke-routed-input-edges");
     println!(
         "commands: x-stress-routed-input [--display=:99] [--iterations=1000] [--threshold-us=500]"
     );

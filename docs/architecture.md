@@ -238,6 +238,13 @@ focus policy violations, and unsupported event forms before entering normal DIX
 delivery. Ordinary active grabs remain XLibre authority and may redirect
 delivery according to normal grab semantics.
 
+Grab/focus edge smokes are represented as closed-route decision reports.
+`x-smoke-routed-input-edges` verifies that `RejectedActiveGrab` and
+`RejectedFocusPolicy` outcomes do not allow delivery and do not fall back to
+direct client injection. Live active-grab redirection remains an XLibre DIX
+responsibility; Sophia only records the edge decision and keeps the route
+closed when XLibre rejects it.
+
 The flat request path remains as a strict compatibility wrapper, but Sophia X
 Bridge also accepts transformed routes when Sophia Engine has already hit-tested
 the visual scene and supplied finite target-local coordinates. XLibre still
