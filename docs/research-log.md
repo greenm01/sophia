@@ -362,6 +362,11 @@ request/reply dispatch time. This gives the SHM question a concrete gate:
 prototype the route ring only if repeated measurements show the X11 request
 path exceeding the chosen threshold.
 
+The transport selector now codifies X11 fallback. `SharedMemoryRing` is selected
+only when measurements recommend considering SHM and the ring is available.
+Unavailable or failed SHM falls back to `X11Request`, preserving XLibre's normal
+request/reply path as the correctness baseline.
+
 Sophia Engine now has `RoutedInputCoalescer` for the first input hot-path
 optimization. It coalesces only stable pure pointer motion, keeps the latest
 motion until the frame boundary, and flushes immediately for button/key input,

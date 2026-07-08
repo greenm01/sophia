@@ -140,6 +140,32 @@ pub enum RoutedInputOptimizationRecommendation {
     ConsiderSharedMemoryRing,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RoutedInputTransport {
+    X11Request,
+    SharedMemoryRing,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SharedMemoryRouteRingState {
+    Unavailable,
+    Available,
+    Failed,
+}
+
+pub fn select_routed_input_transport(
+    recommendation: RoutedInputOptimizationRecommendation,
+    shm_state: SharedMemoryRouteRingState,
+) -> RoutedInputTransport {
+    match (recommendation, shm_state) {
+        (
+            RoutedInputOptimizationRecommendation::ConsiderSharedMemoryRing,
+            SharedMemoryRouteRingState::Available,
+        ) => RoutedInputTransport::SharedMemoryRing,
+        _ => RoutedInputTransport::X11Request,
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct RoutedInputDispatchStats {
     samples: Vec<Duration>,

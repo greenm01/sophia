@@ -1064,6 +1064,44 @@ mod tests {
         );
     }
 
+    #[test]
+    fn routed_input_transport_keeps_x11_when_shm_is_not_recommended() {
+        assert_eq!(
+            select_routed_input_transport(
+                RoutedInputOptimizationRecommendation::KeepX11RequestPath,
+                SharedMemoryRouteRingState::Available
+            ),
+            RoutedInputTransport::X11Request
+        );
+    }
+
+    #[test]
+    fn routed_input_transport_selects_shm_only_when_available_and_recommended() {
+        assert_eq!(
+            select_routed_input_transport(
+                RoutedInputOptimizationRecommendation::ConsiderSharedMemoryRing,
+                SharedMemoryRouteRingState::Available
+            ),
+            RoutedInputTransport::SharedMemoryRing
+        );
+    }
+
+    #[test]
+    fn routed_input_transport_falls_back_to_x11_when_shm_is_unavailable_or_failed() {
+        for shm_state in [
+            SharedMemoryRouteRingState::Unavailable,
+            SharedMemoryRouteRingState::Failed,
+        ] {
+            assert_eq!(
+                select_routed_input_transport(
+                    RoutedInputOptimizationRecommendation::ConsiderSharedMemoryRing,
+                    shm_state
+                ),
+                RoutedInputTransport::X11Request
+            );
+        }
+    }
+
     fn input_event(serial: u64) -> InputEventPacket {
         InputEventPacket {
             serial,

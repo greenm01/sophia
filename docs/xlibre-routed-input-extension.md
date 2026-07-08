@@ -199,6 +199,11 @@ prototype. If shared memory setup fails, the ring overflows, or XLibre rejects
 the fast path, Sophia must keep routing through the existing request path rather
 than dropping input or bypassing XLibre delivery semantics.
 
+This fallback rule is represented in code by `select_routed_input_transport`.
+It selects `SharedMemoryRing` only when dispatch measurements recommend
+considering SHM and the route ring is available. Every other state, including
+unavailable or failed SHM, selects `X11Request`.
+
 ## Expected Rejections
 
 The extension should return or expose distinct failure reasons for:
