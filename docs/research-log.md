@@ -625,6 +625,12 @@ metadata, namespace IDs, XIDs, portal payloads, paths, URIs, and icon bytes.
 This gives the supervised placeholder processes a safe first IPC target before
 the real portal and metadata broker protocols are wired.
 
+The portal broker placeholder now has a bounded IPC health smoke:
+`sophia-cli portal-broker-health-smoke`. It constructs a portal `Ready`
+packet, frames it as `BrokerHealth`, decodes it, and reports the bounded
+message length and frame size. This proves the control path without granting
+the portal broker any generic payload channel.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

@@ -455,6 +455,53 @@ fn wm_response_frame_roundtrips() {
 }
 
 #[test]
+fn broker_health_frame_roundtrips() {
+    let packet = BrokerHealthPacket::new(
+        BrokerKind::Portal,
+        BrokerHealthState::Ready,
+        12,
+        Some("ready".to_owned()),
+    )
+    .unwrap();
+
+    let frame = encode_broker_health_frame(&packet).unwrap();
+
+    assert_eq!(decode_broker_health_frame(&frame), Ok(packet));
+    assert_eq!(frame_payload_len(&frame), 12);
+}
+
+#[test]
+fn broker_health_frame_rejects_oversized_status_message() {
+    let mut payload = Vec::new();
+    push_u16(&mut payload, 1);
+    push_u16(&mut payload, 3);
+    push_u8(&mut payload, 1);
+    push_u16(
+        &mut payload,
+        (SOPHIA_BROKER_HEALTH_MAX_MESSAGE_LEN as u16) + 1,
+    );
+    payload.extend(std::iter::repeat_n(
+        b'x',
+        SOPHIA_BROKER_HEALTH_MAX_MESSAGE_LEN + 1,
+    ));
+    let frame = encode_frame(
+        IpcMessageKind::BrokerHealth,
+        TransactionId::from_raw(4),
+        &payload,
+    )
+    .unwrap();
+
+    assert_eq!(
+        decode_broker_health_frame(&frame),
+        Err(IpcCodecError::TextTooLarge {
+            field: "broker_health_message",
+            len: SOPHIA_BROKER_HEALTH_MAX_MESSAGE_LEN + 1,
+            max: SOPHIA_BROKER_HEALTH_MAX_MESSAGE_LEN,
+        })
+    );
+}
+
+#[test]
 fn oversized_payload_is_rejected_before_allocation() {
     let mut frame = Vec::new();
     push_u32(&mut frame, SOPHIA_IPC_MAGIC);
@@ -585,6 +632,10 @@ fn encode_rect(rect: Rect, out: &mut Vec<u8>) {
     push_i32(out, rect.y);
     push_i32(out, rect.width);
     push_i32(out, rect.height);
+}
+
+fn push_u8(out: &mut Vec<u8>, value: u8) {
+    out.push(value);
 }
 
 fn push_u16(out: &mut Vec<u8>, value: u16) {

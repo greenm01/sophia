@@ -438,7 +438,9 @@ generation, and an optional bounded status message. It cannot carry raw client
 metadata, namespace labels, XIDs, portal payloads, URIs, file paths, or icon
 bytes. Runtime may later consume this packet to mark a broker ready, degraded,
 or stopped, but real portal execution and sanitized chrome metadata remain
-separate protocols with their own validation.
+separate protocols with their own validation. The portal broker placeholder now
+has a bounded health-frame smoke that encodes and decodes the packet over the
+shared Sophia IPC frame header.
 
 Frame scheduling now has an explicit seam. `FrameClock` produces output-scoped
 frame ticks, and the deterministic headless implementation advances serials

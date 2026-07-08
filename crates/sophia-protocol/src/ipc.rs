@@ -1,6 +1,7 @@
 use crate::OutputId;
 use crate::{
-    LayoutNodeCapabilities, LayoutNodeKind, LayoutNodeSnapshot, LayoutNodeState, Rect, Size,
+    BrokerHealthPacket, BrokerHealthState, BrokerKind, LayoutNodeCapabilities, LayoutNodeKind,
+    LayoutNodeSnapshot, LayoutNodeState, Rect, SOPHIA_BROKER_HEALTH_MAX_MESSAGE_LEN, Size,
     SurfaceConstraints, SurfaceId, SurfacePlacement, SurfaceSizeRequest, TransactionId, Transform,
     WmCommand, WmManageSurface, WmRelayoutWorkspace, WmRequestKind, WmRequestPacket,
     WmResponsePacket, WorkspaceId,
@@ -16,6 +17,7 @@ pub const SOPHIA_IPC_MAX_ITEMS: usize = 1024;
 pub enum IpcMessageKind {
     WmRequest = 1,
     WmResponse = 2,
+    BrokerHealth = 3,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -34,9 +36,26 @@ pub enum IpcCodecError {
     PayloadTooLarge(usize),
     ReservedNonZero(u32),
     TrailingBytes(usize),
-    CountTooLarge { count: usize, max: usize },
-    InvalidEnum { field: &'static str, value: u32 },
-    InvalidBool { field: &'static str, value: u8 },
+    CountTooLarge {
+        count: usize,
+        max: usize,
+    },
+    TextTooLarge {
+        field: &'static str,
+        len: usize,
+        max: usize,
+    },
+    InvalidUtf8 {
+        field: &'static str,
+    },
+    InvalidEnum {
+        field: &'static str,
+        value: u32,
+    },
+    InvalidBool {
+        field: &'static str,
+        value: u8,
+    },
 }
 
 pub fn encode_wm_request_frame(request: &WmRequestPacket) -> Result<Vec<u8>, IpcCodecError> {
@@ -75,6 +94,30 @@ pub fn decode_wm_response_frame(frame: &[u8]) -> Result<WmResponsePacket, IpcCod
     }
     let mut cursor = Cursor::new(payload);
     let packet = decode_wm_response_payload(header.transaction, &mut cursor)?;
+    cursor.finish()?;
+    Ok(packet)
+}
+
+pub fn encode_broker_health_frame(packet: &BrokerHealthPacket) -> Result<Vec<u8>, IpcCodecError> {
+    let mut payload = Vec::new();
+    encode_broker_health_payload(packet, &mut payload)?;
+    encode_frame(
+        IpcMessageKind::BrokerHealth,
+        TransactionId::from_raw(packet.generation),
+        &payload,
+    )
+}
+
+pub fn decode_broker_health_frame(frame: &[u8]) -> Result<BrokerHealthPacket, IpcCodecError> {
+    let (header, payload) = decode_frame(frame)?;
+    if header.message_kind != IpcMessageKind::BrokerHealth {
+        return Err(IpcCodecError::InvalidEnum {
+            field: "message_kind",
+            value: header.message_kind as u32,
+        });
+    }
+    let mut cursor = Cursor::new(payload);
+    let packet = decode_broker_health_payload(header.transaction.raw(), &mut cursor)?;
     cursor.finish()?;
     Ok(packet)
 }
@@ -118,6 +161,7 @@ pub fn decode_frame(frame: &[u8]) -> Result<(IpcFrameHeader, &[u8]), IpcCodecErr
     let message_kind = match cursor.u16()? {
         1 => IpcMessageKind::WmRequest,
         2 => IpcMessageKind::WmResponse,
+        3 => IpcMessageKind::BrokerHealth,
         other => return Err(IpcCodecError::UnknownMessageKind(other)),
     };
     let transaction = TransactionId::from_raw(cursor.u64()?);
@@ -303,6 +347,40 @@ fn decode_wm_response_payload(
     })
 }
 
+fn encode_broker_health_payload(
+    packet: &BrokerHealthPacket,
+    out: &mut Vec<u8>,
+) -> Result<(), IpcCodecError> {
+    push_u16(out, encode_broker_kind(packet.broker));
+    push_u16(out, encode_broker_health_state(packet.state));
+    encode_optional_text(
+        out,
+        "broker_health_message",
+        packet.message.as_deref(),
+        SOPHIA_BROKER_HEALTH_MAX_MESSAGE_LEN,
+    )
+}
+
+fn decode_broker_health_payload(
+    generation: u64,
+    cursor: &mut Cursor<'_>,
+) -> Result<BrokerHealthPacket, IpcCodecError> {
+    let broker = decode_broker_kind(cursor.u16()?)?;
+    let state = decode_broker_health_state(cursor.u16()?)?;
+    let message = decode_optional_text(
+        cursor,
+        "broker_health_message",
+        SOPHIA_BROKER_HEALTH_MAX_MESSAGE_LEN,
+    )?;
+
+    Ok(BrokerHealthPacket {
+        broker,
+        state,
+        generation,
+        message,
+    })
+}
+
 fn encode_layout_node(node: &LayoutNodeSnapshot, out: &mut Vec<u8>) {
     encode_surface_id(node.surface, out);
     encode_workspace_id(node.workspace, out);
@@ -470,6 +548,46 @@ fn decode_layout_node_kind(value: u16) -> Result<LayoutNodeKind, IpcCodecError> 
     }
 }
 
+fn encode_broker_kind(kind: BrokerKind) -> u16 {
+    match kind {
+        BrokerKind::Portal => 1,
+        BrokerKind::Metadata => 2,
+    }
+}
+
+fn decode_broker_kind(value: u16) -> Result<BrokerKind, IpcCodecError> {
+    match value {
+        1 => Ok(BrokerKind::Portal),
+        2 => Ok(BrokerKind::Metadata),
+        other => Err(IpcCodecError::InvalidEnum {
+            field: "broker_kind",
+            value: u32::from(other),
+        }),
+    }
+}
+
+fn encode_broker_health_state(state: BrokerHealthState) -> u16 {
+    match state {
+        BrokerHealthState::Starting => 1,
+        BrokerHealthState::Ready => 2,
+        BrokerHealthState::Degraded => 3,
+        BrokerHealthState::Stopped => 4,
+    }
+}
+
+fn decode_broker_health_state(value: u16) -> Result<BrokerHealthState, IpcCodecError> {
+    match value {
+        1 => Ok(BrokerHealthState::Starting),
+        2 => Ok(BrokerHealthState::Ready),
+        3 => Ok(BrokerHealthState::Degraded),
+        4 => Ok(BrokerHealthState::Stopped),
+        other => Err(IpcCodecError::InvalidEnum {
+            field: "broker_health_state",
+            value: u32::from(other),
+        }),
+    }
+}
+
 fn encode_capabilities(capabilities: LayoutNodeCapabilities) -> u16 {
     u16::from(capabilities.movable)
         | (u16::from(capabilities.resizable) << 1)
@@ -523,6 +641,56 @@ fn decode_count(cursor: &mut Cursor<'_>) -> Result<usize, IpcCodecError> {
     Ok(count)
 }
 
+fn encode_optional_text(
+    out: &mut Vec<u8>,
+    field: &'static str,
+    value: Option<&str>,
+    max: usize,
+) -> Result<(), IpcCodecError> {
+    match value {
+        Some(value) => {
+            if value.len() > max {
+                return Err(IpcCodecError::TextTooLarge {
+                    field,
+                    len: value.len(),
+                    max,
+                });
+            }
+            push_u8(out, 1);
+            push_u16(out, value.len() as u16);
+            out.extend_from_slice(value.as_bytes());
+        }
+        None => push_u8(out, 0),
+    }
+
+    Ok(())
+}
+
+fn decode_optional_text(
+    cursor: &mut Cursor<'_>,
+    field: &'static str,
+    max: usize,
+) -> Result<Option<String>, IpcCodecError> {
+    match cursor.u8()? {
+        0 => Ok(None),
+        1 => {
+            let len = cursor.u16()? as usize;
+            if len > max {
+                return Err(IpcCodecError::TextTooLarge { field, len, max });
+            }
+            let bytes = cursor.slice(len)?;
+            let text = core::str::from_utf8(bytes)
+                .map_err(|_| IpcCodecError::InvalidUtf8 { field })?
+                .to_owned();
+            Ok(Some(text))
+        }
+        other => Err(IpcCodecError::InvalidBool {
+            field,
+            value: other,
+        }),
+    }
+}
+
 fn push_u8(out: &mut Vec<u8>, value: u8) {
     out.push(value);
 }
@@ -572,6 +740,19 @@ impl<'a> Cursor<'a> {
         let mut out = [0; N];
         out.copy_from_slice(slice);
         Ok(out)
+    }
+
+    fn slice(&mut self, len: usize) -> Result<&'a [u8], IpcCodecError> {
+        let end = self
+            .offset
+            .checked_add(len)
+            .ok_or(IpcCodecError::Truncated)?;
+        let slice = self
+            .bytes
+            .get(self.offset..end)
+            .ok_or(IpcCodecError::Truncated)?;
+        self.offset = end;
+        Ok(slice)
     }
 
     fn u8(&mut self) -> Result<u8, IpcCodecError> {

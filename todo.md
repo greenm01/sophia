@@ -78,7 +78,7 @@ into bounded, data-only peers without exposing client metadata or payload bytes
 to runtime policy.
 
 - [x] Add a bounded broker health/control packet contract.
-- [ ] Wire portal broker placeholder to a bounded IPC health smoke.
+- [x] Wire portal broker placeholder to a bounded IPC health smoke.
 - [ ] Wire metadata broker placeholder to a bounded IPC health smoke.
 - [ ] Route broker health into `SessionRuntimeState`.
 
