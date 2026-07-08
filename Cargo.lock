@@ -188,6 +188,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sophia-portal"
+version = "0.1.0"
+dependencies = [
+ "sophia-protocol",
+]
+
+[[package]]
 name = "sophia-protocol"
 version = "0.1.0"
 

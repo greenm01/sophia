@@ -434,6 +434,11 @@ approval holds only the specific transfer for a bounded timeout. Approval is
 single-use and generation-bound; if the source owner changes, the pending
 transfer becomes stale and must be revoked or restarted.
 
+The `sophia-portal` crate implements this policy as a reducer over
+`PortalTransfer` values. Its commands are intentionally abstract:
+prompt user/policy, hand off clipboard data, or fail the X11 selection. X Bridge
+code later translates those commands into concrete ICCCM/XFixes behavior.
+
 ## Storage
 
 Use dense tables inside a process. Use snapshots between processes.

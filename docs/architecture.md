@@ -261,6 +261,14 @@ Clipboard denial maps to native X11 selection failure, not synthetic input.
 Pending approval holds only the transfer request for a bounded timeout; it does
 not suspend either application or namespace.
 
+The first portal implementation is the `sophia-portal` clipboard reducer. It
+keeps transfers private and pending by default, accepts only text targets,
+emits prompt, handoff, and fail-selection commands, and revokes pending
+transfers when the source namespace owner generation changes. It does not yet
+monitor X selections itself; Sophia X Bridge remains responsible for observing
+namespaced selection ownership and converting X11 selection outcomes into
+portal events.
+
 ### Metadata Broker And Chrome Actions
 
 Compositor chrome is Engine/session authority, not WM authority. If the user

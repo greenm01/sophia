@@ -192,12 +192,12 @@ Add intentional namespace crossing without weakening Xnamespace.
 
 **Clipboard first**
 - [ ] Monitor namespaced selections.
-- [ ] Keep clipboard private by default.
-- [ ] Add explicit export/import policy.
-- [ ] Support text targets first.
-- [ ] Invalidate transfers when the source owner changes.
-- [ ] Fail denied paste as normal X11 selection failure.
-- [ ] Bind approval to a single source generation.
+- [x] Keep clipboard private by default.
+- [x] Add explicit export/import policy.
+- [x] Support text targets first.
+- [x] Invalidate transfers when the source owner changes.
+- [x] Fail denied paste as normal X11 selection failure.
+- [x] Bind approval to a single source generation.
 
 **Later portals**
 - [ ] Drag-and-drop.

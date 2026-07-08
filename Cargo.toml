@@ -2,6 +2,7 @@
 members = [
     "crates/sophia-cli",
     "crates/sophia-engine",
+    "crates/sophia-portal",
     "crates/sophia-protocol",
     "crates/sophia-runtime",
     "crates/sophia-wm-demo",

@@ -318,6 +318,13 @@ policy, not WM policy: Engine hit-tests chrome, validates a surface generation
 and closability, and Sophia X Bridge attempts the polite X11 close path before
 any future escalation.
 
+The first `sophia-portal` crate now makes the clipboard policy executable. A
+clipboard import starts pending/private, only text targets are accepted, explicit
+deny emits a fail-selection command, matching-generation approval emits a
+handoff command, and stale source generations revoke pending transfers. The
+remaining portal gap is X Bridge integration: monitor namespaced selections and
+turn ICCCM/XFixes events into portal requests.
+
 Routed-input optimization should remain layered behind the working X11 extension
 path. Sophia may coalesce stable pure-motion routes at frame boundaries and may
 later add an Engine-to-XLibre shared-memory route ring if profiling proves the
