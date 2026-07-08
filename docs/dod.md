@@ -252,6 +252,21 @@ Fields should describe:
 For X11 clients, the packet is not delivered directly to the client. It becomes
 input to XLibre's routed-input extension, which still applies X11 semantics.
 
+### LibinputDeviceDescriptor
+
+A libinput device descriptor is the backend-facing record for one discovered
+physical input device before Sophia has a real poll loop.
+
+Fields should describe:
+
+- seat ID
+- device ID
+- broad device kind
+
+The event source accepts packets only when the device is registered and the
+packet seat matches the device seat. This keeps physical-input intake explicit
+before the compositor starts doing scene hit-tests and routed-input generation.
+
 ### InputRoute
 
 An input route is the compositor's answer to "what visual surface did this event

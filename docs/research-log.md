@@ -515,6 +515,12 @@ mode, scale, and Sophia output IDs without opening real DRM devices. The
 descriptor can seed engine output state, giving later device discovery a typed
 target that already works with frame planning.
 
+The libinput backend now has a matching data-only event source skeleton.
+`LibinputDeviceDescriptor` records seat/device/kind, and
+`LibinputEventSource` accepts queued `InputEventPacket` values only from
+registered device/seat pairs. This gives future file-descriptor polling a
+checked intake queue without putting physical input on the X bridge path.
+
 Notification portal commands now have a compositor chrome presentation seam.
 `NotificationChromePresenter` stages bounded notification requests, presents
 them only after a `DeliverNotification` command, and dismisses pending or

@@ -11,10 +11,10 @@ use sophia_portal::{
 };
 use sophia_protocol::{
     AttentionState, BufferSource, ChromeActionKind, ChromeActionRequest, ChromeDescriptor,
-    DisplayLabel, FrameSnapshot, IconTokenId, InputEventKind, InputEventPacket, InputRoute,
-    InputRouteOutcome, IpcCodecError, LayerSnapshot, LayoutNodeSnapshot, LayoutTransaction,
-    OutputId, PortalTransferId, Rect, Region, RenderCommand, RenderCommandKind,
-    SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAX_PAYLOAD_LEN, Size, SurfaceId, TransactionCommit,
+    DeviceId, DisplayLabel, FrameSnapshot, IconTokenId, InputEventKind, InputEventPacket,
+    InputRoute, InputRouteOutcome, IpcCodecError, LayerSnapshot, LayoutNodeSnapshot,
+    LayoutTransaction, OutputId, PortalTransferId, Rect, Region, RenderCommand, RenderCommandKind,
+    SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAX_PAYLOAD_LEN, SeatId, Size, SurfaceId, TransactionCommit,
     TransactionId, TransactionOutcome, TrustLevel, WmRequestKind, WmRequestPacket,
     WmResponsePacket, WorkspaceId, XWindowId, decode_wm_response_frame, encode_wm_request_frame,
 };
@@ -532,6 +532,75 @@ impl DrmKmsOutputRegistry {
             .values()
             .next()
             .map(|output| output.as_engine_output())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibinputDeviceKind {
+    Pointer,
+    Keyboard,
+    Touch,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LibinputDeviceDescriptor {
+    pub seat: SeatId,
+    pub device: DeviceId,
+    pub kind: LibinputDeviceKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibinputEventIngest {
+    Accepted,
+    UnknownDevice,
+    SeatMismatch,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LibinputEventSource {
+    devices: BTreeMap<DeviceId, LibinputDeviceDescriptor>,
+    pending: Vec<InputEventPacket>,
+}
+
+impl LibinputEventSource {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn register_device(&mut self, device: LibinputDeviceDescriptor) {
+        self.devices.insert(device.device, device);
+    }
+
+    pub fn remove_device(&mut self, device: DeviceId) -> Option<LibinputDeviceDescriptor> {
+        self.devices.remove(&device)
+    }
+
+    pub fn device(&self, device: DeviceId) -> Option<&LibinputDeviceDescriptor> {
+        self.devices.get(&device)
+    }
+
+    pub fn devices(&self) -> impl Iterator<Item = &LibinputDeviceDescriptor> {
+        self.devices.values()
+    }
+
+    pub fn push_event(&mut self, event: InputEventPacket) -> LibinputEventIngest {
+        let Some(device) = self.devices.get(&event.device) else {
+            return LibinputEventIngest::UnknownDevice;
+        };
+        if device.seat != event.seat {
+            return LibinputEventIngest::SeatMismatch;
+        }
+
+        self.pending.push(event);
+        LibinputEventIngest::Accepted
+    }
+
+    pub fn drain_events(&mut self) -> Vec<InputEventPacket> {
+        self.pending.drain(..).collect()
+    }
+
+    pub fn pending_len(&self) -> usize {
+        self.pending.len()
     }
 }
 

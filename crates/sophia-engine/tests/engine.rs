@@ -1,7 +1,8 @@
 use sophia_engine::{
     BufferImportPath, ChromeActionDecision, ChromeActionRejectReason, ChromeBroker,
     DeterministicFrameClock, DrmKmsMode, DrmKmsOutputDescriptor, DrmKmsOutputRegistry, EngineError,
-    FrameClock, FramePlanRequest, HeadlessEngine, LastCommittedLayout, MetadataChromeRejectReason,
+    FrameClock, FramePlanRequest, HeadlessEngine, LastCommittedLayout, LibinputDeviceDescriptor,
+    LibinputDeviceKind, LibinputEventIngest, LibinputEventSource, MetadataChromeRejectReason,
     MetadataChromeUpdate, NotificationChromePresenter, NotificationChromeRejectReason,
     NotificationChromeUpdate, RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction,
     SanitizedChromeMetadata, SessionCommand, SessionEvent, SessionLayerSource, SessionTickRequest,
@@ -93,6 +94,59 @@ fn drm_kms_descriptor_can_seed_engine_output() {
 
     assert_eq!(frame.output_size, descriptor.mode.size);
     assert_eq!(frame.output_scale, descriptor.scale);
+}
+
+#[test]
+fn libinput_event_source_accepts_registered_device_events_in_order() {
+    let mut source = LibinputEventSource::new();
+    let device = LibinputDeviceDescriptor {
+        seat: SeatId::from_raw(1),
+        device: DeviceId::from_raw(2),
+        kind: LibinputDeviceKind::Pointer,
+    };
+    source.register_device(device);
+
+    assert_eq!(source.device(DeviceId::from_raw(2)), Some(&device));
+    assert_eq!(source.devices().count(), 1);
+    assert_eq!(
+        source.push_event(motion_event(1, 10.0, 20.0)),
+        LibinputEventIngest::Accepted
+    );
+    assert_eq!(
+        source.push_event(motion_event(2, 11.0, 21.0)),
+        LibinputEventIngest::Accepted
+    );
+
+    let events = source.drain_events();
+
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0].serial, 1);
+    assert_eq!(events[1].serial, 2);
+    assert_eq!(source.pending_len(), 0);
+    assert_eq!(source.remove_device(DeviceId::from_raw(2)), Some(device));
+}
+
+#[test]
+fn libinput_event_source_rejects_unknown_or_wrong_seat_events() {
+    let mut source = LibinputEventSource::new();
+    source.register_device(LibinputDeviceDescriptor {
+        seat: SeatId::from_raw(9),
+        device: DeviceId::from_raw(2),
+        kind: LibinputDeviceKind::Keyboard,
+    });
+
+    assert_eq!(
+        source.push_event(motion_event(1, 0.0, 0.0)),
+        LibinputEventIngest::SeatMismatch
+    );
+
+    let mut unknown_device_event = motion_event(2, 0.0, 0.0);
+    unknown_device_event.device = DeviceId::from_raw(99);
+    assert_eq!(
+        source.push_event(unknown_device_event),
+        LibinputEventIngest::UnknownDevice
+    );
+    assert_eq!(source.pending_len(), 0);
 }
 
 #[test]

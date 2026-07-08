@@ -400,6 +400,13 @@ CRTC ID, mode, scale, and Sophia `OutputId` without opening devices yet. The
 descriptor can seed an engine output, which lets frame planning consume the same
 shape the real backend will later discover from KMS.
 
+The libinput backend starts the same way. `LibinputDeviceDescriptor` records the
+seat, device, and broad device kind that future libinput discovery will
+produce. `LibinputEventSource` accepts `InputEventPacket` values only from
+registered device/seat pairs and drains them in order for the routing pipeline.
+It is not a real file-descriptor poller yet; it is the typed intake seam that
+physical input will feed.
+
 XFixes selection owner updates are the first portal execution input. Sophia X
 Bridge converts owner-generation changes into source-namespace clipboard events;
 the clipboard portal reducer uses those events to revoke stale pending

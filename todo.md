@@ -36,7 +36,7 @@ Do this after the runtime loop has a clear shape.
 - [x] Add frame-clock abstraction while preserving headless determinism.
 - [x] Add renderer/import abstraction with CPU readback kept as fallback.
 - [x] Add DRM/KMS output skeleton.
-- [ ] Add libinput event source skeleton.
+- [x] Add libinput event source skeleton.
 - [ ] Integrate physical input with routed-input request generation.
 
 ---
