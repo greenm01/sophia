@@ -372,6 +372,9 @@ close semantics. The WM receives only later layout consequences.
 Session events are compositor/session inputs that may produce privileged
 commands. For chrome close, `SessionEvent::ChromeAction` can produce
 `SessionCommand::RequestPoliteClose`; it must not produce a WM command.
+When a surface is actually removed, `SessionEvent::SurfaceRemoved` can produce
+a `WmRequestKind::SurfaceRemoved` packet. This keeps WM relayout tied to X11
+lifecycle consequences, not compositor chrome intent.
 
 ### SurfaceSnapshot
 

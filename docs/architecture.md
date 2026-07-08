@@ -268,6 +268,12 @@ close requests emit `SessionCommand::RequestPoliteClose`, which the runtime
 dispatches to Sophia X Bridge. Rejected chrome actions emit no command. This
 keeps close intent out of the blind WM protocol.
 
+The WM notification is a separate lifecycle event. Only after XLibre/X Bridge
+reports that the surface was actually removed does Sophia Engine process
+`SessionEvent::SurfaceRemoved` and emit a `WmRequestKind::SurfaceRemoved`
+command packet. This is the point where the WM may relayout; a chrome close
+request itself never wakes the WM.
+
 ## XLibre Responsibilities
 
 XLibre remains responsible for:

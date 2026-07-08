@@ -330,6 +330,11 @@ The first Phase 8 session seam is implemented as an engine reducer:
 `SessionCommand::RequestPoliteClose` only for accepted close requests. This
 command is meant for Sophia X Bridge dispatch, not WM IPC.
 
+The WM is notified only from the later lifecycle consequence:
+`SessionEvent::SurfaceRemoved` emits a `WmRequestKind::SurfaceRemoved` packet.
+This keeps close intent and layout policy separated; the WM wakes after actual
+surface removal, not after a compositor chrome click.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

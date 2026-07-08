@@ -5,6 +5,7 @@ use sophia_protocol::{
     BufferSource, ChromeActionKind, ChromeActionRequest, ChromeDescriptor, FrameSnapshot,
     LayerSnapshot, LayoutNodeSnapshot, LayoutTransaction, OutputId, Rect, Region, RenderCommand,
     RenderCommandKind, Size, SurfaceId, TransactionCommit, TransactionId, TransactionOutcome,
+    WmRequestKind, WmRequestPacket, WorkspaceId,
 };
 use sophia_runtime::{SophiaErrorExt, SophiaErrorKind};
 use tracing::instrument;
@@ -106,6 +107,11 @@ pub enum ChromeActionRejectReason {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SessionEvent {
     ChromeAction(ChromeActionRequest),
+    SurfaceRemoved {
+        transaction: TransactionId,
+        surface: SurfaceId,
+        workspace: WorkspaceId,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -117,6 +123,7 @@ pub struct SessionUpdate {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SessionCommand {
     RequestPoliteClose { surface: SurfaceId },
+    SendWmRequest(WmRequestPacket),
 }
 
 pub trait EngineBackend {
@@ -451,5 +458,16 @@ pub fn handle_session_event(event: SessionEvent, nodes: &[LayoutNodeSnapshot]) -
                 commands,
             }
         }
+        SessionEvent::SurfaceRemoved {
+            transaction,
+            surface,
+            workspace,
+        } => SessionUpdate {
+            chrome_decision: None,
+            commands: vec![SessionCommand::SendWmRequest(WmRequestPacket {
+                transaction,
+                kind: WmRequestKind::SurfaceRemoved { surface, workspace },
+            })],
+        },
     }
 }

@@ -7,7 +7,7 @@ use sophia_protocol::{
     DisplayLabel, IconTokenId, LayerSnapshot, LayoutNodeCapabilities, LayoutNodeKind,
     LayoutNodeSnapshot, LayoutNodeState, LayoutTransaction, OutputId, Rect, Region,
     SurfaceConstraints, SurfaceId, SurfacePlacement, TransactionId, TransactionOutcome, Transform,
-    TrustLevel, WorkspaceId,
+    TrustLevel, WmRequestKind, WorkspaceId,
 };
 
 #[test]
@@ -445,6 +445,34 @@ fn session_event_does_not_emit_close_command_for_rejected_chrome_action() {
         ))
     );
     assert!(update.commands.is_empty());
+}
+
+#[test]
+fn session_event_notifies_wm_only_after_surface_removed() {
+    let engine = HeadlessEngine::default();
+    let surface = SurfaceId::new(14, 1);
+    let workspace = WorkspaceId::from_raw(3);
+    let transaction = TransactionId::from_raw(99);
+
+    let update = engine.handle_session_event(
+        SessionEvent::SurfaceRemoved {
+            transaction,
+            surface,
+            workspace,
+        },
+        &[],
+    );
+
+    assert_eq!(update.chrome_decision, None);
+    assert_eq!(update.commands.len(), 1);
+    let SessionCommand::SendWmRequest(request) = &update.commands[0] else {
+        panic!("expected WM request command");
+    };
+    assert_eq!(request.transaction, transaction);
+    assert_eq!(
+        request.kind,
+        WmRequestKind::SurfaceRemoved { surface, workspace }
+    );
 }
 
 fn test_layer(surface_index: u32, stack_rank: u32, x: i32, damage: Region) -> LayerSnapshot {
