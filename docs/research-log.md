@@ -518,6 +518,13 @@ the child, feeds `ProcessExited` through the restart reducer, starts a new WM
 process, and sends a second layout request. Both transactions must commit and
 the smoke records the changed child PID.
 
+Clipboard denial now has an executable portal-to-X11 failure smoke:
+`sophia-cli portal-clipboard-deny-smoke`. The smoke creates a pending clipboard
+transfer, denies it through `ClipboardPortal`, observes `FailSelection`, and
+uses Sophia X Bridge to produce a native `SelectionNotify` failure with
+`property = None`. This proves the denial maps to normal X11 selection failure;
+full live paste handling still needs SelectionRequest/requestor dispatch.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

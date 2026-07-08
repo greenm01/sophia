@@ -280,6 +280,11 @@ monitor X selections itself; Sophia X Bridge remains responsible for observing
 namespaced selection ownership and converting X11 selection outcomes into
 portal events.
 
+Denied clipboard transfers now have the first concrete X11 failure adapter.
+`PortalCommand::FailSelection` maps through Sophia X Bridge into a normal
+`SelectionNotify` failure with `property = None`, matching ICCCM selection
+conversion failure instead of injecting synthetic input or blocking clients.
+
 Sophia X Bridge monitors selection ownership through XFixes
 `SelectionNotify` events for `PRIMARY`, `SECONDARY`, and `CLIPBOARD`. The bridge
 attributes each owner window to a known mirrored namespace when possible and

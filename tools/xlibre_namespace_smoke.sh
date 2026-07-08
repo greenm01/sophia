@@ -132,6 +132,12 @@ echo "supervised wm socket smoke:"
     cargo run -q -p sophia-cli -- wm-supervisor-smoke --wm="$ROOT_DIR/target/debug/sophia-wm-demo"
 )
 
+echo "portal clipboard deny smoke:"
+(
+    cd "$ROOT_DIR"
+    cargo run -q -p sophia-cli -- portal-clipboard-deny-smoke
+)
+
 echo "root routed-input smoke:"
 (
     cd "$ROOT_DIR"

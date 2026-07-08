@@ -6,8 +6,8 @@ use std::{io::IoSlice, time::Instant};
 
 use sophia_protocol::{
     BufferSource, DamageFrame, DeviceId, InputEventKind, InputEventPacket, InputRoute,
-    InputRouteOutcome, LayerSnapshot, NamespaceId, OutputId, Point, Rect, Region, SeatId, Size,
-    SurfaceId, SurfaceSnapshot, Transform, XLIBRE_ROUTED_INPUT_EXTENSION_NAME,
+    InputRouteOutcome, LayerSnapshot, NamespaceId, OutputId, Point, PortalTransferId, Rect, Region,
+    SeatId, Size, SurfaceId, SurfaceSnapshot, Transform, XLIBRE_ROUTED_INPUT_EXTENSION_NAME,
     XLIBRE_ROUTED_INPUT_ROUTE_EVENT_LENGTH, XLIBRE_ROUTED_INPUT_ROUTE_EVENT_OPCODE,
     XLibreRoutedInputDecision, XLibreRoutedInputOutcome, XLibreRoutedInputRequest,
     XLibreRoutedInputWireRequest, XWindowId, XWindowMirror,
@@ -25,7 +25,8 @@ use x11rb::protocol::xinput::{
 };
 use x11rb::protocol::xproto::{
     Atom, AtomEnum, ClientMessageData, ClientMessageEvent, ConnectionExt as _, CreateGCAux,
-    CreateWindowAux, EventMask, ImageFormat, MapState, Place, Rectangle, Window, WindowClass,
+    CreateWindowAux, EventMask, ImageFormat, MapState, Place, Rectangle, SELECTION_NOTIFY_EVENT,
+    SelectionNotifyEvent, Timestamp, Window, WindowClass,
 };
 use x11rb::x11_utils::{Serialize, TryParse};
 
@@ -1810,6 +1811,44 @@ pub struct XSelectionOwnerUpdate {
 pub struct ClipboardPortalOwnerChange {
     pub source_namespace: NamespaceId,
     pub generation: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ClipboardSelectionFailureRequest {
+    pub transfer: PortalTransferId,
+    pub requestor: Window,
+    pub selection: Atom,
+    pub target: Atom,
+    pub time: Timestamp,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ClipboardSelectionFailure {
+    pub transfer: PortalTransferId,
+    pub event: SelectionNotifyEvent,
+}
+
+impl ClipboardSelectionFailure {
+    pub fn failed_normally(&self) -> bool {
+        self.event.property == u32::from(AtomEnum::NONE)
+    }
+}
+
+pub fn clipboard_selection_failure_notify(
+    request: ClipboardSelectionFailureRequest,
+) -> ClipboardSelectionFailure {
+    ClipboardSelectionFailure {
+        transfer: request.transfer,
+        event: SelectionNotifyEvent {
+            response_type: SELECTION_NOTIFY_EVENT,
+            sequence: 0,
+            time: request.time,
+            requestor: request.requestor,
+            selection: request.selection,
+            target: request.target,
+            property: u32::from(AtomEnum::NONE),
+        },
+    }
 }
 
 pub fn clipboard_portal_owner_change_from_selection_update(

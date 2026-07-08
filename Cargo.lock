@@ -171,6 +171,7 @@ name = "sophia-cli"
 version = "0.1.0"
 dependencies = [
  "sophia-engine",
+ "sophia-portal",
  "sophia-protocol",
  "sophia-runtime",
  "sophia-wm-demo",

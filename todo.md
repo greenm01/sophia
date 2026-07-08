@@ -24,7 +24,7 @@ Close the gap between existing reducers/protocols and a running session loop.
 - [x] Route notification delivery commands to compositor chrome presentation.
 - [x] Route sanitized metadata broker output into compositor chrome descriptors.
 - [x] Add a supervised long-lived WM socket smoke with kill/restart behavior.
-- [ ] Add a portal smoke proving denied cross-namespace clipboard transfer
+- [x] Add a portal smoke proving denied cross-namespace clipboard transfer
   becomes normal X11 selection failure.
 
 ---

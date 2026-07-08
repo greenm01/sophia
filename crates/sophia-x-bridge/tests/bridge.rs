@@ -190,6 +190,24 @@ mod tests {
     }
 
     #[test]
+    fn clipboard_selection_failure_uses_native_selection_notify_none_property() {
+        let failure = clipboard_selection_failure_notify(ClipboardSelectionFailureRequest {
+            transfer: PortalTransferId::from_raw(9),
+            requestor: 0x44,
+            selection: 0x100,
+            target: 0x200,
+            time: 55,
+        });
+
+        assert_eq!(failure.transfer, PortalTransferId::from_raw(9));
+        assert!(failure.failed_normally());
+        assert_eq!(failure.event.requestor, 0x44);
+        assert_eq!(failure.event.selection, 0x100);
+        assert_eq!(failure.event.target, 0x200);
+        assert_eq!(failure.event.property, 0);
+    }
+
+    #[test]
     fn selection_owner_loss_uses_previous_known_namespace_for_portal_change() {
         let mut state = XMirrorState::default();
         let mut owner = mirror(0x20, None, 0);

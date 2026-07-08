@@ -2,10 +2,12 @@ use sophia_engine::{
     FramePlanRequest, HeadlessEngine, LastCommittedLayout, SessionLayerSource, SessionTickRequest,
     WmSocketTransport, WmSocketTransportConfig,
 };
+use sophia_portal::{ClipboardPortal, ClipboardTarget, ClipboardTransferRequest, PortalCommand};
 use sophia_protocol::{
     BufferSource, LayerSnapshot, LayoutNodeCapabilities, LayoutNodeKind, LayoutNodeSnapshot,
-    LayoutNodeState, Rect, Region, Size, SurfaceConstraints, SurfaceId, TransactionId, Transform,
-    WmRelayoutWorkspace, WmRequestKind, WmRequestPacket, WorkspaceId,
+    LayoutNodeState, NamespaceId, PortalTransferId, Rect, Region, Size, SurfaceConstraints,
+    SurfaceId, TransactionId, Transform, WmRelayoutWorkspace, WmRequestKind, WmRequestPacket,
+    WorkspaceId,
 };
 use sophia_runtime::{
     ProcessLaunchSpec, ProcessSupervisor, RestartPolicy, SupervisedProcessKind, SupervisorEvent,
@@ -13,7 +15,8 @@ use sophia_runtime::{
 };
 use sophia_wm_demo::{ExternalWmClient, tile_workspace};
 use sophia_x_bridge::{
-    TestClientConfig, capture_readback_display, run_test_client_window, smoke_routed_input,
+    ClipboardSelectionFailureRequest, TestClientConfig, capture_readback_display,
+    clipboard_selection_failure_notify, run_test_client_window, smoke_routed_input,
     stress_routed_input,
 };
 use std::os::unix::net::UnixStream;
@@ -343,6 +346,52 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    if args.iter().any(|arg| arg == "portal-clipboard-deny-smoke") {
+        let transfer = PortalTransferId::from_raw(1);
+        let source_namespace = NamespaceId::from_raw(10);
+        let target_namespace = NamespaceId::from_raw(20);
+        let generation = 7;
+        let mut portal = ClipboardPortal::new();
+        portal
+            .request_import(ClipboardTransferRequest {
+                transfer,
+                source_namespace,
+                target_namespace,
+                target: ClipboardTarget::Atom("UTF8_STRING".to_owned()),
+                byte_size: 128,
+                generation,
+            })
+            .map_err(|error| format!("clipboard portal import failed: {error:?}"))?;
+        let command = portal
+            .deny(transfer)
+            .map_err(|error| format!("clipboard portal denial failed: {error:?}"))?;
+        let PortalCommand::FailSelection { transfer } = command else {
+            return Err(format!("expected FailSelection, got {command:?}").into());
+        };
+        let failure = clipboard_selection_failure_notify(ClipboardSelectionFailureRequest {
+            transfer,
+            requestor: 0x44,
+            selection: 0x100,
+            target: 0x200,
+            time: 55,
+        });
+
+        if !failure.failed_normally() {
+            return Err("clipboard denial did not map to SelectionNotify property=None".into());
+        }
+
+        println!(
+            "portal-clipboard-deny-smoke transfer={} source_ns={} target_ns={} generation={} command=FailSelection selection_notify_property={} normal_failure={}",
+            transfer.raw(),
+            source_namespace.raw(),
+            target_namespace.raw(),
+            generation,
+            failure.event.property,
+            failure.failed_normally(),
+        );
+        return Ok(());
+    }
+
     if args.iter().any(|arg| arg == "x-smoke-routed-input") {
         let display = arg_value(&args, "--display");
         let report = smoke_routed_input(display.as_deref())?;
@@ -404,6 +453,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("commands: x-smoke-runtime-tick [--display=:99]");
     println!("commands: x-smoke-external-wm [--display=:99] [--wm=target/debug/sophia-wm-demo]");
     println!("commands: wm-supervisor-smoke [--wm=target/debug/sophia-wm-demo]");
+    println!("commands: portal-clipboard-deny-smoke");
     println!("commands: x-smoke-routed-input [--display=:99]");
     println!(
         "commands: x-stress-routed-input [--display=:99] [--iterations=1000] [--threshold-us=500]"
