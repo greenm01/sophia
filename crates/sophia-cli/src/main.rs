@@ -20,11 +20,12 @@ use sophia_wm_demo::{ExternalWmClient, tile_workspace};
 use sophia_x_bridge::{
     ClipboardSelectionFailureRequest, TestClientConfig, XMirrorState, XSelectionChangeKind,
     XSelectionEvent, XSelectionMonitor, capture_readback_display,
-    clipboard_portal_request_from_selection_request, clipboard_selection_failure_notify,
+    clipboard_selection_failure_notify, dispatch_clipboard_selection_request_event,
     run_test_client_window, smoke_routed_input, smoke_routed_input_edges, stress_routed_input,
 };
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use x11rb::protocol::Event;
 use x11rb::protocol::xproto::SelectionRequestEvent;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -654,7 +655,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
             &mirror,
         );
-        let request = SelectionRequestEvent {
+        let request = Event::SelectionRequest(SelectionRequestEvent {
             response_type: 0,
             sequence: 1,
             time: 55,
@@ -663,37 +664,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             selection: 0x100,
             target: 0x200,
             property: 0x300,
-        };
-        let portal_request = clipboard_portal_request_from_selection_request(
+        });
+        let mut portal = ClipboardPortal::new();
+        let dispatch = dispatch_clipboard_selection_request_event(
             &request,
             "UTF8_STRING",
             &monitor,
             &mirror,
             transfer,
+            &mut portal,
         )
-        .map_err(|error| format!("selection request conversion failed: {error:?}"))?;
-        let mut portal = ClipboardPortal::new();
-        portal
-            .request_import(portal_request.request.clone())
-            .map_err(|error| format!("clipboard portal import failed: {error:?}"))?;
+        .map_err(|error| format!("selection request dispatch failed: {error:?}"))?;
         let PortalCommand::FailSelection { transfer } = portal
             .deny(transfer)
             .map_err(|error| format!("clipboard portal denial failed: {error:?}"))?
         else {
             return Err("expected clipboard denial to fail selection".into());
         };
-        let failure = clipboard_selection_failure_notify(portal_request.failure);
+        let failure = clipboard_selection_failure_notify(dispatch.portal_request.failure);
 
         println!(
             "portal-clipboard-request-smoke transfer={} source_ns={} target_ns={} owner_generation={} requestor={:#x} selection={:#x} target={:#x} property={:#x} failure_property={} normal_failure={}",
             transfer.raw(),
-            portal_request.request.source_namespace.raw(),
-            portal_request.request.target_namespace.raw(),
+            dispatch.portal_request.request.source_namespace.raw(),
+            dispatch.portal_request.request.target_namespace.raw(),
             update.current.generation,
             failure.event.requestor,
             failure.event.selection,
             failure.event.target,
-            portal_request.property,
+            dispatch.portal_request.property,
             failure.event.property,
             failure.failed_normally(),
         );

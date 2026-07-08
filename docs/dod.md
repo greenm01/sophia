@@ -613,6 +613,11 @@ name, byte-size placeholder, and owner generation; the bridge keeps X requestor,
 selection, target atom, property, and timestamp context for concrete X11
 replies.
 
+The dispatcher boundary consumes `Event::SelectionRequest` from x11rb and calls
+the clipboard portal reducer. It must fail closed before portal mutation when
+the event is not a selection request, when namespace attribution is missing, or
+when source and target are in the same namespace.
+
 Drag-and-drop follows the same reducer shape. Offered MIME/protocol targets are
 bounded before storage, approval is generation-bound, denial or stale ownership
 becomes an abstract cancel command, and Xdnd-specific protocol mechanics stay

@@ -89,7 +89,7 @@ bounded portal execution without putting raw X authority in portal policy.
 
 - [x] Convert X11 `SelectionRequest` context into a cross-namespace clipboard
   portal import request with native failure reply context.
-- [ ] Dispatch live X11 `SelectionRequest` events into the clipboard portal
+- [x] Dispatch live X11 `SelectionRequest` events into the clipboard portal
   runtime path.
 - [ ] Implement approved clipboard handoff for one bounded text target.
 - [ ] Add a live X smoke for request -> deny and request -> approved handoff.

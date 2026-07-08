@@ -627,6 +627,12 @@ plus native failure reply context. The smoke denies that request through the
 portal and confirms the X11 reply remains a normal `SelectionNotify`
 `property = None` failure.
 
+The requestor path now dispatches the real x11rb `Event::SelectionRequest`
+variant into `ClipboardPortal`. `dispatch_clipboard_selection_request_event`
+rejects non-selection events, missing namespace attribution, same-namespace
+requests, and unsupported targets before producing a portal prompt. Approved
+clipboard data handoff is still open.
+
 Broker IPC now has its first bounded packet contract. `BrokerHealthPacket`
 covers only portal/metadata broker identity, coarse health state, generation,
 and an optional short status message. It deliberately excludes raw client

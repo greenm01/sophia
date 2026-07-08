@@ -4,7 +4,9 @@ use std::thread;
 use std::time::Duration;
 use std::{io::IoSlice, time::Instant};
 
-use sophia_portal::{ClipboardTarget, ClipboardTransferRequest};
+use sophia_portal::{
+    ClipboardPortal, ClipboardTarget, ClipboardTransferRequest, PortalCommand, PortalError,
+};
 use sophia_protocol::{
     BufferSource, DamageFrame, DeviceId, InputEventKind, InputEventPacket, InputRoute,
     InputRouteOutcome, LayerSnapshot, NamespaceId, OutputId, Point, PortalTransferId, Rect, Region,
@@ -1941,6 +1943,48 @@ pub enum ClipboardSelectionRequestError {
     UnknownSourceOwner,
     MissingSourceNamespace,
     SameNamespace,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClipboardSelectionDispatch {
+    pub portal_request: ClipboardSelectionPortalRequest,
+    pub command: PortalCommand,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ClipboardSelectionDispatchError {
+    NotSelectionRequest,
+    Request(ClipboardSelectionRequestError),
+    Portal(PortalError),
+}
+
+pub fn dispatch_clipboard_selection_request_event(
+    event: &Event,
+    target_name: impl Into<String>,
+    monitor: &XSelectionMonitor,
+    mirror: &XMirrorState,
+    transfer: PortalTransferId,
+    portal: &mut ClipboardPortal,
+) -> Result<ClipboardSelectionDispatch, ClipboardSelectionDispatchError> {
+    let Event::SelectionRequest(event) = event else {
+        return Err(ClipboardSelectionDispatchError::NotSelectionRequest);
+    };
+    let portal_request = clipboard_portal_request_from_selection_request(
+        event,
+        target_name,
+        monitor,
+        mirror,
+        transfer,
+    )
+    .map_err(ClipboardSelectionDispatchError::Request)?;
+    let command = portal
+        .request_import(portal_request.request.clone())
+        .map_err(ClipboardSelectionDispatchError::Portal)?;
+
+    Ok(ClipboardSelectionDispatch {
+        portal_request,
+        command,
+    })
 }
 
 pub fn clipboard_portal_request_from_selection_request(

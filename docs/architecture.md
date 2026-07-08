@@ -322,6 +322,12 @@ cross-namespace `ClipboardTransferRequest` plus the native failure reply
 context. This still does not perform live X dispatch or approved clipboard data
 handoff; it makes the request-to-portal boundary explicit and testable.
 
+The runtime-facing dispatcher now accepts the real `x11rb`
+`Event::SelectionRequest` variant and calls the clipboard portal reducer. It
+fails closed for non-selection events, missing namespace attribution, same-
+namespace requests, and unsupported targets. Approved data handoff remains
+separate work.
+
 The first drag-and-drop portal reducer follows the same rule. It records a
 bounded list of offered transfer types, keeps the handoff pending/private until
 explicit approval, binds approval to a source generation, and emits abstract
@@ -503,8 +509,9 @@ XFixes selection owner updates are the first portal execution input. Sophia X
 Bridge converts owner-generation changes into source-namespace clipboard events;
 the clipboard portal reducer uses those events to revoke stale pending
 transfers. X11 `SelectionRequest` context can now become a bounded clipboard
-portal import request and native failure reply context. Full live paste import
-still requires event-loop dispatch and approved data handoff.
+portal import request and native failure reply context, and the X bridge can
+dispatch the real `Event::SelectionRequest` into the clipboard portal reducer.
+Full live paste import still requires approved data handoff.
 
 ## XLibre Responsibilities
 

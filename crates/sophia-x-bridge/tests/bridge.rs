@@ -1,5 +1,5 @@
 mod tests {
-    use sophia_portal::ClipboardTarget;
+    use sophia_portal::{ClipboardPortal, ClipboardTarget, PortalCommand, PortalError};
     use sophia_protocol::*;
     use sophia_x_bridge::*;
     use x11rb::protocol::Event;
@@ -318,6 +318,116 @@ mod tests {
             ),
             Err(ClipboardSelectionRequestError::SameNamespace)
         );
+    }
+
+    #[test]
+    fn live_selection_request_event_dispatches_into_clipboard_portal() {
+        let mut state = XMirrorState::default();
+        let mut owner = mirror(0x20, None, 0);
+        owner.namespace = Some(NamespaceId::from_raw(7));
+        let mut requestor = mirror(0x44, None, 0);
+        requestor.namespace = Some(NamespaceId::from_raw(9));
+        state.ingest_window(owner);
+        state.ingest_window(requestor);
+
+        let mut monitor = XSelectionMonitor::new();
+        monitor.apply_event(
+            XSelectionEvent {
+                selection: 0x100,
+                owner: Some(xid(0x20)),
+                timestamp: 11,
+                selection_timestamp: 10,
+                kind: XSelectionChangeKind::SetOwner,
+            },
+            &state,
+        );
+        let mut portal = ClipboardPortal::new();
+
+        let dispatch = dispatch_clipboard_selection_request_event(
+            &selection_request_event(0x20, 0x44),
+            "UTF8_STRING",
+            &monitor,
+            &state,
+            PortalTransferId::from_raw(12),
+            &mut portal,
+        )
+        .unwrap();
+
+        let PortalCommand::PromptClipboardTransfer(transfer) = dispatch.command else {
+            panic!("expected clipboard prompt");
+        };
+        assert_eq!(transfer.transfer, PortalTransferId::from_raw(12));
+        assert_eq!(transfer.source_namespace, NamespaceId::from_raw(7));
+        assert_eq!(transfer.target_namespace, NamespaceId::from_raw(9));
+        assert_eq!(
+            portal
+                .transfer(PortalTransferId::from_raw(12))
+                .map(|transfer| transfer.generation),
+            Some(1)
+        );
+        assert_eq!(dispatch.portal_request.failure.requestor, 0x44);
+    }
+
+    #[test]
+    fn live_selection_request_dispatch_rejects_non_selection_events() {
+        let mut portal = ClipboardPortal::new();
+
+        assert_eq!(
+            dispatch_clipboard_selection_request_event(
+                &Event::MapNotify(x11rb::protocol::xproto::MapNotifyEvent {
+                    response_type: 0,
+                    sequence: 1,
+                    event: 0x01,
+                    window: 0x02,
+                    override_redirect: false,
+                }),
+                "UTF8_STRING",
+                &XSelectionMonitor::new(),
+                &XMirrorState::default(),
+                PortalTransferId::from_raw(12),
+                &mut portal,
+            ),
+            Err(ClipboardSelectionDispatchError::NotSelectionRequest)
+        );
+    }
+
+    #[test]
+    fn live_selection_request_dispatch_keeps_portal_target_validation() {
+        let mut state = XMirrorState::default();
+        let mut owner = mirror(0x20, None, 0);
+        owner.namespace = Some(NamespaceId::from_raw(7));
+        let mut requestor = mirror(0x44, None, 0);
+        requestor.namespace = Some(NamespaceId::from_raw(9));
+        state.ingest_window(owner);
+        state.ingest_window(requestor);
+
+        let mut monitor = XSelectionMonitor::new();
+        monitor.apply_event(
+            XSelectionEvent {
+                selection: 0x100,
+                owner: Some(xid(0x20)),
+                timestamp: 11,
+                selection_timestamp: 10,
+                kind: XSelectionChangeKind::SetOwner,
+            },
+            &state,
+        );
+        let mut portal = ClipboardPortal::new();
+
+        assert_eq!(
+            dispatch_clipboard_selection_request_event(
+                &selection_request_event(0x20, 0x44),
+                "image/png",
+                &monitor,
+                &state,
+                PortalTransferId::from_raw(12),
+                &mut portal,
+            ),
+            Err(ClipboardSelectionDispatchError::Portal(
+                PortalError::UnsupportedTarget
+            ))
+        );
+        assert_eq!(portal.transfer(PortalTransferId::from_raw(12)), None);
     }
 
     #[test]
@@ -1415,5 +1525,9 @@ mod tests {
             target: 0x200,
             property: 0x300,
         }
+    }
+
+    fn selection_request_event(owner: u32, requestor: u32) -> Event {
+        Event::SelectionRequest(selection_request(owner, requestor))
     }
 }
