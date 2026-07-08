@@ -75,6 +75,12 @@ impl fmt::Display for WmIpcError {
 
 impl std::error::Error for WmIpcError {}
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct WmTransactionUpdate {
+    pub commit: TransactionCommit,
+    pub ipc_error: Option<WmIpcError>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct WmSocketTransportConfig {
     pub response_timeout: Duration,
@@ -485,6 +491,30 @@ impl HeadlessEngine {
             transaction,
             outcome: TransactionOutcome::TimedOut,
             applied_surfaces: Vec::new(),
+        }
+    }
+
+    pub fn request_and_commit_wm_transaction<S>(
+        &self,
+        stream: &mut S,
+        request: &WmRequestPacket,
+        layers: &mut Vec<LayerSnapshot>,
+    ) -> WmTransactionUpdate
+    where
+        S: Read + Write,
+    {
+        match request_wm_over_stream(stream, request) {
+            Ok(response) => {
+                let transaction = response.into_layout_transaction();
+                WmTransactionUpdate {
+                    commit: self.commit_layout_transaction(&transaction, layers),
+                    ipc_error: None,
+                }
+            }
+            Err(error) => WmTransactionUpdate {
+                commit: self.preserve_layout_on_wm_absent(request.transaction, layers),
+                ipc_error: Some(error),
+            },
         }
     }
 

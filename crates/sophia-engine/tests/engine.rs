@@ -534,6 +534,80 @@ fn wm_socket_transport_rejects_oversized_response_before_payload_read() {
     );
 }
 
+#[test]
+fn wm_transaction_helper_commits_valid_response() {
+    let engine = HeadlessEngine::default();
+    let request = wm_request(TransactionId::from_raw(50));
+    let surface = SurfaceId::new(0, 1);
+    let response = WmResponsePacket {
+        transaction: request.transaction,
+        commands: vec![WmCommand::RenderSurface(SurfacePlacement {
+            surface,
+            geometry: Rect {
+                x: 50,
+                y: 60,
+                width: 700,
+                height: 500,
+            },
+            z_index: 3,
+            crop: None,
+            transform: Transform::IDENTITY,
+        })],
+        timeout_msec: 250,
+    };
+    let mut stream = TestDuplex::new(encode_wm_response_frame(&response).unwrap());
+    let mut layers = vec![test_layer(0, 0, 0, Region::empty())];
+
+    let update = engine.request_and_commit_wm_transaction(&mut stream, &request, &mut layers);
+
+    assert_eq!(update.ipc_error, None);
+    assert_eq!(update.commit.outcome, TransactionOutcome::Committed);
+    assert_eq!(layers[0].geometry.x, 50);
+    assert_eq!(layers[0].geometry.width, 700);
+}
+
+#[test]
+fn wm_transaction_helper_preserves_layout_on_malformed_response() {
+    let engine = HeadlessEngine::default();
+    let request = wm_request(TransactionId::from_raw(51));
+    let mut bad_response = encode_wm_response_frame(&WmResponsePacket {
+        transaction: request.transaction,
+        commands: Vec::new(),
+        timeout_msec: 250,
+    })
+    .unwrap();
+    bad_response[0] = 0;
+    let mut stream = TestDuplex::new(bad_response);
+    let mut layers = vec![test_layer(0, 0, 0, Region::empty())];
+    let before = layers.clone();
+
+    let update = engine.request_and_commit_wm_transaction(&mut stream, &request, &mut layers);
+
+    assert_eq!(update.commit.transaction, request.transaction);
+    assert_eq!(update.commit.outcome, TransactionOutcome::TimedOut);
+    assert!(matches!(
+        update.ipc_error,
+        Some(WmIpcError::Codec(IpcCodecError::BadMagic))
+    ));
+    assert_eq!(layers, before);
+}
+
+#[test]
+fn wm_transaction_helper_preserves_layout_on_missing_response() {
+    let engine = HeadlessEngine::default();
+    let request = wm_request(TransactionId::from_raw(52));
+    let mut stream = TestDuplex::new(Vec::new());
+    let mut layers = vec![test_layer(0, 0, 0, Region::empty())];
+    let before = layers.clone();
+
+    let update = engine.request_and_commit_wm_transaction(&mut stream, &request, &mut layers);
+
+    assert_eq!(update.commit.transaction, request.transaction);
+    assert_eq!(update.commit.outcome, TransactionOutcome::TimedOut);
+    assert!(matches!(update.ipc_error, Some(WmIpcError::Io(_))));
+    assert_eq!(layers, before);
+}
+
 fn test_layer(surface_index: u32, stack_rank: u32, x: i32, damage: Region) -> LayerSnapshot {
     LayerSnapshot {
         surface: SurfaceId::new(surface_index, 1),

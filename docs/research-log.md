@@ -340,6 +340,11 @@ writes one bounded `WmRequestPacket`, reads one bounded `WmResponsePacket`, and
 rejects transaction mismatches before the response can be applied. Timeout
 recovery and WM restart policy remain separate runtime work.
 
+The transaction application helper now preserves the last committed layout on
+missing, malformed, oversized, or mismatched WM responses. It returns a timed-out
+`TransactionCommit` with the IPC error attached, leaving restart policy as the
+remaining runtime concern.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new
