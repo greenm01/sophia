@@ -57,7 +57,7 @@ The current X11 `RouteEvent` request path is the correctness baseline.
 - [x] Measure routed-input dispatch cost before replacing the X11 request path.
 - [x] Keep the X11 request path as fallback for any future SHM work.
 - [x] Add routed-input grab/focus edge smokes.
-- [ ] Add transformed scene hit-test integration once physical input exists.
+- [x] Add transformed scene hit-test integration once physical input exists.
 - [ ] Prototype a unidirectional Engine-to-XLibre SHM route ring only if
   repeated measurements justify it.
 

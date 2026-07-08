@@ -444,6 +444,13 @@ unrouted outcomes, missing target windows, and missing local coordinates. A
 coalescer flush can be converted into a bounded batch of routed-input requests
 without involving WM policy.
 
+Scene hit-testing now handles transformed layer geometry. Sophia Engine walks
+renderable layers from highest stack rank to lowest, inverts each layer's
+transform against the physical pointer position, checks the untransformed layer
+geometry, and emits an `InputRoute` with target-local coordinates. That route
+feeds the same routed-input request generator, so compositor-side transforms are
+resolved before XLibre receives the target XID and local position.
+
 XFixes selection owner updates are the first portal execution input. Sophia X
 Bridge converts owner-generation changes into source-namespace clipboard events;
 the clipboard portal reducer uses those events to revoke stale pending

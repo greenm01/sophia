@@ -538,6 +538,12 @@ decisions as closed routes, and `sophia-cli x-smoke-routed-input-edges` exposes
 the check for repeatable smoke scripts. This does not replace live DIX grab
 testing; it proves Sophia's bridge side refuses rejected delivery.
 
+Transformed scene hit-testing now exists in Sophia Engine. The engine walks
+renderable layers from top stack rank downward, inverts each layer transform
+against the physical pointer position, checks untransformed layer geometry, and
+emits an `InputRoute` with local coordinates. That route feeds the existing
+physical-input-to-`XLibreRoutedInputRequest` adapter.
+
 The DRM/KMS backend now has a data-only output skeleton. `DrmKmsMode`,
 `DrmKmsOutputDescriptor`, and `DrmKmsOutputRegistry` track connector/CRTC IDs,
 mode, scale, and Sophia output IDs without opening real DRM devices. The

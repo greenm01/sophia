@@ -322,6 +322,11 @@ Fields should describe:
 This packet is Sophia Engine authority, but final X11 delivery remains XLibre
 authority.
 
+Transformed scene hit-testing must produce target-local coordinates by applying
+the inverse layer transform to the physical pointer position before checking
+layer geometry. Hit-test walks should prefer the highest stack rank so a
+transformed top layer wins over lower overlapping layers.
+
 ### XLibreRoutedInputRequest
 
 The routed-input request is the smallest data packet Sophia should send to an

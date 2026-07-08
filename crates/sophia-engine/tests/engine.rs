@@ -8,9 +8,10 @@ use sophia_engine::{
     NotificationChromeUpdate, RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction,
     RoutedInputRequestError, SanitizedChromeMetadata, SessionCommand, SessionEvent,
     SessionLayerSource, SessionTickRequest, WmIpcError, WmRestartReason, WmRuntimeAction,
-    measure_resize_behavior, notification_chrome_command_from_portal, request_wm_over_stream,
-    routed_input_request_from_physical_event, routed_input_requests_from_flush,
-    schedule_frame_from_damage, update_wm_supervisor_from_runtime_action,
+    hit_test_scene_for_input, measure_resize_behavior, notification_chrome_command_from_portal,
+    request_wm_over_stream, routed_input_request_from_physical_event,
+    routed_input_requests_from_flush, schedule_frame_from_damage,
+    update_wm_supervisor_from_runtime_action,
 };
 use sophia_portal::{NotificationRequest, NotificationUrgency, PortalCommand};
 use sophia_protocol::{
@@ -1448,6 +1449,56 @@ fn routed_input_coalescer_flushes_for_drag_grab_and_focus_barriers() {
 }
 
 #[test]
+fn transformed_scene_hit_test_routes_to_topmost_layer_local_coordinates() {
+    let mut lower = test_layer(0, 0, 0, Region::empty());
+    lower.window = Some(XWindowId::new(0x20, 1));
+    let mut upper = test_layer(1, 10, 0, Region::empty());
+    upper.window = Some(XWindowId::new(0x30, 1));
+    upper.transform = scale_translate_transform(2.0, 30.0, 40.0);
+    let event = motion_event(70, 50.0, 60.0);
+
+    let route = hit_test_scene_for_input(&event, &[lower, upper]);
+
+    assert_eq!(route.outcome, InputRouteOutcome::Routed);
+    assert_eq!(route.target_surface, Some(SurfaceId::new(1, 1)));
+    assert_eq!(route.target_window, Some(XWindowId::new(0x30, 1)));
+    assert_eq!(route.global_position, Point { x: 50.0, y: 60.0 });
+    assert_eq!(route.local_position, Some(Point { x: 10.0, y: 10.0 }));
+    assert_eq!(route.transform, scale_translate_transform(2.0, 30.0, 40.0));
+}
+
+#[test]
+fn transformed_scene_hit_test_reports_no_target_for_miss() {
+    let mut layer = test_layer(0, 0, 0, Region::empty());
+    layer.window = Some(XWindowId::new(0x20, 1));
+    layer.transform = scale_translate_transform(2.0, 30.0, 40.0);
+    let event = motion_event(71, 10.0, 10.0);
+
+    let route = hit_test_scene_for_input(&event, &[layer]);
+
+    assert_eq!(route.outcome, InputRouteOutcome::NoTarget);
+    assert_eq!(route.target_surface, None);
+    assert_eq!(route.target_window, None);
+    assert_eq!(route.local_position, None);
+}
+
+#[test]
+fn transformed_scene_hit_test_feeds_routed_input_request_generation() {
+    let mut layer = test_layer(0, 0, 0, Region::empty());
+    layer.window = Some(XWindowId::new(0x30, 1));
+    layer.transform = scale_translate_transform(2.0, 30.0, 40.0);
+    let event = motion_event(72, 54.0, 64.0);
+
+    let route = hit_test_scene_for_input(&event, &[layer]);
+    let request = routed_input_request_from_physical_event(&event, &route).unwrap();
+
+    assert_eq!(request.serial, 72);
+    assert_eq!(request.target_window, XWindowId::new(0x30, 1));
+    assert_eq!(request.local_position, Point { x: 12.0, y: 12.0 });
+    assert_eq!(request.kind, InputEventKind::PointerMotion);
+}
+
+#[test]
 fn physical_input_route_becomes_xlibre_request() {
     let event = motion_event(77, 25.0, 35.0);
     let route = route(77, 0x44, 5.0, 6.0);
@@ -1576,6 +1627,16 @@ fn route(serial: u64, target_window: u32, x: f64, y: f64) -> InputRoute {
         local_position: Some(Point { x, y }),
         transform: Transform::IDENTITY,
         outcome: InputRouteOutcome::Routed,
+    }
+}
+
+fn scale_translate_transform(scale: f32, x: f32, y: f32) -> Transform {
+    Transform {
+        matrix: [
+            scale, 0.0, x, //
+            0.0, scale, y, //
+            0.0, 0.0, 1.0,
+        ],
     }
 }
 
