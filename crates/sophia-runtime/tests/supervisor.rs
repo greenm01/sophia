@@ -1,10 +1,11 @@
 use std::time::Duration;
 
+use sophia_protocol::{BrokerHealthState, BrokerKind};
 use sophia_runtime::{
     ProcessLaunchSpec, ProcessSupervisor, ProcessSupervisorError, RestartPolicy,
-    RuntimeBrokerSupervisors, SessionRuntimeCommand, SessionRuntimeEvent, SessionRuntimePhase,
-    SessionRuntimeState, SupervisedProcessKind, SupervisorCommand, SupervisorEvent,
-    SupervisorState, update_session_runtime, update_supervisor,
+    RuntimeBrokerHealth, RuntimeBrokerSupervisors, SessionRuntimeCommand, SessionRuntimeEvent,
+    SessionRuntimePhase, SessionRuntimeState, SupervisedProcessKind, SupervisorCommand,
+    SupervisorEvent, SupervisorState, update_session_runtime, update_supervisor,
 };
 
 #[test]
@@ -80,6 +81,70 @@ fn session_runtime_reducer_requests_wm_restart_without_rendering() {
     assert_eq!(state.frames_rendered, 0);
     assert_eq!(state.phase, SessionRuntimePhase::ApplyingWmPolicy);
     assert_eq!(command, SessionRuntimeCommand::RestartWindowManager);
+}
+
+#[test]
+fn session_runtime_records_broker_health_without_status_payload() {
+    let state = SessionRuntimeState::default();
+
+    let (state, command) = update_session_runtime(
+        state,
+        SessionRuntimeEvent::BrokerHealthChanged {
+            broker: BrokerKind::Portal,
+            state: BrokerHealthState::Ready,
+            generation: 7,
+            status_message_len: 17,
+        },
+    );
+
+    assert_eq!(command, SessionRuntimeCommand::None);
+    assert_eq!(
+        state.portal_broker_health,
+        Some(RuntimeBrokerHealth {
+            state: BrokerHealthState::Ready,
+            generation: 7,
+            status_message_len: 17,
+        })
+    );
+    assert_eq!(state.metadata_broker_health, None);
+
+    let (state, _command) = update_session_runtime(
+        state,
+        SessionRuntimeEvent::BrokerHealthChanged {
+            broker: BrokerKind::Portal,
+            state: BrokerHealthState::Stopped,
+            generation: 6,
+            status_message_len: 0,
+        },
+    );
+
+    assert_eq!(
+        state.portal_broker_health,
+        Some(RuntimeBrokerHealth {
+            state: BrokerHealthState::Ready,
+            generation: 7,
+            status_message_len: 17,
+        })
+    );
+
+    let (state, _command) = update_session_runtime(
+        state,
+        SessionRuntimeEvent::BrokerHealthChanged {
+            broker: BrokerKind::Metadata,
+            state: BrokerHealthState::Degraded,
+            generation: 2,
+            status_message_len: 8,
+        },
+    );
+
+    assert_eq!(
+        state.metadata_broker_health,
+        Some(RuntimeBrokerHealth {
+            state: BrokerHealthState::Degraded,
+            generation: 2,
+            status_message_len: 8,
+        })
+    );
 }
 
 #[test]

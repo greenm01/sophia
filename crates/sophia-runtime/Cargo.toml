@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+sophia-protocol = { path = "../sophia-protocol" }
 tracing-subscriber.workspace = true
 
 [lints]

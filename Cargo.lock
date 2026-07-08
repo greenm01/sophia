@@ -204,6 +204,7 @@ version = "0.1.0"
 name = "sophia-runtime"
 version = "0.1.0"
 dependencies = [
+ "sophia-protocol",
  "tracing-subscriber",
 ]
 

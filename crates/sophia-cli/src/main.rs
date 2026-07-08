@@ -379,14 +379,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
         let decoded = decode_broker_health_frame(&frame)
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        let message_len = decoded.message.as_deref().map(str::len).unwrap_or(0);
+        let (runtime, runtime_command) = update_session_runtime(
+            SessionRuntimeState::default(),
+            SessionRuntimeEvent::BrokerHealthChanged {
+                broker: decoded.broker,
+                state: decoded.state,
+                generation: decoded.generation,
+                status_message_len: message_len,
+            },
+        );
 
         println!(
-            "portal-broker-health-smoke broker={:?} state={:?} generation={} message_len={} frame_bytes={}",
+            "portal-broker-health-smoke broker={:?} state={:?} generation={} message_len={} frame_bytes={} runtime_health={:?} runtime_command={:?}",
             decoded.broker,
             decoded.state,
             decoded.generation,
-            decoded.message.as_deref().map(str::len).unwrap_or(0),
-            frame.len()
+            message_len,
+            frame.len(),
+            runtime.portal_broker_health,
+            runtime_command
         );
         return Ok(());
     }
@@ -403,14 +415,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
         let decoded = decode_broker_health_frame(&frame)
             .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        let message_len = decoded.message.as_deref().map(str::len).unwrap_or(0);
+        let (runtime, runtime_command) = update_session_runtime(
+            SessionRuntimeState::default(),
+            SessionRuntimeEvent::BrokerHealthChanged {
+                broker: decoded.broker,
+                state: decoded.state,
+                generation: decoded.generation,
+                status_message_len: message_len,
+            },
+        );
 
         println!(
-            "metadata-broker-health-smoke broker={:?} state={:?} generation={} message_len={} frame_bytes={}",
+            "metadata-broker-health-smoke broker={:?} state={:?} generation={} message_len={} frame_bytes={} runtime_health={:?} runtime_command={:?}",
             decoded.broker,
             decoded.state,
             decoded.generation,
-            decoded.message.as_deref().map(str::len).unwrap_or(0),
-            frame.len()
+            message_len,
+            frame.len(),
+            runtime.metadata_broker_health,
+            runtime_command
         );
         return Ok(());
     }

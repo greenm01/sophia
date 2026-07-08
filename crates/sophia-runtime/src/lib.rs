@@ -8,6 +8,7 @@ use std::ffi::OsString;
 use std::process::{Child, Command};
 use std::time::Duration;
 
+use sophia_protocol::{BrokerHealthState, BrokerKind};
 use tracing_subscriber::EnvFilter;
 
 pub type SophiaResult<T, E = SophiaError> = Result<T, E>;
@@ -123,18 +124,43 @@ pub struct SessionRuntimeState {
     pub chrome_commands_presented: u64,
     pub wm_restart_requests: u64,
     pub last_frame_serial: Option<u64>,
+    pub portal_broker_health: Option<RuntimeBrokerHealth>,
+    pub metadata_broker_health: Option<RuntimeBrokerHealth>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RuntimeBrokerHealth {
+    pub state: BrokerHealthState,
+    pub generation: u64,
+    pub status_message_len: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SessionRuntimeEvent {
     TickStarted,
-    XEventsPolled { count: u32 },
+    XEventsPolled {
+        count: u32,
+    },
     WmLayoutReady,
     WmRestartRequested,
-    FrameScheduled { frame_serial: u64 },
-    FrameRendered { frame_serial: u64 },
-    PortalCommandsReady { count: u32 },
-    ChromeCommandsReady { count: u32 },
+    FrameScheduled {
+        frame_serial: u64,
+    },
+    FrameRendered {
+        frame_serial: u64,
+    },
+    PortalCommandsReady {
+        count: u32,
+    },
+    ChromeCommandsReady {
+        count: u32,
+    },
+    BrokerHealthChanged {
+        broker: BrokerKind,
+        state: BrokerHealthState,
+        generation: u64,
+        status_message_len: usize,
+    },
     TickCompleted,
 }
 
@@ -202,6 +228,31 @@ pub fn update_session_runtime(
             state.phase = SessionRuntimePhase::Idle;
             SessionRuntimeCommand::None
         }
+        SessionRuntimeEvent::BrokerHealthChanged {
+            broker,
+            state: broker_state,
+            generation,
+            status_message_len,
+        } => {
+            let health = RuntimeBrokerHealth {
+                state: broker_state,
+                generation,
+                status_message_len,
+            };
+            match broker {
+                BrokerKind::Portal => {
+                    if accepts_broker_health(state.portal_broker_health, generation) {
+                        state.portal_broker_health = Some(health);
+                    }
+                }
+                BrokerKind::Metadata => {
+                    if accepts_broker_health(state.metadata_broker_health, generation) {
+                        state.metadata_broker_health = Some(health);
+                    }
+                }
+            }
+            SessionRuntimeCommand::None
+        }
         SessionRuntimeEvent::TickCompleted => {
             state.phase = SessionRuntimePhase::Idle;
             SessionRuntimeCommand::None
@@ -209,6 +260,10 @@ pub fn update_session_runtime(
     };
 
     (state, command)
+}
+
+fn accepts_broker_health(current: Option<RuntimeBrokerHealth>, generation: u64) -> bool {
+    current.is_none_or(|health| generation >= health.generation)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

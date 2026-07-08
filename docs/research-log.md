@@ -635,6 +635,11 @@ The metadata broker placeholder now has the symmetric bounded IPC health smoke:
 `sophia-cli metadata-broker-health-smoke`. It uses the same `BrokerHealth`
 frame and keeps sanitized chrome metadata on its separate protocol path.
 
+Broker health now routes into `SessionRuntimeState`. The reducer records
+portal and metadata broker health independently, stores health state,
+generation, and status-message length only, and ignores stale generations. The
+health smokes now prove frame decode plus runtime-state routing.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

@@ -132,6 +132,11 @@ transaction field, then encodes broker kind, health state, and optional bounded
 UTF-8 status text. The portal and metadata placeholder smokes round-trip this
 frame before any real broker payload protocol exists.
 
+`SessionRuntimeState` records broker health as reduced state only: health
+state, generation, and status-message length. It does not retain the status
+message string. Stale health generations are ignored so an older broker report
+cannot overwrite a newer readiness/degraded/stopped observation.
+
 ### XWindowMirror
 
 Sophia X Bridge keeps a mirror of the XLibre window tree. This is cache data,
