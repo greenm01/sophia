@@ -119,6 +119,12 @@ echo "root runtime tick smoke:"
         cargo run -q -p sophia-cli -- x-smoke-runtime-tick
 )
 
+echo "runtime damage epoch smoke:"
+(
+    cd "$ROOT_DIR"
+    cargo run -q -p sophia-cli -- runtime-damage-epoch-smoke
+)
+
 echo "root external-wm bridge smoke:"
 (
     cd "$ROOT_DIR"

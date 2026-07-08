@@ -560,6 +560,12 @@ still captures X-derived layers and runs a headless session tick, but it now
 wraps that work with runtime events and reports reducer counters for commands,
 frames, X events, portal drains, and chrome presentation.
 
+Runtime scheduling from X Damage and layout epochs now has a deterministic CLI
+smoke. `sophia-cli runtime-damage-epoch-smoke` builds a damage frame, completes
+a layout epoch through the frame scheduler, and drives the runtime reducer
+through render, portal drain, and chrome presentation phases. The XLibre smoke
+script runs it beside the live capture smokes.
+
 The DRM/KMS backend now has a data-only output skeleton. `DrmKmsMode`,
 `DrmKmsOutputDescriptor`, and `DrmKmsOutputRegistry` track connector/CRTC IDs,
 mode, scale, and Sophia output IDs without opening real DRM devices. The

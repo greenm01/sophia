@@ -419,6 +419,13 @@ WM policy, frame scheduling, render, portal drain, and chrome presentation
 commands in order and reports the resulting runtime counters beside the frame
 snapshot/replay counts.
 
+`runtime-damage-epoch-smoke` exercises the next runtime seam without requiring a
+live slow-resize client. It creates an X-shaped `DamageFrame`, completes a
+layout epoch through `schedule_frame_from_damage`, then drives the runtime
+reducer through frame scheduling, rendering, portal drain, and chrome
+presentation. The full XLibre smoke script runs this check alongside the live X
+capture smokes.
+
 Frame scheduling now has an explicit seam. `FrameClock` produces output-scoped
 frame ticks, and the deterministic headless implementation advances serials
 without depending on wall-clock time. A real DRM/KMS backend should implement

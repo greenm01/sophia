@@ -1,13 +1,14 @@
 use sophia_engine::{
-    FramePlanRequest, HeadlessEngine, LastCommittedLayout, SessionLayerSource, SessionTickRequest,
-    WmSocketTransport, WmSocketTransportConfig,
+    FrameClockTick, FramePlanRequest, FrameScheduleDecision, HeadlessEngine, LastCommittedLayout,
+    LayoutEpochState, SessionLayerSource, SessionTickRequest, WmSocketTransport,
+    WmSocketTransportConfig, schedule_frame_from_damage,
 };
 use sophia_portal::{ClipboardPortal, ClipboardTarget, ClipboardTransferRequest, PortalCommand};
 use sophia_protocol::{
-    BufferSource, LayerSnapshot, LayoutNodeCapabilities, LayoutNodeKind, LayoutNodeSnapshot,
-    LayoutNodeState, NamespaceId, PortalTransferId, Rect, Region, Size, SurfaceConstraints,
-    SurfaceId, TransactionId, Transform, WmRelayoutWorkspace, WmRequestKind, WmRequestPacket,
-    WorkspaceId,
+    BufferSource, DamageFrame, LayerSnapshot, LayoutNodeCapabilities, LayoutNodeKind,
+    LayoutNodeSnapshot, LayoutNodeState, NamespaceId, PortalTransferId, Rect, Region, Size,
+    SurfaceConstraints, SurfaceId, TransactionId, Transform, WmRelayoutWorkspace, WmRequestKind,
+    WmRequestPacket, WorkspaceId,
 };
 use sophia_runtime::{
     ProcessLaunchSpec, ProcessSupervisor, RestartPolicy, SessionRuntimeCommand,
@@ -252,6 +253,79 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             runtime.x_events_polled,
             runtime.portal_commands_drained,
             runtime.chrome_commands_presented
+        );
+        return Ok(());
+    }
+
+    if args.iter().any(|arg| arg == "runtime-damage-epoch-smoke") {
+        let engine = HeadlessEngine::default();
+        let output = engine.output();
+        let surface = SurfaceId::new(1, 1);
+        let frame_serial = 5;
+        let mut epoch = LayoutEpochState::with_timing(1, [surface], 0, 300);
+        let damage = DamageFrame {
+            output: output.id,
+            frame_serial,
+            buffer_age: 1,
+            root_generation: 1,
+            affected_surfaces: vec![surface],
+            damage: Region::single(Rect {
+                x: 0,
+                y: 0,
+                width: 100,
+                height: 100,
+            }),
+        };
+        let tick = FrameClockTick {
+            output: output.id,
+            frame_serial,
+            target_msec: 80,
+        };
+        let decision = schedule_frame_from_damage(tick, Some(damage), Some(&mut epoch));
+        let (scheduled_frame_serial, completed_epoch) = match decision {
+            FrameScheduleDecision::Render {
+                frame_serial,
+                completed_epoch,
+                ..
+            } => (frame_serial, completed_epoch),
+            other => {
+                return Err(std::io::Error::other(format!(
+                    "expected render decision, got {other:?}"
+                ))
+                .into());
+            }
+        };
+
+        let mut runtime = SessionRuntimeState::default();
+        let mut runtime_commands = Vec::new();
+        for event in [
+            SessionRuntimeEvent::TickStarted,
+            SessionRuntimeEvent::XEventsPolled { count: 1 },
+            SessionRuntimeEvent::WmLayoutReady,
+            SessionRuntimeEvent::FrameScheduled {
+                frame_serial: scheduled_frame_serial,
+            },
+            SessionRuntimeEvent::FrameRendered {
+                frame_serial: scheduled_frame_serial,
+            },
+            SessionRuntimeEvent::PortalCommandsReady { count: 0 },
+            SessionRuntimeEvent::ChromeCommandsReady { count: 0 },
+        ] {
+            let (next_runtime, command) = update_session_runtime(runtime, event);
+            runtime = next_runtime;
+            runtime_commands.push(command);
+        }
+
+        println!(
+            "runtime-damage-epoch-smoke output={} frame_serial={} completed_epoch={:?} pending_surfaces={} runtime_phase={:?} runtime_commands={} runtime_frames={} runtime_x_events={}",
+            output.id.raw(),
+            scheduled_frame_serial,
+            completed_epoch,
+            epoch.pending_surfaces().len(),
+            runtime.phase,
+            runtime_commands.len(),
+            runtime.frames_rendered,
+            runtime.x_events_polled
         );
         return Ok(());
     }
@@ -518,6 +592,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("commands: x-smoke-frame [--display=:99]");
     println!("commands: x-smoke-policy-frame [--display=:99]");
     println!("commands: x-smoke-runtime-tick [--display=:99]");
+    println!("commands: runtime-damage-epoch-smoke");
     println!("commands: x-smoke-external-wm [--display=:99] [--wm=target/debug/sophia-wm-demo]");
     println!("commands: wm-supervisor-smoke [--wm=target/debug/sophia-wm-demo]");
     println!("commands: portal-clipboard-deny-smoke");
