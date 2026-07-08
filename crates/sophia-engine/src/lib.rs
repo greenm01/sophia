@@ -81,6 +81,28 @@ pub struct WmTransactionUpdate {
     pub ipc_error: Option<WmIpcError>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum WmRuntimeAction {
+    KeepRunning,
+    RestartWm { reason: WmRestartReason },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum WmRestartReason {
+    IpcFailure(WmIpcError),
+}
+
+impl WmTransactionUpdate {
+    pub fn runtime_action(&self) -> WmRuntimeAction {
+        match &self.ipc_error {
+            Some(error) => WmRuntimeAction::RestartWm {
+                reason: WmRestartReason::IpcFailure(error.clone()),
+            },
+            None => WmRuntimeAction::KeepRunning,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct WmSocketTransportConfig {
     pub response_timeout: Duration,

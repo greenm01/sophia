@@ -139,6 +139,9 @@ Sophia Engine owns the request/response transport: it writes exactly one
 whose transaction ID does not match the Engine-minted request transaction.
 If the response is missing, malformed, oversized, or mismatched, Sophia Engine
 preserves the last committed layout and reports the transaction as timed out.
+Those IPC failures produce a runtime restart decision for the WM process. A
+valid response whose proposed layout is rejected does not restart the WM; it is
+a policy proposal failure, not a transport/protocol failure.
 
 The protocol should be sequence-oriented:
 

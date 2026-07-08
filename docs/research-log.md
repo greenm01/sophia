@@ -345,6 +345,11 @@ missing, malformed, oversized, or mismatched WM responses. It returns a timed-ou
 `TransactionCommit` with the IPC error attached, leaving restart policy as the
 remaining runtime concern.
 
+The restart policy seam is now represented as data. IPC failures produce
+`WmRuntimeAction::RestartWm`, while successful IPC with a rejected layout
+proposal keeps the WM running. Process spawning and supervision can consume this
+decision later without changing transaction semantics.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

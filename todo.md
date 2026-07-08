@@ -182,7 +182,7 @@ Replace the demo argv/stdout WM transport with a bounded Unix socket protocol.
 - [x] Add Engine-owned Unix socket request/response transport.
 - [x] Enforce one Engine-minted transaction per request.
 - [x] Preserve last committed layout on timeout or malformed response.
-- [ ] Restart the WM process after timeout or protocol violation.
+- [x] Restart the WM process after timeout or protocol violation.
 
 ---
 

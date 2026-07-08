@@ -1,6 +1,7 @@
 use sophia_engine::{
     ChromeActionDecision, ChromeActionRejectReason, ChromeBroker, EngineError, FramePlanRequest,
-    HeadlessEngine, SessionCommand, SessionEvent, WmIpcError, request_wm_over_stream,
+    HeadlessEngine, SessionCommand, SessionEvent, WmIpcError, WmRestartReason, WmRuntimeAction,
+    request_wm_over_stream,
 };
 use sophia_protocol::{
     AttentionState, BufferSource, ChromeActionKind, ChromeActionRequest, ChromeDescriptor,
@@ -606,6 +607,72 @@ fn wm_transaction_helper_preserves_layout_on_missing_response() {
     assert_eq!(update.commit.outcome, TransactionOutcome::TimedOut);
     assert!(matches!(update.ipc_error, Some(WmIpcError::Io(_))));
     assert_eq!(layers, before);
+}
+
+#[test]
+fn wm_runtime_action_keeps_running_after_valid_response() {
+    let engine = HeadlessEngine::default();
+    let request = wm_request(TransactionId::from_raw(60));
+    let response = WmResponsePacket {
+        transaction: request.transaction,
+        commands: Vec::new(),
+        timeout_msec: 250,
+    };
+    let mut stream = TestDuplex::new(encode_wm_response_frame(&response).unwrap());
+    let mut layers = vec![test_layer(0, 0, 0, Region::empty())];
+
+    let update = engine.request_and_commit_wm_transaction(&mut stream, &request, &mut layers);
+
+    assert_eq!(update.runtime_action(), WmRuntimeAction::KeepRunning);
+}
+
+#[test]
+fn wm_runtime_action_restarts_after_ipc_failure() {
+    let engine = HeadlessEngine::default();
+    let request = wm_request(TransactionId::from_raw(61));
+    let mut stream = TestDuplex::new(Vec::new());
+    let mut layers = vec![test_layer(0, 0, 0, Region::empty())];
+
+    let update = engine.request_and_commit_wm_transaction(&mut stream, &request, &mut layers);
+
+    assert!(matches!(
+        update.runtime_action(),
+        WmRuntimeAction::RestartWm {
+            reason: WmRestartReason::IpcFailure(WmIpcError::Io(_))
+        }
+    ));
+}
+
+#[test]
+fn wm_runtime_action_does_not_restart_for_valid_rejected_layout() {
+    let engine = HeadlessEngine::default();
+    let request = wm_request(TransactionId::from_raw(62));
+    let response = WmResponsePacket {
+        transaction: request.transaction,
+        commands: vec![WmCommand::RenderSurface(SurfacePlacement {
+            surface: SurfaceId::new(99, 1),
+            geometry: Rect {
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 10,
+            },
+            z_index: 0,
+            crop: None,
+            transform: Transform::IDENTITY,
+        })],
+        timeout_msec: 250,
+    };
+    let mut stream = TestDuplex::new(encode_wm_response_frame(&response).unwrap());
+    let mut layers = vec![test_layer(0, 0, 0, Region::empty())];
+
+    let update = engine.request_and_commit_wm_transaction(&mut stream, &request, &mut layers);
+
+    assert_eq!(
+        update.commit.outcome,
+        TransactionOutcome::RejectedInvalidSurface
+    );
+    assert_eq!(update.runtime_action(), WmRuntimeAction::KeepRunning);
 }
 
 fn test_layer(surface_index: u32, stack_rank: u32, x: i32, damage: Region) -> LayerSnapshot {
