@@ -468,6 +468,74 @@ impl FrameClock for DeterministicFrameClock {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DrmKmsMode {
+    pub size: Size,
+    pub refresh_millihz: u32,
+}
+
+impl DrmKmsMode {
+    pub const fn new(width: i32, height: i32, refresh_millihz: u32) -> Self {
+        Self {
+            size: Size { width, height },
+            refresh_millihz,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DrmKmsOutputDescriptor {
+    pub output: OutputId,
+    pub connector_id: u32,
+    pub crtc_id: u32,
+    pub mode: DrmKmsMode,
+    pub scale: u32,
+}
+
+impl DrmKmsOutputDescriptor {
+    pub const fn as_engine_output(self) -> HeadlessOutput {
+        HeadlessOutput {
+            id: self.output,
+            size: self.mode.size,
+            scale: self.scale,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DrmKmsOutputRegistry {
+    outputs: BTreeMap<OutputId, DrmKmsOutputDescriptor>,
+}
+
+impl DrmKmsOutputRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn upsert(&mut self, output: DrmKmsOutputDescriptor) {
+        self.outputs.insert(output.output, output);
+    }
+
+    pub fn remove(&mut self, output: OutputId) -> Option<DrmKmsOutputDescriptor> {
+        self.outputs.remove(&output)
+    }
+
+    pub fn get(&self, output: OutputId) -> Option<&DrmKmsOutputDescriptor> {
+        self.outputs.get(&output)
+    }
+
+    pub fn outputs(&self) -> impl Iterator<Item = &DrmKmsOutputDescriptor> {
+        self.outputs.values()
+    }
+
+    pub fn primary_engine_output(&self) -> Option<HeadlessOutput> {
+        self.outputs
+            .values()
+            .next()
+            .map(|output| output.as_engine_output())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HeadlessOutput {
     pub id: OutputId,
     pub size: Size,

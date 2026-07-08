@@ -509,6 +509,12 @@ imports while using CPU readback as the deterministic fallback execution path.
 This keeps proof-grade rendering intact while isolating the future GPU import
 backend behind a small interface.
 
+The DRM/KMS backend now has a data-only output skeleton. `DrmKmsMode`,
+`DrmKmsOutputDescriptor`, and `DrmKmsOutputRegistry` track connector/CRTC IDs,
+mode, scale, and Sophia output IDs without opening real DRM devices. The
+descriptor can seed engine output state, giving later device discovery a typed
+target that already works with frame planning.
+
 Notification portal commands now have a compositor chrome presentation seam.
 `NotificationChromePresenter` stages bounded notification requests, presents
 them only after a `DeliverNotification` command, and dismisses pending or

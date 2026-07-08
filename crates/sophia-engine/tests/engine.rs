@@ -1,11 +1,11 @@
 use sophia_engine::{
     BufferImportPath, ChromeActionDecision, ChromeActionRejectReason, ChromeBroker,
-    DeterministicFrameClock, EngineError, FrameClock, FramePlanRequest, HeadlessEngine,
-    LastCommittedLayout, MetadataChromeRejectReason, MetadataChromeUpdate,
-    NotificationChromePresenter, NotificationChromeRejectReason, NotificationChromeUpdate,
-    RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction, SanitizedChromeMetadata,
-    SessionCommand, SessionEvent, SessionLayerSource, SessionTickRequest, WmIpcError,
-    WmRestartReason, WmRuntimeAction, notification_chrome_command_from_portal,
+    DeterministicFrameClock, DrmKmsMode, DrmKmsOutputDescriptor, DrmKmsOutputRegistry, EngineError,
+    FrameClock, FramePlanRequest, HeadlessEngine, LastCommittedLayout, MetadataChromeRejectReason,
+    MetadataChromeUpdate, NotificationChromePresenter, NotificationChromeRejectReason,
+    NotificationChromeUpdate, RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction,
+    SanitizedChromeMetadata, SessionCommand, SessionEvent, SessionLayerSource, SessionTickRequest,
+    WmIpcError, WmRestartReason, WmRuntimeAction, notification_chrome_command_from_portal,
     request_wm_over_stream, update_wm_supervisor_from_runtime_action,
 };
 use sophia_portal::{NotificationRequest, NotificationUrgency, PortalCommand};
@@ -38,6 +38,61 @@ fn headless_engine_exposes_deterministic_output() {
         }
     );
     assert_eq!(output.scale, 1);
+}
+
+#[test]
+fn drm_kms_output_registry_tracks_connector_mode_and_scale() {
+    let descriptor = DrmKmsOutputDescriptor {
+        output: OutputId::from_raw(7),
+        connector_id: 42,
+        crtc_id: 99,
+        mode: DrmKmsMode::new(1920, 1080, 60_000),
+        scale: 2,
+    };
+    let mut registry = DrmKmsOutputRegistry::new();
+
+    registry.upsert(descriptor);
+
+    assert_eq!(registry.get(OutputId::from_raw(7)), Some(&descriptor));
+    assert_eq!(registry.outputs().count(), 1);
+    assert_eq!(
+        registry.primary_engine_output(),
+        Some(descriptor.as_engine_output())
+    );
+    assert_eq!(
+        descriptor.as_engine_output().size,
+        sophia_protocol::Size {
+            width: 1920,
+            height: 1080,
+        }
+    );
+    assert_eq!(descriptor.as_engine_output().scale, 2);
+    assert_eq!(registry.remove(OutputId::from_raw(7)), Some(descriptor));
+    assert!(registry.primary_engine_output().is_none());
+}
+
+#[test]
+fn drm_kms_descriptor_can_seed_engine_output() {
+    let descriptor = DrmKmsOutputDescriptor {
+        output: OutputId::from_raw(8),
+        connector_id: 43,
+        crtc_id: 100,
+        mode: DrmKmsMode::new(2560, 1440, 144_000),
+        scale: 1,
+    };
+    let engine = HeadlessEngine::new(descriptor.as_engine_output());
+    let frame = engine
+        .plan_frame(
+            FramePlanRequest {
+                output: OutputId::from_raw(8),
+                frame_serial: 1,
+            },
+            Vec::new(),
+        )
+        .unwrap();
+
+    assert_eq!(frame.output_size, descriptor.mode.size);
+    assert_eq!(frame.output_scale, descriptor.scale);
 }
 
 #[test]

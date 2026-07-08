@@ -166,6 +166,22 @@ The headless backend uses a deterministic clock so tests are repeatable. A real
 DRM/KMS backend should produce the same value shape from page-flip or vblank
 timing rather than pushing backend-specific timing state into frame planning.
 
+### DrmKmsOutputDescriptor
+
+A DRM/KMS output descriptor is the backend-facing record for one discovered
+output before Sophia has a full device backend.
+
+Fields should describe:
+
+- Sophia output ID
+- DRM connector ID
+- DRM CRTC ID
+- active mode size and refresh
+- compositor scale
+
+The descriptor is not authority to scan out by itself. It is the data contract
+between future device discovery and existing frame planning.
+
 ### RenderCommand
 
 Render commands are the final planned compositor work for one frame.

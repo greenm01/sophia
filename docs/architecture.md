@@ -394,6 +394,12 @@ the same boundary from vblank/page-flip timing while preserving the existing
 session-tick contract: clock tick in, frame snapshot and replay/commit report
 out.
 
+The DRM/KMS output backend starts as a data-only skeleton. `DrmKmsMode`,
+`DrmKmsOutputDescriptor`, and `DrmKmsOutputRegistry` preserve connector ID,
+CRTC ID, mode, scale, and Sophia `OutputId` without opening devices yet. The
+descriptor can seed an engine output, which lets frame planning consume the same
+shape the real backend will later discover from KMS.
+
 XFixes selection owner updates are the first portal execution input. Sophia X
 Bridge converts owner-generation changes into source-namespace clipboard events;
 the clipboard portal reducer uses those events to revoke stale pending
