@@ -631,6 +631,10 @@ packet, frames it as `BrokerHealth`, decodes it, and reports the bounded
 message length and frame size. This proves the control path without granting
 the portal broker any generic payload channel.
 
+The metadata broker placeholder now has the symmetric bounded IPC health smoke:
+`sophia-cli metadata-broker-health-smoke`. It uses the same `BrokerHealth`
+frame and keeps sanitized chrome metadata on its separate protocol path.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

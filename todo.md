@@ -79,7 +79,7 @@ to runtime policy.
 
 - [x] Add a bounded broker health/control packet contract.
 - [x] Wire portal broker placeholder to a bounded IPC health smoke.
-- [ ] Wire metadata broker placeholder to a bounded IPC health smoke.
+- [x] Wire metadata broker placeholder to a bounded IPC health smoke.
 - [ ] Route broker health into `SessionRuntimeState`.
 
 ## Deferred / Measurement-Gated

@@ -129,8 +129,8 @@ unbounded allocation in Sophia Engine or runtime.
 Broker health uses the same explicit IPC frame header as WM packets. The
 `BrokerHealth` message kind stores the health generation in the frame
 transaction field, then encodes broker kind, health state, and optional bounded
-UTF-8 status text. The portal placeholder smoke round-trips this frame before
-any real portal broker payload protocol exists.
+UTF-8 status text. The portal and metadata placeholder smokes round-trip this
+frame before any real broker payload protocol exists.
 
 ### XWindowMirror
 

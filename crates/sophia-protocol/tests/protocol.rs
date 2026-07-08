@@ -471,6 +471,18 @@ fn broker_health_frame_roundtrips() {
 }
 
 #[test]
+fn metadata_broker_health_frame_roundtrips_without_message() {
+    let packet =
+        BrokerHealthPacket::new(BrokerKind::Metadata, BrokerHealthState::Stopped, 13, None)
+            .unwrap();
+
+    let frame = encode_broker_health_frame(&packet).unwrap();
+
+    assert_eq!(decode_broker_health_frame(&frame), Ok(packet));
+    assert_eq!(frame_payload_len(&frame), 5);
+}
+
+#[test]
 fn broker_health_frame_rejects_oversized_status_message() {
     let mut payload = Vec::new();
     push_u16(&mut payload, 1);

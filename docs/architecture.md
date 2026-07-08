@@ -440,7 +440,8 @@ bytes. Runtime may later consume this packet to mark a broker ready, degraded,
 or stopped, but real portal execution and sanitized chrome metadata remain
 separate protocols with their own validation. The portal broker placeholder now
 has a bounded health-frame smoke that encodes and decodes the packet over the
-shared Sophia IPC frame header.
+shared Sophia IPC frame header; the metadata broker placeholder uses the same
+control frame.
 
 Frame scheduling now has an explicit seam. `FrameClock` produces output-scoped
 frame ticks, and the deterministic headless implementation advances serials

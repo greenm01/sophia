@@ -391,6 +391,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    if args.iter().any(|arg| arg == "metadata-broker-health-smoke") {
+        let packet = BrokerHealthPacket::new(
+            BrokerKind::Metadata,
+            BrokerHealthState::Ready,
+            1,
+            Some("placeholder ready".to_owned()),
+        )
+        .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        let frame = encode_broker_health_frame(&packet)
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+        let decoded = decode_broker_health_frame(&frame)
+            .map_err(|error| std::io::Error::other(format!("{error:?}")))?;
+
+        println!(
+            "metadata-broker-health-smoke broker={:?} state={:?} generation={} message_len={} frame_bytes={}",
+            decoded.broker,
+            decoded.state,
+            decoded.generation,
+            decoded.message.as_deref().map(str::len).unwrap_or(0),
+            frame.len()
+        );
+        return Ok(());
+    }
+
     if args.iter().any(|arg| arg == "x-smoke-external-wm") {
         let display = arg_value(&args, "--display");
         let wm_path = arg_value(&args, "--wm")
@@ -656,6 +680,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("commands: runtime-damage-epoch-smoke");
     println!("commands: runtime-brokers-smoke [--portal=/usr/bin/true] [--metadata=/usr/bin/true]");
     println!("commands: portal-broker-health-smoke");
+    println!("commands: metadata-broker-health-smoke");
     println!("commands: x-smoke-external-wm [--display=:99] [--wm=target/debug/sophia-wm-demo]");
     println!("commands: wm-supervisor-smoke [--wm=target/debug/sophia-wm-demo]");
     println!("commands: portal-clipboard-deny-smoke");
