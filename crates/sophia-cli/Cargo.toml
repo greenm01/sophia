@@ -16,6 +16,7 @@ sophia-runtime = { path = "../sophia-runtime" }
 sophia-wm-demo = { path = "../sophia-wm-demo" }
 sophia-x-bridge = { path = "../sophia-x-bridge" }
 tracing.workspace = true
+x11rb = "0.13.1"
 
 [lints]
 workspace = true

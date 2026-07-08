@@ -4,6 +4,7 @@ use std::thread;
 use std::time::Duration;
 use std::{io::IoSlice, time::Instant};
 
+use sophia_portal::{ClipboardTarget, ClipboardTransferRequest};
 use sophia_protocol::{
     BufferSource, DamageFrame, DeviceId, InputEventKind, InputEventPacket, InputRoute,
     InputRouteOutcome, LayerSnapshot, NamespaceId, OutputId, Point, PortalTransferId, Rect, Region,
@@ -26,7 +27,7 @@ use x11rb::protocol::xinput::{
 use x11rb::protocol::xproto::{
     Atom, AtomEnum, ClientMessageData, ClientMessageEvent, ConnectionExt as _, CreateGCAux,
     CreateWindowAux, EventMask, ImageFormat, MapState, Place, Rectangle, SELECTION_NOTIFY_EVENT,
-    SelectionNotifyEvent, Timestamp, Window, WindowClass,
+    SelectionNotifyEvent, SelectionRequestEvent, Timestamp, Window, WindowClass,
 };
 use x11rb::x11_utils::{Serialize, TryParse};
 
@@ -1927,6 +1928,62 @@ pub struct ClipboardPortalOwnerChange {
     pub generation: u64,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClipboardSelectionPortalRequest {
+    pub request: ClipboardTransferRequest,
+    pub failure: ClipboardSelectionFailureRequest,
+    pub property: Atom,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ClipboardSelectionRequestError {
+    UnknownRequestorNamespace,
+    UnknownSourceOwner,
+    MissingSourceNamespace,
+    SameNamespace,
+}
+
+pub fn clipboard_portal_request_from_selection_request(
+    event: &SelectionRequestEvent,
+    target_name: impl Into<String>,
+    monitor: &XSelectionMonitor,
+    mirror: &XMirrorState,
+    transfer: PortalTransferId,
+) -> Result<ClipboardSelectionPortalRequest, ClipboardSelectionRequestError> {
+    let target_namespace = mirror
+        .namespace_for_window(wrap_xid(event.requestor))
+        .ok_or(ClipboardSelectionRequestError::UnknownRequestorNamespace)?;
+    let source_owner = monitor
+        .current_owner_for_selection(event.selection)
+        .ok_or(ClipboardSelectionRequestError::UnknownSourceOwner)?;
+    let source_namespace = source_owner
+        .namespace
+        .ok_or(ClipboardSelectionRequestError::MissingSourceNamespace)?;
+
+    if source_namespace == target_namespace {
+        return Err(ClipboardSelectionRequestError::SameNamespace);
+    }
+
+    Ok(ClipboardSelectionPortalRequest {
+        request: ClipboardTransferRequest {
+            transfer,
+            source_namespace,
+            target_namespace,
+            target: ClipboardTarget::Atom(target_name.into()),
+            byte_size: 0,
+            generation: source_owner.generation,
+        },
+        failure: ClipboardSelectionFailureRequest {
+            transfer,
+            requestor: event.requestor,
+            selection: event.selection,
+            target: event.target,
+            time: event.time,
+        },
+        property: event.property,
+    })
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ClipboardSelectionFailureRequest {
     pub transfer: PortalTransferId,
@@ -1999,6 +2056,14 @@ impl XSelectionMonitor {
         namespace: Option<NamespaceId>,
     ) -> Option<XSelectionOwnerRecord> {
         self.owners.get(&(selection, namespace)).copied()
+    }
+
+    pub fn current_owner_for_selection(&self, selection: Atom) -> Option<XSelectionOwnerRecord> {
+        self.owners
+            .values()
+            .filter(|record| record.selection == selection && record.owner.is_some())
+            .max_by_key(|record| record.generation)
+            .copied()
     }
 
     pub fn apply_event(

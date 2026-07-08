@@ -315,6 +315,13 @@ attributes each owner window to a known mirrored namespace when possible and
 bumps a per-selection owner generation. Portal approval is bound to that
 generation, so a later owner change makes old approval stale.
 
+Sophia X Bridge also has the first requestor-side clipboard execution seam.
+Given an X11 `SelectionRequest`, a resolved target atom name, the selection
+owner monitor, and the mirrored namespace table, it can construct a
+cross-namespace `ClipboardTransferRequest` plus the native failure reply
+context. This still does not perform live X dispatch or approved clipboard data
+handoff; it makes the request-to-portal boundary explicit and testable.
+
 The first drag-and-drop portal reducer follows the same rule. It records a
 bounded list of offered transfer types, keeps the handoff pending/private until
 explicit approval, binds approval to a source generation, and emits abstract
@@ -495,8 +502,9 @@ resolved before XLibre receives the target XID and local position.
 XFixes selection owner updates are the first portal execution input. Sophia X
 Bridge converts owner-generation changes into source-namespace clipboard events;
 the clipboard portal reducer uses those events to revoke stale pending
-transfers. Full paste import still requires later SelectionRequest/requestor
-translation.
+transfers. X11 `SelectionRequest` context can now become a bounded clipboard
+portal import request and native failure reply context. Full live paste import
+still requires event-loop dispatch and approved data handoff.
 
 ## XLibre Responsibilities
 

@@ -177,6 +177,7 @@ dependencies = [
  "sophia-wm-demo",
  "sophia-x-bridge",
  "tracing",
+ "x11rb",
 ]
 
 [[package]]
@@ -220,6 +221,7 @@ dependencies = [
 name = "sophia-x-bridge"
 version = "0.1.0"
 dependencies = [
+ "sophia-portal",
  "sophia-protocol",
  "x11rb",
 ]

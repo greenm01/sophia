@@ -605,6 +605,14 @@ The `sophia-portal` crate implements this policy as a reducer over
 prompt user/policy, hand off clipboard data, or fail the X11 selection. X Bridge
 code later translates those commands into concrete ICCCM/XFixes behavior.
 
+X Bridge owns requestor-side clipboard context. A `SelectionRequest` is reduced
+with the selection owner monitor, mirrored namespace table, resolved target atom
+name, and runtime-minted transfer ID into a `ClipboardTransferRequest` plus
+`ClipboardSelectionFailureRequest`. The portal receives only namespaces, target
+name, byte-size placeholder, and owner generation; the bridge keeps X requestor,
+selection, target atom, property, and timestamp context for concrete X11
+replies.
+
 Drag-and-drop follows the same reducer shape. Offered MIME/protocol targets are
 bounded before storage, approval is generation-bound, denial or stale ownership
 becomes an abstract cancel command, and Xdnd-specific protocol mechanics stay

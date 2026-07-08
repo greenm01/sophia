@@ -82,6 +82,18 @@ to runtime policy.
 - [x] Wire metadata broker placeholder to a bounded IPC health smoke.
 - [x] Route broker health into `SessionRuntimeState`.
 
+## Portal Execution Track
+
+Portal reducers exist. The next work is turning X-derived requestor events into
+bounded portal execution without putting raw X authority in portal policy.
+
+- [x] Convert X11 `SelectionRequest` context into a cross-namespace clipboard
+  portal import request with native failure reply context.
+- [ ] Dispatch live X11 `SelectionRequest` events into the clipboard portal
+  runtime path.
+- [ ] Implement approved clipboard handoff for one bounded text target.
+- [ ] Add a live X smoke for request -> deny and request -> approved handoff.
+
 ## Deferred / Measurement-Gated
 
 - [ ] Prototype a unidirectional Engine-to-XLibre SHM route ring only if

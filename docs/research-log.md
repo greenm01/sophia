@@ -616,7 +616,16 @@ Clipboard denial now has an executable portal-to-X11 failure smoke:
 transfer, denies it through `ClipboardPortal`, observes `FailSelection`, and
 uses Sophia X Bridge to produce a native `SelectionNotify` failure with
 `property = None`. This proves the denial maps to normal X11 selection failure;
-full live paste handling still needs SelectionRequest/requestor dispatch.
+full live paste handling still needs live request dispatch and approved data
+handoff.
+
+Clipboard requestor execution now has a headless bridge seam:
+`sophia-cli portal-clipboard-request-smoke`. The bridge reduces an X-shaped
+`SelectionRequest`, selection owner monitor state, namespace mirror state, and
+resolved target atom name into a cross-namespace `ClipboardTransferRequest`
+plus native failure reply context. The smoke denies that request through the
+portal and confirms the X11 reply remains a normal `SelectionNotify`
+`property = None` failure.
 
 Broker IPC now has its first bounded packet contract. `BrokerHealthPacket`
 covers only portal/metadata broker identity, coarse health state, generation,

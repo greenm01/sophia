@@ -8,8 +8,8 @@ use sophia_protocol::{
     BrokerHealthPacket, BrokerHealthState, BrokerKind, BufferSource, DamageFrame, LayerSnapshot,
     LayoutNodeCapabilities, LayoutNodeKind, LayoutNodeSnapshot, LayoutNodeState, NamespaceId,
     PortalTransferId, Rect, Region, Size, SurfaceConstraints, SurfaceId, TransactionId, Transform,
-    WmRelayoutWorkspace, WmRequestKind, WmRequestPacket, WorkspaceId, decode_broker_health_frame,
-    encode_broker_health_frame,
+    WmRelayoutWorkspace, WmRequestKind, WmRequestPacket, WorkspaceId, XWindowId, XWindowMirror,
+    decode_broker_health_frame, encode_broker_health_frame,
 };
 use sophia_runtime::{
     ProcessLaunchSpec, ProcessSupervisor, RestartPolicy, RuntimeBrokerSupervisors,
@@ -18,12 +18,14 @@ use sophia_runtime::{
 };
 use sophia_wm_demo::{ExternalWmClient, tile_workspace};
 use sophia_x_bridge::{
-    ClipboardSelectionFailureRequest, TestClientConfig, capture_readback_display,
-    clipboard_selection_failure_notify, run_test_client_window, smoke_routed_input,
-    smoke_routed_input_edges, stress_routed_input,
+    ClipboardSelectionFailureRequest, TestClientConfig, XMirrorState, XSelectionChangeKind,
+    XSelectionEvent, XSelectionMonitor, capture_readback_display,
+    clipboard_portal_request_from_selection_request, clipboard_selection_failure_notify,
+    run_test_client_window, smoke_routed_input, smoke_routed_input_edges, stress_routed_input,
 };
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use x11rb::protocol::xproto::SelectionRequestEvent;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
@@ -628,6 +630,76 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    if args
+        .iter()
+        .any(|arg| arg == "portal-clipboard-request-smoke")
+    {
+        let transfer = PortalTransferId::from_raw(2);
+        let source_namespace = NamespaceId::from_raw(10);
+        let target_namespace = NamespaceId::from_raw(20);
+        let owner = XWindowId::new(0x40, 1);
+        let requestor = XWindowId::new(0x44, 1);
+        let mut mirror = XMirrorState::default();
+        mirror.ingest_window(clipboard_mirror(owner, source_namespace));
+        mirror.ingest_window(clipboard_mirror(requestor, target_namespace));
+
+        let mut monitor = XSelectionMonitor::new();
+        let update = monitor.apply_event(
+            XSelectionEvent {
+                selection: 0x100,
+                owner: Some(owner),
+                timestamp: 11,
+                selection_timestamp: 10,
+                kind: XSelectionChangeKind::SetOwner,
+            },
+            &mirror,
+        );
+        let request = SelectionRequestEvent {
+            response_type: 0,
+            sequence: 1,
+            time: 55,
+            owner: owner.xid(),
+            requestor: requestor.xid(),
+            selection: 0x100,
+            target: 0x200,
+            property: 0x300,
+        };
+        let portal_request = clipboard_portal_request_from_selection_request(
+            &request,
+            "UTF8_STRING",
+            &monitor,
+            &mirror,
+            transfer,
+        )
+        .map_err(|error| format!("selection request conversion failed: {error:?}"))?;
+        let mut portal = ClipboardPortal::new();
+        portal
+            .request_import(portal_request.request.clone())
+            .map_err(|error| format!("clipboard portal import failed: {error:?}"))?;
+        let PortalCommand::FailSelection { transfer } = portal
+            .deny(transfer)
+            .map_err(|error| format!("clipboard portal denial failed: {error:?}"))?
+        else {
+            return Err("expected clipboard denial to fail selection".into());
+        };
+        let failure = clipboard_selection_failure_notify(portal_request.failure);
+
+        println!(
+            "portal-clipboard-request-smoke transfer={} source_ns={} target_ns={} owner_generation={} requestor={:#x} selection={:#x} target={:#x} property={:#x} failure_property={} normal_failure={}",
+            transfer.raw(),
+            portal_request.request.source_namespace.raw(),
+            portal_request.request.target_namespace.raw(),
+            update.current.generation,
+            failure.event.requestor,
+            failure.event.selection,
+            failure.event.target,
+            portal_request.property,
+            failure.event.property,
+            failure.failed_normally(),
+        );
+        return Ok(());
+    }
+
     if args.iter().any(|arg| arg == "x-smoke-routed-input") {
         let display = arg_value(&args, "--display");
         let report = smoke_routed_input(display.as_deref())?;
@@ -708,6 +780,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("commands: x-smoke-external-wm [--display=:99] [--wm=target/debug/sophia-wm-demo]");
     println!("commands: wm-supervisor-smoke [--wm=target/debug/sophia-wm-demo]");
     println!("commands: portal-clipboard-deny-smoke");
+    println!("commands: portal-clipboard-request-smoke");
     println!("commands: x-smoke-routed-input [--display=:99]");
     println!("commands: x-smoke-routed-input-edges");
     println!(
@@ -742,6 +815,26 @@ fn parse_u64(value: &str) -> Result<u64, Box<dyn std::error::Error>> {
 
 fn duration_us(duration: Option<std::time::Duration>) -> u128 {
     duration.map_or(0, |duration| duration.as_micros())
+}
+
+fn clipboard_mirror(window: XWindowId, namespace: NamespaceId) -> XWindowMirror {
+    XWindowMirror {
+        window,
+        parent: None,
+        children: Vec::new(),
+        toplevel: Some(window),
+        client: Some(window),
+        mapped: true,
+        stack_rank: 0,
+        geometry: Rect {
+            x: 0,
+            y: 0,
+            width: 320,
+            height: 200,
+        },
+        namespace: Some(namespace),
+        stale_metadata: 0,
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
