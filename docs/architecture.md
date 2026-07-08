@@ -173,6 +173,13 @@ enabled, and falls back to CPU readback when a handle type is unsupported. A
 production renderer can replace the skeleton import behavior while preserving
 the same command-stream and import-report contract.
 
+XComposite pixmap lifetime is tracked separately from render import. Sophia X
+Bridge stores `CompositePixmapRecord` values keyed by client window, with a
+generation for each named pixmap. Replacing a pixmap returns a lifetime update
+containing both the new current record and the retired record; removing a window
+returns the retired record with no current replacement. This gives the later
+real renderer an explicit point to release old pixmap/import resources.
+
 This seam exists today in broad shape. It needs measurement and glue, not a new
 theory.
 

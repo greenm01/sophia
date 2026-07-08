@@ -602,14 +602,42 @@ mod tests {
 
         assert_eq!(pixmaps.source_for_window(window), BufferSource::None);
 
-        pixmaps.insert_named_pixmap(window, 0x9000);
+        let inserted = pixmaps.upsert_named_pixmap(window, 0x9000);
 
+        assert_eq!(inserted.window, window);
+        assert_eq!(inserted.retired, None);
+        assert_eq!(inserted.current.unwrap().generation, 1);
         assert_eq!(
             pixmaps.source_for_window(window),
             BufferSource::XPixmap { pixmap: 0x9000 }
         );
+        assert_eq!(pixmaps.record_for_window(window).unwrap().generation, 1);
         assert_eq!(pixmaps.remove_window(window), Some(0x9000));
         assert_eq!(pixmaps.pixmap_for_window(window), None);
+    }
+
+    #[test]
+    fn composite_pixmap_map_tracks_replacements_and_removals() {
+        let mut pixmaps = CompositePixmapMap::default();
+        let window = xid(0x20);
+
+        let first = pixmaps.upsert_named_pixmap(window, 0x9000);
+        let same = pixmaps.upsert_named_pixmap(window, 0x9000);
+        let second = pixmaps.upsert_named_pixmap(window, 0x9001);
+        let removed = pixmaps.remove_window_record(window).unwrap();
+
+        assert_eq!(first.current.unwrap().generation, 1);
+        assert_eq!(first.retired, None);
+        assert_eq!(same.current.unwrap().generation, 1);
+        assert_eq!(same.retired, None);
+        assert_eq!(second.current.unwrap().pixmap, 0x9001);
+        assert_eq!(second.current.unwrap().generation, 2);
+        assert_eq!(second.retired.unwrap().pixmap, 0x9000);
+        assert_eq!(second.retired.unwrap().generation, 1);
+        assert_eq!(removed.current, None);
+        assert_eq!(removed.retired.unwrap().pixmap, 0x9001);
+        assert_eq!(removed.retired.unwrap().generation, 2);
+        assert_eq!(pixmaps.record_for_window(window), None);
     }
 
     #[test]

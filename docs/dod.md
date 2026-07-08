@@ -218,6 +218,22 @@ renderers may use native `XPixmap` or `DmaBuf` handles when supported. A GPU
 renderer should keep the same report shape so tests can distinguish "requested
 import path" from "used path" without inspecting renderer-private state.
 
+### CompositePixmapRecord
+
+A composite pixmap record describes the bridge-owned lifetime of one named
+XComposite pixmap.
+
+Fields should describe:
+
+- client window ID
+- named pixmap ID
+- pixmap generation
+
+Replacing a named pixmap must produce a lifetime update containing the retired
+record. Removing a window must retire the current record. Render import can then
+release old resources from explicit lifetime events instead of guessing from raw
+pixmap integers.
+
 ### CompositorSurface
 
 A compositor surface is Sophia Engine's stable handle for visual placement and

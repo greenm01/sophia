@@ -515,6 +515,12 @@ native `XPixmap` and `DmaBuf` handles when those paths are enabled. Unsupported
 handle types remain visible as CPU-readback fallbacks instead of being hidden in
 renderer-private state.
 
+XComposite pixmap lifetime is now explicit in Sophia X Bridge. The composite
+pixmap map stores `CompositePixmapRecord` values with per-window generations.
+Pixmap replacement returns both the new current record and the retired record;
+window removal returns the retired record. This creates a concrete release point
+for future GPU imports and prevents silent raw-pixmap overwrites.
+
 The DRM/KMS backend now has a data-only output skeleton. `DrmKmsMode`,
 `DrmKmsOutputDescriptor`, and `DrmKmsOutputRegistry` track connector/CRTC IDs,
 mode, scale, and Sophia output IDs without opening real DRM devices. The

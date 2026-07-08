@@ -44,7 +44,7 @@ Do this after the runtime loop has a clear shape.
 ## Rendering Track - Move Beyond Proof Grade
 
 - [x] Replace CPU-readback-only rendering with import-capable buffer handles.
-- [ ] Track buffer lifetime explicitly across XComposite pixmap updates.
+- [x] Track buffer lifetime explicitly across XComposite pixmap updates.
 - [ ] Add frame scheduling around X Damage and layout epochs.
 - [ ] Measure resize behavior under slow or non-cooperative X11 clients.
 
