@@ -2,10 +2,12 @@ use std::time::Duration;
 
 use sophia_protocol::{BrokerHealthState, BrokerKind};
 use sophia_runtime::{
-    ProcessLaunchSpec, ProcessSupervisor, ProcessSupervisorError, RestartPolicy,
-    RuntimeBrokerHealth, RuntimeBrokerSupervisors, SessionRuntimeCommand, SessionRuntimeEvent,
-    SessionRuntimeLoop, SessionRuntimePhase, SessionRuntimeState, SupervisedProcessKind,
-    SupervisorCommand, SupervisorEvent, SupervisorState, update_session_runtime, update_supervisor,
+    MAX_SESSION_RUNTIME_OBSERVATION_BATCH, ProcessLaunchSpec, ProcessSupervisor,
+    ProcessSupervisorError, RestartPolicy, RuntimeBrokerHealth, RuntimeBrokerSupervisors,
+    SessionRuntimeCommand, SessionRuntimeEvent, SessionRuntimeEventBatch, SessionRuntimeLoop,
+    SessionRuntimeObservation, SessionRuntimeObservationError, SessionRuntimePhase,
+    SessionRuntimeState, SupervisedProcessKind, SupervisorCommand, SupervisorEvent,
+    SupervisorState, update_session_runtime, update_supervisor,
 };
 
 #[test]
@@ -216,6 +218,103 @@ fn session_runtime_loop_resumes_from_previous_state() {
         ]
     );
     assert_eq!(runtime.into_state().phase, SessionRuntimePhase::Idle);
+}
+
+#[test]
+fn session_runtime_observations_feed_the_batch_loop() {
+    let mut runtime = SessionRuntimeLoop::default();
+
+    let report = runtime
+        .step_observations([
+            SessionRuntimeObservation::TickStarted,
+            SessionRuntimeObservation::XEventsPolled { count: 1 },
+            SessionRuntimeObservation::WmLayoutReady,
+            SessionRuntimeObservation::FrameScheduled { frame_serial: 15 },
+            SessionRuntimeObservation::FrameRendered { frame_serial: 15 },
+            SessionRuntimeObservation::PortalCommandsReady { count: 3 },
+            SessionRuntimeObservation::ChromeCommandsReady { count: 2 },
+        ])
+        .expect("observation batch should be accepted");
+
+    assert_eq!(report.events_processed, 7);
+    assert_eq!(
+        report.commands,
+        vec![
+            SessionRuntimeCommand::PollXEvents,
+            SessionRuntimeCommand::RequestWmLayout,
+            SessionRuntimeCommand::ScheduleFrame,
+            SessionRuntimeCommand::RenderFrame { frame_serial: 15 },
+            SessionRuntimeCommand::DrainPortalCommands,
+            SessionRuntimeCommand::PresentChrome,
+        ]
+    );
+    assert_eq!(runtime.state().phase, SessionRuntimePhase::Idle);
+    assert_eq!(runtime.state().x_events_polled, 1);
+    assert_eq!(runtime.state().frames_rendered, 1);
+    assert_eq!(runtime.state().portal_commands_drained, 3);
+    assert_eq!(runtime.state().chrome_commands_presented, 2);
+}
+
+#[test]
+fn session_runtime_observations_route_broker_health_without_payload_bytes() {
+    let mut runtime = SessionRuntimeLoop::default();
+
+    let report = runtime
+        .step_observations([SessionRuntimeObservation::BrokerHealthChanged {
+            broker: BrokerKind::Metadata,
+            state: BrokerHealthState::Ready,
+            generation: 9,
+            status_message_len: 12,
+        }])
+        .expect("broker health observation should be accepted");
+
+    assert_eq!(report.events_processed, 1);
+    assert!(report.commands.is_empty());
+    assert_eq!(
+        runtime.state().metadata_broker_health,
+        Some(RuntimeBrokerHealth {
+            state: BrokerHealthState::Ready,
+            generation: 9,
+            status_message_len: 12,
+        })
+    );
+}
+
+#[test]
+fn session_runtime_event_batch_rejects_unbounded_observations() {
+    let observations =
+        vec![SessionRuntimeObservation::TickCompleted; MAX_SESSION_RUNTIME_OBSERVATION_BATCH + 1];
+
+    let error = SessionRuntimeEventBatch::from_observations(observations)
+        .expect_err("oversized observation batch should be rejected");
+
+    assert_eq!(
+        error,
+        SessionRuntimeObservationError::TooManyObservations {
+            max: MAX_SESSION_RUNTIME_OBSERVATION_BATCH
+        }
+    );
+}
+
+#[test]
+fn session_runtime_event_batch_rejects_oversized_broker_status_lengths() {
+    let error = SessionRuntimeEventBatch::from_observations([
+        SessionRuntimeObservation::BrokerHealthChanged {
+            broker: BrokerKind::Portal,
+            state: BrokerHealthState::Degraded,
+            generation: 2,
+            status_message_len: sophia_protocol::SOPHIA_BROKER_HEALTH_MAX_MESSAGE_LEN + 1,
+        },
+    ])
+    .expect_err("oversized broker status length should be rejected");
+
+    assert_eq!(
+        error,
+        SessionRuntimeObservationError::BrokerStatusMessageTooLong {
+            len: sophia_protocol::SOPHIA_BROKER_HEALTH_MAX_MESSAGE_LEN + 1,
+            max: sophia_protocol::SOPHIA_BROKER_HEALTH_MAX_MESSAGE_LEN,
+        }
+    );
 }
 
 #[test]

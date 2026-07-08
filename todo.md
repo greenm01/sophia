@@ -28,8 +28,10 @@ Close the gap between existing reducers/protocols and a running session loop.
   becomes normal X11 selection failure.
 - [x] Add a resumable session runtime loop that batches reduced events into
   commands without polling file descriptors inside policy code.
-- [ ] Wire external X, broker, WM, portal, and chrome observations into the
-  session runtime loop as bounded event batches.
+- [x] Add a bounded runtime observation adapter for X, broker, WM, portal,
+  chrome, and renderer facts.
+- [ ] Connect concrete X bridge, WM transport, broker IPC, portal execution,
+  chrome presenter, and renderer reports to `SessionRuntimeObservation` batches.
 
 ---
 

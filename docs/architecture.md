@@ -447,6 +447,14 @@ reads, portal execution, renderer commits, or libinput/DRM file descriptors.
 Those adapters should translate external facts into `SessionRuntimeEvent`
 values, then feed the loop.
 
+`SessionRuntimeObservation` is the bounded intake form for those adapters. It
+admits only scalar runtime facts: X event counts, WM layout/restart outcomes,
+frame serials, portal/chrome command counts, and broker health state plus
+status-message length. `SessionRuntimeEventBatch` rejects batches larger than
+`MAX_SESSION_RUNTIME_OBSERVATION_BATCH` and rejects broker status lengths beyond
+the broker health packet cap. It does not carry raw X events, XIDs, namespace
+tokens, clipboard bytes, labels, icons, or renderer buffers.
+
 The headless runtime tick smoke now drives this reducer around the existing
 capture -> session tick -> replay path. It executes the reducer's X polling,
 WM policy, frame scheduling, render, portal drain, and chrome presentation

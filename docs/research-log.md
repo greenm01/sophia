@@ -676,6 +676,13 @@ step focused on adapters: X event intake, WM socket responses, broker health,
 portal execution, chrome presentation, and renderer completion can be translated
 into bounded facts without moving file-descriptor polling into reducer logic.
 
+The first adapter form is now explicit. `SessionRuntimeObservation` accepts only
+bounded scalar facts from external runtime sources, and
+`SessionRuntimeEventBatch` converts those observations into reducer events after
+checking batch size and broker status length. This gives concrete X bridge, WM
+transport, broker IPC, portal, chrome, and renderer code a shared intake seam
+without creating a general payload bus through the security broker.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

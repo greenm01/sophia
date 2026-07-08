@@ -120,6 +120,14 @@ runtime adapters own blocking I/O, socket reads, X event polling, renderer
 work, and process waits; they feed observations into the loop rather than
 embedding those operations inside runtime policy.
 
+`SessionRuntimeObservation` is the external adapter boundary. It may represent
+only reduced, bounded facts: counts, frame serials, restart/layout readiness,
+broker health state, broker health generation, and broker status-message
+length. It must not become a generic envelope for raw X events, XIDs, namespace
+tokens, metadata strings, portal payload bytes, icon bytes, buffers, or file
+paths. `SessionRuntimeEventBatch` enforces the maximum observation count before
+the runtime loop sees the events.
+
 Process-supervised portal and metadata broker placeholders are runtime
 ownership records. They prove that the runtime can start, poll, and terminate
 the intended broker process kinds before the real broker IPC protocols exist.
