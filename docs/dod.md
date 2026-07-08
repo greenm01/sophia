@@ -439,6 +439,11 @@ The `sophia-portal` crate implements this policy as a reducer over
 prompt user/policy, hand off clipboard data, or fail the X11 selection. X Bridge
 code later translates those commands into concrete ICCCM/XFixes behavior.
 
+Drag-and-drop follows the same reducer shape. Offered MIME/protocol targets are
+bounded before storage, approval is generation-bound, denial or stale ownership
+becomes an abstract cancel command, and Xdnd-specific protocol mechanics stay
+in X Bridge.
+
 X Bridge owns selection monitoring data. It should reduce XFixes owner-change
 events into records keyed by selection atom and namespace, then pass only the
 selection, namespace, owner generation, and owner-change fact to portal policy.

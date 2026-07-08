@@ -200,7 +200,7 @@ Add intentional namespace crossing without weakening Xnamespace.
 - [x] Bind approval to a single source generation.
 
 **Later portals**
-- [ ] Drag-and-drop.
+- [x] Drag-and-drop.
 - [ ] File open and save handoff.
 - [ ] Screenshots and screen recording.
 - [ ] URI open requests.

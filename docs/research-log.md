@@ -382,6 +382,11 @@ The restart policy seam is now represented as data. IPC failures produce
 proposal keeps the WM running. Process spawning and supervision can consume this
 decision later without changing transaction semantics.
 
+The second portal reducer now covers drag-and-drop policy. A DnD handoff starts
+pending/private, stores a bounded offered-type list hint, requires explicit
+generation-matching approval, and emits abstract handoff or cancel commands.
+Xdnd event monitoring and concrete X11 message handling remain X Bridge work.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

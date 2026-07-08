@@ -282,6 +282,12 @@ attributes each owner window to a known mirrored namespace when possible and
 bumps a per-selection owner generation. Portal approval is bound to that
 generation, so a later owner change makes old approval stale.
 
+The first drag-and-drop portal reducer follows the same rule. It records a
+bounded list of offered transfer types, keeps the handoff pending/private until
+explicit approval, binds approval to a source generation, and emits abstract
+handoff or cancel commands. Xdnd/X11 event translation remains Sophia X Bridge
+work; portal policy does not subscribe to X events directly.
+
 ### Metadata Broker And Chrome Actions
 
 Compositor chrome is Engine/session authority, not WM authority. If the user
