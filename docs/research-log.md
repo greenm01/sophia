@@ -404,6 +404,11 @@ until explicit approval, and emits abstract handoff/cancel commands. The current
 protocol encoding uses a `uri-open:` type hint on the generic portal transfer
 path until a dedicated URI kind is justified.
 
+Notification policy now has a reducer, completing the first Phase 7 portal
+policy pass. It bounds summary/body/action text, records urgency, requires
+generation-matching approval, and emits abstract deliver/drop commands.
+Compositor presentation and notification action execution remain runtime work.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

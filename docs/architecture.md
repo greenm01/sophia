@@ -305,6 +305,11 @@ requires generation-bound approval, and emits abstract handoff or cancel
 commands. Until the protocol grows a dedicated URI kind, URI requests use a
 `uri-open:` type hint on the generic portal transfer path.
 
+Notification requests complete the first portal policy set. The reducer stores
+bounded summary/body/action text, urgency, and generation-bound approval state.
+Compositor presentation, notification history, action dispatch, and rate
+limiting remain runtime policy outside the portal reducer.
+
 ### Metadata Broker And Chrome Actions
 
 Compositor chrome is Engine/session authority, not WM authority. If the user

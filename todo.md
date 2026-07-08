@@ -204,7 +204,7 @@ Add intentional namespace crossing without weakening Xnamespace.
 - [x] File open and save handoff.
 - [x] Screenshots and screen recording.
 - [x] URI open requests.
-- [ ] Notifications.
+- [x] Notifications.
 
 ---
 
