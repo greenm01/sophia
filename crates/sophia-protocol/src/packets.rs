@@ -201,6 +201,18 @@ pub enum AttentionState {
     Critical,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ChromeActionRequest {
+    pub surface: SurfaceId,
+    pub generation: u64,
+    pub kind: ChromeActionKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChromeActionKind {
+    CloseSurfaceRequested,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct InputEventPacket {
     pub serial: u64,
@@ -611,6 +623,19 @@ mod tests {
             Some(true)
         );
         assert_eq!(chrome.icon, Some(IconTokenId::from_raw(4)));
+    }
+
+    #[test]
+    fn chrome_action_request_is_surface_scoped() {
+        let request = ChromeActionRequest {
+            surface: SurfaceId::new(9, 4),
+            generation: 12,
+            kind: ChromeActionKind::CloseSurfaceRequested,
+        };
+
+        assert_eq!(request.surface, SurfaceId::new(9, 4));
+        assert_eq!(request.generation, 12);
+        assert_eq!(request.kind, ChromeActionKind::CloseSurfaceRequested);
     }
 
     #[test]

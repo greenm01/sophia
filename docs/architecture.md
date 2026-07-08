@@ -124,6 +124,17 @@ sanitized compositor chrome data separately from WM layout data.
 The WM is not on the per-frame or per-input hot path. Sophia Engine keeps the
 last committed policy state if the WM crashes or restarts.
 
+The WM control flow is Engine-only. Sophia Engine mints every transaction ID,
+sends the request, applies a strict response timeout, and treats the WM reply as
+a proposal. The WM must not initiate layout transactions, push unsolicited
+commands, or drive animations frame-by-frame. If a layout should animate, the
+WM may provide the target layout; Sophia Engine owns the frame clock,
+interpolation, cancellation, and final commit.
+
+The socket protocol is a versioned, length-prefixed binary frame. Integers are
+little-endian and decoded with explicit fixed-offset parsing, not `repr(C)`
+casts or generic serializers. Payloads are bounded before allocation.
+
 The protocol should be sequence-oriented:
 
 - **Manage sequence** for state that affects clients: size, focus, fullscreen,
@@ -218,6 +229,18 @@ Initial portal candidates:
 
 The portal rule is the same everywhere: data crosses as an explicit packet with
 source namespace, target namespace, type, size, policy decision, and lifetime.
+Clipboard denial maps to native X11 selection failure, not synthetic input.
+Pending approval holds only the transfer request for a bounded timeout; it does
+not suspend either application or namespace.
+
+### Metadata Broker And Chrome Actions
+
+Compositor chrome is Engine/session authority, not WM authority. If the user
+clicks a compositor-drawn close button, Sophia Engine hit-tests that chrome and
+emits a surface-scoped close request with a generation check. Session/chrome
+policy validates the request and asks Sophia X Bridge to perform the polite X11
+close path first, such as `WM_DELETE_WINDOW` when available. The WM sees only
+the later consequence through `SurfaceRemoved` or relayout requests.
 
 ## XLibre Responsibilities
 

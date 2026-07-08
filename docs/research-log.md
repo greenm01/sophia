@@ -298,6 +298,26 @@ This proves the v1 flat button path across the actual X11 wire protocol. The
 remaining routed-input work is no longer basic extension delivery; it is edge
 coverage around grabs/focus and the later transformed-coordinate path.
 
+The Engine-to-WM boundary is now locked to Engine-only transactions. Sophia
+Engine mints every transaction ID, sends a `WmRequestPacket`, waits for one
+bounded `WmResponsePacket`, validates the proposal, and commits or rejects the
+result. The WM cannot initiate transactions or drive animations. Engine owns
+animation timing, frame-clock interpolation, cancellation, and timeout policy.
+
+The first durable IPC codec is in `sophia-protocol`. It uses a 24-byte
+`SOPH`/version/message-kind/transaction/payload-length/reserved header and
+manual little-endian parsing. It does not cast bytes into Rust structs and does
+not use a generic serializer. Payloads are capped at 64 KiB, repeated items are
+bounded, and malformed frames fail closed.
+
+Portal and chrome action policy are also settled at the boundary level.
+Clipboard portals are async transfer state machines: denial maps to normal X11
+selection failure, approval is single-use and generation-bound, and source owner
+changes revoke pending transfers. Compositor close buttons are Engine/session
+policy, not WM policy: Engine hit-tests chrome, validates a surface generation
+and closability, and Sophia X Bridge attempts the polite X11 close path before
+any future escalation.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new
@@ -305,4 +325,3 @@ coverage around grabs/focus and the later transformed-coordinate path.
 - How much frame-perfect resize can be achieved with XComposite/Damage alone?
 - Where should the X11 WM facade live: Sophia WM, Sophia X Bridge, or a separate
   helper?
-- Which IPC format should Sophia use for its internal protocols?

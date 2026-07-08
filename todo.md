@@ -161,6 +161,24 @@ Design and prototype compositor-first input for X11 clients.
 
 ---
 
+## Phase 6.5 - WM IPC Socket
+
+Replace the demo argv/stdout WM transport with a bounded Unix socket protocol.
+
+**Codec**
+- [x] Add versioned length-prefixed WM request/response frames.
+- [x] Decode with explicit little-endian parsing, not `repr(C)` casts.
+- [x] Reject oversized payloads, excessive vector counts, malformed headers,
+  and trailing bytes.
+
+**Runtime**
+- [ ] Add Engine-owned Unix socket request/response transport.
+- [ ] Enforce one Engine-minted transaction per request.
+- [ ] Preserve last committed layout on timeout or malformed response.
+- [ ] Restart the WM process after timeout or protocol violation.
+
+---
+
 ## Phase 7 - Portals
 
 Add intentional namespace crossing without weakening Xnamespace.
@@ -171,6 +189,8 @@ Add intentional namespace crossing without weakening Xnamespace.
 - [ ] Add explicit export/import policy.
 - [ ] Support text targets first.
 - [ ] Invalidate transfers when the source owner changes.
+- [ ] Fail denied paste as normal X11 selection failure.
+- [ ] Bind approval to a single source generation.
 
 **Later portals**
 - [ ] Drag-and-drop.
@@ -178,3 +198,14 @@ Add intentional namespace crossing without weakening Xnamespace.
 - [ ] Screenshots and screen recording.
 - [ ] URI open requests.
 - [ ] Notifications.
+
+---
+
+## Phase 8 - Compositor Chrome Actions
+
+Keep chrome rendering and lifecycle actions out of the blind WM.
+
+- [x] Add `CloseSurfaceRequested(surface, generation)` packet shape.
+- [ ] Validate surface generation and `closable` before dispatch.
+- [ ] Route close through Sophia X Bridge using polite X11 close semantics.
+- [ ] Notify WM only through follow-up remove/relayout requests.

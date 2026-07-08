@@ -296,6 +296,25 @@ The response can be reduced into a `LayoutTransaction` for Sophia Engine. The
 WM remains outside the compositor's per-frame and per-input hot paths; it only
 receives coarse manage/relayout events and returns policy commands.
 
+The durable WM IPC format is a bounded binary frame:
+
+```text
+u32 magic              "SOPH"
+u16 protocol_version
+u16 message_kind
+u64 transaction_id
+u32 payload_len
+u32 reserved
+[payload bytes]
+```
+
+All integers are little-endian. Decoders must parse fixed offsets explicitly
+with `from_le_bytes`; do not cast socket bytes into structs. A frame with an
+unknown message kind, unsupported version, non-zero reserved field, truncated
+payload, trailing bytes, oversized payload, or excessive vector count fails
+closed. The first implementation lives in `sophia-protocol` and covers
+`WmRequestPacket` and `WmResponsePacket`.
+
 ### TransactionCommit
 
 A committed or rejected transaction is reported as data.
@@ -344,6 +363,11 @@ Fields should describe:
 The compositor may use this data to draw title bars, top bars, tab strips, and
 security badges. The external WM should not need this packet to tile or focus
 surfaces.
+
+Chrome actions are not WM commands. A compositor close button produces a
+`ChromeActionRequest` owned by Engine/session policy, validated against surface
+generation and capabilities, then translated by Sophia X Bridge into normal X11
+close semantics. The WM receives only later layout consequences.
 
 ### SurfaceSnapshot
 
@@ -396,6 +420,12 @@ Fields should describe:
 
 Portals should never grant two namespaces general X11 visibility just to move
 one piece of user-approved data.
+
+Clipboard transfers are asynchronous. Denial becomes normal X11 selection
+failure, such as a failed conversion, rather than synthetic input. Pending
+approval holds only the specific transfer for a bounded timeout. Approval is
+single-use and generation-bound; if the source owner changes, the pending
+transfer becomes stale and must be revoked or restarted.
 
 ## Storage
 
