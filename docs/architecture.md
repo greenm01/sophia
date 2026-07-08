@@ -413,6 +413,12 @@ frame serial. `update_session_runtime` consumes runtime facts such as
 `PresentChrome`. This keeps the event loop assembly testable before wiring it
 to real file descriptors.
 
+The headless runtime tick smoke now drives this reducer around the existing
+capture -> session tick -> replay path. It executes the reducer's X polling,
+WM policy, frame scheduling, render, portal drain, and chrome presentation
+commands in order and reports the resulting runtime counters beside the frame
+snapshot/replay counts.
+
 Frame scheduling now has an explicit seam. `FrameClock` produces output-scoped
 frame ticks, and the deterministic headless implementation advances serials
 without depending on wall-clock time. A real DRM/KMS backend should implement

@@ -67,7 +67,7 @@ hot paths.
 
 - [x] Add a data-only session runtime reducer for X polling, WM policy, frame
   scheduling, portal drain, and chrome presentation phases.
-- [ ] Connect the reducer to the headless session tick smoke.
+- [x] Connect the reducer to the headless session tick smoke.
 - [ ] Add a runtime smoke that schedules from X Damage and layout epochs.
 - [ ] Add process-supervised portal and metadata broker placeholders.
 

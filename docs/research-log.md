@@ -555,6 +555,11 @@ policy, frame scheduling/rendering, portal draining, chrome presentation, and WM
 restart requests through explicit commands. This keeps the future loop testable
 before it owns file descriptors or process-local engine state.
 
+The reducer is now connected to `sophia-cli x-smoke-runtime-tick`. The smoke
+still captures X-derived layers and runs a headless session tick, but it now
+wraps that work with runtime events and reports reducer counters for commands,
+frames, X events, portal drains, and chrome presentation.
+
 The DRM/KMS backend now has a data-only output skeleton. `DrmKmsMode`,
 `DrmKmsOutputDescriptor`, and `DrmKmsOutputRegistry` track connector/CRTC IDs,
 mode, scale, and Sophia output IDs without opening real DRM devices. The

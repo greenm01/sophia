@@ -10,8 +10,9 @@ use sophia_protocol::{
     WorkspaceId,
 };
 use sophia_runtime::{
-    ProcessLaunchSpec, ProcessSupervisor, RestartPolicy, SupervisedProcessKind, SupervisorEvent,
-    TraceLevel, init_tracing, update_supervisor,
+    ProcessLaunchSpec, ProcessSupervisor, RestartPolicy, SessionRuntimeCommand,
+    SessionRuntimeEvent, SessionRuntimeState, SupervisedProcessKind, SupervisorEvent, TraceLevel,
+    init_tracing, update_session_runtime, update_supervisor,
 };
 use sophia_wm_demo::{ExternalWmClient, tile_workspace};
 use sophia_x_bridge::{
@@ -169,21 +170,67 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if args.iter().any(|arg| arg == "x-smoke-runtime-tick") {
         let display = arg_value(&args, "--display");
+        let mut runtime = SessionRuntimeState::default();
+        let mut runtime_commands = Vec::new();
+        let (next_runtime, command) =
+            update_session_runtime(runtime, SessionRuntimeEvent::TickStarted);
+        runtime = next_runtime;
+        runtime_commands.push(command);
+
         let capture = capture_readback_display(display.as_deref())?;
+        let (next_runtime, command) = update_session_runtime(
+            runtime,
+            SessionRuntimeEvent::XEventsPolled {
+                count: u32::try_from(capture.report.mirrored_windows).unwrap_or(u32::MAX),
+            },
+        );
+        runtime = next_runtime;
+        runtime_commands.push(command);
+        if command == SessionRuntimeCommand::RequestWmLayout {
+            let (next_runtime, command) =
+                update_session_runtime(runtime, SessionRuntimeEvent::WmLayoutReady);
+            runtime = next_runtime;
+            runtime_commands.push(command);
+        }
+
         let engine = HeadlessEngine::default();
         let output = engine.output();
         let mut last_committed = LastCommittedLayout::default();
+        let frame_serial = 4;
+        let (next_runtime, command) = update_session_runtime(
+            runtime,
+            SessionRuntimeEvent::FrameScheduled { frame_serial },
+        );
+        runtime = next_runtime;
+        runtime_commands.push(command);
+
         let report = engine.run_session_tick(
             SessionTickRequest {
                 output: output.id,
-                frame_serial: 4,
+                frame_serial,
                 layers: SessionLayerSource::Fresh(capture.layers),
             },
             &mut last_committed,
         )?;
+        let (next_runtime, command) =
+            update_session_runtime(runtime, SessionRuntimeEvent::FrameRendered { frame_serial });
+        runtime = next_runtime;
+        runtime_commands.push(command);
+        let (next_runtime, command) = update_session_runtime(
+            runtime,
+            SessionRuntimeEvent::PortalCommandsReady { count: 0 },
+        );
+        runtime = next_runtime;
+        runtime_commands.push(command);
+        let (next_runtime, command) = update_session_runtime(
+            runtime,
+            SessionRuntimeEvent::ChromeCommandsReady { count: 0 },
+        );
+        runtime = next_runtime;
+        runtime_commands.push(command);
 
         println!(
-            "x-smoke-runtime-tick display={} windows={} surfaces={} layers={} readbacks={} bytes={} restored={} commands={} replay_steps={} damage_rects={} cached_layers={}",
+            "x-smoke-runtime-tick display={} windows={} surfaces={} layers={} readbacks={} bytes={} restored={} commands={} replay_steps={} damage_rects={} cached_layers={} runtime_phase={:?} runtime_commands={} runtime_frames={} runtime_x_events={} runtime_portal={} runtime_chrome={}",
             capture
                 .report
                 .display_name
@@ -198,7 +245,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             report.frame.commands.len(),
             report.replay.steps.len(),
             report.replay.damage.rects.len(),
-            last_committed.layers().len()
+            last_committed.layers().len(),
+            runtime.phase,
+            runtime_commands.len(),
+            runtime.frames_rendered,
+            runtime.x_events_polled,
+            runtime.portal_commands_drained,
+            runtime.chrome_commands_presented
         );
         return Ok(());
     }
