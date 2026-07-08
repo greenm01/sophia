@@ -393,6 +393,11 @@ approval, validates suggested filenames so policy never stores path-like names,
 and emits abstract handoff/cancel commands. Runtime file brokering is still
 future work.
 
+Screenshot and screen-recording policy now have a reducer. It stores only
+capture mode, redacted scope, supported MIME type, size hint, and generation
+state, then emits abstract handoff/cancel commands. Compositor pixels, buffers,
+and streaming remain outside portal policy.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

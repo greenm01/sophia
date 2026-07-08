@@ -202,7 +202,7 @@ Add intentional namespace crossing without weakening Xnamespace.
 **Later portals**
 - [x] Drag-and-drop.
 - [x] File open and save handoff.
-- [ ] Screenshots and screen recording.
+- [x] Screenshots and screen recording.
 - [ ] URI open requests.
 - [ ] Notifications.
 

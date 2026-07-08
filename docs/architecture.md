@@ -294,6 +294,11 @@ and generation-bound approval state. Actual file chooser UI, file descriptors,
 temporary handles, and namespace filesystem brokering are runtime work, not
 portal policy state.
 
+Screenshot and screen-recording requests are also policy-only at this layer.
+The reducer records capture mode, redacted capture scope, supported output MIME
+type, and generation-bound approval. Actual compositor capture, frame streaming,
+redaction, and buffer handoff stay in Sophia Engine/runtime.
+
 ### Metadata Broker And Chrome Actions
 
 Compositor chrome is Engine/session authority, not WM authority. If the user

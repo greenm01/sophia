@@ -449,6 +449,10 @@ stores open/save intent, bounded offered types, and a sanitized suggested
 filename. It emits abstract handoff or cancel commands; concrete file handles,
 temporary storage, and chooser UI are runtime responsibilities.
 
+Screen capture policy records only capture intent: screenshot versus recording,
+redacted scope, supported MIME type, size hint, decision, and generation. It
+must not expose raw surface IDs, pixels, or buffers to policy code.
+
 X Bridge owns selection monitoring data. It should reduce XFixes owner-change
 events into records keyed by selection atom and namespace, then pass only the
 selection, namespace, owner generation, and owner-change fact to portal policy.
