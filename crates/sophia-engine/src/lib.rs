@@ -16,7 +16,8 @@ use sophia_protocol::{
     LayoutTransaction, OutputId, PortalTransferId, Rect, Region, RenderCommand, RenderCommandKind,
     SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAX_PAYLOAD_LEN, SeatId, Size, SurfaceId, TransactionCommit,
     TransactionId, TransactionOutcome, TrustLevel, WmRequestKind, WmRequestPacket,
-    WmResponsePacket, WorkspaceId, XWindowId, decode_wm_response_frame, encode_wm_request_frame,
+    WmResponsePacket, WorkspaceId, XLibreRoutedInputRequest, XWindowId, decode_wm_response_frame,
+    encode_wm_request_frame,
 };
 use sophia_runtime::{
     RestartPolicy, SophiaErrorExt, SophiaErrorKind, SupervisedProcessKind, SupervisorCommand,
@@ -182,6 +183,14 @@ pub struct RoutedInputFlush {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RoutedInputRequestError {
+    SerialMismatch,
+    RouteNotAccepted,
+    MissingTargetWindow,
+    MissingLocalPosition,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RoutedInputFlushReason {
     FrameBoundary,
     StateChangingInput,
@@ -279,6 +288,46 @@ impl RoutedInputCoalescer {
             inputs: vec![pending],
         })
     }
+}
+
+pub fn routed_input_request_from_physical_event(
+    event: &InputEventPacket,
+    route: &InputRoute,
+) -> Result<XLibreRoutedInputRequest, RoutedInputRequestError> {
+    if event.serial != route.input_serial {
+        return Err(RoutedInputRequestError::SerialMismatch);
+    }
+    if route.outcome != InputRouteOutcome::Routed {
+        return Err(RoutedInputRequestError::RouteNotAccepted);
+    }
+
+    let target_window = route
+        .target_window
+        .filter(|window| window.is_valid())
+        .ok_or(RoutedInputRequestError::MissingTargetWindow)?;
+    let local_position = route
+        .local_position
+        .ok_or(RoutedInputRequestError::MissingLocalPosition)?;
+
+    Ok(XLibreRoutedInputRequest {
+        serial: event.serial,
+        seat: event.seat,
+        device: event.device,
+        time_msec: event.time_msec,
+        target_window,
+        local_position,
+        kind: event.kind,
+    })
+}
+
+pub fn routed_input_requests_from_flush(
+    flush: &RoutedInputFlush,
+) -> Result<Vec<XLibreRoutedInputRequest>, RoutedInputRequestError> {
+    flush
+        .inputs
+        .iter()
+        .map(|input| routed_input_request_from_physical_event(&input.event, &input.route))
+        .collect()
 }
 
 fn coalescible_motion_key(input: &QueuedRoutedInput) -> Option<RoutedInputRouteKey> {

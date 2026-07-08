@@ -521,6 +521,12 @@ The libinput backend now has a matching data-only event source skeleton.
 registered device/seat pairs. This gives future file-descriptor polling a
 checked intake queue without putting physical input on the X bridge path.
 
+Physical input now connects to routed-input request generation. Sophia Engine
+can combine an accepted `InputRoute` with the original `InputEventPacket` to
+produce an `XLibreRoutedInputRequest`, and coalescer flushes can become request
+batches. The adapter rejects mismatched serials, closed route outcomes, missing
+target XIDs, and missing local coordinates before anything reaches XLibre.
+
 Notification portal commands now have a compositor chrome presentation seam.
 `NotificationChromePresenter` stages bounded notification requests, presents
 them only after a `DeliverNotification` command, and dismisses pending or

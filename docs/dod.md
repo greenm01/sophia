@@ -305,6 +305,10 @@ hit-test target that legacy X11 cannot compute after compositor transforms.
 Grabs, focus policy, XI2 semantics, and Xnamespace checks remain XLibre
 authority.
 
+The Engine may generate this request only from a physical `InputEventPacket`
+plus an accepted `InputRoute`. Serial mismatches, missing target XIDs, missing
+local coordinates, and non-routed outcomes are closed routes.
+
 ### XLibreRoutedInputDecision
 
 XLibre's answer is a decision packet.

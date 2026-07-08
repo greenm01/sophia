@@ -407,6 +407,14 @@ registered device/seat pairs and drains them in order for the routing pipeline.
 It is not a real file-descriptor poller yet; it is the typed intake seam that
 physical input will feed.
 
+Physical input now has a request-generation seam. After Sophia Engine produces
+an `InputRoute`, `routed_input_request_from_physical_event` combines the
+physical `InputEventPacket` with the accepted route and emits an
+`XLibreRoutedInputRequest`. The adapter rejects serial mismatches, denied or
+unrouted outcomes, missing target windows, and missing local coordinates. A
+coalescer flush can be converted into a bounded batch of routed-input requests
+without involving WM policy.
+
 XFixes selection owner updates are the first portal execution input. Sophia X
 Bridge converts owner-generation changes into source-namespace clipboard events;
 the clipboard portal reducer uses those events to revoke stale pending

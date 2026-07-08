@@ -5,9 +5,11 @@ use sophia_engine::{
     LibinputDeviceKind, LibinputEventIngest, LibinputEventSource, MetadataChromeRejectReason,
     MetadataChromeUpdate, NotificationChromePresenter, NotificationChromeRejectReason,
     NotificationChromeUpdate, RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction,
-    SanitizedChromeMetadata, SessionCommand, SessionEvent, SessionLayerSource, SessionTickRequest,
-    WmIpcError, WmRestartReason, WmRuntimeAction, notification_chrome_command_from_portal,
-    request_wm_over_stream, update_wm_supervisor_from_runtime_action,
+    RoutedInputRequestError, SanitizedChromeMetadata, SessionCommand, SessionEvent,
+    SessionLayerSource, SessionTickRequest, WmIpcError, WmRestartReason, WmRuntimeAction,
+    notification_chrome_command_from_portal, request_wm_over_stream,
+    routed_input_request_from_physical_event, routed_input_requests_from_flush,
+    update_wm_supervisor_from_runtime_action,
 };
 use sophia_portal::{NotificationRequest, NotificationUrgency, PortalCommand};
 use sophia_protocol::{
@@ -1289,6 +1291,85 @@ fn routed_input_coalescer_flushes_for_drag_grab_and_focus_barriers() {
         assert_eq!(flush.inputs[0].event.serial, 1);
         assert!(!coalescer.has_pending_motion());
     }
+}
+
+#[test]
+fn physical_input_route_becomes_xlibre_request() {
+    let event = motion_event(77, 25.0, 35.0);
+    let route = route(77, 0x44, 5.0, 6.0);
+
+    let request = routed_input_request_from_physical_event(&event, &route).unwrap();
+
+    assert_eq!(request.serial, 77);
+    assert_eq!(request.seat, event.seat);
+    assert_eq!(request.device, event.device);
+    assert_eq!(request.time_msec, event.time_msec);
+    assert_eq!(request.target_window, XWindowId::new(0x44, 1));
+    assert_eq!(request.local_position, Point { x: 5.0, y: 6.0 });
+    assert_eq!(request.kind, InputEventKind::PointerMotion);
+}
+
+#[test]
+fn physical_input_flush_becomes_xlibre_requests_after_state_change() {
+    let mut coalescer = RoutedInputCoalescer::new();
+    coalescer.push(motion_event(1, 10.0, 10.0), route(1, 0x30, 10.0, 10.0));
+    let button = input_event(
+        2,
+        InputEventKind::PointerButton {
+            button: 1,
+            pressed: true,
+        },
+        10.0,
+        10.0,
+    );
+
+    let RoutedInputQueueAction::Flushed(flush) = coalescer.push(button, route(2, 0x30, 10.0, 10.0))
+    else {
+        panic!("expected state-changing flush");
+    };
+    let requests = routed_input_requests_from_flush(&flush).unwrap();
+
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].serial, 1);
+    assert_eq!(requests[1].serial, 2);
+    assert_eq!(
+        requests[1].kind,
+        InputEventKind::PointerButton {
+            button: 1,
+            pressed: true
+        }
+    );
+}
+
+#[test]
+fn physical_input_route_rejects_malformed_routes() {
+    let event = motion_event(1, 10.0, 10.0);
+    let mut mismatched = route(2, 0x30, 10.0, 10.0);
+    assert_eq!(
+        routed_input_request_from_physical_event(&event, &mismatched),
+        Err(RoutedInputRequestError::SerialMismatch)
+    );
+
+    mismatched.input_serial = 1;
+    mismatched.outcome = InputRouteOutcome::NoTarget;
+    assert_eq!(
+        routed_input_request_from_physical_event(&event, &mismatched),
+        Err(RoutedInputRequestError::RouteNotAccepted)
+    );
+
+    mismatched.outcome = InputRouteOutcome::Routed;
+    mismatched.target_window = None;
+    assert_eq!(
+        routed_input_request_from_physical_event(&event, &mismatched),
+        Err(RoutedInputRequestError::MissingTargetWindow)
+    );
+
+    mismatched.target_window = Some(XWindowId::new(0x30, 1));
+    mismatched.local_position = None;
+    assert_eq!(
+        routed_input_request_from_physical_event(&event, &mismatched),
+        Err(RoutedInputRequestError::MissingLocalPosition)
+    );
 }
 
 fn test_layer(surface_index: u32, stack_rank: u32, x: i32, damage: Region) -> LayerSnapshot {
