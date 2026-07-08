@@ -213,6 +213,26 @@ delivery remains unsupported until the flat route is proven against XLibre.
 
 The patch target is tracked in `docs/xlibre-routed-input-extension.md`.
 
+The first implementation optimizes for correctness, not throughput tricks. The
+ordinary `RouteEvent` request remains the canonical path until profiling shows
+it is the bottleneck. Later optimizations should be layered in this order:
+
+- coalesce only pure pointer motion at frame boundaries when the target route is
+  stable
+- flush immediately for button, key, target-crossing, drag, grab, and focus
+  transitions
+- use any grab/focus cache only as advisory acceleration; XLibre remains final
+  authority
+- consider an Engine-to-XLibre shared-memory route ring only after measurement,
+  with the X11 request path kept as fallback
+
+The first shared-memory ring, if built, should be unidirectional: Sophia Engine
+publishes fixed-size route records and wakes XLibre with a small signal such as
+`eventfd`. XLibre rejection and decision reporting can stay on the existing
+control path until measurements justify a second status queue. A bidirectional
+hot ring would couple the compositor's input loop to XLibre timing and should
+not be introduced speculatively.
+
 ### Xnamespace Portals
 
 Namespaces are private by default. Cross-namespace operations go through portal

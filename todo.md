@@ -159,6 +159,13 @@ Design and prototype compositor-first input for X11 clients.
 - [ ] Add transformed hit-test routes once the flat path is proven.
 - [x] Add tests for stale target windows, denied namespaces, grabs, and focus.
 
+**Later optimization**
+- [ ] Measure routed-input dispatch cost before replacing the X11 request path.
+- [ ] Coalesce stable pure-motion routes at frame boundaries.
+- [ ] Flush immediately for button, key, crossing, drag, grab, and focus events.
+- [ ] Prototype a unidirectional Engine-to-XLibre SHM route ring only if needed.
+- [ ] Keep the X11 request path as fallback for SHM failures.
+
 ---
 
 ## Phase 6.5 - WM IPC Socket
@@ -206,6 +213,7 @@ Add intentional namespace crossing without weakening Xnamespace.
 Keep chrome rendering and lifecycle actions out of the blind WM.
 
 - [x] Add `CloseSurfaceRequested(surface, generation)` packet shape.
-- [ ] Validate surface generation and `closable` before dispatch.
-- [ ] Route close through Sophia X Bridge using polite X11 close semantics.
+- [x] Validate surface generation and `closable` before dispatch.
+- [x] Add Sophia X Bridge helper for polite `WM_DELETE_WINDOW` close requests.
+- [ ] Wire accepted chrome close decisions into the session event loop.
 - [ ] Notify WM only through follow-up remove/relayout requests.

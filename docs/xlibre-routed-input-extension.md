@@ -139,6 +139,30 @@ Unsupported in the first patch:
 - synthetic key focus changes beyond existing X11 focus semantics
 - direct client event injection
 
+## Later Optimization Ladder
+
+The X11 request path is the correctness baseline. Sophia should not replace it
+with a shared-memory fast path until profiling shows route dispatch, not scene
+hit-testing or XLibre delivery, is the actual bottleneck.
+
+The first optimization belongs in Sophia Engine: coalesce pure motion events at
+frame boundaries when the route target is unchanged. State-changing events must
+flush immediately, including button press/release, key events, target crossing,
+drag state, active-grab changes, and focus-affecting transitions. Drawing and
+game-oriented clients may need a later raw/high-rate policy escape hatch.
+
+A grab/focus cache may let Sophia skip expensive spatial hit-testing when
+XLibre has already locked delivery to an active grab owner, but that cache is
+advisory only. XLibre must still revalidate grabs, focus, XI2 masks, sync state,
+and namespace access during delivery.
+
+If a hot-path shared-memory ring is added later, the v1 shape should be
+unidirectional: Sophia Engine writes fixed-size route records to an
+Engine-to-XLibre ring and wakes XLibre with `eventfd` or equivalent. Decision
+and rejection reporting should initially stay on the existing request/reply
+control path. A second XLibre-to-Engine status ring is deferred until measured
+latency requires it.
+
 ## Expected Rejections
 
 The extension should return or expose distinct failure reasons for:

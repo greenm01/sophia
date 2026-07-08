@@ -2,9 +2,9 @@ use core::fmt;
 use std::collections::{BTreeMap, BTreeSet};
 
 use sophia_protocol::{
-    BufferSource, ChromeDescriptor, FrameSnapshot, LayerSnapshot, LayoutTransaction, OutputId,
-    Rect, Region, RenderCommand, RenderCommandKind, Size, SurfaceId, TransactionCommit,
-    TransactionId, TransactionOutcome,
+    BufferSource, ChromeActionKind, ChromeActionRequest, ChromeDescriptor, FrameSnapshot,
+    LayerSnapshot, LayoutNodeSnapshot, LayoutTransaction, OutputId, Rect, Region, RenderCommand,
+    RenderCommandKind, Size, SurfaceId, TransactionCommit, TransactionId, TransactionOutcome,
 };
 use sophia_runtime::{SophiaErrorExt, SophiaErrorKind};
 use tracing::instrument;
@@ -87,6 +87,20 @@ pub struct ReplayReport {
     pub frame_serial: u64,
     pub steps: Vec<ReplayStep>,
     pub damage: Region,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ChromeActionDecision {
+    RequestPoliteClose { surface: SurfaceId },
+    Rejected(ChromeActionRejectReason),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChromeActionRejectReason {
+    UnknownSurface,
+    StaleGeneration,
+    NotClosable,
+    UnsupportedAction,
 }
 
 pub trait EngineBackend {
@@ -327,6 +341,14 @@ impl HeadlessEngine {
         }
     }
 
+    pub fn validate_chrome_action(
+        &self,
+        request: &ChromeActionRequest,
+        nodes: &[LayoutNodeSnapshot],
+    ) -> ChromeActionDecision {
+        validate_chrome_action(request, nodes)
+    }
+
     fn validate_output(&self, output: OutputId) -> Result<(), EngineError> {
         if output.is_valid() && output == self.output.id {
             Ok(())
@@ -364,6 +386,31 @@ fn moved_damage(old_geometry: Rect, new_geometry: Rect) -> Region {
     damage
 }
 
+pub fn validate_chrome_action(
+    request: &ChromeActionRequest,
+    nodes: &[LayoutNodeSnapshot],
+) -> ChromeActionDecision {
+    let Some(node) = nodes.iter().find(|node| node.surface == request.surface) else {
+        return ChromeActionDecision::Rejected(ChromeActionRejectReason::UnknownSurface);
+    };
+
+    if node.generation != request.generation {
+        return ChromeActionDecision::Rejected(ChromeActionRejectReason::StaleGeneration);
+    }
+
+    match request.kind {
+        ChromeActionKind::CloseSurfaceRequested => {
+            if node.capabilities.closable {
+                ChromeActionDecision::RequestPoliteClose {
+                    surface: request.surface,
+                }
+            } else {
+                ChromeActionDecision::Rejected(ChromeActionRejectReason::NotClosable)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 fn test_layer(surface_index: u32, stack_rank: u32, x: i32, damage: Region) -> LayerSnapshot {
     use sophia_protocol::{Rect, SurfaceId, Transform};
@@ -394,8 +441,10 @@ fn test_layer(surface_index: u32, stack_rank: u32, x: i32, damage: Region) -> La
 mod tests {
     use super::*;
     use sophia_protocol::{
-        AttentionState, DisplayLabel, IconTokenId, Rect, SurfaceId, SurfacePlacement,
-        TransactionId, Transform, TrustLevel,
+        AttentionState, ChromeActionKind, ChromeActionRequest, DisplayLabel, IconTokenId,
+        LayoutNodeCapabilities, LayoutNodeKind, LayoutNodeSnapshot, LayoutNodeState, Rect,
+        SurfaceConstraints, SurfaceId, SurfacePlacement, TransactionId, Transform, TrustLevel,
+        WorkspaceId,
     };
 
     #[test]
@@ -723,5 +772,95 @@ mod tests {
         assert!(broker.remove_surface(surface).is_some());
         assert!(broker.get(surface).is_none());
         assert!(broker.is_empty());
+    }
+
+    #[test]
+    fn chrome_close_request_validates_generation_and_closability() {
+        let engine = HeadlessEngine::default();
+        let surface = SurfaceId::new(9, 1);
+        let nodes = vec![layout_node(surface, 3, true)];
+        let request = ChromeActionRequest {
+            surface,
+            generation: 3,
+            kind: ChromeActionKind::CloseSurfaceRequested,
+        };
+
+        assert_eq!(
+            engine.validate_chrome_action(&request, &nodes),
+            ChromeActionDecision::RequestPoliteClose { surface }
+        );
+    }
+
+    #[test]
+    fn chrome_close_request_rejects_unknown_surface() {
+        let engine = HeadlessEngine::default();
+        let request = ChromeActionRequest {
+            surface: SurfaceId::new(99, 1),
+            generation: 1,
+            kind: ChromeActionKind::CloseSurfaceRequested,
+        };
+
+        assert_eq!(
+            engine.validate_chrome_action(&request, &[]),
+            ChromeActionDecision::Rejected(ChromeActionRejectReason::UnknownSurface)
+        );
+    }
+
+    #[test]
+    fn chrome_close_request_rejects_stale_generation() {
+        let engine = HeadlessEngine::default();
+        let surface = SurfaceId::new(10, 1);
+        let nodes = vec![layout_node(surface, 7, true)];
+        let request = ChromeActionRequest {
+            surface,
+            generation: 6,
+            kind: ChromeActionKind::CloseSurfaceRequested,
+        };
+
+        assert_eq!(
+            engine.validate_chrome_action(&request, &nodes),
+            ChromeActionDecision::Rejected(ChromeActionRejectReason::StaleGeneration)
+        );
+    }
+
+    #[test]
+    fn chrome_close_request_rejects_non_closable_surface() {
+        let engine = HeadlessEngine::default();
+        let surface = SurfaceId::new(11, 1);
+        let nodes = vec![layout_node(surface, 2, false)];
+        let request = ChromeActionRequest {
+            surface,
+            generation: 2,
+            kind: ChromeActionKind::CloseSurfaceRequested,
+        };
+
+        assert_eq!(
+            engine.validate_chrome_action(&request, &nodes),
+            ChromeActionDecision::Rejected(ChromeActionRejectReason::NotClosable)
+        );
+    }
+
+    fn layout_node(surface: SurfaceId, generation: u64, closable: bool) -> LayoutNodeSnapshot {
+        let mut capabilities = LayoutNodeCapabilities::STANDARD_TOPLEVEL;
+        capabilities.closable = closable;
+
+        LayoutNodeSnapshot {
+            surface,
+            workspace: WorkspaceId::from_raw(1),
+            kind: LayoutNodeKind::Toplevel,
+            capabilities,
+            state: LayoutNodeState::NORMAL,
+            constraints: SurfaceConstraints {
+                min_size: None,
+                max_size: None,
+            },
+            geometry: Rect {
+                x: 0,
+                y: 0,
+                width: 100,
+                height: 100,
+            },
+            generation,
+        }
     }
 }

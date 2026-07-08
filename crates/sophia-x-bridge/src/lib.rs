@@ -21,8 +21,8 @@ use x11rb::protocol::xinput::{
     ConnectionExt as XInputConnectionExt, Device, DeviceType, XIDeviceInfo,
 };
 use x11rb::protocol::xproto::{
-    Atom, AtomEnum, ConnectionExt as _, CreateGCAux, CreateWindowAux, EventMask, ImageFormat,
-    MapState, Place, Rectangle, Window, WindowClass,
+    Atom, AtomEnum, ClientMessageData, ClientMessageEvent, ConnectionExt as _, CreateGCAux,
+    CreateWindowAux, EventMask, ImageFormat, MapState, Place, Rectangle, Window, WindowClass,
 };
 use x11rb::x11_utils::{Serialize, TryParse};
 
@@ -737,6 +737,30 @@ impl SurfaceIdMap {
         self.surfaces.insert(window, surface);
         surface
     }
+
+    pub fn window_for_surface(&self, surface: SurfaceId) -> Option<XWindowId> {
+        self.surfaces
+            .iter()
+            .find_map(|(window, candidate)| (*candidate == surface).then_some(*window))
+    }
+}
+
+pub fn close_target_for_surface(
+    mirror: &XMirrorState,
+    surfaces: &SurfaceIdMap,
+    surface: SurfaceId,
+) -> Option<XWindowId> {
+    let window = surfaces.window_for_surface(surface)?;
+    let mirrored = mirror
+        .windows()
+        .iter()
+        .find(|mirror| mirror.window == window)?;
+
+    mirrored
+        .client
+        .or(mirrored.toplevel)
+        .or(Some(mirrored.window))
+        .filter(|window| window.is_valid())
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -1073,6 +1097,10 @@ pub enum XBridgeError {
         property: u32,
         message: String,
     },
+    PoliteClose {
+        window: u32,
+        message: String,
+    },
     CompositeVersion {
         message: String,
     },
@@ -1153,6 +1181,12 @@ impl fmt::Display for XBridgeError {
                 write!(
                     f,
                     "failed to get X property {property:#x} from {window:#x}: {message}"
+                )
+            }
+            Self::PoliteClose { window, message } => {
+                write!(
+                    f,
+                    "failed to request polite close for {window:#x}: {message}"
                 )
             }
             Self::CompositeVersion { message } => {
@@ -1354,6 +1388,14 @@ pub struct SmokeReadbackCapture {
 pub struct XAtoms {
     pub wm_state: Atom,
     pub net_client_list: Atom,
+    pub wm_protocols: Atom,
+    pub wm_delete_window: Atom,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PoliteCloseOutcome {
+    SentDeleteWindow { window: XWindowId },
+    UnsupportedProtocol { window: XWindowId },
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -1873,6 +1915,8 @@ where
     Ok(XAtoms {
         wm_state: intern_atom(connection, "WM_STATE")?,
         net_client_list: intern_atom(connection, "_NET_CLIENT_LIST")?,
+        wm_protocols: intern_atom(connection, "WM_PROTOCOLS")?,
+        wm_delete_window: intern_atom(connection, "WM_DELETE_WINDOW")?,
     })
 }
 
@@ -1973,6 +2017,118 @@ where
             property,
             message: error.to_string(),
         })
+}
+
+pub fn polite_close_surface<C>(
+    connection: &C,
+    mirror: &XMirrorState,
+    surfaces: &SurfaceIdMap,
+    atoms: XAtoms,
+    surface: SurfaceId,
+    timestamp: u32,
+) -> Result<PoliteCloseOutcome, XBridgeError>
+where
+    C: Connection,
+{
+    let target = close_target_for_surface(mirror, surfaces, surface).ok_or_else(|| {
+        XBridgeError::PoliteClose {
+            window: 0,
+            message: format!("surface {:?} has no X close target", surface),
+        }
+    })?;
+
+    polite_close_window(connection, target, atoms, timestamp)
+}
+
+pub fn polite_close_window<C>(
+    connection: &C,
+    window: XWindowId,
+    atoms: XAtoms,
+    timestamp: u32,
+) -> Result<PoliteCloseOutcome, XBridgeError>
+where
+    C: Connection,
+{
+    if !window_supports_wm_delete(connection, window, atoms)? {
+        return Ok(PoliteCloseOutcome::UnsupportedProtocol { window });
+    }
+
+    let event = build_wm_delete_client_message(window, atoms, timestamp);
+    connection
+        .send_event(false, window.xid(), EventMask::NO_EVENT, event)
+        .map_err(|error| XBridgeError::PoliteClose {
+            window: window.xid(),
+            message: error.to_string(),
+        })?
+        .check()
+        .map_err(|error| XBridgeError::PoliteClose {
+            window: window.xid(),
+            message: error.to_string(),
+        })?;
+    connection
+        .flush()
+        .map_err(|error| XBridgeError::PoliteClose {
+            window: window.xid(),
+            message: error.to_string(),
+        })?;
+
+    Ok(PoliteCloseOutcome::SentDeleteWindow { window })
+}
+
+pub fn build_wm_delete_client_message(
+    window: XWindowId,
+    atoms: XAtoms,
+    timestamp: u32,
+) -> ClientMessageEvent {
+    ClientMessageEvent::new(
+        32,
+        window.xid(),
+        atoms.wm_protocols,
+        ClientMessageData::from([atoms.wm_delete_window, timestamp, 0, 0, 0]),
+    )
+}
+
+fn window_supports_wm_delete<C>(
+    connection: &C,
+    window: XWindowId,
+    atoms: XAtoms,
+) -> Result<bool, XBridgeError>
+where
+    C: Connection,
+{
+    Ok(
+        read_atom_list_property(connection, window.xid(), atoms.wm_protocols)?
+            .into_iter()
+            .any(|atom| atom == atoms.wm_delete_window),
+    )
+}
+
+fn read_atom_list_property<C>(
+    connection: &C,
+    window: Window,
+    property: Atom,
+) -> Result<Vec<Atom>, XBridgeError>
+where
+    C: Connection,
+{
+    let reply = connection
+        .get_property(false, window, property, AtomEnum::ATOM, 0, u32::MAX / 4)
+        .map_err(|error| XBridgeError::GetProperty {
+            window,
+            property,
+            message: error.to_string(),
+        })?
+        .reply()
+        .map_err(|error| XBridgeError::GetProperty {
+            window,
+            property,
+            message: error.to_string(),
+        })?;
+
+    Ok(reply
+        .value32()
+        .map(|values| values.collect::<Vec<_>>())
+        .unwrap_or_default())
 }
 
 fn import_root_window_tree_from_connection<C>(
@@ -2336,6 +2492,68 @@ mod tests {
 
         assert_eq!(first, second);
         assert!(first.is_valid());
+    }
+
+    #[test]
+    fn surface_id_map_resolves_window_for_surface() {
+        let mut surfaces = SurfaceIdMap::default();
+        let window = wrap_xid(0x20);
+        let surface = surfaces.surface_for_window(window);
+
+        assert_eq!(surfaces.window_for_surface(surface), Some(window));
+        assert_eq!(surfaces.window_for_surface(SurfaceId::new(99, 1)), None);
+    }
+
+    #[test]
+    fn close_target_for_surface_prefers_client_window() {
+        let mut state = XMirrorState::default();
+        let mut surfaces = SurfaceIdMap::default();
+        let frame = wrap_xid(0x20);
+        let client = wrap_xid(0x30);
+        let surface = surfaces.surface_for_window(frame);
+        let mut frame_mirror = mirror(0x20, Some(0x01), 0);
+        frame_mirror.client = Some(client);
+        frame_mirror.toplevel = Some(frame);
+        state.ingest_window(frame_mirror);
+
+        assert_eq!(
+            close_target_for_surface(&state, &surfaces, surface),
+            Some(client)
+        );
+    }
+
+    #[test]
+    fn close_target_for_surface_falls_back_to_mirrored_window() {
+        let mut state = XMirrorState::default();
+        let mut surfaces = SurfaceIdMap::default();
+        let window = wrap_xid(0x20);
+        let surface = surfaces.surface_for_window(window);
+        state.ingest_window(mirror(0x20, Some(0x01), 0));
+
+        assert_eq!(
+            close_target_for_surface(&state, &surfaces, surface),
+            Some(window)
+        );
+    }
+
+    #[test]
+    fn wm_delete_client_message_uses_icccm_atoms() {
+        let window = wrap_xid(0x20);
+        let atoms = XAtoms {
+            wm_state: 1,
+            net_client_list: 2,
+            wm_protocols: 3,
+            wm_delete_window: 4,
+        };
+        let event = build_wm_delete_client_message(window, atoms, 55);
+
+        assert_eq!(event.format, 32);
+        assert_eq!(event.window, window.xid());
+        assert_eq!(event.type_, atoms.wm_protocols);
+        assert_eq!(
+            event.data.as_data32(),
+            [atoms.wm_delete_window, 55, 0, 0, 0]
+        );
     }
 
     #[test]

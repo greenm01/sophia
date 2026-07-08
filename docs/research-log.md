@@ -318,6 +318,13 @@ policy, not WM policy: Engine hit-tests chrome, validates a surface generation
 and closability, and Sophia X Bridge attempts the polite X11 close path before
 any future escalation.
 
+Routed-input optimization should remain layered behind the working X11 extension
+path. Sophia may coalesce stable pure-motion routes at frame boundaries and may
+later add an Engine-to-XLibre shared-memory route ring if profiling proves the
+socket request path is the bottleneck. The first ring should be unidirectional;
+bidirectional rejection/status rings are deferred until measurement justifies
+the added coupling and memory-ordering complexity.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new
