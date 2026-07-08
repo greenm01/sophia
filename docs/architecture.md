@@ -403,6 +403,16 @@ the last committed layout, then produces a frame snapshot and replay report.
 This is not the final event loop; it is the smallest executable coordinator
 between X-derived layer state, cached layout state, and frame planning.
 
+The continuous runtime loop now has a data-only reducer. `SessionRuntimeState`
+tracks the current phase and counters for X events, rendered frames, drained
+portal commands, presented chrome commands, WM restart requests, and the last
+frame serial. `update_session_runtime` consumes runtime facts such as
+`TickStarted`, `XEventsPolled`, `WmLayoutReady`, `FrameScheduled`, and
+`FrameRendered`, then emits explicit commands like `PollXEvents`,
+`RequestWmLayout`, `ScheduleFrame`, `RenderFrame`, `DrainPortalCommands`, and
+`PresentChrome`. This keeps the event loop assembly testable before wiring it
+to real file descriptors.
+
 Frame scheduling now has an explicit seam. `FrameClock` produces output-scoped
 frame ticks, and the deterministic headless implementation advances serials
 without depending on wall-clock time. A real DRM/KMS backend should implement

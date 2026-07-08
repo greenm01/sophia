@@ -2,8 +2,85 @@ use std::time::Duration;
 
 use sophia_runtime::{
     ProcessLaunchSpec, ProcessSupervisor, ProcessSupervisorError, RestartPolicy,
-    SupervisedProcessKind, SupervisorCommand, SupervisorEvent, SupervisorState, update_supervisor,
+    SessionRuntimeCommand, SessionRuntimeEvent, SessionRuntimePhase, SessionRuntimeState,
+    SupervisedProcessKind, SupervisorCommand, SupervisorEvent, SupervisorState,
+    update_session_runtime, update_supervisor,
 };
+
+#[test]
+fn session_runtime_reducer_runs_one_continuous_tick() {
+    let state = SessionRuntimeState::default();
+
+    let (state, command) = update_session_runtime(state, SessionRuntimeEvent::TickStarted);
+    assert_eq!(state.phase, SessionRuntimePhase::PollingX);
+    assert_eq!(command, SessionRuntimeCommand::PollXEvents);
+
+    let (state, command) =
+        update_session_runtime(state, SessionRuntimeEvent::XEventsPolled { count: 3 });
+    assert_eq!(state.x_events_polled, 3);
+    assert_eq!(state.phase, SessionRuntimePhase::ApplyingWmPolicy);
+    assert_eq!(command, SessionRuntimeCommand::RequestWmLayout);
+
+    let (state, command) = update_session_runtime(state, SessionRuntimeEvent::WmLayoutReady);
+    assert_eq!(state.phase, SessionRuntimePhase::WaitingForFrame);
+    assert_eq!(command, SessionRuntimeCommand::ScheduleFrame);
+
+    let (state, command) = update_session_runtime(
+        state,
+        SessionRuntimeEvent::FrameScheduled { frame_serial: 9 },
+    );
+    assert_eq!(state.phase, SessionRuntimePhase::Rendering);
+    assert_eq!(
+        command,
+        SessionRuntimeCommand::RenderFrame { frame_serial: 9 }
+    );
+
+    let (state, command) = update_session_runtime(
+        state,
+        SessionRuntimeEvent::FrameRendered { frame_serial: 9 },
+    );
+    assert_eq!(state.frames_rendered, 1);
+    assert_eq!(state.last_frame_serial, Some(9));
+    assert_eq!(state.phase, SessionRuntimePhase::DrainingPortals);
+    assert_eq!(command, SessionRuntimeCommand::DrainPortalCommands);
+
+    let (state, command) =
+        update_session_runtime(state, SessionRuntimeEvent::PortalCommandsReady { count: 2 });
+    assert_eq!(state.portal_commands_drained, 2);
+    assert_eq!(state.phase, SessionRuntimePhase::PresentingChrome);
+    assert_eq!(command, SessionRuntimeCommand::PresentChrome);
+
+    let (state, command) =
+        update_session_runtime(state, SessionRuntimeEvent::ChromeCommandsReady { count: 1 });
+    assert_eq!(state.chrome_commands_presented, 1);
+    assert_eq!(state.phase, SessionRuntimePhase::Idle);
+    assert_eq!(command, SessionRuntimeCommand::None);
+}
+
+#[test]
+fn session_runtime_reducer_skips_wm_policy_when_no_x_events_arrive() {
+    let state = SessionRuntimeState::default();
+    let (state, _command) = update_session_runtime(state, SessionRuntimeEvent::TickStarted);
+
+    let (state, command) =
+        update_session_runtime(state, SessionRuntimeEvent::XEventsPolled { count: 0 });
+
+    assert_eq!(state.x_events_polled, 0);
+    assert_eq!(state.phase, SessionRuntimePhase::WaitingForFrame);
+    assert_eq!(command, SessionRuntimeCommand::ScheduleFrame);
+}
+
+#[test]
+fn session_runtime_reducer_requests_wm_restart_without_rendering() {
+    let state = SessionRuntimeState::default();
+
+    let (state, command) = update_session_runtime(state, SessionRuntimeEvent::WmRestartRequested);
+
+    assert_eq!(state.wm_restart_requests, 1);
+    assert_eq!(state.frames_rendered, 0);
+    assert_eq!(state.phase, SessionRuntimePhase::ApplyingWmPolicy);
+    assert_eq!(command, SessionRuntimeCommand::RestartWindowManager);
+}
 
 #[test]
 fn supervisor_start_request_emits_immediate_start_without_consuming_restart_budget() {

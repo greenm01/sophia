@@ -95,6 +95,25 @@ foreign identifiers and should be wrapped, not reused as Sophia-owned IDs.
 
 ## Core Packets
 
+### SessionRuntimeState
+
+Session runtime state is the data-only coordinator for the continuous session
+loop.
+
+Fields should describe:
+
+- current runtime phase
+- total X events polled
+- rendered frame count
+- drained portal command count
+- presented chrome command count
+- WM restart request count
+- last rendered frame serial
+
+The reducer may emit commands to poll X, request WM policy, schedule or render a
+frame, drain portals, present chrome, or restart the WM. It must not poll file
+descriptors, render, or mutate X11 state directly.
+
 ### XWindowMirror
 
 Sophia X Bridge keeps a mirror of the XLibre window tree. This is cache data,

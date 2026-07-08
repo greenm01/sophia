@@ -58,8 +58,23 @@ The current X11 `RouteEvent` request path is the correctness baseline.
 - [x] Keep the X11 request path as fallback for any future SHM work.
 - [x] Add routed-input grab/focus edge smokes.
 - [x] Add transformed scene hit-test integration once physical input exists.
+
+## Continuous Runtime Track
+
+The one-shot smoke paths have proven the seams. The next work is assembling a
+repeatable runtime loop without putting policy or X11 authority on compositor
+hot paths.
+
+- [x] Add a data-only session runtime reducer for X polling, WM policy, frame
+  scheduling, portal drain, and chrome presentation phases.
+- [ ] Connect the reducer to the headless session tick smoke.
+- [ ] Add a runtime smoke that schedules from X Damage and layout epochs.
+- [ ] Add process-supervised portal and metadata broker placeholders.
+
+## Deferred / Measurement-Gated
+
 - [ ] Prototype a unidirectional Engine-to-XLibre SHM route ring only if
-  repeated measurements justify it.
+  repeated routed-input stress measurements exceed the documented threshold.
 
 ---
 

@@ -544,6 +544,17 @@ against the physical pointer position, checks untransformed layer geometry, and
 emits an `InputRoute` with local coordinates. That route feeds the existing
 physical-input-to-`XLibreRoutedInputRequest` adapter.
 
+The SHM route-ring item remains measurement-gated. Current repeated routed-input
+measurements keep the X11 request path, so the roadmap now moves speculative SHM
+work into a deferred section and opens the next ungated track: continuous
+runtime assembly.
+
+Continuous runtime assembly now has a data-only reducer in `sophia-runtime`.
+`SessionRuntimeState` and `update_session_runtime` coordinate X polling, WM
+policy, frame scheduling/rendering, portal draining, chrome presentation, and WM
+restart requests through explicit commands. This keeps the future loop testable
+before it owns file descriptors or process-local engine state.
+
 The DRM/KMS backend now has a data-only output skeleton. `DrmKmsMode`,
 `DrmKmsOutputDescriptor`, and `DrmKmsOutputRegistry` track connector/CRTC IDs,
 mode, scale, and Sophia output IDs without opening real DRM devices. The

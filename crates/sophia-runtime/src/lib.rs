@@ -102,6 +102,115 @@ pub fn init_tracing(level: TraceLevel) -> Result<(), TracingInitError> {
         .map_err(|_| TracingInitError::AlreadyInitialized)
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum SessionRuntimePhase {
+    #[default]
+    Idle,
+    PollingX,
+    ApplyingWmPolicy,
+    WaitingForFrame,
+    Rendering,
+    DrainingPortals,
+    PresentingChrome,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct SessionRuntimeState {
+    pub phase: SessionRuntimePhase,
+    pub x_events_polled: u64,
+    pub frames_rendered: u64,
+    pub portal_commands_drained: u64,
+    pub chrome_commands_presented: u64,
+    pub wm_restart_requests: u64,
+    pub last_frame_serial: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SessionRuntimeEvent {
+    TickStarted,
+    XEventsPolled { count: u32 },
+    WmLayoutReady,
+    WmRestartRequested,
+    FrameScheduled { frame_serial: u64 },
+    FrameRendered { frame_serial: u64 },
+    PortalCommandsReady { count: u32 },
+    ChromeCommandsReady { count: u32 },
+    TickCompleted,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SessionRuntimeCommand {
+    None,
+    PollXEvents,
+    RequestWmLayout,
+    ScheduleFrame,
+    RenderFrame { frame_serial: u64 },
+    DrainPortalCommands,
+    PresentChrome,
+    RestartWindowManager,
+}
+
+pub fn update_session_runtime(
+    mut state: SessionRuntimeState,
+    event: SessionRuntimeEvent,
+) -> (SessionRuntimeState, SessionRuntimeCommand) {
+    let command = match event {
+        SessionRuntimeEvent::TickStarted => {
+            state.phase = SessionRuntimePhase::PollingX;
+            SessionRuntimeCommand::PollXEvents
+        }
+        SessionRuntimeEvent::XEventsPolled { count } => {
+            state.x_events_polled = state.x_events_polled.saturating_add(u64::from(count));
+            if count == 0 {
+                state.phase = SessionRuntimePhase::WaitingForFrame;
+                SessionRuntimeCommand::ScheduleFrame
+            } else {
+                state.phase = SessionRuntimePhase::ApplyingWmPolicy;
+                SessionRuntimeCommand::RequestWmLayout
+            }
+        }
+        SessionRuntimeEvent::WmLayoutReady => {
+            state.phase = SessionRuntimePhase::WaitingForFrame;
+            SessionRuntimeCommand::ScheduleFrame
+        }
+        SessionRuntimeEvent::WmRestartRequested => {
+            state.wm_restart_requests = state.wm_restart_requests.saturating_add(1);
+            state.phase = SessionRuntimePhase::ApplyingWmPolicy;
+            SessionRuntimeCommand::RestartWindowManager
+        }
+        SessionRuntimeEvent::FrameScheduled { frame_serial } => {
+            state.phase = SessionRuntimePhase::Rendering;
+            SessionRuntimeCommand::RenderFrame { frame_serial }
+        }
+        SessionRuntimeEvent::FrameRendered { frame_serial } => {
+            state.frames_rendered = state.frames_rendered.saturating_add(1);
+            state.last_frame_serial = Some(frame_serial);
+            state.phase = SessionRuntimePhase::DrainingPortals;
+            SessionRuntimeCommand::DrainPortalCommands
+        }
+        SessionRuntimeEvent::PortalCommandsReady { count } => {
+            state.portal_commands_drained = state
+                .portal_commands_drained
+                .saturating_add(u64::from(count));
+            state.phase = SessionRuntimePhase::PresentingChrome;
+            SessionRuntimeCommand::PresentChrome
+        }
+        SessionRuntimeEvent::ChromeCommandsReady { count } => {
+            state.chrome_commands_presented = state
+                .chrome_commands_presented
+                .saturating_add(u64::from(count));
+            state.phase = SessionRuntimePhase::Idle;
+            SessionRuntimeCommand::None
+        }
+        SessionRuntimeEvent::TickCompleted => {
+            state.phase = SessionRuntimePhase::Idle;
+            SessionRuntimeCommand::None
+        }
+    };
+
+    (state, command)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RestartPolicy {
     pub max_attempts: u32,
