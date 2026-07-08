@@ -220,3 +220,27 @@ Keep chrome rendering and lifecycle actions out of the blind WM.
 - [x] Add Sophia X Bridge helper for polite `WM_DELETE_WINDOW` close requests.
 - [x] Wire accepted chrome close decisions into the session event loop.
 - [x] Notify WM only through follow-up remove/relayout requests.
+
+---
+
+## Phase 9 - Runtime Supervision And Broker Wiring
+
+Turn the completed reducers and bridge helpers into a restartable session
+runtime without weakening the existing process boundaries.
+
+**Supervisor policy**
+- [x] Add data-only restart policy for WM, portal broker, and metadata broker
+  processes.
+- [ ] Wire `WmRuntimeAction::RestartWm` into the runtime supervisor reducer.
+- [ ] Add process spawning with bounded restart backoff.
+- [ ] Preserve the last committed layout while the WM process is absent.
+
+**Broker wiring**
+- [ ] Convert XFixes selection owner changes into portal reducer events.
+- [ ] Route notification delivery commands to compositor chrome presentation.
+- [ ] Route sanitized metadata broker output into compositor chrome descriptors.
+
+**Verification**
+- [ ] Add a supervisor smoke where the WM process is killed and restarted.
+- [ ] Add a portal smoke that proves denied cross-namespace clipboard transfer
+  becomes normal X11 selection failure.

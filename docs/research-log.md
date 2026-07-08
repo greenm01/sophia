@@ -444,6 +444,14 @@ policy pass. It bounds summary/body/action text, records urgency, requires
 generation-matching approval, and emits abstract deliver/drop commands.
 Compositor presentation and notification action execution remain runtime work.
 
+Phase 9 starts the session-runtime layer. The first piece is a data-only
+supervisor reducer in `sophia-runtime`: runtime process events plus a bounded
+restart policy produce explicit `StartProcess`, delayed restart, `GiveUp`, or
+no-op commands. It covers WM, portal broker, and metadata broker process kinds
+without spawning processes yet. This lets Engine decisions such as
+`WmRuntimeAction::RestartWm` become runtime policy inputs later, while keeping
+process supervision out of compositor frame/input code.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

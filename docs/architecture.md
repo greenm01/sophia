@@ -331,6 +331,13 @@ reports that the surface was actually removed does Sophia Engine process
 command packet. This is the point where the WM may relayout; a chrome close
 request itself never wakes the WM.
 
+Process supervision is runtime policy, not compositor policy. Sophia Engine can
+emit facts such as "WM IPC failed" or "restart the WM", but a runtime
+supervisor reducer decides whether that becomes an immediate start, delayed
+restart, or give-up decision based on a bounded restart policy. The supervisor
+may manage the WM, portal broker, and metadata broker processes, but it does not
+receive raw input, XIDs, namespace tokens, pixmaps, or portal payloads.
+
 ## XLibre Responsibilities
 
 XLibre remains responsible for:
