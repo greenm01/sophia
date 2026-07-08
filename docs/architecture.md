@@ -299,6 +299,12 @@ The reducer records capture mode, redacted capture scope, supported output MIME
 type, and generation-bound approval. Actual compositor capture, frame streaming,
 redaction, and buffer handoff stay in Sophia Engine/runtime.
 
+URI open requests are represented as explicit portal policy too. The reducer
+stores only a bounded URI length, validates a conservative scheme allowlist,
+requires generation-bound approval, and emits abstract handoff or cancel
+commands. Until the protocol grows a dedicated URI kind, URI requests use a
+`uri-open:` type hint on the generic portal transfer path.
+
 ### Metadata Broker And Chrome Actions
 
 Compositor chrome is Engine/session authority, not WM authority. If the user

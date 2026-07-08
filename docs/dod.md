@@ -453,6 +453,10 @@ Screen capture policy records only capture intent: screenshot versus recording,
 redacted scope, supported MIME type, size hint, decision, and generation. It
 must not expose raw surface IDs, pixels, or buffers to policy code.
 
+URI-open policy records bounded URI metadata only. It validates syntax and a
+small scheme allowlist before creating pending policy state; the runtime owns
+the actual launcher/browser handoff.
+
 X Bridge owns selection monitoring data. It should reduce XFixes owner-change
 events into records keyed by selection atom and namespace, then pass only the
 selection, namespace, owner generation, and owner-change fact to portal policy.

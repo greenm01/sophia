@@ -203,7 +203,7 @@ Add intentional namespace crossing without weakening Xnamespace.
 - [x] Drag-and-drop.
 - [x] File open and save handoff.
 - [x] Screenshots and screen recording.
-- [ ] URI open requests.
+- [x] URI open requests.
 - [ ] Notifications.
 
 ---

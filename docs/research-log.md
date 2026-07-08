@@ -398,6 +398,12 @@ capture mode, redacted scope, supported MIME type, size hint, and generation
 state, then emits abstract handoff/cancel commands. Compositor pixels, buffers,
 and streaming remain outside portal policy.
 
+URI-open policy now has a reducer. It validates bounded URIs against a small
+scheme allowlist (`http`, `https`, `mailto`, `tel`), keeps requests pending
+until explicit approval, and emits abstract handoff/cancel commands. The current
+protocol encoding uses a `uri-open:` type hint on the generic portal transfer
+path until a dedicated URI kind is justified.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new
