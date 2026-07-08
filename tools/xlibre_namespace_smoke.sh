@@ -126,6 +126,12 @@ echo "root external-wm bridge smoke:"
         cargo run -q -p sophia-cli -- x-smoke-external-wm --wm="$ROOT_DIR/target/debug/sophia-wm-demo"
 )
 
+echo "supervised wm socket smoke:"
+(
+    cd "$ROOT_DIR"
+    cargo run -q -p sophia-cli -- wm-supervisor-smoke --wm="$ROOT_DIR/target/debug/sophia-wm-demo"
+)
+
 echo "root routed-input smoke:"
 (
     cd "$ROOT_DIR"

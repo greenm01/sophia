@@ -1,16 +1,23 @@
 use sophia_engine::{
     FramePlanRequest, HeadlessEngine, LastCommittedLayout, SessionLayerSource, SessionTickRequest,
+    WmSocketTransport, WmSocketTransportConfig,
 };
 use sophia_protocol::{
-    LayoutNodeCapabilities, LayoutNodeKind, LayoutNodeSnapshot, LayoutNodeState, Rect, Size,
-    SurfaceConstraints, TransactionId, WorkspaceId,
+    BufferSource, LayerSnapshot, LayoutNodeCapabilities, LayoutNodeKind, LayoutNodeSnapshot,
+    LayoutNodeState, Rect, Region, Size, SurfaceConstraints, SurfaceId, TransactionId, Transform,
+    WmRelayoutWorkspace, WmRequestKind, WmRequestPacket, WorkspaceId,
 };
-use sophia_runtime::{TraceLevel, init_tracing};
+use sophia_runtime::{
+    ProcessLaunchSpec, ProcessSupervisor, RestartPolicy, SupervisedProcessKind, SupervisorEvent,
+    TraceLevel, init_tracing, update_supervisor,
+};
 use sophia_wm_demo::{ExternalWmClient, tile_workspace};
 use sophia_x_bridge::{
     TestClientConfig, capture_readback_display, run_test_client_window, smoke_routed_input,
     stress_routed_input,
 };
+use std::os::unix::net::UnixStream;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
@@ -251,6 +258,91 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    if args.iter().any(|arg| arg == "wm-supervisor-smoke") {
+        let wm_path = arg_value(&args, "--wm")
+            .or_else(|| std::env::var("SOPHIA_WM_DEMO").ok())
+            .unwrap_or_else(|| "target/debug/sophia-wm-demo".to_owned());
+        let socket_path = std::env::temp_dir().join(format!(
+            "sophia-wm-{}-{}.sock",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+        ));
+        let socket_arg = format!("--socket={}", socket_path.display());
+        let mut supervisor = ProcessSupervisor::new(
+            SupervisedProcessKind::WindowManager,
+            ProcessLaunchSpec::new(&wm_path)
+                .arg("serve-socket")
+                .arg(socket_arg),
+        );
+        let policy = RestartPolicy {
+            max_attempts: 2,
+            initial_backoff: Duration::ZERO,
+            max_backoff: Duration::ZERO,
+        };
+        let mut state = sophia_runtime::SupervisorState::new(SupervisedProcessKind::WindowManager);
+        let (next_state, command) =
+            update_supervisor(state, SupervisorEvent::StartRequested, policy);
+        state = next_state;
+        let start_event = supervisor
+            .apply(command)?
+            .ok_or("supervisor did not start WM process")?;
+        let (next_state, _) = update_supervisor(state, start_event, policy);
+        state = next_state;
+        let first_pid = supervisor.child_id().ok_or("missing first WM pid")?;
+        wait_for_socket(&socket_path)?;
+        let first = request_supervised_wm(&socket_path, TransactionId::from_raw(21))?;
+
+        supervisor.terminate()?;
+        let (next_state, restart_command) =
+            update_supervisor(state, SupervisorEvent::ProcessExited, policy);
+        state = next_state;
+        let restart_event = supervisor
+            .apply(restart_command)?
+            .ok_or("supervisor did not restart WM process")?;
+        let (next_state, _) = update_supervisor(state, restart_event, policy);
+        state = next_state;
+        let second_pid = supervisor.child_id().ok_or("missing restarted WM pid")?;
+        wait_for_socket(&socket_path)?;
+        let second = request_supervised_wm(&socket_path, TransactionId::from_raw(22))?;
+
+        if first_pid == second_pid {
+            return Err("WM supervisor did not restart into a new process".into());
+        }
+        if first.outcome != sophia_protocol::TransactionOutcome::Committed {
+            return Err(format!(
+                "first supervised WM transaction did not commit: {:?}",
+                first.outcome
+            )
+            .into());
+        }
+        if second.outcome != sophia_protocol::TransactionOutcome::Committed {
+            return Err(format!(
+                "second supervised WM transaction did not commit: {:?}",
+                second.outcome
+            )
+            .into());
+        }
+
+        supervisor.terminate()?;
+        let _ = std::fs::remove_file(&socket_path);
+
+        println!(
+            "wm-supervisor-smoke wm={} socket={} first_pid={} second_pid={} restarted={} running={} restart_attempts={} first_outcome={:?} second_outcome={:?} first_commands={} second_commands={}",
+            wm_path,
+            socket_path.display(),
+            first_pid,
+            second_pid,
+            first_pid != second_pid,
+            state.running,
+            state.restart_attempts,
+            first.outcome,
+            second.outcome,
+            first.commands,
+            second.commands,
+        );
+        return Ok(());
+    }
+
     if args.iter().any(|arg| arg == "x-smoke-routed-input") {
         let display = arg_value(&args, "--display");
         let report = smoke_routed_input(display.as_deref())?;
@@ -311,6 +403,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("commands: x-smoke-policy-frame [--display=:99]");
     println!("commands: x-smoke-runtime-tick [--display=:99]");
     println!("commands: x-smoke-external-wm [--display=:99] [--wm=target/debug/sophia-wm-demo]");
+    println!("commands: wm-supervisor-smoke [--wm=target/debug/sophia-wm-demo]");
     println!("commands: x-smoke-routed-input [--display=:99]");
     println!(
         "commands: x-stress-routed-input [--display=:99] [--iterations=1000] [--threshold-us=500]"
@@ -344,6 +437,97 @@ fn parse_u64(value: &str) -> Result<u64, Box<dyn std::error::Error>> {
 
 fn duration_us(duration: Option<std::time::Duration>) -> u128 {
     duration.map_or(0, |duration| duration.as_micros())
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SupervisedWmRequestReport {
+    outcome: sophia_protocol::TransactionOutcome,
+    commands: usize,
+}
+
+fn wait_for_socket(path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let mut last_error = None;
+
+    while std::time::Instant::now() < deadline {
+        match UnixStream::connect(path) {
+            Ok(_) => return Ok(()),
+            Err(error) => {
+                last_error = Some(error);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+
+    Err(format!(
+        "timed out waiting for WM socket {}: {}",
+        path.display(),
+        last_error
+            .map(|error| error.to_string())
+            .unwrap_or_else(|| "not attempted".to_owned())
+    )
+    .into())
+}
+
+fn request_supervised_wm(
+    path: &std::path::Path,
+    transaction: TransactionId,
+) -> Result<SupervisedWmRequestReport, Box<dyn std::error::Error>> {
+    let stream = UnixStream::connect(path)?;
+    let mut transport = WmSocketTransport::new(stream, WmSocketTransportConfig::default());
+    let engine = HeadlessEngine::default();
+    let output = engine.output();
+    let workspace = WorkspaceId::from_raw(1);
+    let mut layers = synthetic_layers();
+    let request = WmRequestPacket {
+        transaction,
+        kind: WmRequestKind::RelayoutWorkspace(WmRelayoutWorkspace {
+            output: output.id,
+            workspace,
+            bounds: Rect {
+                x: 0,
+                y: 0,
+                width: output.size.width,
+                height: output.size.height,
+            },
+            nodes: layout_nodes_from_layers(&layers, workspace),
+        }),
+    };
+    let response = transport.request(&request)?;
+    let command_count = response.commands.len();
+    let transaction = response.into_layout_transaction();
+    let commit = engine.commit_layout_transaction(&transaction, &mut layers);
+
+    Ok(SupervisedWmRequestReport {
+        outcome: commit.outcome,
+        commands: command_count,
+    })
+}
+
+fn synthetic_layers() -> Vec<LayerSnapshot> {
+    vec![LayerSnapshot {
+        surface: SurfaceId::new(1, 1),
+        window: None,
+        namespace: None,
+        stack_rank: 0,
+        geometry: Rect {
+            x: 10,
+            y: 10,
+            width: 320,
+            height: 200,
+        },
+        source: BufferSource::CpuBuffer { handle: 1 },
+        damage: Region::single(Rect {
+            x: 10,
+            y: 10,
+            width: 320,
+            height: 200,
+        }),
+        opacity: 1.0,
+        crop: None,
+        transform: Transform::IDENTITY,
+        generation: 1,
+    }]
 }
 
 fn layout_nodes_from_layers(

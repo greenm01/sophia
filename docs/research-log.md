@@ -510,6 +510,14 @@ and generation checks. This makes the metadata/chrome path useful without
 exposing XIDs, namespace IDs, raw titles, classes, PIDs, or icon pixels to the
 WM protocol.
 
+The WM socket path now has a long-lived supervised smoke. `sophia-wm-demo` can
+serve the binary WM IPC protocol over a Unix socket, handling repeated
+Engine-minted transactions without process-per-request startup. The CLI smoke
+starts that server through `ProcessSupervisor`, sends one layout request, kills
+the child, feeds `ProcessExited` through the restart reducer, starts a new WM
+process, and sends a second layout request. Both transactions must commit and
+the smoke records the changed child PID.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

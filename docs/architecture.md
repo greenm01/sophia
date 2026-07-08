@@ -357,6 +357,12 @@ spawns the configured child process after the bounded delay, polls for process
 exit, and terminates owned children during cleanup. It does not mint restart
 decisions or inspect compositor/session state.
 
+The long-lived WM path uses the same bounded IPC frames as the in-memory socket
+transport. `sophia-wm-demo serve-socket --socket=PATH` accepts repeated
+Engine-owned transactions over a private Unix socket. The supervisor smoke
+starts that process, commits a socket transaction, kills the child, applies the
+restart policy, starts a fresh WM process, and commits a second transaction.
+
 The compositor preserves a last-committed layout cache across WM absence. A
 successful WM transaction replaces the cache. If the WM socket is missing,
 malformed, timed out, or being restarted, Sophia restores that cache before
