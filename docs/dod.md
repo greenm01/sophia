@@ -180,6 +180,11 @@ X Damage events retire pending surfaces from the epoch. The frame scheduler may
 render only when damage exists for the output and the active epoch has no
 pending surfaces left.
 
+Resize behavior samples are derived from the same epoch state. They should
+record elapsed time, timeout policy, completion, timeout status, and remaining
+pending surfaces so slow clients can be measured without reaching into renderer
+or X bridge internals.
+
 ### DrmKmsOutputDescriptor
 
 A DRM/KMS output descriptor is the backend-facing record for one discovered

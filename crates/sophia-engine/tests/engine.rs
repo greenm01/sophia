@@ -8,7 +8,7 @@ use sophia_engine::{
     NotificationChromeUpdate, RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction,
     RoutedInputRequestError, SanitizedChromeMetadata, SessionCommand, SessionEvent,
     SessionLayerSource, SessionTickRequest, WmIpcError, WmRestartReason, WmRuntimeAction,
-    notification_chrome_command_from_portal, request_wm_over_stream,
+    measure_resize_behavior, notification_chrome_command_from_portal, request_wm_over_stream,
     routed_input_request_from_physical_event, routed_input_requests_from_flush,
     schedule_frame_from_damage, update_wm_supervisor_from_runtime_action,
 };
@@ -1204,6 +1204,37 @@ fn frame_scheduler_renders_when_damage_completes_layout_epoch() {
         }
     );
     assert!(epoch.is_complete());
+}
+
+#[test]
+fn resize_behavior_sample_reports_completed_epoch() {
+    let surface = SurfaceId::new(1, 1);
+    let mut epoch = LayoutEpochState::with_timing(11, [surface], 100, 300);
+    epoch.observe_damage(&damage_frame(4, &[surface]));
+
+    let sample = measure_resize_behavior(&epoch, 180);
+
+    assert_eq!(sample.epoch, 11);
+    assert_eq!(sample.elapsed_msec, 80);
+    assert_eq!(sample.timeout_msec, 300);
+    assert!(sample.completed);
+    assert!(!sample.timed_out);
+    assert!(sample.pending_surfaces.is_empty());
+}
+
+#[test]
+fn resize_behavior_sample_reports_slow_non_cooperative_epoch_timeout() {
+    let surface = SurfaceId::new(1, 1);
+    let epoch = LayoutEpochState::with_timing(12, [surface], 100, 250);
+
+    let sample = measure_resize_behavior(&epoch, 351);
+
+    assert_eq!(sample.epoch, 12);
+    assert_eq!(sample.elapsed_msec, 251);
+    assert_eq!(sample.timeout_msec, 250);
+    assert!(!sample.completed);
+    assert!(sample.timed_out);
+    assert_eq!(sample.pending_surfaces, vec![surface]);
 }
 
 #[test]

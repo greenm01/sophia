@@ -527,6 +527,11 @@ Frame scheduling now joins frame-clock ticks, X Damage, and layout epochs.
 observed damage for all pending surfaces. This is still a deterministic
 scheduler seam, not the final continuous compositor event loop.
 
+Resize behavior measurement is now a deterministic sample derived from layout
+epoch state. `measure_resize_behavior` reports elapsed time, timeout policy,
+completion, timeout status, and pending surfaces. This gives future live slow
+client smokes a concrete metric target instead of ad hoc visual inspection.
+
 The DRM/KMS backend now has a data-only output skeleton. `DrmKmsMode`,
 `DrmKmsOutputDescriptor`, and `DrmKmsOutputRegistry` track connector/CRTC IDs,
 mode, scale, and Sophia output IDs without opening real DRM devices. The

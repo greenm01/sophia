@@ -410,6 +410,12 @@ epoch is pending, damage from affected surfaces retires pending surface IDs;
 rendering waits until the epoch completes. When damage is present and the epoch
 is complete, the scheduler emits a render decision with the tick's frame serial.
 
+Resize behavior measurement is tied to the same epoch state. `LayoutEpochState`
+records start time and timeout policy, and `measure_resize_behavior` reports
+elapsed time, pending surfaces, completion, and timeout status. Slow or
+non-cooperative clients therefore become explicit samples instead of implicit
+black frames or hidden scheduler stalls.
+
 The DRM/KMS output backend starts as a data-only skeleton. `DrmKmsMode`,
 `DrmKmsOutputDescriptor`, and `DrmKmsOutputRegistry` preserve connector ID,
 CRTC ID, mode, scale, and Sophia `OutputId` without opening devices yet. The

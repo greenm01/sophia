@@ -46,7 +46,7 @@ Do this after the runtime loop has a clear shape.
 - [x] Replace CPU-readback-only rendering with import-capable buffer handles.
 - [x] Track buffer lifetime explicitly across XComposite pixmap updates.
 - [x] Add frame scheduling around X Damage and layout epochs.
-- [ ] Measure resize behavior under slow or non-cooperative X11 clients.
+- [x] Measure resize behavior under slow or non-cooperative X11 clients.
 
 ---
 

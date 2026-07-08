@@ -519,13 +519,26 @@ impl FrameClock for DeterministicFrameClock {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LayoutEpochState {
     pub epoch: u64,
+    started_msec: u64,
+    timeout_msec: u32,
     pending_surfaces: BTreeSet<SurfaceId>,
 }
 
 impl LayoutEpochState {
     pub fn new(epoch: u64, pending_surfaces: impl IntoIterator<Item = SurfaceId>) -> Self {
+        Self::with_timing(epoch, pending_surfaces, 0, 300)
+    }
+
+    pub fn with_timing(
+        epoch: u64,
+        pending_surfaces: impl IntoIterator<Item = SurfaceId>,
+        started_msec: u64,
+        timeout_msec: u32,
+    ) -> Self {
         Self {
             epoch,
+            started_msec,
+            timeout_msec,
             pending_surfaces: pending_surfaces
                 .into_iter()
                 .filter(|surface| surface.is_valid())
@@ -545,6 +558,43 @@ impl LayoutEpochState {
 
     pub fn pending_surfaces(&self) -> Vec<SurfaceId> {
         self.pending_surfaces.iter().copied().collect()
+    }
+
+    pub fn started_msec(&self) -> u64 {
+        self.started_msec
+    }
+
+    pub fn timeout_msec(&self) -> u32 {
+        self.timeout_msec
+    }
+
+    pub fn elapsed_msec(&self, now_msec: u64) -> u64 {
+        now_msec.saturating_sub(self.started_msec)
+    }
+
+    pub fn is_timed_out(&self, now_msec: u64) -> bool {
+        !self.is_complete() && self.elapsed_msec(now_msec) >= u64::from(self.timeout_msec)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResizeBehaviorSample {
+    pub epoch: u64,
+    pub elapsed_msec: u64,
+    pub timeout_msec: u32,
+    pub completed: bool,
+    pub timed_out: bool,
+    pub pending_surfaces: Vec<SurfaceId>,
+}
+
+pub fn measure_resize_behavior(epoch: &LayoutEpochState, now_msec: u64) -> ResizeBehaviorSample {
+    ResizeBehaviorSample {
+        epoch: epoch.epoch,
+        elapsed_msec: epoch.elapsed_msec(now_msec),
+        timeout_msec: epoch.timeout_msec(),
+        completed: epoch.is_complete(),
+        timed_out: epoch.is_timed_out(now_msec),
+        pending_surfaces: epoch.pending_surfaces(),
     }
 }
 
