@@ -431,6 +431,98 @@ mod tests {
     }
 
     #[test]
+    fn approved_clipboard_handoff_builds_bounded_text_property_and_success_notify() {
+        let mut state = XMirrorState::default();
+        let mut owner = mirror(0x20, None, 0);
+        owner.namespace = Some(NamespaceId::from_raw(7));
+        let mut requestor = mirror(0x44, None, 0);
+        requestor.namespace = Some(NamespaceId::from_raw(9));
+        state.ingest_window(owner);
+        state.ingest_window(requestor);
+
+        let mut monitor = XSelectionMonitor::new();
+        monitor.apply_event(
+            XSelectionEvent {
+                selection: 0x100,
+                owner: Some(xid(0x20)),
+                timestamp: 11,
+                selection_timestamp: 10,
+                kind: XSelectionChangeKind::SetOwner,
+            },
+            &state,
+        );
+        let mut portal = ClipboardPortal::new();
+        let dispatch = dispatch_clipboard_selection_request_event(
+            &selection_request_event(0x20, 0x44),
+            "UTF8_STRING",
+            &monitor,
+            &state,
+            PortalTransferId::from_raw(12),
+            &mut portal,
+        )
+        .unwrap();
+        let command = portal
+            .approve_generation(PortalTransferId::from_raw(12), 1)
+            .unwrap();
+
+        let handoff =
+            clipboard_selection_text_handoff_notify(&command, &dispatch.portal_request, "hello")
+                .unwrap();
+
+        assert_eq!(handoff.transfer, PortalTransferId::from_raw(12));
+        assert_eq!(handoff.property.requestor, 0x44);
+        assert_eq!(handoff.property.property, 0x300);
+        assert_eq!(handoff.property.target, 0x200);
+        assert_eq!(handoff.property.bytes, b"hello");
+        assert_eq!(handoff.event.property, 0x300);
+        assert_eq!(handoff.event.requestor, 0x44);
+        assert!(handoff.succeeded_normally());
+    }
+
+    #[test]
+    fn clipboard_handoff_rejects_mismatched_transfer() {
+        let request = clipboard_portal_request(12, 0x300, "UTF8_STRING");
+        let command = PortalCommand::HandoffClipboard {
+            transfer: PortalTransferId::from_raw(13),
+        };
+
+        assert_eq!(
+            clipboard_selection_text_handoff_notify(&command, &request, "hello").unwrap_err(),
+            ClipboardSelectionHandoffError::TransferMismatch
+        );
+    }
+
+    #[test]
+    fn clipboard_handoff_rejects_missing_success_property() {
+        let request = clipboard_portal_request(12, 0, "UTF8_STRING");
+        let command = PortalCommand::HandoffClipboard {
+            transfer: PortalTransferId::from_raw(12),
+        };
+
+        assert_eq!(
+            clipboard_selection_text_handoff_notify(&command, &request, "hello").unwrap_err(),
+            ClipboardSelectionHandoffError::MissingProperty
+        );
+    }
+
+    #[test]
+    fn clipboard_handoff_rejects_oversized_text_payload() {
+        let request = clipboard_portal_request(12, 0x300, "UTF8_STRING");
+        let command = PortalCommand::HandoffClipboard {
+            transfer: PortalTransferId::from_raw(12),
+        };
+        let text = "x".repeat(MAX_CLIPBOARD_TEXT_HANDOFF_BYTES + 1);
+
+        assert_eq!(
+            clipboard_selection_text_handoff_notify(&command, &request, &text).unwrap_err(),
+            ClipboardSelectionHandoffError::TextTooLarge {
+                len: MAX_CLIPBOARD_TEXT_HANDOFF_BYTES + 1,
+                max: MAX_CLIPBOARD_TEXT_HANDOFF_BYTES,
+            }
+        );
+    }
+
+    #[test]
     fn selection_owner_loss_uses_previous_known_namespace_for_portal_change() {
         let mut state = XMirrorState::default();
         let mut owner = mirror(0x20, None, 0);
@@ -1529,5 +1621,30 @@ mod tests {
 
     fn selection_request_event(owner: u32, requestor: u32) -> Event {
         Event::SelectionRequest(selection_request(owner, requestor))
+    }
+
+    fn clipboard_portal_request(
+        transfer: u64,
+        property: u32,
+        target: &str,
+    ) -> ClipboardSelectionPortalRequest {
+        ClipboardSelectionPortalRequest {
+            request: sophia_portal::ClipboardTransferRequest {
+                transfer: PortalTransferId::from_raw(transfer),
+                source_namespace: NamespaceId::from_raw(7),
+                target_namespace: NamespaceId::from_raw(9),
+                target: ClipboardTarget::Atom(target.to_owned()),
+                byte_size: 0,
+                generation: 1,
+            },
+            failure: ClipboardSelectionFailureRequest {
+                transfer: PortalTransferId::from_raw(transfer),
+                requestor: 0x44,
+                selection: 0x100,
+                target: 0x200,
+                time: 55,
+            },
+            property,
+        }
     }
 }

@@ -91,7 +91,7 @@ bounded portal execution without putting raw X authority in portal policy.
   portal import request with native failure reply context.
 - [x] Dispatch live X11 `SelectionRequest` events into the clipboard portal
   runtime path.
-- [ ] Implement approved clipboard handoff for one bounded text target.
+- [x] Implement approved clipboard handoff for one bounded text target.
 - [ ] Add a live X smoke for request -> deny and request -> approved handoff.
 
 ## Deferred / Measurement-Gated

@@ -618,6 +618,12 @@ the clipboard portal reducer. It must fail closed before portal mutation when
 the event is not a selection request, when namespace attribution is missing, or
 when source and target are in the same namespace.
 
+Approved clipboard text handoff is represented as data before it touches X. The
+bridge validates a `HandoffClipboard` command against the original request,
+requires a non-`None` request property, rejects non-text targets, caps UTF-8
+payload bytes with `MAX_CLIPBOARD_TEXT_HANDOFF_BYTES`, and emits a property
+payload plus successful `SelectionNotify` artifact.
+
 Drag-and-drop follows the same reducer shape. Offered MIME/protocol targets are
 bounded before storage, approval is generation-bound, denial or stale ownership
 becomes an abstract cancel command, and Xdnd-specific protocol mechanics stay

@@ -633,6 +633,13 @@ rejects non-selection events, missing namespace attribution, same-namespace
 requests, and unsupported targets before producing a portal prompt. Approved
 clipboard data handoff is still open.
 
+Approved clipboard handoff now has a bounded text artifact:
+`sophia-cli portal-clipboard-handoff-smoke`. A matching-generation approval
+returns `HandoffClipboard`; Sophia X Bridge validates the command against the
+original request, caps the UTF-8 payload, and produces the property bytes plus a
+successful `SelectionNotify` with the request property. Live X property writes
+and send-event delivery remain the next portal execution step.
+
 Broker IPC now has its first bounded packet contract. `BrokerHealthPacket`
 covers only portal/metadata broker identity, coarse health state, generation,
 and an optional short status message. It deliberately excludes raw client
