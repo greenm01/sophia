@@ -8,8 +8,9 @@ the data model in `dod.md`.
 
 Sophia user-space components are Rust by default.
 
-- Rust: Sophia Engine, Sophia X Bridge, portals, CLI tools, reference WM.
-- C: narrow XLibre patches and protocol extensions.
+- Rust: Sophia Engine, protocol authorities, portals, CLI tools, reference WM,
+  and compatibility/prototype bridges.
+- C: narrow XLibre prototype patches and protocol extensions.
 - Nim: optional experimental WMs or policy prototypes.
 - Zig: optional probes or small C-adjacent helpers, not the main architecture.
 
@@ -25,6 +26,7 @@ src/
   state/
   protocol/
   systems/
+  authority/
   bridge/
   portal/
   wm/
@@ -37,7 +39,8 @@ The same data/logic split applies in Rust:
 - `state` owns tables and lifetimes.
 - `protocol` serializes packets and validates wire data.
 - `systems` transforms data.
-- `bridge` talks to XLibre.
+- `authority` terminates a client protocol and owns protocol resources.
+- `bridge` talks to legacy or external prototype authorities such as XLibre.
 - `portal` owns cross-namespace transfer policy.
 - `engine` owns compositor state and hot-path scheduling.
 - `wm` owns policy examples.
@@ -92,7 +95,7 @@ Poor fits:
 - frame scheduling
 - damage aggregation
 - renderer/backend execution
-- XLibre event mirroring
+- protocol event mirroring
 
 For TEA-style modules, keep update functions deterministic where practical.
 They should consume passive packets and emit command packets. They should not
@@ -119,7 +122,7 @@ IDs should make ownership clear:
 - `NamespaceId`, not raw string in hot paths
 - `TransactionId`, not `Serial` unless it is truly protocol-local
 
-Raw XIDs should be wrapped at the boundary where they enter Sophia.
+Raw protocol IDs should be wrapped at the boundary where they enter Sophia.
 
 ## Ownership
 
@@ -185,7 +188,7 @@ buffers where practical.
 
 Allowed edge allocations:
 
-- connecting to XLibre
+- connecting to a protocol authority or prototype server
 - discovering outputs
 - creating or destroying surfaces
 - resizing dense tables
@@ -199,9 +202,28 @@ Suspicious allocations:
 - every frame for stable surface lists
 - every hit-test walk
 
-## XLibre Patches
+## Protocol Authorities
 
-XLibre changes are C and should stay narrow.
+Protocol authorities are compatibility boundaries. They own protocol parsing,
+client resource tables, protocol-local IDs, focus/grab/selection semantics,
+configure/commit state, and namespace enforcement for their clients.
+
+Authority code must not own:
+
+- physical input devices;
+- compositor scene graph or scanout;
+- workspace/layout policy;
+- compositor chrome;
+- cross-namespace portal policy.
+
+Authorities emit bounded surface transactions, sanitized metadata candidates,
+portal requests, and lifecycle facts. Sophia Engine decides whether a visual
+transaction is committed, delayed, rejected, or timed out.
+
+## XLibre Prototype Patches
+
+XLibre changes are C and should stay narrow. They are prototype and research
+work, not the long-term center of the architecture.
 
 Patch goals:
 

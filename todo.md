@@ -6,131 +6,117 @@ belong in `docs/research-log.md`.
 
 ---
 
-## Active Focus - Session Runtime Assembly
+## Active Focus - Engine-Centered Authorities
 
-Close the gap between existing reducers/protocols and a running session loop.
+Reframe Sophia around Sophia Engine as the permanent visual authority and
+protocol authorities as client-protocol adapters.
 
 **Now**
-- [x] Add a headless session tick that turns layer snapshots into frame/replay
-  reports while preserving the last committed layout.
-- [x] Convert XFixes selection owner updates into clipboard portal owner-change
-  events.
-- [x] Route clipboard owner-change events into `ClipboardPortal` revocation
-  commands.
-- [x] Add a headless runtime smoke that performs: X capture -> session tick ->
-  frame replay.
+- [x] Reframe README around Engine-owned input, atomic rendering, and protocol
+  authorities.
+- [x] Update architecture docs with Sophia X Authority, future Wayland
+  Authority, future Native Authority, and protocol-neutral namespace boundaries.
+- [x] Add docs-level atomic rendering invariant: never present new geometry
+  without matching committed pixels.
+- [x] Move XLibre bridge/routed-input work into prototype/reference status
+  instead of long-term architecture status.
 
 **Next**
-- [x] Route notification delivery commands to compositor chrome presentation.
-- [x] Route sanitized metadata broker output into compositor chrome descriptors.
-- [x] Add a supervised long-lived WM socket smoke with kill/restart behavior.
-- [x] Add a portal smoke proving denied cross-namespace clipboard transfer
-  becomes normal X11 selection failure.
-- [x] Add a resumable session runtime loop that batches reduced events into
-  commands without polling file descriptors inside policy code.
-- [x] Add a bounded runtime observation adapter for X, broker, WM, portal,
-  chrome, and renderer facts.
-- [x] Connect concrete X bridge, WM transport, broker IPC, portal execution,
-  chrome presenter, and renderer reports to `SessionRuntimeObservation` batches.
-- [x] Add a single headless session-driver smoke that executes runtime commands
-  through the concrete adapters instead of each smoke owning its own mini-loop.
-- [x] Replace remaining per-smoke runtime command execution with the reusable
-  headless session driver where the smoke does not need custom setup.
-- [x] Add a runtime driver adapter trait so live X, WM, broker, portal, chrome,
-  and renderer sources can plug into one command executor.
+- [ ] Define authority-facing docs-level `AuthoritySurface`,
+  `SurfaceTransaction`, and `CommittedSurfaceState` acceptance criteria in more
+  implementation-ready terms.
+- [ ] Map existing `SurfaceSnapshot`, `LayerSnapshot`, `DamageFrame`, and
+  `LayoutEpochState` concepts onto the new transaction model.
+- [ ] Decide which existing XLibre bridge tests remain regression references
+  and which should be retired once Sophia X Authority starts.
 
 ---
 
-## Synthetic-To-Live Completion Track
+## Sophia X Authority Track
 
-Synthetic seams should either become live adapters, remain deterministic test
-harnesses, or stay explicitly measurement-gated.
+Replace the long-term dependency on XLibre/Xorg with a Sophia-owned modern X
+protocol subset that can run real applications without carrying the full legacy
+server object graph.
 
-- [x] Keep `HeadlessSessionDriver` as the deterministic session executor.
-- [x] Add a `RuntimeDriverAdapter` trait for command execution sources.
-- [x] Add a headless adapter implementation for deterministic tests and smokes.
-- [x] Add live adapter skeletons for X, WM, broker health, portal, chrome, and
-  renderer facts.
-- [x] Replace live adapter skeleton inputs with non-blocking X bridge, WM socket,
-  broker IPC, portal execution, chrome presenter, and renderer intake.
-- [x] Add one live command-executor smoke that runs against Xvfb and the WM
-  socket without hand-written command sequencing.
-- [ ] Keep SHM routed input deferred until stress measurements exceed the
-  documented threshold.
+- [ ] Define the minimum X protocol subset for real app compatibility:
+  core windows/pixmaps/atoms/properties/events, ICCCM/EWMH, XKB, XFixes, Sync,
+  Render, SHM, DRI3/Present, RandR, and selected GLX compatibility.
+- [ ] Define namespace-aware X resource ownership, lookup, event subscription,
+  selection, focus, grab, and property access rules.
+- [ ] Define how X drawing paths become Sophia pending buffers:
+  PresentPixmap, DRI3 DMA-BUF, SHM/software updates, Render, and core drawing.
+- [ ] Define X selection, clipboard, drag-and-drop, URI, notification, and
+  screen-capture requests as protocol-specific inputs to Sophia Portals.
+- [ ] Define X lifecycle and polite close semantics as authority commands that
+  preserve the blind WM boundary.
+- [ ] Identify Phoenix components and tests worth studying before implementation.
+
+---
+
+## Atomic Transaction Track
+
+Make macOS-style transaction integrity a first-class Sophia invariant.
+
+- [ ] Define pending versus committed surface state in the engine data model.
+- [ ] Define buffer/geometry readiness and the conditions required to commit a
+  visual transaction.
+- [ ] Define fail-closed slow-client behavior: keep the last committed visual
+  state unless timeout policy explicitly degrades.
+- [ ] Define timeout/degrade reporting so chronic offenders can be measured
+  without leaking protocol metadata to the WM.
+- [ ] Update frame scheduling docs so layout epochs become a prototype-specific
+  compatibility mechanism, while authority-native commits use explicit
+  readiness.
+
+---
+
+## Future Wayland Authority Track
+
+Document the later path for Wayland-only applications without turning Sophia
+into a Wayland compositor as the architectural center.
+
+- [ ] Map `wl_surface` attach/damage/commit into Sophia `SurfaceTransaction`
+  readiness.
+- [ ] Map `xdg_toplevel` configure/ack/lifecycle into authority-owned protocol
+  semantics and Engine-owned visual commits.
+- [ ] Define Wayland input delivery as Engine-routed, authority-delivered, and
+  namespace-checked.
+- [ ] Define Wayland clipboard/data-device/screencopy-style requests as portal
+  inputs instead of compositor-wide privileges.
+- [ ] Document that Wayland Authority must not own workspaces, global shortcuts,
+  compositor chrome, or scanout.
 
 ---
 
 ## Backend Track - Real Compositor Work
 
-Do this after the runtime loop has a clear shape.
+Do this after the authority transaction model has a clear shape.
 
 - [x] Add frame-clock abstraction while preserving headless determinism.
 - [x] Add renderer/import abstraction with CPU readback kept as fallback.
 - [x] Add DRM/KMS output skeleton.
 - [x] Add libinput event source skeleton.
 - [x] Integrate physical input with routed-input request generation.
+- [ ] Replace skeleton DRM/KMS descriptors with a real device/output discovery
+  adapter.
+- [ ] Replace libinput descriptor intake with a real non-blocking physical input
+  poller.
+- [ ] Connect real frame-clock/page-flip timing to transaction commits.
 
 ---
 
-## Rendering Track - Move Beyond Proof Grade
+## Deferred / Prototype Reference
 
-- [x] Replace CPU-readback-only rendering with import-capable buffer handles.
-- [x] Track buffer lifetime explicitly across XComposite pixmap updates.
-- [x] Add frame scheduling around X Damage and layout epochs.
-- [x] Measure resize behavior under slow or non-cooperative X11 clients.
-- [x] Model explicit XSync versus implicit legacy resize capability with
-  bridge-owned timeout reputation.
+These items are useful evidence from the XLibre-centered prototype, but they are
+not the long-term target architecture.
 
----
-
-## Routed Input Track
-
-The current X11 `RouteEvent` request path is the correctness baseline.
-
-- [x] Measure routed-input dispatch cost before replacing the X11 request path.
-- [x] Keep the X11 request path as fallback for any future SHM work.
-- [x] Add routed-input grab/focus edge smokes.
-- [x] Add transformed scene hit-test integration once physical input exists.
-
-## Continuous Runtime Track
-
-The one-shot smoke paths have proven the seams. The next work is assembling a
-repeatable runtime loop without putting policy or X11 authority on compositor
-hot paths.
-
-- [x] Add a data-only session runtime reducer for X polling, WM policy, frame
-  scheduling, portal drain, and chrome presentation phases.
-- [x] Connect the reducer to the headless session tick smoke.
-- [x] Add a runtime smoke that schedules from X Damage and layout epochs.
-- [x] Add process-supervised portal and metadata broker placeholders.
-
-## Broker IPC Track
-
-The broker processes are supervised placeholders. The next work is turning them
-into bounded, data-only peers without exposing client metadata or payload bytes
-to runtime policy.
-
-- [x] Add a bounded broker health/control packet contract.
-- [x] Wire portal broker placeholder to a bounded IPC health smoke.
-- [x] Wire metadata broker placeholder to a bounded IPC health smoke.
-- [x] Route broker health into `SessionRuntimeState`.
-
-## Portal Execution Track
-
-Portal reducers exist. The next work is turning X-derived requestor events into
-bounded portal execution without putting raw X authority in portal policy.
-
-- [x] Convert X11 `SelectionRequest` context into a cross-namespace clipboard
-  portal import request with native failure reply context.
-- [x] Dispatch live X11 `SelectionRequest` events into the clipboard portal
-  runtime path.
-- [x] Implement approved clipboard handoff for one bounded text target.
-- [x] Add a live X smoke for request -> deny and request -> approved handoff.
-
-## Deferred / Measurement-Gated
-
-- [ ] Prototype a unidirectional Engine-to-XLibre SHM route ring only if
-  repeated routed-input stress measurements exceed the documented threshold.
+- [ ] Keep SHM routed input deferred unless repeated routed-input stress
+  measurements exceed the documented threshold.
+- [ ] Keep XLibre routed-input extension docs as a compatibility lesson.
+- [ ] Keep XComposite/Damage bridge smokes as reference tests until Sophia X
+  Authority has equivalent transaction tests.
+- [ ] Keep XLibre namespace smoke as isolation evidence until the Sophia X
+  Authority namespace model has live coverage.
 
 ---
 
@@ -146,3 +132,8 @@ bounded portal execution without putting raw X authority in portal policy.
   close helper.
 - [x] Phase 9 supervisor work: restart policy, process supervisor, WM restart
   adapter, last committed layout cache.
+- [x] Session runtime assembly: data-only runtime reducer, bounded observation
+  intake, headless session driver, broker health/control packets, and live X/WM
+  socket smoke.
+- [x] Portal execution prototype: X11 `SelectionRequest` conversion, denial as
+  native selection failure, approved bounded text handoff, and live X smoke.

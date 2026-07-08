@@ -3,9 +3,15 @@
 This doc maps Sophia's processes and the boundaries between them. The data model
 is in `dod.md`; code-level rules live in `style-guide.md`.
 
-Sophia is XLibre-centered. XLibre is not a guest compatibility server hidden
-inside a Wayland desktop. It remains the authority X11 clients talk to. Sophia
-adds a modern display engine and an external policy layer around that authority.
+Sophia is Engine-centered. Sophia Engine owns physical input, visual state,
+atomic surface transactions, rendering, and scanout. Client compatibility lives
+behind protocol authorities that terminate a client protocol and translate it
+into namespace-checked Sophia surface transactions.
+
+The long-term X path is a Sophia-owned modern X authority, informed by Phoenix,
+not a permanent dependency on Xorg or XLibre internals. XLibre remains valuable
+as prototype evidence and as a research reference for X11 semantics,
+Xnamespace, XComposite/Damage, and routed-input experiments.
 
 ## Processes
 
@@ -18,25 +24,26 @@ flowchart TB
     end
 
     subgraph compositor["Compositor Layer: Security Broker"]
-        engine["Sophia Engine<br/>scene graph / spatial hit-testing / damage tracking / frame scheduling"]
+        engine["Sophia Engine<br/>atomic visual authority<br/>scene graph / spatial hit-testing / damage tracking / frame scheduling"]
         wm["Sophia WM<br/>blind policy model / TEA update"]
         portal["Sophia Portals<br/>cross-namespace policy / TEA update"]
-        bridge["Sophia X Bridge<br/>XComposite / Damage / X11 mirror / routed-input adapter"]
         chrome["Metadata Broker + Compositor Chrome<br/>redacted labels / icon tokens / trust badges"]
     end
 
-    subgraph authority["Legacy Authority & Isolation Layer"]
-        xlibre["XLibre Server<br/>XID registry / Xnamespace enforcement / X11 semantics"]
+    subgraph authorities["Protocol Authority Layer"]
+        xauth["Sophia X Authority<br/>modern X subset / resources / selections / grabs"]
+        wayauth["Sophia Wayland Authority<br/>future Wayland frontend"]
+        nativeauth["Sophia Native Authority<br/>future Sophia-first protocol"]
     end
 
     subgraph trusted["Namespace A: Trusted"]
-        terminal["Terminal"]
-        password["Password manager"]
+        terminal["X terminal"]
+        password["Wayland password manager"]
     end
 
     subgraph untrusted["Namespace B: Untrusted"]
-        browser["Web browser"]
-        chat["Chat app"]
+        browser["X web browser"]
+        chat["Wayland chat app"]
     end
 
     input -->|"raw input"| kernel
@@ -48,23 +55,25 @@ flowchart TB
     engine -->|"portal prompts / transfer events"| portal
     portal -->|"allow / deny / revoke / handoff"| engine
 
-    engine -->|"routed input request<br/>target XID + local coordinates"| bridge
-    bridge -->|"surface and layer snapshots"| engine
-    bridge -->|"sanitized ChromeDescriptor"| chrome
+    engine -->|"protocol-routed input / configure / lifecycle"| xauth
+    engine -->|"protocol-routed input / configure / lifecycle"| wayauth
+    xauth -->|"surface transactions / damage / constraints"| engine
+    wayauth -->|"surface transactions / damage / constraints"| engine
+    nativeauth -->|"surface transactions / damage / constraints"| engine
+    xauth -->|"sanitized metadata candidates"| chrome
+    wayauth -->|"sanitized metadata candidates"| chrome
     chrome -->|"compositor-owned UI data"| engine
 
-    bridge -->|"privileged requests"| xlibre
-    xlibre -->|"window tree / pixmaps / damage"| bridge
-
-    terminal -->|"standard X11 protocol"| xlibre
-    password -->|"standard X11 protocol"| xlibre
-    browser -->|"standard X11 protocol"| xlibre
-    chat -->|"standard X11 protocol"| xlibre
+    terminal -->|"X protocol"| xauth
+    browser -->|"X protocol"| xauth
+    password -->|"Wayland protocol"| wayauth
+    chat -->|"Wayland protocol"| wayauth
 ```
 
-The critical split is that surface and layer snapshots flow from Sophia X Bridge
-to Sophia Engine, while sanitized chrome descriptors flow to the metadata
-broker. The WM receives only opaque policy data and returns command packets.
+The critical split is that protocol authorities produce reduced, namespace-
+checked surface transactions for Sophia Engine, while sanitized chrome
+descriptors flow to the metadata broker. The WM receives only opaque policy data
+and returns command packets.
 
 ## Load-Bearing Boundaries
 
@@ -87,6 +96,49 @@ hit-testing, damage tracking, frame scheduling, and final scanout. Its hot paths
 should be data-oriented systems over owned tables and precomputed snapshots, not
 a single app-wide message loop.
 
+### Protocol Authorities
+
+A protocol authority terminates one client protocol and adapts that protocol
+into Sophia-owned visual transactions. Authorities may own protocol resources,
+client object tables, grabs, selections, configure/ack state, and namespace
+checks for their protocol. They must not own workspaces, final layout, global
+shortcuts, compositor chrome, portal policy, physical input devices, or scanout.
+
+The first long-term authority target is **Sophia X Authority**: a modern X
+protocol subset capable of running real applications while avoiding the full
+Xorg/XLibre object graph. It should learn from Phoenix's clean-room approach and
+from Sophia's existing XLibre prototype seams.
+
+A later **Sophia Wayland Authority** can support Wayland-only applications by
+terminating `wl_surface`, `xdg_toplevel`, buffer attach, damage, and commit
+semantics, then emitting the same internal surface transactions as the X
+authority. It must not become a second compositor; Sophia Engine remains the
+only visual authority.
+
+Every authority must preserve the same namespace model. `NamespaceId`,
+`SurfaceId`, portal transfer state, and sanitized metadata are Sophia concepts,
+not X-specific or Wayland-specific concepts.
+
+### Atomic Surface Transactions
+
+Sophia follows the macOS/WindowServer lesson: the compositor should commit
+geometry and pixels together. A surface may have pending geometry, pending
+buffer state, and pending damage, but Sophia Engine should present only a
+committed surface state whose geometry and pixels match.
+
+The default slow-client behavior is fail-closed visual integrity:
+
+- keep presenting the last committed good surface state;
+- do not stretch stale pixels into new geometry as the default;
+- do not expose black borders or half-rendered buffers as normal behavior;
+- record slow or failed readiness as transaction outcomes;
+- degrade only through explicit timeout policy.
+
+For X clients, the Sophia X Authority should translate `PresentPixmap`, SHM,
+Render, and core drawing completion into pending buffer readiness. For Wayland
+clients, the Wayland Authority can map the native attach/damage/commit sequence
+directly into the same readiness model.
+
 ### Compositor Strategy
 
 Sophia Engine should follow Smithay-style compositor structure, using niri as a
@@ -97,14 +149,17 @@ Sophia should not fork niri. Niri combines compositor and window-management
 policy in one central state object, while Sophia deliberately splits policy into
 Sophia WM. The reusable idea is the compositor machinery, not the process model.
 
-Sophia X Bridge should follow picom conceptually for the X side. Picom imports
-the X window tree, tracks top-levels and stacking, redirects windows with
-XComposite, consumes Damage, builds flat layer snapshots, and computes damage
-across buffered layouts. Sophia needs those same data products, but it must hand
-them to Sophia Engine instead of rendering back into the X root.
+The historical Sophia X Bridge follows picom conceptually for the XLibre
+prototype path. Picom imports the X window tree, tracks top-levels and stacking,
+redirects windows with XComposite, consumes Damage, builds flat layer snapshots,
+and computes damage across buffered layouts. Those lessons remain useful for
+understanding X compatibility, but the long-term Sophia X Authority should emit
+surface transactions directly instead of requiring an XComposite mirror as the
+primary seam.
 
-Do not turn Sophia into a traditional X compositor. XLibre remains the X11
-authority, but Sophia owns final scanout and physical input.
+Do not turn Sophia into a traditional X compositor or a Wayland compositor with
+custom policy bolted on. Protocol authorities adapt clients; Sophia Engine owns
+final scanout and physical input.
 
 ### Engine to WM
 
@@ -157,11 +212,12 @@ The protocol should be sequence-oriented:
   is not consumed by the WM. Stale metadata generations are rejected so older
   broker output cannot overwrite newer chrome state.
 
-### Engine to XLibre Rendering
+### Current XLibre Prototype Rendering
 
-XComposite and Damage are the first render seam. XLibre redirects windows to
-offscreen pixmaps and reports changed regions. Sophia X Bridge names or imports
-those pixmaps, tracks damage, and hands frame packets to Sophia Engine.
+XComposite and Damage are the current prototype render seam. XLibre redirects
+windows to offscreen pixmaps and reports changed regions. Sophia X Bridge names
+or imports those pixmaps, tracks damage, and hands frame packets to Sophia
+Engine.
 
 Sophia Engine separates frame validation from renderer/import execution. The
 headless path validates `FrameSnapshot` commands, replays them into a
@@ -180,21 +236,22 @@ containing both the new current record and the retired record; removing a window
 returns the retired record with no current replacement. This gives the later
 real renderer an explicit point to release old pixmap/import resources.
 
-This seam exists today in broad shape. It needs measurement and glue, not a new
-theory.
+This seam exists today in broad shape and remains useful as research evidence.
+It should inform the Sophia X Authority design without becoming the permanent
+authority boundary.
 
-The first implementation should accept ordinary X11 limitations:
+The XLibre prototype accepts ordinary X11 limitations:
 
 - X11 clients do not have Wayland-style configure/commit acknowledgements.
 - Frame-perfect resize needs heuristics at first.
 - Slow or non-cooperative clients may force a timeout frame.
 
-Sophia models resize synchronization as a tiered X11 compromise. The X bridge
-reduces client state to `ResizeSyncCapability`: `ExplicitSync` for clients that
-advertise `_NET_WM_SYNC_REQUEST` and have not earned a bridge-local downgrade,
-or `ImplicitOnly` for legacy, unknown, or downgraded clients. The engine only
-adds explicit-sync surfaces to `LayoutEpochState`; implicit-only surfaces skip
-epoch freezing and rely on ordinary X Damage.
+Sophia currently models resize synchronization as a tiered X11 compromise. The
+X bridge reduces client state to `ResizeSyncCapability`: `ExplicitSync` for
+clients that advertise `_NET_WM_SYNC_REQUEST` and have not earned a
+bridge-local downgrade, or `ImplicitOnly` for legacy, unknown, or downgraded
+clients. The engine only adds explicit-sync surfaces to `LayoutEpochState`;
+implicit-only surfaces skip epoch freezing and rely on ordinary X Damage.
 
 Timeouts remain engine-owned. `LayoutEpochState::expire_if_timed_out` closes a
 stalled epoch and reports the pending surfaces. The bridge can turn those
@@ -202,7 +259,7 @@ timeout reports into class-level reputation strikes keyed by namespace and
 bounded `WM_CLASS`, but that class metadata never leaves the bridge in surface
 or layer snapshots.
 
-### Engine to XLibre Input
+### Current XLibre Prototype Input
 
 This is the hard seam.
 
@@ -211,7 +268,7 @@ coordinate to window, sprite trace, grabs, focus, then delivery. That cannot
 represent compositor-side transforms, scaled scenes, 3D workspaces, or other
 visual effects where rendered geometry diverges from XLibre's 2D tree.
 
-Sophia needs a routed-input path:
+The XLibre prototype needs a routed-input path:
 
 ```text
 Sophia Engine hit-tests the real scene
@@ -227,8 +284,8 @@ DIX delivery with X11 grabs, focus, XI2, and Xnamespace checks preserved
 ```
 
 The extension must not become "send arbitrary event directly to client." XLibre
-still owns X11 delivery semantics. Sophia only supplies the visual target and
-local coordinates that XLibre cannot compute by itself.
+still owns X11 delivery semantics in the prototype. Sophia only supplies the
+visual target and local coordinates that XLibre cannot compute by itself.
 
 The smallest useful extension request is:
 
@@ -264,7 +321,10 @@ the visual scene and supplied finite target-local coordinates. XLibre still
 receives the same target XID plus local-coordinate packet; it is not asked to
 understand compositor transforms.
 
-The patch target is tracked in `docs/xlibre-routed-input-extension.md`.
+The patch target is tracked in `docs/xlibre-routed-input-extension.md`. This is
+historical/prototype work once Sophia owns its X authority: the same routed
+target-selection idea should become an internal Engine-to-Authority command
+instead of an XLibre extension.
 
 The first implementation optimizes for correctness, not throughput tricks. The
 ordinary `RouteEvent` request remains the canonical path until profiling shows
@@ -278,7 +338,7 @@ be layered in this order:
 - keep immediate flush barriers for button, key, target-crossing, drag, grab,
   and focus transitions
 - use any grab/focus cache only as advisory acceleration; XLibre remains final
-  authority
+  authority in the prototype path
 - consider an Engine-to-XLibre shared-memory route ring only after measurement,
   with the X11 request path kept as fallback
 
@@ -289,7 +349,7 @@ control path until measurements justify a second status queue. A bidirectional
 hot ring would couple the compositor's input loop to XLibre timing and should
 not be introduced speculatively.
 
-### Xnamespace Portals
+### Namespace Portals
 
 Namespaces are private by default. Cross-namespace operations go through portal
 services, not ad hoc server exceptions.
@@ -312,15 +372,15 @@ not suspend either application or namespace.
 The first portal implementation is the `sophia-portal` clipboard reducer. It
 keeps transfers private and pending by default, accepts only text targets,
 emits prompt, handoff, and fail-selection commands, and revokes pending
-transfers when the source namespace owner generation changes. It does not yet
-monitor X selections itself; Sophia X Bridge remains responsible for observing
-namespaced selection ownership and converting X11 selection outcomes into
-portal events.
+transfers when the source namespace owner generation changes. It does not
+monitor protocol selections itself; the relevant authority or prototype bridge
+observes protocol-specific ownership and converts it into portal events.
 
-Denied clipboard transfers now have the first concrete X11 failure adapter.
-`PortalCommand::FailSelection` maps through Sophia X Bridge into a normal
-`SelectionNotify` failure with `property = None`, matching ICCCM selection
-conversion failure instead of injecting synthetic input or blocking clients.
+Denied clipboard transfers now have the first concrete X11 failure adapter for
+the prototype path. `PortalCommand::FailSelection` maps through Sophia X Bridge
+into a normal `SelectionNotify` failure with `property = None`, matching ICCCM
+selection conversion failure instead of injecting synthetic input or blocking
+clients.
 
 Sophia X Bridge monitors selection ownership through XFixes
 `SelectionNotify` events for `PRIMARY`, `SECONDARY`, and `CLIPBOARD`. The bridge
@@ -390,15 +450,17 @@ outside the portal reducer.
 Compositor chrome is Engine/session authority, not WM authority. If the user
 clicks a compositor-drawn close button, Sophia Engine hit-tests that chrome and
 emits a surface-scoped close request with a generation check. Session/chrome
-policy validates the request and asks Sophia X Bridge to perform the polite X11
-close path first, such as `WM_DELETE_WINDOW` when available. The WM sees only
-the later consequence through `SurfaceRemoved` or relayout requests.
+policy validates the request and asks the owning protocol authority to perform
+the polite close path first, such as X11 `WM_DELETE_WINDOW` or a Wayland
+xdg-toplevel close. The WM sees only the later consequence through
+`SurfaceRemoved` or relayout requests.
 
 The first session seam is a reducer inside Sophia Engine. A
 `SessionEvent::ChromeAction` is validated against current layout nodes. Accepted
 close requests emit `SessionCommand::RequestPoliteClose`, which the runtime
-dispatches to Sophia X Bridge. Rejected chrome actions emit no command. This
-keeps close intent out of the blind WM protocol.
+dispatches to the owning protocol authority or current X bridge prototype.
+Rejected chrome actions emit no command. This keeps close intent out of the
+blind WM protocol.
 
 Metadata broker output follows the same ownership split. The runtime gives
 Sophia Engine only `SanitizedChromeMetadata`: surface identity, optional bounded
@@ -407,11 +469,11 @@ state, and generation. `ChromeBroker` turns accepted updates into
 `ChromeDescriptor` values and removes descriptors only when the removal
 generation is not stale.
 
-The WM notification is a separate lifecycle event. Only after XLibre/X Bridge
-reports that the surface was actually removed does Sophia Engine process
-`SessionEvent::SurfaceRemoved` and emit a `WmRequestKind::SurfaceRemoved`
-command packet. This is the point where the WM may relayout; a chrome close
-request itself never wakes the WM.
+The WM notification is a separate lifecycle event. Only after the owning
+authority reports that the surface was actually removed does Sophia Engine
+process `SessionEvent::SurfaceRemoved` and emit a
+`WmRequestKind::SurfaceRemoved` command packet. This is the point where the WM
+may relayout; a chrome close request itself never wakes the WM.
 
 Process supervision is runtime policy, not compositor policy. Sophia Engine can
 emit facts such as "WM IPC failed" or "restart the WM", but a runtime
@@ -612,20 +674,26 @@ notify artifact. The live smoke verifies those artifacts against real X
 property writes and event delivery for one text target. General target
 negotiation and full clipboard ownership brokering remain future work.
 
-## XLibre Responsibilities
+## Protocol Authority Responsibilities
 
-XLibre remains responsible for:
+Each protocol authority is responsible for:
 
-- X11 protocol parsing and replies
-- client resource ownership
-- XID allocation and lookup
-- Xnamespace enforcement
-- X11 selections and clipboard ownership
-- X11 grabs, focus, and delivery semantics
-- ICCCM/EWMH compatibility surface
+- parsing and replying to its client protocol
+- client resource ownership and protocol-local object IDs
+- namespace checks for every resource, event subscription, and transfer request
+- protocol-specific selections, focus, grabs, configure/ack, and lifecycle
+  semantics
+- reducing client buffers, damage, constraints, and readiness into Sophia
+  surface transactions
+- converting protocol-specific metadata into sanitized metadata candidates
 
-Sophia should not duplicate those concepts in another object graph. It should
-mirror only the data it needs for rendering and policy.
+Authorities must not duplicate Sophia Engine's visual object graph. They emit
+surface transactions and lifecycle facts; Sophia Engine remains the source of
+truth for committed visual placement and scanout.
+
+The XLibre prototype remains responsible for the same X11 concepts while that
+prototype is in use. The long-term Sophia X Authority should bring those
+responsibilities into a smaller, namespace-aware X subset owned by Sophia.
 
 ## Sophia Responsibilities
 
@@ -639,25 +707,27 @@ Sophia owns:
 - global shortcuts
 - compositor-to-WM policy protocol
 - portal UI hooks
+- atomic geometry-plus-buffer commits
 
-Sophia Engine can cache XLibre state, but XLibre remains the source of truth for
-X11 resources.
+Sophia Engine can cache authority state, but protocol authorities remain the
+source of truth for protocol resources. Sophia Engine is the source of truth for
+visual state.
 
-## First Research Thread
+## Next Research Thread
 
-The first useful proof is not a full desktop. It is a vertical slice:
+The next useful proof is not a full desktop. It is a design-to-code transition
+from XLibre prototype seams into a Sophia-owned authority:
 
-1. Start XLibre with Xnamespace enabled.
-2. Launch one X11 client in one namespace.
-3. Redirect that client's window through XComposite.
-4. Show it in Sophia Engine's scene.
-5. Move and resize it through Sophia WM policy.
-6. Deliver flat, untransformed input or explicitly mark transformed input
-   unsupported until routed input exists.
-7. Verify namespace isolation still works.
+1. Define the minimum X protocol subset for real applications.
+2. Define the namespace-aware X resource model.
+3. Define `SurfaceTransaction` and `CommittedSurfaceState` semantics.
+4. Translate X Present/DRI3/SHM/Render paths into pending buffer readiness.
+5. Translate X selections and drag-and-drop through protocol-neutral portals.
+6. Keep the blind WM protocol unchanged.
+7. Verify that slow clients preserve the last committed visual state.
 
-That slice proves the rendering seam and the process split. Routed input is the
-next research milestone.
+The XLibre/Xvfb smokes remain valuable regression evidence for compatibility
+ideas, but they are no longer the destination architecture.
 
 ## Reference Boundaries
 
@@ -669,5 +739,9 @@ Use each reference at the boundary where it is strongest:
   command planning, damage over buffer age.
 - river: external WM protocol shape, manage/render sequence thinking, crash
   isolation for policy.
-- XLibre: namespace enforcement, X11 delivery semantics, future routed-input
-  protocol.
+- Phoenix: clean-room modern X server feasibility and real-app compatibility
+  lessons.
+- XLibre: namespace enforcement, X11 delivery semantics, and routed-input
+  prototype lessons.
+- macOS WindowServer/Core Animation: transaction-first rendering and fail-closed
+  visual integrity.

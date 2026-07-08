@@ -12,8 +12,9 @@ the rule matters more.
 
 Separate data from authority.
 
-XLibre owns X11 authority. Sophia Engine owns compositor authority. Sophia WM
-owns policy authority. Portals own cross-namespace transfer authority.
+Protocol authorities own client-protocol authority. Sophia Engine owns visual
+and compositor authority. Sophia WM owns policy authority. Portals own
+cross-namespace transfer authority.
 
 Each layer exports data about its state, not pointers into its state.
 
@@ -22,7 +23,7 @@ Good:
 ```text
 SurfaceSnapshot {
     surface_id,
-    xid,
+    authority_local_id,
     namespace_id,
     geometry,
     damage_region,
@@ -34,7 +35,7 @@ SurfaceSnapshot {
 Avoid:
 
 ```text
-Window object shared by Engine, WM, X Bridge, and XLibre.
+Window object shared by Engine, WM, protocol authority, and portal process.
 ```
 
 A shared object graph would turn process boundaries into fiction. Sophia should
@@ -47,12 +48,14 @@ types      passive records, IDs, enums, flags
 state      dense tables owned by one process
 protocol   packet definitions and serialization
 systems    logic that consumes snapshots and emits new packets
-bridge     XLibre-facing translation and privileged requests
+authority  client-protocol translation and protocol resources
+bridge     legacy/prototype translation to external servers
 portal     namespace-crossing transfer policy
 ```
 
 Types do not perform work. State owns storage. Systems transform data. Protocols
-move data. Bridges translate authority from one domain to another.
+move data. Authorities terminate client protocols. Bridges translate legacy or
+external authority from one domain to another during prototype work.
 
 ## TEA Where It Applies
 
@@ -83,8 +86,9 @@ auditable.
 Typed IDs prevent one domain's integer from masquerading as another.
 
 - `SurfaceId` for compositor surfaces tracked by Sophia Engine.
-- `XWindowId` for X11 window XIDs mirrored from XLibre.
-- `NamespaceId` for Xnamespace labels known to Sophia.
+- `XWindowId` for X11 window XIDs mirrored from the XLibre prototype or owned
+  by Sophia X Authority.
+- `NamespaceId` for sandbox labels known to Sophia.
 - `OutputId` for physical or virtual outputs.
 - `SeatId` and `DeviceId` for input routing.
 - `TransactionId` for atomic WM updates.
@@ -185,8 +189,8 @@ cannot overwrite a newer readiness/degraded/stopped observation.
 
 ### XWindowMirror
 
-Sophia X Bridge keeps a mirror of the XLibre window tree. This is cache data,
-not authority.
+Sophia X Bridge keeps a mirror of the XLibre prototype window tree. This is
+cache data, not long-term authority.
 
 Fields should describe:
 
@@ -199,21 +203,23 @@ Fields should describe:
 - stale metadata flags
 
 Namespace identity may start from static configuration and later be replaced by
-server-discovered records. X Bridge should treat discovered namespace ownership
-as mirror metadata, not authority; XLibre remains the enforcement point.
+authority-discovered records. X Bridge should treat discovered namespace
+ownership as mirror metadata; the active protocol authority remains the
+enforcement point.
 
 Picom's window-tree mirror is the reference shape, but Sophia's mirror should
 emit snapshots instead of owning render policy.
 
 ### LayerSnapshot
 
-A layer snapshot is the bridge between XLibre state and Sophia Engine render
-planning.
+A layer snapshot is the reduced frame value that Sophia Engine render planning
+consumes. It may come from the XLibre prototype bridge, Sophia X Authority,
+Sophia Wayland Authority, or a future native authority.
 
 Fields should describe:
 
 - Sophia surface ID
-- X window ID
+- protocol-local window/object ID when relevant
 - namespace ID
 - stack rank
 - geometry in compositor coordinates
@@ -222,6 +228,62 @@ Fields should describe:
 - opacity, crop, and transform state
 
 The snapshot is flat and immutable for the frame that consumes it.
+
+### AuthoritySurface
+
+An authority surface is a protocol-facing record owned by a protocol authority.
+It maps protocol-local objects, such as X windows or Wayland surfaces, to a
+Sophia `SurfaceId`.
+
+Fields should describe:
+
+- authority kind
+- protocol-local object ID and generation
+- Sophia surface ID
+- namespace ID
+- protocol-visible map/configure state
+- protocol constraints and capabilities
+
+Authority surfaces are not compositor surfaces. They are the authority's private
+resource table entries that emit snapshots or surface transactions.
+
+### SurfaceTransaction
+
+A surface transaction is the atomic visual handoff from a protocol authority and
+WM policy into Sophia Engine.
+
+Fields should describe:
+
+- transaction ID
+- authority kind and surface ID
+- namespace ID
+- target geometry
+- target buffer source
+- damage region
+- readiness state
+- deadline or timeout policy
+- previous committed generation
+
+Sophia Engine may accept, reject, wait on, or time out a transaction. It should
+not present a transaction's new geometry unless the matching target buffer is
+ready.
+
+### CommittedSurfaceState
+
+Committed surface state is the last visually safe state Sophia Engine may
+present.
+
+Fields should describe:
+
+- surface ID
+- committed generation
+- committed geometry
+- committed buffer source
+- output assignment
+- visible state
+- damage carried into the next frame
+
+Slow-client fallback presents this state, not partially updated pending state.
 
 ### DamageFrame
 
@@ -257,7 +319,10 @@ timing rather than pushing backend-specific timing state into frame planning.
 ### LayoutEpochState
 
 A layout epoch records surfaces that must produce damage before an atomic layout
-change is considered visually ready.
+change is considered visually ready. In the XLibre prototype this models a
+tiered XSync/Damage compromise. In the long-term authority architecture,
+`SurfaceTransaction` readiness should replace heuristic damage waiting wherever
+the authority can prove buffer/geometry pairing directly.
 
 Fields should describe:
 
@@ -266,19 +331,19 @@ Fields should describe:
 - start timestamp
 - timeout policy
 
-X Damage events retire pending surfaces from the epoch. The frame scheduler may
-render only when damage exists for the output and the active epoch has no
-pending surfaces left.
+X Damage events retire pending surfaces from the epoch in the prototype path.
+Native authority commits should retire pending surfaces by explicit readiness
+instead.
 
 Resize behavior samples are derived from the same epoch state. They should
 record elapsed time, timeout policy, completion, timeout status, and remaining
 pending surfaces so slow clients can be measured without reaching into renderer
 or X bridge internals.
 
-Epochs should be created only for surfaces marked
+For the prototype, epochs should be created only for surfaces marked
 `ResizeSyncCapability::ExplicitSync`. Timed-out epochs may be expired by the
 engine, which returns the pending surfaces as a bounded timeout report for the
-bridge to score.
+bridge or authority to score.
 
 ### DrmKmsOutputDescriptor
 
@@ -310,7 +375,8 @@ Fields should describe:
 - transform
 - alpha or effect parameters
 
-The command stream is Sophia Engine authority. XLibre does not own this data.
+The command stream is Sophia Engine authority. Protocol authorities do not own
+this data.
 
 ### BufferImportReport
 
@@ -334,8 +400,8 @@ import path" from "used path" without inspecting renderer-private state.
 
 ### CompositePixmapRecord
 
-A composite pixmap record describes the bridge-owned lifetime of one named
-XComposite pixmap.
+A composite pixmap record describes the XLibre prototype bridge-owned lifetime
+of one named XComposite pixmap.
 
 Fields should describe:
 
@@ -363,7 +429,8 @@ Fields should describe:
 - visibility state
 - damage accumulator
 
-The surface may refer back to an X window, but it is not an X window.
+The surface may refer back to a protocol-local object, but it is not that
+protocol object.
 
 ### InputEventPacket
 
@@ -720,9 +787,10 @@ The portal reducer should not subscribe to X events or hold raw X authority.
 
 Use dense tables inside a process. Use snapshots between processes.
 
-Sophia Engine owns dense tables for surfaces, outputs, seats, devices, and
-active transactions. Sophia X Bridge owns its X11 mirror tables. Sophia WM owns
-policy state. Portals own transfer state.
+Sophia Engine owns dense tables for surfaces, outputs, seats, devices,
+committed visual state, and active transactions. Protocol authorities own their
+client resource tables. Sophia X Bridge owns X11 mirror tables only for the
+XLibre prototype path. Sophia WM owns policy state. Portals own transfer state.
 
 No process should hold a mutable reference into another process's table. Cross a
 boundary by serializing a packet or by passing an OS handle with explicit
@@ -753,9 +821,11 @@ Policy can be TEA-style. Compositor hot paths should be table/system style.
 
 ## Invariants
 
-- XLibre is the source of truth for X11 resources.
-- Sophia X Bridge mirrors XLibre state; it does not become XLibre.
-- Sophia Engine is the source of truth for visual placement.
+- Protocol authorities are the source of truth for their client resources.
+- Sophia X Bridge mirrors XLibre prototype state; it does not become the target
+  X authority.
+- Sophia Engine is the source of truth for committed visual placement.
+- Sophia must not present new geometry without matching committed pixels.
 - Layer snapshots are frame values, not mutable windows.
 - The WM proposes policy; the engine commits renderable state.
 - Namespace crossings require portal packets.

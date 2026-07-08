@@ -1,5 +1,10 @@
 # XLibre Routed Input Extension
 
+Status: prototype/reference. This document records the XLibre-centered routed
+input experiment and remains useful for compatibility lessons. The long-term
+Sophia architecture moves this target-selection seam into a Sophia-owned X
+Authority instead of relying on an XLibre extension.
+
 This is the patch target for Phase 6. It turns Sophia's compositor-side
 hit-test result into an XLibre-controlled delivery path without letting Sophia
 send arbitrary events directly to clients.
