@@ -11,13 +11,13 @@ use sophia_portal::{
 };
 use sophia_protocol::{
     AttentionState, BufferSource, ChromeActionKind, ChromeActionRequest, ChromeDescriptor,
-    DeviceId, DisplayLabel, FrameSnapshot, IconTokenId, InputEventKind, InputEventPacket,
-    InputRoute, InputRouteOutcome, IpcCodecError, LayerSnapshot, LayoutNodeSnapshot,
-    LayoutTransaction, OutputId, PortalTransferId, Rect, Region, RenderCommand, RenderCommandKind,
-    SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAX_PAYLOAD_LEN, SeatId, Size, SurfaceId, TransactionCommit,
-    TransactionId, TransactionOutcome, TrustLevel, WmRequestKind, WmRequestPacket,
-    WmResponsePacket, WorkspaceId, XLibreRoutedInputRequest, XWindowId, decode_wm_response_frame,
-    encode_wm_request_frame,
+    DamageFrame, DeviceId, DisplayLabel, FrameSnapshot, IconTokenId, InputEventKind,
+    InputEventPacket, InputRoute, InputRouteOutcome, IpcCodecError, LayerSnapshot,
+    LayoutNodeSnapshot, LayoutTransaction, OutputId, PortalTransferId, Rect, Region, RenderCommand,
+    RenderCommandKind, SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAX_PAYLOAD_LEN, SeatId, Size, SurfaceId,
+    TransactionCommit, TransactionId, TransactionOutcome, TrustLevel, WmRequestKind,
+    WmRequestPacket, WmResponsePacket, WorkspaceId, XLibreRoutedInputRequest, XWindowId,
+    decode_wm_response_frame, encode_wm_request_frame,
 };
 use sophia_runtime::{
     RestartPolicy, SophiaErrorExt, SophiaErrorKind, SupervisedProcessKind, SupervisorCommand,
@@ -513,6 +513,98 @@ impl FrameClock for DeterministicFrameClock {
             frame_serial,
             target_msec: frame_serial.saturating_mul(self.frame_interval_msec),
         }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LayoutEpochState {
+    pub epoch: u64,
+    pending_surfaces: BTreeSet<SurfaceId>,
+}
+
+impl LayoutEpochState {
+    pub fn new(epoch: u64, pending_surfaces: impl IntoIterator<Item = SurfaceId>) -> Self {
+        Self {
+            epoch,
+            pending_surfaces: pending_surfaces
+                .into_iter()
+                .filter(|surface| surface.is_valid())
+                .collect(),
+        }
+    }
+
+    pub fn observe_damage(&mut self, damage: &DamageFrame) {
+        for surface in &damage.affected_surfaces {
+            self.pending_surfaces.remove(surface);
+        }
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.pending_surfaces.is_empty()
+    }
+
+    pub fn pending_surfaces(&self) -> Vec<SurfaceId> {
+        self.pending_surfaces.iter().copied().collect()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FrameScheduleDecision {
+    WaitForDamage,
+    WaitForLayoutEpoch {
+        epoch: u64,
+        pending_surfaces: Vec<SurfaceId>,
+    },
+    Render {
+        output: OutputId,
+        frame_serial: u64,
+        damage: DamageFrame,
+        completed_epoch: Option<u64>,
+    },
+}
+
+pub fn schedule_frame_from_damage(
+    tick: FrameClockTick,
+    damage: Option<DamageFrame>,
+    layout_epoch: Option<&mut LayoutEpochState>,
+) -> FrameScheduleDecision {
+    let Some(damage) = damage else {
+        return match layout_epoch {
+            Some(epoch) if !epoch.is_complete() => FrameScheduleDecision::WaitForLayoutEpoch {
+                epoch: epoch.epoch,
+                pending_surfaces: epoch.pending_surfaces(),
+            },
+            _ => FrameScheduleDecision::WaitForDamage,
+        };
+    };
+
+    if damage.output != tick.output {
+        return FrameScheduleDecision::WaitForDamage;
+    }
+
+    let mut completed_epoch = None;
+    if let Some(epoch) = layout_epoch {
+        epoch.observe_damage(&damage);
+        if epoch.is_complete() {
+            completed_epoch = Some(epoch.epoch);
+        } else {
+            return FrameScheduleDecision::WaitForLayoutEpoch {
+                epoch: epoch.epoch,
+                pending_surfaces: epoch.pending_surfaces(),
+            };
+        }
+    }
+
+    if damage.damage.is_empty() && damage.affected_surfaces.is_empty() && completed_epoch.is_none()
+    {
+        return FrameScheduleDecision::WaitForDamage;
+    }
+
+    FrameScheduleDecision::Render {
+        output: tick.output,
+        frame_serial: tick.frame_serial,
+        damage,
+        completed_epoch,
     }
 }
 

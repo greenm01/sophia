@@ -166,6 +166,20 @@ The headless backend uses a deterministic clock so tests are repeatable. A real
 DRM/KMS backend should produce the same value shape from page-flip or vblank
 timing rather than pushing backend-specific timing state into frame planning.
 
+### LayoutEpochState
+
+A layout epoch records surfaces that must produce damage before an atomic layout
+change is considered visually ready.
+
+Fields should describe:
+
+- epoch serial
+- pending surface IDs
+
+X Damage events retire pending surfaces from the epoch. The frame scheduler may
+render only when damage exists for the output and the active epoch has no
+pending surfaces left.
+
 ### DrmKmsOutputDescriptor
 
 A DRM/KMS output descriptor is the backend-facing record for one discovered

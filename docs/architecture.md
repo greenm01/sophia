@@ -403,6 +403,13 @@ the same boundary from vblank/page-flip timing while preserving the existing
 session-tick contract: clock tick in, frame snapshot and replay/commit report
 out.
 
+X Damage now participates in frame scheduling. `schedule_frame_from_damage`
+combines a frame-clock tick, an optional X-derived `DamageFrame`, and an
+optional layout epoch. If no damage exists, the scheduler waits. If a layout
+epoch is pending, damage from affected surfaces retires pending surface IDs;
+rendering waits until the epoch completes. When damage is present and the epoch
+is complete, the scheduler emits a render decision with the tick's frame serial.
+
 The DRM/KMS output backend starts as a data-only skeleton. `DrmKmsMode`,
 `DrmKmsOutputDescriptor`, and `DrmKmsOutputRegistry` preserve connector ID,
 CRTC ID, mode, scale, and Sophia `OutputId` without opening devices yet. The

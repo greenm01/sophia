@@ -1,20 +1,21 @@
 use sophia_engine::{
     BufferImportPath, ChromeActionDecision, ChromeActionRejectReason, ChromeBroker,
     DeterministicFrameClock, DrmKmsMode, DrmKmsOutputDescriptor, DrmKmsOutputRegistry, EngineError,
-    FrameClock, FramePlanRequest, HeadlessEngine, ImportCapableRenderer, ImportedBufferHandle,
-    LastCommittedLayout, LibinputDeviceDescriptor, LibinputDeviceKind, LibinputEventIngest,
-    LibinputEventSource, MetadataChromeRejectReason, MetadataChromeUpdate,
-    NotificationChromePresenter, NotificationChromeRejectReason, NotificationChromeUpdate,
-    RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction, RoutedInputRequestError,
-    SanitizedChromeMetadata, SessionCommand, SessionEvent, SessionLayerSource, SessionTickRequest,
-    WmIpcError, WmRestartReason, WmRuntimeAction, notification_chrome_command_from_portal,
-    request_wm_over_stream, routed_input_request_from_physical_event,
-    routed_input_requests_from_flush, update_wm_supervisor_from_runtime_action,
+    FrameClock, FramePlanRequest, FrameScheduleDecision, HeadlessEngine, ImportCapableRenderer,
+    ImportedBufferHandle, LastCommittedLayout, LayoutEpochState, LibinputDeviceDescriptor,
+    LibinputDeviceKind, LibinputEventIngest, LibinputEventSource, MetadataChromeRejectReason,
+    MetadataChromeUpdate, NotificationChromePresenter, NotificationChromeRejectReason,
+    NotificationChromeUpdate, RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction,
+    RoutedInputRequestError, SanitizedChromeMetadata, SessionCommand, SessionEvent,
+    SessionLayerSource, SessionTickRequest, WmIpcError, WmRestartReason, WmRuntimeAction,
+    notification_chrome_command_from_portal, request_wm_over_stream,
+    routed_input_request_from_physical_event, routed_input_requests_from_flush,
+    schedule_frame_from_damage, update_wm_supervisor_from_runtime_action,
 };
 use sophia_portal::{NotificationRequest, NotificationUrgency, PortalCommand};
 use sophia_protocol::{
     AttentionState, BufferSource, ChromeActionKind, ChromeActionRequest, ChromeDescriptor,
-    DeviceId, DisplayLabel, IconTokenId, InputEventKind, InputEventPacket, InputRoute,
+    DamageFrame, DeviceId, DisplayLabel, IconTokenId, InputEventKind, InputEventPacket, InputRoute,
     InputRouteOutcome, IpcCodecError, LayerSnapshot, LayoutNodeCapabilities, LayoutNodeKind,
     LayoutNodeSnapshot, LayoutNodeState, LayoutTransaction, NamespaceId, OutputId, Point,
     PortalTransferId, Rect, Region, SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAGIC,
@@ -1157,6 +1158,55 @@ fn clocked_session_tick_can_restore_last_committed_layout() {
 }
 
 #[test]
+fn frame_scheduler_waits_without_damage() {
+    let tick = frame_tick(1);
+
+    assert_eq!(
+        schedule_frame_from_damage(tick, None, None),
+        FrameScheduleDecision::WaitForDamage
+    );
+}
+
+#[test]
+fn frame_scheduler_waits_for_pending_layout_epoch_surfaces() {
+    let tick = frame_tick(2);
+    let surface_a = SurfaceId::new(1, 1);
+    let surface_b = SurfaceId::new(2, 1);
+    let mut epoch = LayoutEpochState::new(9, [surface_a, surface_b]);
+    let damage = damage_frame(2, &[surface_a]);
+
+    assert_eq!(
+        schedule_frame_from_damage(tick, Some(damage), Some(&mut epoch)),
+        FrameScheduleDecision::WaitForLayoutEpoch {
+            epoch: 9,
+            pending_surfaces: vec![surface_b],
+        }
+    );
+    assert_eq!(epoch.pending_surfaces(), vec![surface_b]);
+}
+
+#[test]
+fn frame_scheduler_renders_when_damage_completes_layout_epoch() {
+    let tick = frame_tick(3);
+    let surface = SurfaceId::new(1, 1);
+    let mut epoch = LayoutEpochState::new(10, [surface]);
+    let damage = damage_frame(3, &[surface]);
+
+    let decision = schedule_frame_from_damage(tick, Some(damage.clone()), Some(&mut epoch));
+
+    assert_eq!(
+        decision,
+        FrameScheduleDecision::Render {
+            output: tick.output,
+            frame_serial: 3,
+            damage,
+            completed_epoch: Some(10),
+        }
+    );
+    assert!(epoch.is_complete());
+}
+
+#[test]
 fn wm_runtime_action_keeps_running_after_valid_response() {
     let engine = HeadlessEngine::default();
     let request = wm_request(TransactionId::from_raw(60));
@@ -1495,6 +1545,30 @@ fn route(serial: u64, target_window: u32, x: f64, y: f64) -> InputRoute {
         local_position: Some(Point { x, y }),
         transform: Transform::IDENTITY,
         outcome: InputRouteOutcome::Routed,
+    }
+}
+
+fn frame_tick(frame_serial: u64) -> sophia_engine::FrameClockTick {
+    sophia_engine::FrameClockTick {
+        output: OutputId::from_raw(1),
+        frame_serial,
+        target_msec: frame_serial * 16,
+    }
+}
+
+fn damage_frame(frame_serial: u64, affected_surfaces: &[SurfaceId]) -> DamageFrame {
+    DamageFrame {
+        output: OutputId::from_raw(1),
+        frame_serial,
+        buffer_age: 1,
+        root_generation: frame_serial,
+        affected_surfaces: affected_surfaces.to_vec(),
+        damage: Region::single(Rect {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 10,
+        }),
     }
 }
 

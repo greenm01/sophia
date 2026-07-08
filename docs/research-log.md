@@ -521,6 +521,12 @@ Pixmap replacement returns both the new current record and the retired record;
 window removal returns the retired record. This creates a concrete release point
 for future GPU imports and prevents silent raw-pixmap overwrites.
 
+Frame scheduling now joins frame-clock ticks, X Damage, and layout epochs.
+`LayoutEpochState` tracks pending surfaces for an atomic layout change, and
+`schedule_frame_from_damage` waits until damage exists and the active epoch has
+observed damage for all pending surfaces. This is still a deterministic
+scheduler seam, not the final continuous compositor event loop.
+
 The DRM/KMS backend now has a data-only output skeleton. `DrmKmsMode`,
 `DrmKmsOutputDescriptor`, and `DrmKmsOutputRegistry` track connector/CRTC IDs,
 mode, scale, and Sophia output IDs without opening real DRM devices. The
