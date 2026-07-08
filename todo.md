@@ -51,7 +51,7 @@ harnesses, or stay explicitly measurement-gated.
 - [x] Add a headless adapter implementation for deterministic tests and smokes.
 - [x] Add live adapter skeletons for X, WM, broker health, portal, chrome, and
   renderer facts.
-- [ ] Replace live adapter skeleton inputs with non-blocking X bridge, WM socket,
+- [x] Replace live adapter skeleton inputs with non-blocking X bridge, WM socket,
   broker IPC, portal execution, chrome presenter, and renderer intake.
 - [ ] Add one live command-executor smoke that runs against Xvfb and the WM
   socket without hand-written command sequencing.

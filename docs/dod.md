@@ -150,8 +150,15 @@ broker health packet routing or isolated WM transaction observation.
 external sources. Implementations must answer runtime commands with reduced
 observations or existing frame reports. Live adapters may wrap X bridge, WM
 socket, broker, portal, chrome, and renderer sources, but they must not expose
-raw X events, namespace tokens, metadata strings, portal payload bytes, icon
-bytes, or unbounded buffers through the runtime loop.
+raw X events, namespace launch/auth tokens, metadata strings, portal payload
+bytes, icon bytes, or unbounded buffers through the runtime loop.
+
+Live adapter constructors must take non-blocking intake values that were already
+reduced by the owning boundary. The runtime executor may receive counts,
+transaction outcomes, broker health summaries, portal command counts, chrome
+command counts, layer snapshots, and frame reports. It must not become the
+place that parses X protocol payloads, blocks on sockets, validates clipboard
+payload bytes, reads icon data, or owns renderer import buffers.
 
 Process-supervised portal and metadata broker placeholders are runtime
 ownership records. They prove that the runtime can start, poll, and terminate

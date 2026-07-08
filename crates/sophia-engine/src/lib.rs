@@ -360,6 +360,12 @@ pub struct LiveXRuntimeAdapter {
 }
 
 impl LiveXRuntimeAdapter {
+    pub fn from_polled_event_count(count: u32) -> Self {
+        Self {
+            pending_event_count: count,
+        }
+    }
+
     pub fn poll_observation(&self) -> SessionRuntimeObservation {
         SessionRuntimeObservation::XEventsPolled {
             count: self.pending_event_count,
@@ -373,6 +379,12 @@ pub struct LiveWmRuntimeAdapter {
 }
 
 impl LiveWmRuntimeAdapter {
+    pub fn from_transaction_update(update: WmTransactionUpdate) -> Self {
+        Self {
+            update: Some(update),
+        }
+    }
+
     pub fn layout_observation(&self) -> SessionRuntimeObservation {
         self.update
             .as_ref()
@@ -385,6 +397,10 @@ impl LiveWmRuntimeAdapter {
 pub struct LiveBrokerRuntimeAdapter;
 
 impl LiveBrokerRuntimeAdapter {
+    pub fn from_health_packet(packet: &BrokerHealthPacket) -> SessionRuntimeObservation {
+        Self::health_observation(packet)
+    }
+
     pub fn health_observation(packet: &BrokerHealthPacket) -> SessionRuntimeObservation {
         SessionRuntimeObservation::BrokerHealthChanged {
             broker: packet.broker,
@@ -401,6 +417,10 @@ pub struct LivePortalRuntimeAdapter {
 }
 
 impl LivePortalRuntimeAdapter {
+    pub fn from_commands(commands: Vec<PortalCommand>) -> Self {
+        Self { commands }
+    }
+
     pub fn drain_observation(&self) -> SessionRuntimeObservation {
         runtime_observation_from_portal_commands(&self.commands)
     }
@@ -412,6 +432,36 @@ pub struct LiveChromeRuntimeAdapter {
 }
 
 impl LiveChromeRuntimeAdapter {
+    pub fn from_command_count(count: u32) -> Self {
+        Self {
+            command_count: count,
+        }
+    }
+
+    pub fn from_notification_updates<'a>(
+        updates: impl IntoIterator<Item = &'a NotificationChromeUpdate>,
+    ) -> Self {
+        let SessionRuntimeObservation::ChromeCommandsReady { count } =
+            runtime_observation_from_notification_chrome_updates(updates)
+        else {
+            unreachable!("notification chrome updates always map to chrome command counts");
+        };
+
+        Self::from_command_count(count)
+    }
+
+    pub fn from_metadata_updates<'a>(
+        updates: impl IntoIterator<Item = &'a MetadataChromeUpdate>,
+    ) -> Self {
+        let SessionRuntimeObservation::ChromeCommandsReady { count } =
+            runtime_observation_from_metadata_chrome_updates(updates)
+        else {
+            unreachable!("metadata chrome updates always map to chrome command counts");
+        };
+
+        Self::from_command_count(count)
+    }
+
     pub fn present_observation(&self) -> SessionRuntimeObservation {
         SessionRuntimeObservation::ChromeCommandsReady {
             count: self.command_count,
@@ -425,6 +475,10 @@ pub struct LiveRendererRuntimeAdapter {
 }
 
 impl LiveRendererRuntimeAdapter {
+    pub fn from_layers(layers: Vec<LayerSnapshot>) -> Self {
+        Self { layers }
+    }
+
     pub fn render_frame(
         &mut self,
         engine: &HeadlessEngine,
@@ -445,6 +499,19 @@ impl LiveRendererRuntimeAdapter {
     pub fn rendered_observation(report: &SessionTickReport) -> SessionRuntimeObservation {
         runtime_observation_from_session_tick_report(report)
     }
+
+    pub fn from_render_frame_report(report: &RenderFrameReport) -> SessionRuntimeObservation {
+        runtime_observation_from_render_frame_report(report)
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LiveRuntimeDriverIntake {
+    pub x_event_count: u32,
+    pub wm_update: Option<WmTransactionUpdate>,
+    pub portal_commands: Vec<PortalCommand>,
+    pub chrome_command_count: u32,
+    pub layers: Vec<LayerSnapshot>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -454,6 +521,20 @@ pub struct LiveRuntimeDriverAdapter {
     pub portal: LivePortalRuntimeAdapter,
     pub chrome: LiveChromeRuntimeAdapter,
     pub renderer: LiveRendererRuntimeAdapter,
+}
+
+impl LiveRuntimeDriverAdapter {
+    pub fn from_intake(intake: LiveRuntimeDriverIntake) -> Self {
+        Self {
+            x: LiveXRuntimeAdapter::from_polled_event_count(intake.x_event_count),
+            wm: LiveWmRuntimeAdapter {
+                update: intake.wm_update,
+            },
+            portal: LivePortalRuntimeAdapter::from_commands(intake.portal_commands),
+            chrome: LiveChromeRuntimeAdapter::from_command_count(intake.chrome_command_count),
+            renderer: LiveRendererRuntimeAdapter::from_layers(intake.layers),
+        }
+    }
 }
 
 impl RuntimeDriverAdapter for LiveRuntimeDriverAdapter {

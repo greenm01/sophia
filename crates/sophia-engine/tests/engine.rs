@@ -6,12 +6,13 @@ use sophia_engine::{
     LastCommittedLayout, LayoutEpochState, LibinputDeviceDescriptor, LibinputDeviceKind,
     LibinputEventIngest, LibinputEventSource, LiveBrokerRuntimeAdapter, LiveChromeRuntimeAdapter,
     LivePortalRuntimeAdapter, LiveRendererRuntimeAdapter, LiveRuntimeDriverAdapter,
-    LiveWmRuntimeAdapter, LiveXRuntimeAdapter, MetadataChromeRejectReason, MetadataChromeUpdate,
-    NotificationChromePresenter, NotificationChromeRejectReason, NotificationChromeUpdate,
-    RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction, RoutedInputRequestError,
-    SanitizedChromeMetadata, SessionCommand, SessionEvent, SessionLayerSource, SessionTickRequest,
-    WmIpcError, WmRestartReason, WmRuntimeAction, WmTransactionUpdate, hit_test_scene_for_input,
-    measure_resize_behavior, notification_chrome_command_from_portal, request_wm_over_stream,
+    LiveRuntimeDriverIntake, LiveWmRuntimeAdapter, LiveXRuntimeAdapter, MetadataChromeRejectReason,
+    MetadataChromeUpdate, NotificationChromePresenter, NotificationChromeRejectReason,
+    NotificationChromeUpdate, RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction,
+    RoutedInputRequestError, SanitizedChromeMetadata, SessionCommand, SessionEvent,
+    SessionLayerSource, SessionTickRequest, WmIpcError, WmRestartReason, WmRuntimeAction,
+    WmTransactionUpdate, hit_test_scene_for_input, measure_resize_behavior,
+    notification_chrome_command_from_portal, request_wm_over_stream,
     routed_input_request_from_physical_event, routed_input_requests_from_flush,
     runtime_observation_from_metadata_chrome_updates,
     runtime_observation_from_notification_chrome_updates, runtime_observation_from_portal_commands,
@@ -1511,25 +1512,19 @@ fn live_runtime_driver_adapter_executes_through_shared_command_executor() {
     let engine = HeadlessEngine::default();
     let output = engine.output();
     let mut driver = HeadlessSessionDriver::new(engine);
-    let mut adapter = LiveRuntimeDriverAdapter {
-        x: LiveXRuntimeAdapter {
-            pending_event_count: 1,
-        },
-        wm: LiveWmRuntimeAdapter { update: None },
-        portal: LivePortalRuntimeAdapter {
-            commands: vec![PortalCommand::DropNotification {
-                transfer: PortalTransferId::from_raw(3),
-            }],
-        },
-        chrome: LiveChromeRuntimeAdapter { command_count: 1 },
-        renderer: LiveRendererRuntimeAdapter {
-            layers: vec![test_layer(1, 0, 0, Region::empty())],
-        },
-    };
+    let mut adapter = LiveRuntimeDriverAdapter::from_intake(LiveRuntimeDriverIntake {
+        x_event_count: 1,
+        wm_update: None,
+        portal_commands: vec![PortalCommand::DropNotification {
+            transfer: PortalTransferId::from_raw(3),
+        }],
+        chrome_command_count: 1,
+        layers: vec![test_layer(1, 0, 0, Region::empty())],
+    });
 
     let report = driver
         .run_with_adapter(output.id, 93, &mut adapter)
-        .expect("live adapter skeleton should drive one runtime tick");
+        .expect("live adapter intake should drive one runtime tick");
 
     assert_eq!(report.runtime_state.phase, SessionRuntimePhase::Idle);
     assert_eq!(report.runtime_state.x_events_polled, 1);
@@ -1542,6 +1537,43 @@ fn live_runtime_driver_adapter_executes_through_shared_command_executor() {
             .map(|tick| tick.frame.frame_serial),
         Some(93)
     );
+}
+
+#[test]
+fn live_runtime_driver_adapter_builds_from_nonblocking_intake_values() {
+    let update = WmTransactionUpdate {
+        commit: TransactionCommit {
+            transaction: TransactionId::from_raw(83),
+            outcome: TransactionOutcome::Committed,
+            applied_surfaces: vec![SurfaceId::new(1, 1)],
+        },
+        ipc_error: None,
+    };
+
+    let adapter = LiveRuntimeDriverAdapter::from_intake(LiveRuntimeDriverIntake {
+        x_event_count: 2,
+        wm_update: Some(update.clone()),
+        portal_commands: vec![PortalCommand::DropNotification {
+            transfer: PortalTransferId::from_raw(3),
+        }],
+        chrome_command_count: 4,
+        layers: vec![test_layer(1, 0, 0, Region::empty())],
+    });
+
+    assert_eq!(adapter.x, LiveXRuntimeAdapter::from_polled_event_count(2));
+    assert_eq!(
+        adapter.wm,
+        LiveWmRuntimeAdapter::from_transaction_update(update)
+    );
+    assert_eq!(
+        adapter.portal.drain_observation(),
+        SessionRuntimeObservation::PortalCommandsReady { count: 1 }
+    );
+    assert_eq!(
+        adapter.chrome.present_observation(),
+        SessionRuntimeObservation::ChromeCommandsReady { count: 4 }
+    );
+    assert_eq!(adapter.renderer.layers.len(), 1);
 }
 
 #[test]
@@ -1628,7 +1660,7 @@ fn live_broker_runtime_adapter_routes_health_without_message_payload() {
     .unwrap();
 
     assert_eq!(
-        LiveBrokerRuntimeAdapter::health_observation(&packet),
+        LiveBrokerRuntimeAdapter::from_health_packet(&packet),
         SessionRuntimeObservation::BrokerHealthChanged {
             broker: BrokerKind::Portal,
             state: BrokerHealthState::Ready,
@@ -1640,23 +1672,31 @@ fn live_broker_runtime_adapter_routes_health_without_message_payload() {
 
 #[test]
 fn live_portal_chrome_and_renderer_adapters_emit_counts_and_frame_serials() {
-    let portal = LivePortalRuntimeAdapter {
-        commands: vec![
-            PortalCommand::DropNotification {
-                transfer: PortalTransferId::from_raw(1),
-            },
-            PortalCommand::DeliverNotification {
-                transfer: PortalTransferId::from_raw(2),
-            },
-        ],
-    };
-    let chrome = LiveChromeRuntimeAdapter { command_count: 3 };
+    let portal = LivePortalRuntimeAdapter::from_commands(vec![
+        PortalCommand::DropNotification {
+            transfer: PortalTransferId::from_raw(1),
+        },
+        PortalCommand::DeliverNotification {
+            transfer: PortalTransferId::from_raw(2),
+        },
+    ]);
+    let notification_updates = [
+        NotificationChromeUpdate::Staged {
+            transfer: PortalTransferId::from_raw(1),
+        },
+        NotificationChromeUpdate::Presented {
+            transfer: PortalTransferId::from_raw(1),
+        },
+        NotificationChromeUpdate::Dismissed {
+            transfer: PortalTransferId::from_raw(1),
+        },
+    ];
+    let chrome = LiveChromeRuntimeAdapter::from_notification_updates(&notification_updates);
     let engine = HeadlessEngine::default();
     let output = engine.output();
     let mut last_committed = LastCommittedLayout::default();
-    let mut renderer = LiveRendererRuntimeAdapter {
-        layers: vec![test_layer(1, 0, 0, Region::empty())],
-    };
+    let mut renderer =
+        LiveRendererRuntimeAdapter::from_layers(vec![test_layer(1, 0, 0, Region::empty())]);
 
     let report = renderer
         .render_frame(&engine, output.id, 94, &mut last_committed)
@@ -1668,11 +1708,37 @@ fn live_portal_chrome_and_renderer_adapters_emit_counts_and_frame_serials() {
     );
     assert_eq!(
         chrome.present_observation(),
-        SessionRuntimeObservation::ChromeCommandsReady { count: 3 }
+        SessionRuntimeObservation::ChromeCommandsReady { count: 2 }
     );
     assert_eq!(
         LiveRendererRuntimeAdapter::rendered_observation(&report),
         SessionRuntimeObservation::FrameRendered { frame_serial: 94 }
+    );
+    assert_eq!(
+        LiveRendererRuntimeAdapter::from_render_frame_report(
+            &engine.render_frame(&report.frame).unwrap()
+        ),
+        SessionRuntimeObservation::FrameRendered { frame_serial: 94 }
+    );
+}
+
+#[test]
+fn live_chrome_runtime_adapter_counts_metadata_updates() {
+    let updates = [
+        MetadataChromeUpdate::Upserted {
+            surface: SurfaceId::new(1, 1),
+        },
+        MetadataChromeUpdate::Removed {
+            surface: SurfaceId::new(1, 2),
+        },
+        MetadataChromeUpdate::Rejected(MetadataChromeRejectReason::InvalidLabel),
+    ];
+
+    let chrome = LiveChromeRuntimeAdapter::from_metadata_updates(&updates);
+
+    assert_eq!(
+        chrome.present_observation(),
+        SessionRuntimeObservation::ChromeCommandsReady { count: 2 }
     );
 }
 

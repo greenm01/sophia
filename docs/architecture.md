@@ -483,9 +483,17 @@ not full session ticks.
 driver asks an adapter to answer each runtime command with a reduced
 observation or concrete frame report: X event count, WM layout/restart result,
 frame scheduling/rendering, portal drain count, and chrome presentation count.
-`HeadlessRuntimeAdapter` preserves deterministic test behavior, while live
-skeleton adapters model X bridge, WM socket, broker health, portal, chrome, and
-renderer intake without blocking on file descriptors yet.
+`HeadlessRuntimeAdapter` preserves deterministic test behavior.
+`LiveRuntimeDriverIntake` is the non-blocking handoff shape for live sources:
+the X bridge, WM socket, broker IPC, portal execution, chrome presenter, and
+renderer reduce their own data into bounded facts before the runtime executor
+sees them. This keeps raw X events, namespace authority tokens, metadata
+strings, portal payload bytes, and renderer payload buffers out of the reducer.
+
+The live adapters still do not poll file descriptors themselves. The eventual
+session loop owns readiness and process supervision, gathers reduced facts from
+each boundary, builds `LiveRuntimeDriverIntake`, then lets the common executor
+advance the runtime phases.
 
 The headless runtime tick smoke now drives this reducer around the existing
 capture -> session tick -> replay path. It executes the reducer's X polling,

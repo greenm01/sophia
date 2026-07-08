@@ -706,11 +706,12 @@ external WM transaction observation.
 
 `RuntimeDriverAdapter` now turns the headless driver into a shared command
 executor rather than a hard-coded synthetic loop. `HeadlessRuntimeAdapter`
-preserves deterministic tests, and live skeleton adapters cover the intended
-replacement sources: X event counts, WM layout/restart observations, broker
-health facts, portal command drains, chrome presentation counts, and renderer
-frame reports. These skeletons still do not poll real file descriptors; they
-define the shape for replacing synthetic values with live intake.
+preserves deterministic tests, and `LiveRuntimeDriverIntake` covers the
+intended replacement sources: X event counts, WM layout/restart observations,
+broker health facts, portal command drains, chrome presentation counts, layer
+snapshots, and renderer frame reports. The live adapters now expose
+non-blocking constructors over those reduced facts, while file-descriptor
+polling remains owned by the future session loop.
 
 ## Open Questions
 
