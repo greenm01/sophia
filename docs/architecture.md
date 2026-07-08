@@ -288,6 +288,12 @@ explicit approval, binds approval to a source generation, and emits abstract
 handoff or cancel commands. Xdnd/X11 event translation remains Sophia X Bridge
 work; portal policy does not subscribe to X events directly.
 
+File open/save handoff uses the same reducer boundary. It records open versus
+save intent, a bounded offered-type list, an optional safe suggested filename,
+and generation-bound approval state. Actual file chooser UI, file descriptors,
+temporary handles, and namespace filesystem brokering are runtime work, not
+portal policy state.
+
 ### Metadata Broker And Chrome Actions
 
 Compositor chrome is Engine/session authority, not WM authority. If the user

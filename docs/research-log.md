@@ -387,6 +387,12 @@ pending/private, stores a bounded offered-type list hint, requires explicit
 generation-matching approval, and emits abstract handoff or cancel commands.
 Xdnd event monitoring and concrete X11 message handling remain X Bridge work.
 
+File open/save handoff policy is now represented as a portal reducer too. It
+keeps open/save intent and bounded file type metadata private until explicit
+approval, validates suggested filenames so policy never stores path-like names,
+and emits abstract handoff/cancel commands. Runtime file brokering is still
+future work.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

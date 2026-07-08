@@ -444,6 +444,11 @@ bounded before storage, approval is generation-bound, denial or stale ownership
 becomes an abstract cancel command, and Xdnd-specific protocol mechanics stay
 in X Bridge.
 
+File handoff also stays metadata-only at the reducer level. The policy model
+stores open/save intent, bounded offered types, and a sanitized suggested
+filename. It emits abstract handoff or cancel commands; concrete file handles,
+temporary storage, and chooser UI are runtime responsibilities.
+
 X Bridge owns selection monitoring data. It should reduce XFixes owner-change
 events into records keyed by selection atom and namespace, then pass only the
 selection, namespace, owner generation, and owner-change fact to portal policy.
