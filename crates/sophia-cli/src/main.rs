@@ -1,4 +1,6 @@
-use sophia_engine::{FramePlanRequest, HeadlessEngine};
+use sophia_engine::{
+    FramePlanRequest, HeadlessEngine, LastCommittedLayout, SessionLayerSource, SessionTickRequest,
+};
 use sophia_protocol::{
     LayoutNodeCapabilities, LayoutNodeKind, LayoutNodeSnapshot, LayoutNodeState, Rect, Size,
     SurfaceConstraints, TransactionId, WorkspaceId,
@@ -155,6 +157,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    if args.iter().any(|arg| arg == "x-smoke-runtime-tick") {
+        let display = arg_value(&args, "--display");
+        let capture = capture_readback_display(display.as_deref())?;
+        let engine = HeadlessEngine::default();
+        let output = engine.output();
+        let mut last_committed = LastCommittedLayout::default();
+        let report = engine.run_session_tick(
+            SessionTickRequest {
+                output: output.id,
+                frame_serial: 4,
+                layers: SessionLayerSource::Fresh(capture.layers),
+            },
+            &mut last_committed,
+        )?;
+
+        println!(
+            "x-smoke-runtime-tick display={} windows={} surfaces={} layers={} readbacks={} bytes={} restored={} commands={} replay_steps={} damage_rects={} cached_layers={}",
+            capture
+                .report
+                .display_name
+                .as_deref()
+                .unwrap_or("<default>"),
+            capture.report.mirrored_windows,
+            capture.report.surfaces,
+            report.frame.layers.len(),
+            capture.report.readbacks,
+            capture.report.total_bytes,
+            report.restored_last_committed,
+            report.frame.commands.len(),
+            report.replay.steps.len(),
+            report.replay.damage.rects.len(),
+            last_committed.layers().len()
+        );
+        return Ok(());
+    }
+
     if args.iter().any(|arg| arg == "x-smoke-external-wm") {
         let display = arg_value(&args, "--display");
         let wm_path = arg_value(&args, "--wm")
@@ -271,6 +309,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("commands: x-smoke-readback [--display=:99]");
     println!("commands: x-smoke-frame [--display=:99]");
     println!("commands: x-smoke-policy-frame [--display=:99]");
+    println!("commands: x-smoke-runtime-tick [--display=:99]");
     println!("commands: x-smoke-external-wm [--display=:99] [--wm=target/debug/sophia-wm-demo]");
     println!("commands: x-smoke-routed-input [--display=:99]");
     println!(

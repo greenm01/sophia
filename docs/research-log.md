@@ -490,6 +490,13 @@ side applies those events to revoke stale pending clipboard transfers. This is
 owner-generation/revocation wiring only; full paste import still needs X11
 SelectionRequest/requestor context.
 
+The first headless runtime smoke is now a CLI command:
+`sophia-cli x-smoke-runtime-tick`. It captures X-derived layers through Sophia X
+Bridge, feeds them into the session tick, updates the last-committed layout
+cache, plans a headless frame, and replays it. The XLibre namespace smoke runs
+this command as the first integrated proof of capture -> session tick -> frame
+replay. It is still a one-shot coordinator, not the final continuous event loop.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

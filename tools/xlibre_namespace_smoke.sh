@@ -112,6 +112,13 @@ echo "root bridge smoke:"
         cargo run -q -p sophia-cli -- x-smoke-policy-frame
 )
 
+echo "root runtime tick smoke:"
+(
+    cd "$ROOT_DIR"
+    env DISPLAY="$DISPLAY_NAME" XAUTHORITY="$WORK_DIR/root.xauth" \
+        cargo run -q -p sophia-cli -- x-smoke-runtime-tick
+)
+
 echo "root external-wm bridge smoke:"
 (
     cd "$ROOT_DIR"

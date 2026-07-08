@@ -17,7 +17,7 @@ Close the gap between existing reducers/protocols and a running session loop.
   events.
 - [x] Route clipboard owner-change events into `ClipboardPortal` revocation
   commands.
-- [ ] Add a headless runtime smoke that performs: X capture -> session tick ->
+- [x] Add a headless runtime smoke that performs: X capture -> session tick ->
   frame replay.
 
 **Next**
