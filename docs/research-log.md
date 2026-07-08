@@ -367,6 +367,18 @@ only when measurements recommend considering SHM and the ring is available.
 Unavailable or failed SHM falls back to `X11Request`, preserving XLibre's normal
 request/reply path as the correctness baseline.
 
+The XLibre namespace smoke script now patches a temporary XLibre source copy
+when the configured `XSERVER_SRC` does not already contain Sophia's routed-input
+extension. The first local stress run completed 1000 accepted routed pointer
+motion requests through the X11 request path:
+
+```text
+x-stress-routed-input iterations=1000 accepted=1000 request_bytes=44 min_us=13 avg_us=14 p95_us=16 max_us=45 threshold_us=500 recommendation=KeepX11RequestPath
+```
+
+That result does not justify prototyping the SHM route ring yet. The next SHM
+step should remain gated on repeated measurements that exceed the threshold.
+
 Sophia Engine now has `RoutedInputCoalescer` for the first input hot-path
 optimization. It coalesces only stable pure pointer motion, keeps the latest
 motion until the frame boundary, and flushes immediately for button/key input,

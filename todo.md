@@ -162,6 +162,7 @@ Design and prototype compositor-first input for X11 clients.
 **Later optimization**
 - [x] Measure routed-input dispatch cost before replacing the X11 request path.
 - [x] Add a repeated routed-input stress command for X11 request-path latency.
+- [x] Run patched Xvfb routed-input stress and record the first threshold result.
 - [x] Coalesce stable pure-motion routes at frame boundaries.
 - [x] Flush immediately for button, key, crossing, drag, grab, and focus events.
 - [x] Gate SHM route-ring work on measured dispatch samples.

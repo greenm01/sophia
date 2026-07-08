@@ -66,6 +66,10 @@ the XInput master pointer, sends a raw `RouteEvent` request, requires an
 `Accepted` reply, and waits for the target client connection to receive a core
 `ButtonPress` at the requested local coordinates.
 
+If the configured `XSERVER_SRC` does not already contain
+`SOPHIA-ROUTED-INPUT`, the smoke script builds from a temporary patched source
+copy under `/tmp` instead of mutating the local XLibre checkout.
+
 ## Required XLibre Touch Points
 
 - Add a new `Xext/sophia-routed-input/` extension with a small dispatch file.
@@ -164,6 +168,12 @@ motion requests through the `SOPHIA-ROUTED-INPUT` X11 request path, requires
 `Accepted` replies, and reports min/average/p95/max dispatch latency. This is
 the first tool to use when asking whether the X11 request path is too slow. It
 still measures request/reply dispatch, not full hardware-to-photon latency.
+
+The patched Xvfb smoke currently reports 1000 accepted routed-input requests
+with p95 dispatch around 16 microseconds and max dispatch around 45
+microseconds on the local test machine. With the default 500 microsecond gate,
+that keeps the X11 request path and does not justify an SHM route-ring
+prototype yet.
 
 `RoutedInputDispatchStats` records those dispatch samples and produces a
 conservative optimization recommendation. Empty samples and samples within the

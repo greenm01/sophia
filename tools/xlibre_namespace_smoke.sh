@@ -3,20 +3,38 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 XSERVER_SRC="${XSERVER_SRC:-/home/niltempus/src/xserver}"
+PATCH_FILE="${SOPHIA_ROUTED_INPUT_PATCH:-$ROOT_DIR/patches/xlibre/0001-add-sophia-routed-input-extension.patch}"
+PATCHED_SRC="${SOPHIA_XLIBRE_SMOKE_PATCHED_SRC:-/tmp/sophia-xserver-routed-input-smoke-src}"
 BUILD_DIR="${XLIBRE_BUILD_DIR:-/tmp/sophia-xlibre-build}"
 WORK_DIR="${SOPHIA_XLIBRE_SMOKE_DIR:-/tmp/sophia-xlibre-smoke}"
 DISPLAY_NAME="${SOPHIA_XLIBRE_DISPLAY:-:120}"
 ROOT_COOKIE="${SOPHIA_XLIBRE_ROOT_COOKIE:-00112233445566778899aabbccddeeff}"
 CLIENT_COOKIE="${SOPHIA_XLIBRE_CLIENT_COOKIE:-102132435465768798a9babbdcddedef}"
 XVFB="$BUILD_DIR/hw/vfb/Xvfb"
+ACTIVE_XSERVER_SRC="$XSERVER_SRC"
 
 if [ ! -d "$XSERVER_SRC" ]; then
     echo "missing XLibre source tree: $XSERVER_SRC" >&2
     exit 1
 fi
 
+if ! grep -Rqs "SOPHIA-ROUTED-INPUT" "$XSERVER_SRC/Xext"; then
+    if [ ! -f "$PATCH_FILE" ]; then
+        echo "missing routed-input patch: $PATCH_FILE" >&2
+        exit 1
+    fi
+
+    echo "source tree lacks SOPHIA-ROUTED-INPUT; preparing patched smoke tree"
+    rm -rf "$PATCHED_SRC"
+    rsync -a --delete "$XSERVER_SRC"/ "$PATCHED_SRC"/
+    git -C "$PATCHED_SRC" apply "$PATCH_FILE"
+    ACTIVE_XSERVER_SRC="$PATCHED_SRC"
+    BUILD_DIR="${XLIBRE_BUILD_DIR:-/tmp/sophia-xlibre-routed-input-smoke-build}"
+    XVFB="$BUILD_DIR/hw/vfb/Xvfb"
+fi
+
 if [ ! -f "$BUILD_DIR/build.ninja" ]; then
-    meson setup "$BUILD_DIR" "$XSERVER_SRC" \
+    meson setup "$BUILD_DIR" "$ACTIVE_XSERVER_SRC" \
         -Dxvfb=true \
         -Dxorg=false \
         -Dxnest=false \
@@ -106,6 +124,13 @@ echo "root routed-input smoke:"
     cd "$ROOT_DIR"
     env DISPLAY="$DISPLAY_NAME" XAUTHORITY="$WORK_DIR/root.xauth" \
         cargo run -q -p sophia-cli -- x-smoke-routed-input
+)
+
+echo "root routed-input stress:"
+(
+    cd "$ROOT_DIR"
+    env DISPLAY="$DISPLAY_NAME" XAUTHORITY="$WORK_DIR/root.xauth" \
+        cargo run -q -p sophia-cli -- x-stress-routed-input --iterations=1000 --threshold-us=500
 )
 
 echo "namespace isolation smoke:"
