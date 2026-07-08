@@ -7,6 +7,7 @@ use sophia_runtime::{TraceLevel, init_tracing};
 use sophia_wm_demo::{ExternalWmClient, tile_workspace};
 use sophia_x_bridge::{
     TestClientConfig, capture_readback_display, run_test_client_window, smoke_routed_input,
+    stress_routed_input,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -231,6 +232,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    if args.iter().any(|arg| arg == "x-stress-routed-input") {
+        let display = arg_value(&args, "--display");
+        let iterations = arg_value(&args, "--iterations")
+            .as_deref()
+            .map(parse_usize)
+            .transpose()?
+            .unwrap_or(1_000);
+        let threshold_us = arg_value(&args, "--threshold-us")
+            .as_deref()
+            .map(parse_u64)
+            .transpose()?
+            .unwrap_or(500);
+        let threshold = std::time::Duration::from_micros(threshold_us);
+        let report = stress_routed_input(display.as_deref(), iterations, threshold)?;
+        println!(
+            "x-stress-routed-input display={} opcode={} target={:#x} device={} iterations={} accepted={} request_bytes={} min_us={} avg_us={} p95_us={} max_us={} threshold_us={} recommendation={:?}",
+            report.display_name.as_deref().unwrap_or("<default>"),
+            report.extension_opcode,
+            report.target_window.xid(),
+            report.device.raw(),
+            report.iterations,
+            report.accepted,
+            report.request_bytes,
+            duration_us(report.stats.min()),
+            duration_us(report.stats.average()),
+            duration_us(report.stats.percentile_nearest(95)),
+            duration_us(report.stats.max()),
+            report.threshold.as_micros(),
+            report.recommendation
+        );
+        return Ok(());
+    }
+
     println!("sophia {}", env!("CARGO_PKG_VERSION"));
     println!("components: engine, x-bridge, protocol, wm-demo");
     println!("commands: x-test-client [--display=:99] [--seconds=5] [--width=320] [--height=200]");
@@ -239,6 +273,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("commands: x-smoke-policy-frame [--display=:99]");
     println!("commands: x-smoke-external-wm [--display=:99] [--wm=target/debug/sophia-wm-demo]");
     println!("commands: x-smoke-routed-input [--display=:99]");
+    println!(
+        "commands: x-stress-routed-input [--display=:99] [--iterations=1000] [--threshold-us=500]"
+    );
 
     if verbose {
         tracing::debug!("verbose tracing enabled");
@@ -252,6 +289,22 @@ fn arg_value(args: &[String], key: &str) -> Option<String> {
     let prefix = format!("{key}=");
     args.iter()
         .find_map(|arg| arg.strip_prefix(&prefix).map(str::to_owned))
+}
+
+fn parse_usize(value: &str) -> Result<usize, Box<dyn std::error::Error>> {
+    value
+        .parse::<usize>()
+        .map_err(|error| format!("invalid usize value {value:?}: {error}").into())
+}
+
+fn parse_u64(value: &str) -> Result<u64, Box<dyn std::error::Error>> {
+    value
+        .parse::<u64>()
+        .map_err(|error| format!("invalid u64 value {value:?}: {error}").into())
+}
+
+fn duration_us(duration: Option<std::time::Duration>) -> u128 {
+    duration.map_or(0, |duration| duration.as_micros())
 }
 
 fn layout_nodes_from_layers(

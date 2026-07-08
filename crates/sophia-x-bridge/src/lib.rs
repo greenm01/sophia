@@ -120,6 +120,20 @@ pub struct RoutedInputSmokeReport {
     pub button: u8,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RoutedInputStressReport {
+    pub display_name: Option<String>,
+    pub extension_opcode: u8,
+    pub target_window: XWindowId,
+    pub device: DeviceId,
+    pub iterations: usize,
+    pub accepted: usize,
+    pub request_bytes: usize,
+    pub threshold: Duration,
+    pub stats: RoutedInputDispatchStats,
+    pub recommendation: RoutedInputOptimizationRecommendation,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RoutedInputOptimizationRecommendation {
     KeepX11RequestPath,
@@ -168,6 +182,20 @@ impl RoutedInputDispatchStats {
         let average_nanos = average_nanos.min(u128::from(u64::MAX)) as u64;
 
         Some(Duration::from_nanos(average_nanos))
+    }
+
+    pub fn percentile_nearest(&self, percentile: u8) -> Option<Duration> {
+        if self.samples.is_empty() {
+            return None;
+        }
+
+        let percentile = percentile.min(100);
+        let mut sorted = self.samples.clone();
+        sorted.sort_unstable();
+        let last = sorted.len() - 1;
+        let index = (last * usize::from(percentile) + 50) / 100;
+
+        sorted.get(index).copied()
     }
 
     pub fn recommendation(
@@ -243,126 +271,18 @@ impl TryParse for SophiaRoutedInputRouteReply {
 pub fn smoke_routed_input(
     display_name: Option<&str>,
 ) -> Result<RoutedInputSmokeReport, XBridgeError> {
-    let (connection, screen_num) =
-        x11rb::connect(display_name).map_err(|error| XBridgeError::Connect {
-            message: error.to_string(),
-        })?;
-    let routed_info = connection
-        .extension_information(XLIBRE_ROUTED_INPUT_EXTENSION_NAME)
-        .map_err(|error| XBridgeError::RoutedInput {
-            message: error.to_string(),
-        })?
-        .ok_or_else(|| XBridgeError::RoutedInput {
-            message: format!("missing {XLIBRE_ROUTED_INPUT_EXTENSION_NAME} extension"),
-        })?;
-    let screen = connection
-        .setup()
-        .roots
-        .get(screen_num)
-        .ok_or(XBridgeError::InvalidScreen { screen_num })?;
-    let device = master_pointer_device(&connection)?;
-    let target = connection
-        .generate_id()
-        .map_err(|error| XBridgeError::GenerateId {
-            message: error.to_string(),
-        })?;
-    let gc = connection
-        .generate_id()
-        .map_err(|error| XBridgeError::GenerateId {
-            message: error.to_string(),
-        })?;
-    let target_width = 160;
-    let target_height = 120;
+    let harness = RoutedInputHarness::new(display_name)?;
     let local_x = 42;
     let local_y = 37;
     let button = 1;
     let serial = 0x534f_5048_4941_0001;
 
-    connection
-        .create_window(
-            screen.root_depth,
-            target,
-            screen.root,
-            12,
-            14,
-            target_width,
-            target_height,
-            0,
-            WindowClass::INPUT_OUTPUT,
-            screen.root_visual,
-            &CreateWindowAux::new()
-                .background_pixel(screen.white_pixel)
-                .event_mask(
-                    EventMask::EXPOSURE
-                        | EventMask::STRUCTURE_NOTIFY
-                        | EventMask::BUTTON_PRESS
-                        | EventMask::BUTTON_RELEASE
-                        | EventMask::POINTER_MOTION,
-                ),
-        )
-        .map_err(|error| XBridgeError::RoutedInput {
-            message: error.to_string(),
-        })?
-        .check()
-        .map_err(|error| XBridgeError::RoutedInput {
-            message: error.to_string(),
-        })?;
-    connection
-        .create_gc(
-            gc,
-            target,
-            &CreateGCAux::new()
-                .foreground(screen.black_pixel)
-                .background(screen.white_pixel),
-        )
-        .map_err(|error| XBridgeError::RoutedInput {
-            message: error.to_string(),
-        })?
-        .check()
-        .map_err(|error| XBridgeError::RoutedInput {
-            message: error.to_string(),
-        })?;
-    connection
-        .map_window(target)
-        .map_err(|error| XBridgeError::RoutedInput {
-            message: error.to_string(),
-        })?
-        .check()
-        .map_err(|error| XBridgeError::RoutedInput {
-            message: error.to_string(),
-        })?;
-    connection
-        .poly_fill_rectangle(
-            target,
-            gc,
-            &[Rectangle {
-                x: 8,
-                y: 8,
-                width: target_width.saturating_sub(16),
-                height: target_height.saturating_sub(16),
-            }],
-        )
-        .map_err(|error| XBridgeError::RoutedInput {
-            message: error.to_string(),
-        })?
-        .check()
-        .map_err(|error| XBridgeError::RoutedInput {
-            message: error.to_string(),
-        })?;
-    connection
-        .flush()
-        .map_err(|error| XBridgeError::RoutedInput {
-            message: error.to_string(),
-        })?;
-
-    wait_for_mapped_window(&connection, target, Duration::from_secs(2))?;
-
     let request = XLibreRoutedInputRequest {
         serial,
         seat: SeatId::from_raw(1),
-        device,
+        device: harness.device,
         time_msec: 1,
-        target_window: XWindowId::new(target, 1),
+        target_window: harness.target_window(),
         local_position: Point {
             x: f64::from(local_x),
             y: f64::from(local_y),
@@ -372,7 +292,7 @@ pub fn smoke_routed_input(
             pressed: true,
         },
     };
-    let dispatch = send_sophia_routed_input_route(&connection, routed_info.major_opcode, &request)?;
+    let dispatch = harness.send(&request)?;
     let decision = XLibreRoutedInputDecision {
         serial: dispatch.reply.serial,
         target_window: dispatch.reply.target_window,
@@ -385,7 +305,7 @@ pub fn smoke_routed_input(
     }
 
     let (event_x, event_y, observed_button) =
-        wait_for_routed_button_press(&connection, target, Duration::from_secs(2))?;
+        wait_for_routed_button_press(&harness.connection, harness.target, Duration::from_secs(2))?;
 
     if event_x != local_x || event_y != local_y || observed_button != button {
         return Err(XBridgeError::RoutedInput {
@@ -398,9 +318,9 @@ pub fn smoke_routed_input(
 
     Ok(RoutedInputSmokeReport {
         display_name: display_name.map(str::to_owned),
-        extension_opcode: routed_info.major_opcode,
-        target_window: XWindowId::new(target, 1),
-        device,
+        extension_opcode: harness.routed_major_opcode,
+        target_window: harness.target_window(),
+        device: harness.device,
         decision,
         dispatch_elapsed: dispatch.elapsed,
         request_bytes: dispatch.request_bytes,
@@ -408,6 +328,214 @@ pub fn smoke_routed_input(
         event_y,
         button: observed_button,
     })
+}
+
+pub fn stress_routed_input(
+    display_name: Option<&str>,
+    iterations: usize,
+    threshold: Duration,
+) -> Result<RoutedInputStressReport, XBridgeError> {
+    if iterations == 0 {
+        return Err(XBridgeError::RoutedInput {
+            message: "routed-input stress iterations must be greater than zero".to_owned(),
+        });
+    }
+
+    let harness = RoutedInputHarness::new(display_name)?;
+    let mut stats = RoutedInputDispatchStats::new();
+    let mut accepted = 0;
+    let mut request_bytes = 0;
+    let base_serial = 0x534f_5048_5354_0000;
+
+    for index in 0..iterations {
+        let local_x = 8 + i32::try_from(index % 120).unwrap_or(0);
+        let local_y = 8 + i32::try_from((index / 120) % 80).unwrap_or(0);
+        let request = XLibreRoutedInputRequest {
+            serial: base_serial + u64::try_from(index).unwrap_or(u64::MAX),
+            seat: SeatId::from_raw(1),
+            device: harness.device,
+            time_msec: u64::try_from(index).unwrap_or(u64::MAX),
+            target_window: harness.target_window(),
+            local_position: Point {
+                x: f64::from(local_x),
+                y: f64::from(local_y),
+            },
+            kind: InputEventKind::PointerMotion,
+        };
+        let dispatch = harness.send(&request)?;
+        request_bytes = dispatch.request_bytes;
+        stats.record(dispatch.elapsed);
+
+        if dispatch.reply.outcome == XLibreRoutedInputOutcome::Accepted {
+            accepted += 1;
+        } else {
+            return Err(XBridgeError::RoutedInput {
+                message: format!(
+                    "routed-input stress rejected sample {index} with {:?}",
+                    dispatch.reply.outcome
+                ),
+            });
+        }
+
+        if index % 128 == 0 {
+            drain_pending_events(&harness.connection)?;
+        }
+    }
+
+    drain_pending_events(&harness.connection)?;
+    let recommendation = stats.recommendation(threshold);
+
+    Ok(RoutedInputStressReport {
+        display_name: display_name.map(str::to_owned),
+        extension_opcode: harness.routed_major_opcode,
+        target_window: harness.target_window(),
+        device: harness.device,
+        iterations,
+        accepted,
+        request_bytes,
+        threshold,
+        stats,
+        recommendation,
+    })
+}
+
+struct RoutedInputHarness {
+    connection: x11rb::rust_connection::RustConnection,
+    routed_major_opcode: u8,
+    target: Window,
+    device: DeviceId,
+}
+
+impl RoutedInputHarness {
+    fn new(display_name: Option<&str>) -> Result<Self, XBridgeError> {
+        let (connection, screen_num) =
+            x11rb::connect(display_name).map_err(|error| XBridgeError::Connect {
+                message: error.to_string(),
+            })?;
+        let routed_info = connection
+            .extension_information(XLIBRE_ROUTED_INPUT_EXTENSION_NAME)
+            .map_err(|error| XBridgeError::RoutedInput {
+                message: error.to_string(),
+            })?
+            .ok_or_else(|| XBridgeError::RoutedInput {
+                message: format!("missing {XLIBRE_ROUTED_INPUT_EXTENSION_NAME} extension"),
+            })?;
+        let screen = connection
+            .setup()
+            .roots
+            .get(screen_num)
+            .ok_or(XBridgeError::InvalidScreen { screen_num })?;
+        let device = master_pointer_device(&connection)?;
+        let target = connection
+            .generate_id()
+            .map_err(|error| XBridgeError::GenerateId {
+                message: error.to_string(),
+            })?;
+        let gc = connection
+            .generate_id()
+            .map_err(|error| XBridgeError::GenerateId {
+                message: error.to_string(),
+            })?;
+        let target_width = 160;
+        let target_height = 120;
+
+        connection
+            .create_window(
+                screen.root_depth,
+                target,
+                screen.root,
+                12,
+                14,
+                target_width,
+                target_height,
+                0,
+                WindowClass::INPUT_OUTPUT,
+                screen.root_visual,
+                &CreateWindowAux::new()
+                    .background_pixel(screen.white_pixel)
+                    .event_mask(
+                        EventMask::EXPOSURE
+                            | EventMask::STRUCTURE_NOTIFY
+                            | EventMask::BUTTON_PRESS
+                            | EventMask::BUTTON_RELEASE
+                            | EventMask::POINTER_MOTION,
+                    ),
+            )
+            .map_err(|error| XBridgeError::RoutedInput {
+                message: error.to_string(),
+            })?
+            .check()
+            .map_err(|error| XBridgeError::RoutedInput {
+                message: error.to_string(),
+            })?;
+        connection
+            .create_gc(
+                gc,
+                target,
+                &CreateGCAux::new()
+                    .foreground(screen.black_pixel)
+                    .background(screen.white_pixel),
+            )
+            .map_err(|error| XBridgeError::RoutedInput {
+                message: error.to_string(),
+            })?
+            .check()
+            .map_err(|error| XBridgeError::RoutedInput {
+                message: error.to_string(),
+            })?;
+        connection
+            .map_window(target)
+            .map_err(|error| XBridgeError::RoutedInput {
+                message: error.to_string(),
+            })?
+            .check()
+            .map_err(|error| XBridgeError::RoutedInput {
+                message: error.to_string(),
+            })?;
+        connection
+            .poly_fill_rectangle(
+                target,
+                gc,
+                &[Rectangle {
+                    x: 8,
+                    y: 8,
+                    width: target_width.saturating_sub(16),
+                    height: target_height.saturating_sub(16),
+                }],
+            )
+            .map_err(|error| XBridgeError::RoutedInput {
+                message: error.to_string(),
+            })?
+            .check()
+            .map_err(|error| XBridgeError::RoutedInput {
+                message: error.to_string(),
+            })?;
+        connection
+            .flush()
+            .map_err(|error| XBridgeError::RoutedInput {
+                message: error.to_string(),
+            })?;
+
+        wait_for_mapped_window(&connection, target, Duration::from_secs(2))?;
+
+        Ok(Self {
+            connection,
+            routed_major_opcode: routed_info.major_opcode,
+            target,
+            device,
+        })
+    }
+
+    fn target_window(&self) -> XWindowId {
+        XWindowId::new(self.target, 1)
+    }
+
+    fn send(
+        &self,
+        request: &XLibreRoutedInputRequest,
+    ) -> Result<SophiaRoutedInputDispatch, XBridgeError> {
+        send_sophia_routed_input_route(&self.connection, self.routed_major_opcode, request)
+    }
 }
 
 fn master_pointer_device<C>(connection: &C) -> Result<DeviceId, XBridgeError>
@@ -483,6 +611,21 @@ fn serialize_routed_input_wire(wire: &XLibreRoutedInputWireRequest, bytes: &mut 
     wire.event_code.serialize_into(bytes);
     wire.detail.serialize_into(bytes);
     wire.flags.serialize_into(bytes);
+}
+
+fn drain_pending_events<C>(connection: &C) -> Result<(), XBridgeError>
+where
+    C: Connection + ?Sized,
+{
+    while connection
+        .poll_for_event()
+        .map_err(|error| XBridgeError::RoutedInput {
+            message: error.to_string(),
+        })?
+        .is_some()
+    {}
+
+    Ok(())
 }
 
 fn wait_for_mapped_window<C>(

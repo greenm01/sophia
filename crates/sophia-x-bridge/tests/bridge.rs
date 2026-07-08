@@ -1014,6 +1014,34 @@ mod tests {
     }
 
     #[test]
+    fn routed_input_dispatch_stats_report_nearest_percentiles() {
+        let stats = RoutedInputDispatchStats::from_samples([
+            std::time::Duration::from_micros(10),
+            std::time::Duration::from_micros(20),
+            std::time::Duration::from_micros(30),
+            std::time::Duration::from_micros(40),
+            std::time::Duration::from_micros(50),
+        ]);
+
+        assert_eq!(
+            stats.percentile_nearest(0),
+            Some(std::time::Duration::from_micros(10))
+        );
+        assert_eq!(
+            stats.percentile_nearest(50),
+            Some(std::time::Duration::from_micros(30))
+        );
+        assert_eq!(
+            stats.percentile_nearest(95),
+            Some(std::time::Duration::from_micros(50))
+        );
+        assert_eq!(
+            stats.percentile_nearest(100),
+            Some(std::time::Duration::from_micros(50))
+        );
+    }
+
+    #[test]
     fn routed_input_dispatch_stats_keep_x11_path_until_threshold_is_exceeded() {
         let mut stats = RoutedInputDispatchStats::new();
 

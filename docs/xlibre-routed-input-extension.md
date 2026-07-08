@@ -153,6 +153,18 @@ and the elapsed time from serialized `RouteEvent` request dispatch through
 XLibre's reply. This is a round-trip smoke measurement, not a full input-latency
 benchmark.
 
+For repeated dispatch measurement, use:
+
+```text
+cargo run -q -p sophia-cli -- x-stress-routed-input --display=:99 --iterations=1000 --threshold-us=500
+```
+
+The stress command creates one target window, sends repeated routed pointer
+motion requests through the `SOPHIA-ROUTED-INPUT` X11 request path, requires
+`Accepted` replies, and reports min/average/p95/max dispatch latency. This is
+the first tool to use when asking whether the X11 request path is too slow. It
+still measures request/reply dispatch, not full hardware-to-photon latency.
+
 `RoutedInputDispatchStats` records those dispatch samples and produces a
 conservative optimization recommendation. Empty samples and samples within the
 chosen threshold keep the X11 request path. Only measured dispatch times above

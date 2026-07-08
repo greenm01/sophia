@@ -355,6 +355,13 @@ speculation. `RoutedInputDispatchStats` summarizes dispatch samples and only
 recommends considering a shared-memory ring when measured dispatch time exceeds
 the caller's threshold. The request path remains the baseline and fallback.
 
+Sophia now has a live routed-input stress command:
+`sophia-cli x-stress-routed-input`. It repeats accepted `RouteEvent` requests
+against one patched-XLibre target window and reports min/average/p95/max
+request/reply dispatch time. This gives the SHM question a concrete gate:
+prototype the route ring only if repeated measurements show the X11 request
+path exceeding the chosen threshold.
+
 Sophia Engine now has `RoutedInputCoalescer` for the first input hot-path
 optimization. It coalesces only stable pure pointer motion, keeps the latest
 motion until the frame boundary, and flushes immediately for button/key input,
