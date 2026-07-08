@@ -269,6 +269,12 @@ monitor X selections itself; Sophia X Bridge remains responsible for observing
 namespaced selection ownership and converting X11 selection outcomes into
 portal events.
 
+Sophia X Bridge monitors selection ownership through XFixes
+`SelectionNotify` events for `PRIMARY`, `SECONDARY`, and `CLIPBOARD`. The bridge
+attributes each owner window to a known mirrored namespace when possible and
+bumps a per-selection owner generation. Portal approval is bound to that
+generation, so a later owner change makes old approval stale.
+
 ### Metadata Broker And Chrome Actions
 
 Compositor chrome is Engine/session authority, not WM authority. If the user

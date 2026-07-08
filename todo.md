@@ -191,7 +191,7 @@ Replace the demo argv/stdout WM transport with a bounded Unix socket protocol.
 Add intentional namespace crossing without weakening Xnamespace.
 
 **Clipboard first**
-- [ ] Monitor namespaced selections.
+- [x] Monitor namespaced selections.
 - [x] Keep clipboard private by default.
 - [x] Add explicit export/import policy.
 - [x] Support text targets first.

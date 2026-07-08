@@ -325,6 +325,13 @@ handoff command, and stale source generations revoke pending transfers. The
 remaining portal gap is X Bridge integration: monitor namespaced selections and
 turn ICCCM/XFixes events into portal requests.
 
+X Bridge now has the first selection-monitoring seam. It can subscribe to
+XFixes owner-change notifications for standard clipboard selections, convert
+`XfixesSelectionNotify` into Sophia-owned events, attribute owners through the
+mirrored namespace table, and bump per-selection owner generations. The next
+portal slice is to turn those owner records plus paste requests into concrete
+`ClipboardTransferRequest` values.
+
 Routed-input optimization should remain layered behind the working X11 extension
 path. Sophia may coalesce stable pure-motion routes at frame boundaries and may
 later add an Engine-to-XLibre shared-memory route ring if profiling proves the

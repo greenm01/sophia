@@ -3,6 +3,7 @@ mod tests {
     use sophia_x_bridge::*;
     use x11rb::protocol::Event;
     use x11rb::protocol::damage::ReportLevel;
+    use x11rb::protocol::xfixes::SelectionEvent;
 
     fn xid(window: u32) -> XWindowId {
         XWindowId::new(window, 1)
@@ -45,6 +46,113 @@ mod tests {
         assert_eq!(config.namespaces().len(), 1);
         assert_eq!(config.namespaces()[0].label, "trusted");
         assert_eq!(config.namespaces()[0].source, NamespaceSource::StaticConfig);
+    }
+
+    #[test]
+    fn selection_monitor_attributes_owner_to_namespace() {
+        let mut state = XMirrorState::default();
+        let mut owner = mirror(0x20, None, 0);
+        owner.namespace = Some(NamespaceId::from_raw(7));
+        state.ingest_window(owner);
+        let mut monitor = XSelectionMonitor::new();
+
+        let update = monitor.apply_event(
+            XSelectionEvent {
+                selection: 0x100,
+                owner: Some(xid(0x20)),
+                timestamp: 11,
+                selection_timestamp: 10,
+                kind: XSelectionChangeKind::SetOwner,
+            },
+            &state,
+        );
+
+        assert_eq!(update.previous, None);
+        assert_eq!(update.current.namespace, Some(NamespaceId::from_raw(7)));
+        assert_eq!(update.current.generation, 1);
+        assert_eq!(
+            monitor
+                .owner(0x100, Some(NamespaceId::from_raw(7)))
+                .unwrap()
+                .owner,
+            Some(xid(0x20))
+        );
+    }
+
+    #[test]
+    fn selection_monitor_increments_generation_per_namespace_selection() {
+        let mut state = XMirrorState::default();
+        let mut owner = mirror(0x20, None, 0);
+        owner.namespace = Some(NamespaceId::from_raw(7));
+        state.ingest_window(owner);
+        let mut monitor = XSelectionMonitor::new();
+
+        monitor.apply_event(
+            XSelectionEvent {
+                selection: 0x100,
+                owner: Some(xid(0x20)),
+                timestamp: 11,
+                selection_timestamp: 10,
+                kind: XSelectionChangeKind::SetOwner,
+            },
+            &state,
+        );
+        let update = monitor.apply_event(
+            XSelectionEvent {
+                selection: 0x100,
+                owner: Some(xid(0x20)),
+                timestamp: 13,
+                selection_timestamp: 12,
+                kind: XSelectionChangeKind::SetOwner,
+            },
+            &state,
+        );
+
+        assert_eq!(update.previous.unwrap().generation, 1);
+        assert_eq!(update.current.generation, 2);
+    }
+
+    #[test]
+    fn selection_monitor_records_unknown_namespace_for_owner_loss() {
+        let state = XMirrorState::default();
+        let mut monitor = XSelectionMonitor::new();
+
+        let update = monitor.apply_event(
+            XSelectionEvent {
+                selection: 0x100,
+                owner: None,
+                timestamp: 13,
+                selection_timestamp: 12,
+                kind: XSelectionChangeKind::OwnerClientClosed,
+            },
+            &state,
+        );
+
+        assert_eq!(update.current.namespace, None);
+        assert_eq!(update.current.owner, None);
+        assert_eq!(update.kind, XSelectionChangeKind::OwnerClientClosed);
+    }
+
+    #[test]
+    fn xfixes_selection_notify_converts_to_selection_event() {
+        let event = Event::XfixesSelectionNotify(x11rb::protocol::xfixes::SelectionNotifyEvent {
+            response_type: 0,
+            subtype: SelectionEvent::SET_SELECTION_OWNER,
+            sequence: 1,
+            window: 0x01,
+            owner: 0x20,
+            selection: 0x100,
+            timestamp: 13,
+            selection_timestamp: 12,
+        });
+
+        let converted = XSelectionEvent::from_x11_event(&event).unwrap();
+
+        assert_eq!(converted.selection, 0x100);
+        assert_eq!(converted.owner, Some(xid(0x20)));
+        assert_eq!(converted.kind, XSelectionChangeKind::SetOwner);
+        assert_eq!(converted.timestamp, 13);
+        assert_eq!(converted.selection_timestamp, 12);
     }
 
     #[test]

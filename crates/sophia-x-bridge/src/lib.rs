@@ -17,6 +17,9 @@ use x11rb::errors::ParseError;
 use x11rb::protocol::Event;
 use x11rb::protocol::composite::{ConnectionExt as CompositeConnectionExt, Redirect};
 use x11rb::protocol::damage::{ConnectionExt as DamageConnectionExt, ReportLevel};
+use x11rb::protocol::xfixes::{
+    ConnectionExt as XFixesConnectionExt, SelectionEvent, SelectionEventMask,
+};
 use x11rb::protocol::xinput::{
     ConnectionExt as XInputConnectionExt, Device, DeviceType, XIDeviceInfo,
 };
@@ -449,6 +452,17 @@ impl XMirrorState {
 
     pub fn emit_mirrors(&self) -> Vec<XWindowMirror> {
         self.windows.clone()
+    }
+
+    pub fn namespace_for_window(&self, window: XWindowId) -> Option<NamespaceId> {
+        self.windows
+            .iter()
+            .find(|mirror| {
+                mirror.window == window
+                    || mirror.client == Some(window)
+                    || mirror.toplevel == Some(window)
+            })
+            .and_then(|mirror| mirror.namespace)
     }
 
     pub fn apply_event(&mut self, event: XMirrorEvent) {
@@ -977,6 +991,34 @@ impl XDamageEvent {
     }
 }
 
+impl XSelectionEvent {
+    pub fn from_x11_event(event: &Event) -> Option<Self> {
+        let Event::XfixesSelectionNotify(event) = event else {
+            return None;
+        };
+
+        Some(Self {
+            selection: event.selection,
+            owner: nonzero_window(event.owner).map(wrap_xid),
+            timestamp: event.timestamp,
+            selection_timestamp: event.selection_timestamp,
+            kind: selection_change_kind(event.subtype),
+        })
+    }
+}
+
+fn selection_change_kind(kind: SelectionEvent) -> XSelectionChangeKind {
+    if kind == SelectionEvent::SET_SELECTION_OWNER {
+        XSelectionChangeKind::SetOwner
+    } else if kind == SelectionEvent::SELECTION_WINDOW_DESTROY {
+        XSelectionChangeKind::OwnerWindowDestroyed
+    } else if kind == SelectionEvent::SELECTION_CLIENT_CLOSE {
+        XSelectionChangeKind::OwnerClientClosed
+    } else {
+        XSelectionChangeKind::Unknown
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum XMirrorEvent {
     Map {
@@ -1138,6 +1180,9 @@ pub enum XBridgeError {
     RoutedInput {
         message: String,
     },
+    SelectionMonitor {
+        message: String,
+    },
 }
 
 impl fmt::Display for XBridgeError {
@@ -1238,6 +1283,9 @@ impl fmt::Display for XBridgeError {
             }
             Self::RoutedInput { message } => {
                 write!(f, "failed to run Sophia routed-input smoke: {message}")
+            }
+            Self::SelectionMonitor { message } => {
+                write!(f, "failed to monitor X selections: {message}")
             }
         }
     }
@@ -1390,6 +1438,103 @@ pub struct XAtoms {
     pub net_client_list: Atom,
     pub wm_protocols: Atom,
     pub wm_delete_window: Atom,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XSelectionAtoms {
+    pub primary: Atom,
+    pub secondary: Atom,
+    pub clipboard: Atom,
+}
+
+impl XSelectionAtoms {
+    pub const fn all(self) -> [Atom; 3] {
+        [self.primary, self.secondary, self.clipboard]
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum XSelectionChangeKind {
+    SetOwner,
+    OwnerWindowDestroyed,
+    OwnerClientClosed,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XSelectionEvent {
+    pub selection: Atom,
+    pub owner: Option<XWindowId>,
+    pub timestamp: u32,
+    pub selection_timestamp: u32,
+    pub kind: XSelectionChangeKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XSelectionOwnerRecord {
+    pub selection: Atom,
+    pub namespace: Option<NamespaceId>,
+    pub owner: Option<XWindowId>,
+    pub generation: u64,
+    pub timestamp: u32,
+    pub selection_timestamp: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XSelectionOwnerUpdate {
+    pub previous: Option<XSelectionOwnerRecord>,
+    pub current: XSelectionOwnerRecord,
+    pub kind: XSelectionChangeKind,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct XSelectionMonitor {
+    owners: BTreeMap<(Atom, Option<NamespaceId>), XSelectionOwnerRecord>,
+}
+
+impl XSelectionMonitor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn owner(
+        &self,
+        selection: Atom,
+        namespace: Option<NamespaceId>,
+    ) -> Option<XSelectionOwnerRecord> {
+        self.owners.get(&(selection, namespace)).copied()
+    }
+
+    pub fn apply_event(
+        &mut self,
+        event: XSelectionEvent,
+        mirror: &XMirrorState,
+    ) -> XSelectionOwnerUpdate {
+        let namespace = event
+            .owner
+            .and_then(|owner| mirror.namespace_for_window(owner));
+        let key = (event.selection, namespace);
+        let previous = self.owners.get(&key).copied();
+        let generation = previous
+            .map(|record| record.generation.saturating_add(1))
+            .unwrap_or(1);
+        let current = XSelectionOwnerRecord {
+            selection: event.selection,
+            namespace,
+            owner: event.owner,
+            generation,
+            timestamp: event.timestamp,
+            selection_timestamp: event.selection_timestamp,
+        };
+
+        self.owners.insert(key, current);
+
+        XSelectionOwnerUpdate {
+            previous,
+            current,
+            kind: event.kind,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1918,6 +2063,50 @@ where
         wm_protocols: intern_atom(connection, "WM_PROTOCOLS")?,
         wm_delete_window: intern_atom(connection, "WM_DELETE_WINDOW")?,
     })
+}
+
+pub fn intern_selection_atoms<C>(connection: &C) -> Result<XSelectionAtoms, XBridgeError>
+where
+    C: Connection,
+{
+    Ok(XSelectionAtoms {
+        primary: intern_atom(connection, "PRIMARY")?,
+        secondary: intern_atom(connection, "SECONDARY")?,
+        clipboard: intern_atom(connection, "CLIPBOARD")?,
+    })
+}
+
+pub fn select_selection_owner_events<C>(
+    connection: &C,
+    window: Window,
+    selections: &[Atom],
+) -> Result<(), XBridgeError>
+where
+    C: Connection,
+{
+    let mask = SelectionEventMask::SET_SELECTION_OWNER
+        | SelectionEventMask::SELECTION_WINDOW_DESTROY
+        | SelectionEventMask::SELECTION_CLIENT_CLOSE;
+
+    for selection in selections {
+        connection
+            .xfixes_select_selection_input(window, *selection, mask)
+            .map_err(|error| XBridgeError::SelectionMonitor {
+                message: error.to_string(),
+            })?
+            .check()
+            .map_err(|error| XBridgeError::SelectionMonitor {
+                message: error.to_string(),
+            })?;
+    }
+
+    connection
+        .flush()
+        .map_err(|error| XBridgeError::SelectionMonitor {
+            message: error.to_string(),
+        })?;
+
+    Ok(())
 }
 
 fn intern_atom<C>(connection: &C, name: &str) -> Result<Atom, XBridgeError>

@@ -439,6 +439,11 @@ The `sophia-portal` crate implements this policy as a reducer over
 prompt user/policy, hand off clipboard data, or fail the X11 selection. X Bridge
 code later translates those commands into concrete ICCCM/XFixes behavior.
 
+X Bridge owns selection monitoring data. It should reduce XFixes owner-change
+events into records keyed by selection atom and namespace, then pass only the
+selection, namespace, owner generation, and owner-change fact to portal policy.
+The portal reducer should not subscribe to X events or hold raw X authority.
+
 ## Storage
 
 Use dense tables inside a process. Use snapshots between processes.
