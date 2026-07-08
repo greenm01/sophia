@@ -415,6 +415,59 @@ pub struct FramePlanRequest {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FrameClockTick {
+    pub output: OutputId,
+    pub frame_serial: u64,
+    pub target_msec: u64,
+}
+
+pub trait FrameClock {
+    fn next_frame(&mut self, output: OutputId) -> FrameClockTick;
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DeterministicFrameClock {
+    next_serial: u64,
+    frame_interval_msec: u64,
+}
+
+impl DeterministicFrameClock {
+    pub const fn new(start_serial: u64, frame_interval_msec: u64) -> Self {
+        Self {
+            next_serial: start_serial,
+            frame_interval_msec,
+        }
+    }
+
+    pub const fn next_serial(&self) -> u64 {
+        self.next_serial
+    }
+
+    pub const fn frame_interval_msec(&self) -> u64 {
+        self.frame_interval_msec
+    }
+}
+
+impl Default for DeterministicFrameClock {
+    fn default() -> Self {
+        Self::new(1, 16)
+    }
+}
+
+impl FrameClock for DeterministicFrameClock {
+    fn next_frame(&mut self, output: OutputId) -> FrameClockTick {
+        let frame_serial = self.next_serial;
+        self.next_serial = self.next_serial.saturating_add(1);
+
+        FrameClockTick {
+            output,
+            frame_serial,
+            target_msec: frame_serial.saturating_mul(self.frame_interval_msec),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HeadlessOutput {
     pub id: OutputId,
     pub size: Size,
@@ -1333,6 +1386,30 @@ impl HeadlessEngine {
             replay,
             restored_last_committed,
         })
+    }
+
+    pub fn run_clocked_session_tick(
+        &self,
+        clock: &mut impl FrameClock,
+        layers: SessionLayerSource,
+        last_committed: &mut LastCommittedLayout,
+    ) -> Result<SessionTickReport, EngineError> {
+        let tick = clock.next_frame(self.output.id);
+        trace!(
+            output = tick.output.raw(),
+            frame_serial = tick.frame_serial,
+            target_msec = tick.target_msec,
+            "frame clock produced session tick"
+        );
+
+        self.run_session_tick(
+            SessionTickRequest {
+                output: tick.output,
+                frame_serial: tick.frame_serial,
+                layers,
+            },
+            last_committed,
+        )
     }
 
     fn validate_output(&self, output: OutputId) -> Result<(), EngineError> {

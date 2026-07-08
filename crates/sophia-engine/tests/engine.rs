@@ -1,11 +1,12 @@
 use sophia_engine::{
-    ChromeActionDecision, ChromeActionRejectReason, ChromeBroker, EngineError, FramePlanRequest,
-    HeadlessEngine, LastCommittedLayout, MetadataChromeRejectReason, MetadataChromeUpdate,
-    NotificationChromePresenter, NotificationChromeRejectReason, NotificationChromeUpdate,
-    RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction, SanitizedChromeMetadata,
-    SessionCommand, SessionEvent, SessionLayerSource, SessionTickRequest, WmIpcError,
-    WmRestartReason, WmRuntimeAction, notification_chrome_command_from_portal,
-    request_wm_over_stream, update_wm_supervisor_from_runtime_action,
+    ChromeActionDecision, ChromeActionRejectReason, ChromeBroker, DeterministicFrameClock,
+    EngineError, FrameClock, FramePlanRequest, HeadlessEngine, LastCommittedLayout,
+    MetadataChromeRejectReason, MetadataChromeUpdate, NotificationChromePresenter,
+    NotificationChromeRejectReason, NotificationChromeUpdate, RoutedInputCoalescer,
+    RoutedInputFlushReason, RoutedInputQueueAction, SanitizedChromeMetadata, SessionCommand,
+    SessionEvent, SessionLayerSource, SessionTickRequest, WmIpcError, WmRestartReason,
+    WmRuntimeAction, notification_chrome_command_from_portal, request_wm_over_stream,
+    update_wm_supervisor_from_runtime_action,
 };
 use sophia_portal::{NotificationRequest, NotificationUrgency, PortalCommand};
 use sophia_protocol::{
@@ -863,6 +864,67 @@ fn session_tick_restores_cached_layout_when_requested() {
     assert!(report.restored_last_committed);
     assert_eq!(report.frame.layers, cached);
     assert_eq!(report.replay.steps.len(), 1);
+}
+
+#[test]
+fn deterministic_frame_clock_advances_serials_predictably() {
+    let output = OutputId::from_raw(4);
+    let mut clock = DeterministicFrameClock::new(5, 16);
+
+    let first = clock.next_frame(output);
+    let second = clock.next_frame(output);
+
+    assert_eq!(first.output, output);
+    assert_eq!(first.frame_serial, 5);
+    assert_eq!(first.target_msec, 80);
+    assert_eq!(second.output, output);
+    assert_eq!(second.frame_serial, 6);
+    assert_eq!(second.target_msec, 96);
+    assert_eq!(clock.next_serial(), 7);
+    assert_eq!(clock.frame_interval_msec(), 16);
+}
+
+#[test]
+fn clocked_session_tick_uses_clock_serial_and_updates_cache() {
+    let engine = HeadlessEngine::default();
+    let layers = vec![test_layer(0, 0, 0, Region::empty())];
+    let mut cache = LastCommittedLayout::default();
+    let mut clock = DeterministicFrameClock::new(10, 16);
+
+    let report = engine
+        .run_clocked_session_tick(
+            &mut clock,
+            SessionLayerSource::Fresh(layers.clone()),
+            &mut cache,
+        )
+        .unwrap();
+
+    assert_eq!(report.frame.frame_serial, 10);
+    assert_eq!(report.replay.frame_serial, 10);
+    assert!(!report.restored_last_committed);
+    assert_eq!(cache.layers(), layers.as_slice());
+    assert_eq!(clock.next_serial(), 11);
+}
+
+#[test]
+fn clocked_session_tick_can_restore_last_committed_layout() {
+    let engine = HeadlessEngine::default();
+    let cached = vec![test_layer(0, 0, 8, Region::empty())];
+    let mut cache = LastCommittedLayout::new(cached.clone());
+    let mut clock = DeterministicFrameClock::new(20, 16);
+
+    let report = engine
+        .run_clocked_session_tick(
+            &mut clock,
+            SessionLayerSource::RestoreLastCommitted,
+            &mut cache,
+        )
+        .unwrap();
+
+    assert_eq!(report.frame.frame_serial, 20);
+    assert!(report.restored_last_committed);
+    assert_eq!(report.frame.layers, cached);
+    assert_eq!(clock.next_serial(), 21);
 }
 
 #[test]

@@ -379,6 +379,13 @@ the last committed layout, then produces a frame snapshot and replay report.
 This is not the final event loop; it is the smallest executable coordinator
 between X-derived layer state, cached layout state, and frame planning.
 
+Frame scheduling now has an explicit seam. `FrameClock` produces output-scoped
+frame ticks, and the deterministic headless implementation advances serials
+without depending on wall-clock time. A real DRM/KMS backend should implement
+the same boundary from vblank/page-flip timing while preserving the existing
+session-tick contract: clock tick in, frame snapshot and replay/commit report
+out.
+
 XFixes selection owner updates are the first portal execution input. Sophia X
 Bridge converts owner-generation changes into source-namespace clipboard events;
 the clipboard portal reducer uses those events to revoke stale pending

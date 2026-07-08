@@ -152,6 +152,20 @@ Fields should describe:
 Picom's buffer-age damage math is the reference idea. Sophia should keep the
 calculation over layer snapshots, not live windows.
 
+### FrameClockTick
+
+A frame-clock tick is the scheduling value that starts compositor frame work.
+
+Fields should describe:
+
+- output ID
+- frame serial
+- target presentation time in the clock's monotonic domain
+
+The headless backend uses a deterministic clock so tests are repeatable. A real
+DRM/KMS backend should produce the same value shape from page-flip or vblank
+timing rather than pushing backend-specific timing state into frame planning.
+
 ### RenderCommand
 
 Render commands are the final planned compositor work for one frame.

@@ -497,6 +497,11 @@ cache, plans a headless frame, and replays it. The XLibre namespace smoke runs
 this command as the first integrated proof of capture -> session tick -> frame
 replay. It is still a one-shot coordinator, not the final continuous event loop.
 
+The backend track now has its first frame-scheduling seam. `FrameClock` produces
+output-scoped frame ticks, and `DeterministicFrameClock` drives the headless
+session tick without wall-clock dependence. This keeps the session runtime
+repeatable while leaving a clean replacement point for a future DRM/KMS clock.
+
 Notification portal commands now have a compositor chrome presentation seam.
 `NotificationChromePresenter` stages bounded notification requests, presents
 them only after a `DeliverNotification` command, and dismisses pending or
