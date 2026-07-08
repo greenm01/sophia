@@ -332,6 +332,18 @@ mirrored namespace table, and bump per-selection owner generations. The next
 portal slice is to turn those owner records plus paste requests into concrete
 `ClipboardTransferRequest` values.
 
+The routed-input adapter now has a transformed-route path. The old flat helper
+still rejects non-identity transforms, preserving the original proof boundary,
+but `build_routed_input_request` accepts transformed `InputRoute` values when
+the Engine has already supplied finite target-local coordinates. XLibre still
+receives the same target XID/local point request and remains responsible for
+DIX delivery, grabs, focus, and namespace checks.
+
+The routed-input smoke now records the fixed request size and elapsed dispatch
+round trip for the X11 request path. This gives Sophia a measurement hook before
+any motion coalescing or shared-memory ring work. It is deliberately a smoke
+metric, not a claim about end-to-end input latency.
+
 Routed-input optimization should remain layered behind the working X11 extension
 path. Sophia may coalesce stable pure-motion routes at frame boundaries and may
 later add an Engine-to-XLibre shared-memory route ring if profiling proves the

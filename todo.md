@@ -156,11 +156,11 @@ Design and prototype compositor-first input for X11 clients.
 - [x] Land the extension shell in the private `sophia-xserver` fork.
 - [x] Deliver flat, untransformed pointer events through an XLibre extension.
 - [x] Add an end-to-end Xvfb smoke that observes a routed button event.
-- [ ] Add transformed hit-test routes once the flat path is proven.
+- [x] Add transformed hit-test routes once the flat path is proven.
 - [x] Add tests for stale target windows, denied namespaces, grabs, and focus.
 
 **Later optimization**
-- [ ] Measure routed-input dispatch cost before replacing the X11 request path.
+- [x] Measure routed-input dispatch cost before replacing the X11 request path.
 - [ ] Coalesce stable pure-motion routes at frame boundaries.
 - [ ] Flush immediately for button, key, crossing, drag, grab, and focus events.
 - [ ] Prototype a unidirectional Engine-to-XLibre SHM route ring only if needed.

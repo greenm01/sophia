@@ -124,16 +124,18 @@ The first routed-input patch is deliberately flat:
 The current runtime proof is intentionally narrow: button 1 at local `(42, 37)`
 inside a root-namespace test window on Xvfb. It proves the extension crosses
 the wire and reaches client-visible X11 delivery. It does not yet prove
-cross-namespace portal policy, transformed routes, or grab edge cases.
+cross-namespace portal policy or grab edge cases.
 
 ## First Prototype Boundary
 
-The first XLibre patch only accepts flat, untransformed pointer routes. Sophia
-already rejects transformed routes in `build_flat_routed_input_request`.
+The XLibre wire request is transform-agnostic: it accepts a target XID and
+target-local coordinates. The strict `build_flat_routed_input_request` helper is
+kept for the original flat proof, while `build_routed_input_request` accepts
+transformed routes after Sophia Engine has already inverted the compositor
+transform and supplied finite target-local coordinates.
 
 Unsupported in the first patch:
 
-- transformed compositor coordinates
 - touch events
 - tablet valuators
 - synthetic key focus changes beyond existing X11 focus semantics
@@ -144,6 +146,12 @@ Unsupported in the first patch:
 The X11 request path is the correctness baseline. Sophia should not replace it
 with a shared-memory fast path until profiling shows route dispatch, not scene
 hit-testing or XLibre delivery, is the actual bottleneck.
+
+The current baseline measurement hook is the existing
+`sophia x-smoke-routed-input` command. It reports the fixed request byte length
+and the elapsed time from serialized `RouteEvent` request dispatch through
+XLibre's reply. This is a round-trip smoke measurement, not a full input-latency
+benchmark.
 
 The first optimization belongs in Sophia Engine: coalesce pure motion events at
 frame boundaries when the route target is unchanged. State-changing events must

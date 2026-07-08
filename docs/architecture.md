@@ -215,9 +215,13 @@ This request is an alternate target selection path, not a delivery bypass.
 XLibre must still reject stale XIDs, namespace violations, sync-frozen devices,
 focus policy violations, and unsupported event forms before entering normal DIX
 delivery. Ordinary active grabs remain XLibre authority and may redirect
-delivery according to normal grab semantics. The first Sophia prototype only
-builds this request for flat, identity-transform routes. Transformed hit-test
-delivery remains unsupported until the flat route is proven against XLibre.
+delivery according to normal grab semantics.
+
+The flat request path remains as a strict compatibility wrapper, but Sophia X
+Bridge also accepts transformed routes when Sophia Engine has already hit-tested
+the visual scene and supplied finite target-local coordinates. XLibre still
+receives the same target XID plus local-coordinate packet; it is not asked to
+understand compositor transforms.
 
 The patch target is tracked in `docs/xlibre-routed-input-extension.md`.
 

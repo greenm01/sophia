@@ -850,6 +850,56 @@ mod tests {
     }
 
     #[test]
+    fn transformed_routed_input_uses_engine_supplied_local_coordinates() {
+        let event = input_event(13);
+        let route = input_route(
+            13,
+            InputRouteOutcome::Routed,
+            Some(xid(0x30)),
+            Some(Point { x: 3.5, y: 4.25 }),
+            Transform {
+                matrix: [
+                    2.0, 0.0, 30.0, //
+                    0.0, 2.0, 40.0, //
+                    0.0, 0.0, 1.0,
+                ],
+            },
+        );
+
+        let request = build_routed_input_request(&event, &route).unwrap();
+
+        assert_eq!(request.serial, 13);
+        assert_eq!(request.target_window, xid(0x30));
+        assert_eq!(request.local_position, Point { x: 3.5, y: 4.25 });
+    }
+
+    #[test]
+    fn transformed_routed_input_rejects_non_finite_local_coordinates() {
+        let event = input_event(14);
+        let route = input_route(
+            14,
+            InputRouteOutcome::Routed,
+            Some(xid(0x30)),
+            Some(Point {
+                x: f64::NAN,
+                y: 4.25,
+            }),
+            Transform {
+                matrix: [
+                    2.0, 0.0, 30.0, //
+                    0.0, 2.0, 40.0, //
+                    0.0, 0.0, 1.0,
+                ],
+            },
+        );
+
+        assert_eq!(
+            build_routed_input_request(&event, &route),
+            Err(RoutedInputAdapterError::InvalidLocalPosition)
+        );
+    }
+
+    #[test]
     fn flat_routed_input_rejects_stale_target_before_xlibre_request() {
         let event = input_event(12);
         let route = input_route(
@@ -893,6 +943,11 @@ mod tests {
         };
 
         assert!(routed_input_decision_allows_delivery(&decision));
+    }
+
+    #[test]
+    fn routed_input_wire_length_is_fixed_for_dispatch_measurement() {
+        assert_eq!(routed_input_request_wire_len(), 44);
     }
 
     fn input_event(serial: u64) -> InputEventPacket {

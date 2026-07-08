@@ -42,10 +42,29 @@ pub enum RoutedInputAdapterError {
     Denied,
     MissingTargetWindow,
     MissingLocalPosition,
+    InvalidLocalPosition,
     UnsupportedTransform,
 }
 
+pub fn build_routed_input_request(
+    event: &InputEventPacket,
+    route: &InputRoute,
+) -> Result<XLibreRoutedInputRequest, RoutedInputAdapterError> {
+    build_routed_input_request_inner(event, route)
+}
+
 pub fn build_flat_routed_input_request(
+    event: &InputEventPacket,
+    route: &InputRoute,
+) -> Result<XLibreRoutedInputRequest, RoutedInputAdapterError> {
+    if route.transform != Transform::IDENTITY {
+        return Err(RoutedInputAdapterError::UnsupportedTransform);
+    }
+
+    build_routed_input_request_inner(event, route)
+}
+
+fn build_routed_input_request_inner(
     event: &InputEventPacket,
     route: &InputRoute,
 ) -> Result<XLibreRoutedInputRequest, RoutedInputAdapterError> {
@@ -60,10 +79,6 @@ pub fn build_flat_routed_input_request(
         InputRouteOutcome::Denied => return Err(RoutedInputAdapterError::Denied),
     }
 
-    if route.transform != Transform::IDENTITY {
-        return Err(RoutedInputAdapterError::UnsupportedTransform);
-    }
-
     let target_window = route
         .target_window
         .filter(|window| window.is_valid())
@@ -71,6 +86,10 @@ pub fn build_flat_routed_input_request(
     let local_position = route
         .local_position
         .ok_or(RoutedInputAdapterError::MissingLocalPosition)?;
+
+    if !local_position.x.is_finite() || !local_position.y.is_finite() {
+        return Err(RoutedInputAdapterError::InvalidLocalPosition);
+    }
 
     Ok(XLibreRoutedInputRequest {
         serial: event.serial,
@@ -94,9 +113,18 @@ pub struct RoutedInputSmokeReport {
     pub target_window: XWindowId,
     pub device: DeviceId,
     pub decision: XLibreRoutedInputDecision,
+    pub dispatch_elapsed: Duration,
+    pub request_bytes: usize,
     pub event_x: i16,
     pub event_y: i16,
     pub button: u8,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SophiaRoutedInputDispatch {
+    reply: SophiaRoutedInputRouteReply,
+    elapsed: Duration,
+    request_bytes: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -281,11 +309,11 @@ pub fn smoke_routed_input(
             pressed: true,
         },
     };
-    let reply = send_sophia_routed_input_route(&connection, routed_info.major_opcode, &request)?;
+    let dispatch = send_sophia_routed_input_route(&connection, routed_info.major_opcode, &request)?;
     let decision = XLibreRoutedInputDecision {
-        serial: reply.serial,
-        target_window: reply.target_window,
-        outcome: reply.outcome,
+        serial: dispatch.reply.serial,
+        target_window: dispatch.reply.target_window,
+        outcome: dispatch.reply.outcome,
     };
     if !routed_input_decision_allows_delivery(&decision) {
         return Err(XBridgeError::RoutedInput {
@@ -311,6 +339,8 @@ pub fn smoke_routed_input(
         target_window: XWindowId::new(target, 1),
         device,
         decision,
+        dispatch_elapsed: dispatch.elapsed,
+        request_bytes: dispatch.request_bytes,
         event_x,
         event_y,
         button: observed_button,
@@ -345,7 +375,7 @@ fn send_sophia_routed_input_route<C>(
     connection: &C,
     major_opcode: u8,
     request: &XLibreRoutedInputRequest,
-) -> Result<SophiaRoutedInputRouteReply, XBridgeError>
+) -> Result<SophiaRoutedInputDispatch, XBridgeError>
 where
     C: RequestConnection + ?Sized,
 {
@@ -356,14 +386,26 @@ where
     XLIBRE_ROUTED_INPUT_ROUTE_EVENT_LENGTH.serialize_into(&mut bytes);
     serialize_routed_input_wire(&wire, &mut bytes);
 
+    let request_bytes = bytes.len();
+    let start = Instant::now();
     let cookie = connection
         .send_request_with_reply::<SophiaRoutedInputRouteReply>(&[IoSlice::new(&bytes)], Vec::new())
         .map_err(|error| XBridgeError::RoutedInput {
             message: error.to_string(),
         })?;
-    cookie.reply().map_err(|error| XBridgeError::RoutedInput {
+    let reply = cookie.reply().map_err(|error| XBridgeError::RoutedInput {
         message: error.to_string(),
+    })?;
+
+    Ok(SophiaRoutedInputDispatch {
+        reply,
+        elapsed: start.elapsed(),
+        request_bytes,
     })
+}
+
+pub const fn routed_input_request_wire_len() -> usize {
+    XLIBRE_ROUTED_INPUT_ROUTE_EVENT_LENGTH as usize * 4
 }
 
 fn serialize_routed_input_wire(wire: &XLibreRoutedInputWireRequest, bytes: &mut Vec<u8>) {

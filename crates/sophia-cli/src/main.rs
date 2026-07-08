@@ -216,7 +216,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let display = arg_value(&args, "--display");
         let report = smoke_routed_input(display.as_deref())?;
         println!(
-            "x-smoke-routed-input display={} opcode={} target={:#x} device={} outcome={:?} event=button{}@{},{}",
+            "x-smoke-routed-input display={} opcode={} target={:#x} device={} outcome={:?} event=button{}@{},{} request_bytes={} dispatch_us={}",
             report.display_name.as_deref().unwrap_or("<default>"),
             report.extension_opcode,
             report.target_window.xid(),
@@ -224,7 +224,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             report.decision.outcome,
             report.button,
             report.event_x,
-            report.event_y
+            report.event_y,
+            report.request_bytes,
+            report.dispatch_elapsed.as_micros()
         );
         return Ok(());
     }
