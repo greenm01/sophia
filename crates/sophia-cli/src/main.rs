@@ -1,17 +1,18 @@
 use sophia_engine::{
-    FrameClockTick, FramePlanRequest, FrameScheduleDecision, HeadlessEngine, LastCommittedLayout,
-    LayoutEpochState, SessionLayerSource, SessionTickRequest, WmSocketTransport,
-    WmSocketTransportConfig, WmTransactionUpdate, runtime_observation_from_portal_commands,
-    runtime_observation_from_session_tick_report, runtime_observation_from_wm_transaction_update,
-    schedule_frame_from_damage,
+    FrameClockTick, FramePlanRequest, FrameScheduleDecision, HeadlessEngine, HeadlessSessionDriver,
+    HeadlessSessionDriverTick, LastCommittedLayout, LayoutEpochState, SessionLayerSource,
+    SessionTickRequest, WmSocketTransport, WmSocketTransportConfig, WmTransactionUpdate,
+    runtime_observation_from_portal_commands, runtime_observation_from_session_tick_report,
+    runtime_observation_from_wm_transaction_update, schedule_frame_from_damage,
 };
 use sophia_portal::{ClipboardPortal, ClipboardTarget, ClipboardTransferRequest, PortalCommand};
 use sophia_protocol::{
     BrokerHealthPacket, BrokerHealthState, BrokerKind, BufferSource, DamageFrame, LayerSnapshot,
     LayoutNodeCapabilities, LayoutNodeKind, LayoutNodeSnapshot, LayoutNodeState, NamespaceId,
-    PortalTransferId, Rect, Region, Size, SurfaceConstraints, SurfaceId, TransactionId, Transform,
-    WmRelayoutWorkspace, WmRequestKind, WmRequestPacket, WorkspaceId, XWindowId, XWindowMirror,
-    decode_broker_health_frame, encode_broker_health_frame,
+    PortalTransferId, Rect, Region, Size, SurfaceConstraints, SurfaceId, TransactionCommit,
+    TransactionId, TransactionOutcome, Transform, WmRelayoutWorkspace, WmRequestKind,
+    WmRequestPacket, WorkspaceId, XWindowId, XWindowMirror, decode_broker_health_frame,
+    encode_broker_health_frame,
 };
 use sophia_runtime::{
     ProcessLaunchSpec, ProcessSupervisor, RestartPolicy, RuntimeBrokerSupervisors,
@@ -331,6 +332,54 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             runtime_commands.len(),
             runtime.state().frames_rendered,
             runtime.state().x_events_polled
+        );
+        return Ok(());
+    }
+
+    if args
+        .iter()
+        .any(|arg| arg == "headless-session-driver-smoke")
+    {
+        let engine = HeadlessEngine::default();
+        let output = engine.output();
+        let mut driver = HeadlessSessionDriver::new(engine);
+        let transaction = TransactionId::from_raw(30);
+        let report = driver.run_tick(HeadlessSessionDriverTick {
+            output: output.id,
+            frame_serial: 6,
+            x_event_count: 1,
+            layers: synthetic_layers(),
+            wm_update: Some(WmTransactionUpdate {
+                commit: TransactionCommit {
+                    transaction,
+                    outcome: TransactionOutcome::Committed,
+                    applied_surfaces: vec![SurfaceId::new(1, 1)],
+                },
+                ipc_error: None,
+            }),
+            portal_commands: vec![PortalCommand::DropNotification {
+                transfer: PortalTransferId::from_raw(1),
+            }],
+            chrome_command_count: 1,
+        })?;
+        let session_tick = report
+            .session_tick
+            .as_ref()
+            .ok_or("headless session driver did not render a frame")?;
+
+        println!(
+            "headless-session-driver-smoke output={} frame_serial={} runtime_phase={:?} runtime_commands={} runtime_frames={} runtime_x_events={} runtime_portal={} runtime_chrome={} cached_layers={} frame_layers={} replay_steps={}",
+            output.id.raw(),
+            session_tick.frame.frame_serial,
+            report.runtime_state.phase,
+            report.runtime_commands.len(),
+            report.runtime_state.frames_rendered,
+            report.runtime_state.x_events_polled,
+            report.runtime_state.portal_commands_drained,
+            report.runtime_state.chrome_commands_presented,
+            report.cached_layers,
+            session_tick.frame.layers.len(),
+            session_tick.replay.steps.len()
         );
         return Ok(());
     }
@@ -881,6 +930,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("commands: x-smoke-policy-frame [--display=:99]");
     println!("commands: x-smoke-runtime-tick [--display=:99]");
     println!("commands: runtime-damage-epoch-smoke");
+    println!("commands: headless-session-driver-smoke");
     println!("commands: runtime-brokers-smoke [--portal=/usr/bin/true] [--metadata=/usr/bin/true]");
     println!("commands: portal-broker-health-smoke");
     println!("commands: metadata-broker-health-smoke");

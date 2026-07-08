@@ -464,6 +464,15 @@ decode results, WM transaction results, portal drain counts, chrome presentation
 counts, and rendered frame reports. These helpers translate facts; they do not
 poll file descriptors or execute runtime commands themselves.
 
+`HeadlessSessionDriver` is the first reusable command executor around this
+loop. It owns a `SessionRuntimeLoop` and last-committed layout cache, starts a
+tick with `TickStarted`, then executes emitted runtime commands through
+deterministic headless adapters: X event count intake, WM transaction
+observation, frame scheduling, session tick rendering, portal command counting,
+and chrome command counting. It is still not the production compositor loop: it
+does not block on file descriptors, supervise processes, or own real libinput,
+DRM/KMS, X sockets, or broker sockets.
+
 The headless runtime tick smoke now drives this reducer around the existing
 capture -> session tick -> replay path. It executes the reducer's X polling,
 WM policy, frame scheduling, render, portal drain, and chrome presentation

@@ -134,6 +134,13 @@ commands, and chrome updates into observations because it already owns those
 types. Such adapters must remain pure translation helpers: no socket polling,
 no X mutation, no rendering, no process supervision, and no payload retention.
 
+`HeadlessSessionDriver` may execute runtime command sequencing against
+deterministic headless adapters. It may own `SessionRuntimeLoop` state and a
+last-committed layout cache. It must not become the real compositor event loop:
+blocking file-descriptor polling, libinput intake, DRM/KMS commits, X socket
+dispatch, broker socket dispatch, and process supervision remain outside this
+headless test driver.
+
 Process-supervised portal and metadata broker placeholders are runtime
 ownership records. They prove that the runtime can start, poll, and terminate
 the intended broker process kinds before the real broker IPC protocols exist.

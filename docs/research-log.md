@@ -691,6 +691,13 @@ counts, and rendered frame observations through `SessionRuntimeLoop`. The next
 step is to collapse the per-smoke mini-loops into a reusable headless session
 driver that executes runtime commands through these adapters.
 
+`HeadlessSessionDriver` now performs that collapse for deterministic headless
+ticks. It starts from `TickStarted`, drains the runtime command queue, translates
+each command through concrete headless adapters, and records the rendered
+session tick plus final runtime state. The new
+`headless-session-driver-smoke` proves this path without requiring live X or
+real broker sockets.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

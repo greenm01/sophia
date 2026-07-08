@@ -20,7 +20,8 @@ use sophia_protocol::{
     XWindowId, decode_wm_response_frame, encode_wm_request_frame,
 };
 use sophia_runtime::{
-    RestartPolicy, SessionRuntimeObservation, SophiaErrorExt, SophiaErrorKind,
+    RestartPolicy, SessionRuntimeCommand, SessionRuntimeLoop, SessionRuntimeObservation,
+    SessionRuntimeObservationError, SessionRuntimeState, SophiaErrorExt, SophiaErrorKind,
     SupervisedProcessKind, SupervisorCommand, SupervisorEvent, SupervisorState, update_supervisor,
 };
 use tracing::{debug, instrument, trace, warn};
@@ -31,6 +32,7 @@ pub enum EngineError {
     InvalidSurface,
     InvalidFrame,
     WmIpc(WmIpcError),
+    RuntimeObservation(SessionRuntimeObservationError),
 }
 
 impl fmt::Display for EngineError {
@@ -40,6 +42,7 @@ impl fmt::Display for EngineError {
             Self::InvalidSurface => f.write_str("invalid surface ID"),
             Self::InvalidFrame => f.write_str("invalid frame snapshot"),
             Self::WmIpc(error) => write!(f, "WM IPC failed: {error}"),
+            Self::RuntimeObservation(error) => write!(f, "runtime observation failed: {error}"),
         }
     }
 }
@@ -53,6 +56,7 @@ impl SophiaErrorExt for EngineError {
             Self::InvalidSurface => SophiaErrorKind::InvalidSurface,
             Self::InvalidFrame => SophiaErrorKind::InvalidFrame,
             Self::WmIpc(_) => SophiaErrorKind::ExternalProcess,
+            Self::RuntimeObservation(_) => SophiaErrorKind::InvalidFrame,
         }
     }
 }
@@ -237,6 +241,153 @@ pub fn runtime_observation_from_metadata_chrome_updates<'a>(
 
     SessionRuntimeObservation::ChromeCommandsReady {
         count: u32::try_from(count).unwrap_or(u32::MAX),
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HeadlessSessionDriverTick {
+    pub output: OutputId,
+    pub frame_serial: u64,
+    pub x_event_count: u32,
+    pub layers: Vec<LayerSnapshot>,
+    pub wm_update: Option<WmTransactionUpdate>,
+    pub portal_commands: Vec<PortalCommand>,
+    pub chrome_command_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HeadlessSessionDriverReport {
+    pub runtime_state: SessionRuntimeState,
+    pub runtime_commands: Vec<SessionRuntimeCommand>,
+    pub session_tick: Option<SessionTickReport>,
+    pub cached_layers: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct HeadlessSessionDriver {
+    engine: HeadlessEngine,
+    runtime: SessionRuntimeLoop,
+    last_committed: LastCommittedLayout,
+}
+
+impl HeadlessSessionDriver {
+    pub fn new(engine: HeadlessEngine) -> Self {
+        Self {
+            engine,
+            runtime: SessionRuntimeLoop::default(),
+            last_committed: LastCommittedLayout::default(),
+        }
+    }
+
+    pub fn runtime_state(&self) -> &SessionRuntimeState {
+        self.runtime.state()
+    }
+
+    pub fn last_committed(&self) -> &LastCommittedLayout {
+        &self.last_committed
+    }
+
+    pub fn run_tick(
+        &mut self,
+        request: HeadlessSessionDriverTick,
+    ) -> Result<HeadlessSessionDriverReport, EngineError> {
+        let mut executor = HeadlessSessionCommandExecutor {
+            engine: &self.engine,
+            runtime: &mut self.runtime,
+            last_committed: &mut self.last_committed,
+            request,
+            runtime_commands: Vec::new(),
+            pending_commands: Vec::new(),
+            session_tick: None,
+        };
+        executor.run()
+    }
+}
+
+struct HeadlessSessionCommandExecutor<'a> {
+    engine: &'a HeadlessEngine,
+    runtime: &'a mut SessionRuntimeLoop,
+    last_committed: &'a mut LastCommittedLayout,
+    request: HeadlessSessionDriverTick,
+    runtime_commands: Vec<SessionRuntimeCommand>,
+    pending_commands: Vec<SessionRuntimeCommand>,
+    session_tick: Option<SessionTickReport>,
+}
+
+impl HeadlessSessionCommandExecutor<'_> {
+    fn run(&mut self) -> Result<HeadlessSessionDriverReport, EngineError> {
+        self.observe([SessionRuntimeObservation::TickStarted])?;
+
+        while let Some(command) = self.pending_commands.pop() {
+            match command {
+                SessionRuntimeCommand::None => {}
+                SessionRuntimeCommand::PollXEvents => {
+                    self.observe([SessionRuntimeObservation::XEventsPolled {
+                        count: self.request.x_event_count,
+                    }])?;
+                }
+                SessionRuntimeCommand::RequestWmLayout => {
+                    let observation = self
+                        .request
+                        .wm_update
+                        .as_ref()
+                        .map(runtime_observation_from_wm_transaction_update)
+                        .unwrap_or(SessionRuntimeObservation::WmLayoutReady);
+                    self.observe([observation])?;
+                }
+                SessionRuntimeCommand::ScheduleFrame => {
+                    self.observe([SessionRuntimeObservation::FrameScheduled {
+                        frame_serial: self.request.frame_serial,
+                    }])?;
+                }
+                SessionRuntimeCommand::RenderFrame { frame_serial } => {
+                    let report = self.engine.run_session_tick(
+                        SessionTickRequest {
+                            output: self.request.output,
+                            frame_serial,
+                            layers: SessionLayerSource::Fresh(self.request.layers.clone()),
+                        },
+                        self.last_committed,
+                    )?;
+                    let observation = runtime_observation_from_session_tick_report(&report);
+                    self.session_tick = Some(report);
+                    self.observe([observation])?;
+                }
+                SessionRuntimeCommand::DrainPortalCommands => {
+                    let observation =
+                        runtime_observation_from_portal_commands(&self.request.portal_commands);
+                    self.observe([observation])?;
+                }
+                SessionRuntimeCommand::PresentChrome => {
+                    self.observe([SessionRuntimeObservation::ChromeCommandsReady {
+                        count: self.request.chrome_command_count,
+                    }])?;
+                }
+                SessionRuntimeCommand::RestartWindowManager => break,
+            }
+        }
+
+        Ok(HeadlessSessionDriverReport {
+            runtime_state: self.runtime.state().clone(),
+            runtime_commands: self.runtime_commands.clone(),
+            session_tick: self.session_tick.clone(),
+            cached_layers: self.last_committed.layers().len(),
+        })
+    }
+
+    fn observe(
+        &mut self,
+        observations: impl IntoIterator<Item = SessionRuntimeObservation>,
+    ) -> Result<(), EngineError> {
+        let report = self
+            .runtime
+            .step_observations(observations)
+            .map_err(EngineError::RuntimeObservation)?;
+        self.runtime_commands
+            .extend(report.commands.iter().copied());
+        self.pending_commands
+            .extend(report.commands.into_iter().rev());
+        Ok(())
     }
 }
 

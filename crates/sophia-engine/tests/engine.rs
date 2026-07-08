@@ -1,16 +1,17 @@
 use sophia_engine::{
     BufferImportPath, ChromeActionDecision, ChromeActionRejectReason, ChromeBroker,
     DeterministicFrameClock, DrmKmsMode, DrmKmsOutputDescriptor, DrmKmsOutputRegistry, EngineError,
-    FrameClock, FramePlanRequest, FrameScheduleDecision, HeadlessEngine, ImportCapableRenderer,
-    ImportedBufferHandle, LastCommittedLayout, LayoutEpochState, LibinputDeviceDescriptor,
-    LibinputDeviceKind, LibinputEventIngest, LibinputEventSource, MetadataChromeRejectReason,
-    MetadataChromeUpdate, NotificationChromePresenter, NotificationChromeRejectReason,
-    NotificationChromeUpdate, RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction,
-    RoutedInputRequestError, SanitizedChromeMetadata, SessionCommand, SessionEvent,
-    SessionLayerSource, SessionTickRequest, WmIpcError, WmRestartReason, WmRuntimeAction,
-    hit_test_scene_for_input, measure_resize_behavior, notification_chrome_command_from_portal,
-    request_wm_over_stream, routed_input_request_from_physical_event,
-    routed_input_requests_from_flush, runtime_observation_from_metadata_chrome_updates,
+    FrameClock, FramePlanRequest, FrameScheduleDecision, HeadlessEngine, HeadlessSessionDriver,
+    HeadlessSessionDriverTick, ImportCapableRenderer, ImportedBufferHandle, LastCommittedLayout,
+    LayoutEpochState, LibinputDeviceDescriptor, LibinputDeviceKind, LibinputEventIngest,
+    LibinputEventSource, MetadataChromeRejectReason, MetadataChromeUpdate,
+    NotificationChromePresenter, NotificationChromeRejectReason, NotificationChromeUpdate,
+    RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction, RoutedInputRequestError,
+    SanitizedChromeMetadata, SessionCommand, SessionEvent, SessionLayerSource, SessionTickRequest,
+    WmIpcError, WmRestartReason, WmRuntimeAction, WmTransactionUpdate, hit_test_scene_for_input,
+    measure_resize_behavior, notification_chrome_command_from_portal, request_wm_over_stream,
+    routed_input_request_from_physical_event, routed_input_requests_from_flush,
+    runtime_observation_from_metadata_chrome_updates,
     runtime_observation_from_notification_chrome_updates, runtime_observation_from_portal_commands,
     runtime_observation_from_render_frame_report, runtime_observation_from_session_tick_report,
     runtime_observation_from_wm_transaction_update, schedule_frame_from_damage,
@@ -24,13 +25,13 @@ use sophia_protocol::{
     LayoutNodeSnapshot, LayoutNodeState, LayoutTransaction, NamespaceId, OutputId, Point,
     PortalTransferId, Rect, Region, SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAGIC,
     SOPHIA_IPC_MAX_PAYLOAD_LEN, SOPHIA_IPC_VERSION, SeatId, SurfaceConstraints, SurfaceId,
-    SurfacePlacement, TransactionId, TransactionOutcome, Transform, TrustLevel, WmCommand,
-    WmRequestKind, WmRequestPacket, WmResponsePacket, WorkspaceId, XWindowId,
+    SurfacePlacement, TransactionCommit, TransactionId, TransactionOutcome, Transform, TrustLevel,
+    WmCommand, WmRequestKind, WmRequestPacket, WmResponsePacket, WorkspaceId, XWindowId,
     decode_wm_request_frame, encode_wm_response_frame,
 };
 use sophia_runtime::{
-    RestartPolicy, SessionRuntimeObservation, SupervisedProcessKind, SupervisorCommand,
-    SupervisorState,
+    RestartPolicy, SessionRuntimeCommand, SessionRuntimeObservation, SessionRuntimePhase,
+    SupervisedProcessKind, SupervisorCommand, SupervisorState,
 };
 use std::io::{Cursor, Read, Result as IoResult, Write};
 use std::time::Duration;
@@ -1419,6 +1420,102 @@ fn chrome_updates_map_to_runtime_chrome_observations() {
         runtime_observation_from_metadata_chrome_updates(&metadata_updates),
         SessionRuntimeObservation::ChromeCommandsReady { count: 2 }
     );
+}
+
+#[test]
+fn headless_session_driver_executes_runtime_commands_to_idle() {
+    let engine = HeadlessEngine::default();
+    let output = engine.output();
+    let mut driver = HeadlessSessionDriver::new(engine);
+    let transaction = TransactionId::from_raw(80);
+
+    let report = driver
+        .run_tick(HeadlessSessionDriverTick {
+            output: output.id,
+            frame_serial: 90,
+            x_event_count: 1,
+            layers: vec![test_layer(1, 0, 0, Region::empty())],
+            wm_update: Some(WmTransactionUpdate {
+                commit: TransactionCommit {
+                    transaction,
+                    outcome: TransactionOutcome::Committed,
+                    applied_surfaces: vec![SurfaceId::new(1, 1)],
+                },
+                ipc_error: None,
+            }),
+            portal_commands: vec![PortalCommand::DropNotification {
+                transfer: PortalTransferId::from_raw(1),
+            }],
+            chrome_command_count: 2,
+        })
+        .unwrap();
+
+    assert_eq!(
+        report.runtime_commands,
+        vec![
+            SessionRuntimeCommand::PollXEvents,
+            SessionRuntimeCommand::RequestWmLayout,
+            SessionRuntimeCommand::ScheduleFrame,
+            SessionRuntimeCommand::RenderFrame { frame_serial: 90 },
+            SessionRuntimeCommand::DrainPortalCommands,
+            SessionRuntimeCommand::PresentChrome,
+        ]
+    );
+    assert_eq!(report.runtime_state.phase, SessionRuntimePhase::Idle);
+    assert_eq!(report.runtime_state.x_events_polled, 1);
+    assert_eq!(report.runtime_state.frames_rendered, 1);
+    assert_eq!(report.runtime_state.portal_commands_drained, 1);
+    assert_eq!(report.runtime_state.chrome_commands_presented, 2);
+    assert_eq!(report.cached_layers, 1);
+    assert_eq!(
+        report
+            .session_tick
+            .as_ref()
+            .map(|tick| tick.frame.frame_serial),
+        Some(90)
+    );
+}
+
+#[test]
+fn headless_session_driver_stops_before_rendering_when_wm_restart_is_requested() {
+    let engine = HeadlessEngine::default();
+    let output = engine.output();
+    let mut driver = HeadlessSessionDriver::new(engine);
+    let transaction = TransactionId::from_raw(81);
+
+    let report = driver
+        .run_tick(HeadlessSessionDriverTick {
+            output: output.id,
+            frame_serial: 91,
+            x_event_count: 1,
+            layers: vec![test_layer(1, 0, 0, Region::empty())],
+            wm_update: Some(WmTransactionUpdate {
+                commit: TransactionCommit {
+                    transaction,
+                    outcome: TransactionOutcome::TimedOut,
+                    applied_surfaces: Vec::new(),
+                },
+                ipc_error: Some(WmIpcError::Io("closed".to_owned())),
+            }),
+            portal_commands: Vec::new(),
+            chrome_command_count: 0,
+        })
+        .unwrap();
+
+    assert_eq!(
+        report.runtime_commands,
+        vec![
+            SessionRuntimeCommand::PollXEvents,
+            SessionRuntimeCommand::RequestWmLayout,
+            SessionRuntimeCommand::RestartWindowManager,
+        ]
+    );
+    assert_eq!(
+        report.runtime_state.phase,
+        SessionRuntimePhase::ApplyingWmPolicy
+    );
+    assert_eq!(report.runtime_state.frames_rendered, 0);
+    assert!(report.session_tick.is_none());
 }
 
 #[test]

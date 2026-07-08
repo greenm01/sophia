@@ -32,8 +32,10 @@ Close the gap between existing reducers/protocols and a running session loop.
   chrome, and renderer facts.
 - [x] Connect concrete X bridge, WM transport, broker IPC, portal execution,
   chrome presenter, and renderer reports to `SessionRuntimeObservation` batches.
-- [ ] Add a single headless session-driver smoke that executes runtime commands
+- [x] Add a single headless session-driver smoke that executes runtime commands
   through the concrete adapters instead of each smoke owning its own mini-loop.
+- [ ] Replace remaining per-smoke runtime command execution with the reusable
+  headless session driver where the smoke does not need custom setup.
 
 ---
 
