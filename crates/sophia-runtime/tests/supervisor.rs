@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use sophia_runtime::{
-    RestartPolicy, SupervisedProcessKind, SupervisorCommand, SupervisorEvent, SupervisorState,
-    update_supervisor,
+    ProcessLaunchSpec, ProcessSupervisor, ProcessSupervisorError, RestartPolicy,
+    SupervisedProcessKind, SupervisorCommand, SupervisorEvent, SupervisorState, update_supervisor,
 };
 
 #[test]
@@ -113,4 +113,88 @@ fn supervisor_healthy_event_resets_restart_budget() {
     assert!(state.running);
     assert_eq!(state.restart_attempts, 0);
     assert_eq!(command, SupervisorCommand::None);
+}
+
+#[test]
+fn process_supervisor_spawns_and_observes_process_exit() {
+    let mut supervisor = ProcessSupervisor::new(
+        SupervisedProcessKind::WindowManager,
+        ProcessLaunchSpec::new("/usr/bin/true"),
+    );
+
+    let event = supervisor
+        .apply(SupervisorCommand::StartProcess {
+            process: SupervisedProcessKind::WindowManager,
+            delay: Duration::ZERO,
+        })
+        .unwrap();
+
+    assert_eq!(event, Some(SupervisorEvent::ProcessStarted));
+    assert!(supervisor.child_id().is_some());
+
+    let mut observed = None;
+    for _ in 0..100 {
+        observed = supervisor.poll().unwrap();
+        if observed.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+
+    assert_eq!(observed, Some(SupervisorEvent::ProcessExited));
+    assert_eq!(supervisor.child_id(), None);
+}
+
+#[test]
+fn process_supervisor_rejects_wrong_process_command() {
+    let mut supervisor = ProcessSupervisor::new(
+        SupervisedProcessKind::WindowManager,
+        ProcessLaunchSpec::new("/usr/bin/true"),
+    );
+
+    let error = supervisor
+        .apply(SupervisorCommand::StartProcess {
+            process: SupervisedProcessKind::PortalBroker,
+            delay: Duration::ZERO,
+        })
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        ProcessSupervisorError::WrongProcess {
+            expected: SupervisedProcessKind::WindowManager,
+            actual: SupervisedProcessKind::PortalBroker
+        }
+    );
+}
+
+#[test]
+fn process_supervisor_rejects_start_while_child_is_running() {
+    let mut supervisor = ProcessSupervisor::new(
+        SupervisedProcessKind::WindowManager,
+        ProcessLaunchSpec::new("/usr/bin/sleep").arg("1"),
+    );
+
+    supervisor
+        .apply(SupervisorCommand::StartProcess {
+            process: SupervisedProcessKind::WindowManager,
+            delay: Duration::ZERO,
+        })
+        .unwrap();
+    let error = supervisor
+        .apply(SupervisorCommand::StartProcess {
+            process: SupervisedProcessKind::WindowManager,
+            delay: Duration::ZERO,
+        })
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        ProcessSupervisorError::AlreadyRunning {
+            process: SupervisedProcessKind::WindowManager
+        }
+    );
+
+    supervisor.terminate().unwrap();
+    assert_eq!(supervisor.child_id(), None);
 }

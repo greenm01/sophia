@@ -338,6 +338,11 @@ restart, or give-up decision based on a bounded restart policy. The supervisor
 may manage the WM, portal broker, and metadata broker processes, but it does not
 receive raw input, XIDs, namespace tokens, pixmaps, or portal payloads.
 
+The process executor is below that reducer. It consumes supervisor commands,
+spawns the configured child process after the bounded delay, polls for process
+exit, and terminates owned children during cleanup. It does not mint restart
+decisions or inspect compositor/session state.
+
 ## XLibre Responsibilities
 
 XLibre remains responsible for:

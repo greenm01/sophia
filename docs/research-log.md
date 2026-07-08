@@ -457,6 +457,14 @@ policy. `KeepRunning` leaves the supervisor idle. `RestartWm` feeds a
 `SupervisorEvent::RestartRequested` into the runtime reducer for the
 `WindowManager` process kind. Process spawning is still separate runtime work.
 
+Process spawning now has a thin runtime executor. `ProcessSupervisor` owns one
+supervised child process and consumes `SupervisorCommand` values from the
+reducer. `StartProcess` sleeps for the bounded reducer-supplied delay, spawns
+the configured program, and reports `ProcessStarted`; `poll` reports
+`ProcessExited`; wrong-process and double-start commands are rejected. The
+executor does not decide restart budgets, inspect WM state, or touch compositor
+input/rendering paths.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new
