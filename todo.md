@@ -231,7 +231,7 @@ runtime without weakening the existing process boundaries.
 **Supervisor policy**
 - [x] Add data-only restart policy for WM, portal broker, and metadata broker
   processes.
-- [ ] Wire `WmRuntimeAction::RestartWm` into the runtime supervisor reducer.
+- [x] Wire `WmRuntimeAction::RestartWm` into the runtime supervisor reducer.
 - [ ] Add process spawning with bounded restart backoff.
 - [ ] Preserve the last committed layout while the WM process is absent.
 

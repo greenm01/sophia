@@ -2,7 +2,7 @@ use sophia_engine::{
     ChromeActionDecision, ChromeActionRejectReason, ChromeBroker, EngineError, FramePlanRequest,
     HeadlessEngine, RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction,
     SessionCommand, SessionEvent, WmIpcError, WmRestartReason, WmRuntimeAction,
-    request_wm_over_stream,
+    request_wm_over_stream, update_wm_supervisor_from_runtime_action,
 };
 use sophia_protocol::{
     AttentionState, BufferSource, ChromeActionKind, ChromeActionRequest, ChromeDescriptor,
@@ -14,7 +14,9 @@ use sophia_protocol::{
     Transform, TrustLevel, WmCommand, WmRequestKind, WmRequestPacket, WmResponsePacket,
     WorkspaceId, XWindowId, decode_wm_request_frame, encode_wm_response_frame,
 };
+use sophia_runtime::{RestartPolicy, SupervisedProcessKind, SupervisorCommand, SupervisorState};
 use std::io::{Cursor, Read, Result as IoResult, Write};
+use std::time::Duration;
 
 #[test]
 fn headless_engine_exposes_deterministic_output() {
@@ -675,6 +677,46 @@ fn wm_runtime_action_does_not_restart_for_valid_rejected_layout() {
         TransactionOutcome::RejectedInvalidSurface
     );
     assert_eq!(update.runtime_action(), WmRuntimeAction::KeepRunning);
+}
+
+#[test]
+fn wm_supervisor_adapter_keeps_supervisor_idle_when_wm_keeps_running() {
+    let state = SupervisorState::new(SupervisedProcessKind::WindowManager);
+
+    let (state, command) = update_wm_supervisor_from_runtime_action(
+        state,
+        WmRuntimeAction::KeepRunning,
+        RestartPolicy::default(),
+    );
+
+    assert_eq!(state.restart_attempts, 0);
+    assert_eq!(command, SupervisorCommand::None);
+}
+
+#[test]
+fn wm_supervisor_adapter_restarts_wm_after_runtime_restart_action() {
+    let state = SupervisorState::new(SupervisedProcessKind::WindowManager);
+
+    let (state, command) = update_wm_supervisor_from_runtime_action(
+        state,
+        WmRuntimeAction::RestartWm {
+            reason: WmRestartReason::IpcFailure(WmIpcError::Io("closed".to_owned())),
+        },
+        RestartPolicy {
+            max_attempts: 2,
+            initial_backoff: Duration::from_millis(25),
+            max_backoff: Duration::from_millis(100),
+        },
+    );
+
+    assert_eq!(state.restart_attempts, 1);
+    assert_eq!(
+        command,
+        SupervisorCommand::StartProcess {
+            process: SupervisedProcessKind::WindowManager,
+            delay: Duration::ZERO
+        }
+    );
 }
 
 #[test]

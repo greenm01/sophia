@@ -13,7 +13,10 @@ use sophia_protocol::{
     TransactionCommit, TransactionId, TransactionOutcome, WmRequestKind, WmRequestPacket,
     WmResponsePacket, WorkspaceId, XWindowId, decode_wm_response_frame, encode_wm_request_frame,
 };
-use sophia_runtime::{SophiaErrorExt, SophiaErrorKind};
+use sophia_runtime::{
+    RestartPolicy, SophiaErrorExt, SophiaErrorKind, SupervisedProcessKind, SupervisorCommand,
+    SupervisorEvent, SupervisorState, update_supervisor,
+};
 use tracing::instrument;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -99,6 +102,21 @@ impl WmTransactionUpdate {
                 reason: WmRestartReason::IpcFailure(error.clone()),
             },
             None => WmRuntimeAction::KeepRunning,
+        }
+    }
+}
+
+pub fn update_wm_supervisor_from_runtime_action(
+    state: SupervisorState,
+    action: WmRuntimeAction,
+    policy: RestartPolicy,
+) -> (SupervisorState, SupervisorCommand) {
+    debug_assert_eq!(state.process, SupervisedProcessKind::WindowManager);
+
+    match action {
+        WmRuntimeAction::KeepRunning => (state, SupervisorCommand::None),
+        WmRuntimeAction::RestartWm { .. } => {
+            update_supervisor(state, SupervisorEvent::RestartRequested, policy)
         }
     }
 }

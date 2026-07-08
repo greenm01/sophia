@@ -452,6 +452,11 @@ without spawning processes yet. This lets Engine decisions such as
 `WmRuntimeAction::RestartWm` become runtime policy inputs later, while keeping
 process supervision out of compositor frame/input code.
 
+The first engine-to-runtime adapter now maps `WmRuntimeAction` into supervisor
+policy. `KeepRunning` leaves the supervisor idle. `RestartWm` feeds a
+`SupervisorEvent::RestartRequested` into the runtime reducer for the
+`WindowManager` process kind. Process spawning is still separate runtime work.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new
