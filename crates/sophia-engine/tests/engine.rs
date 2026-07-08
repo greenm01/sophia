@@ -1,16 +1,18 @@
 use sophia_engine::{
     ChromeActionDecision, ChromeActionRejectReason, ChromeBroker, EngineError, FramePlanRequest,
-    HeadlessEngine, SessionCommand, SessionEvent, WmIpcError, WmRestartReason, WmRuntimeAction,
+    HeadlessEngine, RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction,
+    SessionCommand, SessionEvent, WmIpcError, WmRestartReason, WmRuntimeAction,
     request_wm_over_stream,
 };
 use sophia_protocol::{
     AttentionState, BufferSource, ChromeActionKind, ChromeActionRequest, ChromeDescriptor,
-    DisplayLabel, IconTokenId, IpcCodecError, LayerSnapshot, LayoutNodeCapabilities,
-    LayoutNodeKind, LayoutNodeSnapshot, LayoutNodeState, LayoutTransaction, OutputId, Rect, Region,
+    DeviceId, DisplayLabel, IconTokenId, InputEventKind, InputEventPacket, InputRoute,
+    InputRouteOutcome, IpcCodecError, LayerSnapshot, LayoutNodeCapabilities, LayoutNodeKind,
+    LayoutNodeSnapshot, LayoutNodeState, LayoutTransaction, OutputId, Point, Rect, Region,
     SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAGIC, SOPHIA_IPC_MAX_PAYLOAD_LEN, SOPHIA_IPC_VERSION,
-    SurfaceConstraints, SurfaceId, SurfacePlacement, TransactionId, TransactionOutcome, Transform,
-    TrustLevel, WmCommand, WmRequestKind, WmRequestPacket, WmResponsePacket, WorkspaceId,
-    decode_wm_request_frame, encode_wm_response_frame,
+    SeatId, SurfaceConstraints, SurfaceId, SurfacePlacement, TransactionId, TransactionOutcome,
+    Transform, TrustLevel, WmCommand, WmRequestKind, WmRequestPacket, WmResponsePacket,
+    WorkspaceId, XWindowId, decode_wm_request_frame, encode_wm_response_frame,
 };
 use std::io::{Cursor, Read, Result as IoResult, Write};
 
@@ -675,6 +677,110 @@ fn wm_runtime_action_does_not_restart_for_valid_rejected_layout() {
     assert_eq!(update.runtime_action(), WmRuntimeAction::KeepRunning);
 }
 
+#[test]
+fn routed_input_coalescer_keeps_latest_stable_motion_until_frame() {
+    let mut coalescer = RoutedInputCoalescer::new();
+
+    assert_eq!(
+        coalescer.push(motion_event(1, 10.0, 10.0), route(1, 0x30, 10.0, 10.0)),
+        RoutedInputQueueAction::BufferedMotion
+    );
+    assert_eq!(
+        coalescer.push(motion_event(2, 20.0, 20.0), route(2, 0x30, 20.0, 20.0)),
+        RoutedInputQueueAction::BufferedMotion
+    );
+
+    let flush = coalescer.flush_frame().unwrap();
+
+    assert_eq!(flush.reason, RoutedInputFlushReason::FrameBoundary);
+    assert_eq!(flush.inputs.len(), 1);
+    assert_eq!(flush.inputs[0].event.serial, 2);
+    assert!(!coalescer.has_pending_motion());
+}
+
+#[test]
+fn routed_input_coalescer_flushes_on_target_crossing() {
+    let mut coalescer = RoutedInputCoalescer::new();
+    coalescer.push(motion_event(1, 10.0, 10.0), route(1, 0x30, 10.0, 10.0));
+
+    let action = coalescer.push(motion_event(2, 11.0, 11.0), route(2, 0x40, 1.0, 1.0));
+
+    let RoutedInputQueueAction::Flushed(flush) = action else {
+        panic!("expected target crossing flush");
+    };
+    assert_eq!(flush.reason, RoutedInputFlushReason::TargetCrossing);
+    assert_eq!(
+        flush
+            .inputs
+            .iter()
+            .map(|input| input.event.serial)
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
+    assert!(!coalescer.has_pending_motion());
+}
+
+#[test]
+fn routed_input_coalescer_flushes_for_button_and_key_events() {
+    let mut coalescer = RoutedInputCoalescer::new();
+    coalescer.push(motion_event(1, 10.0, 10.0), route(1, 0x30, 10.0, 10.0));
+
+    let button = input_event(
+        2,
+        InputEventKind::PointerButton {
+            button: 1,
+            pressed: true,
+        },
+        10.0,
+        10.0,
+    );
+    let action = coalescer.push(button, route(2, 0x30, 10.0, 10.0));
+
+    let RoutedInputQueueAction::Flushed(flush) = action else {
+        panic!("expected button flush");
+    };
+    assert_eq!(flush.reason, RoutedInputFlushReason::StateChangingInput);
+    assert_eq!(flush.inputs.len(), 2);
+    assert!(!coalescer.has_pending_motion());
+
+    let key = input_event(
+        3,
+        InputEventKind::Key {
+            keycode: 38,
+            pressed: true,
+        },
+        0.0,
+        0.0,
+    );
+    let action = coalescer.push(key, route(3, 0x30, 0.0, 0.0));
+
+    let RoutedInputQueueAction::Flushed(flush) = action else {
+        panic!("expected key flush");
+    };
+    assert_eq!(flush.reason, RoutedInputFlushReason::StateChangingInput);
+    assert_eq!(flush.inputs.len(), 1);
+    assert_eq!(flush.inputs[0].event.serial, 3);
+}
+
+#[test]
+fn routed_input_coalescer_flushes_for_drag_grab_and_focus_barriers() {
+    for reason in [
+        RoutedInputFlushReason::DragStateChanged,
+        RoutedInputFlushReason::GrabChanged,
+        RoutedInputFlushReason::FocusChanged,
+    ] {
+        let mut coalescer = RoutedInputCoalescer::new();
+        coalescer.push(motion_event(1, 10.0, 10.0), route(1, 0x30, 10.0, 10.0));
+
+        let flush = coalescer.flush_barrier(reason).unwrap();
+
+        assert_eq!(flush.reason, reason);
+        assert_eq!(flush.inputs.len(), 1);
+        assert_eq!(flush.inputs[0].event.serial, 1);
+        assert!(!coalescer.has_pending_motion());
+    }
+}
+
 fn test_layer(surface_index: u32, stack_rank: u32, x: i32, damage: Region) -> LayerSnapshot {
     LayerSnapshot {
         surface: SurfaceId::new(surface_index, 1),
@@ -695,6 +801,36 @@ fn test_layer(surface_index: u32, stack_rank: u32, x: i32, damage: Region) -> La
         crop: None,
         transform: Transform::IDENTITY,
         generation: 1,
+    }
+}
+
+fn motion_event(serial: u64, x: f64, y: f64) -> InputEventPacket {
+    input_event(serial, InputEventKind::PointerMotion, x, y)
+}
+
+fn input_event(serial: u64, kind: InputEventKind, x: f64, y: f64) -> InputEventPacket {
+    InputEventPacket {
+        serial,
+        seat: SeatId::from_raw(1),
+        device: DeviceId::from_raw(2),
+        time_msec: serial * 10,
+        kind,
+        global_position: Some(Point { x, y }),
+        target_surface: Some(SurfaceId::new(1, 1)),
+        target_window: Some(XWindowId::new(0x30, 1)),
+        local_position: Some(Point { x, y }),
+    }
+}
+
+fn route(serial: u64, target_window: u32, x: f64, y: f64) -> InputRoute {
+    InputRoute {
+        input_serial: serial,
+        target_surface: Some(SurfaceId::new(1, 1)),
+        target_window: Some(XWindowId::new(target_window, 1)),
+        global_position: Point { x, y },
+        local_position: Some(Point { x, y }),
+        transform: Transform::IDENTITY,
+        outcome: InputRouteOutcome::Routed,
     }
 }
 

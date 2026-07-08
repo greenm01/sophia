@@ -227,12 +227,15 @@ The patch target is tracked in `docs/xlibre-routed-input-extension.md`.
 
 The first implementation optimizes for correctness, not throughput tricks. The
 ordinary `RouteEvent` request remains the canonical path until profiling shows
-it is the bottleneck. Later optimizations should be layered in this order:
+it is the bottleneck. Sophia Engine owns the first optimization through
+`RoutedInputCoalescer`: it buffers at most one pure pointer-motion route per
+stable target and flushes it at the frame boundary. Later optimizations should
+be layered in this order:
 
-- coalesce only pure pointer motion at frame boundaries when the target route is
-  stable
-- flush immediately for button, key, target-crossing, drag, grab, and focus
-  transitions
+- keep coalescing limited to pure pointer motion at frame boundaries when the
+  target route is stable
+- keep immediate flush barriers for button, key, target-crossing, drag, grab,
+  and focus transitions
 - use any grab/focus cache only as advisory acceleration; XLibre remains final
   authority
 - consider an Engine-to-XLibre shared-memory route ring only after measurement,

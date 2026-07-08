@@ -161,8 +161,8 @@ Design and prototype compositor-first input for X11 clients.
 
 **Later optimization**
 - [x] Measure routed-input dispatch cost before replacing the X11 request path.
-- [ ] Coalesce stable pure-motion routes at frame boundaries.
-- [ ] Flush immediately for button, key, crossing, drag, grab, and focus events.
+- [x] Coalesce stable pure-motion routes at frame boundaries.
+- [x] Flush immediately for button, key, crossing, drag, grab, and focus events.
 - [ ] Prototype a unidirectional Engine-to-XLibre SHM route ring only if needed.
 - [ ] Keep the X11 request path as fallback for SHM failures.
 

@@ -344,6 +344,12 @@ round trip for the X11 request path. This gives Sophia a measurement hook before
 any motion coalescing or shared-memory ring work. It is deliberately a smoke
 metric, not a claim about end-to-end input latency.
 
+Sophia Engine now has `RoutedInputCoalescer` for the first input hot-path
+optimization. It coalesces only stable pure pointer motion, keeps the latest
+motion until the frame boundary, and flushes immediately for button/key input,
+target crossings, and explicit drag/grab/focus barriers. This keeps the
+optimization above the XLibre request path and avoids speculative SHM work.
+
 Routed-input optimization should remain layered behind the working X11 extension
 path. Sophia may coalesce stable pure-motion routes at frame boundaries and may
 later add an Engine-to-XLibre shared-memory route ring if profiling proves the

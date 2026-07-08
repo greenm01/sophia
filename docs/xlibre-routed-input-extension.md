@@ -159,6 +159,12 @@ flush immediately, including button press/release, key events, target crossing,
 drag state, active-grab changes, and focus-affecting transitions. Drawing and
 game-oriented clients may need a later raw/high-rate policy escape hatch.
 
+`RoutedInputCoalescer` implements this as data-only Engine policy. It keeps one
+pending routed pointer-motion packet for a stable target, replaces that pending
+packet with newer motion for the same target, flushes at frame boundaries, and
+flushes immediately for state-changing input or explicit drag/grab/focus
+barriers. The XLibre request path remains unchanged.
+
 A grab/focus cache may let Sophia skip expensive spatial hit-testing when
 XLibre has already locked delivery to an active grab owner, but that cache is
 advisory only. XLibre must still revalidate grabs, focus, XI2 masks, sync state,
