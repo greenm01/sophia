@@ -155,6 +155,7 @@ Design and prototype compositor-first input for X11 clients.
 - [x] Add a git-applyable XLibre routed-input patch and build check.
 - [x] Land the extension shell in the private `sophia-xserver` fork.
 - [x] Deliver flat, untransformed pointer events through an XLibre extension.
+- [x] Add an end-to-end Xvfb smoke that observes a routed button event.
 - [ ] Add transformed hit-test routes once the flat path is proven.
 - [x] Add tests for stale target windows, denied namespaces, grabs, and focus.
 

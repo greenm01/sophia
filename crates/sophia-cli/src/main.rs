@@ -5,7 +5,9 @@ use sophia_protocol::{
 };
 use sophia_runtime::{TraceLevel, init_tracing};
 use sophia_wm_demo::{ExternalWmClient, tile_workspace};
-use sophia_x_bridge::{TestClientConfig, capture_readback_display, run_test_client_window};
+use sophia_x_bridge::{
+    TestClientConfig, capture_readback_display, run_test_client_window, smoke_routed_input,
+};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
@@ -210,6 +212,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    if args.iter().any(|arg| arg == "x-smoke-routed-input") {
+        let display = arg_value(&args, "--display");
+        let report = smoke_routed_input(display.as_deref())?;
+        println!(
+            "x-smoke-routed-input display={} opcode={} target={:#x} device={} outcome={:?} event=button{}@{},{}",
+            report.display_name.as_deref().unwrap_or("<default>"),
+            report.extension_opcode,
+            report.target_window.xid(),
+            report.device.raw(),
+            report.decision.outcome,
+            report.button,
+            report.event_x,
+            report.event_y
+        );
+        return Ok(());
+    }
+
     println!("sophia {}", env!("CARGO_PKG_VERSION"));
     println!("components: engine, x-bridge, protocol, wm-demo");
     println!("commands: x-test-client [--display=:99] [--seconds=5] [--width=320] [--height=200]");
@@ -217,6 +236,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("commands: x-smoke-frame [--display=:99]");
     println!("commands: x-smoke-policy-frame [--display=:99]");
     println!("commands: x-smoke-external-wm [--display=:99] [--wm=target/debug/sophia-wm-demo]");
+    println!("commands: x-smoke-routed-input [--display=:99]");
 
     if verbose {
         tracing::debug!("verbose tracing enabled");

@@ -60,6 +60,12 @@ flat pointer motion/button events through normal XLibre event delivery. Use
 `tools/check_xlibre_routed_input_patch.sh` to apply the patch to a temporary
 XLibre tree and compile `hw/vfb/Xvfb`.
 
+`tools/xlibre_namespace_smoke.sh` runs the runtime smoke against the private
+`sophia-xserver` fork. The smoke creates a privileged target window, discovers
+the XInput master pointer, sends a raw `RouteEvent` request, requires an
+`Accepted` reply, and waits for the target client connection to receive a core
+`ButtonPress` at the requested local coordinates.
+
 ## Required XLibre Touch Points
 
 - Add a new `Xext/sophia-routed-input/` extension with a small dispatch file.
@@ -114,6 +120,11 @@ The first routed-input patch is deliberately flat:
 - It rejects a device that is already sync-frozen, but ordinary active grabs
   still follow XLibre grab semantics and may redirect delivery to the grab
   owner.
+
+The current runtime proof is intentionally narrow: button 1 at local `(42, 37)`
+inside a root-namespace test window on Xvfb. It proves the extension crosses
+the wire and reaches client-visible X11 delivery. It does not yet prove
+cross-namespace portal policy, transformed routes, or grab edge cases.
 
 ## First Prototype Boundary
 

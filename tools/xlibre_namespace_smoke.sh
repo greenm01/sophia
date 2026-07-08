@@ -101,6 +101,13 @@ echo "root external-wm bridge smoke:"
         cargo run -q -p sophia-cli -- x-smoke-external-wm --wm="$ROOT_DIR/target/debug/sophia-wm-demo"
 )
 
+echo "root routed-input smoke:"
+(
+    cd "$ROOT_DIR"
+    env DISPLAY="$DISPLAY_NAME" XAUTHORITY="$WORK_DIR/root.xauth" \
+        cargo run -q -p sophia-cli -- x-smoke-routed-input
+)
+
 echo "namespace isolation smoke:"
 if (
     cd "$ROOT_DIR"

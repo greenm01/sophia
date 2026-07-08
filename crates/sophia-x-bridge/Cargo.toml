@@ -6,7 +6,7 @@ rust-version.workspace = true
 
 [dependencies]
 sophia-protocol = { path = "../sophia-protocol" }
-x11rb = { version = "0.13.1", features = ["composite", "damage", "render", "shape", "xfixes"] }
+x11rb = { version = "0.13.1", features = ["composite", "damage", "render", "shape", "xfixes", "xinput"] }
 
 [lints]
 workspace = true

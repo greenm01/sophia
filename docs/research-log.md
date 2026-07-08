@@ -283,6 +283,21 @@ sync-frozen device returns `RejectedActiveGrab`; ordinary active grabs remain
 normal XLibre authority and can redirect accepted routes according to X11 grab
 semantics.
 
+The runtime routed-input smoke is now wired into
+`tools/xlibre_namespace_smoke.sh`. The smoke runs against the private
+`sophia-xserver` fork, creates a root-namespace target window, discovers the
+XInput master pointer with `XIQueryDevice(AllMaster)`, sends a raw
+`SOPHIA-ROUTED-INPUT RouteEvent`, and waits for the client-side core
+`ButtonPress` event. The first passing run reported:
+
+```text
+x-smoke-routed-input display=<default> opcode=167 target=0x400000 device=2 outcome=Accepted event=button1@42,37
+```
+
+This proves the v1 flat button path across the actual X11 wire protocol. The
+remaining routed-input work is no longer basic extension delivery; it is edge
+coverage around grabs/focus and the later transformed-coordinate path.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new
