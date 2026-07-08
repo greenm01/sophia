@@ -26,6 +26,10 @@ Close the gap between existing reducers/protocols and a running session loop.
 - [x] Add a supervised long-lived WM socket smoke with kill/restart behavior.
 - [x] Add a portal smoke proving denied cross-namespace clipboard transfer
   becomes normal X11 selection failure.
+- [x] Add a resumable session runtime loop that batches reduced events into
+  commands without polling file descriptors inside policy code.
+- [ ] Wire external X, broker, WM, portal, and chrome observations into the
+  session runtime loop as bounded event batches.
 
 ---
 

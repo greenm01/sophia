@@ -114,6 +114,12 @@ The reducer may emit commands to poll X, request WM policy, schedule or render a
 frame, drain portals, present chrome, or restart the WM. It must not poll file
 descriptors, render, or mutate X11 state directly.
 
+`SessionRuntimeLoop` may batch `SessionRuntimeEvent` values and collect emitted
+commands, but it must remain a pure data shell around the reducer. External
+runtime adapters own blocking I/O, socket reads, X event polling, renderer
+work, and process waits; they feed observations into the loop rather than
+embedding those operations inside runtime policy.
+
 Process-supervised portal and metadata broker placeholders are runtime
 ownership records. They prove that the runtime can start, poll, and terminate
 the intended broker process kinds before the real broker IPC protocols exist.

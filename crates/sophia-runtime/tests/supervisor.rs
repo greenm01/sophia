@@ -4,8 +4,8 @@ use sophia_protocol::{BrokerHealthState, BrokerKind};
 use sophia_runtime::{
     ProcessLaunchSpec, ProcessSupervisor, ProcessSupervisorError, RestartPolicy,
     RuntimeBrokerHealth, RuntimeBrokerSupervisors, SessionRuntimeCommand, SessionRuntimeEvent,
-    SessionRuntimePhase, SessionRuntimeState, SupervisedProcessKind, SupervisorCommand,
-    SupervisorEvent, SupervisorState, update_session_runtime, update_supervisor,
+    SessionRuntimeLoop, SessionRuntimePhase, SessionRuntimeState, SupervisedProcessKind,
+    SupervisorCommand, SupervisorEvent, SupervisorState, update_session_runtime, update_supervisor,
 };
 
 #[test]
@@ -145,6 +145,77 @@ fn session_runtime_records_broker_health_without_status_payload() {
             status_message_len: 8,
         })
     );
+}
+
+#[test]
+fn session_runtime_loop_processes_event_batches_without_side_effects() {
+    let mut runtime = SessionRuntimeLoop::default();
+
+    let report = runtime.step([
+        SessionRuntimeEvent::TickStarted,
+        SessionRuntimeEvent::XEventsPolled { count: 4 },
+        SessionRuntimeEvent::WmLayoutReady,
+        SessionRuntimeEvent::FrameScheduled { frame_serial: 11 },
+        SessionRuntimeEvent::FrameRendered { frame_serial: 11 },
+        SessionRuntimeEvent::PortalCommandsReady { count: 2 },
+        SessionRuntimeEvent::ChromeCommandsReady { count: 1 },
+    ]);
+
+    assert_eq!(report.events_processed, 7);
+    assert_eq!(
+        report.commands,
+        vec![
+            SessionRuntimeCommand::PollXEvents,
+            SessionRuntimeCommand::RequestWmLayout,
+            SessionRuntimeCommand::ScheduleFrame,
+            SessionRuntimeCommand::RenderFrame { frame_serial: 11 },
+            SessionRuntimeCommand::DrainPortalCommands,
+            SessionRuntimeCommand::PresentChrome,
+        ]
+    );
+    assert_eq!(runtime.state().phase, SessionRuntimePhase::Idle);
+    assert_eq!(runtime.state().x_events_polled, 4);
+    assert_eq!(runtime.state().frames_rendered, 1);
+    assert_eq!(runtime.state().last_frame_serial, Some(11));
+    assert_eq!(runtime.state().portal_commands_drained, 2);
+    assert_eq!(runtime.state().chrome_commands_presented, 1);
+}
+
+#[test]
+fn session_runtime_loop_resumes_from_previous_state() {
+    let mut runtime = SessionRuntimeLoop::new(SessionRuntimeState::default());
+
+    let first = runtime.step([
+        SessionRuntimeEvent::TickStarted,
+        SessionRuntimeEvent::XEventsPolled { count: 0 },
+    ]);
+
+    assert_eq!(
+        first.commands,
+        vec![
+            SessionRuntimeCommand::PollXEvents,
+            SessionRuntimeCommand::ScheduleFrame,
+        ]
+    );
+    assert_eq!(runtime.state().phase, SessionRuntimePhase::WaitingForFrame);
+
+    let second = runtime.step([
+        SessionRuntimeEvent::FrameScheduled { frame_serial: 2 },
+        SessionRuntimeEvent::FrameRendered { frame_serial: 2 },
+        SessionRuntimeEvent::PortalCommandsReady { count: 0 },
+        SessionRuntimeEvent::ChromeCommandsReady { count: 0 },
+    ]);
+
+    assert_eq!(second.events_processed, 4);
+    assert_eq!(
+        second.commands,
+        vec![
+            SessionRuntimeCommand::RenderFrame { frame_serial: 2 },
+            SessionRuntimeCommand::DrainPortalCommands,
+            SessionRuntimeCommand::PresentChrome,
+        ]
+    );
+    assert_eq!(runtime.into_state().phase, SessionRuntimePhase::Idle);
 }
 
 #[test]

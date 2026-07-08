@@ -439,6 +439,14 @@ frame serial. `update_session_runtime` consumes runtime facts such as
 `PresentChrome`. This keeps the event loop assembly testable before wiring it
 to real file descriptors.
 
+`SessionRuntimeLoop` is the first reusable shell around that reducer. It accepts
+bounded batches of already-observed runtime events, preserves reduced state
+between batches, and returns the non-empty command stream for the outer runtime
+driver to execute. It still does not own X polling, broker sockets, WM socket
+reads, portal execution, renderer commits, or libinput/DRM file descriptors.
+Those adapters should translate external facts into `SessionRuntimeEvent`
+values, then feed the loop.
+
 The headless runtime tick smoke now drives this reducer around the existing
 capture -> session tick -> replay path. It executes the reducer's X polling,
 WM policy, frame scheduling, render, portal drain, and chrome presentation

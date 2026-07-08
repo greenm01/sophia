@@ -669,6 +669,13 @@ portal and metadata broker health independently, stores health state,
 generation, and status-message length only, and ignores stale generations. The
 health smokes now prove frame decode plus runtime-state routing.
 
+The runtime reducer now has a reusable batch shell. `SessionRuntimeLoop`
+preserves `SessionRuntimeState` across batches of `SessionRuntimeEvent` values
+and returns only executable, non-empty commands. This keeps the next runtime
+step focused on adapters: X event intake, WM socket responses, broker health,
+portal execution, chrome presentation, and renderer completion can be translated
+into bounded facts without moving file-descriptor polling into reducer logic.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new
