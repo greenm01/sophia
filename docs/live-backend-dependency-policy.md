@@ -31,6 +31,10 @@ fence handling stay deferred until the `sophia-renderer-live` boundary has
 deterministic fake coverage for the same path. Discovery code must not grow into
 buffer ownership by accident.
 
+The first native renderer candidate is a feature-gated GBM capability probe. EGL
+rendering, DMA-BUF import, and explicit sync remain later steps. Default
+workspace tests must continue to run without native renderer dependencies.
+
 Phase 4 is the shared-memory import boundary. Real MIT-SHM mapping stays
 deferred until mapped bytes can pass through a bounded renderer upload path with
 namespace validation, size checks, lifetime tracking, and fail-closed errors.

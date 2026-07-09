@@ -10,5 +10,9 @@ rust-version.workspace = true
 sophia-engine = { path = "../sophia-engine" }
 sophia-protocol = { path = "../sophia-protocol" }
 
+[features]
+default = []
+gbm-probe = []
+
 [lints]
 workspace = true

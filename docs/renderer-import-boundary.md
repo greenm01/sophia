@@ -74,6 +74,33 @@ imports should land there, while `sophia-backend-live` remains the session
 assembly boundary that wires discovery, input, renderer admission, and startup
 health together.
 
+## Native Dependency Admission
+
+The live runtime wrapper stays outside `sophia-engine`. That is a deliberate
+boundary: the engine owns protocol-neutral state and deterministic frame
+validation, while backend-live and renderer-live own live startup health and
+renderer capability facts. Move renderer policy into the engine only if atomic
+visual correctness requires it.
+
+The first real native renderer dependency candidate is a GBM capability probe,
+not full EGL rendering and not DMA-BUF import. GBM is the smallest useful probe
+because it can establish whether the live renderer can speak to a DRM render
+device and create renderer-private allocation context. That probe must be gated
+behind an optional crate feature and must not be required for the default
+workspace test suite.
+
+The initial `gbm-probe` feature is dependency-free scaffolding. It exposes only
+fake GBM capability probes, so the feature path can be tested before a real GBM
+crate is admitted.
+
+Admission tests for the first real dependency must prove:
+
+- the crate still builds and tests offline without the feature;
+- fake degraded capability coverage remains the default test path;
+- absence of GBM produces reduced degraded health, not a panic;
+- no raw file descriptor, device path, or renderer-private handle crosses into
+  `sophia-engine`, WM IPC, portals, or protocol authorities.
+
 ## Failure Shape
 
 Unsupported import paths fail closed as reduced decisions. They do not panic, do

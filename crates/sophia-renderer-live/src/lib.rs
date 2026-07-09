@@ -152,6 +152,30 @@ impl FakeLiveRendererCapabilityProbe {
     }
 }
 
+#[cfg(feature = "gbm-probe")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FakeGbmCapabilityProbe {
+    pub available: bool,
+}
+
+#[cfg(feature = "gbm-probe")]
+impl FakeGbmCapabilityProbe {
+    pub const fn new(available: bool) -> Self {
+        Self { available }
+    }
+
+    pub fn startup_status(self) -> LiveRendererImportStartupStatus {
+        LiveRendererImportStartupStatus::from_path_statuses(
+            LiveRendererImportPathStatus::Disabled,
+            if self.available {
+                LiveRendererImportPathStatus::Enabled
+            } else {
+                LiveRendererImportPathStatus::Degraded
+            },
+        )
+    }
+}
+
 fn renderer_health_from_path_statuses(
     xpixmap: LiveRendererImportPathStatus,
     dmabuf: LiveRendererImportPathStatus,

@@ -9,16 +9,15 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Keep the live runtime wrapper outside `sophia-engine` unless engine-local
-  renderer policy becomes unavoidable.
-- [ ] Revisit real GBM/EGL/DMA-BUF admission only after the degraded-health
-  source decision is documented.
+- [ ] Keep default workspace tests independent of native renderer libraries.
+- [ ] Revisit real GBM dependency admission only after the feature-gated fake
+  path exists.
 
 **Next**
-- [ ] Decide the first real native renderer dependency candidate and admission
-  test shape.
-- [ ] Keep first real renderer dependency behind an optional crate feature if it
-  would break offline deterministic tests.
+- [ ] Decide the real GBM probe API shape: device-path intake, borrowed fd
+  intake, or backend-provided reduced device token.
+- [ ] Keep real GBM dependency optional until CI exercises both default and
+  feature-enabled paths.
 
 ---
 
@@ -128,6 +127,18 @@ evidence belong in `docs/research-log.md`.
   capability probes and per-frame failed imports.
 - [x] Add a fake failed-import path in `sophia-renderer-live` for per-frame
   degraded runtime observation.
+- [x] Keep the live runtime wrapper outside `sophia-engine` unless engine-local
+  renderer policy becomes unavoidable.
+- [x] Revisit real GBM/EGL/DMA-BUF admission only after the degraded-health
+  source decision is documented.
+- [x] Decide that the first real native renderer dependency candidate is a
+  feature-gated GBM capability probe.
+- [x] Keep the first real renderer dependency behind an optional crate feature
+  so default offline deterministic tests remain available.
+- [x] Add feature-gate scaffolding for the future GBM capability probe without
+  adding the dependency.
+- [x] Add a fake feature-enabled GBM probe test that still uses deterministic
+  data before introducing a real crate.
 
 ---
 
