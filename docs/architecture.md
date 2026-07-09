@@ -667,6 +667,17 @@ surface state into renderable layers. Sophia X Authority can adapt its bounded
 `XAuthorityObservedTransactionBatch` into this shape at the process/runtime
 edge without making Sophia Engine depend on the X Authority crate.
 
+The first runtime-owned compositor backend assembly is deterministic and
+headless. `HeadlessCompositorBackendAssembly` holds the Engine, session driver,
+frame clock, DRM/KMS output registry, libinput adapter, renderer selection, and
+committed surface cache. One `run_tick` polls physical input once, advances the
+frame clock, commits authority transaction batches through the live runtime
+adapter, runs the common session driver, and renders the produced frame through
+the selected renderer. This proves the ownership boundary before real kernel
+file descriptors enter the loop: the assembly coordinates backends, but it does
+not own protocol policy, WM layout semantics, portal policy, or client
+resources.
+
 Resize behavior measurement is tied to the same epoch state. `LayoutEpochState`
 records start time and timeout policy, and `measure_resize_behavior` reports
 elapsed time, pending surfaces, completion, and timeout status. Slow or

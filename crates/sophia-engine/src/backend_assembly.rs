@@ -1,0 +1,232 @@
+use crate::prelude::*;
+use crate::{
+    AuthorityTransactionIntake, CpuFallbackRenderer, DeterministicFrameClock, DrmKmsMode,
+    DrmKmsOutputDescriptor, DrmKmsOutputRegistry, EngineError, FrameClock, FrameClockTick,
+    HeadlessEngine, HeadlessOutput, HeadlessSessionDriver, HeadlessSessionDriverReport,
+    ImportCapableRenderer, LibinputEventSource, LibinputPhysicalInputAdapter, LibinputPollReport,
+    LiveRuntimeDriverAdapter, LiveRuntimeDriverIntake, QueuedInputPoller, RenderFrameReport,
+    WmTransactionUpdate,
+};
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum RendererSelection {
+    #[default]
+    CpuFallback,
+    ImportCapable {
+        import_xpixmap: bool,
+        import_dmabuf: bool,
+    },
+}
+
+impl RendererSelection {
+    pub fn render_frame(
+        self,
+        engine: &HeadlessEngine,
+        frame: &FrameSnapshot,
+    ) -> Result<RenderFrameReport, EngineError> {
+        match self {
+            Self::CpuFallback => engine.render_frame_with(&CpuFallbackRenderer, frame),
+            Self::ImportCapable {
+                import_xpixmap,
+                import_dmabuf,
+            } => engine.render_frame_with(
+                &ImportCapableRenderer::new(import_xpixmap, import_dmabuf),
+                frame,
+            ),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CompositorBackendTickInput {
+    pub x_event_count: u32,
+    pub authority_batches: Vec<AuthorityTransactionIntake>,
+    pub wm_update: Option<WmTransactionUpdate>,
+    pub portal_commands: Vec<PortalCommand>,
+    pub chrome_command_count: u32,
+    pub layer_templates: Vec<LayerSnapshot>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompositorBackendTickReport {
+    pub tick: FrameClockTick,
+    pub input_poll: LibinputPollReport,
+    pub runtime: HeadlessSessionDriverReport,
+    pub render: Option<RenderFrameReport>,
+}
+
+#[derive(Debug)]
+pub enum CompositorBackendAssemblyError {
+    InputPoll(io::Error),
+    Engine(EngineError),
+}
+
+impl fmt::Display for CompositorBackendAssemblyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InputPoll(error) => write!(f, "input poll failed: {error}"),
+            Self::Engine(error) => write!(f, "engine backend tick failed: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for CompositorBackendAssemblyError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InputPoll(error) => Some(error),
+            Self::Engine(error) => Some(error),
+        }
+    }
+}
+
+impl From<EngineError> for CompositorBackendAssemblyError {
+    fn from(error: EngineError) -> Self {
+        Self::Engine(error)
+    }
+}
+
+pub struct HeadlessCompositorBackendAssembly {
+    engine: HeadlessEngine,
+    driver: HeadlessSessionDriver,
+    clock: DeterministicFrameClock,
+    outputs: DrmKmsOutputRegistry,
+    input: LibinputPhysicalInputAdapter<QueuedInputPoller>,
+    renderer: RendererSelection,
+    committed_surfaces: Vec<CommittedSurfaceState>,
+}
+
+impl HeadlessCompositorBackendAssembly {
+    pub fn new(output: HeadlessOutput) -> Self {
+        let mut outputs = DrmKmsOutputRegistry::new();
+        outputs.upsert(output_descriptor_from_headless_output(output));
+
+        Self::from_parts(
+            output,
+            outputs,
+            DeterministicFrameClock::default(),
+            LibinputPhysicalInputAdapter::new(
+                QueuedInputPoller::default(),
+                LibinputEventSource::new(),
+            ),
+            RendererSelection::default(),
+        )
+    }
+
+    pub fn from_parts(
+        output: HeadlessOutput,
+        outputs: DrmKmsOutputRegistry,
+        clock: DeterministicFrameClock,
+        input: LibinputPhysicalInputAdapter<QueuedInputPoller>,
+        renderer: RendererSelection,
+    ) -> Self {
+        let engine = HeadlessEngine::new(output);
+        let driver = HeadlessSessionDriver::new(engine.clone());
+
+        Self {
+            engine,
+            driver,
+            clock,
+            outputs,
+            input,
+            renderer,
+            committed_surfaces: Vec::new(),
+        }
+    }
+
+    pub fn engine(&self) -> &HeadlessEngine {
+        &self.engine
+    }
+
+    pub fn driver(&self) -> &HeadlessSessionDriver {
+        &self.driver
+    }
+
+    pub fn outputs(&self) -> &DrmKmsOutputRegistry {
+        &self.outputs
+    }
+
+    pub fn input(&self) -> &LibinputPhysicalInputAdapter<QueuedInputPoller> {
+        &self.input
+    }
+
+    pub fn input_mut(&mut self) -> &mut LibinputPhysicalInputAdapter<QueuedInputPoller> {
+        &mut self.input
+    }
+
+    pub fn renderer(&self) -> RendererSelection {
+        self.renderer
+    }
+
+    pub fn committed_surfaces(&self) -> &[CommittedSurfaceState] {
+        &self.committed_surfaces
+    }
+
+    pub fn run_tick(
+        &mut self,
+        input: CompositorBackendTickInput,
+    ) -> Result<CompositorBackendTickReport, CompositorBackendAssemblyError> {
+        let input_poll = self
+            .input
+            .poll_once()
+            .map_err(CompositorBackendAssemblyError::InputPoll)?;
+        let tick = self.clock.next_frame(self.engine.output().id);
+        let mut adapter = LiveRuntimeDriverAdapter::from_authority_batches(
+            &self.engine,
+            LiveRuntimeDriverIntake {
+                x_event_count: input.x_event_count,
+                authority_commits: Vec::new(),
+                authority_batches: input.authority_batches,
+                wm_update: input.wm_update,
+                portal_commands: input.portal_commands,
+                chrome_command_count: input.chrome_command_count,
+                layers: input.layer_templates,
+                committed_surfaces: self.committed_surfaces.clone(),
+            },
+        );
+
+        self.committed_surfaces = adapter.renderer.committed_surfaces.clone();
+        let runtime = self
+            .driver
+            .run_with_adapter(tick.output, tick.frame_serial, &mut adapter)?;
+        self.committed_surfaces = adapter.renderer.committed_surfaces.clone();
+        let render = runtime
+            .session_tick
+            .as_ref()
+            .map(|session_tick| {
+                self.renderer
+                    .render_frame(&self.engine, &session_tick.frame)
+            })
+            .transpose()?;
+
+        debug!(
+            output = tick.output.raw(),
+            frame_serial = tick.frame_serial,
+            input_polled = input_poll.polled,
+            input_accepted = input_poll.accepted,
+            input_rejected = input_poll.rejected.len(),
+            committed_surfaces = self.committed_surfaces.len(),
+            rendered = render.is_some(),
+            "ran deterministic compositor backend tick"
+        );
+
+        Ok(CompositorBackendTickReport {
+            tick,
+            input_poll,
+            runtime,
+            render,
+        })
+    }
+}
+
+fn output_descriptor_from_headless_output(output: HeadlessOutput) -> DrmKmsOutputDescriptor {
+    DrmKmsOutputDescriptor {
+        output: output.id,
+        connector_id: u32::try_from(output.id.raw()).unwrap_or(u32::MAX),
+        crtc_id: 0,
+        mode: DrmKmsMode {
+            size: output.size,
+            refresh_millihz: 60_000,
+        },
+        scale: output.scale,
+    }
+}

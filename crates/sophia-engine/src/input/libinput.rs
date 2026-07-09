@@ -99,6 +99,10 @@ impl<P> LibinputPhysicalInputAdapter<P> {
         &mut self.source
     }
 
+    pub fn poller_mut(&mut self) -> &mut P {
+        &mut self.poller
+    }
+
     pub fn into_source(self) -> LibinputEventSource {
         self.source
     }

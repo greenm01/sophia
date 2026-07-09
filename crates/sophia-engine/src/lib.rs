@@ -33,6 +33,7 @@ mod prelude {
     pub(crate) use tracing::{debug, instrument, trace, warn};
 }
 
+mod backend_assembly;
 mod chrome;
 mod drm;
 mod engine;
@@ -46,6 +47,7 @@ mod session;
 mod visual_state;
 mod wm;
 
+pub use backend_assembly::*;
 pub use chrome::*;
 pub use drm::*;
 pub use engine::*;

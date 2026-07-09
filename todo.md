@@ -6,22 +6,21 @@ evidence belong in `docs/research-log.md`.
 
 ---
 
-## Active Focus - Compositor Backend Assembly
+## Active Focus - X Authority Supervisor Integration
 
 **Now**
-- [ ] Define the first runtime-owned backend assembly struct that holds output
-  discovery, input polling, frame clock, authority transaction intake, and
-  renderer selection without owning protocol policy.
-- [ ] Add a headless assembly smoke that drains authority batches into committed
-  surface state and renders through the existing runtime driver.
-- [ ] Keep real DRM/KMS ioctls, GPU imports, and real MIT-SHM mapping deferred
-  until the assembly seam is proven with deterministic tests.
-
-**Next**
 - [ ] Convert the bounded X Authority transaction channel into the session
   supervisor path once the long-running authority process exists.
+- [ ] Define the runtime event that reports authority process ready/degraded
+  state without leaking X11 resource IDs or namespace metadata.
+- [ ] Preserve callback observers only for focused tests; runtime code should
+  consume the bounded channel path.
+
+**Next**
 - [ ] Decide the first real backend dependency boundary for DRM/KMS and
   libinput without changing the Engine/WM/Authority packet contracts.
+- [ ] Keep real DRM/KMS ioctls, GPU imports, and real MIT-SHM mapping deferred
+  until the deterministic backend assembly needs a live backend implementation.
 
 ---
 
@@ -73,6 +72,11 @@ evidence belong in `docs/research-log.md`.
   mapped bytes through a bounded renderer import path.
 - [x] Add protocol-neutral `AuthorityTransactionIntake` so runtime can commit
   authority batches without making Sophia Engine depend on Sophia X Authority.
+- [x] Define the first runtime-owned backend assembly struct that holds output
+  discovery, input polling, frame clock, authority transaction intake, and
+  renderer selection without owning protocol policy.
+- [x] Add a headless assembly smoke that drains authority batches into committed
+  surface state and renders through the existing runtime driver.
 
 ---
 
