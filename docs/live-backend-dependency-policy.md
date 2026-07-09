@@ -174,6 +174,13 @@ open a card, register callbacks, or poll file descriptors. The next native step
 must introduce backend-owned fd authority explicitly and keep all `drm` handles
 inside the module.
 
+The backend-owned fd authority shape is `LibdrmBackendFdAuthority`. It is a
+generation-checked token, not a file descriptor wrapper and not a path. It may
+be minted only with a nonzero generation and currently reduces to
+`LibdrmBackendFdAuthorityReport { BackendOwned }`. The token gives the native
+adapter a future place to receive private fd ownership without letting runtime,
+WM IPC, docs, or tests depend on raw descriptors.
+
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
 authority. On Linux, wgpu will usually target Vulkan, but Sophia must first prove

@@ -478,6 +478,13 @@ pub fn native_libdrm_event_adapter_report() -> LibdrmNativeEventAdapterReport {
 }
 
 #[cfg(feature = "libdrm-events")]
+pub fn libdrm_fd_authority_report(
+    authority: LibdrmBackendFdAuthority,
+) -> LibdrmBackendFdAuthorityReport {
+    native_libdrm_events::fd_authority_report(authority)
+}
+
+#[cfg(feature = "libdrm-events")]
 mod native_drm_admission {
     use super::{LibdrmDependencyAdmissionReport, LibdrmDependencyAdmissionStatus};
 
@@ -502,13 +509,57 @@ pub enum LibdrmNativeEventAdapterStatus {
 }
 
 #[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LibdrmBackendFdAuthority {
+    generation: u64,
+}
+
+#[cfg(feature = "libdrm-events")]
+impl LibdrmBackendFdAuthority {
+    pub const fn new(generation: u64) -> Option<Self> {
+        if generation == 0 {
+            return None;
+        }
+
+        Some(Self { generation })
+    }
+
+    pub const fn generation(self) -> u64 {
+        self.generation
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LibdrmBackendFdAuthorityReport {
+    pub status: LibdrmBackendFdAuthorityStatus,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibdrmBackendFdAuthorityStatus {
+    BackendOwned,
+}
+
+#[cfg(feature = "libdrm-events")]
 mod native_libdrm_events {
-    use super::{LibdrmNativeEventAdapterReport, LibdrmNativeEventAdapterStatus};
+    use super::{
+        LibdrmBackendFdAuthority, LibdrmBackendFdAuthorityReport, LibdrmBackendFdAuthorityStatus,
+        LibdrmNativeEventAdapterReport, LibdrmNativeEventAdapterStatus,
+    };
 
     pub(super) fn adapter_report() -> LibdrmNativeEventAdapterReport {
         let _ = core::mem::align_of::<drm::control::PageFlipEvent>();
         LibdrmNativeEventAdapterReport {
             status: LibdrmNativeEventAdapterStatus::SkeletonReady,
+        }
+    }
+
+    pub(super) fn fd_authority_report(
+        _authority: LibdrmBackendFdAuthority,
+    ) -> LibdrmBackendFdAuthorityReport {
+        LibdrmBackendFdAuthorityReport {
+            status: LibdrmBackendFdAuthorityStatus::BackendOwned,
         }
     }
 }

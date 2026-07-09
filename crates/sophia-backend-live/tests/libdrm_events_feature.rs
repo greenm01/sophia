@@ -3,12 +3,14 @@
 use std::sync::mpsc;
 
 use sophia_backend_live::{
-    CompositorBackendTickInput, FakeLibdrmPageFlipEventPoller, LibdrmDependencyAdmissionReport,
-    LibdrmDependencyAdmissionStatus, LibdrmNativeEventAdapterReport,
-    LibdrmNativeEventAdapterStatus, LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus,
-    LibdrmPageFlipEventPoller, LiveBackendConfig, LivePageFlipCallback, LivePageFlipCallbackQueue,
-    LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus, OutputId,
-    QueuedInputPoller, discover_live_backend, libdrm_dependency_admission_report,
+    CompositorBackendTickInput, FakeLibdrmPageFlipEventPoller, LibdrmBackendFdAuthority,
+    LibdrmBackendFdAuthorityReport, LibdrmBackendFdAuthorityStatus,
+    LibdrmDependencyAdmissionReport, LibdrmDependencyAdmissionStatus,
+    LibdrmNativeEventAdapterReport, LibdrmNativeEventAdapterStatus, LibdrmPageFlipEventPollReport,
+    LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller, LiveBackendConfig,
+    LivePageFlipCallback, LivePageFlipCallbackQueue, LivePageFlipCallbackSourceReport,
+    LivePageFlipEvent, LivePageFlipEventStatus, OutputId, QueuedInputPoller, discover_live_backend,
+    libdrm_dependency_admission_report, libdrm_fd_authority_report,
     native_libdrm_event_adapter_report,
 };
 
@@ -18,6 +20,21 @@ fn libdrm_dependency_is_admitted_without_exposing_native_event_shape() {
         libdrm_dependency_admission_report(),
         LibdrmDependencyAdmissionReport {
             status: LibdrmDependencyAdmissionStatus::TypedPageFlipEventAvailable,
+        }
+    );
+}
+
+#[test]
+fn libdrm_fd_authority_is_generation_checked_and_reduced() {
+    assert_eq!(LibdrmBackendFdAuthority::new(0), None);
+
+    let authority =
+        LibdrmBackendFdAuthority::new(9).expect("nonzero generation should mint authority token");
+    assert_eq!(authority.generation(), 9);
+    assert_eq!(
+        libdrm_fd_authority_report(authority),
+        LibdrmBackendFdAuthorityReport {
+            status: LibdrmBackendFdAuthorityStatus::BackendOwned,
         }
     );
 }
