@@ -35,7 +35,8 @@ The first native renderer candidate is a feature-gated GBM capability probe. EGL
 rendering, DMA-BUF import, and explicit sync remain later steps. Default
 workspace tests must continue to run without native renderer dependencies.
 The public probe shape is a backend-provided reduced render-device token, not a
-device path or borrowed file descriptor.
+device path or borrowed file descriptor. The required default and feature-enabled
+local checks are listed in `docs/validation.md`.
 
 Phase 4 is the shared-memory import boundary. Real MIT-SHM mapping stays
 deferred until mapped bytes can pass through a bounded renderer upload path with

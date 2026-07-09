@@ -100,6 +100,10 @@ opening later; renderer-live receives only the reduced token needed to report
 capability health. This keeps raw kernel authority out of engine state, WM IPC,
 portals, and protocol authorities.
 
+The feature-enabled local validation command is documented in
+`docs/validation.md`. Real GBM admission is deferred until that validation path
+is part of the expected check set.
+
 Admission tests for the first real dependency must prove:
 
 - the crate still builds and tests offline without the feature;

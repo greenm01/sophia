@@ -9,15 +9,15 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Keep default workspace tests independent of native renderer libraries.
-- [ ] Keep real GBM dependency optional until CI exercises both default and
-  feature-enabled paths.
+- [ ] Keep real GBM dependency optional until CI or release checks exercise both
+  default and feature-enabled paths.
+- [ ] Revisit real GBM crate admission only after selecting the concrete crate
+  and checking its offline/system dependency behavior.
 
 **Next**
-- [ ] Add CI or documented local check coverage for
-  `cargo test -p sophia-renderer-live --features gbm-probe`.
-- [ ] Revisit real GBM crate admission after feature-enabled coverage is part
-  of the expected validation set.
+- [ ] Decide whether to use a low-level GBM binding directly or isolate it
+  behind a tiny adapter module.
+- [ ] Add dependency-admission notes for the selected GBM crate before adding it.
 
 ---
 
@@ -143,6 +143,9 @@ evidence belong in `docs/research-log.md`.
   exists.
 - [x] Decide the real GBM probe API shape: backend-provided reduced device token,
   not device-path intake or borrowed fd intake.
+- [x] Keep default workspace tests independent of native renderer libraries.
+- [x] Add documented local check coverage for
+  `cargo test --offline -p sophia-renderer-live --features gbm-probe`.
 
 ---
 
