@@ -5,6 +5,7 @@ use sophia_protocol::NamespaceId;
 use crate::{XAtom, XAtomTable, XResourceId, is_metadata_candidate_name};
 
 pub const X_PROPERTY_MAX_VALUE_BYTES: usize = 64 * 1024;
+pub const X_PROPERTY_ANY_TYPE: XAtom = 0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum XPropertyMode {
@@ -20,6 +21,25 @@ pub struct XPropertyChange {
     pub property: XAtom,
     pub property_type: XAtom,
     pub format: u8,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct XPropertyRead {
+    pub delete: bool,
+    pub window: XResourceId,
+    pub property: XAtom,
+    pub property_type: XAtom,
+    pub long_offset: u32,
+    pub long_length: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct XPropertyReadReply {
+    pub property_type: XAtom,
+    pub format: u8,
+    pub bytes_after: u32,
+    pub item_count: u32,
     pub bytes: Vec<u8>,
 }
 
@@ -54,6 +74,8 @@ pub enum XPropertyError {
     InvalidFormat(u8),
     ValueTooLarge { len: usize, max: usize },
     TypeMismatch,
+    InvalidOffset,
+    ReadTooLarge { len: usize, max: usize },
 }
 
 pub fn metadata_property_candidate(
@@ -161,6 +183,73 @@ impl XPropertyTable {
 
     pub fn is_empty(&self) -> bool {
         self.records.is_empty()
+    }
+
+    pub fn read_property(
+        &self,
+        namespace: NamespaceId,
+        read: XPropertyRead,
+    ) -> Result<XPropertyReadReply, XPropertyError> {
+        if !namespace.is_valid() {
+            return Err(XPropertyError::InvalidNamespace);
+        }
+        if !read.window.is_valid() {
+            return Err(XPropertyError::InvalidWindow);
+        }
+
+        let Some(record) = self.get(namespace, read.window, read.property) else {
+            return Ok(XPropertyReadReply {
+                property_type: X_PROPERTY_ANY_TYPE,
+                format: 0,
+                bytes_after: 0,
+                item_count: 0,
+                bytes: Vec::new(),
+            });
+        };
+
+        if read.property_type != X_PROPERTY_ANY_TYPE && read.property_type != record.property_type {
+            return Ok(XPropertyReadReply {
+                property_type: record.property_type,
+                format: record.format,
+                bytes_after: u32::try_from(record.bytes.len()).unwrap_or(u32::MAX),
+                item_count: 0,
+                bytes: Vec::new(),
+            });
+        }
+
+        let offset = usize::try_from(read.long_offset)
+            .ok()
+            .and_then(|value| value.checked_mul(4))
+            .ok_or(XPropertyError::InvalidOffset)?;
+        if offset > record.bytes.len() {
+            return Err(XPropertyError::InvalidOffset);
+        }
+
+        let max_read = usize::try_from(read.long_length)
+            .ok()
+            .and_then(|value| value.checked_mul(4))
+            .ok_or(XPropertyError::ReadTooLarge {
+                len: usize::MAX,
+                max: X_PROPERTY_MAX_VALUE_BYTES,
+            })?;
+        if max_read > X_PROPERTY_MAX_VALUE_BYTES {
+            return Err(XPropertyError::ReadTooLarge {
+                len: max_read,
+                max: X_PROPERTY_MAX_VALUE_BYTES,
+            });
+        }
+
+        let remaining = record.bytes.len() - offset;
+        let returned_len = remaining.min(max_read);
+        let bytes_after = remaining - returned_len;
+        let item_width = usize::from(record.format / 8);
+        Ok(XPropertyReadReply {
+            property_type: record.property_type,
+            format: record.format,
+            bytes_after: u32::try_from(bytes_after).unwrap_or(u32::MAX),
+            item_count: u32::try_from(returned_len / item_width).unwrap_or(u32::MAX),
+            bytes: record.bytes[offset..offset + returned_len].to_vec(),
+        })
     }
 }
 

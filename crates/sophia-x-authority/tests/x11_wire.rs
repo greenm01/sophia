@@ -349,6 +349,36 @@ fn x11_core_decoder_captures_atom_requests() {
 }
 
 #[test]
+fn x11_core_decoder_captures_get_property_requests() {
+    let namespace = NamespaceId::from_raw(45);
+    let get_property = decode_x11_core_request(
+        context(namespace, 507, XByteOrder::LittleEndian),
+        &get_property_request(
+            XByteOrder::LittleEndian,
+            false,
+            0x220007,
+            X_ATOM_WM_NAME,
+            X_PROPERTY_ANY_TYPE,
+            1,
+            2,
+        ),
+    )
+    .unwrap();
+
+    assert_eq!(
+        get_property,
+        XWireRequest::GetProperty(XPropertyRead {
+            delete: false,
+            window: XResourceId::new(0x220007, 1),
+            property: X_ATOM_WM_NAME,
+            property_type: X_PROPERTY_ANY_TYPE,
+            long_offset: 1,
+            long_length: 2,
+        })
+    );
+}
+
+#[test]
 fn x11_dispatch_replies_to_atom_requests_and_rejects_unknown_names() {
     let namespace = NamespaceId::from_raw(45);
     let mut runtime = XAuthorityRuntime::new();
@@ -419,6 +449,211 @@ fn x11_dispatch_replies_to_atom_requests_and_rejects_unknown_names() {
     let encoded = unknown.encoded_outputs(XByteOrder::LittleEndian);
     assert_eq!(encoded[0][0], 0);
     assert_eq!(encoded[0][1], XErrorCode::BadAtom.wire_code());
+}
+
+#[test]
+fn x11_dispatch_reads_bounded_property_slices() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let utf8 = atoms
+        .intern(X_ATOM_NAME_UTF8_STRING, false)
+        .unwrap()
+        .unwrap();
+    let net_wm_name = atoms
+        .intern(X_ATOM_NAME_NET_WM_NAME, false)
+        .unwrap()
+        .unwrap();
+    let window = 0x220008;
+
+    let create = decode_x11_core_request(
+        context(namespace, 513, XByteOrder::LittleEndian),
+        &create_window_request(XByteOrder::LittleEndian, window, 0, 0, 300, 200),
+    )
+    .unwrap();
+    dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 1),
+        create,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    let title = b"Secret Terminal Title";
+    let change = decode_x11_core_request(
+        context(namespace, 514, XByteOrder::LittleEndian),
+        &change_property_request(
+            XByteOrder::LittleEndian,
+            XPropertyMode::Replace,
+            window,
+            net_wm_name,
+            utf8,
+            8,
+            title,
+        ),
+    )
+    .unwrap();
+    dispatch_x11_wire_request(
+        dispatch_context(namespace, 2, XByteOrder::LittleEndian, 18),
+        change,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    let read = decode_x11_core_request(
+        context(namespace, 515, XByteOrder::LittleEndian),
+        &get_property_request(
+            XByteOrder::LittleEndian,
+            false,
+            window,
+            net_wm_name,
+            X_PROPERTY_ANY_TYPE,
+            1,
+            2,
+        ),
+    )
+    .unwrap();
+    let read = dispatch_x11_wire_request(
+        dispatch_context(namespace, 3, XByteOrder::LittleEndian, 20),
+        read,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = read.encoded_outputs(XByteOrder::LittleEndian);
+
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(encoded[0][1], 8);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][8..12]), utf8);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &encoded[0][12..16]),
+        u32::try_from(title.len() - 12).unwrap()
+    );
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][16..20]), 8);
+    assert_eq!(&encoded[0][32..40], &title[4..12]);
+}
+
+#[test]
+fn x11_dispatch_get_property_fails_closed_for_bad_window_atom_and_offset() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let utf8 = atoms
+        .intern(X_ATOM_NAME_UTF8_STRING, false)
+        .unwrap()
+        .unwrap();
+
+    let bad_window = decode_x11_core_request(
+        context(namespace, 516, XByteOrder::LittleEndian),
+        &get_property_request(
+            XByteOrder::LittleEndian,
+            false,
+            0x220009,
+            X_ATOM_WM_NAME,
+            X_PROPERTY_ANY_TYPE,
+            0,
+            1,
+        ),
+    )
+    .unwrap();
+    let bad_window = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 20),
+        bad_window,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert_eq!(
+        bad_window.encoded_outputs(XByteOrder::LittleEndian)[0][1],
+        3
+    );
+
+    let create = decode_x11_core_request(
+        context(namespace, 517, XByteOrder::LittleEndian),
+        &create_window_request(XByteOrder::LittleEndian, 0x220009, 0, 0, 300, 200),
+    )
+    .unwrap();
+    dispatch_x11_wire_request(
+        dispatch_context(namespace, 2, XByteOrder::LittleEndian, 1),
+        create,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    let bad_atom = decode_x11_core_request(
+        context(namespace, 518, XByteOrder::LittleEndian),
+        &get_property_request(
+            XByteOrder::LittleEndian,
+            false,
+            0x220009,
+            0x00ff_ffff,
+            X_PROPERTY_ANY_TYPE,
+            0,
+            1,
+        ),
+    )
+    .unwrap();
+    let bad_atom = dispatch_x11_wire_request(
+        dispatch_context(namespace, 3, XByteOrder::LittleEndian, 20),
+        bad_atom,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert_eq!(
+        bad_atom.encoded_outputs(XByteOrder::LittleEndian)[0][1],
+        XErrorCode::BadAtom.wire_code()
+    );
+
+    let change = decode_x11_core_request(
+        context(namespace, 519, XByteOrder::LittleEndian),
+        &change_property_request(
+            XByteOrder::LittleEndian,
+            XPropertyMode::Replace,
+            0x220009,
+            X_ATOM_WM_NAME,
+            utf8,
+            8,
+            b"short",
+        ),
+    )
+    .unwrap();
+    dispatch_x11_wire_request(
+        dispatch_context(namespace, 4, XByteOrder::LittleEndian, 18),
+        change,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    let bad_offset = decode_x11_core_request(
+        context(namespace, 520, XByteOrder::LittleEndian),
+        &get_property_request(
+            XByteOrder::LittleEndian,
+            false,
+            0x220009,
+            X_ATOM_WM_NAME,
+            X_PROPERTY_ANY_TYPE,
+            2,
+            1,
+        ),
+    )
+    .unwrap();
+    let bad_offset = dispatch_x11_wire_request(
+        dispatch_context(namespace, 5, XByteOrder::LittleEndian, 20),
+        bad_offset,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert_eq!(
+        bad_offset.encoded_outputs(XByteOrder::LittleEndian)[0][1],
+        XErrorCode::BadValue.wire_code()
+    );
 }
 
 #[test]
@@ -713,7 +948,7 @@ fn x11_setup_socket_smoke_completes_handshake() {
 
 #[cfg(unix)]
 #[test]
-fn x11_core_socket_smoke_completes_setup_create_and_map() {
+fn x11_core_socket_smoke_round_trips_atom_property_and_window_events() {
     use std::io::Write;
     use std::os::unix::net::UnixStream;
     use std::thread;
@@ -740,6 +975,30 @@ fn x11_core_socket_smoke_completes_setup_create_and_map() {
     read_setup_success(&mut stream, XByteOrder::LittleEndian);
 
     stream
+        .write_all(&intern_atom_request(
+            XByteOrder::LittleEndian,
+            false,
+            X_ATOM_NAME_NET_WM_NAME,
+        ))
+        .unwrap();
+    let intern = read_x_record(&mut stream);
+    assert_eq!(intern[0], 1);
+    let net_wm_name = read_u32(XByteOrder::LittleEndian, &intern[8..12]);
+    assert_ne!(net_wm_name, 0);
+
+    stream
+        .write_all(&intern_atom_request(
+            XByteOrder::LittleEndian,
+            false,
+            X_ATOM_NAME_UTF8_STRING,
+        ))
+        .unwrap();
+    let intern = read_x_record(&mut stream);
+    assert_eq!(intern[0], 1);
+    let utf8 = read_u32(XByteOrder::LittleEndian, &intern[8..12]);
+    assert_ne!(utf8, 0);
+
+    stream
         .write_all(&create_window_request(
             XByteOrder::LittleEndian,
             0x220201,
@@ -762,6 +1021,41 @@ fn x11_core_socket_smoke_completes_setup_create_and_map() {
     let map = read_x_record(&mut stream);
     assert_eq!(map[0], 19);
     assert_eq!(read_u32(XByteOrder::LittleEndian, &map[8..12]), 0x220201);
+
+    stream
+        .write_all(&change_property_request(
+            XByteOrder::LittleEndian,
+            XPropertyMode::Replace,
+            0x220201,
+            net_wm_name,
+            utf8,
+            8,
+            b"Sophia Socket",
+        ))
+        .unwrap();
+    let property = read_x_record(&mut stream);
+    assert_eq!(property[0], 28);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &property[8..12]),
+        net_wm_name
+    );
+
+    stream
+        .write_all(&get_property_request(
+            XByteOrder::LittleEndian,
+            false,
+            0x220201,
+            net_wm_name,
+            X_PROPERTY_ANY_TYPE,
+            0,
+            64,
+        ))
+        .unwrap();
+    let property = read_x_reply(&mut stream, XByteOrder::LittleEndian);
+    assert_eq!(property[0], 1);
+    assert_eq!(property[1], 8);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &property[8..12]), utf8);
+    assert_eq!(&property[32..45], b"Sophia Socket");
 
     drop(stream);
     let _ = std::fs::remove_file(&socket_path);
@@ -920,6 +1214,25 @@ fn change_property_request(
     out
 }
 
+fn get_property_request(
+    byte_order: XByteOrder,
+    delete: bool,
+    window: u32,
+    property: u32,
+    property_type: u32,
+    long_offset: u32,
+    long_length: u32,
+) -> Vec<u8> {
+    let mut out = vec![20, u8::from(delete)];
+    push_u16(&mut out, byte_order, 6);
+    push_u32(&mut out, byte_order, window);
+    push_u32(&mut out, byte_order, property);
+    push_u32(&mut out, byte_order, property_type);
+    push_u32(&mut out, byte_order, long_offset);
+    push_u32(&mut out, byte_order, long_length);
+    out
+}
+
 fn push_u16(out: &mut Vec<u8>, byte_order: XByteOrder, value: u16) {
     match byte_order {
         XByteOrder::LittleEndian => out.extend_from_slice(&value.to_le_bytes()),
@@ -993,4 +1306,17 @@ fn read_x_record(stream: &mut std::os::unix::net::UnixStream) -> [u8; 32] {
     let mut record = [0; 32];
     stream.read_exact(&mut record).unwrap();
     record
+}
+
+#[cfg(unix)]
+fn read_x_reply(stream: &mut std::os::unix::net::UnixStream, byte_order: XByteOrder) -> Vec<u8> {
+    use std::io::Read;
+
+    let mut prefix = [0; 32];
+    stream.read_exact(&mut prefix).unwrap();
+    let body_len = usize::try_from(read_u32(byte_order, &prefix[4..8])).unwrap() * 4;
+    let mut reply = prefix.to_vec();
+    reply.resize(32 + body_len, 0);
+    stream.read_exact(&mut reply[32..]).unwrap();
+    reply
 }

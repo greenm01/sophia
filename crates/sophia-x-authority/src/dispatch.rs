@@ -1,8 +1,8 @@
 use crate::{
     XAtomTable, XAuthorityRequestKind, XAuthorityResponseOutcome, XAuthorityResponsePacket,
-    XAuthorityRuntime, XByteOrder, XClientEvent, XClientOutput, XClientReply,
-    XMetadataPropertyCandidate, XPropertyTable, XResourceId, XWireParseError, XWireRequest,
-    encode_x_client_output, metadata_property_candidate, x_error_from_runtime,
+    XAuthorityRuntime, XByteOrder, XClientEvent, XClientOutput, XClientReply, XErrorCode,
+    XMetadataPropertyCandidate, XPropertyError, XPropertyTable, XResourceId, XWireParseError,
+    XWireRequest, encode_x_client_output, metadata_property_candidate, x_error_from_runtime,
     x_error_from_wire_parse, x_selection_failure_event,
 };
 use sophia_protocol::NamespaceId;
@@ -125,6 +125,52 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates,
             }
         }
+        XWireRequest::GetProperty(read) => {
+            let output = if read.property == crate::X_PROPERTY_ANY_TYPE
+                || atoms.name(read.property).is_none()
+                || atom_type_is_unknown(atoms, read.property_type)
+            {
+                XClientOutput::Error(crate::XClientError {
+                    code: crate::XErrorCode::BadAtom,
+                    sequence: context.sequence,
+                    resource_id: read.property,
+                    minor_code: 0,
+                    major_code: context.major_opcode,
+                })
+            } else if let Err(error) =
+                runtime.validate_window_access(context.namespace, read.window)
+            {
+                XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(read.window.local.raw()).unwrap_or(0),
+                ))
+            } else {
+                match properties.read_property(context.namespace, read) {
+                    Ok(reply) => XClientOutput::Reply(XClientReply::GetProperty {
+                        sequence: context.sequence,
+                        property_type: reply.property_type,
+                        format: reply.format,
+                        bytes_after: reply.bytes_after,
+                        item_count: reply.item_count,
+                        bytes: reply.bytes,
+                    }),
+                    Err(error) => XClientOutput::Error(crate::XClientError {
+                        code: x_error_from_property_read(error),
+                        sequence: context.sequence,
+                        resource_id: 0,
+                        minor_code: 0,
+                        major_code: context.major_opcode,
+                    }),
+                }
+            };
+            XDispatchResult {
+                response: None,
+                outputs: vec![output],
+                metadata_candidates: Vec::new(),
+            }
+        }
     }
 }
 
@@ -216,6 +262,21 @@ fn resource_from_kind(kind: &XAuthorityRequestKind) -> u32 {
         XAuthorityRequestKind::RequestSelection { requestor, .. } => *requestor,
     };
     u32::try_from(resource.local.raw()).unwrap_or(0)
+}
+
+fn atom_type_is_unknown(atoms: &XAtomTable, atom: u32) -> bool {
+    atom != crate::X_PROPERTY_ANY_TYPE && atoms.name(atom).is_none()
+}
+
+fn x_error_from_property_read(error: XPropertyError) -> XErrorCode {
+    match error {
+        XPropertyError::InvalidNamespace | XPropertyError::InvalidWindow => XErrorCode::BadWindow,
+        XPropertyError::InvalidFormat(_)
+        | XPropertyError::ValueTooLarge { .. }
+        | XPropertyError::TypeMismatch
+        | XPropertyError::InvalidOffset
+        | XPropertyError::ReadTooLarge { .. } => XErrorCode::BadValue,
+    }
 }
 
 fn clamp_i16(value: i32) -> i16 {

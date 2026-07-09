@@ -171,4 +171,15 @@ impl XAuthorityRuntime {
     pub fn window_count(&self) -> usize {
         self.windows.len()
     }
+
+    pub fn validate_window_access(
+        &self,
+        namespace: sophia_protocol::NamespaceId,
+        window: crate::XResourceId,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        self.resources
+            .lookup(namespace, window, XResourceKind::Window)
+            .map(|_| ())
+            .map_err(Into::into)
+    }
 }

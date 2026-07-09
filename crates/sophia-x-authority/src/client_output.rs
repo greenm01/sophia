@@ -86,8 +86,22 @@ pub enum XClientEvent {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum XClientReply {
-    InternAtom { sequence: u16, atom: u32 },
-    GetAtomName { sequence: u16, name: String },
+    InternAtom {
+        sequence: u16,
+        atom: u32,
+    },
+    GetAtomName {
+        sequence: u16,
+        name: String,
+    },
+    GetProperty {
+        sequence: u16,
+        property_type: u32,
+        format: u8,
+        bytes_after: u32,
+        item_count: u32,
+        bytes: Vec<u8>,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -130,6 +144,30 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             );
             out[X_CLIENT_OUTPUT_RECORD_LEN..X_CLIENT_OUTPUT_RECORD_LEN + bytes.len()]
                 .copy_from_slice(bytes);
+            out
+        }
+        XClientReply::GetProperty {
+            sequence,
+            property_type,
+            format,
+            bytes_after,
+            item_count,
+            bytes,
+        } => {
+            let padded_value_len = padded_len(bytes.len());
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN + padded_value_len];
+            write_reply_header(
+                byte_order,
+                &mut out[..X_CLIENT_OUTPUT_RECORD_LEN],
+                sequence,
+                u32::try_from(padded_value_len / 4).unwrap_or(0),
+            );
+            out[1] = format;
+            put_u32(byte_order, &mut out[8..12], property_type);
+            put_u32(byte_order, &mut out[12..16], bytes_after);
+            put_u32(byte_order, &mut out[16..20], item_count);
+            out[X_CLIENT_OUTPUT_RECORD_LEN..X_CLIENT_OUTPUT_RECORD_LEN + bytes.len()]
+                .copy_from_slice(&bytes);
             out
         }
     }

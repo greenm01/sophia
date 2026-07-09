@@ -259,17 +259,18 @@ The covered setup fixtures are:
 - setup success and setup failure reply encoding.
 
 Core request parsing now starts with fixtures for `CreateWindow`, `MapWindow`,
-`InternAtom`, `GetAtomName`, `ChangeProperty`, `SetSelectionOwner`, and
-`ConvertSelection`. Runtime-backed wire requests translate into existing
-internal `XAuthorityRequestPacket` values before they reach
-`XAuthorityRuntime`; `ChangeProperty` lands in a minimal namespace-keyed
-property table.
+`InternAtom`, `GetAtomName`, `ChangeProperty`, `GetProperty`,
+`SetSelectionOwner`, and `ConvertSelection`. Runtime-backed wire requests
+translate into existing internal `XAuthorityRequestPacket` values before they
+reach `XAuthorityRuntime`; property writes and reads land in a minimal
+namespace-keyed property table.
 
 Minimal client-visible output now covers bounded X error records, 32-byte core
 events for `ConfigureNotify`, `MapNotify`, `PropertyNotify`, and
 `SelectionNotify`, and variable-length replies for `InternAtom` and
-`GetAtomName`. The X11 socket smoke completes setup, sends synthetic
-`CreateWindow` and `MapWindow` requests, and observes the expected events.
+`GetAtomName`/`GetProperty`. The X11 socket smoke completes setup, interns
+atoms, sends synthetic `CreateWindow` and `MapWindow` requests, writes a title
+property, reads it back, and observes the expected events.
 
 Atom naming is authority-owned and bounded. Sophia preloads the small predefined
 set needed by the prototype, allocates dynamic client-interned atoms after the
@@ -279,6 +280,7 @@ property writes such as `WM_CLASS`, `WM_NAME`, `_NET_WM_NAME`, and
 window, atom names, type names, value length, and generation. They do not emit
 raw titles, classes, icons, paths, or namespace labels to the window manager.
 
-The next milestone is minimal `GetProperty` support so a tiny Xlib client can
-round-trip normal ICCCM/EWMH property reads through the synthetic socket before
-we move to a real-client smoke.
+Minimal `GetProperty` is now present. The next milestone is a tiny real Xlib
+client that uses the normal library path to connect, intern atoms, create and
+map a window, and round-trip a bounded title property. Its first failure should
+drive the next opcode or reply implementation.

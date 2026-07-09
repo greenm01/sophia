@@ -6,23 +6,20 @@ evidence belong in `docs/research-log.md`.
 
 ---
 
-## Active Focus - Sophia X Authority: Minimal GetProperty
+## Active Focus - Sophia X Authority: Tiny Real Xlib Smoke
 
 **Now**
-- [ ] Add minimal `GetProperty` decode and reply support for bounded
-  metadata-relevant properties.
-- [ ] Return normal X11 failure shapes for unknown windows, unknown atoms, bad
-  offsets, and oversized reads.
-- [ ] Extend the synthetic socket smoke through atom lookup, property write,
-  and property read.
-- [ ] Keep full property payloads inside the authority; metadata broker
-  candidates remain length/name/type summaries only.
+- [ ] Define the smallest real Xlib client target: connect, intern atoms,
+  create a window, set/read a title, map, and observe events.
+- [ ] Add a CLI smoke wrapper that starts the Sophia X Authority socket and
+  runs the tiny client against it.
+- [ ] Record the next missing X11 opcode or reply shape found by the real
+  client instead of guessing ahead.
 
 **Next**
-- [ ] Define the tiny Xlib real-client smoke after the synthetic request/reply
-  path is green.
-- [ ] Start a first real Xlib smoke with setup, atom lookup, create, map, and
-  event observation.
+- [ ] Add minimal request coverage for the first real-client failure.
+- [ ] Re-run the Xlib smoke until the connect/create/map/property path is
+  stable.
 
 ---
 
@@ -30,6 +27,7 @@ evidence belong in `docs/research-log.md`.
 
 - [x] Expand X11 atom/property tables for ICCCM names and metadata-broker
   candidates.
+- [x] Add minimal bounded `GetProperty` replies and socket smoke coverage.
 - [ ] Define the first real-client target after synthetic setup succeeds:
   likely a tiny Xlib window before GTK/Qt/browser paths.
 - [ ] Revisit compositor backend work after X Authority can create, map, draw,
