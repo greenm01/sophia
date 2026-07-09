@@ -46,8 +46,8 @@ pub use sophia_renderer_live::{
 pub use sophia_renderer_live::{GbmCapabilityProbeReport, NativeGbmCapabilityProbe};
 #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
 use sophia_renderer_live::{
-    NativeGbmBackedEglDrawSmoke, NativeGbmBackedEglPlatformProbe,
-    NativeGbmBackedEglPresentationSmoke,
+    NativeGbmBackedEglDrawSmoke, NativeGbmBackedEglFrameTargetAllocator,
+    NativeGbmBackedEglPlatformProbe, NativeGbmBackedEglPresentationSmoke,
 };
 
 pub const LIVE_PAGE_FLIP_CALLBACK_CHANNEL_CAPACITY: usize = 128;
@@ -1338,6 +1338,32 @@ impl LiveBackendStartupReport {
     {
         self.native_gbm_backed_egl_presentation_smoke_report_from_device_result(
             discovery.open_render_device(),
+        )
+    }
+
+    #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
+    pub fn native_gbm_backed_egl_frame_target_allocation_report_from_device_result<T: AsFd>(
+        &self,
+        device: io::Result<T>,
+        request: LiveGbmEglFrameTargetAllocationRequest,
+    ) -> LiveGbmEglFrameTargetAllocationReport {
+        NativeGbmBackedEglFrameTargetAllocator::allocation_report_from_backend_device_result(
+            device, request,
+        )
+    }
+
+    #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
+    pub fn native_gbm_backed_egl_frame_target_allocation_report_with_gbm_device<D>(
+        &self,
+        discovery: &D,
+        request: LiveGbmEglFrameTargetAllocationRequest,
+    ) -> LiveGbmEglFrameTargetAllocationReport
+    where
+        D: RenderDeviceDiscoveryBackend,
+    {
+        self.native_gbm_backed_egl_frame_target_allocation_report_from_device_result(
+            discovery.open_render_device(),
+            request,
         )
     }
 

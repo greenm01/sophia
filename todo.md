@@ -9,12 +9,12 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Decide how backend-live should call the native GBM/EGL frame-target
-  allocator skeleton.
+- [ ] Decide whether native frame-target allocation should feed
+  `LiveBackendRuntimeAssembly` directly or remain an explicit caller action.
 
 **Next**
-- [ ] Add backend-live feature-gated coverage for native frame-target allocation
-  using invalid and missing render devices.
+- [ ] Add runtime assembly helper for native frame-target allocation if the
+  explicit caller action remains stable.
 
 ---
 
@@ -305,6 +305,10 @@ evidence belong in `docs/research-log.md`.
 - [x] Decide the first native GBM/EGL frame-target allocator skeleton shape.
 - [x] Add a native allocator skeleton behind existing GBM/EGL features that
   returns reduced allocation status without exporting handles.
+- [x] Decide how backend-live should call the native GBM/EGL frame-target
+  allocator skeleton.
+- [x] Add backend-live feature-gated coverage for native frame-target allocation
+  using invalid and missing render devices.
 
 ---
 
