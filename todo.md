@@ -9,12 +9,12 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Decide the first runtime observation shape for reduced GBM/EGL frame
-  target readiness.
+- [ ] Decide the first runtime mutation path for GBM/EGL frame-target readiness
+  when output size changes.
 
 **Next**
-- [ ] Add runtime tick projection for reduced GBM/EGL frame target readiness if
-  startup projection remains stable.
+- [ ] Add a reduced frame-target update method on backend-live runtime assembly
+  if output-size mutation belongs outside startup.
 
 ---
 
@@ -286,6 +286,10 @@ evidence belong in `docs/research-log.md`.
   backend-live startup reports or stay renderer-local for one more step.
 - [x] Add backend-live projection for reduced GBM/EGL frame target readiness if
   the renderer-local record proves stable.
+- [x] Decide the first runtime observation shape for reduced GBM/EGL frame
+  target readiness.
+- [x] Add runtime tick projection for reduced GBM/EGL frame target readiness if
+  startup projection remains stable.
 
 ---
 

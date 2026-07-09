@@ -115,6 +115,10 @@ and page-flip event beside renderer health. This keeps the runtime-facing
 diagnostics useful without introducing KMS dependencies or leaking native object
 identity. Native presentation and future page-flip callbacks should update those
 fields through reduced reports before the next runtime tick observes them.
+Runtime ticks also carry the reduced GBM/EGL frame-target observation when a
+startup output is selected. That observation is only a size/status record; it is
+not a GBM surface, EGL surface, framebuffer, DMA-BUF, file descriptor, or native
+allocation request.
 
 The deterministic page-flip callback intake seam accepts only backend-local
 facts: the Sophia output selected by startup and a frame serial. It rejects

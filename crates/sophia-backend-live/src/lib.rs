@@ -1515,6 +1515,7 @@ impl LiveBackendStartupReport {
                 assembly,
                 renderer_observation,
                 scanout_readiness,
+                gbm_egl_frame_target: Some(LiveGbmEglFrameTargetRecord::new(selected_output.size)),
                 page_flip_event,
                 page_flip_callback_intake,
                 page_flip_callback_queue: None,
@@ -1724,6 +1725,7 @@ pub struct LiveBackendRuntimeAssembly {
     assembly: HeadlessCompositorBackendAssembly,
     renderer_observation: LiveRendererRuntimeObservation,
     scanout_readiness: LiveScanoutReadinessReport,
+    gbm_egl_frame_target: Option<LiveGbmEglFrameTargetRecord>,
     page_flip_event: LivePageFlipEvent,
     page_flip_callback_intake: LivePageFlipCallbackIntake,
     page_flip_callback_queue: Option<LivePageFlipCallbackQueue>,
@@ -1784,6 +1786,10 @@ impl LiveBackendRuntimeAssembly {
         self.scanout_readiness
     }
 
+    pub fn gbm_egl_frame_target_observation(&self) -> Option<LiveGbmEglFrameTargetRecord> {
+        self.gbm_egl_frame_target
+    }
+
     pub fn page_flip_observation(&self) -> LivePageFlipEvent {
         self.page_flip_event
     }
@@ -1828,6 +1834,7 @@ impl LiveBackendRuntimeAssembly {
             engine,
             renderer: self.renderer_observation,
             scanout: self.scanout_readiness,
+            gbm_egl_frame_target: self.gbm_egl_frame_target,
             page_flip: self.page_flip_event,
             page_flip_callbacks,
             libdrm_poller: self.libdrm_poller_diagnostics,
@@ -1840,6 +1847,7 @@ pub struct LiveBackendRuntimeTickReport {
     pub engine: CompositorBackendTickReport,
     pub renderer: LiveRendererRuntimeObservation,
     pub scanout: LiveScanoutReadinessReport,
+    pub gbm_egl_frame_target: Option<LiveGbmEglFrameTargetRecord>,
     pub page_flip: LivePageFlipEvent,
     pub page_flip_callbacks: LivePageFlipCallbackQueueReport,
     pub libdrm_poller: LiveLibdrmPollerDiagnostics,

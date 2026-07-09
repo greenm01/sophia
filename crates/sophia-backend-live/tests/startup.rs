@@ -267,6 +267,20 @@ fn live_runtime_assembly_reports_reduced_renderer_health_on_tick() {
         }
     );
     assert_eq!(
+        assembly.gbm_egl_frame_target_observation(),
+        Some(LiveGbmEglFrameTargetRecord {
+            status: LiveGbmEglFrameTargetStatus::Ready,
+            size: Size {
+                width: 1280,
+                height: 720,
+            },
+        })
+    );
+    assert_eq!(
+        tick.gbm_egl_frame_target,
+        assembly.gbm_egl_frame_target_observation()
+    );
+    assert_eq!(
         tick.page_flip,
         LivePageFlipEvent {
             status: LivePageFlipEventStatus::Ready,
