@@ -1,5 +1,7 @@
 use sophia_renderer_live::{
-    FakePresentationSmoke, LiveGbmEglFrameTargetRecord, LiveGbmEglFrameTargetStatus,
+    FakeGbmEglFrameTargetAllocator, FakePresentationSmoke, LiveGbmEglFrameTargetAllocationReport,
+    LiveGbmEglFrameTargetAllocationRequest, LiveGbmEglFrameTargetAllocationStatus,
+    LiveGbmEglFrameTargetAllocator, LiveGbmEglFrameTargetRecord, LiveGbmEglFrameTargetStatus,
     LiveRendererPresentationReport, LiveRendererPresentationStatus, Size,
 };
 
@@ -65,4 +67,80 @@ fn gbm_egl_frame_target_record_rejects_invalid_size_without_native_errors() {
             },
         }
     );
+}
+
+#[test]
+fn fake_gbm_egl_frame_target_allocator_reports_ready_without_handles() {
+    let mut allocator =
+        FakeGbmEglFrameTargetAllocator::new(LiveGbmEglFrameTargetAllocationStatus::Ready);
+    let request = LiveGbmEglFrameTargetAllocationRequest::new(Size {
+        width: 1920,
+        height: 1080,
+    });
+
+    assert_eq!(
+        allocator.allocate_frame_target(request),
+        LiveGbmEglFrameTargetAllocationReport {
+            status: LiveGbmEglFrameTargetAllocationStatus::Ready,
+            target: LiveGbmEglFrameTargetRecord {
+                status: LiveGbmEglFrameTargetStatus::Ready,
+                size: Size {
+                    width: 1920,
+                    height: 1080,
+                },
+            },
+        }
+    );
+}
+
+#[test]
+fn fake_gbm_egl_frame_target_allocator_rejects_invalid_target_without_native_errors() {
+    let mut allocator =
+        FakeGbmEglFrameTargetAllocator::new(LiveGbmEglFrameTargetAllocationStatus::Ready);
+    let request = LiveGbmEglFrameTargetAllocationRequest::new(Size {
+        width: 0,
+        height: 1080,
+    });
+
+    assert_eq!(
+        allocator.allocate_frame_target(request),
+        LiveGbmEglFrameTargetAllocationReport {
+            status: LiveGbmEglFrameTargetAllocationStatus::InvalidTarget,
+            target: LiveGbmEglFrameTargetRecord {
+                status: LiveGbmEglFrameTargetStatus::InvalidSize,
+                size: Size {
+                    width: 0,
+                    height: 1080,
+                },
+            },
+        }
+    );
+}
+
+#[test]
+fn fake_gbm_egl_frame_target_allocator_reports_reduced_failures_without_handles() {
+    for status in [
+        LiveGbmEglFrameTargetAllocationStatus::Unavailable,
+        LiveGbmEglFrameTargetAllocationStatus::Degraded,
+    ] {
+        let mut allocator = FakeGbmEglFrameTargetAllocator::new(status);
+        let request = LiveGbmEglFrameTargetAllocationRequest::new(Size {
+            width: 1280,
+            height: 720,
+        });
+
+        assert_eq!(
+            allocator.allocate_frame_target(request),
+            LiveGbmEglFrameTargetAllocationReport {
+                status,
+                target: LiveGbmEglFrameTargetRecord {
+                    status: LiveGbmEglFrameTargetStatus::Ready,
+                    size: Size {
+                        width: 1280,
+                        height: 720,
+                    },
+                },
+            }
+        );
+    }
 }

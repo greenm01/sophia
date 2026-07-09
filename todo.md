@@ -9,12 +9,12 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Define the first renderer-private allocation seam for GBM/EGL frame
-  targets.
+- [ ] Decide how backend-live should observe reduced GBM/EGL frame-target
+  allocation reports.
 
 **Next**
-- [ ] Add a fake allocation smoke that proves native frame-target handles stay
-  renderer-private while runtime observes only reduced status.
+- [ ] Thread fake frame-target allocation reports into backend-live without
+  exposing renderer-private handles.
 
 ---
 
@@ -294,6 +294,10 @@ evidence belong in `docs/research-log.md`.
   when output size changes.
 - [x] Add a reduced frame-target update method on backend-live runtime assembly
   if output-size mutation belongs outside startup.
+- [x] Define the first renderer-private allocation seam for GBM/EGL frame
+  targets.
+- [x] Add a fake allocation smoke that proves native frame-target handles stay
+  renderer-private while runtime observes only reduced status.
 
 ---
 

@@ -122,6 +122,11 @@ allocation request.
 Runtime output-size changes update that observation through a size-only method.
 The method may report an invalid target size, but it still must not allocate or
 retain native renderer resources.
+Renderer-private GBM/EGL frame-target allocation is admitted only through a
+reduced allocator seam. Public reports may say ready, invalid target,
+unavailable, or degraded, and may echo the reduced target record. They must not
+contain GBM surfaces, EGL surfaces, framebuffers, DMA-BUFs, file descriptors, or
+driver error payloads.
 
 The deterministic page-flip callback intake seam accepts only backend-local
 facts: the Sophia output selected by startup and a frame serial. It rejects

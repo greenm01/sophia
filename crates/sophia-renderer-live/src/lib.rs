@@ -86,6 +86,69 @@ pub enum LiveGbmEglFrameTargetStatus {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveGbmEglFrameTargetAllocationRequest {
+    pub target: LiveGbmEglFrameTargetRecord,
+}
+
+impl LiveGbmEglFrameTargetAllocationRequest {
+    pub const fn new(size: Size) -> Self {
+        Self {
+            target: LiveGbmEglFrameTargetRecord::new(size),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveGbmEglFrameTargetAllocationReport {
+    pub status: LiveGbmEglFrameTargetAllocationStatus,
+    pub target: LiveGbmEglFrameTargetRecord,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveGbmEglFrameTargetAllocationStatus {
+    Ready,
+    InvalidTarget,
+    Unavailable,
+    Degraded,
+}
+
+pub trait LiveGbmEglFrameTargetAllocator {
+    fn allocate_frame_target(
+        &mut self,
+        request: LiveGbmEglFrameTargetAllocationRequest,
+    ) -> LiveGbmEglFrameTargetAllocationReport;
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FakeGbmEglFrameTargetAllocator {
+    pub status: LiveGbmEglFrameTargetAllocationStatus,
+}
+
+impl FakeGbmEglFrameTargetAllocator {
+    pub const fn new(status: LiveGbmEglFrameTargetAllocationStatus) -> Self {
+        Self { status }
+    }
+}
+
+impl LiveGbmEglFrameTargetAllocator for FakeGbmEglFrameTargetAllocator {
+    fn allocate_frame_target(
+        &mut self,
+        request: LiveGbmEglFrameTargetAllocationRequest,
+    ) -> LiveGbmEglFrameTargetAllocationReport {
+        let status = if request.target.status == LiveGbmEglFrameTargetStatus::Ready {
+            self.status
+        } else {
+            LiveGbmEglFrameTargetAllocationStatus::InvalidTarget
+        };
+
+        LiveGbmEglFrameTargetAllocationReport {
+            status,
+            target: request.target,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LiveRendererImportBoundary {
     pub import_xpixmap: bool,
     pub import_dmabuf: bool,

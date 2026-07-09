@@ -378,6 +378,13 @@ Backend-live runtime may also update the record from an output-size change. The
 update accepts only `Size`, derives the reduced status again, and does not own
 or borrow native renderer resources.
 
+The first allocation seam is `LiveGbmEglFrameTargetAllocator`. It accepts a
+`LiveGbmEglFrameTargetAllocationRequest` and returns only
+`LiveGbmEglFrameTargetAllocationReport`: reduced allocation status plus the
+reduced target record. Implementations may allocate native GBM/EGL resources
+privately, but those handles must not appear in renderer-live, backend-live, or
+runtime observations.
+
 The next reduced boundary is `LivePageFlipEvent`. It can be derived from
 scanout readiness or from the engine's `PageFlipCommitOutcome`, but it drops the
 output ID, transaction ID, surface IDs, commit payload, and all native KMS
