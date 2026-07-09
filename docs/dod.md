@@ -316,6 +316,23 @@ The headless backend uses a deterministic clock so tests are repeatable. A real
 DRM/KMS backend should produce the same value shape from page-flip or vblank
 timing rather than pushing backend-specific timing state into frame planning.
 
+### PageFlipCommitGate
+
+A page-flip commit gate stages authority-native surface transactions until the
+output presentation boundary arrives.
+
+Fields should describe:
+
+- output ID
+- transaction ID
+- staged surface transactions
+
+The gate may only commit on a matching output tick. If the tick is for another
+output, or any staged transaction is not ready, the gate preserves the last
+committed visual state. This keeps atomic rendering fail-closed for slow or
+misbehaving apps: old geometry and old buffers remain visible until a complete,
+validated transaction can advance on the presentation boundary.
+
 ### LayoutEpochState
 
 A layout epoch records surfaces that must produce damage before an atomic layout

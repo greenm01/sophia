@@ -9,13 +9,14 @@ use sophia_engine::{
     LiveRendererRuntimeAdapter, LiveRuntimeDriverAdapter, LiveRuntimeDriverIntake,
     LiveWmRuntimeAdapter, LiveXRuntimeAdapter, MetadataChromeRejectReason, MetadataChromeUpdate,
     NotificationChromePresenter, NotificationChromeRejectReason, NotificationChromeUpdate,
-    QueuedInputPoller, RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction,
-    RoutedInputRequestError, SanitizedChromeMetadata, SessionCommand, SessionEvent,
-    SessionLayerSource, SessionTickRequest, SlowClientVisualDecision, SurfaceTimeoutPolicy,
-    SurfaceTransactionCommitReadiness, SurfaceVisualStateTable, WmIpcError, WmRestartReason,
-    WmRuntimeAction, WmTransactionUpdate, discover_drm_kms_outputs_from_sysfs,
-    explicit_sync_surfaces, hit_test_scene_for_input, layout_epoch_for_explicit_sync,
-    measure_resize_behavior, notification_chrome_command_from_portal, request_wm_over_stream,
+    PageFlipCommitGate, PageFlipCommitOutcome, QueuedInputPoller, RoutedInputCoalescer,
+    RoutedInputFlushReason, RoutedInputQueueAction, RoutedInputRequestError,
+    SanitizedChromeMetadata, SessionCommand, SessionEvent, SessionLayerSource, SessionTickRequest,
+    SlowClientVisualDecision, SurfaceTimeoutPolicy, SurfaceTransactionCommitReadiness,
+    SurfaceVisualStateTable, WmIpcError, WmRestartReason, WmRuntimeAction, WmTransactionUpdate,
+    discover_drm_kms_outputs_from_sysfs, explicit_sync_surfaces, hit_test_scene_for_input,
+    layout_epoch_for_explicit_sync, measure_resize_behavior,
+    notification_chrome_command_from_portal, request_wm_over_stream,
     routed_input_request_from_physical_event, routed_input_requests_from_flush,
     runtime_observation_from_authority_transaction_commit,
     runtime_observation_from_metadata_chrome_updates,
@@ -1850,6 +1851,123 @@ fn frame_scheduler_renders_when_damage_completes_layout_epoch() {
         }
     );
     assert!(epoch.is_complete());
+}
+
+#[test]
+fn page_flip_commit_gate_waits_for_matching_output_tick() {
+    let engine = HeadlessEngine::default();
+    let old_layer = test_layer(1, 0, 0, Region::empty());
+    let mut committed = vec![engine.committed_state_from_layer(&old_layer)];
+    let mut next_layer = old_layer.clone();
+    next_layer.geometry.width = 500;
+    let transaction = next_layer.to_surface_transaction(
+        TransactionId::from_raw(81),
+        AuthorityKind::SophiaX,
+        SurfaceTransactionReadiness::Ready,
+        250,
+        1,
+    );
+    let mut gate = PageFlipCommitGate::new();
+    gate.stage(
+        OutputId::from_raw(1),
+        TransactionId::from_raw(81),
+        vec![transaction],
+    );
+
+    let outcome = gate.commit_on_page_flip(
+        &engine,
+        sophia_engine::FrameClockTick {
+            output: OutputId::from_raw(2),
+            frame_serial: 11,
+            target_msec: 176,
+        },
+        &mut committed,
+    );
+
+    assert_eq!(
+        outcome,
+        PageFlipCommitOutcome::WaitingForOutput {
+            expected: OutputId::from_raw(1),
+            actual: OutputId::from_raw(2),
+            transaction: TransactionId::from_raw(81),
+        }
+    );
+    assert_eq!(committed[0].geometry.width, old_layer.geometry.width);
+    assert!(gate.staged().is_some());
+}
+
+#[test]
+fn page_flip_commit_gate_preserves_committed_state_until_transactions_are_ready() {
+    let engine = HeadlessEngine::default();
+    let old_layer = test_layer(1, 0, 0, Region::empty());
+    let mut committed = vec![engine.committed_state_from_layer(&old_layer)];
+    let mut next_layer = old_layer.clone();
+    next_layer.geometry.width = 500;
+    let transaction = next_layer.to_surface_transaction(
+        TransactionId::from_raw(82),
+        AuthorityKind::SophiaX,
+        SurfaceTransactionReadiness::Pending,
+        250,
+        1,
+    );
+    let mut gate = PageFlipCommitGate::new();
+    gate.stage(
+        OutputId::from_raw(1),
+        TransactionId::from_raw(82),
+        vec![transaction],
+    );
+
+    let outcome = gate.commit_on_page_flip(&engine, frame_tick(12), &mut committed);
+
+    assert_eq!(
+        outcome,
+        PageFlipCommitOutcome::WaitingForTransactionReadiness {
+            transaction: TransactionId::from_raw(82),
+            pending_surfaces: vec![old_layer.surface],
+        }
+    );
+    assert_eq!(committed[0].geometry.width, old_layer.geometry.width);
+    assert!(gate.staged().is_some());
+}
+
+#[test]
+fn page_flip_commit_gate_commits_ready_transactions_on_page_flip() {
+    let engine = HeadlessEngine::default();
+    let old_layer = test_layer(1, 0, 0, Region::empty());
+    let mut committed = vec![engine.committed_state_from_layer(&old_layer)];
+    let mut next_layer = old_layer.clone();
+    next_layer.geometry.width = 500;
+    next_layer.generation = 2;
+    let transaction = next_layer.to_surface_transaction(
+        TransactionId::from_raw(83),
+        AuthorityKind::SophiaX,
+        SurfaceTransactionReadiness::Ready,
+        250,
+        1,
+    );
+    let mut gate = PageFlipCommitGate::new();
+    gate.stage(
+        OutputId::from_raw(1),
+        TransactionId::from_raw(83),
+        vec![transaction],
+    );
+
+    let outcome = gate.commit_on_page_flip(&engine, frame_tick(13), &mut committed);
+
+    let PageFlipCommitOutcome::Committed {
+        frame_serial,
+        commit,
+    } = outcome
+    else {
+        panic!("expected page-flip commit");
+    };
+    assert_eq!(frame_serial, 13);
+    assert_eq!(commit.transaction, TransactionId::from_raw(83));
+    assert_eq!(commit.outcome, TransactionOutcome::Committed);
+    assert_eq!(commit.applied_surfaces, vec![old_layer.surface]);
+    assert_eq!(committed[0].geometry.width, 500);
+    assert_eq!(committed[0].committed_generation, 2);
+    assert!(gate.staged().is_none());
 }
 
 #[test]

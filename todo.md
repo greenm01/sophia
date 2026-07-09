@@ -127,7 +127,7 @@ Do this after the authority transaction model has a clear shape.
   adapter.
 - [x] Replace libinput descriptor intake with a real non-blocking physical input
   poller.
-- [ ] Connect real frame-clock/page-flip timing to transaction commits.
+- [x] Connect real frame-clock/page-flip timing to transaction commits.
 
 ---
 

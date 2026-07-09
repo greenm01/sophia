@@ -622,6 +622,16 @@ the same boundary from vblank/page-flip timing while preserving the session-tick
 contract: clock tick in, committed surface state selected, frame snapshot and
 replay/commit report out.
 
+Authority transaction commits are now tied to that same presentation boundary.
+`PageFlipCommitGate` stages a batch of ready authority `SurfaceTransaction`
+records for a specific output and transaction ID. On a matching
+`FrameClockTick`, the gate validates the staged transactions against
+`SurfaceVisualStateTable` and commits them as the new visual truth only if they
+are ready. If the tick belongs to another output, or any transaction is still
+pending/timed out, the gate preserves the last committed surface state and keeps
+the batch staged. This gives the DRM/KMS backend a concrete page-flip seam
+without making tests depend on real scanout hardware.
+
 The XLibre prototype scheduler may still consume X Damage. In that path,
 `schedule_frame_from_damage` combines a frame-clock tick, an optional X-derived
 `DamageFrame`, and an optional layout epoch. If no damage exists, the scheduler
