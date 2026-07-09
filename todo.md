@@ -10,14 +10,14 @@ evidence belong in `docs/research-log.md`.
 
 **Now**
 - [ ] Keep default workspace tests independent of native renderer libraries.
-- [ ] Revisit real GBM dependency admission only after the feature-gated fake
-  path exists.
-
-**Next**
-- [ ] Decide the real GBM probe API shape: device-path intake, borrowed fd
-  intake, or backend-provided reduced device token.
 - [ ] Keep real GBM dependency optional until CI exercises both default and
   feature-enabled paths.
+
+**Next**
+- [ ] Add CI or documented local check coverage for
+  `cargo test -p sophia-renderer-live --features gbm-probe`.
+- [ ] Revisit real GBM crate admission after feature-enabled coverage is part
+  of the expected validation set.
 
 ---
 
@@ -139,6 +139,10 @@ evidence belong in `docs/research-log.md`.
   adding the dependency.
 - [x] Add a fake feature-enabled GBM probe test that still uses deterministic
   data before introducing a real crate.
+- [x] Revisit real GBM dependency admission after the feature-gated fake path
+  exists.
+- [x] Decide the real GBM probe API shape: backend-provided reduced device token,
+  not device-path intake or borrowed fd intake.
 
 ---
 

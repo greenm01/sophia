@@ -93,6 +93,13 @@ The initial `gbm-probe` feature is dependency-free scaffolding. It exposes only
 fake GBM capability probes, so the feature path can be tested before a real GBM
 crate is admitted.
 
+The GBM probe API uses a backend-provided reduced render-device token. It does
+not accept a public device path, and it does not expose borrowed file descriptors
+through Sophia's stable data boundary. Backend-live may own the real device
+opening later; renderer-live receives only the reduced token needed to report
+capability health. This keeps raw kernel authority out of engine state, WM IPC,
+portals, and protocol authorities.
+
 Admission tests for the first real dependency must prove:
 
 - the crate still builds and tests offline without the feature;

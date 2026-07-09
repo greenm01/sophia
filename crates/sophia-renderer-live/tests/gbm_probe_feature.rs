@@ -1,14 +1,23 @@
 #![cfg(feature = "gbm-probe")]
 
 use sophia_renderer_live::{
-    FakeGbmCapabilityProbe, LiveRendererImportHealth, LiveRendererImportPathStatus,
-    LiveRendererImportStartupStatus,
+    FakeGbmCapabilityProbe, GbmRenderDeviceToken, LiveRendererImportHealth,
+    LiveRendererImportPathStatus, LiveRendererImportStartupStatus,
 };
 
 #[test]
-fn fake_gbm_probe_reports_native_capability_without_real_gbm_dependency() {
+fn gbm_probe_uses_reduced_render_device_tokens() {
+    assert_eq!(GbmRenderDeviceToken::from_raw(0), None);
     assert_eq!(
-        FakeGbmCapabilityProbe::new(true).startup_status(),
+        GbmRenderDeviceToken::from_raw(42),
+        Some(GbmRenderDeviceToken { raw: 42 })
+    );
+}
+
+#[test]
+fn fake_gbm_probe_reports_native_capability_from_reduced_device_token() {
+    assert_eq!(
+        FakeGbmCapabilityProbe::new(GbmRenderDeviceToken::from_raw(42)).startup_status(),
         LiveRendererImportStartupStatus {
             health: LiveRendererImportHealth::NativeImportCapable,
             xpixmap: LiveRendererImportPathStatus::Disabled,
@@ -20,7 +29,7 @@ fn fake_gbm_probe_reports_native_capability_without_real_gbm_dependency() {
 #[test]
 fn fake_gbm_probe_reports_degraded_health_when_unavailable() {
     assert_eq!(
-        FakeGbmCapabilityProbe::new(false).startup_status(),
+        FakeGbmCapabilityProbe::new(None).startup_status(),
         LiveRendererImportStartupStatus {
             health: LiveRendererImportHealth::Degraded,
             xpixmap: LiveRendererImportPathStatus::Disabled,
