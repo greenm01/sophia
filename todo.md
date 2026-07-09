@@ -11,7 +11,7 @@ evidence belong in `docs/research-log.md`.
 **Now**
 - [ ] Keep `DEFAULT_DISPLAY` clear-color smoke as fallback until GBM-backed
   drawing is validated against real render nodes.
-- [ ] Record a passing `SOPHIA_RUN_REAL_GBM_SMOKE=1` run before retiring
+- [ ] Record repeated passing `SOPHIA_RUN_REAL_GBM_SMOKE=1` runs before retiring
   `DEFAULT_DISPLAY`.
 
 **Next**
@@ -270,6 +270,8 @@ evidence belong in `docs/research-log.md`.
 - [x] Keep wgpu deferred until GBM/EGL startup, drawing, and presentation seams
   are proven.
 - [x] Add a reduced real-GBM-smoke evidence record shape for validation output.
+- [x] Record a passing `SOPHIA_RUN_REAL_GBM_SMOKE=1` run before retiring
+  `DEFAULT_DISPLAY`.
 
 ---
 

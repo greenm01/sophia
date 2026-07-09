@@ -760,6 +760,13 @@ XLibre/Xvfb script, captures real layer snapshots, requests layout from
 `sophia-wm-demo serve-socket`, and renders through `LiveRuntimeDriverAdapter`
 instead of hand-writing runtime command sequencing.
 
+On July 9, 2026, the opt-in real GBM/EGL validation passed on a host exposing
+`/dev/dri/renderD128` and `/dev/dri/renderD129`:
+`SOPHIA_RUN_REAL_GBM_SMOKE=1 cargo test --offline -p sophia-backend-live --features gbm-probe,egl-probe`.
+The child smoke asserted `EglDrawSmokeStatus::ClearColorReady` and
+`LiveRendererPresentationStatus::Ready`; public evidence remains reduced to
+`LiveRealGbmSmokeEvidence` status, draw status, and presentation status.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new
