@@ -9,13 +9,13 @@ use sophia_wm_demo::ExternalWmClient;
 
 #[test]
 fn external_wm_restarts_without_losing_engine_state() {
-    let wm = env!("CARGO_BIN_EXE_sophia-wm-demo");
+    let wm = sophia_wm_demo_binary();
     let engine = HeadlessEngine::default();
     let output = engine.output();
     let workspace = WorkspaceId::from_raw(1);
     let mut layers = vec![layer(0), layer(1)];
 
-    let first_response = ExternalWmClient::new(wm)
+    let first_response = ExternalWmClient::new(wm.clone())
         .request(&relayout_request(
             TransactionId::from_raw(1),
             output.id,
@@ -52,6 +52,19 @@ fn external_wm_restarts_without_losing_engine_state() {
     assert_eq!(second_commit.outcome, TransactionOutcome::Committed);
     assert_eq!(layers[0].geometry.width, 500);
     assert_eq!(layers[1].geometry.x, 500);
+}
+
+fn sophia_wm_demo_binary() -> std::path::PathBuf {
+    if let Some(path) = std::env::var_os("CARGO_BIN_EXE_sophia-wm-demo") {
+        return path.into();
+    }
+
+    std::env::current_exe()
+        .expect("integration test executable path should be available")
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("integration test executable should live under target/debug/deps")
+        .join("sophia-wm-demo")
 }
 
 fn relayout_request(

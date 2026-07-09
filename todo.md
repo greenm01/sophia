@@ -6,20 +6,21 @@ evidence belong in `docs/research-log.md`.
 
 ---
 
-## Active Focus - Sophia X Authority: Drawing Surface Coverage
+## Active Focus - Sophia X Authority: Runtime Transport
 
 **Now**
-- [ ] Define the first Present-style explicit buffer handoff request model.
-- [ ] Add socket dispatch coverage proving Present-style handoff emits a ready
-  transaction without inventing compositor-owned policy.
-- [ ] Decide whether Present-style handoff should use XPixmap handles first or
-  a placeholder DMA-BUF handle model.
+- [ ] Decide whether the long-running X Authority process should keep the
+  observer callback shape or move to a bounded channel owned by session runtime.
+- [ ] Add a small transport note documenting the chosen shape and backpressure
+  behavior for observed authority transactions.
+- [ ] Keep callback-based test helpers available even if the long-running path
+  moves to a bounded channel.
 
 **Next**
-- [ ] Decide whether the long-running X Authority process should keep the
-  callback shape or move to a bounded channel owned by the session runtime.
 - [ ] Revisit MIT-SHM extension negotiation after core software upload and
   Present-style handoff are both modeled.
+- [ ] Revisit compositor backend work after X Authority can create, map, draw,
+  and expose a simple client through the authority transaction model.
 
 ---
 
@@ -51,8 +52,12 @@ evidence belong in `docs/research-log.md`.
 - [x] Pass a compiled C Xlib `XPutImage` smoke through observed transaction,
   Engine commit, and Runtime authority counters with no direct X reply on
   success.
-- [ ] Revisit compositor backend work after X Authority can create, map, draw,
-  and expose a simple client through the authority transaction model.
+- [x] Add the first Present-style explicit buffer handoff model as private
+  `SOPHIA-PRESENT` minor opcode `0` using XPixmap handles.
+- [x] Add socket and CLI smoke coverage proving Present-style handoff reaches
+  Engine commit and Runtime counters without adding compositor policy.
+- [x] Defer DMA-BUF placeholder modeling until real DRI3/Present semantics are
+  ready.
 
 ---
 

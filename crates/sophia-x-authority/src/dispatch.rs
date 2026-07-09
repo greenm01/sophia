@@ -1,8 +1,9 @@
 use crate::{
-    XAtomTable, XAuthorityRequestKind, XAuthorityResponseOutcome, XAuthorityResponsePacket,
-    XAuthorityRuntime, XByteOrder, XClientEvent, XClientOutput, XClientReply, XErrorCode,
-    XMetadataPropertyCandidate, XPropertyError, XPropertyTable, XResourceId, XWireParseError,
-    XWireRequest, encode_x_client_output, metadata_property_candidate, x_error_from_runtime,
+    X_SOPHIA_PRESENT_EXTENSION_NAME, X_SOPHIA_PRESENT_MAJOR_OPCODE, XAtomTable,
+    XAuthorityRequestKind, XAuthorityResponseOutcome, XAuthorityResponsePacket, XAuthorityRuntime,
+    XByteOrder, XClientEvent, XClientOutput, XClientReply, XErrorCode, XMetadataPropertyCandidate,
+    XPropertyError, XPropertyTable, XResourceId, XWireParseError, XWireRequest,
+    encode_x_client_output, metadata_property_candidate, x_error_from_runtime,
     x_error_from_wire_parse, x_selection_failure_event,
 };
 use sophia_protocol::{NamespaceId, Rect, Region, TransactionId};
@@ -197,14 +198,24 @@ pub fn dispatch_x11_wire_request(
             })],
             metadata_candidates: Vec::new(),
         },
-        XWireRequest::QueryExtension { .. } => XDispatchResult {
-            response: None,
-            outputs: vec![XClientOutput::Reply(XClientReply::QueryExtension {
-                sequence: context.sequence,
-                present: false,
-            })],
-            metadata_candidates: Vec::new(),
-        },
+        XWireRequest::QueryExtension { name } => {
+            let present = name == X_SOPHIA_PRESENT_EXTENSION_NAME;
+            XDispatchResult {
+                response: None,
+                outputs: vec![XClientOutput::Reply(XClientReply::QueryExtension {
+                    sequence: context.sequence,
+                    present,
+                    major_opcode: if present {
+                        X_SOPHIA_PRESENT_MAJOR_OPCODE
+                    } else {
+                        0
+                    },
+                    first_event: 0,
+                    first_error: 0,
+                })],
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::ListExtensions => XDispatchResult {
             response: None,
             outputs: vec![XClientOutput::Reply(XClientReply::ListExtensions {

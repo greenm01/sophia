@@ -32,6 +32,7 @@ pub(crate) fn print(verbose: bool) {
     println!("commands: x-authority-xlib-smoke");
     println!("commands: x-authority-xlib-drawing-smoke");
     println!("commands: x-authority-xlib-put-image-smoke");
+    println!("commands: x-authority-present-pixmap-smoke");
 
     if verbose {
         tracing::debug!("verbose tracing enabled");

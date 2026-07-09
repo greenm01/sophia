@@ -3,6 +3,22 @@ use super::prelude::*;
 pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
     if args
         .iter()
+        .any(|arg| arg == "x-authority-present-pixmap-smoke")
+    {
+        let report = run_x_authority_present_pixmap_smoke()?;
+        println!(
+            "x-authority-present-pixmap-smoke display={} extension_opcode={} transactions={} runtime_committed={} runtime_surfaces={}",
+            report.display,
+            report.extension_opcode,
+            report.transactions,
+            report.runtime_committed,
+            report.runtime_surfaces
+        );
+        return Ok(true);
+    }
+
+    if args
+        .iter()
         .any(|arg| arg == "x-authority-xlib-put-image-smoke")
     {
         let report = run_x_authority_xlib_put_image_smoke()?;
@@ -163,6 +179,15 @@ struct XAuthorityXlibPutImageSmokeReport {
     stdout_bytes: usize,
     stderr_bytes: usize,
     image_ops: usize,
+    transactions: usize,
+    runtime_committed: u64,
+    runtime_surfaces: u64,
+}
+
+#[derive(Clone, Debug)]
+struct XAuthorityPresentPixmapSmokeReport {
+    display: String,
+    extension_opcode: u8,
     transactions: usize,
     runtime_committed: u64,
     runtime_surfaces: u64,
@@ -526,6 +551,84 @@ fn run_x_authority_xlib_put_image_smoke()
     })
 }
 
+fn run_x_authority_present_pixmap_smoke()
+-> Result<XAuthorityPresentPixmapSmokeReport, Box<dyn std::error::Error>> {
+    use std::io::Write;
+
+    let (display, socket_path) = temp_xauthority_display(5600)?;
+    let server_path = socket_path.clone();
+    let server = std::thread::spawn(move || -> Result<Vec<SurfaceTransaction>, String> {
+        let mut transactions = Vec::new();
+        run_x11_core_socket_server_once_observed(
+            &server_path,
+            NamespaceId::from_raw(47),
+            |result| {
+                if let Some(response) = &result.response {
+                    transactions.extend(response.transactions.iter().cloned());
+                }
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(transactions)
+    });
+
+    wait_for_socket_path(&socket_path)?;
+    let mut stream = UnixStream::connect(&socket_path)?;
+    stream.write_all(&x11_setup_request(XByteOrder::LittleEndian))?;
+    read_x11_setup_success(&mut stream, XByteOrder::LittleEndian)?;
+
+    stream.write_all(&x11_query_extension_request(
+        XByteOrder::LittleEndian,
+        X_SOPHIA_PRESENT_EXTENSION_NAME,
+    ))?;
+    let extension = read_x11_record(&mut stream)?;
+    if extension[8] != 1 || extension[9] != X_SOPHIA_PRESENT_MAJOR_OPCODE {
+        return Err(format!(
+            "SOPHIA-PRESENT query returned present={} opcode={}",
+            extension[8], extension[9]
+        )
+        .into());
+    }
+
+    stream.write_all(&x11_create_window_request(
+        XByteOrder::LittleEndian,
+        0x0020_0001,
+        20,
+        30,
+        640,
+        480,
+    ))?;
+    let configure = read_x11_record(&mut stream)?;
+    if configure[0] != 22 {
+        return Err(format!("expected ConfigureNotify, got record {}", configure[0]).into());
+    }
+
+    stream.write_all(&x11_sophia_present_pixmap_request(
+        XByteOrder::LittleEndian,
+        0x0020_0001,
+        0x0000_0990,
+        (0, 0, 640, 480),
+        1,
+        250,
+    ))?;
+
+    drop(stream);
+    let _ = std::fs::remove_file(&socket_path);
+    let transactions = server
+        .join()
+        .map_err(|_| "X authority X11 socket server thread panicked")?
+        .map_err(|error| format!("X authority X11 socket server failed: {error}"))?;
+    let runtime_state = runtime_state_from_observed_transactions(&transactions)?;
+
+    Ok(XAuthorityPresentPixmapSmokeReport {
+        display,
+        extension_opcode: extension[9],
+        transactions: transactions.len(),
+        runtime_committed: runtime_state.authority_transactions_committed,
+        runtime_surfaces: runtime_state.authority_surfaces_applied,
+    })
+}
+
 fn runtime_state_from_observed_transactions(
     transactions: &[SurfaceTransaction],
 ) -> Result<sophia_runtime::SessionRuntimeState, Box<dyn std::error::Error>> {
@@ -776,6 +879,41 @@ fn x11_intern_atom_request(byte_order: XByteOrder, only_if_exists: bool, name: &
     out
 }
 
+fn x11_query_extension_request(byte_order: XByteOrder, name: &str) -> Vec<u8> {
+    let mut out = vec![98, 0];
+    let len_units = (8 + padded_x11_len(name.len())) / 4;
+    push_x11_u16(&mut out, byte_order, len_units as u16);
+    push_x11_u16(&mut out, byte_order, name.len() as u16);
+    push_x11_u16(&mut out, byte_order, 0);
+    out.extend_from_slice(name.as_bytes());
+    pad_x11(&mut out);
+    out
+}
+
+fn x11_sophia_present_pixmap_request(
+    byte_order: XByteOrder,
+    window: u32,
+    pixmap: u32,
+    damage: (i16, i16, u16, u16),
+    previous_committed_generation: u64,
+    timeout_msec: u32,
+) -> Vec<u8> {
+    let mut out = vec![
+        X_SOPHIA_PRESENT_MAJOR_OPCODE,
+        X_SOPHIA_PRESENT_PIXMAP_MINOR_OPCODE,
+    ];
+    push_x11_u16(&mut out, byte_order, 8);
+    push_x11_u32(&mut out, byte_order, window);
+    push_x11_u32(&mut out, byte_order, pixmap);
+    push_x11_i16(&mut out, byte_order, damage.0);
+    push_x11_i16(&mut out, byte_order, damage.1);
+    push_x11_u16(&mut out, byte_order, damage.2);
+    push_x11_u16(&mut out, byte_order, damage.3);
+    push_x11_u64(&mut out, byte_order, previous_committed_generation);
+    push_x11_u32(&mut out, byte_order, timeout_msec);
+    out
+}
+
 fn x11_change_property_request(
     byte_order: XByteOrder,
     window: u32,
@@ -870,6 +1008,13 @@ fn push_x11_i16(out: &mut Vec<u8>, byte_order: XByteOrder, value: i16) {
 }
 
 fn push_x11_u32(out: &mut Vec<u8>, byte_order: XByteOrder, value: u32) {
+    match byte_order {
+        XByteOrder::LittleEndian => out.extend_from_slice(&value.to_le_bytes()),
+        XByteOrder::BigEndian => out.extend_from_slice(&value.to_be_bytes()),
+    }
+}
+
+fn push_x11_u64(out: &mut Vec<u8>, byte_order: XByteOrder, value: u64) {
     match byte_order {
         XByteOrder::LittleEndian => out.extend_from_slice(&value.to_le_bytes()),
         XByteOrder::BigEndian => out.extend_from_slice(&value.to_be_bytes()),

@@ -97,6 +97,9 @@ pub enum XClientReply {
     QueryExtension {
         sequence: u16,
         present: bool,
+        major_opcode: u8,
+        first_event: u8,
+        first_error: u8,
     },
     ListExtensions {
         sequence: u16,
@@ -163,10 +166,19 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
                 .copy_from_slice(bytes);
             out
         }
-        XClientReply::QueryExtension { sequence, present } => {
+        XClientReply::QueryExtension {
+            sequence,
+            present,
+            major_opcode,
+            first_event,
+            first_error,
+        } => {
             let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
             write_reply_header(byte_order, &mut out, sequence, 0);
             out[8] = u8::from(present);
+            out[9] = major_opcode;
+            out[10] = first_event;
+            out[11] = first_error;
             out
         }
         XClientReply::ListExtensions { sequence } => {

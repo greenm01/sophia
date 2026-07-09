@@ -36,6 +36,16 @@ impl XByteOrder {
         }
     }
 
+    pub(crate) fn u64(self, bytes: &[u8]) -> u64 {
+        let bytes = [
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ];
+        match self {
+            Self::LittleEndian => u64::from_le_bytes(bytes),
+            Self::BigEndian => u64::from_be_bytes(bytes),
+        }
+    }
+
     pub(crate) fn i16(self, bytes: &[u8]) -> i16 {
         let bytes = [bytes[0], bytes[1]];
         match self {

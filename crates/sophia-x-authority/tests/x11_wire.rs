@@ -526,6 +526,43 @@ fn x11_core_decoder_captures_query_extension_requests() {
 }
 
 #[test]
+fn x11_core_decoder_captures_sophia_present_pixmap_requests() {
+    let namespace = NamespaceId::from_raw(45);
+    let present = decode_x11_core_request(
+        context(namespace, 509, XByteOrder::LittleEndian),
+        &sophia_present_pixmap_request(
+            XByteOrder::LittleEndian,
+            0x220030,
+            0x900,
+            (4, 5, 64, 48),
+            3,
+            250,
+        ),
+    )
+    .unwrap();
+
+    assert_eq!(
+        present,
+        XWireRequest::Authority(XAuthorityRequestPacket {
+            transaction: TransactionId::from_raw(509),
+            namespace,
+            kind: XAuthorityRequestKind::PresentPixmap {
+                window: XResourceId::new(0x220030, 1),
+                pixmap: 0x900,
+                damage: Region::single(Rect {
+                    x: 4,
+                    y: 5,
+                    width: 64,
+                    height: 48,
+                }),
+                previous_committed_generation: 3,
+                timeout_msec: 250,
+            },
+        })
+    );
+}
+
+#[test]
 fn x11_dispatch_reports_root_input_focus_for_minimal_server() {
     let namespace = NamespaceId::from_raw(45);
     let mut runtime = XAuthorityRuntime::new();
@@ -648,6 +685,34 @@ fn x11_dispatch_reports_extensions_absent_until_explicitly_supported() {
     let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
     assert_eq!(encoded[0][0], 1);
     assert_eq!(encoded[0][8], 0);
+    assert_eq!(encoded[0][9], 0);
+}
+
+#[test]
+fn x11_dispatch_advertises_sophia_present_extension() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let query = decode_x11_core_request(
+        context(namespace, 524, XByteOrder::LittleEndian),
+        &query_extension_request(XByteOrder::LittleEndian, X_SOPHIA_PRESENT_EXTENSION_NAME),
+    )
+    .unwrap();
+
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 98),
+        query,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(encoded[0][8], 1);
+    assert_eq!(encoded[0][9], X_SOPHIA_PRESENT_MAJOR_OPCODE);
+    assert_eq!(encoded[0][10], 0);
+    assert_eq!(encoded[0][11], 0);
 }
 
 #[test]
@@ -1336,6 +1401,72 @@ fn x11_dispatch_put_image_emits_software_surface_transaction() {
     );
 }
 
+#[test]
+fn x11_dispatch_sophia_present_emits_xpixmap_surface_transaction() {
+    let namespace = NamespaceId::from_raw(46);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let create = decode_x11_core_request(
+        context(namespace, 621, XByteOrder::LittleEndian),
+        &create_window_request(XByteOrder::LittleEndian, 0x220121, 10, 20, 640, 480),
+    )
+    .unwrap();
+    dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 1),
+        create,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    let present = decode_x11_core_request(
+        context(namespace, 622, XByteOrder::LittleEndian),
+        &sophia_present_pixmap_request(
+            XByteOrder::LittleEndian,
+            0x220121,
+            0x990,
+            (3, 5, 32, 24),
+            1,
+            250,
+        ),
+    )
+    .unwrap();
+    let present = dispatch_x11_wire_request(
+        dispatch_context(
+            namespace,
+            2,
+            XByteOrder::LittleEndian,
+            X_SOPHIA_PRESENT_MAJOR_OPCODE,
+        ),
+        present,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    assert!(present.outputs.is_empty());
+    let response = present.response.unwrap();
+    assert_eq!(response.transactions.len(), 1);
+    assert_eq!(
+        response.transactions[0].surface,
+        SurfaceId::new(0x220121, 1)
+    );
+    assert_eq!(
+        response.transactions[0].target_buffer,
+        BufferSource::XPixmap { pixmap: 0x990 }
+    );
+    assert_eq!(
+        response.transactions[0].damage,
+        Region::single(Rect {
+            x: 3,
+            y: 5,
+            width: 32,
+            height: 24,
+        })
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn x11_setup_socket_smoke_completes_handshake() {
@@ -1649,6 +1780,84 @@ fn x11_core_socket_observer_sees_put_image_transaction() {
     assert_eq!(server.join().unwrap(), 1);
 }
 
+#[cfg(unix)]
+#[test]
+fn x11_core_socket_observer_sees_sophia_present_transaction() {
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let socket_path = std::env::temp_dir().join(format!(
+        "sophia-x11-present-test-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let server_path = socket_path.clone();
+    let server = thread::spawn(move || {
+        let mut transactions = 0usize;
+        run_x11_core_socket_server_once_observed(
+            &server_path,
+            NamespaceId::from_raw(50),
+            |result| {
+                if let Some(response) = &result.response {
+                    transactions = transactions.saturating_add(response.transactions.len());
+                }
+            },
+        )
+        .unwrap();
+        transactions
+    });
+
+    wait_for_socket(&socket_path);
+    let mut stream = UnixStream::connect(&socket_path).unwrap();
+    stream
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    read_setup_success(&mut stream, XByteOrder::LittleEndian);
+
+    stream
+        .write_all(&query_extension_request(
+            XByteOrder::LittleEndian,
+            X_SOPHIA_PRESENT_EXTENSION_NAME,
+        ))
+        .unwrap();
+    let query = read_x_record(&mut stream);
+    assert_eq!(query[8], 1);
+    assert_eq!(query[9], X_SOPHIA_PRESENT_MAJOR_OPCODE);
+
+    stream
+        .write_all(&create_window_request(
+            XByteOrder::LittleEndian,
+            0x220501,
+            1,
+            2,
+            300,
+            200,
+        ))
+        .unwrap();
+    let configure = read_x_record(&mut stream);
+    assert_eq!(configure[0], 22);
+
+    stream
+        .write_all(&sophia_present_pixmap_request(
+            XByteOrder::LittleEndian,
+            0x220501,
+            0x990,
+            (3, 5, 32, 24),
+            1,
+            250,
+        ))
+        .unwrap();
+
+    drop(stream);
+    let _ = std::fs::remove_file(&socket_path);
+    assert_eq!(server.join().unwrap(), 1);
+}
+
 fn context(namespace: NamespaceId, transaction: u64, byte_order: XByteOrder) -> XWireClientContext {
     XWireClientContext {
         byte_order,
@@ -1876,6 +2085,30 @@ fn put_image_request(
     out
 }
 
+fn sophia_present_pixmap_request(
+    byte_order: XByteOrder,
+    window: u32,
+    pixmap: u32,
+    damage: (i16, i16, u16, u16),
+    previous_committed_generation: u64,
+    timeout_msec: u32,
+) -> Vec<u8> {
+    let mut out = vec![
+        X_SOPHIA_PRESENT_MAJOR_OPCODE,
+        X_SOPHIA_PRESENT_PIXMAP_MINOR_OPCODE,
+    ];
+    push_u16(&mut out, byte_order, 8);
+    push_u32(&mut out, byte_order, window);
+    push_u32(&mut out, byte_order, pixmap);
+    push_i16(&mut out, byte_order, damage.0);
+    push_i16(&mut out, byte_order, damage.1);
+    push_u16(&mut out, byte_order, damage.2);
+    push_u16(&mut out, byte_order, damage.3);
+    push_u64(&mut out, byte_order, previous_committed_generation);
+    push_u32(&mut out, byte_order, timeout_msec);
+    out
+}
+
 fn query_extension_request(byte_order: XByteOrder, name: &str) -> Vec<u8> {
     let mut out = vec![98, 0];
     let len_units = (8 + padded_len_for_test(name.len())) / 4;
@@ -1902,6 +2135,13 @@ fn push_i16(out: &mut Vec<u8>, byte_order: XByteOrder, value: i16) {
 }
 
 fn push_u32(out: &mut Vec<u8>, byte_order: XByteOrder, value: u32) {
+    match byte_order {
+        XByteOrder::LittleEndian => out.extend_from_slice(&value.to_le_bytes()),
+        XByteOrder::BigEndian => out.extend_from_slice(&value.to_be_bytes()),
+    }
+}
+
+fn push_u64(out: &mut Vec<u8>, byte_order: XByteOrder, value: u64) {
     match byte_order {
         XByteOrder::LittleEndian => out.extend_from_slice(&value.to_le_bytes()),
         XByteOrder::BigEndian => out.extend_from_slice(&value.to_be_bytes()),

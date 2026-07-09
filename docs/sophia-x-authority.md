@@ -325,3 +325,11 @@ damage, emits a ready CPU-backed `SurfaceTransaction`, and still sends no direct
 X11 reply on success. The compiled Xlib `XPutImage` smoke validates that the
 observed transaction commits in Sophia Engine and increments Sophia Runtime's
 authority transaction counters.
+
+A private `SOPHIA-PRESENT` extension now models the first explicit buffer
+handoff without claiming full X Present support. `QueryExtension` advertises a
+fixed private major opcode for that extension only. Minor opcode `0` presents an
+XPixmap handle for a namespace-owned window, emits a ready
+`BufferSource::XPixmap` transaction, and remains reply-free on success. The CLI
+present-pixmap smoke validates the raw X11 socket path through Engine commit and
+Runtime authority counters.
