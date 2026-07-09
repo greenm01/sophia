@@ -48,6 +48,12 @@ The same data/logic split applies in Rust:
 Avoid placing behavior on data records unless it is a pure helper such as
 validation, conversion, or formatting.
 
+During cleanup passes, split production `src` files that exceed roughly 250
+lines when a clear domain seam exists. Keep the old public module as a facade
+when callers already depend on that path. Do not split purely to satisfy a line
+count if the result would obscure ownership or scatter one tightly coupled
+algorithm across files.
+
 ### Engine Crate Modules
 
 `crates/sophia-engine/src/lib.rs` is the public facade for the engine crate. It

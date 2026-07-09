@@ -150,6 +150,8 @@ not the long-term target architecture.
 
 - [x] Engine-centered authority reframe: README, architecture docs, atomic
   rendering invariant, and XLibre prototype/reference status.
+- [x] Refactor finish pass: split production source files at clear domain seams,
+  keep public facades stable, and document the roughly 250-line cleanup rule.
 - [x] Phase 0-2: repository shape, Rust skeleton, protocol/data model, headless
   engine.
 - [x] Phase 3-4: XLibre mirror probe, XComposite/Damage capture, CPU readback,
