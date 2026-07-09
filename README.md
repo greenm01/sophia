@@ -1,4 +1,30 @@
-# Sophia
+# The Sophia Manifesto
+
+X11 is a beautiful, asynchronous disaster. Designed for diskless terminals and slow networks, it offers a hacker's playground—a shared property tree where any script can move any window. You want a tiling window manager? You write one. You want a global hotkey daemon? You build it. X11 never asks for a committee's permission. But X11 tears. It leaves black borders during resizes. It operates on the flawed assumption that every client is trustworthy.
+
+Wayland stepped in to fix the visual rot. It enforces atomic buffer swaps and secures the desktop. The tearing stopped. The freedom stopped, too. Wayland makes the compositor a dictator. If you want a screenshot tool or a custom dock, you wait for a committee of competing developers to ratify an XML schema. It traded the permissionless joy of the Linux desktop for a totalatarian, bureaucratic straitjacket where everything is designed by committee... i.e. hell.
+
+Sophia rejects this false binary. 
+
+Sophia is a secure, frame-perfect session stack for the Linux desktop. It shatters the monolithic display server and divides the labor.
+
+## The Engine Dictates the Pixels
+
+Sophia Engine is the absolute visual authority. It hit-tests the scene, schedules the frames, and owns the scanout. It enforces a simple, unbreakable rule: no new geometry appears on the screen without matching, committed pixels. If an application hangs during a resize, Sophia fails closed. The old, perfectly rendered layout remains on the screen. 
+
+## The Authorities Translate the Past
+
+Sophia does not force the world to rewrite its software. It hosts Protocol Authorities. The Sophia X Authority and Sophia Wayland Authority sit at the edges. They terminate the client protocols, enforce strict namespace sandboxes, and translate legacy requests into atomic surface transactions. They do not own workspaces. They do not dictate layout. They merely translate.
+
+## The Window Manager Remains Blind
+
+Layout policy belongs in an external process. The Sophia Window Manager receives opaque layout nodes. It never sees an XID, a window title, or a Wayland object ID. It crunches the geometry and returns command packets. Because the window manager is blind, it cannot leak secure metadata. Because it sits outside the rendering hot path, it can crash, restart, or be rewritten in any language without taking down the session.
+
+Sophia gives you the flawless visual integrity of a modern macOS environment and the hackable freedom of a tiling setup. 
+
+No tearing. No shared mutable state. NOT designed by committee.
+
+# The Sophia Session Stack
 
 Sophia is a secure, frame-perfect session stack for X11 and Wayland.
 
