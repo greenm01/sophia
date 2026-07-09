@@ -125,6 +125,109 @@ impl LastCommittedLayout {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SurfaceVisualStateEntry {
+    pub surface: SurfaceId,
+    pub committed: Option<CommittedSurfaceState>,
+    pub pending: Option<SurfaceTransaction>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct SurfaceVisualStateTable {
+    entries: BTreeMap<SurfaceId, SurfaceVisualStateEntry>,
+}
+
+impl SurfaceVisualStateTable {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn from_committed_states(
+        committed: impl IntoIterator<Item = CommittedSurfaceState>,
+    ) -> Self {
+        let mut table = Self::new();
+        for state in committed {
+            table.upsert_committed(state);
+        }
+        table
+    }
+
+    pub fn entry(&self, surface: SurfaceId) -> Option<&SurfaceVisualStateEntry> {
+        self.entries.get(&surface)
+    }
+
+    pub fn committed(&self, surface: SurfaceId) -> Option<&CommittedSurfaceState> {
+        self.entries
+            .get(&surface)
+            .and_then(|entry| entry.committed.as_ref())
+    }
+
+    pub fn pending(&self, surface: SurfaceId) -> Option<&SurfaceTransaction> {
+        self.entries
+            .get(&surface)
+            .and_then(|entry| entry.pending.as_ref())
+    }
+
+    pub fn committed_states(&self) -> Vec<CommittedSurfaceState> {
+        self.entries
+            .values()
+            .filter_map(|entry| entry.committed.clone())
+            .collect()
+    }
+
+    pub fn pending_transactions(&self) -> Vec<SurfaceTransaction> {
+        self.entries
+            .values()
+            .filter_map(|entry| entry.pending.clone())
+            .collect()
+    }
+
+    pub fn upsert_committed(&mut self, committed: CommittedSurfaceState) {
+        self.entries
+            .entry(committed.surface)
+            .and_modify(|entry| {
+                entry.committed = Some(committed.clone());
+            })
+            .or_insert_with(|| SurfaceVisualStateEntry {
+                surface: committed.surface,
+                committed: Some(committed),
+                pending: None,
+            });
+    }
+
+    pub fn stage_pending(&mut self, pending: SurfaceTransaction) -> Result<(), EngineError> {
+        if !pending.surface.is_valid() {
+            return Err(EngineError::InvalidSurface);
+        }
+
+        self.entries
+            .entry(pending.surface)
+            .and_modify(|entry| {
+                entry.pending = Some(pending.clone());
+            })
+            .or_insert_with(|| SurfaceVisualStateEntry {
+                surface: pending.surface,
+                committed: None,
+                pending: Some(pending),
+            });
+        Ok(())
+    }
+
+    pub fn clear_pending(&mut self, surface: SurfaceId) -> Option<SurfaceTransaction> {
+        self.entries
+            .get_mut(&surface)
+            .and_then(|entry| entry.pending.take())
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WmRuntimeAction {
     KeepRunning,
     RestartWm { reason: WmRestartReason },

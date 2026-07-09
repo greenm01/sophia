@@ -10,8 +10,8 @@ use sophia_engine::{
     MetadataChromeUpdate, NotificationChromePresenter, NotificationChromeRejectReason,
     NotificationChromeUpdate, RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction,
     RoutedInputRequestError, SanitizedChromeMetadata, SessionCommand, SessionEvent,
-    SessionLayerSource, SessionTickRequest, WmIpcError, WmRestartReason, WmRuntimeAction,
-    WmTransactionUpdate, explicit_sync_surfaces, hit_test_scene_for_input,
+    SessionLayerSource, SessionTickRequest, SurfaceVisualStateTable, WmIpcError, WmRestartReason,
+    WmRuntimeAction, WmTransactionUpdate, explicit_sync_surfaces, hit_test_scene_for_input,
     layout_epoch_for_explicit_sync, measure_resize_behavior,
     notification_chrome_command_from_portal, request_wm_over_stream,
     routed_input_request_from_physical_event, routed_input_requests_from_flush,
@@ -564,6 +564,83 @@ fn committed_surface_projection_rejects_missing_or_mismatched_templates() {
         engine.project_committed_surface_states(&[committed], &[other_template]),
         Err(EngineError::InvalidSurface)
     );
+}
+
+#[test]
+fn surface_visual_state_table_keeps_pending_separate_from_committed() {
+    let engine = HeadlessEngine::default();
+    let old_layer = test_layer(0, 0, 0, Region::empty());
+    let committed = engine.committed_state_from_layer(&old_layer);
+    let mut table = SurfaceVisualStateTable::from_committed_states([committed.clone()]);
+    let mut next_layer = old_layer.clone();
+    next_layer.geometry.width = 500;
+    next_layer.source = BufferSource::DmaBuf { handle: 99 };
+    let pending = next_layer.to_surface_transaction(
+        TransactionId::from_raw(80),
+        AuthorityKind::SophiaX,
+        SurfaceTransactionReadiness::Pending,
+        250,
+        committed.committed_generation,
+    );
+
+    table.stage_pending(pending.clone()).unwrap();
+
+    assert_eq!(table.len(), 1);
+    assert_eq!(table.committed(old_layer.surface), Some(&committed));
+    assert_eq!(table.pending(old_layer.surface), Some(&pending));
+    assert_eq!(
+        table.committed(old_layer.surface).unwrap().geometry.width,
+        old_layer.geometry.width
+    );
+    assert_eq!(
+        table
+            .pending(old_layer.surface)
+            .unwrap()
+            .target_geometry
+            .width,
+        500
+    );
+}
+
+#[test]
+fn surface_visual_state_table_can_clear_pending_without_dropping_committed() {
+    let engine = HeadlessEngine::default();
+    let old_layer = test_layer(0, 0, 0, Region::empty());
+    let committed = engine.committed_state_from_layer(&old_layer);
+    let mut table = SurfaceVisualStateTable::from_committed_states([committed.clone()]);
+    let pending = old_layer.to_surface_transaction(
+        TransactionId::from_raw(81),
+        AuthorityKind::SophiaX,
+        SurfaceTransactionReadiness::Ready,
+        250,
+        committed.committed_generation,
+    );
+
+    table.stage_pending(pending.clone()).unwrap();
+
+    assert_eq!(table.clear_pending(old_layer.surface), Some(pending));
+    assert_eq!(table.committed(old_layer.surface), Some(&committed));
+    assert!(table.pending(old_layer.surface).is_none());
+}
+
+#[test]
+fn surface_visual_state_table_rejects_invalid_pending_surface() {
+    let mut table = SurfaceVisualStateTable::new();
+    let mut layer = test_layer(0, 0, 0, Region::empty());
+    layer.surface = SurfaceId::INVALID;
+    let pending = layer.to_surface_transaction(
+        TransactionId::from_raw(82),
+        AuthorityKind::SophiaX,
+        SurfaceTransactionReadiness::Ready,
+        250,
+        0,
+    );
+
+    assert_eq!(
+        table.stage_pending(pending),
+        Err(EngineError::InvalidSurface)
+    );
+    assert!(table.is_empty());
 }
 
 #[test]

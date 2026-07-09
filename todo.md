@@ -83,7 +83,7 @@ server object graph.
 
 Make macOS-style transaction integrity a first-class Sophia invariant.
 
-- [ ] Define pending versus committed surface state in the engine data model.
+- [x] Define pending versus committed surface state in the engine data model.
 - [ ] Define buffer/geometry readiness and the conditions required to commit a
   visual transaction.
 - [ ] Define fail-closed slow-client behavior: keep the last committed visual
