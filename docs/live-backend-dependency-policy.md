@@ -248,6 +248,9 @@ Native libdrm poller construction derives backend-local output slots from the
 already-discovered output registry. Those slots are process-local routing
 indices; they must not mirror connector IDs, CRTC IDs, fd numbers, or any other
 native DRM/KMS identifier.
+Native libdrm poller startup status is likewise reduced to ready/no-output or
+backend-not-ready state plus route count. It is a startup health record, not a
+native resource inventory.
 
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout

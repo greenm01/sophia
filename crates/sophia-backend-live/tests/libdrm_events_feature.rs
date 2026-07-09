@@ -12,7 +12,8 @@ use sophia_backend_live::{
     LibdrmNativePageFlipSourceStatus, LibdrmNativePollerDiagnostics, LibdrmNativeReadLoopReport,
     LibdrmNativeReadLoopStatus, LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus,
     LibdrmPageFlipEventPoller, LiveBackendConfig, LiveLibdrmPollerDiagnostics,
-    LiveLibdrmPollerDiagnosticsStatus, LivePageFlipCallback, LivePageFlipCallbackQueue,
+    LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
+    LiveLibdrmPollerStartupStatus, LivePageFlipCallback, LivePageFlipCallbackQueue,
     LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus,
     NativeLibdrmPageFlipEventPoller, OutputId, QueuedInputPoller, decode_native_page_flip_batch,
     discover_live_backend, libdrm_dependency_admission_report, libdrm_fd_authority_report,
@@ -496,6 +497,13 @@ fn native_libdrm_poller_constructs_routes_from_discovered_outputs_without_kms_id
     assert_eq!(routes[0].output, OutputId::from_raw(1));
     assert_eq!(routes[1].slot.raw(), 2);
     assert_eq!(routes[1].output, OutputId::from_raw(2));
+    assert_eq!(
+        report.native_libdrm_poller_startup_report(),
+        LiveLibdrmPollerStartupReport {
+            status: LiveLibdrmPollerStartupStatus::Ready,
+            route_count: 2,
+        }
+    );
 
     let mut poller = report
         .native_libdrm_poller_from_authority(authority)
@@ -531,6 +539,13 @@ fn native_libdrm_poller_construction_fails_closed_without_outputs() {
         LibdrmBackendFdAuthority::new(23).expect("nonzero generation should mint authority token");
 
     assert!(report.native_libdrm_output_routes().is_empty());
+    assert_eq!(
+        report.native_libdrm_poller_startup_report(),
+        LiveLibdrmPollerStartupReport {
+            status: LiveLibdrmPollerStartupStatus::NoOutputs,
+            route_count: 0,
+        }
+    );
     assert!(
         report
             .native_libdrm_poller_from_authority(authority)

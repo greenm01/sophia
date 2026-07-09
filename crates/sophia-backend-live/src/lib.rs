@@ -384,6 +384,29 @@ pub enum LiveLibdrmPollerDiagnosticsStatus {
     ReadFailed,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveLibdrmPollerStartupReport {
+    pub status: LiveLibdrmPollerStartupStatus,
+    pub route_count: usize,
+}
+
+impl LiveLibdrmPollerStartupReport {
+    pub const fn not_configured() -> Self {
+        Self {
+            status: LiveLibdrmPollerStartupStatus::NotConfigured,
+            route_count: 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveLibdrmPollerStartupStatus {
+    NotConfigured,
+    Ready,
+    NoOutputs,
+    BackendNotReady,
+}
+
 pub struct LivePageFlipCallbackQueue {
     receiver: Receiver<LivePageFlipCallback>,
     max_drain_per_tick: usize,
@@ -1165,6 +1188,30 @@ impl LiveBackendStartupReport {
                 })
             })
             .collect()
+    }
+
+    #[cfg(feature = "libdrm-events")]
+    pub fn native_libdrm_poller_startup_report(&self) -> LiveLibdrmPollerStartupReport {
+        if !self.discovery.is_ready() {
+            return LiveLibdrmPollerStartupReport {
+                status: if self.discovery.selected_output.is_none() {
+                    LiveLibdrmPollerStartupStatus::NoOutputs
+                } else {
+                    LiveLibdrmPollerStartupStatus::BackendNotReady
+                },
+                route_count: 0,
+            };
+        }
+
+        let route_count = self.native_libdrm_output_routes().len();
+        LiveLibdrmPollerStartupReport {
+            status: if route_count == 0 {
+                LiveLibdrmPollerStartupStatus::NoOutputs
+            } else {
+                LiveLibdrmPollerStartupStatus::Ready
+            },
+            route_count,
+        }
     }
 
     #[cfg(feature = "libdrm-events")]
