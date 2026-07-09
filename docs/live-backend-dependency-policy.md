@@ -53,12 +53,16 @@ for absent, unavailable, or degraded GPU startup, and `GpuRequired` sessions fai
 closed when the GBM path cannot prove native capability. A degraded native import
 must not partially enable the import-capable renderer: Sophia either has a
 native-capable startup status or it selects CPU fallback.
+Native-capable means the private renderer adapter can open the backend-owned
+device, verify the first render format, allocate a tiny private GBM buffer, and
+drop it without exporting any GBM object.
 
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
 authority. On Linux, wgpu will usually target Vulkan, but Sophia must first prove
-render-device authority, GBM allocation, reduced startup health, and atomic
-presentation before admitting that higher-level renderer dependency.
+render-device authority, GBM allocation, reduced startup health, atomic
+presentation, and buffer import before admitting that higher-level renderer
+dependency.
 
 Phase 4 is the shared-memory import boundary. Real MIT-SHM mapping stays
 deferred until mapped bytes can pass through a bounded renderer upload path with

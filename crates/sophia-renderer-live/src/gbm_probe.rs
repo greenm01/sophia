@@ -100,13 +100,19 @@ mod native {
 
     pub(super) fn probe_backend_device<T: AsFd>(device: T) -> GbmProbeResult {
         match gbm::Device::new(device) {
-            Ok(device) if supports_first_render_target(&device) => GbmProbeResult::Capable,
+            Ok(device) if can_allocate_first_private_buffer(&device) => GbmProbeResult::Capable,
             Ok(_device) => GbmProbeResult::NativeError,
             Err(_error) => GbmProbeResult::NativeError,
         }
     }
 
-    fn supports_first_render_target<T: AsFd>(device: &gbm::Device<T>) -> bool {
-        device.is_format_supported(gbm::Format::Argb8888, gbm::BufferObjectFlags::RENDERING)
+    fn can_allocate_first_private_buffer<T: AsFd>(device: &gbm::Device<T>) -> bool {
+        let format = gbm::Format::Argb8888;
+        let usage = gbm::BufferObjectFlags::RENDERING;
+
+        device.is_format_supported(format, usage)
+            && device
+                .create_buffer_object::<()>(1, 1, format, usage)
+                .is_ok()
     }
 }

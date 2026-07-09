@@ -9,15 +9,15 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Add a real GBM allocation probe that creates and drops a tiny private
-  buffer without exporting GBM handles.
 - [ ] Decide when to introduce EGL or wgpu above the GBM platform boundary.
-
-**Next**
 - [ ] Add explicit backend-owned fd injection smoke coverage around a real
   render device when the host test environment exposes one.
+
+**Next**
 - [ ] Choose whether the first compositor drawing API above GBM is EGL/OpenGL,
   raw Vulkan, or wgpu.
+- [ ] Add a reduced GPU startup report that can distinguish allocation failure
+  from render-device discovery failure without leaking native error text.
 
 ---
 
@@ -180,6 +180,8 @@ evidence belong in `docs/research-log.md`.
   backend-owned fd injection.
 - [x] Add docs for why degraded native import must not partially enable the
   import-capable renderer.
+- [x] Add a real GBM allocation probe that creates and drops a tiny private
+  buffer without exporting GBM handles.
 
 ---
 

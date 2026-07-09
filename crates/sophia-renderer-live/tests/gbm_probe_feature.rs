@@ -77,3 +77,17 @@ fn native_gbm_probe_maps_backend_device_open_failure_to_degraded_health() {
         }
     );
 }
+
+#[test]
+fn native_gbm_probe_degrades_when_private_buffer_allocation_fails() {
+    let invalid_render_device = std::fs::File::open("/dev/null").unwrap();
+
+    assert_eq!(
+        NativeGbmCapabilityProbe::startup_status_from_backend_device(invalid_render_device),
+        LiveRendererImportStartupStatus {
+            health: LiveRendererImportHealth::Degraded,
+            xpixmap: LiveRendererImportPathStatus::Disabled,
+            dmabuf: LiveRendererImportPathStatus::Degraded,
+        }
+    );
+}

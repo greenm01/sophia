@@ -119,11 +119,17 @@ Degraded GBM does not produce a partial import-capable renderer. This keeps the
 atomic visual path honest: native import is either capable, or the session runs
 through the fallback renderer with reduced degraded startup health.
 
+Native GBM capability requires more than opening a GBM device or checking a
+format flag. The probe must also allocate and immediately drop a tiny
+renderer-private buffer. The allocation result is reduced to startup health; the
+buffer object, handle, driver error, and fd never cross the adapter boundary.
+
 Admission tests for the first real dependency must prove:
 
 - the crate still builds and tests offline without the feature;
 - fake degraded capability coverage remains the default test path;
 - absence of GBM produces reduced degraded health, not a panic;
+- failed private GBM allocation produces reduced degraded health;
 - no raw file descriptor, device path, or renderer-private handle crosses into
   `sophia-engine`, WM IPC, portals, or protocol authorities.
 
@@ -138,6 +144,8 @@ The adapter module owns:
 - native GBM crate imports behind the `gbm-probe` feature;
 - fake GBM capability probes for deterministic default-style coverage;
 - reduced native GBM capability probes for feature-enabled validation.
+- tiny private allocation probes that are dropped before returning reduced
+  health.
 
 The adapter module may later own:
 
@@ -162,7 +170,8 @@ depends on `gbm-sys`. Its optional `drm-support` feature is useful later, but
 the first Sophia probe should not require it. The initial probe only needs to
 prove that renderer-live can compile the native GBM boundary and translate a
 reduced render-device token or backend-owned device authority into reduced GBM
-capability health. Backend-live wires that authority through reduced startup
+capability health. Capability includes a private allocation check, not just
+device construction. Backend-live wires that authority through reduced startup
 reports and renderer preference policy.
 
 `gbm-sys` is not the first choice. It exposes raw FFI functions and low-level GBM
