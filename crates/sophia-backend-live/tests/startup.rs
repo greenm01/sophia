@@ -244,6 +244,87 @@ fn live_runtime_assembly_reports_reduced_renderer_health_on_tick() {
         .run_tick(CompositorBackendTickInput::default())
         .expect("runtime tick should succeed");
     assert_eq!(tick.renderer, assembly.renderer_observation());
+    assert_eq!(
+        tick.scanout,
+        LiveScanoutReadinessReport {
+            status: LiveScanoutReadinessStatus::Ready,
+        }
+    );
+    assert_eq!(
+        tick.page_flip,
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Ready,
+            frame_serial: None,
+        }
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_runtime_assembly_threads_scanout_and_page_flip_observations() {
+    let root = ready_drm_sysfs_fixture("runtime-scanout-page-flip");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed live assembly");
+
+    assert_eq!(
+        assembly.scanout_readiness_observation(),
+        LiveScanoutReadinessReport {
+            status: LiveScanoutReadinessStatus::Ready,
+        }
+    );
+    assert_eq!(
+        assembly.page_flip_observation(),
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Ready,
+            frame_serial: None,
+        }
+    );
+
+    assembly.observe_presentation_report(LiveRendererPresentationReport {
+        status: LiveRendererPresentationStatus::Unavailable,
+    });
+    assert_eq!(
+        assembly.scanout_readiness_observation(),
+        LiveScanoutReadinessReport {
+            status: LiveScanoutReadinessStatus::PresentationUnavailable,
+        }
+    );
+    assert_eq!(
+        assembly.page_flip_observation(),
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::PresentationUnavailable,
+            frame_serial: None,
+        }
+    );
+
+    assembly.observe_page_flip_outcome(&PageFlipCommitOutcome::Committed {
+        frame_serial: 121,
+        commit: TransactionCommit {
+            transaction: TransactionId::from_raw(71),
+            outcome: TransactionOutcome::Committed,
+            applied_surfaces: vec![sophia_protocol::SurfaceId::new(101, 1)],
+        },
+    });
+    let tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should succeed");
+
+    assert_eq!(
+        tick.scanout,
+        LiveScanoutReadinessReport {
+            status: LiveScanoutReadinessStatus::PresentationUnavailable,
+        }
+    );
+    assert_eq!(
+        tick.page_flip,
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(121),
+        }
+    );
 
     fs::remove_dir_all(root).unwrap();
 }

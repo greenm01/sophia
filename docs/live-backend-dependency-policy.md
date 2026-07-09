@@ -110,6 +110,12 @@ IDs, file descriptors, native driver errors, or KMS object handles. The future
 libdrm/KMS adapter must translate native page-flip callbacks into this shape
 before runtime code observes them.
 
+Backend-live runtime ticks carry the current reduced scanout readiness report
+and page-flip event beside renderer health. This keeps the runtime-facing
+diagnostics useful without introducing KMS dependencies or leaking native object
+identity. Native presentation and future page-flip callbacks should update those
+fields through reduced reports before the next runtime tick observes them.
+
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
 authority. On Linux, wgpu will usually target Vulkan, but Sophia must first prove

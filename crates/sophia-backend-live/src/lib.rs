@@ -149,7 +149,14 @@ impl LiveScanoutReadinessReport {
         backend: &LiveBackendStartupReport,
         presentation: LiveRendererPresentationReport,
     ) -> Self {
-        if backend.selected_output().is_none() {
+        Self::from_output_and_presentation(backend.selected_output().is_some(), presentation)
+    }
+
+    fn from_output_and_presentation(
+        output_available: bool,
+        presentation: LiveRendererPresentationReport,
+    ) -> Self {
+        if !output_available {
             return Self {
                 status: LiveScanoutReadinessStatus::OutputUnavailable,
             };
@@ -559,10 +566,16 @@ impl LiveBackendStartupReport {
             renderer_status,
             selection_observation(renderer_selection),
         );
+        let scanout_readiness = self.scanout_readiness_report(LiveRendererPresentationReport {
+            status: LiveRendererPresentationStatus::Ready,
+        });
+        let page_flip_event = LivePageFlipEvent::from_scanout_status(scanout_readiness.status);
         self.into_headless_assembly(poller, renderer_selection)
             .map(|assembly| LiveBackendRuntimeAssembly {
                 assembly,
                 renderer_observation,
+                scanout_readiness,
+                page_flip_event,
             })
     }
 }
@@ -731,6 +744,8 @@ pub enum LiveEglStartupStatus {
 pub struct LiveBackendRuntimeAssembly {
     assembly: HeadlessCompositorBackendAssembly,
     renderer_observation: LiveRendererRuntimeObservation,
+    scanout_readiness: LiveScanoutReadinessReport,
+    page_flip_event: LivePageFlipEvent,
 }
 
 impl LiveBackendRuntimeAssembly {
@@ -746,6 +761,25 @@ impl LiveBackendRuntimeAssembly {
         self.renderer_observation
     }
 
+    pub fn scanout_readiness_observation(&self) -> LiveScanoutReadinessReport {
+        self.scanout_readiness
+    }
+
+    pub fn page_flip_observation(&self) -> LivePageFlipEvent {
+        self.page_flip_event
+    }
+
+    pub fn observe_presentation_report(&mut self, presentation: LiveRendererPresentationReport) {
+        self.scanout_readiness =
+            LiveScanoutReadinessReport::from_output_and_presentation(true, presentation);
+        self.page_flip_event =
+            LivePageFlipEvent::from_scanout_status(self.scanout_readiness.status);
+    }
+
+    pub fn observe_page_flip_outcome(&mut self, outcome: &PageFlipCommitOutcome) {
+        self.page_flip_event = LivePageFlipEvent::from_commit_outcome(outcome);
+    }
+
     pub fn run_tick(
         &mut self,
         input: CompositorBackendTickInput,
@@ -755,6 +789,8 @@ impl LiveBackendRuntimeAssembly {
         Ok(LiveBackendRuntimeTickReport {
             engine,
             renderer: self.renderer_observation,
+            scanout: self.scanout_readiness,
+            page_flip: self.page_flip_event,
         })
     }
 }
@@ -763,6 +799,8 @@ impl LiveBackendRuntimeAssembly {
 pub struct LiveBackendRuntimeTickReport {
     pub engine: CompositorBackendTickReport,
     pub renderer: LiveRendererRuntimeObservation,
+    pub scanout: LiveScanoutReadinessReport,
+    pub page_flip: LivePageFlipEvent,
 }
 
 pub fn discover_live_backend(config: &LiveBackendConfig) -> LiveBackendStartupReport {
