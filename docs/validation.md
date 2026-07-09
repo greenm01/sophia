@@ -37,6 +37,9 @@ only reduced EGL startup and draw-smoke status.
 The `libdrm-events` feature does not admit a native libdrm crate yet. It checks
 the reduced page-flip event polling adapter shape and deterministic fake poller
 that feeds the runtime-owned bounded callback queue.
+The selected concrete candidate is Smithay's `drm` crate, but it should enter
+only as an optional backend-live dependency behind `libdrm-events`, with native
+page-flip values reduced before they reach runtime observation.
 
 The backend-live GBM feature suite includes an opt-in real-device smoke. Set
 `SOPHIA_RUN_REAL_GBM_SMOKE=1` to let the test look for an openable

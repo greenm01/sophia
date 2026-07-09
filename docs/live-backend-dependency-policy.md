@@ -143,6 +143,26 @@ disconnected, or emit-limit-reached. The fake feature poller exercises this
 shape deterministically; a later native poller must preserve the same public
 report and callback queue contracts.
 
+The first concrete libdrm candidate is Smithay's `drm` crate. It is admitted as
+the preferred candidate because it is a safe, low-level DRM/KMS interface built
+around caller-owned file descriptors, `Device`/`control::Device` traits, typed
+KMS resources, and typed page-flip events. That matches Sophia's boundary:
+backend-live owns the card fd, private adapter code handles native event
+iteration, and public runtime state receives only `LivePageFlipCallback` and
+reduced poll reports. Do not expose `drm::control::PageFlipEvent`, CRTC handles,
+durations, device paths, fds, raw ioctls, or native errors beyond the adapter.
+
+`drm-ffi` and `drm-sys` are not the first public dependency candidates. They may
+remain transitive implementation details of `drm`, but Sophia should not depend
+on them directly unless the safe crate cannot support the narrow page-flip poll
+adapter. A direct FFI dependency would enlarge the unsafe audit surface before
+the reduced callback path needs it.
+
+The next admission step may add `drm = "0.15"` as an optional
+`sophia-backend-live` dependency behind `libdrm-events`, with the native adapter
+kept in a small private module. That step must still keep default workspace
+tests dependency-light and deterministic.
+
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
 authority. On Linux, wgpu will usually target Vulkan, but Sophia must first prove
