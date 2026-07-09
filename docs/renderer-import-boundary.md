@@ -285,6 +285,24 @@ Admission rules for the GBM-backed EGL platform:
 - keep `DEFAULT_DISPLAY` as a fallback host smoke until GBM-backed drawing is
   exercised against real render nodes in validation.
 
+`DEFAULT_DISPLAY` retirement requires evidence, not intent. Sophia may remove
+the fallback host smoke only after all of these are true:
+
+- `SOPHIA_RUN_REAL_GBM_SMOKE=1` passes the GBM capability, GBM-backed EGL draw,
+  and offscreen presentation smokes on a real render node;
+- the same command remains green for repeated local runs after a clean build;
+- native driver crashes stay isolated to the child smoke process and report as
+  opt-in validation failures;
+- public reports still expose only reduced GBM, EGL, presentation, and scanout
+  readiness status;
+- the reduced scanout-adjacent readiness report has a successor page-flip event
+  shape that does not expose KMS object identity.
+
+Until then, `DEFAULT_DISPLAY` remains a compatibility smoke. It is not the
+production compositor platform, but it proves the dynamic EGL and GL loading
+path on machines where backend-owned GBM/EGL cannot yet create a stable private
+target.
+
 Rejected shortcuts:
 
 - using `DEFAULT_DISPLAY` as the production compositor platform: it does not

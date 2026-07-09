@@ -66,3 +66,26 @@ coverage:
 ```sh
 SOPHIA_RUN_REAL_GBM_SMOKE=1 cargo test --offline -p sophia-backend-live --features gbm-probe,egl-probe
 ```
+
+## Retiring `DEFAULT_DISPLAY`
+
+The `DEFAULT_DISPLAY` EGL smoke is temporary, but it is not removable merely
+because the GBM-backed path exists. It can be retired only after the opt-in real
+render-node validation is repeatably green and the reduced public boundary is
+unchanged.
+
+Before removing it, record evidence that:
+
+- `SOPHIA_RUN_REAL_GBM_SMOKE=1` passes after a clean build;
+- the same command passes in repeated local runs on the target development
+  machine;
+- the GBM-backed draw smoke reaches `ClearColorReady`;
+- the offscreen presentation smoke reaches `Ready`;
+- driver crashes remain isolated to child-process validation failures;
+- no public report exposes render-node paths, file descriptors, GBM/EGL objects,
+  native errors, pixels, KMS framebuffer IDs, connector IDs, CRTC IDs, or plane
+  IDs.
+
+If any condition fails, keep `DEFAULT_DISPLAY` as a host compatibility smoke and
+continue treating GBM-backed EGL as the production-shaped path under
+development.
