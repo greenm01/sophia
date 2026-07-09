@@ -156,6 +156,50 @@ the authority's normal protocol path.
 The WM remains blind to Wayland role IDs, app IDs, titles, namespaces, and
 configure serials. It sees only opaque layout nodes and proposes geometry.
 
+## Input Delivery
+
+Wayland input must follow the same Sophia routing rule as every other protocol:
+Sophia Engine owns physical devices and visual hit-testing; the protocol
+authority owns protocol-correct delivery.
+
+The Engine produces an accepted route:
+
+- physical seat and device identity;
+- Sophia `SurfaceId`;
+- output/global position;
+- surface-local coordinates after scene transforms;
+- event serial and monotonic event time;
+- keyboard focus intent, pointer focus intent, or touch target intent.
+
+Sophia Wayland Authority consumes that route and applies Wayland semantics:
+
+- map Sophia `SurfaceId` to the namespace-local `wl_surface`;
+- verify the target client belongs to the route's namespace;
+- apply protocol-local seat focus state;
+- deliver `wl_pointer`, `wl_keyboard`, or `wl_touch` events with authority-owned
+  serials where Wayland requires them;
+- preserve grabs, popups, and implicit grabs as authority state;
+- reject or ignore routes that point at stale, unmapped, destroyed, or
+  cross-namespace surfaces.
+
+The authority must not read `/dev/input`, perform global scene hit-testing, or
+choose workspace focus policy. It can maintain protocol-local focus and grab
+state only after the Engine supplies the visual target and the namespace check
+passes.
+
+Input failures should be data, not fallback privileges:
+
+- stale route: drop and report a reduced rejected-route observation;
+- namespace mismatch: deny and report a security rejection;
+- destroyed surface: drop and clear protocol-local focus if required;
+- active protocol grab: deliver to the grab owner only if the grab is valid for
+  the same namespace and seat;
+- compositor chrome hit: handled by Sophia Engine before the authority sees the
+  event.
+
+This keeps the compositor-first invariant intact while preserving Wayland's
+client-visible seat, serial, focus, and grab behavior.
+
 ## Namespace Rules
 
 Wayland's object isolation is per client connection, but Sophia's isolation is
@@ -191,3 +235,11 @@ The second reducer should prove:
   commit path;
 - stale or destroyed toplevel state cannot advance committed visual truth;
 - polite close maps to `xdg_toplevel.close`, not engine-owned process killing.
+
+The input reducer should prove:
+
+- Engine routes are mapped to namespace-local `wl_surface` targets;
+- cross-namespace routes are rejected before Wayland event delivery;
+- protocol-local grabs can redirect delivery within the same namespace/seat;
+- destroyed or unmapped targets clear focus instead of fabricating events;
+- compositor chrome clicks never enter the Wayland Authority input path.
