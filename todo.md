@@ -109,7 +109,7 @@ into a Wayland compositor as the architectural center.
   namespace-checked.
 - [x] Define Wayland clipboard/data-device/screencopy-style requests as portal
   inputs instead of compositor-wide privileges.
-- [ ] Document that Wayland Authority must not own workspaces, global shortcuts,
+- [x] Document that Wayland Authority must not own workspaces, global shortcuts,
   compositor chrome, or scanout.
 
 ---

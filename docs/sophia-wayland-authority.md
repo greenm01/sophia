@@ -32,6 +32,36 @@ Sophia Wayland Authority must not own:
 - portal policy decisions;
 - frame scheduling, renderer imports, or scanout.
 
+## Non-Ownership Contract
+
+The Wayland Authority exists to terminate Wayland protocol, not to become the
+desktop shell. This distinction is mandatory because Sophia's architecture only
+works if there is one compositor authority: Sophia Engine.
+
+The Wayland Authority must never own:
+
+- workspaces or workspace switching;
+- tiling, stacking, fullscreen policy, or final window placement;
+- global shortcuts, keybindings, gestures, or launcher policy;
+- compositor chrome, title bars, trust badges, shadows, animations, or panels;
+- physical input devices or raw input grabs;
+- output configuration, mode setting, frame pacing, page flips, or scanout;
+- cross-namespace portal policy;
+- unsanitized metadata presentation to the WM.
+
+Allowed authority state is protocol-local:
+
+- Wayland object IDs and resource lifetimes;
+- role state for `wl_surface`, `xdg_surface`, and `xdg_toplevel`;
+- configure serials and acknowledgements;
+- protocol-local focus/grab state after Engine routing;
+- namespace-scoped data-device offers and selections;
+- protocol errors, disconnects, and lifecycle cleanup.
+
+The practical rule is simple: if a decision affects what the whole desktop
+looks like, where a surface lives, which namespace may cross a boundary, or
+what gets scanned out, it belongs outside the Wayland Authority.
+
 ## `wl_surface` Transaction Mapping
 
 Wayland already has a useful split between pending surface state and committed
