@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use sophia_backend_live::{
     DeviceId, HeadlessOutput, LibinputDeviceDescriptor, LibinputDeviceKind, LiveBackendConfig,
     LiveBackendDependencyDecision, LiveBackendDependencyKind, LiveBackendDependencyUse,
-    LiveCompositorBackendDiscoveryStatus, OutputId, QueuedInputPoller, RendererSelection, SeatId,
-    Size, discover_live_backend, live_backend_dependency_decision,
+    LiveCompositorBackendDiscoveryStatus, LiveRendererImportBoundary, OutputId, QueuedInputPoller,
+    RendererSelection, SeatId, Size, discover_live_backend, live_backend_dependency_decision,
 };
 
 #[test]
@@ -70,6 +70,52 @@ fn live_backend_startup_fails_closed_without_connected_outputs() {
 }
 
 #[test]
+fn live_backend_startup_uses_cpu_renderer_until_native_import_is_configured() {
+    let root = ready_drm_sysfs_fixture("renderer-default");
+    let config = LiveBackendConfig::new(&root);
+
+    let report = discover_live_backend(&config);
+
+    assert_eq!(report.renderer_selection(), RendererSelection::CpuFallback);
+    let assembly = report
+        .into_configured_headless_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed assembly");
+    assert_eq!(assembly.renderer(), RendererSelection::CpuFallback);
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_backend_startup_admits_native_renderer_import_only_when_configured() {
+    let root = ready_drm_sysfs_fixture("renderer-native");
+    let config = LiveBackendConfig::new(&root).with_renderer_import_boundary(
+        LiveRendererImportBoundary::with_native_imports(true, false),
+    );
+
+    let report = discover_live_backend(&config);
+
+    assert_eq!(
+        report.renderer_selection(),
+        RendererSelection::ImportCapable {
+            import_xpixmap: true,
+            import_dmabuf: false,
+        }
+    );
+    let assembly = report
+        .into_configured_headless_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed assembly");
+    assert_eq!(
+        assembly.renderer(),
+        RendererSelection::ImportCapable {
+            import_xpixmap: true,
+            import_dmabuf: false,
+        }
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn dependency_policy_allows_libdrm_and_libinput_at_live_backend_seams() {
     assert!(
         live_backend_dependency_decision(
@@ -123,6 +169,15 @@ fn drm_sysfs_fixture(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("sophia-backend-live-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
+    root
+}
+
+fn ready_drm_sysfs_fixture(name: &str) -> PathBuf {
+    let root = drm_sysfs_fixture(name);
+    let connector = root.join("card0-HDMI-A-1");
+    fs::create_dir_all(&connector).unwrap();
+    write_fixture_file(&connector, "status", "connected\n");
+    write_fixture_file(&connector, "modes", "1280x720\n");
     root
 }
 

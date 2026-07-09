@@ -9,16 +9,16 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Decide whether the first real renderer implementation belongs in
-  `sophia-backend-live` or a dedicated `sophia-renderer-live` crate.
-- [ ] Thread live renderer import admission into backend startup without adding
-  GBM, EGL, DMA-BUF, or real MIT-SHM mapping yet.
-
-**Next**
-- [ ] Add a startup smoke proving native renderer import remains disabled until
-  explicitly configured.
 - [ ] Define the first live renderer health observation for degraded import
   capability.
+- [ ] Add renderer admission status to live backend startup reports without
+  leaking renderer-private handles.
+
+**Next**
+- [ ] Sketch the `sophia-renderer-live` crate boundary without adding GBM, EGL,
+  DMA-BUF, or real MIT-SHM mapping yet.
+- [ ] Decide the first runtime observation shape for CPU fallback versus native
+  import-capable renderer selection.
 
 ---
 
@@ -101,6 +101,13 @@ evidence belong in `docs/research-log.md`.
   DMA-BUF, or real MIT-SHM mapping.
 - [x] Add deterministic tests for renderer import admission and fail-closed
   unsupported import paths.
+- [x] Decide that the first real renderer implementation should live in a
+  dedicated `sophia-renderer-live` crate once GBM, EGL, DMA-BUF, or explicit
+  sync dependencies are required.
+- [x] Thread live renderer import admission into backend startup without adding
+  GBM, EGL, DMA-BUF, or real MIT-SHM mapping.
+- [x] Add a startup smoke proving native renderer import remains disabled until
+  explicitly configured.
 
 ---
 

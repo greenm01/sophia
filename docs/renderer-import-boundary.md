@@ -40,10 +40,19 @@ The live renderer boundary does not own:
 CPU-backed uploads are the only always-accepted path. `XPixmap` and `DmaBuf`
 sources are reduced records today, not proof that a real GPU import path exists.
 They stay deferred unless the live renderer boundary explicitly declares support.
+Live backend startup therefore defaults to CPU fallback. Native import-capable
+rendering must be selected through startup configuration; it is not implied by
+discovering a DRM/KMS output.
 
 Real MIT-SHM mapping remains outside this boundary until Sophia has a bounded
 shared-memory upload path with size checks, namespace validation, lifetime
 tracking, and fail-closed errors.
+
+The first real renderer implementation should live in a dedicated
+`sophia-renderer-live` crate once it needs GBM, EGL, DMA-BUF, explicit sync
+fences, or renderer-private resource caches. `sophia-backend-live` should remain
+the session assembly boundary that wires discovery, input, renderer admission,
+and startup health together.
 
 ## Failure Shape
 

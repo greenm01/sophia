@@ -148,6 +148,7 @@ pub enum LiveRendererImportRejection {
 pub struct LiveBackendConfig {
     pub drm_sysfs_root: PathBuf,
     pub input_devices: Vec<LibinputDeviceDescriptor>,
+    pub renderer_import: LiveRendererImportBoundary,
 }
 
 impl LiveBackendConfig {
@@ -155,6 +156,7 @@ impl LiveBackendConfig {
         Self {
             drm_sysfs_root: drm_sysfs_root.into(),
             input_devices: Vec::new(),
+            renderer_import: LiveRendererImportBoundary::cpu_only(),
         }
     }
 
@@ -162,11 +164,20 @@ impl LiveBackendConfig {
         self.input_devices.push(device);
         self
     }
+
+    pub fn with_renderer_import_boundary(
+        mut self,
+        renderer_import: LiveRendererImportBoundary,
+    ) -> Self {
+        self.renderer_import = renderer_import;
+        self
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LiveBackendStartupReport {
     pub discovery: LiveCompositorBackendDiscoveryReport,
+    pub renderer_import: LiveRendererImportBoundary,
 }
 
 impl LiveBackendStartupReport {
@@ -176,6 +187,25 @@ impl LiveBackendStartupReport {
 
     pub fn selected_output(&self) -> Option<HeadlessOutput> {
         self.discovery.selected_output
+    }
+
+    pub fn renderer_selection(&self) -> RendererSelection {
+        if self.renderer_import.import_xpixmap || self.renderer_import.import_dmabuf {
+            RendererSelection::ImportCapable {
+                import_xpixmap: self.renderer_import.import_xpixmap,
+                import_dmabuf: self.renderer_import.import_dmabuf,
+            }
+        } else {
+            RendererSelection::CpuFallback
+        }
+    }
+
+    pub fn into_configured_headless_assembly(
+        self,
+        poller: QueuedInputPoller,
+    ) -> Option<HeadlessCompositorBackendAssembly> {
+        let renderer = self.renderer_selection();
+        self.into_headless_assembly(poller, renderer)
     }
 
     pub fn into_headless_assembly(
@@ -193,5 +223,6 @@ pub fn discover_live_backend(config: &LiveBackendConfig) -> LiveBackendStartupRe
 
     LiveBackendStartupReport {
         discovery: discover_live_compositor_backend(&output_backend, &input_backend),
+        renderer_import: config.renderer_import,
     }
 }
