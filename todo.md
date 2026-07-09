@@ -11,8 +11,8 @@ evidence belong in `docs/research-log.md`.
 **Now**
 - [ ] Keep `DEFAULT_DISPLAY` clear-color smoke as fallback until GBM-backed
   drawing is validated against real render nodes.
-- [ ] Add a non-polling native libdrm poller skeleton that preserves reduced
-  report contracts.
+- [ ] Define reduced native page-flip callback decoding without exposing KMS
+  resource identity.
 
 **Next**
 - [ ] Keep wgpu deferred until GBM/EGL startup, drawing, and presentation seams
@@ -253,6 +253,8 @@ evidence belong in `docs/research-log.md`.
 - [x] Define reduced native libdrm page-flip source construction from authority
   without reading events.
 - [x] Define native libdrm read-loop result mapping before real fd polling.
+- [x] Add a non-polling native libdrm poller skeleton that preserves reduced
+  report contracts.
 
 ---
 

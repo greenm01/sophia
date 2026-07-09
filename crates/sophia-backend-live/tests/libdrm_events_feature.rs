@@ -10,10 +10,10 @@ use sophia_backend_live::{
     LibdrmNativePageFlipSourceReport, LibdrmNativePageFlipSourceStatus, LibdrmNativeReadLoopReport,
     LibdrmNativeReadLoopStatus, LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus,
     LibdrmPageFlipEventPoller, LiveBackendConfig, LivePageFlipCallback, LivePageFlipCallbackQueue,
-    LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus, OutputId,
-    QueuedInputPoller, discover_live_backend, libdrm_dependency_admission_report,
-    libdrm_fd_authority_report, native_libdrm_event_adapter_report,
-    native_libdrm_event_adapter_report_for_authority,
+    LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus,
+    NativeLibdrmPageFlipEventPoller, OutputId, QueuedInputPoller, discover_live_backend,
+    libdrm_dependency_admission_report, libdrm_fd_authority_report,
+    native_libdrm_event_adapter_report, native_libdrm_event_adapter_report_for_authority,
 };
 
 #[test]
@@ -107,6 +107,27 @@ fn native_libdrm_read_loop_result_maps_to_reduced_poll_report() {
             .status,
         LibdrmPageFlipEventPollStatus::Disconnected
     );
+}
+
+#[test]
+fn native_libdrm_poller_skeleton_reports_idle_without_emitting_callbacks() {
+    let authority =
+        LibdrmBackendFdAuthority::new(14).expect("nonzero generation should mint authority token");
+    let source = LibdrmNativePageFlipSource::from_authority(authority);
+    let mut poller = NativeLibdrmPageFlipEventPoller::new(source);
+    let (sender, receiver) = mpsc::sync_channel(1);
+
+    assert_eq!(
+        poller.source_report(),
+        LibdrmNativePageFlipSourceReport {
+            status: LibdrmNativePageFlipSourceStatus::ConstructedWithoutPolling,
+        }
+    );
+    assert_eq!(
+        poller.poll_page_flip_events(&sender, 4).status,
+        LibdrmPageFlipEventPollStatus::Idle
+    );
+    assert!(receiver.try_recv().is_err());
 }
 
 #[test]

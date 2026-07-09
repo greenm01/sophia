@@ -547,6 +547,23 @@ pub enum LibdrmNativePageFlipSourceStatus {
 }
 
 #[cfg(feature = "libdrm-events")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeLibdrmPageFlipEventPoller {
+    source: LibdrmNativePageFlipSource,
+}
+
+#[cfg(feature = "libdrm-events")]
+impl NativeLibdrmPageFlipEventPoller {
+    pub const fn new(source: LibdrmNativePageFlipSource) -> Self {
+        Self { source }
+    }
+
+    pub const fn source_report(&self) -> LibdrmNativePageFlipSourceReport {
+        self.source.report()
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LibdrmNativeReadLoopReport {
     pub status: LibdrmNativeReadLoopStatus,
@@ -753,6 +770,18 @@ impl LibdrmPageFlipEventPoller for FakeLibdrmPageFlipEventPoller {
         max_emit: usize,
     ) -> LibdrmPageFlipEventPollReport {
         LibdrmPageFlipEventPollReport::from_source_report(self.source.emit_ready(sender, max_emit))
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+impl LibdrmPageFlipEventPoller for NativeLibdrmPageFlipEventPoller {
+    fn poll_page_flip_events(
+        &mut self,
+        _sender: &SyncSender<LivePageFlipCallback>,
+        _max_emit: usize,
+    ) -> LibdrmPageFlipEventPollReport {
+        let _ = self.source.report();
+        LibdrmNativeReadLoopReport::idle().into_poll_report()
     }
 }
 

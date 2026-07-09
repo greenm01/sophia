@@ -201,6 +201,12 @@ poll report, decoded callbacks become an emitted poll report with only a count,
 and read failure becomes a disconnected poll report. The mapping carries no
 native errno, fd, CRTC, connector, or raw event identity.
 
+`NativeLibdrmPageFlipEventPoller` is a non-polling skeleton over
+`LibdrmNativePageFlipSource`. It implements the same `LibdrmPageFlipEventPoller`
+trait as the deterministic fake, but currently returns the idle reduced report
+and emits no callbacks. Real polling must replace only the private read-loop
+implementation, not the public queue, report, or runtime observation contracts.
+
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
 authority. On Linux, wgpu will usually target Vulkan, but Sophia must first prove
