@@ -324,6 +324,13 @@ tiered XSync/Damage compromise. In the long-term authority architecture,
 `SurfaceTransaction` readiness should replace heuristic damage waiting wherever
 the authority can prove buffer/geometry pairing directly.
 
+Do not treat epochs as the universal frame scheduler. They are compatibility
+state for implicit X11 readiness. Authority-native commits should flow through
+`SurfaceVisualStateTable`: pending `SurfaceTransaction` values are staged beside
+the last `CommittedSurfaceState`, and only transactions with ready state,
+non-empty geometry, concrete buffer source, valid surface, and matching previous
+generation may advance committed visual truth.
+
 Fields should describe:
 
 - epoch serial
@@ -344,6 +351,11 @@ For the prototype, epochs should be created only for surfaces marked
 `ResizeSyncCapability::ExplicitSync`. Timed-out epochs may be expired by the
 engine, which returns the pending surfaces as a bounded timeout report for the
 bridge or authority to score.
+
+Slow-client timeout reporting must remain aggregate at runtime boundaries.
+Counts for preserved and explicitly degraded timeouts are acceptable. Raw
+surface IDs, protocol object IDs, namespaces, classes, titles, and payload data
+must stay inside the authority or bridge that owns them.
 
 ### DrmKmsOutputDescriptor
 

@@ -139,6 +139,12 @@ Render, and core drawing completion into pending buffer readiness. For Wayland
 clients, the Wayland Authority can map the native attach/damage/commit sequence
 directly into the same readiness model.
 
+`LayoutEpochState` is not the permanent atomic-commit primitive. It is the
+XLibre prototype compatibility mechanism for clients whose buffer readiness must
+be inferred from XSync and X Damage. Authority-native paths should emit
+`SurfaceTransaction` records with explicit readiness, then let the Engine commit
+only ready geometry/buffer pairs into `CommittedSurfaceState`.
+
 ### Compositor Strategy
 
 Sophia Engine should follow Smithay-style compositor structure, using niri as a
@@ -612,16 +618,24 @@ state only: broker health state, generation, and status-message length.
 Frame scheduling now has an explicit seam. `FrameClock` produces output-scoped
 frame ticks, and the deterministic headless implementation advances serials
 without depending on wall-clock time. A real DRM/KMS backend should implement
-the same boundary from vblank/page-flip timing while preserving the existing
-session-tick contract: clock tick in, frame snapshot and replay/commit report
-out.
+the same boundary from vblank/page-flip timing while preserving the session-tick
+contract: clock tick in, committed surface state selected, frame snapshot and
+replay/commit report out.
 
-X Damage now participates in frame scheduling. `schedule_frame_from_damage`
-combines a frame-clock tick, an optional X-derived `DamageFrame`, and an
-optional layout epoch. If no damage exists, the scheduler waits. If a layout
-epoch is pending, damage from affected surfaces retires pending surface IDs;
-rendering waits until the epoch completes. When damage is present and the epoch
-is complete, the scheduler emits a render decision with the tick's frame serial.
+The XLibre prototype scheduler may still consume X Damage. In that path,
+`schedule_frame_from_damage` combines a frame-clock tick, an optional X-derived
+`DamageFrame`, and an optional layout epoch. If no damage exists, the scheduler
+waits. If a layout epoch is pending, damage from affected surfaces retires
+pending surface IDs; rendering waits until the epoch completes. When damage is
+present and the epoch is complete, the scheduler emits a render decision with
+the tick's frame serial.
+
+Authority-native scheduling should instead treat protocol damage as one input
+to `SurfaceTransaction` readiness. The Engine's commit gate is the transaction
+validator: valid surface, non-empty target geometry, concrete buffer source,
+`Ready` state, and matching previous committed generation. Pending, timed-out,
+failed, malformed, or stale transactions keep the last committed visual state
+unless an explicit timeout policy produces a degraded artifact.
 
 Resize behavior measurement is tied to the same epoch state. `LayoutEpochState`
 records start time and timeout policy, and `measure_resize_behavior` reports
@@ -629,11 +643,12 @@ elapsed time, pending surfaces, completion, and timeout status. Slow or
 non-cooperative clients therefore become explicit samples instead of implicit
 black frames or hidden scheduler stalls.
 
-Only layers marked `ResizeSyncCapability::ExplicitSync` participate in a layout
-epoch. Mixed resize transactions therefore wait for cooperative clients without
-letting legacy clients hold the whole frame hostage. If the epoch times out,
-Sophia clears the pending set, renders the fallback frame, and leaves the bridge
-to decide whether the client class should be downgraded for future snapshots.
+Only XLibre prototype layers marked `ResizeSyncCapability::ExplicitSync`
+participate in a layout epoch. Mixed resize transactions therefore wait for
+cooperative clients without letting legacy clients hold the whole frame hostage.
+If the epoch times out, Sophia clears the pending set, renders the fallback
+frame from committed state, and leaves the bridge to decide whether the client
+class should be downgraded for future snapshots.
 
 The DRM/KMS output backend starts as a data-only skeleton. `DrmKmsMode`,
 `DrmKmsOutputDescriptor`, and `DrmKmsOutputRegistry` preserve connector ID,
