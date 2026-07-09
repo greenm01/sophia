@@ -226,6 +226,39 @@ to degraded EGL platform status; it must not become native drawing capability.
 wgpu remains deferred until GBM/EGL startup, drawing, and presentation seams are
 proven.
 
+## EGL Candidate Dependency
+
+The selected candidate for the future native EGL probe is `khronos-egl` 6.0.0.
+It binds the Khronos EGL 1.5 API, exposes an explicit `Instance` API, and can
+use dynamic loading through its `dynamic` feature. That fits Sophia's boundary:
+native EGL calls can stay inside a renderer-live adapter, and startup can reduce
+all driver and context failures to `LiveEglStartupStatus`.
+
+Do not admit `khronos-egl` until the first native probe patch. When admitted:
+
+- keep it optional under the existing `egl-probe` feature;
+- prefer dynamic loading so missing `libEGL.so.1` becomes reduced startup
+  failure instead of a hard link/load failure;
+- keep all EGL displays, contexts, configs, surfaces, errors, and loaded
+  library handles private to renderer-live;
+- project native failures only to reduced EGL startup status;
+- keep fake EGL tests as the default feature-enabled coverage path;
+- run `cargo test --workspace --offline` without feature flags;
+- run `cargo test --offline -p sophia-renderer-live --features egl-probe`;
+- run `cargo test --offline -p sophia-backend-live --features egl-probe`;
+- run `cargo test --offline -p sophia-backend-live --features gbm-probe,egl-probe`.
+
+Rejected candidates:
+
+- `egl` 0.2.7: older low-level binding with 0% docs.rs documentation, and the
+  `khronos-egl` docs describe it as left unmaintained;
+- `glutin` 0.32.3: documented and useful for applications, but it is a broad
+  cross-platform OpenGL context abstraction and pulls in policy beyond the
+  first narrow EGL probe;
+- Smithay EGL helpers: useful reference material for compositor architecture,
+  but adopting Smithay would pull in a large compositor framework surface before
+  Sophia has proven its own reduced GBM/EGL boundary.
+
 ## Failure Shape
 
 Unsupported import paths fail closed as reduced decisions. They do not panic, do

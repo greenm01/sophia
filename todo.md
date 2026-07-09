@@ -9,11 +9,11 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Evaluate concrete EGL binding options for a native context probe.
-- [ ] Add dependency-admission notes before admitting a real EGL crate.
+- [ ] Add the optional `khronos-egl` dependency under `egl-probe` with dynamic
+  loading only.
+- [ ] Add a real EGL context probe behind the `egl-probe` feature.
 
 **Next**
-- [ ] Add a real EGL context probe behind the `egl-probe` feature.
 - [ ] Keep wgpu deferred until GBM/EGL startup, drawing, and presentation seams
   are proven.
 
@@ -189,6 +189,9 @@ evidence belong in `docs/research-log.md`.
   Vulkan and wgpu remain deferred.
 - [x] Add `egl-probe` feature scaffolding without admitting a native EGL crate.
 - [x] Add fake reduced EGL capability records and backend startup projection.
+- [x] Evaluate concrete EGL binding options and choose `khronos-egl` as the
+  candidate for the native context probe.
+- [x] Add EGL dependency-admission notes before admitting a real EGL crate.
 
 ---
 
