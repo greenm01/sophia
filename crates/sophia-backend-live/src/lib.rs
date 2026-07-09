@@ -517,6 +517,37 @@ pub enum LibdrmNativeEventAdapterStatus {
 
 #[cfg(feature = "libdrm-events")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LibdrmNativePageFlipSource {
+    _private: (),
+}
+
+#[cfg(feature = "libdrm-events")]
+impl LibdrmNativePageFlipSource {
+    pub fn from_authority(authority: LibdrmBackendFdAuthority) -> Self {
+        native_libdrm_events::page_flip_source_from_authority(authority)
+    }
+
+    pub const fn report(&self) -> LibdrmNativePageFlipSourceReport {
+        LibdrmNativePageFlipSourceReport {
+            status: LibdrmNativePageFlipSourceStatus::ConstructedWithoutPolling,
+        }
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LibdrmNativePageFlipSourceReport {
+    pub status: LibdrmNativePageFlipSourceStatus,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibdrmNativePageFlipSourceStatus {
+    ConstructedWithoutPolling,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LibdrmBackendFdAuthority {
     generation: u64,
 }
@@ -552,7 +583,7 @@ pub enum LibdrmBackendFdAuthorityStatus {
 mod native_libdrm_events {
     use super::{
         LibdrmBackendFdAuthority, LibdrmBackendFdAuthorityReport, LibdrmBackendFdAuthorityStatus,
-        LibdrmNativeEventAdapterReport, LibdrmNativeEventAdapterStatus,
+        LibdrmNativeEventAdapterReport, LibdrmNativeEventAdapterStatus, LibdrmNativePageFlipSource,
     };
 
     pub(super) fn adapter_report() -> LibdrmNativeEventAdapterReport {
@@ -567,6 +598,13 @@ mod native_libdrm_events {
     ) -> LibdrmNativeEventAdapterReport {
         let _ = fd_authority_report(authority);
         adapter_report()
+    }
+
+    pub(super) fn page_flip_source_from_authority(
+        authority: LibdrmBackendFdAuthority,
+    ) -> LibdrmNativePageFlipSource {
+        let _ = fd_authority_report(authority);
+        LibdrmNativePageFlipSource { _private: () }
     }
 
     pub(super) fn fd_authority_report(

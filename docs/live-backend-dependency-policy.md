@@ -188,6 +188,13 @@ readiness seam. It consumes the token only to reduce authority into
 card, register callbacks, poll a file descriptor, expose a descriptor, or emit a
 native event shape.
 
+`LibdrmNativePageFlipSource::from_authority` is the first reduced source
+construction seam. It is created from backend-owned authority and reports
+`ConstructedWithoutPolling`. It does not implement `LibdrmPageFlipEventPoller`
+yet, and it must not be wired into runtime page-flip intake until a bounded
+native read loop can preserve the existing callback queue and reduced poll
+report contracts.
+
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
 authority. On Linux, wgpu will usually target Vulkan, but Sophia must first prove

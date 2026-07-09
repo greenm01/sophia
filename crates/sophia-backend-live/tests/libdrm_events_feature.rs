@@ -6,12 +6,14 @@ use sophia_backend_live::{
     CompositorBackendTickInput, FakeLibdrmPageFlipEventPoller, LibdrmBackendFdAuthority,
     LibdrmBackendFdAuthorityReport, LibdrmBackendFdAuthorityStatus,
     LibdrmDependencyAdmissionReport, LibdrmDependencyAdmissionStatus,
-    LibdrmNativeEventAdapterReport, LibdrmNativeEventAdapterStatus, LibdrmPageFlipEventPollReport,
-    LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller, LiveBackendConfig,
-    LivePageFlipCallback, LivePageFlipCallbackQueue, LivePageFlipCallbackSourceReport,
-    LivePageFlipEvent, LivePageFlipEventStatus, OutputId, QueuedInputPoller, discover_live_backend,
-    libdrm_dependency_admission_report, libdrm_fd_authority_report,
-    native_libdrm_event_adapter_report, native_libdrm_event_adapter_report_for_authority,
+    LibdrmNativeEventAdapterReport, LibdrmNativeEventAdapterStatus, LibdrmNativePageFlipSource,
+    LibdrmNativePageFlipSourceReport, LibdrmNativePageFlipSourceStatus,
+    LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller,
+    LiveBackendConfig, LivePageFlipCallback, LivePageFlipCallbackQueue,
+    LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus, OutputId,
+    QueuedInputPoller, discover_live_backend, libdrm_dependency_admission_report,
+    libdrm_fd_authority_report, native_libdrm_event_adapter_report,
+    native_libdrm_event_adapter_report_for_authority,
 };
 
 #[test]
@@ -58,6 +60,20 @@ fn native_libdrm_event_adapter_accepts_authority_without_polling() {
         native_libdrm_event_adapter_report_for_authority(authority),
         LibdrmNativeEventAdapterReport {
             status: LibdrmNativeEventAdapterStatus::SkeletonReady,
+        }
+    );
+}
+
+#[test]
+fn native_libdrm_page_flip_source_constructs_from_authority_without_reading_events() {
+    let authority =
+        LibdrmBackendFdAuthority::new(13).expect("nonzero generation should mint authority token");
+    let source = LibdrmNativePageFlipSource::from_authority(authority);
+
+    assert_eq!(
+        source.report(),
+        LibdrmNativePageFlipSourceReport {
+            status: LibdrmNativePageFlipSourceStatus::ConstructedWithoutPolling,
         }
     );
 }
