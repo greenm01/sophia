@@ -106,3 +106,17 @@ Before removing it, record evidence that:
 If any condition fails, keep `DEFAULT_DISPLAY` as a host compatibility smoke and
 continue treating GBM-backed EGL as the production-shaped path under
 development.
+
+Minimum host/device matrix before retirement:
+
+- one Intel integrated GPU machine;
+- one AMD integrated or discrete GPU machine;
+- one machine where `/dev/dri/renderD*` exists but GBM/EGL degrades cleanly;
+- one headless or restricted environment where the real smoke is skipped or
+  unavailable without failing default validation;
+- repeated clean-build runs on the primary development machine.
+
+Each matrix entry must record only reduced evidence: command, pass/fail status,
+draw status, presentation status, and whether a child-process crash was
+contained. Do not record render-node paths, fd numbers, GBM/EGL handles, driver
+error strings, pixels, or KMS object identity.

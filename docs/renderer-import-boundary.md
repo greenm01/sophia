@@ -309,6 +309,11 @@ is GBM-backed EGL, but `DEFAULT_DISPLAY` still catches host EGL loader issues on
 machines where backend-owned render-node validation is unavailable or not yet
 trusted across a broader device matrix.
 
+Retirement requires at least Intel, AMD, degraded-driver, and restricted/headless
+host evidence. Each result must use the reduced real-GBM evidence shape; device
+paths, handles, driver errors, pixels, and KMS identity stay out of project
+records.
+
 Rejected shortcuts:
 
 - using `DEFAULT_DISPLAY` as the production compositor platform: it does not

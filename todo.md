@@ -9,12 +9,12 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Define the broader host/device matrix required before retiring
-  `DEFAULT_DISPLAY`.
-
-**Next**
 - [ ] Decide the next production-shaped GBM/EGL step after offscreen
   presentation smoke evidence.
+
+**Next**
+- [ ] Define the first reduced GBM/EGL frame target record for future renderer
+  integration.
 
 ---
 
@@ -276,6 +276,8 @@ evidence belong in `docs/research-log.md`.
   drawing is validated against real render nodes.
 - [x] Decide whether `DEFAULT_DISPLAY` should retire now or remain as a host
   compatibility smoke.
+- [x] Define the broader host/device matrix required before retiring
+  `DEFAULT_DISPLAY`.
 
 ---
 
