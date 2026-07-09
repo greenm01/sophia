@@ -114,9 +114,11 @@ fn native_egl_draw_smoke_stays_reduced_at_public_boundary() {
 #[cfg(feature = "gbm-probe")]
 mod gbm_backed_platform {
     use sophia_renderer_live::{
-        EglDrawSmokeStatus, EglPlatformStatus, LiveRendererPresentationStatus,
-        NativeGbmBackedEglDrawSmoke, NativeGbmBackedEglPlatformProbe,
-        NativeGbmBackedEglPresentationSmoke,
+        EglDrawSmokeStatus, EglPlatformStatus, LiveGbmEglFrameTargetAllocationRequest,
+        LiveGbmEglFrameTargetAllocationStatus, LiveGbmEglFrameTargetStatus,
+        LiveRendererPresentationStatus, NativeGbmBackedEglDrawSmoke,
+        NativeGbmBackedEglFrameTargetAllocator, NativeGbmBackedEglPlatformProbe,
+        NativeGbmBackedEglPresentationSmoke, Size,
     };
 
     #[test]
@@ -204,5 +206,71 @@ mod gbm_backed_platform {
                 | LiveRendererPresentationStatus::Unavailable
                 | LiveRendererPresentationStatus::Degraded
         ));
+    }
+
+    #[test]
+    fn native_gbm_backed_frame_target_allocator_maps_open_failure_to_unavailable() {
+        let missing_device = Err(std::io::Error::from_raw_os_error(19));
+        let request = LiveGbmEglFrameTargetAllocationRequest::new(Size {
+            width: 1920,
+            height: 1080,
+        });
+
+        let report =
+            NativeGbmBackedEglFrameTargetAllocator::allocation_report_from_backend_device_result::<
+                std::fs::File,
+            >(missing_device, request);
+
+        assert_eq!(
+            report.status,
+            LiveGbmEglFrameTargetAllocationStatus::Unavailable
+        );
+        assert_eq!(report.target, request.target);
+    }
+
+    #[test]
+    fn native_gbm_backed_frame_target_allocator_rejects_invalid_target_before_native_work() {
+        let missing_device = Err(std::io::Error::from_raw_os_error(19));
+        let request = LiveGbmEglFrameTargetAllocationRequest::new(Size {
+            width: 0,
+            height: 1080,
+        });
+
+        let report =
+            NativeGbmBackedEglFrameTargetAllocator::allocation_report_from_backend_device_result::<
+                std::fs::File,
+            >(missing_device, request);
+
+        assert_eq!(
+            report.status,
+            LiveGbmEglFrameTargetAllocationStatus::InvalidTarget
+        );
+        assert_eq!(
+            report.target.status,
+            LiveGbmEglFrameTargetStatus::InvalidSize
+        );
+    }
+
+    #[test]
+    fn native_gbm_backed_frame_target_allocator_stays_reduced_for_invalid_device() {
+        let invalid_render_device = std::fs::File::open("/dev/null");
+        let request = LiveGbmEglFrameTargetAllocationRequest::new(Size {
+            width: 1280,
+            height: 720,
+        });
+
+        let report =
+            NativeGbmBackedEglFrameTargetAllocator::allocation_report_from_backend_device_result(
+                invalid_render_device,
+                request,
+            );
+
+        assert!(matches!(
+            report.status,
+            LiveGbmEglFrameTargetAllocationStatus::Ready
+                | LiveGbmEglFrameTargetAllocationStatus::Unavailable
+                | LiveGbmEglFrameTargetAllocationStatus::Degraded
+        ));
+        assert_eq!(report.target, request.target);
     }
 }

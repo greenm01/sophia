@@ -107,6 +107,33 @@ impl NativeGbmBackedEglPresentationSmoke {
     }
 }
 
+#[cfg(feature = "gbm-probe")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeGbmBackedEglFrameTargetAllocator;
+
+#[cfg(feature = "gbm-probe")]
+impl NativeGbmBackedEglFrameTargetAllocator {
+    pub fn allocation_report_from_backend_device_result<T: std::os::fd::AsFd>(
+        device: std::io::Result<T>,
+        request: crate::LiveGbmEglFrameTargetAllocationRequest,
+    ) -> crate::LiveGbmEglFrameTargetAllocationReport {
+        let status = if request.target.status == crate::LiveGbmEglFrameTargetStatus::Ready {
+            native::gbm_backed_frame_target_allocation_status_from_backend_device_result(
+                device,
+                request.target.size.width as u32,
+                request.target.size.height as u32,
+            )
+        } else {
+            crate::LiveGbmEglFrameTargetAllocationStatus::InvalidTarget
+        };
+
+        crate::LiveGbmEglFrameTargetAllocationReport {
+            status,
+            target: request.target,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EglCapabilityProbeReport {
     pub status: EglCapabilityProbeStatus,
@@ -308,6 +335,29 @@ mod native {
             }
             sophia_renderer_native_egl::NativePresentationSmokeStatus::Degraded => {
                 crate::LiveRendererPresentationStatus::Degraded
+            }
+        }
+    }
+
+    #[cfg(feature = "gbm-probe")]
+    pub(super) fn gbm_backed_frame_target_allocation_status_from_backend_device_result<
+        T: std::os::fd::AsFd,
+    >(
+        device: std::io::Result<T>,
+        width: u32,
+        height: u32,
+    ) -> crate::LiveGbmEglFrameTargetAllocationStatus {
+        match sophia_renderer_native_egl::allocate_gbm_backed_frame_target_from_backend_device_result(
+            device, width, height,
+        ) {
+            sophia_renderer_native_egl::NativeGbmEglFrameTargetAllocationStatus::Ready => {
+                crate::LiveGbmEglFrameTargetAllocationStatus::Ready
+            }
+            sophia_renderer_native_egl::NativeGbmEglFrameTargetAllocationStatus::Unavailable => {
+                crate::LiveGbmEglFrameTargetAllocationStatus::Unavailable
+            }
+            sophia_renderer_native_egl::NativeGbmEglFrameTargetAllocationStatus::Degraded => {
+                crate::LiveGbmEglFrameTargetAllocationStatus::Degraded
             }
         }
     }

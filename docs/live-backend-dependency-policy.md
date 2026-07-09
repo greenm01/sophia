@@ -129,6 +129,9 @@ contain GBM surfaces, EGL surfaces, framebuffers, DMA-BUFs, file descriptors, or
 driver error payloads.
 Backend-live may retain that reduced allocation report for the next runtime
 tick, but it must clear the report whenever the frame-target size changes.
+Native GBM/EGL frame-target allocation remains behind the renderer adapter. The
+native skeleton accepts backend-owned device results and emits the same reduced
+report shape; it must not return handles, native errors, or driver identity.
 
 The deterministic page-flip callback intake seam accepts only backend-local
 facts: the Sophia output selected by startup and a frame serial. It rejects

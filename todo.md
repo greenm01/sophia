@@ -9,11 +9,12 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Decide the first native GBM/EGL frame-target allocator skeleton shape.
+- [ ] Decide how backend-live should call the native GBM/EGL frame-target
+  allocator skeleton.
 
 **Next**
-- [ ] Add a native allocator skeleton behind existing GBM/EGL features that
-  returns reduced allocation status without exporting handles.
+- [ ] Add backend-live feature-gated coverage for native frame-target allocation
+  using invalid and missing render devices.
 
 ---
 
@@ -301,6 +302,9 @@ evidence belong in `docs/research-log.md`.
   allocation reports.
 - [x] Thread fake frame-target allocation reports into backend-live without
   exposing renderer-private handles.
+- [x] Decide the first native GBM/EGL frame-target allocator skeleton shape.
+- [x] Add a native allocator skeleton behind existing GBM/EGL features that
+  returns reduced allocation status without exporting handles.
 
 ---
 

@@ -43,6 +43,14 @@ pub enum NativePresentationSmokeStatus {
     Degraded,
 }
 
+#[cfg(feature = "gbm-platform")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeGbmEglFrameTargetAllocationStatus {
+    Ready,
+    Unavailable,
+    Degraded,
+}
+
 pub fn probe_default_display_context() -> NativeEglProbeStatus {
     match probe_context() {
         Ok(()) => NativeEglProbeStatus::NativeDrawingCapable,
@@ -98,6 +106,29 @@ pub fn present_gbm_backed_offscreen_from_backend_device_result<T: std::os::fd::A
             }
         }
         Err(_error) => NativePresentationSmokeStatus::Unavailable,
+    }
+}
+
+#[cfg(feature = "gbm-platform")]
+pub fn allocate_gbm_backed_frame_target_from_backend_device_result<T: std::os::fd::AsFd>(
+    device: std::io::Result<T>,
+    width: u32,
+    height: u32,
+) -> NativeGbmEglFrameTargetAllocationStatus {
+    match device {
+        Ok(device) => match smoke_gbm_backed_private_target_with_size(
+            device,
+            GbmTargetAction::ClearOnly,
+            width,
+            height,
+        ) {
+            Ok(()) => NativeGbmEglFrameTargetAllocationStatus::Ready,
+            Err(NativeEglDrawSmokeStatus::PlatformUnavailable) => {
+                NativeGbmEglFrameTargetAllocationStatus::Unavailable
+            }
+            Err(_error) => NativeGbmEglFrameTargetAllocationStatus::Degraded,
+        },
+        Err(_error) => NativeGbmEglFrameTargetAllocationStatus::Unavailable,
     }
 }
 
@@ -261,6 +292,16 @@ fn smoke_gbm_backed_private_target<T: std::os::fd::AsFd>(
     device: T,
     action: GbmTargetAction,
 ) -> Result<(), NativeEglDrawSmokeStatus> {
+    smoke_gbm_backed_private_target_with_size(device, action, 1, 1)
+}
+
+#[cfg(feature = "gbm-platform")]
+fn smoke_gbm_backed_private_target_with_size<T: std::os::fd::AsFd>(
+    device: T,
+    action: GbmTargetAction,
+    width: u32,
+    height: u32,
+) -> Result<(), NativeEglDrawSmokeStatus> {
     use gbm::AsRaw as _;
 
     let gbm_device =
@@ -280,7 +321,8 @@ fn smoke_gbm_backed_private_target<T: std::os::fd::AsFd>(
 
     egl.initialize(display)
         .map_err(|_error| NativeEglDrawSmokeStatus::PlatformDegraded)?;
-    let result = smoke_initialized_gbm_private_target(&egl, display, &gbm_device, action);
+    let result =
+        smoke_initialized_gbm_private_target(&egl, display, &gbm_device, action, width, height);
     let _ = egl.terminate(display);
     result
 }
@@ -291,6 +333,8 @@ fn smoke_initialized_gbm_private_target<T: std::os::fd::AsFd>(
     display: khronos_egl::Display,
     gbm_device: &gbm::Device<T>,
     action: GbmTargetAction,
+    width: u32,
+    height: u32,
 ) -> Result<(), NativeEglDrawSmokeStatus> {
     use gbm::AsRaw as _;
 
@@ -303,8 +347,8 @@ fn smoke_initialized_gbm_private_target<T: std::os::fd::AsFd>(
         .ok_or(NativeEglDrawSmokeStatus::ContextUnavailable)?;
     let gbm_surface = gbm_device
         .create_surface::<()>(
-            1,
-            1,
+            width,
+            height,
             gbm::Format::Argb8888,
             gbm::BufferObjectFlags::RENDERING,
         )
