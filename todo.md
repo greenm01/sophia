@@ -103,7 +103,7 @@ into a Wayland compositor as the architectural center.
 
 - [x] Map `wl_surface` attach/damage/commit into Sophia `SurfaceTransaction`
   readiness.
-- [ ] Map `xdg_toplevel` configure/ack/lifecycle into authority-owned protocol
+- [x] Map `xdg_toplevel` configure/ack/lifecycle into authority-owned protocol
   semantics and Engine-owned visual commits.
 - [ ] Define Wayland input delivery as Engine-routed, authority-delivered, and
   namespace-checked.

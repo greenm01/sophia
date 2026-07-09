@@ -102,6 +102,60 @@ This is the same optimistic concurrency rule used by Sophia X Authority. It
 prevents an old commit, delayed buffer import, or confused authority worker from
 overwriting newer visual truth.
 
+## `xdg_toplevel` Configure, Ack, And Lifecycle
+
+`xdg_toplevel` gives a `wl_surface` a desktop role. Sophia Wayland Authority
+owns that role state, but it still does not own workspace policy or final
+geometry. The WM proposes layout through Sophia Engine; the authority translates
+accepted engine geometry into protocol-specific configure sequences.
+
+The authority should keep protocol-local toplevel state:
+
+- role object ID and mapped Sophia `SurfaceId`;
+- last configure serial sent to the client;
+- last configure size and state set;
+- acknowledged configure serials;
+- pending resize/fullscreen/maximized hints requested by the engine;
+- lifecycle state: created, configured, mapped, unmapping, destroyed;
+- polite-close state for `xdg_toplevel.close` and client destroy handling.
+
+Configure flow:
+
+1. Sophia Engine accepts layout/policy intent and asks the authority to
+   configure a toplevel surface to protocol-visible bounds.
+2. Sophia Wayland Authority sends `xdg_toplevel.configure` and
+   `xdg_surface.configure` with a serial it owns.
+3. The client replies with `xdg_surface.ack_configure`.
+4. A later `wl_surface.commit` that corresponds to the acknowledged configure
+   may emit a Sophia `SurfaceTransaction`.
+
+`ack_configure` is not a visual commit. It only proves that the client accepted
+the configure serial. The visual commit still happens through `wl_surface.commit`
+plus buffer readiness, and Sophia Engine still decides when the resulting
+`SurfaceTransaction` becomes committed visual truth.
+
+State mapping:
+
+- Configure sent, not acked: authority state is waiting for client protocol
+  acknowledgement; no ready visual transaction should be emitted for that
+  configure.
+- Acked, no matching surface commit: transaction remains absent or pending
+  depending on whether a buffer wait has started.
+- Acked plus committed ready buffer: emit `Ready` `SurfaceTransaction`.
+- Client commits a buffer for stale configure state: emit a transaction with the
+  current `previous_committed_generation`; Sophia Engine rejects stale visual
+  updates if its generation has moved on.
+- Client destroys the role or surface: emit lifecycle artifacts that cause the
+  engine to unmap/hide the Sophia surface and release protocol-local resources.
+
+Lifecycle commands must stay polite first. A compositor chrome close button or
+WM policy close request should become an authority command to send
+`xdg_toplevel.close`. Forced termination is a supervisor/runtime policy outside
+the authority's normal protocol path.
+
+The WM remains blind to Wayland role IDs, app IDs, titles, namespaces, and
+configure serials. It sees only opaque layout nodes and proposes geometry.
+
 ## Namespace Rules
 
 Wayland's object isolation is per client connection, but Sophia's isolation is
@@ -128,3 +182,12 @@ The initial reducer should prove:
 - commit with an unready import emits a pending transaction;
 - null buffer commit produces an unmap/hide artifact;
 - stale generation is rejected by Sophia Engine, not patched by the authority.
+
+The second reducer should prove:
+
+- configure serials are authority-owned and protocol-local;
+- `ack_configure` does not emit a visual transaction by itself;
+- a matching acknowledged commit emits a transaction through the `wl_surface`
+  commit path;
+- stale or destroyed toplevel state cannot advance committed visual truth;
+- polite close maps to `xdg_toplevel.close`, not engine-owned process killing.
