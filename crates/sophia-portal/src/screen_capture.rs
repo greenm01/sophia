@@ -1,0 +1,135 @@
+use crate::prelude::*;
+use crate::types::*;
+
+#[derive(Debug, Default)]
+pub struct ScreenCapturePortal {
+    transfers: BTreeMap<PortalTransferId, PortalTransfer>,
+}
+
+impl ScreenCapturePortal {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn request_capture(
+        &mut self,
+        request: ScreenCaptureRequest,
+    ) -> Result<PortalCommand, PortalError> {
+        validate_screen_capture_request(&request)?;
+
+        let transfer = PortalTransfer {
+            transfer: request.transfer,
+            source_namespace: request.source_namespace,
+            target_namespace: request.target_namespace,
+            kind: PortalTransferKind::Screenshot,
+            mime_type: Some(screen_capture_type_hint(&request)),
+            byte_size: request.byte_size,
+            decision: PortalDecision::Pending,
+            generation: request.generation,
+        };
+
+        self.transfers.insert(transfer.transfer, transfer.clone());
+        Ok(PortalCommand::PromptScreenCapture(transfer))
+    }
+
+    pub fn deny(&mut self, transfer: PortalTransferId) -> Result<PortalCommand, PortalError> {
+        let transfer_state = self.pending_transfer_mut(transfer)?;
+        transfer_state.decision = PortalDecision::Denied;
+
+        Ok(PortalCommand::CancelScreenCapture { transfer })
+    }
+
+    pub fn approve_generation(
+        &mut self,
+        transfer: PortalTransferId,
+        generation: u64,
+    ) -> Result<PortalCommand, PortalError> {
+        let transfer_state = self.pending_transfer_mut(transfer)?;
+
+        if transfer_state.generation != generation {
+            transfer_state.decision = PortalDecision::Revoked;
+            return Ok(PortalCommand::CancelScreenCapture { transfer });
+        }
+
+        transfer_state.decision = PortalDecision::Allowed;
+        Ok(PortalCommand::HandoffScreenCapture { transfer })
+    }
+
+    pub fn source_owner_changed(
+        &mut self,
+        source_namespace: NamespaceId,
+        generation: u64,
+    ) -> Vec<PortalCommand> {
+        let mut commands = Vec::new();
+
+        for transfer in self.transfers.values_mut() {
+            if transfer.source_namespace == source_namespace
+                && transfer.decision == PortalDecision::Pending
+                && transfer.generation != generation
+            {
+                transfer.decision = PortalDecision::Revoked;
+                commands.push(PortalCommand::CancelScreenCapture {
+                    transfer: transfer.transfer,
+                });
+            }
+        }
+
+        commands
+    }
+
+    pub fn transfer(&self, transfer: PortalTransferId) -> Option<&PortalTransfer> {
+        self.transfers.get(&transfer)
+    }
+
+    fn pending_transfer_mut(
+        &mut self,
+        transfer: PortalTransferId,
+    ) -> Result<&mut PortalTransfer, PortalError> {
+        let transfer_state = self
+            .transfers
+            .get_mut(&transfer)
+            .ok_or(PortalError::UnknownTransfer)?;
+
+        if transfer_state.decision != PortalDecision::Pending {
+            return Err(PortalError::NotPending);
+        }
+
+        Ok(transfer_state)
+    }
+}
+fn validate_screen_capture_request(request: &ScreenCaptureRequest) -> Result<(), PortalError> {
+    if !request.transfer.is_valid() {
+        return Err(PortalError::InvalidTransfer);
+    }
+
+    if !request.source_namespace.is_valid() || !request.target_namespace.is_valid() {
+        return Err(PortalError::InvalidNamespace);
+    }
+
+    if !supported_screen_capture_mime(request.mode, &request.mime_type) {
+        return Err(PortalError::UnsupportedCaptureMimeType);
+    }
+
+    Ok(())
+}
+
+fn supported_screen_capture_mime(mode: ScreenCaptureMode, mime_type: &str) -> bool {
+    match mode {
+        ScreenCaptureMode::Screenshot => matches!(mime_type, "image/png" | "image/jpeg"),
+        ScreenCaptureMode::ScreenRecording => matches!(mime_type, "video/webm" | "video/mp4"),
+    }
+}
+
+fn screen_capture_type_hint(request: &ScreenCaptureRequest) -> String {
+    let mode = match request.mode {
+        ScreenCaptureMode::Screenshot => "screenshot",
+        ScreenCaptureMode::ScreenRecording => "screen-recording",
+    };
+    let scope = match request.scope {
+        ScreenCaptureScope::Desktop => "desktop",
+        ScreenCaptureScope::Output => "output",
+        ScreenCaptureScope::Surface => "surface",
+    };
+
+    format!("{mode}:{scope}:{}", request.mime_type)
+}
