@@ -61,3 +61,19 @@ fn native_gbm_probe_stays_reduced_at_public_boundary() {
         }
     );
 }
+
+#[test]
+fn native_gbm_probe_maps_backend_device_open_failure_to_degraded_health() {
+    let missing_device = Err(std::io::Error::from_raw_os_error(19));
+
+    assert_eq!(
+        NativeGbmCapabilityProbe::startup_status_from_backend_device_result::<std::fs::File>(
+            missing_device,
+        ),
+        LiveRendererImportStartupStatus {
+            health: LiveRendererImportHealth::Degraded,
+            xpixmap: LiveRendererImportPathStatus::Disabled,
+            dmabuf: LiveRendererImportPathStatus::Degraded,
+        }
+    );
+}

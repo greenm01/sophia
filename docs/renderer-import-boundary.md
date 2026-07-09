@@ -102,8 +102,9 @@ portals, and protocol authorities.
 
 The feature-enabled local validation command is documented in
 `docs/validation.md`. The GBM crate is admitted only through that path. Real
-device probing remains deferred until backend-live can hand renderer-live
-backend-owned device authority without exposing fds through public Sophia data.
+device probing is available only through backend-owned fd-like authority. It
+still collapses native failures into reduced degraded health and does not expose
+fds, paths, GBM handles, or native errors through Sophia's public data model.
 
 Admission tests for the first real dependency must prove:
 
@@ -147,8 +148,9 @@ The first admitted candidate is the safe `gbm` crate, currently documented as `g
 depends on `gbm-sys`. Its optional `drm-support` feature is useful later, but
 the first Sophia probe should not require it. The initial probe only needs to
 prove that renderer-live can compile the native GBM boundary and translate a
-reduced render-device token into reduced GBM capability health. Opening real GBM
-devices is the next step.
+reduced render-device token or backend-owned device authority into reduced GBM
+capability health. Wiring backend-live discovery into that authority path is the
+next step.
 
 `gbm-sys` is not the first choice. It exposes raw FFI functions and low-level GBM
 types directly. Keep it as a fallback only if the safe `gbm` crate cannot support
