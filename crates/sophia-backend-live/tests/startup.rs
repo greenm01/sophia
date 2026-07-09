@@ -1,18 +1,19 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 
 use sophia_backend_live::{
     CompositorBackendTickInput, DeviceId, HeadlessOutput, LibinputDeviceDescriptor,
     LibinputDeviceKind, LiveBackendConfig, LiveBackendDependencyDecision,
     LiveBackendDependencyKind, LiveBackendDependencyUse, LiveCompositorBackendDiscoveryStatus,
     LivePageFlipCallback, LivePageFlipCallbackDecision, LivePageFlipCallbackIntake,
-    LivePageFlipCallbackReport, LivePageFlipEvent, LivePageFlipEventStatus,
-    LiveRendererImportBoundary, LiveRendererImportHealth, LiveRendererImportPathStatus,
-    LiveRendererImportStartupStatus, LiveRendererPreference, LiveRendererPresentationReport,
-    LiveRendererPresentationStatus, LiveRendererRuntimeObservation,
-    LiveRendererSelectionObservation, LiveScanoutReadinessReport, LiveScanoutReadinessStatus,
-    OutputId, PageFlipCommitOutcome, QueuedInputPoller, RendererSelection, SeatId, Size,
-    discover_live_backend, live_backend_dependency_decision,
+    LivePageFlipCallbackQueue, LivePageFlipCallbackQueueReport, LivePageFlipCallbackReport,
+    LivePageFlipEvent, LivePageFlipEventStatus, LiveRendererImportBoundary,
+    LiveRendererImportHealth, LiveRendererImportPathStatus, LiveRendererImportStartupStatus,
+    LiveRendererPreference, LiveRendererPresentationReport, LiveRendererPresentationStatus,
+    LiveRendererRuntimeObservation, LiveRendererSelectionObservation, LiveScanoutReadinessReport,
+    LiveScanoutReadinessStatus, OutputId, PageFlipCommitOutcome, QueuedInputPoller,
+    RendererSelection, SeatId, Size, discover_live_backend, live_backend_dependency_decision,
 };
 use sophia_protocol::{TransactionCommit, TransactionId, TransactionOutcome};
 
@@ -412,6 +413,91 @@ fn live_runtime_assembly_observes_reduced_page_flip_callbacks() {
         LivePageFlipEvent {
             status: LivePageFlipEventStatus::Presented,
             frame_serial: Some(17),
+        }
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_runtime_assembly_drains_bounded_page_flip_callback_queue() {
+    let root = ready_drm_sysfs_fixture("runtime-page-flip-callback-queue");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let (sender, receiver) = mpsc::sync_channel(2);
+    sender
+        .try_send(LivePageFlipCallback {
+            output: OutputId::from_raw(1),
+            frame_serial: 22,
+        })
+        .expect("test channel should accept first callback");
+    sender
+        .try_send(LivePageFlipCallback {
+            output: OutputId::from_raw(1),
+            frame_serial: 23,
+        })
+        .expect("test channel should accept second callback");
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed live assembly")
+        .with_page_flip_callback_queue(LivePageFlipCallbackQueue::new(receiver, 1));
+
+    let first_tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should drain first callback");
+    assert_eq!(
+        first_tick.page_flip_callbacks,
+        LivePageFlipCallbackQueueReport {
+            drained: 1,
+            accepted: 1,
+            rejected_unexpected_output: 0,
+            rejected_stale_frame_serial: 0,
+            disconnected: false,
+            max_reached: true,
+        }
+    );
+    assert_eq!(
+        first_tick.page_flip,
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(22),
+        }
+    );
+
+    drop(sender);
+    let second_tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should drain queued callback");
+    assert_eq!(
+        second_tick.page_flip_callbacks,
+        LivePageFlipCallbackQueueReport {
+            drained: 1,
+            accepted: 1,
+            rejected_unexpected_output: 0,
+            rejected_stale_frame_serial: 0,
+            disconnected: false,
+            max_reached: true,
+        }
+    );
+    assert_eq!(
+        second_tick.page_flip,
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(23),
+        }
+    );
+
+    let disconnected_tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should report disconnected callback queue");
+    assert_eq!(
+        disconnected_tick.page_flip_callbacks,
+        LivePageFlipCallbackQueueReport {
+            drained: 0,
+            accepted: 0,
+            rejected_unexpected_output: 0,
+            rejected_stale_frame_serial: 0,
+            disconnected: true,
+            max_reached: false,
         }
     );
 

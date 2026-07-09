@@ -7,6 +7,7 @@
 //! protocol authority packets.
 
 use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, TryRecvError};
 #[cfg(feature = "gbm-probe")]
 use std::{io, os::fd::AsFd};
 
@@ -44,6 +45,8 @@ use sophia_renderer_live::{
     NativeGbmBackedEglDrawSmoke, NativeGbmBackedEglPlatformProbe,
     NativeGbmBackedEglPresentationSmoke,
 };
+
+pub const LIVE_PAGE_FLIP_CALLBACK_CHANNEL_CAPACITY: usize = 128;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LiveBackendDependencyKind {
@@ -313,6 +316,74 @@ impl LivePageFlipCallbackIntake {
                 frame_serial: Some(callback.frame_serial),
             },
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct LivePageFlipCallbackQueueReport {
+    pub drained: usize,
+    pub accepted: usize,
+    pub rejected_unexpected_output: usize,
+    pub rejected_stale_frame_serial: usize,
+    pub disconnected: bool,
+    pub max_reached: bool,
+}
+
+impl LivePageFlipCallbackQueueReport {
+    fn record_decision(&mut self, decision: LivePageFlipCallbackDecision) {
+        match decision {
+            LivePageFlipCallbackDecision::Accepted => {
+                self.accepted = self.accepted.saturating_add(1);
+            }
+            LivePageFlipCallbackDecision::RejectedUnexpectedOutput => {
+                self.rejected_unexpected_output = self.rejected_unexpected_output.saturating_add(1);
+            }
+            LivePageFlipCallbackDecision::RejectedStaleFrameSerial => {
+                self.rejected_stale_frame_serial =
+                    self.rejected_stale_frame_serial.saturating_add(1);
+            }
+        }
+    }
+}
+
+pub struct LivePageFlipCallbackQueue {
+    receiver: Receiver<LivePageFlipCallback>,
+    max_drain_per_tick: usize,
+}
+
+impl LivePageFlipCallbackQueue {
+    pub fn new(receiver: Receiver<LivePageFlipCallback>, max_drain_per_tick: usize) -> Self {
+        Self {
+            receiver,
+            max_drain_per_tick,
+        }
+    }
+
+    fn drain_ready(
+        &self,
+        intake: &mut LivePageFlipCallbackIntake,
+        page_flip_event: &mut LivePageFlipEvent,
+    ) -> LivePageFlipCallbackQueueReport {
+        let mut report = LivePageFlipCallbackQueueReport::default();
+
+        for _ in 0..self.max_drain_per_tick {
+            match self.receiver.try_recv() {
+                Ok(callback) => {
+                    let callback_report = intake.observe(callback);
+                    *page_flip_event = callback_report.event;
+                    report.drained = report.drained.saturating_add(1);
+                    report.record_decision(callback_report.decision);
+                }
+                Err(TryRecvError::Empty) => return report,
+                Err(TryRecvError::Disconnected) => {
+                    report.disconnected = true;
+                    return report;
+                }
+            }
+        }
+
+        report.max_reached = true;
+        report
     }
 }
 
@@ -651,6 +722,7 @@ impl LiveBackendStartupReport {
                 scanout_readiness,
                 page_flip_event,
                 page_flip_callback_intake,
+                page_flip_callback_queue: None,
             })
     }
 }
@@ -822,6 +894,7 @@ pub struct LiveBackendRuntimeAssembly {
     scanout_readiness: LiveScanoutReadinessReport,
     page_flip_event: LivePageFlipEvent,
     page_flip_callback_intake: LivePageFlipCallbackIntake,
+    page_flip_callback_queue: Option<LivePageFlipCallbackQueue>,
 }
 
 impl LiveBackendRuntimeAssembly {
@@ -835,6 +908,11 @@ impl LiveBackendRuntimeAssembly {
 
     pub fn renderer_observation(&self) -> LiveRendererRuntimeObservation {
         self.renderer_observation
+    }
+
+    pub fn with_page_flip_callback_queue(mut self, queue: LivePageFlipCallbackQueue) -> Self {
+        self.page_flip_callback_queue = Some(queue);
+        self
     }
 
     pub fn scanout_readiness_observation(&self) -> LiveScanoutReadinessReport {
@@ -869,6 +947,16 @@ impl LiveBackendRuntimeAssembly {
         &mut self,
         input: CompositorBackendTickInput,
     ) -> Result<LiveBackendRuntimeTickReport, CompositorBackendAssemblyError> {
+        let page_flip_callbacks = self
+            .page_flip_callback_queue
+            .as_ref()
+            .map(|queue| {
+                queue.drain_ready(
+                    &mut self.page_flip_callback_intake,
+                    &mut self.page_flip_event,
+                )
+            })
+            .unwrap_or_default();
         let engine = self.assembly.run_tick(input)?;
 
         Ok(LiveBackendRuntimeTickReport {
@@ -876,6 +964,7 @@ impl LiveBackendRuntimeAssembly {
             renderer: self.renderer_observation,
             scanout: self.scanout_readiness,
             page_flip: self.page_flip_event,
+            page_flip_callbacks,
         })
     }
 }
@@ -886,6 +975,7 @@ pub struct LiveBackendRuntimeTickReport {
     pub renderer: LiveRendererRuntimeObservation,
     pub scanout: LiveScanoutReadinessReport,
     pub page_flip: LivePageFlipEvent,
+    pub page_flip_callbacks: LivePageFlipCallbackQueueReport,
 }
 
 pub fn discover_live_backend(config: &LiveBackendConfig) -> LiveBackendStartupReport {
