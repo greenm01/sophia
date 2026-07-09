@@ -9,16 +9,15 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Add feature-enabled startup assembly that selects CPU fallback when GBM
-  probing degrades a requested DMA-BUF path.
-- [ ] Add a runtime observation for degraded GBM startup that remains count-only
-  and path-free.
+- [ ] Add a real GBM allocation probe that creates and drops a tiny private
+  buffer without exporting GBM handles.
+- [ ] Decide when to introduce EGL or wgpu above the GBM platform boundary.
 
 **Next**
-- [ ] Decide the first real render-node discovery source: sysfs renderD scan,
-  libdrm enumeration, or explicit backend-owned fd injection.
-- [ ] Add docs for why degraded native import must not partially enable the
-  import-capable renderer.
+- [ ] Add explicit backend-owned fd injection smoke coverage around a real
+  render device when the host test environment exposes one.
+- [ ] Choose whether the first compositor drawing API above GBM is EGL/OpenGL,
+  raw Vulkan, or wgpu.
 
 ---
 
@@ -171,6 +170,16 @@ evidence belong in `docs/research-log.md`.
   render node without leaking paths into engine state.
 - [x] Decide render-node discovery stays in backend-live for now, behind a
   narrower feature-gated trait.
+- [x] Add feature-enabled startup assembly that selects CPU fallback when GBM
+  probing degrades a requested DMA-BUF path.
+- [x] Add a runtime observation for degraded GBM startup that remains count-only
+  and path-free.
+- [x] Add renderer preference policy: `GpuPreferred`, `CpuOnly`, and
+  `GpuRequired`.
+- [x] Decide the first real render-node discovery source is explicit
+  backend-owned fd injection.
+- [x] Add docs for why degraded native import must not partially enable the
+  import-capable renderer.
 
 ---
 

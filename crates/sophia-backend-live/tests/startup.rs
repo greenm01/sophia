@@ -6,7 +6,7 @@ use sophia_backend_live::{
     LibinputDeviceKind, LiveBackendConfig, LiveBackendDependencyDecision,
     LiveBackendDependencyKind, LiveBackendDependencyUse, LiveCompositorBackendDiscoveryStatus,
     LiveRendererImportBoundary, LiveRendererImportHealth, LiveRendererImportPathStatus,
-    LiveRendererImportStartupStatus, LiveRendererRuntimeObservation,
+    LiveRendererImportStartupStatus, LiveRendererPreference, LiveRendererRuntimeObservation,
     LiveRendererSelectionObservation, OutputId, QueuedInputPoller, RendererSelection, SeatId, Size,
     discover_live_backend, live_backend_dependency_decision,
 };
@@ -94,6 +94,88 @@ fn live_backend_startup_uses_cpu_renderer_until_native_import_is_configured() {
     assert_eq!(assembly.renderer(), RendererSelection::CpuFallback);
 
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_backend_defaults_to_gpu_preferred_policy() {
+    let config = LiveBackendConfig::new("/does/not/matter");
+
+    assert_eq!(
+        config.renderer_preference,
+        LiveRendererPreference::GpuPreferred
+    );
+}
+
+#[test]
+fn renderer_preference_uses_cpu_only_without_native_status() {
+    let root = ready_drm_sysfs_fixture("renderer-cpu-only");
+    let config = LiveBackendConfig::new(&root)
+        .with_renderer_import_boundary(LiveRendererImportBoundary::with_native_imports(true, true))
+        .with_renderer_preference(LiveRendererPreference::CpuOnly);
+
+    let report = discover_live_backend(&config);
+    let assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed CPU-only live assembly");
+
+    assert_eq!(
+        assembly.assembly().renderer(),
+        RendererSelection::CpuFallback
+    );
+    assert_eq!(
+        assembly.renderer_observation(),
+        LiveRendererRuntimeObservation {
+            health: LiveRendererImportHealth::CpuFallback,
+            xpixmap: LiveRendererImportPathStatus::Disabled,
+            dmabuf: LiveRendererImportPathStatus::Disabled,
+            selection: LiveRendererSelectionObservation::CpuFallback,
+        }
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn renderer_preference_requires_gpu_when_requested() {
+    let root = ready_drm_sysfs_fixture("renderer-gpu-required");
+    let config =
+        LiveBackendConfig::new(&root).with_renderer_preference(LiveRendererPreference::GpuRequired);
+
+    let report = discover_live_backend(&config);
+
+    assert!(
+        report
+            .into_live_runtime_assembly(QueuedInputPoller::default())
+            .is_none()
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn renderer_preference_selects_import_renderer_only_for_native_capable_status() {
+    let config = LiveBackendConfig::new("/does/not/matter");
+    let report = discover_live_backend(&config);
+
+    assert_eq!(
+        report.renderer_selection_for_status(LiveRendererImportStartupStatus {
+            health: LiveRendererImportHealth::NativeImportCapable,
+            xpixmap: LiveRendererImportPathStatus::Disabled,
+            dmabuf: LiveRendererImportPathStatus::Enabled,
+        }),
+        Some(RendererSelection::ImportCapable {
+            import_xpixmap: false,
+            import_dmabuf: true,
+        })
+    );
+    assert_eq!(
+        report.renderer_selection_for_status(LiveRendererImportStartupStatus {
+            health: LiveRendererImportHealth::Degraded,
+            xpixmap: LiveRendererImportPathStatus::Enabled,
+            dmabuf: LiveRendererImportPathStatus::Degraded,
+        }),
+        Some(RendererSelection::CpuFallback)
+    );
 }
 
 #[test]

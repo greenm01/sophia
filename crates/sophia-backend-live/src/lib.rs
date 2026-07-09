@@ -83,6 +83,7 @@ pub struct LiveBackendConfig {
     pub drm_sysfs_root: PathBuf,
     pub input_devices: Vec<LibinputDeviceDescriptor>,
     pub renderer_import: LiveRendererImportBoundary,
+    pub renderer_preference: LiveRendererPreference,
 }
 
 impl LiveBackendConfig {
@@ -91,6 +92,7 @@ impl LiveBackendConfig {
             drm_sysfs_root: drm_sysfs_root.into(),
             input_devices: Vec::new(),
             renderer_import: LiveRendererImportBoundary::cpu_only(),
+            renderer_preference: LiveRendererPreference::default(),
         }
     }
 
@@ -106,12 +108,26 @@ impl LiveBackendConfig {
         self.renderer_import = renderer_import;
         self
     }
+
+    pub fn with_renderer_preference(mut self, renderer_preference: LiveRendererPreference) -> Self {
+        self.renderer_preference = renderer_preference;
+        self
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum LiveRendererPreference {
+    #[default]
+    GpuPreferred,
+    CpuOnly,
+    GpuRequired,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LiveBackendStartupReport {
     pub discovery: LiveCompositorBackendDiscoveryReport,
     pub renderer_import: LiveRendererImportBoundary,
+    pub renderer_preference: LiveRendererPreference,
 }
 
 impl LiveBackendStartupReport {
@@ -124,13 +140,34 @@ impl LiveBackendStartupReport {
     }
 
     pub fn renderer_selection(&self) -> RendererSelection {
-        if self.renderer_import.import_xpixmap || self.renderer_import.import_dmabuf {
-            RendererSelection::ImportCapable {
-                import_xpixmap: self.renderer_import.import_xpixmap,
-                import_dmabuf: self.renderer_import.import_dmabuf,
+        self.try_renderer_selection()
+            .unwrap_or(RendererSelection::CpuFallback)
+    }
+
+    pub fn try_renderer_selection(&self) -> Option<RendererSelection> {
+        self.renderer_selection_for_status(self.renderer_import_status())
+    }
+
+    pub fn renderer_selection_for_status(
+        &self,
+        status: LiveRendererImportStartupStatus,
+    ) -> Option<RendererSelection> {
+        match self.renderer_preference {
+            LiveRendererPreference::CpuOnly => Some(RendererSelection::CpuFallback),
+            LiveRendererPreference::GpuPreferred => {
+                Some(selection_from_native_status(status).unwrap_or(RendererSelection::CpuFallback))
             }
-        } else {
-            RendererSelection::CpuFallback
+            LiveRendererPreference::GpuRequired => selection_from_native_status(status),
+        }
+    }
+
+    pub fn renderer_runtime_status_for_preference(
+        &self,
+        status: LiveRendererImportStartupStatus,
+    ) -> LiveRendererImportStartupStatus {
+        match self.renderer_preference {
+            LiveRendererPreference::CpuOnly => cpu_fallback_renderer_status(),
+            LiveRendererPreference::GpuPreferred | LiveRendererPreference::GpuRequired => status,
         }
     }
 
@@ -151,6 +188,14 @@ impl LiveBackendStartupReport {
     }
 
     #[cfg(feature = "gbm-probe")]
+    pub fn renderer_selection_with_gbm_device<D>(&self, discovery: &D) -> Option<RendererSelection>
+    where
+        D: RenderDeviceDiscoveryBackend,
+    {
+        self.renderer_selection_for_status(self.renderer_import_status_with_gbm_device(discovery))
+    }
+
+    #[cfg(feature = "gbm-probe")]
     pub fn renderer_probe_report_with_gbm_device<D>(
         &self,
         discovery: &D,
@@ -158,18 +203,23 @@ impl LiveBackendStartupReport {
     where
         D: RenderDeviceDiscoveryBackend,
     {
-        if !self.renderer_import.import_dmabuf {
+        if self.renderer_preference == LiveRendererPreference::CpuOnly
+            || !self.renderer_import.import_dmabuf
+        {
             return LiveBackendRendererProbeReport {
                 render_device: LiveRenderDeviceDiscoveryReport {
                     status: LiveRenderDeviceDiscoveryStatus::NotRequested,
                 },
-                renderer_import: self.renderer_import_status(),
+                renderer_import: self
+                    .renderer_runtime_status_for_preference(self.renderer_import_status()),
             };
         }
 
         let device = discovery.open_render_device();
         let render_device = LiveRenderDeviceDiscoveryReport::from_open_result(&device);
-        let renderer_import = self.renderer_import_status_from_gbm_device_result(device);
+        let renderer_import = self.renderer_runtime_status_for_preference(
+            self.renderer_import_status_from_gbm_device_result(device),
+        );
 
         LiveBackendRendererProbeReport {
             render_device,
@@ -197,7 +247,7 @@ impl LiveBackendStartupReport {
         self,
         poller: QueuedInputPoller,
     ) -> Option<HeadlessCompositorBackendAssembly> {
-        let renderer = self.renderer_selection();
+        let renderer = self.try_renderer_selection()?;
         self.into_headless_assembly(poller, renderer)
     }
 
@@ -205,8 +255,52 @@ impl LiveBackendStartupReport {
         self,
         poller: QueuedInputPoller,
     ) -> Option<LiveBackendRuntimeAssembly> {
-        let renderer_status = self.renderer_import_status();
-        let renderer_selection = self.renderer_selection();
+        let renderer_status =
+            self.renderer_runtime_status_for_preference(self.renderer_import_status());
+        self.into_live_runtime_assembly_with_status(poller, renderer_status)
+    }
+
+    #[cfg(feature = "gbm-probe")]
+    pub fn into_configured_headless_assembly_with_gbm_device<D>(
+        self,
+        poller: QueuedInputPoller,
+        discovery: &D,
+    ) -> Option<HeadlessCompositorBackendAssembly>
+    where
+        D: RenderDeviceDiscoveryBackend,
+    {
+        let renderer_status = self.renderer_import_status_with_gbm_device(discovery);
+        let renderer = self.renderer_selection_for_status(renderer_status)?;
+        self.into_headless_assembly(poller, renderer)
+    }
+
+    #[cfg(feature = "gbm-probe")]
+    pub fn into_live_runtime_assembly_with_gbm_device<D>(
+        self,
+        poller: QueuedInputPoller,
+        discovery: &D,
+    ) -> Option<LiveBackendRuntimeAssembly>
+    where
+        D: RenderDeviceDiscoveryBackend,
+    {
+        let renderer_status = self.renderer_import_status_with_gbm_device(discovery);
+        self.into_live_runtime_assembly_with_status(poller, renderer_status)
+    }
+
+    pub fn into_headless_assembly(
+        self,
+        poller: QueuedInputPoller,
+        renderer: RendererSelection,
+    ) -> Option<HeadlessCompositorBackendAssembly> {
+        self.discovery.into_headless_assembly(poller, renderer)
+    }
+
+    fn into_live_runtime_assembly_with_status(
+        self,
+        poller: QueuedInputPoller,
+        renderer_status: LiveRendererImportStartupStatus,
+    ) -> Option<LiveBackendRuntimeAssembly> {
+        let renderer_selection = self.renderer_selection_for_status(renderer_status)?;
         let renderer_observation = LiveRendererRuntimeObservation::from_startup_status(
             renderer_status,
             selection_observation(renderer_selection),
@@ -216,14 +310,6 @@ impl LiveBackendStartupReport {
                 assembly,
                 renderer_observation,
             })
-    }
-
-    pub fn into_headless_assembly(
-        self,
-        poller: QueuedInputPoller,
-        renderer: RendererSelection,
-    ) -> Option<HeadlessCompositorBackendAssembly> {
-        self.discovery.into_headless_assembly(poller, renderer)
     }
 }
 
@@ -312,7 +398,25 @@ pub fn discover_live_backend(config: &LiveBackendConfig) -> LiveBackendStartupRe
     LiveBackendStartupReport {
         discovery: discover_live_compositor_backend(&output_backend, &input_backend),
         renderer_import: config.renderer_import,
+        renderer_preference: config.renderer_preference,
     }
+}
+
+fn selection_from_native_status(
+    status: LiveRendererImportStartupStatus,
+) -> Option<RendererSelection> {
+    if status.health != LiveRendererImportHealth::NativeImportCapable {
+        return None;
+    }
+
+    Some(RendererSelection::ImportCapable {
+        import_xpixmap: status.xpixmap == LiveRendererImportPathStatus::Enabled,
+        import_dmabuf: status.dmabuf == LiveRendererImportPathStatus::Enabled,
+    })
+}
+
+fn cpu_fallback_renderer_status() -> LiveRendererImportStartupStatus {
+    LiveRendererImportBoundary::cpu_only().startup_status()
 }
 
 fn selection_observation(selection: RendererSelection) -> LiveRendererSelectionObservation {

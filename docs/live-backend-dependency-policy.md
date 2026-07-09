@@ -48,6 +48,18 @@ reports only path-free discovery state such as not requested, opened, or
 unavailable. If the later libdrm implementation needs broader policy, move it
 behind a smaller live adapter crate before exposing more surface area.
 
+GBM is Sophia's preferred Linux live renderer path. CPU rendering is a fallback
+for absent, unavailable, or degraded GPU startup, and `GpuRequired` sessions fail
+closed when the GBM path cannot prove native capability. A degraded native import
+must not partially enable the import-capable renderer: Sophia either has a
+native-capable startup status or it selects CPU fallback.
+
+WebGPU/wgpu is a future compositor drawing API candidate above the Linux
+platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
+authority. On Linux, wgpu will usually target Vulkan, but Sophia must first prove
+render-device authority, GBM allocation, reduced startup health, and atomic
+presentation before admitting that higher-level renderer dependency.
+
 Phase 4 is the shared-memory import boundary. Real MIT-SHM mapping stays
 deferred until mapped bytes can pass through a bounded renderer upload path with
 namespace validation, size checks, lifetime tracking, and fail-closed errors.

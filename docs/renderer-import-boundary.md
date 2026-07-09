@@ -109,6 +109,16 @@ Backend-live reports render-device discovery separately as reduced path-free
 state so startup diagnostics can distinguish "not requested" from "unavailable"
 without leaking device identity.
 
+Renderer startup policy is explicit:
+
+- `GpuPreferred` attempts GBM and selects CPU fallback when the probe degrades;
+- `CpuOnly` never opens a render device;
+- `GpuRequired` fails closed when GBM does not prove native capability.
+
+Degraded GBM does not produce a partial import-capable renderer. This keeps the
+atomic visual path honest: native import is either capable, or the session runs
+through the fallback renderer with reduced degraded startup health.
+
 Admission tests for the first real dependency must prove:
 
 - the crate still builds and tests offline without the feature;
@@ -152,8 +162,8 @@ depends on `gbm-sys`. Its optional `drm-support` feature is useful later, but
 the first Sophia probe should not require it. The initial probe only needs to
 prove that renderer-live can compile the native GBM boundary and translate a
 reduced render-device token or backend-owned device authority into reduced GBM
-capability health. Wiring backend-live discovery into that authority path is the
-next step.
+capability health. Backend-live wires that authority through reduced startup
+reports and renderer preference policy.
 
 `gbm-sys` is not the first choice. It exposes raw FFI functions and low-level GBM
 types directly. Keep it as a fallback only if the safe `gbm` crate cannot support
