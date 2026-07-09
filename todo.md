@@ -107,7 +107,7 @@ into a Wayland compositor as the architectural center.
   semantics and Engine-owned visual commits.
 - [x] Define Wayland input delivery as Engine-routed, authority-delivered, and
   namespace-checked.
-- [ ] Define Wayland clipboard/data-device/screencopy-style requests as portal
+- [x] Define Wayland clipboard/data-device/screencopy-style requests as portal
   inputs instead of compositor-wide privileges.
 - [ ] Document that Wayland Authority must not own workspaces, global shortcuts,
   compositor chrome, or scanout.

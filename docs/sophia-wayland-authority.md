@@ -200,6 +200,58 @@ Input failures should be data, not fallback privileges:
 This keeps the compositor-first invariant intact while preserving Wayland's
 client-visible seat, serial, focus, and grab behavior.
 
+## Portal Inputs
+
+Wayland protocols that expose cross-client or cross-namespace capability must
+be translated into Sophia Portal requests. The Wayland Authority may collect
+protocol facts, but it cannot approve the transfer itself.
+
+Clipboard and primary selection:
+
+- `wl_data_device` selection ownership is namespace-local authority state.
+- A paste from another namespace becomes a Sophia clipboard portal request.
+- Denial should produce a native Wayland failure path: no offer, cancelled
+  offer, or empty/incompatible transfer depending on the protocol point.
+- Approval must be single-use and tied to the source generation known at prompt
+  time.
+- Source owner changes revoke pending approvals before bytes are transferred.
+
+Drag-and-drop:
+
+- Drag source, target surface, MIME types, action set, and serial are authority
+  facts.
+- Cross-namespace drop intent becomes a Sophia drag-and-drop portal request.
+- The authority should not expose target app identity, namespace labels, file
+  paths, or titles to the WM.
+- Denial maps to native cancellation/no-action semantics.
+- Approval maps to a bounded handoff command whose lifetime is owned by the
+  portal state machine.
+
+Screencopy and capture-style requests:
+
+- Any request that would expose pixels outside the requesting namespace becomes
+  a Sophia screen-capture portal request.
+- The Wayland Authority must not grant compositor-wide capture just because a
+  Wayland extension exists.
+- The Engine owns the final pixels; the Portal owns consent and scope; the
+  authority only reports protocol-local request facts.
+- Approved capture should return only the bounded region, output, surface, or
+  namespace scope granted by policy.
+
+URI open, notifications, and file handoff:
+
+- Protocol-specific requests become reduced portal facts.
+- The Portal decides whether the target namespace or host service may receive
+  the request.
+- The authority receives only the resulting command: deny, handoff, revoke, or
+  protocol-local completion.
+
+Portal request packets must be bounded and sanitized. They may include MIME
+types, requested action, source/target `SurfaceId`, transfer generation, and
+small display strings if already sanitized. They must not include raw file
+contents, unbounded strings, namespace secrets, PIDs, socket paths, or protocol
+object IDs visible to the WM.
+
 ## Namespace Rules
 
 Wayland's object isolation is per client connection, but Sophia's isolation is
@@ -243,3 +295,11 @@ The input reducer should prove:
 - protocol-local grabs can redirect delivery within the same namespace/seat;
 - destroyed or unmapped targets clear focus instead of fabricating events;
 - compositor chrome clicks never enter the Wayland Authority input path.
+
+The portal reducer should prove:
+
+- cross-namespace paste becomes a Sophia clipboard portal request;
+- source generation changes revoke pending transfer approval;
+- denied drag-and-drop maps to native cancellation/no-action;
+- screencopy outside the requester namespace requires portal approval;
+- portal facts are bounded and do not expose protocol object IDs to the WM.
