@@ -12,7 +12,7 @@ cargo fmt --check
 cargo test --workspace --offline
 ```
 
-The optional renderer-native feature has one extra local check:
+The optional renderer-native features have extra local checks:
 
 ```sh
 cargo test --offline -p sophia-renderer-live --features gbm-probe
@@ -27,6 +27,11 @@ It exercises fake and native GBM capability records while keeping the public
 boundary reduced to capability health. This command must remain optional, and
 the default workspace suite must continue to pass without native renderer
 feature flags.
+
+The `egl-probe` feature admits `khronos-egl` through the internal
+`sophia-renderer-native-egl` adapter crate. That crate owns the unavoidable
+unsafe dynamic EGL calls. Public renderer-live and backend-live tests assert
+only reduced EGL startup status.
 
 The backend-live GBM feature suite includes an opt-in real-device smoke. Set
 `SOPHIA_RUN_REAL_GBM_SMOKE=1` to let the test look for an openable

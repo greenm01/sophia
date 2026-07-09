@@ -2,7 +2,7 @@
 
 use sophia_renderer_live::{
     EglCapabilityProbeReport, EglCapabilityProbeStatus, EglContextProbeStatus, EglPlatformStatus,
-    FakeEglCapabilityProbe,
+    FakeEglCapabilityProbe, NativeEglCapabilityProbe,
 };
 
 #[test]
@@ -59,4 +59,17 @@ fn fake_egl_probe_reports_context_unavailable_only_after_platform_is_ready() {
             status: EglCapabilityProbeStatus::ContextUnavailable,
         }
     );
+}
+
+#[test]
+fn native_egl_probe_stays_reduced_at_public_boundary() {
+    let report = NativeEglCapabilityProbe::probe_report();
+
+    assert!(matches!(
+        report.status,
+        EglCapabilityProbeStatus::NativeDrawingCapable
+            | EglCapabilityProbeStatus::PlatformUnavailable
+            | EglCapabilityProbeStatus::PlatformDegraded
+            | EglCapabilityProbeStatus::ContextUnavailable
+    ));
 }

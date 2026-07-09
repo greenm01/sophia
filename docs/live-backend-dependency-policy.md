@@ -62,9 +62,10 @@ reduced. They do not expose native driver text, device paths, file descriptors,
 or GBM handles.
 
 EGL/OpenGL is the first compositor drawing API above the GBM platform boundary.
-The initial `egl-probe` feature is dependency-free and models only reduced
-platform/context startup status. A real EGL binding must not be admitted until
-those reduced records and backend projections are documented and tested.
+The `egl-probe` feature models reduced platform/context startup status and
+admits `khronos-egl` only through the internal `sophia-renderer-native-egl`
+adapter. The adapter owns unavoidable unsafe dynamic EGL calls; backend-live and
+renderer-live expose only reduced startup status.
 
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout

@@ -50,6 +50,20 @@ fn egl_probe_reports_context_unavailable_after_platform_is_ready() {
     );
 }
 
+#[test]
+fn native_egl_probe_reports_only_reduced_startup_status() {
+    let report = discover_live_backend(&LiveBackendConfig::new("/does/not/matter"));
+    let egl = report.native_egl_probe_report();
+
+    assert!(matches!(
+        egl.status,
+        LiveEglStartupStatus::NativeDrawingCapable
+            | LiveEglStartupStatus::PlatformUnavailable
+            | LiveEglStartupStatus::PlatformDegraded
+            | LiveEglStartupStatus::ContextUnavailable
+    ));
+}
+
 #[cfg(feature = "gbm-probe")]
 mod gbm_projection {
     use super::*;

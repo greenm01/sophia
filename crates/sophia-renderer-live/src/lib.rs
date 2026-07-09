@@ -16,7 +16,7 @@ mod gbm_probe;
 #[cfg(feature = "egl-probe")]
 pub use egl_probe::{
     EglCapabilityProbeReport, EglCapabilityProbeStatus, EglContextProbeStatus, EglPlatformStatus,
-    FakeEglCapabilityProbe,
+    FakeEglCapabilityProbe, NativeEglCapabilityProbe,
 };
 
 #[cfg(feature = "gbm-probe")]

@@ -30,6 +30,15 @@ impl FakeEglCapabilityProbe {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeEglCapabilityProbe;
+
+impl NativeEglCapabilityProbe {
+    pub fn probe_report() -> EglCapabilityProbeReport {
+        report_from_probe_result(native::probe())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EglCapabilityProbeReport {
     pub status: EglCapabilityProbeStatus,
 }
@@ -53,4 +62,44 @@ pub enum EglPlatformStatus {
 pub enum EglContextProbeStatus {
     Available,
     Unavailable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EglProbeResult {
+    NativeDrawingCapable,
+    PlatformUnavailable,
+    PlatformDegraded,
+    ContextUnavailable,
+}
+
+fn report_from_probe_result(result: EglProbeResult) -> EglCapabilityProbeReport {
+    EglCapabilityProbeReport {
+        status: match result {
+            EglProbeResult::NativeDrawingCapable => EglCapabilityProbeStatus::NativeDrawingCapable,
+            EglProbeResult::PlatformUnavailable => EglCapabilityProbeStatus::PlatformUnavailable,
+            EglProbeResult::PlatformDegraded => EglCapabilityProbeStatus::PlatformDegraded,
+            EglProbeResult::ContextUnavailable => EglCapabilityProbeStatus::ContextUnavailable,
+        },
+    }
+}
+
+mod native {
+    use super::EglProbeResult;
+
+    pub(super) fn probe() -> EglProbeResult {
+        match sophia_renderer_native_egl::probe_default_display_context() {
+            sophia_renderer_native_egl::NativeEglProbeStatus::NativeDrawingCapable => {
+                EglProbeResult::NativeDrawingCapable
+            }
+            sophia_renderer_native_egl::NativeEglProbeStatus::PlatformUnavailable => {
+                EglProbeResult::PlatformUnavailable
+            }
+            sophia_renderer_native_egl::NativeEglProbeStatus::PlatformDegraded => {
+                EglProbeResult::PlatformDegraded
+            }
+            sophia_renderer_native_egl::NativeEglProbeStatus::ContextUnavailable => {
+                EglProbeResult::ContextUnavailable
+            }
+        }
+    }
 }

@@ -208,10 +208,11 @@ boundary. GBM remains responsible for render-device authority and allocation
 capability; EGL is only the context/drawing layer that sits on top of a proven
 platform.
 
-The first `egl-probe` feature is intentionally dependency-free. It adds fake
-reduced records for platform readiness and context readiness, then projects
-those records through backend-live as reduced startup status. This locks the API
-shape before Sophia admits a native EGL binding.
+The first `egl-probe` feature adds fake reduced records for platform readiness
+and context readiness, then projects those records through backend-live as
+reduced startup status. It also admits a native dynamic EGL probe behind an
+internal adapter crate. The public renderer-live and backend-live APIs still
+expose only reduced startup records.
 
 The EGL probe boundary must not expose:
 
@@ -228,19 +229,20 @@ proven.
 
 ## EGL Candidate Dependency
 
-The selected candidate for the future native EGL probe is `khronos-egl` 6.0.0.
-It binds the Khronos EGL 1.5 API, exposes an explicit `Instance` API, and can
-use dynamic loading through its `dynamic` feature. That fits Sophia's boundary:
-native EGL calls can stay inside a renderer-live adapter, and startup can reduce
-all driver and context failures to `LiveEglStartupStatus`.
+The admitted native EGL dependency is `khronos-egl` 6.0.0. It binds the Khronos
+EGL 1.5 API, exposes an explicit `Instance` API, and supports dynamic loading
+through its `dynamic` feature. Sophia admits it only inside
+`sophia-renderer-native-egl`, a tiny internal adapter crate that owns the
+unavoidable unsafe FFI calls. `sophia-renderer-live` depends on that adapter
+only when `egl-probe` is enabled.
 
-Do not admit `khronos-egl` until the first native probe patch. When admitted:
+Admission rules for `khronos-egl`:
 
-- keep it optional under the existing `egl-probe` feature;
-- prefer dynamic loading so missing `libEGL.so.1` becomes reduced startup
+- keep it optional under the existing `egl-probe` feature path;
+- use dynamic loading so missing `libEGL.so.1` becomes reduced startup
   failure instead of a hard link/load failure;
 - keep all EGL displays, contexts, configs, surfaces, errors, and loaded
-  library handles private to renderer-live;
+  library handles private to the native adapter;
 - project native failures only to reduced EGL startup status;
 - keep fake EGL tests as the default feature-enabled coverage path;
 - run `cargo test --workspace --offline` without feature flags;

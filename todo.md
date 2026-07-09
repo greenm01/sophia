@@ -9,9 +9,10 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Add the optional `khronos-egl` dependency under `egl-probe` with dynamic
-  loading only.
-- [ ] Add a real EGL context probe behind the `egl-probe` feature.
+- [ ] Define the first EGL offscreen draw smoke: clear color into a private
+  pbuffer or GBM-backed target, with no exported handles.
+- [ ] Add reduced draw-smoke status records before admitting GL function
+  loading or shader code.
 
 **Next**
 - [ ] Keep wgpu deferred until GBM/EGL startup, drawing, and presentation seams
@@ -192,6 +193,10 @@ evidence belong in `docs/research-log.md`.
 - [x] Evaluate concrete EGL binding options and choose `khronos-egl` as the
   candidate for the native context probe.
 - [x] Add EGL dependency-admission notes before admitting a real EGL crate.
+- [x] Add the optional `khronos-egl` dependency under `egl-probe` with dynamic
+  loading only.
+- [x] Add a real EGL context probe behind the `egl-probe` feature, isolated in
+  a tiny native adapter crate that returns only reduced status.
 
 ---
 
