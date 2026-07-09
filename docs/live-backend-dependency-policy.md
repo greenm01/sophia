@@ -101,20 +101,31 @@ It must not expose connector IDs, CRTC IDs, plane IDs, framebuffer IDs, device
 paths, fds, driver errors, or native KMS object identity. Real page flips remain
 deferred until this reduced status shape is stable.
 
+The first reduced KMS scanout target report is `LiveKmsScanoutTargetReport`.
+It combines reduced output availability, reduced GBM/EGL frame-target status,
+and reduced renderer presentation status. It may expose the intended target
+`Size`, because size is already part of compositor geometry, but it must not
+expose output IDs, connector IDs, CRTC IDs, plane IDs, framebuffer IDs, device
+paths, fds, driver errors, or KMS object handles. Missing, invalid, degraded,
+and unavailable target states must remain valid while scanout matures.
+
 The first page-flip event shape is also reduced. `LivePageFlipEvent` may report
 ready, idle, waiting for output, waiting for transaction readiness, presented,
-rejected, output unavailable, presentation unavailable, or degraded. Terminal
-events may carry a frame serial. They must not carry Sophia output IDs,
-transaction IDs, surface IDs, connector IDs, CRTC IDs, plane IDs, framebuffer
-IDs, file descriptors, native driver errors, or KMS object handles. The future
-libdrm/KMS adapter must translate native page-flip callbacks into this shape
-before runtime code observes them.
+rejected, output unavailable, frame-target unavailable, invalid frame target,
+presentation unavailable, or degraded. Target readiness is derived from
+`LiveKmsScanoutTargetReport`, so page-flip readiness cannot bypass frame-target
+validation. Terminal events may carry a frame serial. They must not carry
+Sophia output IDs, transaction IDs, surface IDs, connector IDs, CRTC IDs, plane
+IDs, framebuffer IDs, file descriptors, native driver errors, or KMS object
+handles. The future libdrm/KMS adapter must translate native page-flip callbacks
+into this shape before runtime code observes them.
 
-Backend-live runtime ticks carry the current reduced scanout readiness report
-and page-flip event beside renderer health. This keeps the runtime-facing
-diagnostics useful without introducing KMS dependencies or leaking native object
-identity. Native presentation and future page-flip callbacks should update those
-fields through reduced reports before the next runtime tick observes them.
+Backend-live runtime ticks carry the current reduced scanout readiness report,
+KMS scanout target report, and page-flip event beside renderer health. This
+keeps the runtime-facing diagnostics useful without introducing KMS dependencies
+or leaking native object identity. Native presentation and future page-flip
+callbacks should update those fields through reduced reports before the next
+runtime tick observes them.
 Runtime ticks also carry the reduced GBM/EGL frame-target observation when a
 startup output is selected. That observation is only a size/status record; it is
 not a GBM surface, EGL surface, framebuffer, DMA-BUF, file descriptor, or native

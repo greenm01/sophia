@@ -9,13 +9,14 @@ use sophia_backend_live::{
     LiveBackendDependencyUse, LiveCompositorBackendDiscoveryStatus,
     LiveGbmEglFrameTargetAllocationReport, LiveGbmEglFrameTargetAllocationStatus,
     LiveGbmEglFrameTargetLifecycleReport, LiveGbmEglFrameTargetLifecycleStatus,
-    LiveGbmEglFrameTargetRecord, LiveGbmEglFrameTargetStatus, LiveLibdrmPollerDiagnostics,
-    LiveLibdrmPollerDiagnosticsStatus, LivePageFlipCallback, LivePageFlipCallbackDecision,
-    LivePageFlipCallbackIntake, LivePageFlipCallbackQueue, LivePageFlipCallbackQueueReport,
-    LivePageFlipCallbackReport, LivePageFlipCallbackSourceReport, LivePageFlipEvent,
-    LivePageFlipEventStatus, LiveRendererImportBoundary, LiveRendererImportHealth,
-    LiveRendererImportPathStatus, LiveRendererImportStartupStatus, LiveRendererPreference,
-    LiveRendererPresentationReport, LiveRendererPresentationStatus, LiveRendererRuntimeObservation,
+    LiveGbmEglFrameTargetRecord, LiveGbmEglFrameTargetStatus, LiveKmsScanoutTargetReport,
+    LiveKmsScanoutTargetStatus, LiveLibdrmPollerDiagnostics, LiveLibdrmPollerDiagnosticsStatus,
+    LivePageFlipCallback, LivePageFlipCallbackDecision, LivePageFlipCallbackIntake,
+    LivePageFlipCallbackQueue, LivePageFlipCallbackQueueReport, LivePageFlipCallbackReport,
+    LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus,
+    LiveRendererImportBoundary, LiveRendererImportHealth, LiveRendererImportPathStatus,
+    LiveRendererImportStartupStatus, LiveRendererPreference, LiveRendererPresentationReport,
+    LiveRendererPresentationStatus, LiveRendererRuntimeObservation,
     LiveRendererSelectionObservation, LiveScanoutReadinessReport, LiveScanoutReadinessStatus,
     OutputId, PageFlipCommitOutcome, QueuedInputPoller, RendererSelection, SeatId, Size,
     discover_live_backend, live_backend_dependency_decision,
@@ -270,6 +271,16 @@ fn live_runtime_assembly_reports_reduced_renderer_health_on_tick() {
         }
     );
     assert_eq!(
+        tick.kms_scanout_target,
+        LiveKmsScanoutTargetReport {
+            status: LiveKmsScanoutTargetStatus::Ready,
+            size: Some(Size {
+                width: 1280,
+                height: 720,
+            }),
+        }
+    );
+    assert_eq!(
         assembly.gbm_egl_frame_target_observation(),
         Some(LiveGbmEglFrameTargetRecord {
             status: LiveGbmEglFrameTargetStatus::Ready,
@@ -329,6 +340,16 @@ fn live_runtime_assembly_threads_scanout_and_page_flip_observations() {
             frame_serial: None,
         }
     );
+    assert_eq!(
+        assembly.kms_scanout_target_observation(),
+        LiveKmsScanoutTargetReport {
+            status: LiveKmsScanoutTargetStatus::Ready,
+            size: Some(Size {
+                width: 1280,
+                height: 720,
+            }),
+        }
+    );
 
     assembly.observe_presentation_report(LiveRendererPresentationReport {
         status: LiveRendererPresentationStatus::Unavailable,
@@ -344,6 +365,16 @@ fn live_runtime_assembly_threads_scanout_and_page_flip_observations() {
         LivePageFlipEvent {
             status: LivePageFlipEventStatus::PresentationUnavailable,
             frame_serial: None,
+        }
+    );
+    assert_eq!(
+        assembly.kms_scanout_target_observation(),
+        LiveKmsScanoutTargetReport {
+            status: LiveKmsScanoutTargetStatus::PresentationUnavailable,
+            size: Some(Size {
+                width: 1280,
+                height: 720,
+            }),
         }
     );
 
@@ -372,6 +403,103 @@ fn live_runtime_assembly_threads_scanout_and_page_flip_observations() {
             frame_serial: Some(121),
         }
     );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_runtime_assembly_blocks_page_flip_readiness_for_invalid_scanout_target() {
+    let root = ready_drm_sysfs_fixture("runtime-kms-scanout-target-invalid");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed live assembly");
+
+    assembly.observe_gbm_egl_frame_target_size(Size {
+        width: 0,
+        height: 720,
+    });
+
+    assert_eq!(
+        assembly.kms_scanout_target_observation(),
+        LiveKmsScanoutTargetReport {
+            status: LiveKmsScanoutTargetStatus::InvalidFrameTarget,
+            size: Some(Size {
+                width: 0,
+                height: 720,
+            }),
+        }
+    );
+    assert_eq!(
+        assembly.page_flip_observation(),
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::InvalidFrameTarget,
+            frame_serial: None,
+        }
+    );
+
+    assembly
+        .retire_gbm_egl_frame_target()
+        .expect("invalid target should still retire through reduced lifecycle");
+    assert_eq!(
+        assembly.kms_scanout_target_observation(),
+        LiveKmsScanoutTargetReport {
+            status: LiveKmsScanoutTargetStatus::FrameTargetUnavailable,
+            size: Some(Size {
+                width: 1280,
+                height: 720,
+            }),
+        }
+    );
+    assert_eq!(
+        assembly.page_flip_observation(),
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::FrameTargetUnavailable,
+            frame_serial: None,
+        }
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_runtime_assembly_keeps_degraded_scanout_target_reduced() {
+    let root = ready_drm_sysfs_fixture("runtime-kms-scanout-target-degraded");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed live assembly");
+
+    assembly.observe_presentation_report(LiveRendererPresentationReport {
+        status: LiveRendererPresentationStatus::Degraded,
+    });
+
+    assert_eq!(
+        assembly.kms_scanout_target_observation(),
+        LiveKmsScanoutTargetReport {
+            status: LiveKmsScanoutTargetStatus::Degraded,
+            size: Some(Size {
+                width: 1280,
+                height: 720,
+            }),
+        }
+    );
+    assert_eq!(
+        assembly.page_flip_observation(),
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Degraded,
+            frame_serial: None,
+        }
+    );
+
+    let tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should report reduced degraded target");
+    assert_eq!(
+        tick.kms_scanout_target,
+        assembly.kms_scanout_target_observation()
+    );
+    assert_eq!(tick.page_flip, assembly.page_flip_observation());
 
     fs::remove_dir_all(root).unwrap();
 }
@@ -1015,6 +1143,27 @@ fn scanout_readiness_reports_ready_without_exposing_kms_identity() {
 }
 
 #[test]
+fn kms_scanout_target_reports_ready_size_without_kms_identity() {
+    let root = ready_drm_sysfs_fixture("kms-scanout-target-ready");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+
+    assert_eq!(
+        report.kms_scanout_target_report(LiveRendererPresentationReport {
+            status: LiveRendererPresentationStatus::Ready,
+        }),
+        LiveKmsScanoutTargetReport {
+            status: LiveKmsScanoutTargetStatus::Ready,
+            size: Some(Size {
+                width: 1280,
+                height: 720,
+            }),
+        }
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn scanout_readiness_reports_missing_output_before_renderer_status() {
     let root = drm_sysfs_fixture("scanout-no-output");
     let report = discover_live_backend(&LiveBackendConfig::new(&root));
@@ -1032,6 +1181,24 @@ fn scanout_readiness_reports_missing_output_before_renderer_status() {
 }
 
 #[test]
+fn kms_scanout_target_reports_missing_output_without_kms_identity() {
+    let root = drm_sysfs_fixture("kms-scanout-target-no-output");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+
+    assert_eq!(
+        report.kms_scanout_target_report(LiveRendererPresentationReport {
+            status: LiveRendererPresentationStatus::Ready,
+        }),
+        LiveKmsScanoutTargetReport {
+            status: LiveKmsScanoutTargetStatus::OutputUnavailable,
+            size: None,
+        }
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn scanout_readiness_collapses_unavailable_presentation_without_native_details() {
     let root = ready_drm_sysfs_fixture("scanout-presentation-unavailable");
     let report = discover_live_backend(&LiveBackendConfig::new(&root));
@@ -1042,6 +1209,39 @@ fn scanout_readiness_collapses_unavailable_presentation_without_native_details()
         }),
         LiveScanoutReadinessReport {
             status: LiveScanoutReadinessStatus::PresentationUnavailable,
+        }
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn kms_scanout_target_collapses_presentation_without_native_details() {
+    let root = ready_drm_sysfs_fixture("kms-scanout-target-presentation");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+
+    assert_eq!(
+        report.kms_scanout_target_report(LiveRendererPresentationReport {
+            status: LiveRendererPresentationStatus::Unavailable,
+        }),
+        LiveKmsScanoutTargetReport {
+            status: LiveKmsScanoutTargetStatus::PresentationUnavailable,
+            size: Some(Size {
+                width: 1280,
+                height: 720,
+            }),
+        }
+    );
+    assert_eq!(
+        report.kms_scanout_target_report(LiveRendererPresentationReport {
+            status: LiveRendererPresentationStatus::Degraded,
+        }),
+        LiveKmsScanoutTargetReport {
+            status: LiveKmsScanoutTargetStatus::Degraded,
+            size: Some(Size {
+                width: 1280,
+                height: 720,
+            }),
         }
     );
 
@@ -1090,6 +1290,42 @@ fn page_flip_event_projects_scanout_readiness_without_kms_identity() {
     );
     assert_eq!(
         LivePageFlipEvent::from_scanout_status(LiveScanoutReadinessStatus::Degraded),
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Degraded,
+            frame_serial: None,
+        }
+    );
+}
+
+#[test]
+fn page_flip_event_projects_kms_scanout_target_without_kms_identity() {
+    assert_eq!(
+        LivePageFlipEvent::from_kms_scanout_target_status(LiveKmsScanoutTargetStatus::Ready),
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Ready,
+            frame_serial: None,
+        }
+    );
+    assert_eq!(
+        LivePageFlipEvent::from_kms_scanout_target_status(
+            LiveKmsScanoutTargetStatus::FrameTargetUnavailable,
+        ),
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::FrameTargetUnavailable,
+            frame_serial: None,
+        }
+    );
+    assert_eq!(
+        LivePageFlipEvent::from_kms_scanout_target_status(
+            LiveKmsScanoutTargetStatus::InvalidFrameTarget,
+        ),
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::InvalidFrameTarget,
+            frame_serial: None,
+        }
+    );
+    assert_eq!(
+        LivePageFlipEvent::from_kms_scanout_target_status(LiveKmsScanoutTargetStatus::Degraded),
         LivePageFlipEvent {
             status: LivePageFlipEventStatus::Degraded,
             frame_serial: None,

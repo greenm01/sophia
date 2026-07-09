@@ -39,10 +39,10 @@ active milestone to `docs/roadmap-history.md`.
 
 ### 2. Scanout Path
 
-- [ ] Define the first reduced KMS scanout target report.
-- [ ] Connect renderer presentation readiness to page-flip readiness without
+- [x] Define the first reduced KMS scanout target report.
+- [x] Connect renderer presentation readiness to page-flip readiness without
   exposing connector, CRTC, plane, framebuffer, fd, or driver identity.
-- [ ] Keep CPU fallback and degraded GPU paths valid while scanout matures.
+- [x] Keep CPU fallback and degraded GPU paths valid while scanout matures.
 
 ### 3. Live Compositor Runtime Loop
 

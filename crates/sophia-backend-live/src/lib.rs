@@ -195,6 +195,73 @@ pub enum LiveScanoutReadinessStatus {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveKmsScanoutTargetReport {
+    pub status: LiveKmsScanoutTargetStatus,
+    pub size: Option<Size>,
+}
+
+impl LiveKmsScanoutTargetReport {
+    fn from_backend_and_presentation(
+        backend: &LiveBackendStartupReport,
+        presentation: LiveRendererPresentationReport,
+    ) -> Self {
+        Self::from_output_target_and_presentation(
+            backend.selected_output().map(|output| output.size),
+            backend.selected_gbm_egl_frame_target(),
+            presentation,
+        )
+    }
+
+    fn from_output_target_and_presentation(
+        output_size: Option<Size>,
+        frame_target: Option<LiveGbmEglFrameTargetRecord>,
+        presentation: LiveRendererPresentationReport,
+    ) -> Self {
+        let Some(output_size) = output_size else {
+            return Self {
+                status: LiveKmsScanoutTargetStatus::OutputUnavailable,
+                size: None,
+            };
+        };
+
+        let Some(frame_target) = frame_target else {
+            return Self {
+                status: LiveKmsScanoutTargetStatus::FrameTargetUnavailable,
+                size: Some(output_size),
+            };
+        };
+
+        if frame_target.status != LiveGbmEglFrameTargetStatus::Ready {
+            return Self {
+                status: LiveKmsScanoutTargetStatus::InvalidFrameTarget,
+                size: Some(frame_target.size),
+            };
+        }
+
+        Self {
+            status: match presentation.status {
+                LiveRendererPresentationStatus::Ready => LiveKmsScanoutTargetStatus::Ready,
+                LiveRendererPresentationStatus::Unavailable => {
+                    LiveKmsScanoutTargetStatus::PresentationUnavailable
+                }
+                LiveRendererPresentationStatus::Degraded => LiveKmsScanoutTargetStatus::Degraded,
+            },
+            size: Some(frame_target.size),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveKmsScanoutTargetStatus {
+    Ready,
+    OutputUnavailable,
+    FrameTargetUnavailable,
+    InvalidFrameTarget,
+    PresentationUnavailable,
+    Degraded,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LivePageFlipEvent {
     pub status: LivePageFlipEventStatus,
     pub frame_serial: Option<u64>,
@@ -212,6 +279,28 @@ impl LivePageFlipEvent {
                     LivePageFlipEventStatus::PresentationUnavailable
                 }
                 LiveScanoutReadinessStatus::Degraded => LivePageFlipEventStatus::Degraded,
+            },
+            frame_serial: None,
+        }
+    }
+
+    pub const fn from_kms_scanout_target_status(status: LiveKmsScanoutTargetStatus) -> Self {
+        Self {
+            status: match status {
+                LiveKmsScanoutTargetStatus::Ready => LivePageFlipEventStatus::Ready,
+                LiveKmsScanoutTargetStatus::OutputUnavailable => {
+                    LivePageFlipEventStatus::OutputUnavailable
+                }
+                LiveKmsScanoutTargetStatus::FrameTargetUnavailable => {
+                    LivePageFlipEventStatus::FrameTargetUnavailable
+                }
+                LiveKmsScanoutTargetStatus::InvalidFrameTarget => {
+                    LivePageFlipEventStatus::InvalidFrameTarget
+                }
+                LiveKmsScanoutTargetStatus::PresentationUnavailable => {
+                    LivePageFlipEventStatus::PresentationUnavailable
+                }
+                LiveKmsScanoutTargetStatus::Degraded => LivePageFlipEventStatus::Degraded,
             },
             frame_serial: None,
         }
@@ -252,6 +341,8 @@ pub enum LivePageFlipEventStatus {
     Presented,
     Rejected,
     OutputUnavailable,
+    FrameTargetUnavailable,
+    InvalidFrameTarget,
     PresentationUnavailable,
     Degraded,
 }
@@ -1180,6 +1271,13 @@ impl LiveBackendStartupReport {
         LiveScanoutReadinessReport::from_backend_and_presentation(self, presentation)
     }
 
+    pub fn kms_scanout_target_report(
+        &self,
+        presentation: LiveRendererPresentationReport,
+    ) -> LiveKmsScanoutTargetReport {
+        LiveKmsScanoutTargetReport::from_backend_and_presentation(self, presentation)
+    }
+
     pub fn selected_gbm_egl_frame_target(&self) -> Option<LiveGbmEglFrameTargetRecord> {
         self.selected_output()
             .map(|output| LiveGbmEglFrameTargetRecord::new(output.size))
@@ -1537,14 +1635,20 @@ impl LiveBackendStartupReport {
         let scanout_readiness = self.scanout_readiness_report(LiveRendererPresentationReport {
             status: LiveRendererPresentationStatus::Ready,
         });
-        let page_flip_event = LivePageFlipEvent::from_scanout_status(scanout_readiness.status);
+        let kms_scanout_target = self.kms_scanout_target_report(LiveRendererPresentationReport {
+            status: LiveRendererPresentationStatus::Ready,
+        });
+        let page_flip_event =
+            LivePageFlipEvent::from_kms_scanout_target_status(kms_scanout_target.status);
         let page_flip_callback_intake = LivePageFlipCallbackIntake::new(selected_output.id);
         let gbm_egl_frame_target = LiveGbmEglFrameTargetRecord::new(selected_output.size);
         self.into_headless_assembly(poller, renderer_selection)
             .map(|assembly| LiveBackendRuntimeAssembly {
                 assembly,
                 renderer_observation,
+                output_size: Some(selected_output.size),
                 scanout_readiness,
+                kms_scanout_target,
                 gbm_egl_frame_target: Some(gbm_egl_frame_target),
                 gbm_egl_frame_target_lifecycle: Some(
                     LiveGbmEglFrameTargetLifecycleReport::created(gbm_egl_frame_target),
@@ -1767,7 +1871,9 @@ pub enum LiveEglStartupStatus {
 pub struct LiveBackendRuntimeAssembly {
     assembly: HeadlessCompositorBackendAssembly,
     renderer_observation: LiveRendererRuntimeObservation,
+    output_size: Option<Size>,
     scanout_readiness: LiveScanoutReadinessReport,
+    kms_scanout_target: LiveKmsScanoutTargetReport,
     gbm_egl_frame_target: Option<LiveGbmEglFrameTargetRecord>,
     gbm_egl_frame_target_lifecycle: Option<LiveGbmEglFrameTargetLifecycleReport>,
     gbm_egl_frame_target_allocation: Option<LiveGbmEglFrameTargetAllocationReport>,
@@ -1831,6 +1937,10 @@ impl LiveBackendRuntimeAssembly {
         self.scanout_readiness
     }
 
+    pub fn kms_scanout_target_observation(&self) -> LiveKmsScanoutTargetReport {
+        self.kms_scanout_target
+    }
+
     pub fn gbm_egl_frame_target_observation(&self) -> Option<LiveGbmEglFrameTargetRecord> {
         self.gbm_egl_frame_target
     }
@@ -1856,6 +1966,16 @@ impl LiveBackendRuntimeAssembly {
         if lifecycle.status != LiveGbmEglFrameTargetLifecycleStatus::Retained {
             self.gbm_egl_frame_target_allocation = None;
         }
+        self.refresh_kms_scanout_target(LiveRendererPresentationReport {
+            status: match self.scanout_readiness.status {
+                LiveScanoutReadinessStatus::Ready => LiveRendererPresentationStatus::Ready,
+                LiveScanoutReadinessStatus::OutputUnavailable
+                | LiveScanoutReadinessStatus::PresentationUnavailable => {
+                    LiveRendererPresentationStatus::Unavailable
+                }
+                LiveScanoutReadinessStatus::Degraded => LiveRendererPresentationStatus::Degraded,
+            },
+        });
         record
     }
 
@@ -1864,6 +1984,16 @@ impl LiveBackendRuntimeAssembly {
         let lifecycle = LiveGbmEglFrameTargetLifecycleReport::retired(target);
         self.gbm_egl_frame_target_lifecycle = Some(lifecycle);
         self.gbm_egl_frame_target_allocation = None;
+        self.refresh_kms_scanout_target(LiveRendererPresentationReport {
+            status: match self.scanout_readiness.status {
+                LiveScanoutReadinessStatus::Ready => LiveRendererPresentationStatus::Ready,
+                LiveScanoutReadinessStatus::OutputUnavailable
+                | LiveScanoutReadinessStatus::PresentationUnavailable => {
+                    LiveRendererPresentationStatus::Unavailable
+                }
+                LiveScanoutReadinessStatus::Degraded => LiveRendererPresentationStatus::Degraded,
+            },
+        });
         Some(lifecycle)
     }
 
@@ -1906,8 +2036,7 @@ impl LiveBackendRuntimeAssembly {
     pub fn observe_presentation_report(&mut self, presentation: LiveRendererPresentationReport) {
         self.scanout_readiness =
             LiveScanoutReadinessReport::from_output_and_presentation(true, presentation);
-        self.page_flip_event =
-            LivePageFlipEvent::from_scanout_status(self.scanout_readiness.status);
+        self.refresh_kms_scanout_target(presentation);
     }
 
     pub fn observe_page_flip_outcome(&mut self, outcome: &PageFlipCommitOutcome) {
@@ -1943,6 +2072,7 @@ impl LiveBackendRuntimeAssembly {
             engine,
             renderer: self.renderer_observation,
             scanout: self.scanout_readiness,
+            kms_scanout_target: self.kms_scanout_target,
             gbm_egl_frame_target: self.gbm_egl_frame_target,
             gbm_egl_frame_target_lifecycle: self.gbm_egl_frame_target_lifecycle,
             gbm_egl_frame_target_allocation: self.gbm_egl_frame_target_allocation,
@@ -1953,11 +2083,24 @@ impl LiveBackendRuntimeAssembly {
     }
 }
 
+impl LiveBackendRuntimeAssembly {
+    fn refresh_kms_scanout_target(&mut self, presentation: LiveRendererPresentationReport) {
+        self.kms_scanout_target = LiveKmsScanoutTargetReport::from_output_target_and_presentation(
+            self.output_size,
+            self.gbm_egl_frame_target,
+            presentation,
+        );
+        self.page_flip_event =
+            LivePageFlipEvent::from_kms_scanout_target_status(self.kms_scanout_target.status);
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct LiveBackendRuntimeTickReport {
     pub engine: CompositorBackendTickReport,
     pub renderer: LiveRendererRuntimeObservation,
     pub scanout: LiveScanoutReadinessReport,
+    pub kms_scanout_target: LiveKmsScanoutTargetReport,
     pub gbm_egl_frame_target: Option<LiveGbmEglFrameTargetRecord>,
     pub gbm_egl_frame_target_lifecycle: Option<LiveGbmEglFrameTargetLifecycleReport>,
     pub gbm_egl_frame_target_allocation: Option<LiveGbmEglFrameTargetAllocationReport>,

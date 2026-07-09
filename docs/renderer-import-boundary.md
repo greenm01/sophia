@@ -358,6 +358,13 @@ but that report stays outside renderer-private state. `LiveScanoutReadinessRepor
 is reduced to ready, output unavailable, presentation unavailable, or degraded.
 It is not a KMS page-flip result and must not contain connector IDs, CRTC IDs,
 plane IDs, framebuffer IDs, fds, paths, driver errors, or framebuffer handles.
+`LiveKmsScanoutTargetReport` is the first reduced KMS target report. It combines
+output availability, reduced frame-target status, and presentation status into
+ready, output unavailable, frame-target unavailable, invalid frame target,
+presentation unavailable, or degraded. It may carry the intended target size,
+but no output ID, connector ID, CRTC ID, plane ID, framebuffer ID, fd, path,
+driver error, or KMS handle. Page-flip readiness is derived from this target
+report so invalid or missing frame targets cannot be treated as ready.
 
 Real GBM-backed validation evidence is reduced through
 `LiveRealGbmSmokeEvidence`. It records only whether the opt-in smoke passed, the
