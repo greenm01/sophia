@@ -216,8 +216,50 @@ impl XAuthorityRuntime {
         }
         response
     }
+
+    pub fn apply_put_image(
+        &self,
+        transaction: TransactionId,
+        namespace: NamespaceId,
+        window: crate::XResourceId,
+        damage: Region,
+        data_len: usize,
+    ) -> XAuthorityResponsePacket {
+        let Some(record) = self.windows.get(window) else {
+            return XAuthorityResponsePacket::rejected(
+                transaction,
+                XAuthorityRuntimeError::UnknownResource,
+            );
+        };
+        let handle = put_image_buffer_handle(window, transaction, data_len);
+        let mut response = XAuthorityResponsePacket::accepted(transaction);
+        match surface_transaction_from_drawing_update(
+            &self.windows,
+            XDrawingUpdate::shm_put_image(
+                transaction,
+                namespace,
+                window,
+                handle,
+                damage,
+                record.generation,
+                250,
+            ),
+        ) {
+            Ok(transaction) => response.transactions.push(transaction),
+            Err(error) => return XAuthorityResponsePacket::rejected(transaction, error.into()),
+        }
+        response
+    }
 }
 
 fn core_draw_buffer_handle(window: crate::XResourceId, transaction: TransactionId) -> u64 {
     window.local.raw().rotate_left(32) ^ transaction.raw()
+}
+
+fn put_image_buffer_handle(
+    window: crate::XResourceId,
+    transaction: TransactionId,
+    data_len: usize,
+) -> u64 {
+    core_draw_buffer_handle(window, transaction) ^ (data_len as u64).rotate_left(17)
 }

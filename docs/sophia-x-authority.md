@@ -318,3 +318,10 @@ compiled Xlib drawing smoke now validates the whole reduced path: `XFillRectangl
 produces one observed transaction, Sophia Engine commits it, and the live
 runtime adapter records one authority transaction without exposing XIDs or
 namespace metadata.
+
+A software image upload smoke now passes through the same path. The authority
+decodes bounded core `PutImage` requests, records the uploaded image extent as
+damage, emits a ready CPU-backed `SurfaceTransaction`, and still sends no direct
+X11 reply on success. The compiled Xlib `XPutImage` smoke validates that the
+observed transaction commits in Sophia Engine and increments Sophia Runtime's
+authority transaction counters.

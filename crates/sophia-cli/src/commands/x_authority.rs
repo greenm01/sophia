@@ -3,6 +3,25 @@ use super::prelude::*;
 pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
     if args
         .iter()
+        .any(|arg| arg == "x-authority-xlib-put-image-smoke")
+    {
+        let report = run_x_authority_xlib_put_image_smoke()?;
+        println!(
+            "x-authority-xlib-put-image-smoke display={} status={} stdout_bytes={} stderr_bytes={} image_ops={} transactions={} runtime_committed={} runtime_surfaces={}",
+            report.display,
+            report.status,
+            report.stdout_bytes,
+            report.stderr_bytes,
+            report.image_ops,
+            report.transactions,
+            report.runtime_committed,
+            report.runtime_surfaces
+        );
+        return Ok(true);
+    }
+
+    if args
+        .iter()
         .any(|arg| arg == "x-authority-xlib-drawing-smoke")
     {
         let report = run_x_authority_xlib_drawing_smoke()?;
@@ -132,6 +151,18 @@ struct XAuthorityXlibDrawingSmokeReport {
     stdout_bytes: usize,
     stderr_bytes: usize,
     draw_ops: usize,
+    transactions: usize,
+    runtime_committed: u64,
+    runtime_surfaces: u64,
+}
+
+#[derive(Clone, Debug)]
+struct XAuthorityXlibPutImageSmokeReport {
+    display: String,
+    status: i32,
+    stdout_bytes: usize,
+    stderr_bytes: usize,
+    image_ops: usize,
     transactions: usize,
     runtime_committed: u64,
     runtime_surfaces: u64,
@@ -436,6 +467,59 @@ fn run_x_authority_xlib_drawing_smoke()
         stdout_bytes: output.stdout.len(),
         stderr_bytes: output.stderr.len(),
         draw_ops,
+        transactions: transactions.len(),
+        runtime_committed: runtime_state.authority_transactions_committed,
+        runtime_surfaces: runtime_state.authority_surfaces_applied,
+    })
+}
+
+fn run_x_authority_xlib_put_image_smoke()
+-> Result<XAuthorityXlibPutImageSmokeReport, Box<dyn std::error::Error>> {
+    let (display, socket_path) = temp_xauthority_display(4600)?;
+    let server_path = socket_path.clone();
+    let server = std::thread::spawn(move || -> Result<Vec<SurfaceTransaction>, String> {
+        let mut transactions = Vec::new();
+        run_x11_core_socket_server_once_observed(
+            &server_path,
+            NamespaceId::from_raw(46),
+            |result| {
+                if let Some(response) = &result.response {
+                    transactions.extend(response.transactions.iter().cloned());
+                }
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(transactions)
+    });
+    wait_for_socket_path(&socket_path)?;
+    let output = run_compiled_xlib_probe(&display, "xlib-put-image", XLIB_PUT_IMAGE_SMOKE_SOURCE)?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let status = output.status.code().unwrap_or(-1);
+    let image_ops = xlib_smoke_field(&stdout, "image_ops").unwrap_or(0);
+
+    let _ = std::fs::remove_file(&socket_path);
+    let transactions = server
+        .join()
+        .map_err(|_| "X authority X11 socket server thread panicked")?
+        .map_err(|error| format!("X authority X11 socket server failed: {error}"))?;
+    let runtime_state = runtime_state_from_observed_transactions(&transactions)?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Xlib PutImage smoke failed for {display}: status={status} stdout={} stderr={}",
+            stdout.trim(),
+            stderr.trim()
+        )
+        .into());
+    }
+
+    Ok(XAuthorityXlibPutImageSmokeReport {
+        display,
+        status,
+        stdout_bytes: output.stdout.len(),
+        stderr_bytes: output.stderr.len(),
+        image_ops,
         transactions: transactions.len(),
         runtime_committed: runtime_state.authority_transactions_committed,
         runtime_surfaces: runtime_state.authority_surfaces_applied,
@@ -967,6 +1051,63 @@ int main(void) {
     XFillRectangle(display, window, gc, 5, 6, 40, 30);
     XSync(display, False);
     printf("window=0x%lx draw_ops=1\n", window);
+    XFreeGC(display, gc);
+    XDestroyWindow(display, window);
+    XCloseDisplay(display);
+    return 0;
+}
+"#;
+
+const XLIB_PUT_IMAGE_SMOKE_SOURCE: &str = r#"
+#include <X11/Xlib.h>
+#include <X11/Xutil.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+int main(void) {
+    Display *display = XOpenDisplay(NULL);
+    if (!display) {
+        fprintf(stderr, "open_display=0\n");
+        return 2;
+    }
+
+    int screen = DefaultScreen(display);
+    Window root = RootWindow(display, screen);
+    Window window = XCreateSimpleWindow(display, root, 10, 20, 240, 160, 0, 0, 0);
+    GC gc = XCreateGC(display, window, 0, NULL);
+    XMapWindow(display, window);
+
+    const int width = 8;
+    const int height = 4;
+    char *data = calloc((size_t)width * (size_t)height, 4);
+    if (!data) {
+        fprintf(stderr, "alloc=0\n");
+        XFreeGC(display, gc);
+        XDestroyWindow(display, window);
+        XCloseDisplay(display);
+        return 3;
+    }
+    for (int i = 0; i < width * height * 4; ++i) {
+        data[i] = (char)(i * 3);
+    }
+
+    XImage *image = XCreateImage(display, DefaultVisual(display, screen),
+                                 DefaultDepth(display, screen), ZPixmap, 0,
+                                 data, width, height, 32, 0);
+    if (!image) {
+        fprintf(stderr, "create_image=0\n");
+        free(data);
+        XFreeGC(display, gc);
+        XDestroyWindow(display, window);
+        XCloseDisplay(display);
+        return 4;
+    }
+
+    XPutImage(display, window, gc, image, 0, 0, 3, 5, width, height);
+    XSync(display, False);
+    printf("window=0x%lx image_ops=1\n", window);
+
+    XDestroyImage(image);
     XFreeGC(display, gc);
     XDestroyWindow(display, window);
     XCloseDisplay(display);

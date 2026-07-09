@@ -1,4 +1,6 @@
-use sophia_protocol::{NamespaceId, Rect, Region, SurfaceConstraints, SurfaceId, TransactionId};
+use sophia_protocol::{
+    BufferSource, NamespaceId, Rect, Region, SurfaceConstraints, SurfaceId, TransactionId,
+};
 use sophia_x_authority::*;
 
 #[test]
@@ -467,6 +469,41 @@ fn x11_core_decoder_captures_poly_fill_rectangle_requests() {
                     height: 9,
                 },
             ],
+        }
+    );
+}
+
+#[test]
+fn x11_core_decoder_captures_put_image_requests() {
+    let namespace = NamespaceId::from_raw(45);
+    let put = decode_x11_core_request(
+        context(namespace, 508, XByteOrder::LittleEndian),
+        &put_image_request(
+            XByteOrder::LittleEndian,
+            0x220020,
+            0x220021,
+            8,
+            4,
+            3,
+            5,
+            &[0xaa; 128],
+        ),
+    )
+    .unwrap();
+
+    assert_eq!(
+        put,
+        XWireRequest::PutImage {
+            format: 2,
+            drawable: XResourceId::new(0x220020, 1),
+            gc: XResourceId::new(0x220021, 1),
+            width: 8,
+            height: 4,
+            dst_x: 3,
+            dst_y: 5,
+            left_pad: 0,
+            depth: 24,
+            data_len: 128,
         }
     );
 }
@@ -1236,6 +1273,69 @@ fn x11_dispatch_poly_fill_rectangle_emits_core_draw_transaction() {
     );
 }
 
+#[test]
+fn x11_dispatch_put_image_emits_software_surface_transaction() {
+    let namespace = NamespaceId::from_raw(46);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let create = decode_x11_core_request(
+        context(namespace, 611, XByteOrder::LittleEndian),
+        &create_window_request(XByteOrder::LittleEndian, 0x220111, 10, 20, 640, 480),
+    )
+    .unwrap();
+    dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 1),
+        create,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    let put = decode_x11_core_request(
+        context(namespace, 612, XByteOrder::LittleEndian),
+        &put_image_request(
+            XByteOrder::LittleEndian,
+            0x220111,
+            0x220112,
+            8,
+            4,
+            3,
+            5,
+            &[0xaa; 128],
+        ),
+    )
+    .unwrap();
+    let put = dispatch_x11_wire_request(
+        dispatch_context(namespace, 2, XByteOrder::LittleEndian, 72),
+        put,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    assert!(put.outputs.is_empty());
+    let response = put.response.unwrap();
+    assert_eq!(response.transactions.len(), 1);
+    assert_eq!(
+        response.transactions[0].surface,
+        SurfaceId::new(0x220111, 1)
+    );
+    assert!(matches!(
+        response.transactions[0].target_buffer,
+        BufferSource::CpuBuffer { .. }
+    ));
+    assert_eq!(
+        response.transactions[0].damage,
+        Region::single(Rect {
+            x: 3,
+            y: 5,
+            width: 8,
+            height: 4,
+        })
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn x11_setup_socket_smoke_completes_handshake() {
@@ -1472,6 +1572,83 @@ fn x11_core_socket_observer_sees_poly_fill_rectangle_transaction() {
     assert_eq!(server.join().unwrap(), 1);
 }
 
+#[cfg(unix)]
+#[test]
+fn x11_core_socket_observer_sees_put_image_transaction() {
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let socket_path = std::env::temp_dir().join(format!(
+        "sophia-x11-put-image-test-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let server_path = socket_path.clone();
+    let server = thread::spawn(move || {
+        let mut transactions = 0usize;
+        run_x11_core_socket_server_once_observed(
+            &server_path,
+            NamespaceId::from_raw(49),
+            |result| {
+                if let Some(response) = &result.response {
+                    transactions = transactions.saturating_add(response.transactions.len());
+                }
+            },
+        )
+        .unwrap();
+        transactions
+    });
+
+    wait_for_socket(&socket_path);
+    let mut stream = UnixStream::connect(&socket_path).unwrap();
+    stream
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    read_setup_success(&mut stream, XByteOrder::LittleEndian);
+
+    stream
+        .write_all(&create_window_request(
+            XByteOrder::LittleEndian,
+            0x220401,
+            1,
+            2,
+            300,
+            200,
+        ))
+        .unwrap();
+    let configure = read_x_record(&mut stream);
+    assert_eq!(configure[0], 22);
+
+    stream
+        .write_all(&create_gc_request(
+            XByteOrder::LittleEndian,
+            0x220402,
+            0x220401,
+        ))
+        .unwrap();
+    stream
+        .write_all(&put_image_request(
+            XByteOrder::LittleEndian,
+            0x220401,
+            0x220402,
+            8,
+            4,
+            3,
+            5,
+            &[0xaa; 128],
+        ))
+        .unwrap();
+
+    drop(stream);
+    let _ = std::fs::remove_file(&socket_path);
+    assert_eq!(server.join().unwrap(), 1);
+}
+
 fn context(namespace: NamespaceId, transaction: u64, byte_order: XByteOrder) -> XWireClientContext {
     XWireClientContext {
         byte_order,
@@ -1669,6 +1846,33 @@ fn poly_fill_rectangle_request(
         push_u16(&mut out, byte_order, *width);
         push_u16(&mut out, byte_order, *height);
     }
+    out
+}
+
+fn put_image_request(
+    byte_order: XByteOrder,
+    drawable: u32,
+    gc: u32,
+    width: u16,
+    height: u16,
+    dst_x: i16,
+    dst_y: i16,
+    data: &[u8],
+) -> Vec<u8> {
+    let mut out = vec![72, 2];
+    let len_units = (24 + padded_len_for_test(data.len())) / 4;
+    push_u16(&mut out, byte_order, len_units as u16);
+    push_u32(&mut out, byte_order, drawable);
+    push_u32(&mut out, byte_order, gc);
+    push_u16(&mut out, byte_order, width);
+    push_u16(&mut out, byte_order, height);
+    push_i16(&mut out, byte_order, dst_x);
+    push_i16(&mut out, byte_order, dst_y);
+    out.push(0);
+    out.push(24);
+    push_u16(&mut out, byte_order, 0);
+    out.extend_from_slice(data);
+    pad_to_four(&mut out);
     out
 }
 

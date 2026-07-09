@@ -9,17 +9,17 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Sophia X Authority: Drawing Surface Coverage
 
 **Now**
-- [ ] Add the first bounded SHM/PutImage request model that emits ready
-  software-backed `SurfaceTransaction` records.
-- [ ] Add a socket or CLI smoke proving a client-visible software drawing path
-  reaches Sophia Runtime counters.
-- [ ] Keep successful drawing requests reply-free unless the X11 request
-  explicitly requires a reply.
+- [ ] Define the first Present-style explicit buffer handoff request model.
+- [ ] Add socket dispatch coverage proving Present-style handoff emits a ready
+  transaction without inventing compositor-owned policy.
+- [ ] Decide whether Present-style handoff should use XPixmap handles first or
+  a placeholder DMA-BUF handle model.
 
 **Next**
 - [ ] Decide whether the long-running X Authority process should keep the
   callback shape or move to a bounded channel owned by the session runtime.
-- [ ] Extend observed transactions to Present-style explicit buffer handoff.
+- [ ] Revisit MIT-SHM extension negotiation after core software upload and
+  Present-style handoff are both modeled.
 
 ---
 
@@ -46,6 +46,11 @@ evidence belong in `docs/research-log.md`.
   adapter as reduced authority commit summaries.
 - [x] Validate the C Xlib drawing smoke through Engine commit and Runtime
   authority transaction counters without leaking XIDs or namespace metadata.
+- [x] Add the first bounded software upload request model with core `PutImage`
+  decoding into ready CPU-backed surface transactions.
+- [x] Pass a compiled C Xlib `XPutImage` smoke through observed transaction,
+  Engine commit, and Runtime authority counters with no direct X reply on
+  success.
 - [ ] Revisit compositor backend work after X Authority can create, map, draw,
   and expose a simple client through the authority transaction model.
 

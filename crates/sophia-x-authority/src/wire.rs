@@ -20,6 +20,7 @@ const X_GET_INPUT_FOCUS: u8 = 43;
 const X_CREATE_GC: u8 = 55;
 const X_FREE_GC: u8 = 60;
 const X_POLY_FILL_RECTANGLE: u8 = 70;
+const X_PUT_IMAGE: u8 = 72;
 const X_QUERY_EXTENSION: u8 = 98;
 const X_LIST_EXTENSIONS: u8 = 99;
 const X_QUERY_BEST_SIZE: u8 = 97;
@@ -37,9 +38,12 @@ const X_GET_INPUT_FOCUS_REQ_LEN: usize = 4;
 const X_CREATE_GC_REQ_LEN: usize = 16;
 const X_FREE_GC_REQ_LEN: usize = 8;
 const X_POLY_FILL_RECTANGLE_REQ_LEN: usize = 12;
+const X_PUT_IMAGE_REQ_LEN: usize = 24;
 const X_QUERY_EXTENSION_REQ_LEN: usize = 8;
 const X_LIST_EXTENSIONS_REQ_LEN: usize = 4;
 const X_QUERY_BEST_SIZE_REQ_LEN: usize = 12;
+
+pub const X_PUT_IMAGE_MAX_DATA_BYTES: usize = crate::X_PROPERTY_MAX_VALUE_BYTES;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct XWireClientContext {
@@ -74,6 +78,18 @@ pub enum XWireRequest {
         drawable: XResourceId,
         gc: XResourceId,
         rectangles: Vec<Rect>,
+    },
+    PutImage {
+        format: u8,
+        drawable: XResourceId,
+        gc: XResourceId,
+        width: u16,
+        height: u16,
+        dst_x: i16,
+        dst_y: i16,
+        left_pad: u8,
+        depth: u8,
+        data_len: usize,
     },
     GetInputFocus,
     QueryExtension {
@@ -161,11 +177,40 @@ pub fn decode_x11_core_request(
         X_CREATE_GC => decode_create_gc(context, bytes),
         X_FREE_GC => decode_free_gc(context, bytes),
         X_POLY_FILL_RECTANGLE => decode_poly_fill_rectangle(context, bytes),
+        X_PUT_IMAGE => decode_put_image(context, bytes),
         X_QUERY_BEST_SIZE => decode_query_best_size(context, bytes),
         X_QUERY_EXTENSION => decode_query_extension(context, bytes),
         X_LIST_EXTENSIONS => decode_list_extensions(bytes),
         other => Err(XWireParseError::UnknownOpcode(other)),
     }
+}
+
+fn decode_put_image(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_len(X_PUT_IMAGE, X_PUT_IMAGE_REQ_LEN, bytes.len())?;
+    validate_wire_image_format(bytes[1])?;
+    let data_len = bytes.len() - X_PUT_IMAGE_REQ_LEN;
+    if data_len > X_PUT_IMAGE_MAX_DATA_BYTES {
+        return Err(XWireParseError::PropertyValueTooLarge {
+            len: data_len,
+            max: X_PUT_IMAGE_MAX_DATA_BYTES,
+        });
+    }
+
+    Ok(XWireRequest::PutImage {
+        format: bytes[1],
+        drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        gc: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
+        width: context.byte_order.u16(&bytes[12..14]),
+        height: context.byte_order.u16(&bytes[14..16]),
+        dst_x: context.byte_order.i16(&bytes[16..18]),
+        dst_y: context.byte_order.i16(&bytes[18..20]),
+        left_pad: bytes[20],
+        depth: bytes[21],
+        data_len,
+    })
 }
 
 fn decode_poly_fill_rectangle(
@@ -506,6 +551,13 @@ fn require_exact_len(opcode: u8, expected: usize, actual: usize) -> Result<(), X
 fn validate_wire_property_format(format: u8) -> Result<(), XWireParseError> {
     match format {
         8 | 16 | 32 => Ok(()),
+        other => Err(XWireParseError::InvalidPropertyFormat(other)),
+    }
+}
+
+fn validate_wire_image_format(format: u8) -> Result<(), XWireParseError> {
+    match format {
+        0..=2 => Ok(()),
         other => Err(XWireParseError::InvalidPropertyFormat(other)),
     }
 }
