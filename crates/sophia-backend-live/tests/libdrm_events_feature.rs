@@ -7,9 +7,9 @@ use sophia_backend_live::{
     LibdrmBackendFdAuthorityReport, LibdrmBackendFdAuthorityStatus,
     LibdrmDependencyAdmissionReport, LibdrmDependencyAdmissionStatus,
     LibdrmNativeEventAdapterReport, LibdrmNativeEventAdapterStatus, LibdrmNativePageFlipSource,
-    LibdrmNativePageFlipSourceReport, LibdrmNativePageFlipSourceStatus,
-    LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller,
-    LiveBackendConfig, LivePageFlipCallback, LivePageFlipCallbackQueue,
+    LibdrmNativePageFlipSourceReport, LibdrmNativePageFlipSourceStatus, LibdrmNativeReadLoopReport,
+    LibdrmNativeReadLoopStatus, LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus,
+    LibdrmPageFlipEventPoller, LiveBackendConfig, LivePageFlipCallback, LivePageFlipCallbackQueue,
     LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus, OutputId,
     QueuedInputPoller, discover_live_backend, libdrm_dependency_admission_report,
     libdrm_fd_authority_report, native_libdrm_event_adapter_report,
@@ -75,6 +75,37 @@ fn native_libdrm_page_flip_source_constructs_from_authority_without_reading_even
         LibdrmNativePageFlipSourceReport {
             status: LibdrmNativePageFlipSourceStatus::ConstructedWithoutPolling,
         }
+    );
+}
+
+#[test]
+fn native_libdrm_read_loop_result_maps_to_reduced_poll_report() {
+    assert_eq!(
+        LibdrmNativeReadLoopReport::idle().into_poll_report().status,
+        LibdrmPageFlipEventPollStatus::Idle
+    );
+    assert_eq!(
+        LibdrmNativeReadLoopReport::would_block()
+            .into_poll_report()
+            .status,
+        LibdrmPageFlipEventPollStatus::Idle
+    );
+
+    let decoded =
+        LibdrmNativeReadLoopReport::callback_decoded(3).expect("decoded count must be nonzero");
+    assert_eq!(decoded.status, LibdrmNativeReadLoopStatus::CallbackDecoded);
+    assert_eq!(decoded.into_poll_report().callbacks.emitted, 3);
+    assert_eq!(
+        decoded.into_poll_report().status,
+        LibdrmPageFlipEventPollStatus::Emitted
+    );
+
+    assert_eq!(LibdrmNativeReadLoopReport::callback_decoded(0), None);
+    assert_eq!(
+        LibdrmNativeReadLoopReport::read_failed()
+            .into_poll_report()
+            .status,
+        LibdrmPageFlipEventPollStatus::Disconnected
     );
 }
 

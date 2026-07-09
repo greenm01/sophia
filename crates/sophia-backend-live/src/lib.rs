@@ -548,6 +548,71 @@ pub enum LibdrmNativePageFlipSourceStatus {
 
 #[cfg(feature = "libdrm-events")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LibdrmNativeReadLoopReport {
+    pub status: LibdrmNativeReadLoopStatus,
+    pub decoded_callbacks: usize,
+}
+
+#[cfg(feature = "libdrm-events")]
+impl LibdrmNativeReadLoopReport {
+    pub const fn idle() -> Self {
+        Self {
+            status: LibdrmNativeReadLoopStatus::Idle,
+            decoded_callbacks: 0,
+        }
+    }
+
+    pub const fn would_block() -> Self {
+        Self {
+            status: LibdrmNativeReadLoopStatus::WouldBlock,
+            decoded_callbacks: 0,
+        }
+    }
+
+    pub const fn callback_decoded(decoded_callbacks: usize) -> Option<Self> {
+        if decoded_callbacks == 0 {
+            return None;
+        }
+
+        Some(Self {
+            status: LibdrmNativeReadLoopStatus::CallbackDecoded,
+            decoded_callbacks,
+        })
+    }
+
+    pub const fn read_failed() -> Self {
+        Self {
+            status: LibdrmNativeReadLoopStatus::ReadFailed,
+            decoded_callbacks: 0,
+        }
+    }
+
+    pub fn into_poll_report(self) -> LibdrmPageFlipEventPollReport {
+        LibdrmPageFlipEventPollReport::from_source_report(LivePageFlipCallbackSourceReport {
+            emitted: if matches!(self.status, LibdrmNativeReadLoopStatus::CallbackDecoded) {
+                self.decoded_callbacks
+            } else {
+                0
+            },
+            queued_remaining: 0,
+            backpressure: false,
+            disconnected: matches!(self.status, LibdrmNativeReadLoopStatus::ReadFailed),
+            max_reached: false,
+        })
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibdrmNativeReadLoopStatus {
+    Idle,
+    WouldBlock,
+    CallbackDecoded,
+    ReadFailed,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LibdrmBackendFdAuthority {
     generation: u64,
 }

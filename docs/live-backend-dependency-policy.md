@@ -195,6 +195,12 @@ yet, and it must not be wired into runtime page-flip intake until a bounded
 native read loop can preserve the existing callback queue and reduced poll
 report contracts.
 
+`LibdrmNativeReadLoopReport` defines that reduced read-loop vocabulary before
+real fd polling exists. Native idle and would-block states collapse to an idle
+poll report, decoded callbacks become an emitted poll report with only a count,
+and read failure becomes a disconnected poll report. The mapping carries no
+native errno, fd, CRTC, connector, or raw event identity.
+
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
 authority. On Linux, wgpu will usually target Vulkan, but Sophia must first prove
