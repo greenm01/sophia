@@ -1,7 +1,7 @@
 use sophia_renderer_live::{
-    BufferImportPath, BufferSource, LiveRendererImportBoundary, LiveRendererImportDecision,
-    LiveRendererImportHealth, LiveRendererImportPathStatus, LiveRendererImportRejection,
-    LiveRendererImportStartupStatus, LiveRendererRuntimeObservation,
+    BufferImportPath, BufferSource, FakeLiveRendererCapabilityProbe, LiveRendererImportBoundary,
+    LiveRendererImportDecision, LiveRendererImportHealth, LiveRendererImportPathStatus,
+    LiveRendererImportRejection, LiveRendererImportStartupStatus, LiveRendererRuntimeObservation,
     LiveRendererSelectionObservation,
 };
 
@@ -85,6 +85,40 @@ fn runtime_observation_reports_reduced_renderer_selection_without_handles() {
             xpixmap: LiveRendererImportPathStatus::Enabled,
             dmabuf: LiveRendererImportPathStatus::Disabled,
             selection: LiveRendererSelectionObservation::NativeImportCapable,
+        }
+    );
+}
+
+#[test]
+fn fake_capability_probe_can_report_degraded_native_import_without_real_gpu_deps() {
+    let probe = FakeLiveRendererCapabilityProbe::new(
+        LiveRendererImportPathStatus::Degraded,
+        LiveRendererImportPathStatus::Disabled,
+    );
+
+    assert_eq!(
+        probe.startup_status(),
+        LiveRendererImportStartupStatus {
+            health: LiveRendererImportHealth::Degraded,
+            xpixmap: LiveRendererImportPathStatus::Degraded,
+            dmabuf: LiveRendererImportPathStatus::Disabled,
+        }
+    );
+}
+
+#[test]
+fn degraded_path_status_takes_precedence_over_partial_native_import() {
+    let probe = FakeLiveRendererCapabilityProbe::new(
+        LiveRendererImportPathStatus::Enabled,
+        LiveRendererImportPathStatus::Degraded,
+    );
+
+    assert_eq!(
+        probe.startup_status(),
+        LiveRendererImportStartupStatus {
+            health: LiveRendererImportHealth::Degraded,
+            xpixmap: LiveRendererImportPathStatus::Enabled,
+            dmabuf: LiveRendererImportPathStatus::Degraded,
         }
     );
 }

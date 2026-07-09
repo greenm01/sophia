@@ -55,6 +55,11 @@ observation beside the engine's protocol-neutral tick report. The engine remains
 free of renderer-live dependencies, and runtime consumers still learn whether
 the session is using CPU fallback or a native import-capable renderer.
 
+Degraded renderer health is currently modeled through deterministic fake
+capability probes in `sophia-renderer-live`. That lets Sophia exercise reduced
+failure shape before adding GBM, EGL, DMA-BUF, explicit sync, or renderer-private
+resource caches.
+
 Real MIT-SHM mapping remains outside this boundary until Sophia has a bounded
 shared-memory upload path with size checks, namespace validation, lifetime
 tracking, and fail-closed errors.

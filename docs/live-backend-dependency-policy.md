@@ -39,6 +39,9 @@ namespace validation, size checks, lifetime tracking, and fail-closed errors.
 
 - `sophia-engine` remains dependency-neutral for kernel, GPU, and protocol IO.
 - Every new live dependency must have a deterministic fixture or fake backend.
+- Native renderer dependencies must have deterministic fake degraded coverage in
+  `sophia-renderer-live` before real GBM, EGL, DMA-BUF, or explicit sync code is
+  admitted.
 - Every live failure must return a reduced status report instead of panicking or
   partially starting the session.
 - Discovery, input polling, renderer import, and shared-memory import stay

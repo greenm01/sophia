@@ -59,23 +59,18 @@ impl LiveRendererImportBoundary {
     }
 
     pub fn startup_status(self) -> LiveRendererImportStartupStatus {
-        LiveRendererImportStartupStatus {
-            health: if self.import_xpixmap || self.import_dmabuf {
-                LiveRendererImportHealth::NativeImportCapable
-            } else {
-                LiveRendererImportHealth::CpuFallback
-            },
-            xpixmap: if self.import_xpixmap {
+        LiveRendererImportStartupStatus::from_path_statuses(
+            if self.import_xpixmap {
                 LiveRendererImportPathStatus::Enabled
             } else {
                 LiveRendererImportPathStatus::Disabled
             },
-            dmabuf: if self.import_dmabuf {
+            if self.import_dmabuf {
                 LiveRendererImportPathStatus::Enabled
             } else {
                 LiveRendererImportPathStatus::Disabled
             },
-        }
+        )
     }
 }
 
@@ -111,6 +106,19 @@ pub struct LiveRendererImportStartupStatus {
     pub dmabuf: LiveRendererImportPathStatus,
 }
 
+impl LiveRendererImportStartupStatus {
+    pub fn from_path_statuses(
+        xpixmap: LiveRendererImportPathStatus,
+        dmabuf: LiveRendererImportPathStatus,
+    ) -> Self {
+        Self {
+            health: renderer_health_from_path_statuses(xpixmap, dmabuf),
+            xpixmap,
+            dmabuf,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LiveRendererImportHealth {
     CpuFallback,
@@ -123,6 +131,41 @@ pub enum LiveRendererImportPathStatus {
     Disabled,
     Enabled,
     Degraded,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FakeLiveRendererCapabilityProbe {
+    pub xpixmap: LiveRendererImportPathStatus,
+    pub dmabuf: LiveRendererImportPathStatus,
+}
+
+impl FakeLiveRendererCapabilityProbe {
+    pub const fn new(
+        xpixmap: LiveRendererImportPathStatus,
+        dmabuf: LiveRendererImportPathStatus,
+    ) -> Self {
+        Self { xpixmap, dmabuf }
+    }
+
+    pub fn startup_status(self) -> LiveRendererImportStartupStatus {
+        LiveRendererImportStartupStatus::from_path_statuses(self.xpixmap, self.dmabuf)
+    }
+}
+
+fn renderer_health_from_path_statuses(
+    xpixmap: LiveRendererImportPathStatus,
+    dmabuf: LiveRendererImportPathStatus,
+) -> LiveRendererImportHealth {
+    match (xpixmap, dmabuf) {
+        (LiveRendererImportPathStatus::Degraded, _)
+        | (_, LiveRendererImportPathStatus::Degraded) => LiveRendererImportHealth::Degraded,
+        (LiveRendererImportPathStatus::Enabled, _) | (_, LiveRendererImportPathStatus::Enabled) => {
+            LiveRendererImportHealth::NativeImportCapable
+        }
+        (LiveRendererImportPathStatus::Disabled, LiveRendererImportPathStatus::Disabled) => {
+            LiveRendererImportHealth::CpuFallback
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
