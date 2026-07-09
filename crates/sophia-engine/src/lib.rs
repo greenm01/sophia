@@ -136,6 +136,16 @@ pub struct SurfaceVisualStateTable {
     entries: BTreeMap<SurfaceId, SurfaceVisualStateEntry>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SurfaceTransactionCommitReadiness {
+    Ready,
+    InvalidSurface,
+    EmptyGeometry,
+    MissingBuffer,
+    NotReady(SurfaceTransactionReadiness),
+    StaleGeneration { current: u64, expected: u64 },
+}
+
 impl SurfaceVisualStateTable {
     pub fn new() -> Self {
         Self::default()
@@ -179,6 +189,35 @@ impl SurfaceVisualStateTable {
             .values()
             .filter_map(|entry| entry.pending.clone())
             .collect()
+    }
+
+    pub fn transaction_commit_readiness(
+        &self,
+        transaction: &SurfaceTransaction,
+    ) -> SurfaceTransactionCommitReadiness {
+        if !transaction.surface.is_valid() {
+            return SurfaceTransactionCommitReadiness::InvalidSurface;
+        }
+        if transaction.target_geometry.is_empty() {
+            return SurfaceTransactionCommitReadiness::EmptyGeometry;
+        }
+        if matches!(transaction.target_buffer, BufferSource::None) {
+            return SurfaceTransactionCommitReadiness::MissingBuffer;
+        }
+        if transaction.readiness != SurfaceTransactionReadiness::Ready {
+            return SurfaceTransactionCommitReadiness::NotReady(transaction.readiness);
+        }
+
+        let current = self
+            .committed(transaction.surface)
+            .map(|state| state.committed_generation)
+            .unwrap_or(0);
+        let expected = transaction.previous_committed_generation;
+        if current != expected {
+            return SurfaceTransactionCommitReadiness::StaleGeneration { current, expected };
+        }
+
+        SurfaceTransactionCommitReadiness::Ready
     }
 
     pub fn upsert_committed(&mut self, committed: CommittedSurfaceState) {
@@ -2571,11 +2610,7 @@ impl HeadlessEngine {
             .map(|surface_transaction| surface_transaction.surface)
             .collect::<Vec<_>>();
 
-        let indexes = committed
-            .iter()
-            .enumerate()
-            .map(|(index, state)| (state.surface, index))
-            .collect::<BTreeMap<_, _>>();
+        let visual_state = SurfaceVisualStateTable::from_committed_states(committed.clone());
 
         for surface_transaction in transactions {
             if surface_transaction.transaction != transaction {
@@ -2591,21 +2626,11 @@ impl HeadlessEngine {
                 };
             }
 
-            if !surface_transaction.surface.is_valid() {
-                warn!(
-                    transaction = transaction.raw(),
-                    "rejected authority transaction with invalid surface"
-                );
-                return TransactionCommit {
-                    transaction,
-                    outcome: TransactionOutcome::RejectedInvalidSurface,
-                    applied_surfaces: Vec::new(),
-                };
-            }
-
-            match surface_transaction.readiness {
-                SurfaceTransactionReadiness::Ready => {}
-                SurfaceTransactionReadiness::Pending | SurfaceTransactionReadiness::TimedOut => {
+            match visual_state.transaction_commit_readiness(surface_transaction) {
+                SurfaceTransactionCommitReadiness::Ready => {}
+                SurfaceTransactionCommitReadiness::NotReady(
+                    SurfaceTransactionReadiness::Pending | SurfaceTransactionReadiness::TimedOut,
+                ) => {
                     warn!(
                         transaction = transaction.raw(),
                         surface_index = surface_transaction.surface.index(),
@@ -2618,7 +2643,9 @@ impl HeadlessEngine {
                         applied_surfaces: Vec::new(),
                     };
                 }
-                SurfaceTransactionReadiness::Failed => {
+                SurfaceTransactionCommitReadiness::NotReady(
+                    SurfaceTransactionReadiness::Failed,
+                ) => {
                     warn!(
                         transaction = transaction.raw(),
                         surface_index = surface_transaction.surface.index(),
@@ -2630,27 +2657,37 @@ impl HeadlessEngine {
                         applied_surfaces: Vec::new(),
                     };
                 }
-            }
-
-            let current_generation = indexes
-                .get(&surface_transaction.surface)
-                .map(|index| committed[*index].committed_generation)
-                .unwrap_or(0);
-
-            if current_generation != surface_transaction.previous_committed_generation {
-                warn!(
-                    transaction = transaction.raw(),
-                    surface_index = surface_transaction.surface.index(),
-                    current_generation,
-                    previous_committed_generation =
-                        surface_transaction.previous_committed_generation,
-                    "rejected stale authority transaction"
-                );
-                return TransactionCommit {
-                    transaction,
-                    outcome: TransactionOutcome::RejectedStaleSurface,
-                    applied_surfaces: Vec::new(),
-                };
+                SurfaceTransactionCommitReadiness::InvalidSurface
+                | SurfaceTransactionCommitReadiness::EmptyGeometry
+                | SurfaceTransactionCommitReadiness::MissingBuffer
+                | SurfaceTransactionCommitReadiness::NotReady(SurfaceTransactionReadiness::Ready) =>
+                {
+                    warn!(
+                        transaction = transaction.raw(),
+                        surface_index = surface_transaction.surface.index(),
+                        readiness = ?visual_state.transaction_commit_readiness(surface_transaction),
+                        "rejected malformed authority transaction"
+                    );
+                    return TransactionCommit {
+                        transaction,
+                        outcome: TransactionOutcome::RejectedInvalidSurface,
+                        applied_surfaces: Vec::new(),
+                    };
+                }
+                SurfaceTransactionCommitReadiness::StaleGeneration { current, expected } => {
+                    warn!(
+                        transaction = transaction.raw(),
+                        surface_index = surface_transaction.surface.index(),
+                        current_generation = current,
+                        previous_committed_generation = expected,
+                        "rejected stale authority transaction"
+                    );
+                    return TransactionCommit {
+                        transaction,
+                        outcome: TransactionOutcome::RejectedStaleSurface,
+                        applied_surfaces: Vec::new(),
+                    };
+                }
             }
         }
 

@@ -10,10 +10,10 @@ use sophia_engine::{
     MetadataChromeUpdate, NotificationChromePresenter, NotificationChromeRejectReason,
     NotificationChromeUpdate, RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction,
     RoutedInputRequestError, SanitizedChromeMetadata, SessionCommand, SessionEvent,
-    SessionLayerSource, SessionTickRequest, SurfaceVisualStateTable, WmIpcError, WmRestartReason,
-    WmRuntimeAction, WmTransactionUpdate, explicit_sync_surfaces, hit_test_scene_for_input,
-    layout_epoch_for_explicit_sync, measure_resize_behavior,
-    notification_chrome_command_from_portal, request_wm_over_stream,
+    SessionLayerSource, SessionTickRequest, SurfaceTransactionCommitReadiness,
+    SurfaceVisualStateTable, WmIpcError, WmRestartReason, WmRuntimeAction, WmTransactionUpdate,
+    explicit_sync_surfaces, hit_test_scene_for_input, layout_epoch_for_explicit_sync,
+    measure_resize_behavior, notification_chrome_command_from_portal, request_wm_over_stream,
     routed_input_request_from_physical_event, routed_input_requests_from_flush,
     runtime_observation_from_authority_transaction_commit,
     runtime_observation_from_metadata_chrome_updates,
@@ -641,6 +641,97 @@ fn surface_visual_state_table_rejects_invalid_pending_surface() {
         Err(EngineError::InvalidSurface)
     );
     assert!(table.is_empty());
+}
+
+#[test]
+fn surface_transaction_readiness_requires_ready_buffer_and_geometry() {
+    let engine = HeadlessEngine::default();
+    let old_layer = test_layer(0, 0, 0, Region::empty());
+    let committed = engine.committed_state_from_layer(&old_layer);
+    let table = SurfaceVisualStateTable::from_committed_states([committed.clone()]);
+    let ready = old_layer.to_surface_transaction(
+        TransactionId::from_raw(83),
+        AuthorityKind::SophiaX,
+        SurfaceTransactionReadiness::Ready,
+        250,
+        committed.committed_generation,
+    );
+    let mut pending = ready.clone();
+    pending.readiness = SurfaceTransactionReadiness::Pending;
+    let mut missing_buffer = ready.clone();
+    missing_buffer.target_buffer = BufferSource::None;
+    let mut empty_geometry = ready.clone();
+    empty_geometry.target_geometry.width = 0;
+    let mut stale = ready.clone();
+    stale.previous_committed_generation = 99;
+
+    assert_eq!(
+        table.transaction_commit_readiness(&ready),
+        SurfaceTransactionCommitReadiness::Ready
+    );
+    assert_eq!(
+        table.transaction_commit_readiness(&pending),
+        SurfaceTransactionCommitReadiness::NotReady(SurfaceTransactionReadiness::Pending)
+    );
+    assert_eq!(
+        table.transaction_commit_readiness(&missing_buffer),
+        SurfaceTransactionCommitReadiness::MissingBuffer
+    );
+    assert_eq!(
+        table.transaction_commit_readiness(&empty_geometry),
+        SurfaceTransactionCommitReadiness::EmptyGeometry
+    );
+    assert_eq!(
+        table.transaction_commit_readiness(&stale),
+        SurfaceTransactionCommitReadiness::StaleGeneration {
+            current: committed.committed_generation,
+            expected: 99
+        }
+    );
+}
+
+#[test]
+fn malformed_surface_transactions_do_not_commit_visual_state() {
+    let engine = HeadlessEngine::default();
+    let old_layer = test_layer(0, 0, 0, Region::empty());
+    let mut committed = vec![engine.committed_state_from_layer(&old_layer)];
+    let before = committed.clone();
+    let mut missing_buffer = old_layer.to_surface_transaction(
+        TransactionId::from_raw(84),
+        AuthorityKind::SophiaX,
+        SurfaceTransactionReadiness::Ready,
+        250,
+        before[0].committed_generation,
+    );
+    missing_buffer.target_buffer = BufferSource::None;
+
+    let commit = engine.commit_surface_transactions(
+        TransactionId::from_raw(84),
+        &[missing_buffer],
+        &mut committed,
+    );
+
+    assert_eq!(commit.outcome, TransactionOutcome::RejectedInvalidSurface);
+    assert!(commit.applied_surfaces.is_empty());
+    assert_eq!(committed, before);
+
+    let mut empty_geometry = old_layer.to_surface_transaction(
+        TransactionId::from_raw(85),
+        AuthorityKind::SophiaX,
+        SurfaceTransactionReadiness::Ready,
+        250,
+        before[0].committed_generation,
+    );
+    empty_geometry.target_geometry.height = 0;
+    let commit = engine.commit_surface_transactions(
+        TransactionId::from_raw(85),
+        &[empty_geometry],
+        &mut committed,
+    );
+
+    assert_eq!(commit.outcome, TransactionOutcome::RejectedInvalidSurface);
+    assert!(commit.applied_surfaces.is_empty());
+    assert_eq!(committed, before);
 }
 
 #[test]
