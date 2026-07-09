@@ -42,6 +42,18 @@ impl RenderDeviceDiscoveryBackend for InvalidRenderDevice {
     }
 }
 
+struct ExplicitRenderDevice {
+    path: PathBuf,
+}
+
+impl RenderDeviceDiscoveryBackend for ExplicitRenderDevice {
+    type Device = std::fs::File;
+
+    fn open_render_device(&self) -> io::Result<Self::Device> {
+        std::fs::File::open(&self.path)
+    }
+}
+
 #[test]
 fn gbm_probe_keeps_default_startup_on_cpu_fallback() {
     let config = LiveBackendConfig::new("/does/not/matter");
@@ -162,6 +174,41 @@ fn gbm_probe_distinguishes_allocation_failure_from_device_discovery_failure() {
 }
 
 #[test]
+fn gbm_probe_smokes_real_render_device_when_host_exposes_one() {
+    if std::env::var_os("SOPHIA_RUN_REAL_GBM_SMOKE").is_none() {
+        return;
+    }
+
+    let Some(render_device_path) = first_openable_render_node() else {
+        return;
+    };
+    let config = LiveBackendConfig::new("/does/not/matter").with_renderer_import_boundary(
+        LiveRendererImportBoundary::with_native_imports(false, true),
+    );
+    let report = discover_live_backend(&config);
+    let probe = report.renderer_probe_report_with_gbm_device(&ExplicitRenderDevice {
+        path: render_device_path,
+    });
+
+    assert_eq!(
+        probe.render_device,
+        LiveRenderDeviceDiscoveryReport {
+            status: LiveRenderDeviceDiscoveryStatus::Opened,
+        }
+    );
+    assert!(matches!(
+        probe.gpu_startup.status,
+        LiveGpuStartupStatus::NativeCapable
+            | LiveGpuStartupStatus::GbmDeviceRejected
+            | LiveGpuStartupStatus::PrivateAllocationUnavailable
+    ));
+    assert_ne!(
+        probe.gpu_startup.status,
+        LiveGpuStartupStatus::RenderDeviceUnavailable
+    );
+}
+
+#[test]
 fn gbm_probe_preserves_xpixmap_status_when_dmabuf_degrades() {
     let config = LiveBackendConfig::new("/does/not/matter")
         .with_renderer_import_boundary(LiveRendererImportBoundary::with_native_imports(true, true));
@@ -241,6 +288,24 @@ fn ready_drm_sysfs_fixture(name: &str) -> PathBuf {
     write_fixture_file(&connector, "status", "connected\n");
     write_fixture_file(&connector, "modes", "1280x720\n");
     root
+}
+
+fn first_openable_render_node() -> Option<PathBuf> {
+    let entries = fs::read_dir("/dev/dri").ok()?;
+    let mut candidates = Vec::new();
+
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+        if file_name.starts_with("renderD") {
+            candidates.push(entry.path());
+        }
+    }
+
+    candidates.sort();
+    candidates
+        .into_iter()
+        .find(|path| std::fs::File::open(path).is_ok())
 }
 
 fn write_fixture_file(root: &Path, name: &str, contents: &str) {

@@ -25,6 +25,13 @@ boundary reduced to capability health. This command must remain optional, and
 the default workspace suite must continue to pass without native renderer
 feature flags.
 
+The backend-live GBM feature suite includes an opt-in real-device smoke. Set
+`SOPHIA_RUN_REAL_GBM_SMOKE=1` to let the test look for an openable
+`/dev/dri/renderD*` node, route that backend-owned fd-like authority through the
+GBM probe, and assert only reduced startup status. Without that environment
+variable, the smoke returns early. This keeps CI deterministic and avoids
+letting native driver crashes fail ordinary validation.
+
 When touching renderer-native code, run both paths:
 
 ```sh

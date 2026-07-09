@@ -10,8 +10,6 @@ evidence belong in `docs/research-log.md`.
 
 **Now**
 - [ ] Decide when to introduce EGL or wgpu above the GBM platform boundary.
-- [ ] Add explicit backend-owned fd injection smoke coverage around a real
-  render device when the host test environment exposes one.
 
 **Next**
 - [ ] Choose whether the first compositor drawing API above GBM is EGL/OpenGL,
@@ -183,6 +181,8 @@ evidence belong in `docs/research-log.md`.
 - [x] Add a reduced GPU startup report that distinguishes render-device
   discovery failure from GBM device rejection and private allocation failure
   without leaking native error text.
+- [x] Add opt-in backend-owned fd injection smoke coverage around a real render
+  device when the host test environment exposes one.
 
 ---
 
