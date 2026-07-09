@@ -315,6 +315,7 @@ dependencies = [
 name = "sophia-renderer-native-egl"
 version = "0.1.0"
 dependencies = [
+ "gbm",
  "glow",
  "khronos-egl",
 ]

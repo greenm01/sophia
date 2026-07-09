@@ -76,7 +76,9 @@ boundary.
 path must be GBM-backed EGL: backend-live owns render-device authority,
 renderer-live proves GBM capability, and the native EGL adapter creates and
 tears down the EGL display from private GBM state while exposing only reduced
-platform status.
+platform status. The first native GBM-backed EGL platform smoke now stops at
+display initialize/terminate. It does not create surfaces, export buffers,
+present frames, or replace the `DEFAULT_DISPLAY` clear-color fallback.
 
 Presentation is the next renderer boundary after private drawing. The admitted
 public shape is a reduced renderer-live report: ready, unavailable, or degraded.

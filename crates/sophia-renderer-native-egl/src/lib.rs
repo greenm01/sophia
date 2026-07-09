@@ -5,6 +5,9 @@ use std::{
     ptr,
 };
 
+#[cfg(feature = "gbm-platform")]
+const EGL_PLATFORM_GBM_KHR: khronos_egl::Enum = 0x31D7;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeEglProbeStatus {
     NativeDrawingCapable,
@@ -24,6 +27,14 @@ pub enum NativeEglDrawSmokeStatus {
     GlUnavailable,
 }
 
+#[cfg(feature = "gbm-platform")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeGbmBackedEglPlatformStatus {
+    NativePlatformCapable,
+    PlatformUnavailable,
+    PlatformDegraded,
+}
+
 pub fn probe_default_display_context() -> NativeEglProbeStatus {
     match probe_context() {
         Ok(()) => NativeEglProbeStatus::NativeDrawingCapable,
@@ -35,6 +46,19 @@ pub fn smoke_default_display_pbuffer() -> NativeEglDrawSmokeStatus {
     match smoke_pbuffer() {
         Ok(()) => NativeEglDrawSmokeStatus::ClearColorReady,
         Err(error) => error,
+    }
+}
+
+#[cfg(feature = "gbm-platform")]
+pub fn probe_gbm_backed_platform_from_backend_device_result<T: std::os::fd::AsFd>(
+    device: std::io::Result<T>,
+) -> NativeGbmBackedEglPlatformStatus {
+    match device {
+        Ok(device) => match probe_gbm_backed_platform(device) {
+            Ok(()) => NativeGbmBackedEglPlatformStatus::NativePlatformCapable,
+            Err(error) => error,
+        },
+        Err(_error) => NativeGbmBackedEglPlatformStatus::PlatformUnavailable,
     }
 }
 
@@ -151,6 +175,34 @@ fn smoke_current_gl_context(
     } else {
         Err(NativeEglDrawSmokeStatus::GlUnavailable)
     }
+}
+
+#[cfg(feature = "gbm-platform")]
+fn probe_gbm_backed_platform<T: std::os::fd::AsFd>(
+    device: T,
+) -> Result<(), NativeGbmBackedEglPlatformStatus> {
+    use gbm::AsRaw as _;
+
+    let gbm_device = gbm::Device::new(device)
+        .map_err(|_error| NativeGbmBackedEglPlatformStatus::PlatformDegraded)?;
+    let egl = unsafe { khronos_egl::DynamicInstance::<khronos_egl::EGL1_5>::load_required() }
+        .map_err(|_error| NativeGbmBackedEglPlatformStatus::PlatformUnavailable)?;
+
+    let native_display = gbm_device.as_raw() as khronos_egl::NativeDisplayType;
+    let display = unsafe {
+        egl.get_platform_display(
+            EGL_PLATFORM_GBM_KHR,
+            native_display,
+            &[khronos_egl::ATTRIB_NONE],
+        )
+    }
+    .map_err(|_error| NativeGbmBackedEglPlatformStatus::PlatformUnavailable)?;
+
+    egl.initialize(display)
+        .map_err(|_error| NativeGbmBackedEglPlatformStatus::PlatformDegraded)?;
+    let _ = egl.terminate(display);
+
+    Ok(())
 }
 
 fn config_attributes() -> [khronos_egl::Int; 13] {

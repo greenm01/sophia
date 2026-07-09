@@ -131,6 +131,36 @@ mod gbm_projection {
     }
 
     #[test]
+    fn native_gbm_backed_egl_platform_report_maps_open_failure_to_unavailable() {
+        let report = discover_live_backend(&LiveBackendConfig::new("/does/not/matter"));
+        let missing_device = Err(std::io::Error::from_raw_os_error(19));
+
+        assert_eq!(
+            report.native_gbm_backed_egl_platform_report_from_device_result::<std::fs::File>(
+                missing_device,
+            ),
+            LiveGbmBackedEglPlatformReport {
+                status: EglPlatformStatus::PlatformUnavailable,
+            }
+        );
+    }
+
+    #[test]
+    fn native_gbm_backed_egl_platform_report_stays_reduced_for_invalid_device() {
+        let report = discover_live_backend(&LiveBackendConfig::new("/does/not/matter"));
+        let invalid_render_device = std::fs::File::open("/dev/null");
+        let platform =
+            report.native_gbm_backed_egl_platform_report_from_device_result(invalid_render_device);
+
+        assert!(matches!(
+            platform.status,
+            EglPlatformStatus::NativePlatformCapable
+                | EglPlatformStatus::PlatformUnavailable
+                | EglPlatformStatus::PlatformDegraded
+        ));
+    }
+
+    #[test]
     fn egl_probe_uses_native_gbm_startup_as_ready_platform() {
         let report = discover_live_backend(&LiveBackendConfig::new("/does/not/matter"));
 

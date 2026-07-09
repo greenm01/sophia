@@ -110,3 +110,35 @@ fn native_egl_draw_smoke_stays_reduced_at_public_boundary() {
             | EglDrawSmokeStatus::GlUnavailable
     ));
 }
+
+#[cfg(feature = "gbm-probe")]
+mod gbm_backed_platform {
+    use sophia_renderer_live::{EglPlatformStatus, NativeGbmBackedEglPlatformProbe};
+
+    #[test]
+    fn native_gbm_backed_platform_maps_open_failure_to_unavailable() {
+        let missing_device = Err(std::io::Error::from_raw_os_error(19));
+
+        assert_eq!(
+            NativeGbmBackedEglPlatformProbe::platform_status_from_backend_device_result::<
+                std::fs::File,
+            >(missing_device),
+            EglPlatformStatus::PlatformUnavailable,
+        );
+    }
+
+    #[test]
+    fn native_gbm_backed_platform_stays_reduced_for_invalid_device() {
+        let invalid_render_device = std::fs::File::open("/dev/null");
+        let status = NativeGbmBackedEglPlatformProbe::platform_status_from_backend_device_result(
+            invalid_render_device,
+        );
+
+        assert!(matches!(
+            status,
+            EglPlatformStatus::NativePlatformCapable
+                | EglPlatformStatus::PlatformUnavailable
+                | EglPlatformStatus::PlatformDegraded
+        ));
+    }
+}

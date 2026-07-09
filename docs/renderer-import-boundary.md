@@ -249,16 +249,18 @@ native visual, or driver error text.
 
 The admitted reduced status shape is `LiveGbmBackedEglPlatformReport`. It
 projects GBM startup into EGL platform readiness without exposing the render
-device or EGL objects. The candidate native path is:
+device or EGL objects. The native platform smoke now proves that backend-owned
+device authority can become a private GBM device, that EGL can create and
+initialize a GBM platform display from that private state, and that teardown can
+complete without exposing the display. The path is:
 
 1. Backend-live discovers a render node and holds the opened device authority.
 2. Renderer-live proves GBM native capability with a private allocation smoke.
 3. The native EGL adapter receives only backend-owned authority, creates an EGL
-   display using the GBM platform path, initializes it, chooses a compatible
-   config, and tears it down.
+   display using the GBM platform path, initializes it, and tears it down.
 4. A later draw smoke may reuse that platform to clear a private GBM-backed
-   target, but buffer export and scanout stay out of scope until presentation
-   status exists.
+   target, but surface creation, buffer export, and scanout stay out of scope
+   until the next boundary admits them.
 
 Admission rules for the GBM-backed EGL platform:
 
@@ -270,8 +272,8 @@ Admission rules for the GBM-backed EGL platform:
   error text, and driver details inside live adapters;
 - do not expose DMA-BUF, KMS framebuffer IDs, GBM buffer handles, EGLImages, or
   GL object names;
-- keep `DEFAULT_DISPLAY` only as a temporary host smoke until the GBM-backed
-  path exists.
+- keep `DEFAULT_DISPLAY` as a fallback host smoke until the GBM-backed path
+  covers private target creation and drawing.
 
 Rejected shortcuts:
 

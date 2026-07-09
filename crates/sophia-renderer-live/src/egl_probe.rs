@@ -64,6 +64,19 @@ impl NativeEglDrawSmoke {
     }
 }
 
+#[cfg(feature = "gbm-probe")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeGbmBackedEglPlatformProbe;
+
+#[cfg(feature = "gbm-probe")]
+impl NativeGbmBackedEglPlatformProbe {
+    pub fn platform_status_from_backend_device_result<T: std::os::fd::AsFd>(
+        device: std::io::Result<T>,
+    ) -> EglPlatformStatus {
+        native::gbm_backed_platform_status_from_backend_device_result(device)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EglCapabilityProbeReport {
     pub status: EglCapabilityProbeStatus,
@@ -194,6 +207,25 @@ mod native {
             }
             sophia_renderer_native_egl::NativeEglDrawSmokeStatus::GlUnavailable => {
                 EglDrawSmokeResult::GlUnavailable
+            }
+        }
+    }
+
+    #[cfg(feature = "gbm-probe")]
+    pub(super) fn gbm_backed_platform_status_from_backend_device_result<T: std::os::fd::AsFd>(
+        device: std::io::Result<T>,
+    ) -> super::EglPlatformStatus {
+        match sophia_renderer_native_egl::probe_gbm_backed_platform_from_backend_device_result(
+            device,
+        ) {
+            sophia_renderer_native_egl::NativeGbmBackedEglPlatformStatus::NativePlatformCapable => {
+                super::EglPlatformStatus::NativePlatformCapable
+            }
+            sophia_renderer_native_egl::NativeGbmBackedEglPlatformStatus::PlatformUnavailable => {
+                super::EglPlatformStatus::PlatformUnavailable
+            }
+            sophia_renderer_native_egl::NativeGbmBackedEglPlatformStatus::PlatformDegraded => {
+                super::EglPlatformStatus::PlatformDegraded
             }
         }
     }

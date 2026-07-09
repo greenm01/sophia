@@ -9,10 +9,9 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Add a native GBM-backed EGL platform smoke that preserves
-  `LiveGbmBackedEglPlatformReport`.
-- [ ] Keep `DEFAULT_DISPLAY` as fallback smoke until the GBM-backed platform
-  smoke passes.
+- [ ] Add a GBM-backed EGL private target smoke without exporting buffers.
+- [ ] Keep `DEFAULT_DISPLAY` clear-color smoke as fallback until GBM-backed
+  drawing passes.
 
 **Next**
 - [ ] Keep wgpu deferred until GBM/EGL startup, drawing, and presentation seams
@@ -221,6 +220,10 @@ evidence belong in `docs/research-log.md`.
   statuses.
 - [x] Add a GBM-backed EGL platform status model behind `gbm-probe,egl-probe`.
 - [x] Add fake GBM-backed EGL platform projection coverage before native code.
+- [x] Add a native GBM-backed EGL platform smoke that preserves
+  `LiveGbmBackedEglPlatformReport`.
+- [x] Keep `DEFAULT_DISPLAY` as fallback smoke until the GBM-backed platform
+  smoke passes.
 
 ---
 
