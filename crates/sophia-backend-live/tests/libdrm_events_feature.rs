@@ -9,9 +9,9 @@ use sophia_backend_live::{
     LibdrmNativeEventAdapterReport, LibdrmNativeEventAdapterStatus, LibdrmNativeOutputRoute,
     LibdrmNativeOutputSlot, LibdrmNativePageFlipCallback, LibdrmNativePageFlipDecodeReport,
     LibdrmNativePageFlipDecodeStatus, LibdrmNativePageFlipSource, LibdrmNativePageFlipSourceReport,
-    LibdrmNativePageFlipSourceStatus, LibdrmNativeReadLoopReport, LibdrmNativeReadLoopStatus,
-    LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller,
-    LiveBackendConfig, LivePageFlipCallback, LivePageFlipCallbackQueue,
+    LibdrmNativePageFlipSourceStatus, LibdrmNativePollerDiagnostics, LibdrmNativeReadLoopReport,
+    LibdrmNativeReadLoopStatus, LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus,
+    LibdrmPageFlipEventPoller, LiveBackendConfig, LivePageFlipCallback, LivePageFlipCallbackQueue,
     LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus,
     NativeLibdrmPageFlipEventPoller, OutputId, QueuedInputPoller, decode_native_page_flip_batch,
     discover_live_backend, libdrm_dependency_admission_report, libdrm_fd_authority_report,
@@ -346,6 +346,76 @@ fn native_libdrm_poller_rejects_pending_callbacks_after_route_removal() {
     );
     assert_eq!(poller.last_read_loop_report().rejected_callbacks, 1);
     assert!(receiver.try_recv().is_err());
+}
+
+#[test]
+fn native_libdrm_poller_diagnostics_report_only_reduced_counts() {
+    let authority =
+        LibdrmBackendFdAuthority::new(20).expect("nonzero generation should mint authority token");
+    let first_slot = LibdrmNativeOutputSlot::new(2).expect("nonzero slot should be valid");
+    let second_slot = LibdrmNativeOutputSlot::new(3).expect("nonzero slot should be valid");
+    let source = LibdrmNativePageFlipSource::from_authority(authority);
+    let mut poller =
+        NativeLibdrmPageFlipEventPoller::new(source).with_routes([LibdrmNativeOutputRoute {
+            slot: first_slot,
+            output: OutputId::from_raw(7),
+        }]);
+    let (sender, receiver) = mpsc::sync_channel(2);
+
+    poller.inject_callbacks([
+        LibdrmNativePageFlipCallback::new(first_slot, 81),
+        LibdrmNativePageFlipCallback::new(second_slot, 82),
+    ]);
+
+    assert_eq!(
+        poller.diagnostics(),
+        LibdrmNativePollerDiagnostics {
+            route_count: 1,
+            pending_callbacks: 2,
+            last_read_loop: LibdrmNativeReadLoopReport::idle(),
+        }
+    );
+
+    poller.replace_routes([
+        LibdrmNativeOutputRoute {
+            slot: first_slot,
+            output: OutputId::from_raw(7),
+        },
+        LibdrmNativeOutputRoute {
+            slot: second_slot,
+            output: OutputId::from_raw(9),
+        },
+    ]);
+    let report = poller.poll_page_flip_events(&sender, 4);
+
+    assert_eq!(report.status, LibdrmPageFlipEventPollStatus::Emitted);
+    assert_eq!(
+        poller.diagnostics(),
+        LibdrmNativePollerDiagnostics {
+            route_count: 2,
+            pending_callbacks: 0,
+            last_read_loop: LibdrmNativeReadLoopReport::callback_decoded(2)
+                .expect("decoded count should build a report"),
+        }
+    );
+    assert_eq!(
+        receiver
+            .try_recv()
+            .expect("first callback should be queued"),
+        LivePageFlipCallback {
+            output: OutputId::from_raw(7),
+            frame_serial: 81,
+        }
+    );
+    assert_eq!(
+        receiver
+            .try_recv()
+            .expect("second callback should be queued"),
+        LivePageFlipCallback {
+            output: OutputId::from_raw(9),
+            frame_serial: 82,
+        }
+    );
 }
 
 #[test]

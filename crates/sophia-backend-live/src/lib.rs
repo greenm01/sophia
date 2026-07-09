@@ -754,6 +754,22 @@ impl NativeLibdrmPageFlipEventPoller {
     pub fn route_count(&self) -> usize {
         self.routes.len()
     }
+
+    pub fn diagnostics(&self) -> LibdrmNativePollerDiagnostics {
+        LibdrmNativePollerDiagnostics {
+            route_count: self.routes.len(),
+            pending_callbacks: self.pending_callbacks.len(),
+            last_read_loop: self.last_read_loop,
+        }
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LibdrmNativePollerDiagnostics {
+    pub route_count: usize,
+    pub pending_callbacks: usize,
+    pub last_read_loop: LibdrmNativeReadLoopReport,
 }
 
 #[cfg(feature = "libdrm-events")]

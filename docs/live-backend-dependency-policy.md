@@ -237,6 +237,10 @@ Route replacement is explicit through `NativeLibdrmPageFlipEventPoller`; hotplug
 or modeset-shaped changes replace backend-local slots without exposing native
 KMS identifiers. Pending callbacks are decoded against the current route table
 at poll time.
+Native poller diagnostics stay reduced to aggregate counts and the reduced
+read-loop report. They may report route count and pending callback count, but
+must not expose route slots, connector IDs, CRTC IDs, file descriptors, or other
+native KMS identity.
 
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
