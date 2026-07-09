@@ -16,6 +16,7 @@ The optional renderer-native feature has one extra local check:
 
 ```sh
 cargo test --offline -p sophia-renderer-live --features gbm-probe
+cargo test --offline -p sophia-backend-live --features gbm-probe
 ```
 
 The `gbm-probe` feature admits the safe `gbm` crate behind an optional feature.
@@ -29,4 +30,5 @@ When touching renderer-native code, run both paths:
 ```sh
 cargo test --workspace --offline
 cargo test --offline -p sophia-renderer-live --features gbm-probe
+cargo test --offline -p sophia-backend-live --features gbm-probe
 ```

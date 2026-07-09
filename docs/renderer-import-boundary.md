@@ -165,7 +165,9 @@ Admission notes for the admitted `gbm` dependency:
 - keep the fake probe tests as the default path;
 - run `cargo test --workspace --offline` without feature flags;
 - run `cargo test --offline -p sophia-renderer-live --features gbm-probe`
-  separately for native probe changes.
+  separately for native probe changes;
+- run `cargo test --offline -p sophia-backend-live --features gbm-probe`
+  separately for backend-owned device discovery changes.
 
 ## Failure Shape
 

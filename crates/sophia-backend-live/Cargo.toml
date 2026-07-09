@@ -11,5 +11,9 @@ sophia-engine = { path = "../sophia-engine" }
 sophia-protocol = { path = "../sophia-protocol" }
 sophia-renderer-live = { path = "../sophia-renderer-live" }
 
+[features]
+default = []
+gbm-probe = ["sophia-renderer-live/gbm-probe"]
+
 [lints]
 workspace = true

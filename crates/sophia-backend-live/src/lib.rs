@@ -7,6 +7,8 @@
 //! protocol authority packets.
 
 use std::path::PathBuf;
+#[cfg(feature = "gbm-probe")]
+use std::{io, os::fd::AsFd};
 
 pub use sophia_engine::{
     BufferImportPath, CompositorBackendAssemblyError, CompositorBackendTickInput,
@@ -19,6 +21,8 @@ use sophia_engine::{
     StaticInputDiscoveryBackend, SysfsDrmKmsOutputBackend, discover_live_compositor_backend,
 };
 pub use sophia_protocol::{BufferSource, DeviceId, OutputId, SeatId, Size};
+#[cfg(feature = "gbm-probe")]
+pub use sophia_renderer_live::NativeGbmCapabilityProbe;
 pub use sophia_renderer_live::{
     LiveRendererImportBoundary, LiveRendererImportDecision, LiveRendererImportHealth,
     LiveRendererImportPathStatus, LiveRendererImportRejection, LiveRendererImportStartupStatus,
@@ -134,6 +138,33 @@ impl LiveBackendStartupReport {
         self.renderer_import.startup_status()
     }
 
+    #[cfg(feature = "gbm-probe")]
+    pub fn renderer_import_status_with_gbm_device<D>(
+        &self,
+        discovery: &D,
+    ) -> LiveRendererImportStartupStatus
+    where
+        D: RenderDeviceDiscoveryBackend,
+    {
+        self.renderer_import_status_from_gbm_device_result(discovery.open_render_device())
+    }
+
+    #[cfg(feature = "gbm-probe")]
+    pub fn renderer_import_status_from_gbm_device_result<T: AsFd>(
+        &self,
+        device: io::Result<T>,
+    ) -> LiveRendererImportStartupStatus {
+        let configured = self.renderer_import_status();
+
+        if !self.renderer_import.import_dmabuf {
+            return configured;
+        }
+
+        let gbm_status =
+            NativeGbmCapabilityProbe::startup_status_from_backend_device_result(device);
+        LiveRendererImportStartupStatus::from_path_statuses(configured.xpixmap, gbm_status.dmabuf)
+    }
+
     pub fn into_configured_headless_assembly(
         self,
         poller: QueuedInputPoller,
@@ -166,6 +197,13 @@ impl LiveBackendStartupReport {
     ) -> Option<HeadlessCompositorBackendAssembly> {
         self.discovery.into_headless_assembly(poller, renderer)
     }
+}
+
+#[cfg(feature = "gbm-probe")]
+pub trait RenderDeviceDiscoveryBackend {
+    type Device: AsFd;
+
+    fn open_render_device(&self) -> io::Result<Self::Device>;
 }
 
 pub struct LiveBackendRuntimeAssembly {

@@ -9,14 +9,16 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Wire backend-live render-device discovery into the reduced GBM probe path.
-- [ ] Keep CPU fallback startup as the default when GBM probing is absent,
-  unavailable, or degraded.
-
-**Next**
 - [ ] Add a live render-device discovery abstraction that can later choose a DRM
   render node without leaking paths into engine state.
-- [ ] Add feature-enabled backend-live coverage for GBM degraded startup health.
+- [ ] Decide whether render-node discovery belongs in backend-live directly or
+  behind a narrower libdrm adapter crate.
+
+**Next**
+- [ ] Add feature-enabled startup assembly that selects CPU fallback when GBM
+  probing degrades a requested DMA-BUF path.
+- [ ] Add a runtime observation for degraded GBM startup that remains count-only
+  and path-free.
 
 ---
 
@@ -161,6 +163,10 @@ evidence belong in `docs/research-log.md`.
 - [x] Teach the private native GBM probe to consume backend-owned device
   authority without exposing raw fds through public Sophia data.
 - [x] Map real native GBM probe failures to reduced degraded renderer health.
+- [x] Wire backend-live render-device discovery into the reduced GBM probe path.
+- [x] Keep CPU fallback startup as the default when GBM probing is absent,
+  unavailable, or degraded.
+- [x] Add feature-enabled backend-live coverage for GBM degraded startup health.
 
 ---
 
