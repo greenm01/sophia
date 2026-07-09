@@ -101,6 +101,15 @@ It must not expose connector IDs, CRTC IDs, plane IDs, framebuffer IDs, device
 paths, fds, driver errors, or native KMS object identity. Real page flips remain
 deferred until this reduced status shape is stable.
 
+The first page-flip event shape is also reduced. `LivePageFlipEvent` may report
+ready, idle, waiting for output, waiting for transaction readiness, presented,
+rejected, output unavailable, presentation unavailable, or degraded. Terminal
+events may carry a frame serial. They must not carry Sophia output IDs,
+transaction IDs, surface IDs, connector IDs, CRTC IDs, plane IDs, framebuffer
+IDs, file descriptors, native driver errors, or KMS object handles. The future
+libdrm/KMS adapter must translate native page-flip callbacks into this shape
+before runtime code observes them.
+
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
 authority. On Linux, wgpu will usually target Vulkan, but Sophia must first prove

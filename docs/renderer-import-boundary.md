@@ -348,6 +348,12 @@ is reduced to ready, output unavailable, presentation unavailable, or degraded.
 It is not a KMS page-flip result and must not contain connector IDs, CRTC IDs,
 plane IDs, framebuffer IDs, fds, paths, driver errors, or framebuffer handles.
 
+The next reduced boundary is `LivePageFlipEvent`. It can be derived from
+scanout readiness or from the engine's `PageFlipCommitOutcome`, but it drops the
+output ID, transaction ID, surface IDs, commit payload, and all native KMS
+identity. Presented and rejected events retain only the frame serial needed to
+relate the event to the compositor timeline.
+
 ## EGL Candidate Dependency
 
 The admitted native EGL dependency is `khronos-egl` 6.0.0. It binds the Khronos

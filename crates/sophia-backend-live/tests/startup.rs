@@ -5,13 +5,14 @@ use sophia_backend_live::{
     CompositorBackendTickInput, DeviceId, HeadlessOutput, LibinputDeviceDescriptor,
     LibinputDeviceKind, LiveBackendConfig, LiveBackendDependencyDecision,
     LiveBackendDependencyKind, LiveBackendDependencyUse, LiveCompositorBackendDiscoveryStatus,
-    LiveRendererImportBoundary, LiveRendererImportHealth, LiveRendererImportPathStatus,
-    LiveRendererImportStartupStatus, LiveRendererPreference, LiveRendererPresentationReport,
-    LiveRendererPresentationStatus, LiveRendererRuntimeObservation,
-    LiveRendererSelectionObservation, LiveScanoutReadinessReport, LiveScanoutReadinessStatus,
-    OutputId, QueuedInputPoller, RendererSelection, SeatId, Size, discover_live_backend,
-    live_backend_dependency_decision,
+    LivePageFlipEvent, LivePageFlipEventStatus, LiveRendererImportBoundary,
+    LiveRendererImportHealth, LiveRendererImportPathStatus, LiveRendererImportStartupStatus,
+    LiveRendererPreference, LiveRendererPresentationReport, LiveRendererPresentationStatus,
+    LiveRendererRuntimeObservation, LiveRendererSelectionObservation, LiveScanoutReadinessReport,
+    LiveScanoutReadinessStatus, OutputId, PageFlipCommitOutcome, QueuedInputPoller,
+    RendererSelection, SeatId, Size, discover_live_backend, live_backend_dependency_decision,
 };
+use sophia_protocol::{TransactionCommit, TransactionId, TransactionOutcome};
 
 #[test]
 fn live_backend_startup_can_seed_headless_assembly_from_sysfs_and_static_input() {
@@ -362,6 +363,97 @@ fn scanout_readiness_collapses_degraded_presentation_without_native_details() {
     );
 
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn page_flip_event_projects_scanout_readiness_without_kms_identity() {
+    assert_eq!(
+        LivePageFlipEvent::from_scanout_status(LiveScanoutReadinessStatus::Ready),
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Ready,
+            frame_serial: None,
+        }
+    );
+    assert_eq!(
+        LivePageFlipEvent::from_scanout_status(LiveScanoutReadinessStatus::OutputUnavailable),
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::OutputUnavailable,
+            frame_serial: None,
+        }
+    );
+    assert_eq!(
+        LivePageFlipEvent::from_scanout_status(LiveScanoutReadinessStatus::PresentationUnavailable,),
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::PresentationUnavailable,
+            frame_serial: None,
+        }
+    );
+    assert_eq!(
+        LivePageFlipEvent::from_scanout_status(LiveScanoutReadinessStatus::Degraded),
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Degraded,
+            frame_serial: None,
+        }
+    );
+}
+
+#[test]
+fn page_flip_event_drops_output_transaction_and_surface_identity() {
+    assert_eq!(
+        LivePageFlipEvent::from_commit_outcome(&PageFlipCommitOutcome::WaitingForOutput {
+            expected: OutputId::from_raw(4),
+            actual: OutputId::from_raw(9),
+            transaction: TransactionId::from_raw(55),
+        }),
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::WaitingForOutput,
+            frame_serial: None,
+        }
+    );
+    assert_eq!(
+        LivePageFlipEvent::from_commit_outcome(
+            &PageFlipCommitOutcome::WaitingForTransactionReadiness {
+                transaction: TransactionId::from_raw(56),
+                pending_surfaces: vec![sophia_protocol::SurfaceId::new(77, 1)],
+            },
+        ),
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::WaitingForTransactionReadiness,
+            frame_serial: None,
+        }
+    );
+}
+
+#[test]
+fn page_flip_event_preserves_only_frame_serial_for_terminal_outcomes() {
+    assert_eq!(
+        LivePageFlipEvent::from_commit_outcome(&PageFlipCommitOutcome::Committed {
+            frame_serial: 91,
+            commit: TransactionCommit {
+                transaction: TransactionId::from_raw(57),
+                outcome: TransactionOutcome::Committed,
+                applied_surfaces: vec![sophia_protocol::SurfaceId::new(88, 1)],
+            },
+        }),
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(91),
+        }
+    );
+    assert_eq!(
+        LivePageFlipEvent::from_commit_outcome(&PageFlipCommitOutcome::Rejected {
+            frame_serial: 92,
+            commit: TransactionCommit {
+                transaction: TransactionId::from_raw(58),
+                outcome: TransactionOutcome::RejectedInvalidSurface,
+                applied_surfaces: vec![sophia_protocol::SurfaceId::new(89, 1)],
+            },
+        }),
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Rejected,
+            frame_serial: Some(92),
+        }
+    );
 }
 
 fn drm_sysfs_fixture(name: &str) -> PathBuf {
