@@ -9,14 +9,12 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Keep `DEFAULT_DISPLAY` clear-color smoke as fallback until GBM-backed
-  drawing is validated against real render nodes.
-- [ ] Decide whether `DEFAULT_DISPLAY` should retire now or remain as a host
-  compatibility smoke.
+- [ ] Define the broader host/device matrix required before retiring
+  `DEFAULT_DISPLAY`.
 
 **Next**
-- [ ] Document the `DEFAULT_DISPLAY` retirement decision in
-  `docs/validation.md` and `docs/renderer-import-boundary.md`.
+- [ ] Decide the next production-shaped GBM/EGL step after offscreen
+  presentation smoke evidence.
 
 ---
 
@@ -274,6 +272,10 @@ evidence belong in `docs/research-log.md`.
   `DEFAULT_DISPLAY`.
 - [x] Record repeated passing `SOPHIA_RUN_REAL_GBM_SMOKE=1` runs before retiring
   `DEFAULT_DISPLAY`.
+- [x] Keep `DEFAULT_DISPLAY` clear-color smoke as fallback until GBM-backed
+  drawing is validated against real render nodes.
+- [x] Decide whether `DEFAULT_DISPLAY` should retire now or remain as a host
+  compatibility smoke.
 
 ---
 

@@ -84,6 +84,12 @@ because the GBM-backed path exists. It can be retired only after the opt-in real
 render-node validation is repeatably green and the reduced public boundary is
 unchanged.
 
+Current decision: keep `DEFAULT_DISPLAY` for now as a host compatibility smoke.
+The real GBM/EGL path has passed repeated local validation on the current
+machine, but one host is not enough evidence to remove a broad compatibility
+check. `DEFAULT_DISPLAY` remains non-production-shaped; it must not be used as
+the compositor platform boundary.
+
 Before removing it, record evidence that:
 
 - `SOPHIA_RUN_REAL_GBM_SMOKE=1` passes after a clean build;

@@ -303,6 +303,12 @@ production compositor platform, but it proves the dynamic EGL and GL loading
 path on machines where backend-owned GBM/EGL cannot yet create a stable private
 target.
 
+Decision after the first repeated real GBM/EGL validation pass: keep
+`DEFAULT_DISPLAY` as a compatibility smoke. The production-shaped renderer path
+is GBM-backed EGL, but `DEFAULT_DISPLAY` still catches host EGL loader issues on
+machines where backend-owned render-node validation is unavailable or not yet
+trusted across a broader device matrix.
+
 Rejected shortcuts:
 
 - using `DEFAULT_DISPLAY` as the production compositor platform: it does not
