@@ -6,21 +6,21 @@ evidence belong in `docs/research-log.md`.
 
 ---
 
-## Active Focus - Sophia X Authority: Runtime Transport
+## Active Focus - Sophia X Authority: MIT-SHM Negotiation
 
 **Now**
-- [ ] Decide whether the long-running X Authority process should keep the
-  observer callback shape or move to a bounded channel owned by session runtime.
-- [ ] Add a small transport note documenting the chosen shape and backpressure
-  behavior for observed authority transactions.
-- [ ] Keep callback-based test helpers available even if the long-running path
-  moves to a bounded channel.
+- [ ] Add minimal `MIT-SHM` `QueryExtension` advertisement only if the authority
+  can fail closed for unsupported minor opcodes.
+- [ ] Model `ShmAttach` as namespace-local metadata without mapping host memory
+  in the first pass.
+- [ ] Add an `XShmPutImage` decode path that rejects missing segments and emits
+  a bounded native X error rather than a surface transaction.
 
 **Next**
-- [ ] Revisit MIT-SHM extension negotiation after core software upload and
-  Present-style handoff are both modeled.
 - [ ] Revisit compositor backend work after X Authority can create, map, draw,
   and expose a simple client through the authority transaction model.
+- [ ] Convert the bounded X Authority transaction channel into the session
+  supervisor path once the long-running authority process exists.
 
 ---
 
@@ -58,6 +58,11 @@ evidence belong in `docs/research-log.md`.
   Engine commit and Runtime counters without adding compositor policy.
 - [x] Defer DMA-BUF placeholder modeling until real DRI3/Present semantics are
   ready.
+- [x] Move the long-running X Authority transaction side channel to a
+  runtime-owned bounded queue while keeping callback observers for focused
+  tests.
+- [x] Document side-channel backpressure: full or disconnected queues fail
+  closed instead of allocating unbounded buffers or dropping visual facts.
 
 ---
 

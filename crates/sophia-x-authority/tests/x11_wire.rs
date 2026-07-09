@@ -1467,6 +1467,34 @@ fn x11_dispatch_sophia_present_emits_xpixmap_surface_transaction() {
     );
 }
 
+#[test]
+fn x_authority_transaction_emitter_sends_bounded_batches() {
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let result = present_dispatch_result(TransactionId::from_raw(610));
+
+    let emitted = try_emit_x_authority_transactions(&sender, &result)
+        .unwrap()
+        .unwrap();
+    let received = receiver.try_recv().unwrap();
+
+    assert_eq!(emitted.transaction, TransactionId::from_raw(610));
+    assert_eq!(emitted.transactions.len(), 1);
+    assert_eq!(received, emitted);
+}
+
+#[test]
+fn x_authority_transaction_emitter_reports_backpressure() {
+    let (sender, _receiver) = std::sync::mpsc::sync_channel(0);
+    let result = present_dispatch_result(TransactionId::from_raw(611));
+
+    assert_eq!(
+        try_emit_x_authority_transactions(&sender, &result),
+        Err(XAuthorityTransportError::Backpressure {
+            transaction: TransactionId::from_raw(611)
+        })
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn x11_setup_socket_smoke_completes_handshake() {
@@ -1856,6 +1884,128 @@ fn x11_core_socket_observer_sees_sophia_present_transaction() {
     drop(stream);
     let _ = std::fs::remove_file(&socket_path);
     assert_eq!(server.join().unwrap(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn x11_core_socket_channel_sees_sophia_present_transaction_batch() {
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let socket_path = std::env::temp_dir().join(format!(
+        "sophia-x11-present-channel-test-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let server_path = socket_path.clone();
+    let (sender, receiver) =
+        std::sync::mpsc::sync_channel(X_AUTHORITY_OBSERVED_TRANSACTION_CHANNEL_CAPACITY);
+    let server = thread::spawn(move || {
+        run_x11_core_socket_server_once_channel(&server_path, NamespaceId::from_raw(51), sender)
+            .unwrap();
+    });
+
+    wait_for_socket(&socket_path);
+    let mut stream = UnixStream::connect(&socket_path).unwrap();
+    stream
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    read_setup_success(&mut stream, XByteOrder::LittleEndian);
+
+    stream
+        .write_all(&create_window_request(
+            XByteOrder::LittleEndian,
+            0x220601,
+            1,
+            2,
+            300,
+            200,
+        ))
+        .unwrap();
+    let configure = read_x_record(&mut stream);
+    assert_eq!(configure[0], 22);
+
+    stream
+        .write_all(&sophia_present_pixmap_request(
+            XByteOrder::LittleEndian,
+            0x220601,
+            0x991,
+            (3, 5, 32, 24),
+            1,
+            250,
+        ))
+        .unwrap();
+
+    drop(stream);
+    let _ = std::fs::remove_file(&socket_path);
+    server.join().unwrap();
+    let batch = receiver.try_recv().unwrap();
+    assert_eq!(batch.transaction, TransactionId::from_raw(2));
+    assert_eq!(batch.transactions.len(), 1);
+    assert_eq!(
+        batch.transactions[0].transaction,
+        TransactionId::from_raw(2)
+    );
+}
+
+fn present_dispatch_result(transaction: TransactionId) -> XDispatchResult {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let window = XResourceId::new(0x220530, 1);
+    runtime.apply(XAuthorityRequestPacket {
+        transaction: TransactionId::from_raw(1),
+        namespace,
+        kind: XAuthorityRequestKind::CreateWindow {
+            window,
+            surface: SurfaceId::new(40, 1),
+            geometry: Rect {
+                x: 0,
+                y: 0,
+                width: 300,
+                height: 200,
+            },
+            constraints: SurfaceConstraints {
+                min_size: None,
+                max_size: None,
+            },
+            generation: 1,
+        },
+    });
+
+    dispatch_x11_wire_request(
+        dispatch_context(
+            namespace,
+            u16::try_from(transaction.raw()).unwrap_or(u16::MAX),
+            XByteOrder::LittleEndian,
+            X_SOPHIA_PRESENT_MAJOR_OPCODE,
+        ),
+        XWireRequest::Authority(XAuthorityRequestPacket {
+            transaction,
+            namespace,
+            kind: XAuthorityRequestKind::PresentPixmap {
+                window,
+                pixmap: 0x900,
+                damage: Region::single(Rect {
+                    x: 4,
+                    y: 5,
+                    width: 64,
+                    height: 48,
+                }),
+                previous_committed_generation: 3,
+                timeout_msec: 250,
+            },
+        }),
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    )
 }
 
 fn context(namespace: NamespaceId, transaction: u64, byte_order: XByteOrder) -> XWireClientContext {

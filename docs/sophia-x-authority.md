@@ -333,3 +333,22 @@ XPixmap handle for a namespace-owned window, emits a ready
 `BufferSource::XPixmap` transaction, and remains reply-free on success. The CLI
 present-pixmap smoke validates the raw X11 socket path through Engine commit and
 Runtime authority counters.
+
+## Runtime Transport
+
+The long-running X Authority path uses a bounded side channel for observed
+surface transactions. Successful X11 drawing and present requests still write no
+client-visible success reply when the X11 protocol does not require one. Instead
+the authority packages ready `SurfaceTransaction` values into
+`XAuthorityObservedTransactionBatch` records and attempts a nonblocking send to
+the runtime-owned queue.
+
+Backpressure is explicit. If the queue is full, the authority reports
+`Backpressure` and stops the socket helper rather than allocating an unbounded
+buffer or silently dropping visual facts. If the receiver has gone away, the
+authority reports `Disconnected`; supervision can then restart the authority
+process. This keeps the X11 client stream separate from Sophia Runtime's
+transaction intake while preserving the fail-closed rule.
+
+The callback observer helpers remain for focused tests and smoke probes. They
+are not the production transport shape.

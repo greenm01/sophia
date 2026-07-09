@@ -1,6 +1,8 @@
 #[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 #[cfg(unix)]
+use std::sync::mpsc::SyncSender;
+#[cfg(unix)]
 use std::{
     io::{ErrorKind, Read, Write},
     path::Path,
@@ -8,11 +10,11 @@ use std::{
 
 #[cfg(unix)]
 use crate::{
-    X_SETUP_CLIENT_PREFIX_LEN, X_SETUP_MAX_AUTH_FIELD_LEN, XAtomTable, XAuthorityRuntime,
-    XDispatchContext, XDispatchResult, XPropertyTable, XSetupRequest, XSetupSuccess,
-    XWireClientContext, decode_x11_core_request, dispatch_x11_parse_error,
-    dispatch_x11_wire_request, encode_x11_setup_success, parse_x11_setup_request,
-    x11_setup_request_total_len,
+    X_SETUP_CLIENT_PREFIX_LEN, X_SETUP_MAX_AUTH_FIELD_LEN, XAtomTable,
+    XAuthorityObservedTransactionBatch, XAuthorityRuntime, XDispatchContext, XDispatchResult,
+    XPropertyTable, XSetupRequest, XSetupSuccess, XWireClientContext, decode_x11_core_request,
+    dispatch_x11_parse_error, dispatch_x11_wire_request, encode_x11_setup_success,
+    parse_x11_setup_request, try_emit_x_authority_transactions, x11_setup_request_total_len,
 };
 #[cfg(unix)]
 use sophia_protocol::{NamespaceId, TransactionId};
@@ -79,7 +81,30 @@ pub fn run_x11_core_socket_server_once(
 pub fn run_x11_core_socket_server_once_observed(
     path: impl AsRef<Path>,
     namespace: NamespaceId,
-    observer: impl FnMut(&XDispatchResult),
+    mut observer: impl FnMut(&XDispatchResult),
+) -> Result<(), X11SetupSocketError> {
+    run_x11_core_socket_server_once_with_observer(path, namespace, move |result| {
+        observer(result);
+        Ok(())
+    })
+}
+
+#[cfg(unix)]
+pub fn run_x11_core_socket_server_once_channel(
+    path: impl AsRef<Path>,
+    namespace: NamespaceId,
+    sender: SyncSender<XAuthorityObservedTransactionBatch>,
+) -> Result<(), X11SetupSocketError> {
+    run_x11_core_socket_server_once_with_observer(path, namespace, move |result| {
+        Ok(try_emit_x_authority_transactions(&sender, result).map(|_| ())?)
+    })
+}
+
+#[cfg(unix)]
+fn run_x11_core_socket_server_once_with_observer(
+    path: impl AsRef<Path>,
+    namespace: NamespaceId,
+    observer: impl FnMut(&XDispatchResult) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
     let path = path.as_ref();
     match std::fs::remove_file(path) {
@@ -105,7 +130,7 @@ pub fn run_x11_core_socket_server_once_observed(
             path.display()
         ))
     })?;
-    serve_x11_core_socket_client_observed(&mut stream, namespace, observer)
+    serve_x11_core_socket_client_with_observer(&mut stream, namespace, observer)
 }
 
 #[cfg(unix)]
@@ -142,6 +167,18 @@ pub fn serve_x11_core_socket_client_observed(
     namespace: NamespaceId,
     mut observer: impl FnMut(&XDispatchResult),
 ) -> Result<(), X11SetupSocketError> {
+    serve_x11_core_socket_client_with_observer(stream, namespace, move |result| {
+        observer(result);
+        Ok(())
+    })
+}
+
+#[cfg(unix)]
+fn serve_x11_core_socket_client_with_observer(
+    stream: &mut UnixStream,
+    namespace: NamespaceId,
+    mut observer: impl FnMut(&XDispatchResult) -> Result<(), X11SetupSocketError>,
+) -> Result<(), X11SetupSocketError> {
     let setup = serve_x11_setup_socket_client(stream)?;
     let mut runtime = XAuthorityRuntime::new();
     let mut atoms = XAtomTable::new();
@@ -173,7 +210,7 @@ pub fn serve_x11_core_socket_client_observed(
             ),
             Err(error) => dispatch_x11_parse_error(dispatch_context, error),
         };
-        observer(&output);
+        observer(&output)?;
         for record in output.encoded_outputs(setup.byte_order) {
             stream.write_all(&record).map_err(|error| {
                 X11SetupSocketError::new(format!("failed to write X11 output: {error}"))
@@ -185,6 +222,13 @@ pub fn serve_x11_core_socket_client_observed(
     }
 
     Ok(())
+}
+
+#[cfg(unix)]
+impl From<crate::XAuthorityTransportError> for X11SetupSocketError {
+    fn from(error: crate::XAuthorityTransportError) -> Self {
+        Self::new(error.to_string())
+    }
 }
 
 #[cfg(unix)]
