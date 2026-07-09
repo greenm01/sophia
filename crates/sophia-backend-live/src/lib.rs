@@ -22,7 +22,9 @@ use sophia_engine::{
 };
 pub use sophia_protocol::{BufferSource, DeviceId, OutputId, SeatId, Size};
 #[cfg(feature = "gbm-probe")]
-pub use sophia_renderer_live::NativeGbmCapabilityProbe;
+use sophia_renderer_live::GbmCapabilityProbeStatus;
+#[cfg(feature = "gbm-probe")]
+pub use sophia_renderer_live::{GbmCapabilityProbeReport, NativeGbmCapabilityProbe};
 pub use sophia_renderer_live::{
     LiveRendererImportBoundary, LiveRendererImportDecision, LiveRendererImportHealth,
     LiveRendererImportPathStatus, LiveRendererImportRejection, LiveRendererImportStartupStatus,
@@ -210,6 +212,7 @@ impl LiveBackendStartupReport {
                 render_device: LiveRenderDeviceDiscoveryReport {
                     status: LiveRenderDeviceDiscoveryStatus::NotRequested,
                 },
+                gpu_startup: LiveGpuStartupReport::not_requested(),
                 renderer_import: self
                     .renderer_runtime_status_for_preference(self.renderer_import_status()),
             };
@@ -217,12 +220,17 @@ impl LiveBackendStartupReport {
 
         let device = discovery.open_render_device();
         let render_device = LiveRenderDeviceDiscoveryReport::from_open_result(&device);
+        let probe_report =
+            NativeGbmCapabilityProbe::probe_report_from_backend_device_result(device);
         let renderer_import = self.renderer_runtime_status_for_preference(
-            self.renderer_import_status_from_gbm_device_result(device),
+            self.renderer_import_status_from_gbm_probe(probe_report),
         );
+        let gpu_startup =
+            LiveGpuStartupReport::from_discovery_and_probe(render_device, probe_report.status);
 
         LiveBackendRendererProbeReport {
             render_device,
+            gpu_startup,
             renderer_import,
         }
     }
@@ -238,9 +246,26 @@ impl LiveBackendStartupReport {
             return configured;
         }
 
-        let gbm_status =
-            NativeGbmCapabilityProbe::startup_status_from_backend_device_result(device);
-        LiveRendererImportStartupStatus::from_path_statuses(configured.xpixmap, gbm_status.dmabuf)
+        self.renderer_import_status_from_gbm_probe(
+            NativeGbmCapabilityProbe::probe_report_from_backend_device_result(device),
+        )
+    }
+
+    #[cfg(feature = "gbm-probe")]
+    fn renderer_import_status_from_gbm_probe(
+        &self,
+        probe_report: GbmCapabilityProbeReport,
+    ) -> LiveRendererImportStartupStatus {
+        let configured = self.renderer_import_status();
+
+        if !self.renderer_import.import_dmabuf {
+            return configured;
+        }
+
+        LiveRendererImportStartupStatus::from_path_statuses(
+            configured.xpixmap,
+            probe_report.startup_status.dmabuf,
+        )
     }
 
     pub fn into_configured_headless_assembly(
@@ -324,6 +349,7 @@ pub trait RenderDeviceDiscoveryBackend {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LiveBackendRendererProbeReport {
     pub render_device: LiveRenderDeviceDiscoveryReport,
+    pub gpu_startup: LiveGpuStartupReport,
     pub renderer_import: LiveRendererImportStartupStatus,
 }
 
@@ -352,6 +378,57 @@ pub enum LiveRenderDeviceDiscoveryStatus {
     NotRequested,
     Opened,
     Unavailable,
+}
+
+#[cfg(feature = "gbm-probe")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveGpuStartupReport {
+    pub status: LiveGpuStartupStatus,
+}
+
+#[cfg(feature = "gbm-probe")]
+impl LiveGpuStartupReport {
+    fn not_requested() -> Self {
+        Self {
+            status: LiveGpuStartupStatus::NotRequested,
+        }
+    }
+
+    fn from_discovery_and_probe(
+        discovery: LiveRenderDeviceDiscoveryReport,
+        probe_status: GbmCapabilityProbeStatus,
+    ) -> Self {
+        if discovery.status != LiveRenderDeviceDiscoveryStatus::Opened {
+            return Self {
+                status: LiveGpuStartupStatus::RenderDeviceUnavailable,
+            };
+        }
+
+        Self {
+            status: match probe_status {
+                GbmCapabilityProbeStatus::NativeCapable => LiveGpuStartupStatus::NativeCapable,
+                GbmCapabilityProbeStatus::ReducedDeviceUnavailable => {
+                    LiveGpuStartupStatus::RenderDeviceUnavailable
+                }
+                GbmCapabilityProbeStatus::NativeDeviceRejected => {
+                    LiveGpuStartupStatus::GbmDeviceRejected
+                }
+                GbmCapabilityProbeStatus::PrivateAllocationUnavailable => {
+                    LiveGpuStartupStatus::PrivateAllocationUnavailable
+                }
+            },
+        }
+    }
+}
+
+#[cfg(feature = "gbm-probe")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveGpuStartupStatus {
+    NotRequested,
+    NativeCapable,
+    RenderDeviceUnavailable,
+    GbmDeviceRejected,
+    PrivateAllocationUnavailable,
 }
 
 pub struct LiveBackendRuntimeAssembly {

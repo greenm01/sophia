@@ -1,8 +1,9 @@
 #![cfg(feature = "gbm-probe")]
 
 use sophia_renderer_live::{
-    FakeGbmCapabilityProbe, GbmRenderDeviceToken, LiveRendererImportHealth,
-    LiveRendererImportPathStatus, LiveRendererImportStartupStatus, NativeGbmCapabilityProbe,
+    FakeGbmCapabilityProbe, GbmCapabilityProbeReport, GbmCapabilityProbeStatus,
+    GbmRenderDeviceToken, LiveRendererImportHealth, LiveRendererImportPathStatus,
+    LiveRendererImportStartupStatus, NativeGbmCapabilityProbe,
 };
 
 #[test]
@@ -34,6 +35,21 @@ fn fake_gbm_probe_reports_degraded_health_when_unavailable() {
             health: LiveRendererImportHealth::Degraded,
             xpixmap: LiveRendererImportPathStatus::Disabled,
             dmabuf: LiveRendererImportPathStatus::Degraded,
+        }
+    );
+}
+
+#[test]
+fn fake_gbm_probe_reports_reduced_capability_reason() {
+    assert_eq!(
+        FakeGbmCapabilityProbe::new(None).probe_report(),
+        GbmCapabilityProbeReport {
+            status: GbmCapabilityProbeStatus::ReducedDeviceUnavailable,
+            startup_status: LiveRendererImportStartupStatus {
+                health: LiveRendererImportHealth::Degraded,
+                xpixmap: LiveRendererImportPathStatus::Disabled,
+                dmabuf: LiveRendererImportPathStatus::Degraded,
+            },
         }
     );
 }
@@ -82,12 +98,18 @@ fn native_gbm_probe_maps_backend_device_open_failure_to_degraded_health() {
 fn native_gbm_probe_degrades_when_private_buffer_allocation_fails() {
     let invalid_render_device = std::fs::File::open("/dev/null").unwrap();
 
+    let probe_report =
+        NativeGbmCapabilityProbe::probe_report_from_backend_device(invalid_render_device);
+
     assert_eq!(
-        NativeGbmCapabilityProbe::startup_status_from_backend_device(invalid_render_device),
-        LiveRendererImportStartupStatus {
-            health: LiveRendererImportHealth::Degraded,
-            xpixmap: LiveRendererImportPathStatus::Disabled,
-            dmabuf: LiveRendererImportPathStatus::Degraded,
+        probe_report,
+        GbmCapabilityProbeReport {
+            status: GbmCapabilityProbeStatus::PrivateAllocationUnavailable,
+            startup_status: LiveRendererImportStartupStatus {
+                health: LiveRendererImportHealth::Degraded,
+                xpixmap: LiveRendererImportPathStatus::Disabled,
+                dmabuf: LiveRendererImportPathStatus::Degraded,
+            },
         }
     );
 }

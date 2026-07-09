@@ -16,8 +16,6 @@ evidence belong in `docs/research-log.md`.
 **Next**
 - [ ] Choose whether the first compositor drawing API above GBM is EGL/OpenGL,
   raw Vulkan, or wgpu.
-- [ ] Add a reduced GPU startup report that can distinguish allocation failure
-  from render-device discovery failure without leaking native error text.
 
 ---
 
@@ -182,6 +180,9 @@ evidence belong in `docs/research-log.md`.
   import-capable renderer.
 - [x] Add a real GBM allocation probe that creates and drops a tiny private
   buffer without exporting GBM handles.
+- [x] Add a reduced GPU startup report that distinguishes render-device
+  discovery failure from GBM device rejection and private allocation failure
+  without leaking native error text.
 
 ---
 

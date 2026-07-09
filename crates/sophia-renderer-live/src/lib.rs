@@ -12,7 +12,10 @@ pub use sophia_protocol::BufferSource;
 mod gbm_probe;
 
 #[cfg(feature = "gbm-probe")]
-pub use gbm_probe::{FakeGbmCapabilityProbe, GbmRenderDeviceToken, NativeGbmCapabilityProbe};
+pub use gbm_probe::{
+    FakeGbmCapabilityProbe, GbmCapabilityProbeReport, GbmCapabilityProbeStatus,
+    GbmRenderDeviceToken, NativeGbmCapabilityProbe,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LiveRendererImportBoundary {

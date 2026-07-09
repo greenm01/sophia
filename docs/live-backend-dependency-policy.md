@@ -56,6 +56,10 @@ native-capable startup status or it selects CPU fallback.
 Native-capable means the private renderer adapter can open the backend-owned
 device, verify the first render format, allocate a tiny private GBM buffer, and
 drop it without exporting any GBM object.
+Backend startup reports distinguish render-device discovery failure from GBM
+device rejection and private allocation failure, but those reports remain
+reduced. They do not expose native driver text, device paths, file descriptors,
+or GBM handles.
 
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout

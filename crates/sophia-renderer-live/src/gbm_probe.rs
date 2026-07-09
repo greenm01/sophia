@@ -23,7 +23,11 @@ impl FakeGbmCapabilityProbe {
     }
 
     pub fn startup_status(self) -> LiveRendererImportStartupStatus {
-        status_from_probe_result(fake_probe(self.device))
+        self.probe_report().startup_status
+    }
+
+    pub fn probe_report(self) -> GbmCapabilityProbeReport {
+        report_from_probe_result(fake_probe(self.device))
     }
 }
 
@@ -38,50 +42,93 @@ impl NativeGbmCapabilityProbe {
     }
 
     pub fn startup_status(self) -> LiveRendererImportStartupStatus {
-        status_from_probe_result(native::probe(self.device))
+        self.probe_report().startup_status
+    }
+
+    pub fn probe_report(self) -> GbmCapabilityProbeReport {
+        report_from_probe_result(native::probe(self.device))
     }
 
     pub fn startup_status_from_backend_device<T: AsFd>(
         device: T,
     ) -> LiveRendererImportStartupStatus {
-        status_from_probe_result(native::probe_backend_device(device))
+        Self::probe_report_from_backend_device(device).startup_status
     }
 
     pub fn startup_status_from_backend_device_result<T: AsFd>(
         device: std::io::Result<T>,
     ) -> LiveRendererImportStartupStatus {
-        status_from_probe_result(match device {
+        Self::probe_report_from_backend_device_result(device).startup_status
+    }
+
+    pub fn probe_report_from_backend_device<T: AsFd>(device: T) -> GbmCapabilityProbeReport {
+        report_from_probe_result(native::probe_backend_device(device))
+    }
+
+    pub fn probe_report_from_backend_device_result<T: AsFd>(
+        device: std::io::Result<T>,
+    ) -> GbmCapabilityProbeReport {
+        report_from_probe_result(match device {
             Ok(device) => native::probe_backend_device(device),
-            Err(_error) => GbmProbeResult::NativeError,
+            Err(_error) => GbmProbeResult::ReducedDeviceUnavailable,
         })
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GbmCapabilityProbeReport {
+    pub status: GbmCapabilityProbeStatus,
+    pub startup_status: LiveRendererImportStartupStatus,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GbmCapabilityProbeStatus {
+    NativeCapable,
+    ReducedDeviceUnavailable,
+    NativeDeviceRejected,
+    PrivateAllocationUnavailable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum GbmProbeResult {
     Capable,
-    Unavailable,
-    NativeError,
+    ReducedDeviceUnavailable,
+    NativeDeviceRejected,
+    PrivateAllocationUnavailable,
 }
 
 fn fake_probe(device: Option<GbmRenderDeviceToken>) -> GbmProbeResult {
     if device.is_some() {
         GbmProbeResult::Capable
     } else {
-        GbmProbeResult::Unavailable
+        GbmProbeResult::ReducedDeviceUnavailable
     }
 }
 
-fn status_from_probe_result(result: GbmProbeResult) -> LiveRendererImportStartupStatus {
-    LiveRendererImportStartupStatus::from_path_statuses(
-        LiveRendererImportPathStatus::Disabled,
-        match result {
-            GbmProbeResult::Capable => LiveRendererImportPathStatus::Enabled,
-            GbmProbeResult::Unavailable | GbmProbeResult::NativeError => {
-                LiveRendererImportPathStatus::Degraded
-            }
-        },
-    )
+fn report_from_probe_result(result: GbmProbeResult) -> GbmCapabilityProbeReport {
+    let status = match result {
+        GbmProbeResult::Capable => GbmCapabilityProbeStatus::NativeCapable,
+        GbmProbeResult::ReducedDeviceUnavailable => {
+            GbmCapabilityProbeStatus::ReducedDeviceUnavailable
+        }
+        GbmProbeResult::NativeDeviceRejected => GbmCapabilityProbeStatus::NativeDeviceRejected,
+        GbmProbeResult::PrivateAllocationUnavailable => {
+            GbmCapabilityProbeStatus::PrivateAllocationUnavailable
+        }
+    };
+    let dmabuf = if result == GbmProbeResult::Capable {
+        LiveRendererImportPathStatus::Enabled
+    } else {
+        LiveRendererImportPathStatus::Degraded
+    };
+
+    GbmCapabilityProbeReport {
+        status,
+        startup_status: LiveRendererImportStartupStatus::from_path_statuses(
+            LiveRendererImportPathStatus::Disabled,
+            dmabuf,
+        ),
+    }
 }
 
 mod native {
@@ -90,7 +137,7 @@ mod native {
 
     pub(super) fn probe(device: Option<GbmRenderDeviceToken>) -> GbmProbeResult {
         let Some(_device) = device else {
-            return GbmProbeResult::Unavailable;
+            return GbmProbeResult::ReducedDeviceUnavailable;
         };
 
         let _format = gbm::Format::Argb8888;
@@ -101,8 +148,8 @@ mod native {
     pub(super) fn probe_backend_device<T: AsFd>(device: T) -> GbmProbeResult {
         match gbm::Device::new(device) {
             Ok(device) if can_allocate_first_private_buffer(&device) => GbmProbeResult::Capable,
-            Ok(_device) => GbmProbeResult::NativeError,
-            Err(_error) => GbmProbeResult::NativeError,
+            Ok(_device) => GbmProbeResult::PrivateAllocationUnavailable,
+            Err(_error) => GbmProbeResult::NativeDeviceRejected,
         }
     }
 

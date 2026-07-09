@@ -109,6 +109,16 @@ Backend-live reports render-device discovery separately as reduced path-free
 state so startup diagnostics can distinguish "not requested" from "unavailable"
 without leaking device identity.
 
+Backend-live also reports a reduced GPU startup status. This status is more
+specific than renderer health, but still contains no path, fd, handle, or driver
+message. It can distinguish:
+
+- GPU startup was not requested;
+- the backend could not open a render device;
+- GBM rejected the opened device;
+- the opened GBM device could not allocate the first private renderer buffer;
+- native GPU startup is capable.
+
 Renderer startup policy is explicit:
 
 - `GpuPreferred` attempts GBM and selects CPU fallback when the probe degrades;

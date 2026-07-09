@@ -5,11 +5,11 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use sophia_backend_live::{
-    LiveBackendConfig, LiveRenderDeviceDiscoveryReport, LiveRenderDeviceDiscoveryStatus,
-    LiveRendererImportBoundary, LiveRendererImportHealth, LiveRendererImportPathStatus,
-    LiveRendererImportStartupStatus, LiveRendererPreference, LiveRendererRuntimeObservation,
-    LiveRendererSelectionObservation, QueuedInputPoller, RenderDeviceDiscoveryBackend,
-    RendererSelection, discover_live_backend,
+    LiveBackendConfig, LiveGpuStartupReport, LiveGpuStartupStatus, LiveRenderDeviceDiscoveryReport,
+    LiveRenderDeviceDiscoveryStatus, LiveRendererImportBoundary, LiveRendererImportHealth,
+    LiveRendererImportPathStatus, LiveRendererImportStartupStatus, LiveRendererPreference,
+    LiveRendererRuntimeObservation, LiveRendererSelectionObservation, QueuedInputPoller,
+    RenderDeviceDiscoveryBackend, RendererSelection, discover_live_backend,
 };
 
 struct MissingRenderDevice;
@@ -32,6 +32,16 @@ impl RenderDeviceDiscoveryBackend for UnexpectedRenderDeviceOpen {
     }
 }
 
+struct InvalidRenderDevice;
+
+impl RenderDeviceDiscoveryBackend for InvalidRenderDevice {
+    type Device = std::fs::File;
+
+    fn open_render_device(&self) -> io::Result<Self::Device> {
+        std::fs::File::open("/dev/null")
+    }
+}
+
 #[test]
 fn gbm_probe_keeps_default_startup_on_cpu_fallback() {
     let config = LiveBackendConfig::new("/does/not/matter");
@@ -43,6 +53,12 @@ fn gbm_probe_keeps_default_startup_on_cpu_fallback() {
         probe.render_device,
         LiveRenderDeviceDiscoveryReport {
             status: LiveRenderDeviceDiscoveryStatus::NotRequested,
+        }
+    );
+    assert_eq!(
+        probe.gpu_startup,
+        LiveGpuStartupReport {
+            status: LiveGpuStartupStatus::NotRequested,
         }
     );
     assert_eq!(
@@ -70,6 +86,12 @@ fn gbm_probe_cpu_only_never_opens_render_device_even_when_imports_are_configured
         }
     );
     assert_eq!(
+        probe.gpu_startup,
+        LiveGpuStartupReport {
+            status: LiveGpuStartupStatus::NotRequested,
+        }
+    );
+    assert_eq!(
         probe.renderer_import,
         LiveRendererImportStartupStatus {
             health: LiveRendererImportHealth::CpuFallback,
@@ -91,6 +113,42 @@ fn gbm_probe_degrades_dmabuf_without_leaking_device_error() {
         probe.render_device,
         LiveRenderDeviceDiscoveryReport {
             status: LiveRenderDeviceDiscoveryStatus::Unavailable,
+        }
+    );
+    assert_eq!(
+        probe.gpu_startup,
+        LiveGpuStartupReport {
+            status: LiveGpuStartupStatus::RenderDeviceUnavailable,
+        }
+    );
+    assert_eq!(
+        probe.renderer_import,
+        LiveRendererImportStartupStatus {
+            health: LiveRendererImportHealth::Degraded,
+            xpixmap: LiveRendererImportPathStatus::Disabled,
+            dmabuf: LiveRendererImportPathStatus::Degraded,
+        }
+    );
+}
+
+#[test]
+fn gbm_probe_distinguishes_allocation_failure_from_device_discovery_failure() {
+    let config = LiveBackendConfig::new("/does/not/matter").with_renderer_import_boundary(
+        LiveRendererImportBoundary::with_native_imports(false, true),
+    );
+    let report = discover_live_backend(&config);
+    let probe = report.renderer_probe_report_with_gbm_device(&InvalidRenderDevice);
+
+    assert_eq!(
+        probe.render_device,
+        LiveRenderDeviceDiscoveryReport {
+            status: LiveRenderDeviceDiscoveryStatus::Opened,
+        }
+    );
+    assert_eq!(
+        probe.gpu_startup,
+        LiveGpuStartupReport {
+            status: LiveGpuStartupStatus::PrivateAllocationUnavailable,
         }
     );
     assert_eq!(
