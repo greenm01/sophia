@@ -1,6 +1,15 @@
 use super::prelude::*;
 
 pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
+    if args.iter().any(|arg| arg == "x-authority-x11-smoke") {
+        let report = run_x_authority_x11_smoke()?;
+        println!(
+            "x-authority-x11-smoke setup=ok configure_notify={} map_notify={} errors={}",
+            report.configure_notify, report.map_notify, report.errors
+        );
+        return Ok(true);
+    }
+
     if args.iter().any(|arg| arg == "x-authority-runtime-smoke") {
         let report = run_x_authority_runtime_smoke()?;
         println!(
@@ -18,12 +27,72 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
 }
 
 #[derive(Clone, Debug)]
+struct XAuthorityX11SmokeReport {
+    configure_notify: usize,
+    map_notify: usize,
+    errors: usize,
+}
+
+#[derive(Clone, Debug)]
 struct XAuthorityRuntimeSmokeReport {
     socket_path: std::path::PathBuf,
     surfaces: usize,
     transactions: usize,
     portal_prompts: usize,
     selection_artifacts: usize,
+}
+
+fn run_x_authority_x11_smoke() -> Result<XAuthorityX11SmokeReport, Box<dyn std::error::Error>> {
+    use std::io::Write;
+
+    let socket_path = std::env::temp_dir().join(format!(
+        "sophia-x-authority-x11-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    ));
+    let server_path = socket_path.clone();
+    let server = std::thread::spawn(move || {
+        run_x11_core_socket_server_once(&server_path, NamespaceId::from_raw(41))
+    });
+
+    wait_for_socket_path(&socket_path)?;
+    let mut stream = UnixStream::connect(&socket_path)?;
+    stream.write_all(&x11_setup_request(XByteOrder::LittleEndian))?;
+    read_x11_setup_success(&mut stream, XByteOrder::LittleEndian)?;
+
+    stream.write_all(&x11_create_window_request(
+        XByteOrder::LittleEndian,
+        0x0020_0001,
+        20,
+        30,
+        640,
+        480,
+    ))?;
+    let configure = read_x11_record(&mut stream)?;
+
+    stream.write_all(&x11_resource_request(
+        XByteOrder::LittleEndian,
+        8,
+        0x0020_0001,
+    ))?;
+    let map = read_x11_record(&mut stream)?;
+
+    let records = [configure, map];
+    let configure_notify = records.iter().filter(|record| record[0] == 22).count();
+    let map_notify = records.iter().filter(|record| record[0] == 19).count();
+    let errors = records.iter().filter(|record| record[0] == 0).count();
+
+    drop(stream);
+    let _ = std::fs::remove_file(&socket_path);
+    server
+        .join()
+        .map_err(|_| "X authority X11 socket server thread panicked")??;
+
+    Ok(XAuthorityX11SmokeReport {
+        configure_notify,
+        map_notify,
+        errors,
+    })
 }
 
 fn run_x_authority_runtime_smoke()
@@ -153,6 +222,101 @@ fn run_x_authority_runtime_smoke()
         portal_prompts,
         selection_artifacts,
     })
+}
+
+fn x11_setup_request(byte_order: XByteOrder) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.push(byte_order.marker());
+    out.push(0);
+    push_x11_u16(&mut out, byte_order, 11);
+    push_x11_u16(&mut out, byte_order, 0);
+    push_x11_u16(&mut out, byte_order, 0);
+    push_x11_u16(&mut out, byte_order, 0);
+    push_x11_u16(&mut out, byte_order, 0);
+    out
+}
+
+fn x11_create_window_request(
+    byte_order: XByteOrder,
+    window: u32,
+    x: i16,
+    y: i16,
+    width: u16,
+    height: u16,
+) -> Vec<u8> {
+    let mut out = vec![1, 24];
+    push_x11_u16(&mut out, byte_order, 8);
+    push_x11_u32(&mut out, byte_order, window);
+    push_x11_u32(&mut out, byte_order, 0x20);
+    push_x11_i16(&mut out, byte_order, x);
+    push_x11_i16(&mut out, byte_order, y);
+    push_x11_u16(&mut out, byte_order, width);
+    push_x11_u16(&mut out, byte_order, height);
+    push_x11_u16(&mut out, byte_order, 0);
+    push_x11_u16(&mut out, byte_order, 1);
+    push_x11_u32(&mut out, byte_order, 0);
+    push_x11_u32(&mut out, byte_order, 0);
+    out
+}
+
+fn x11_resource_request(byte_order: XByteOrder, opcode: u8, id: u32) -> Vec<u8> {
+    let mut out = vec![opcode, 0];
+    push_x11_u16(&mut out, byte_order, 2);
+    push_x11_u32(&mut out, byte_order, id);
+    out
+}
+
+fn read_x11_setup_success(
+    stream: &mut UnixStream,
+    byte_order: XByteOrder,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Read;
+
+    let mut prefix = [0; 8];
+    stream.read_exact(&mut prefix)?;
+    if prefix[0] != 1 {
+        return Err(format!("X11 setup failed with status {}", prefix[0]).into());
+    }
+    let body_len = usize::from(read_x11_u16(byte_order, &prefix[6..8])) * 4;
+    let mut body = vec![0; body_len];
+    stream.read_exact(&mut body)?;
+    Ok(())
+}
+
+fn read_x11_record(stream: &mut UnixStream) -> Result<[u8; 32], Box<dyn std::error::Error>> {
+    use std::io::Read;
+
+    let mut record = [0; 32];
+    stream.read_exact(&mut record)?;
+    Ok(record)
+}
+
+fn push_x11_u16(out: &mut Vec<u8>, byte_order: XByteOrder, value: u16) {
+    match byte_order {
+        XByteOrder::LittleEndian => out.extend_from_slice(&value.to_le_bytes()),
+        XByteOrder::BigEndian => out.extend_from_slice(&value.to_be_bytes()),
+    }
+}
+
+fn push_x11_i16(out: &mut Vec<u8>, byte_order: XByteOrder, value: i16) {
+    match byte_order {
+        XByteOrder::LittleEndian => out.extend_from_slice(&value.to_le_bytes()),
+        XByteOrder::BigEndian => out.extend_from_slice(&value.to_be_bytes()),
+    }
+}
+
+fn push_x11_u32(out: &mut Vec<u8>, byte_order: XByteOrder, value: u32) {
+    match byte_order {
+        XByteOrder::LittleEndian => out.extend_from_slice(&value.to_le_bytes()),
+        XByteOrder::BigEndian => out.extend_from_slice(&value.to_be_bytes()),
+    }
+}
+
+fn read_x11_u16(byte_order: XByteOrder, bytes: &[u8]) -> u16 {
+    match byte_order {
+        XByteOrder::LittleEndian => u16::from_le_bytes(bytes.try_into().expect("u16 bytes")),
+        XByteOrder::BigEndian => u16::from_be_bytes(bytes.try_into().expect("u16 bytes")),
+    }
 }
 
 fn send_request(

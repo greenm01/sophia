@@ -26,6 +26,7 @@ pub(crate) fn print(verbose: bool) {
         "commands: x-stress-routed-input [--display=:99] [--iterations=1000] [--threshold-us=500]"
     );
     println!("commands: x-authority-runtime-smoke");
+    println!("commands: x-authority-x11-smoke");
 
     if verbose {
         tracing::debug!("verbose tracing enabled");

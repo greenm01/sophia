@@ -8,9 +8,13 @@ use std::{
 
 #[cfg(unix)]
 use crate::{
-    X_SETUP_CLIENT_PREFIX_LEN, XSetupRequest, XSetupSuccess, encode_x11_setup_success,
-    parse_x11_setup_request, x11_setup_request_total_len,
+    X_SETUP_CLIENT_PREFIX_LEN, X_SETUP_MAX_AUTH_FIELD_LEN, XAuthorityRuntime, XDispatchContext,
+    XPropertyTable, XSetupRequest, XSetupSuccess, XWireClientContext, decode_x11_core_request,
+    dispatch_x11_parse_error, dispatch_x11_wire_request, encode_x_client_output,
+    encode_x11_setup_success, parse_x11_setup_request, x11_setup_request_total_len,
 };
+#[cfg(unix)]
+use sophia_protocol::{NamespaceId, TransactionId};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct X11SetupSocketError {
@@ -63,6 +67,38 @@ pub fn run_x11_setup_socket_server_once(path: impl AsRef<Path>) -> Result<(), X1
 }
 
 #[cfg(unix)]
+pub fn run_x11_core_socket_server_once(
+    path: impl AsRef<Path>,
+    namespace: NamespaceId,
+) -> Result<(), X11SetupSocketError> {
+    let path = path.as_ref();
+    match std::fs::remove_file(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(X11SetupSocketError::new(format!(
+                "failed to remove stale X11 core socket {}: {error}",
+                path.display()
+            )));
+        }
+    }
+
+    let listener = UnixListener::bind(path).map_err(|error| {
+        X11SetupSocketError::new(format!(
+            "failed to bind X11 core socket {}: {error}",
+            path.display()
+        ))
+    })?;
+    let (mut stream, _) = listener.accept().map_err(|error| {
+        X11SetupSocketError::new(format!(
+            "failed to accept X11 core client on {}: {error}",
+            path.display()
+        ))
+    })?;
+    serve_x11_core_socket_client(&mut stream, namespace)
+}
+
+#[cfg(unix)]
 pub fn serve_x11_setup_socket_client(
     stream: &mut UnixStream,
 ) -> Result<XSetupRequest, X11SetupSocketError> {
@@ -78,6 +114,52 @@ pub fn serve_x11_setup_socket_client(
         .flush()
         .map_err(|error| X11SetupSocketError::new(format!("failed to flush X11 setup: {error}")))?;
     Ok(request)
+}
+
+#[cfg(unix)]
+pub fn serve_x11_core_socket_client(
+    stream: &mut UnixStream,
+    namespace: NamespaceId,
+) -> Result<(), X11SetupSocketError> {
+    let setup = serve_x11_setup_socket_client(stream)?;
+    let mut runtime = XAuthorityRuntime::new();
+    let mut properties = XPropertyTable::new();
+    let mut sequence = 0u16;
+
+    while let Some((major_opcode, request)) = read_x11_core_request(stream, setup.byte_order)? {
+        sequence = sequence.wrapping_add(1);
+        let dispatch_context = XDispatchContext {
+            byte_order: setup.byte_order,
+            namespace,
+            sequence,
+            major_opcode,
+        };
+        let output = match decode_x11_core_request(
+            XWireClientContext {
+                byte_order: setup.byte_order,
+                namespace,
+                transaction: TransactionId::from_raw(u64::from(sequence)),
+            },
+            &request,
+        ) {
+            Ok(request) => {
+                dispatch_x11_wire_request(dispatch_context, request, &mut runtime, &mut properties)
+            }
+            Err(error) => dispatch_x11_parse_error(dispatch_context, error),
+        };
+        for record in output.outputs {
+            stream
+                .write_all(&encode_x_client_output(setup.byte_order, record))
+                .map_err(|error| {
+                    X11SetupSocketError::new(format!("failed to write X11 output: {error}"))
+                })?;
+        }
+        stream.flush().map_err(|error| {
+            X11SetupSocketError::new(format!("failed to flush X11 output: {error}"))
+        })?;
+    }
+
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -98,4 +180,41 @@ pub fn read_x11_setup_request(
         })?;
     parse_x11_setup_request(&bytes)
         .map_err(|error| X11SetupSocketError::new(format!("invalid X11 setup request: {error}")))
+}
+
+#[cfg(unix)]
+fn read_x11_core_request(
+    stream: &mut UnixStream,
+    byte_order: crate::XByteOrder,
+) -> Result<Option<(u8, Vec<u8>)>, X11SetupSocketError> {
+    let mut header = [0; 4];
+    match stream.read_exact(&mut header) {
+        Ok(()) => {}
+        Err(error) if error.kind() == ErrorKind::UnexpectedEof => return Ok(None),
+        Err(error) => {
+            return Err(X11SetupSocketError::new(format!(
+                "failed to read X11 request header: {error}"
+            )));
+        }
+    }
+
+    let length = usize::from(byte_order.u16(&header[2..4])) * 4;
+    if length < 4 {
+        return Ok(Some((header[0], header.to_vec())));
+    }
+    let max_len = X_SETUP_MAX_AUTH_FIELD_LEN * 64;
+    if length > max_len {
+        return Err(X11SetupSocketError::new(format!(
+            "X11 request payload too large: {length}"
+        )));
+    }
+
+    let mut request = Vec::with_capacity(length);
+    request.extend_from_slice(&header);
+    request.resize(length, 0);
+    stream.read_exact(&mut request[4..]).map_err(|error| {
+        X11SetupSocketError::new(format!("failed to read X11 request payload: {error}"))
+    })?;
+
+    Ok(Some((header[0], request)))
 }

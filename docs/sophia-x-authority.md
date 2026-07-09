@@ -264,6 +264,12 @@ wire requests translate into existing internal `XAuthorityRequestPacket` values
 before they reach `XAuthorityRuntime`; `ChangeProperty` lands in a minimal
 namespace-keyed property table and is not metadata broker output yet.
 
-The next milestone is minimal X reply, error, and event emission for decoded
-requests. That is the step needed before a tiny Xlib client can observe normal
-protocol outcomes after setup.
+Minimal client-visible output now covers bounded X error records and 32-byte
+core events for `ConfigureNotify`, `MapNotify`, `PropertyNotify`, and
+`SelectionNotify`. The X11 socket smoke completes setup, sends synthetic
+`CreateWindow` and `MapWindow` requests, and observes the expected events.
+
+The next milestone is atom and property naming. Sophia X Authority needs enough
+`InternAtom`, `GetAtomName`, and metadata-relevant property handling for a tiny
+Xlib client to use normal ICCCM/EWMH names without leaking raw metadata to the
+WM.

@@ -342,6 +342,154 @@ fn x11_core_decoder_rejects_bad_lengths_and_unknown_opcodes() {
     );
 }
 
+#[test]
+fn x11_client_event_encoders_emit_32_byte_records() {
+    let map = encode_x_client_output(
+        XByteOrder::LittleEndian,
+        XClientOutput::Event(XClientEvent::MapNotify {
+            sequence: 9,
+            event: XResourceId::new(0x220001, 1),
+            window: XResourceId::new(0x220001, 1),
+            override_redirect: false,
+        }),
+    );
+    assert_eq!(map.len(), 32);
+    assert_eq!(map[0], 19);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &map[2..4]), 9);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &map[4..8]), 0x220001);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &map[8..12]), 0x220001);
+
+    let configure = encode_x_client_output(
+        XByteOrder::BigEndian,
+        XClientOutput::Event(XClientEvent::ConfigureNotify {
+            sequence: 10,
+            event: XResourceId::new(0x220002, 1),
+            window: XResourceId::new(0x220002, 1),
+            above_sibling: None,
+            x: 12,
+            y: 13,
+            width: 640,
+            height: 480,
+            border_width: 0,
+            override_redirect: false,
+        }),
+    );
+    assert_eq!(configure[0], 22);
+    assert_eq!(read_u16(XByteOrder::BigEndian, &configure[2..4]), 10);
+    assert_eq!(read_u32(XByteOrder::BigEndian, &configure[8..12]), 0x220002);
+    assert_eq!(read_u16(XByteOrder::BigEndian, &configure[20..22]), 640);
+    assert_eq!(read_u16(XByteOrder::BigEndian, &configure[22..24]), 480);
+}
+
+#[test]
+fn x11_client_error_encoder_and_parse_mapping_use_core_error_shape() {
+    let error = x_error_from_wire_parse(&XWireParseError::UnknownOpcode(99), 11, 99);
+    assert_eq!(error.code, XErrorCode::BadRequest);
+
+    let encoded = encode_x_client_output(XByteOrder::LittleEndian, XClientOutput::Error(error));
+    assert_eq!(encoded.len(), 32);
+    assert_eq!(encoded[0], 0);
+    assert_eq!(encoded[1], 1);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[2..4]), 11);
+    assert_eq!(encoded[10], 99);
+
+    let bad_length = x_error_from_wire_parse(
+        &XWireParseError::InvalidLength {
+            opcode: 8,
+            expected_at_least: 8,
+            actual: 12,
+        },
+        12,
+        8,
+    );
+    assert_eq!(bad_length.code, XErrorCode::BadLength);
+}
+
+#[test]
+fn x11_dispatch_emits_configure_map_property_and_selection_failure_outputs() {
+    let namespace = NamespaceId::from_raw(46);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut properties = XPropertyTable::new();
+
+    let create = decode_x11_core_request(
+        context(namespace, 601, XByteOrder::LittleEndian),
+        &create_window_request(XByteOrder::LittleEndian, 0x220101, 10, 20, 640, 480),
+    )
+    .unwrap();
+    let create = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 1),
+        create,
+        &mut runtime,
+        &mut properties,
+    );
+    assert_eq!(create.outputs.len(), 1);
+    assert_eq!(
+        encode_x_client_output(XByteOrder::LittleEndian, create.outputs[0])[0],
+        22
+    );
+
+    let map = decode_x11_core_request(
+        context(namespace, 602, XByteOrder::LittleEndian),
+        &resource_request(XByteOrder::LittleEndian, 8, 0x220101),
+    )
+    .unwrap();
+    let map = dispatch_x11_wire_request(
+        dispatch_context(namespace, 2, XByteOrder::LittleEndian, 8),
+        map,
+        &mut runtime,
+        &mut properties,
+    );
+    assert_eq!(map.outputs.len(), 1);
+    assert_eq!(
+        encode_x_client_output(XByteOrder::LittleEndian, map.outputs[0])[0],
+        19
+    );
+
+    let property = decode_x11_core_request(
+        context(namespace, 603, XByteOrder::LittleEndian),
+        &change_property_request(
+            XByteOrder::LittleEndian,
+            XPropertyMode::Replace,
+            0x220101,
+            7,
+            8,
+            8,
+            b"hello",
+        ),
+    )
+    .unwrap();
+    let property = dispatch_x11_wire_request(
+        dispatch_context(namespace, 3, XByteOrder::LittleEndian, 18),
+        property,
+        &mut runtime,
+        &mut properties,
+    );
+    assert_eq!(property.outputs.len(), 1);
+    assert_eq!(
+        encode_x_client_output(XByteOrder::LittleEndian, property.outputs[0])[0],
+        28
+    );
+
+    let selection = decode_x11_core_request(
+        context(namespace, 604, XByteOrder::LittleEndian),
+        &convert_selection_request(XByteOrder::LittleEndian, 0x220101, 100, 101, 102, 33),
+    )
+    .unwrap();
+    let selection = dispatch_x11_wire_request(
+        dispatch_context(namespace, 4, XByteOrder::LittleEndian, 24),
+        selection,
+        &mut runtime,
+        &mut properties,
+    );
+    assert_eq!(selection.outputs.len(), 1);
+    let encoded = encode_x_client_output(XByteOrder::LittleEndian, selection.outputs[0]);
+    assert_eq!(encoded[0], 31);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &encoded[20..24]),
+        X_ATOM_NONE
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn x11_setup_socket_smoke_completes_handshake() {
@@ -389,11 +537,82 @@ fn x11_setup_socket_smoke_completes_handshake() {
     server.join().unwrap();
 }
 
+#[cfg(unix)]
+#[test]
+fn x11_core_socket_smoke_completes_setup_create_and_map() {
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let socket_path = std::env::temp_dir().join(format!(
+        "sophia-x11-core-test-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let server_path = socket_path.clone();
+    let server = thread::spawn(move || {
+        run_x11_core_socket_server_once(&server_path, NamespaceId::from_raw(47)).unwrap();
+    });
+
+    wait_for_socket(&socket_path);
+    let mut stream = UnixStream::connect(&socket_path).unwrap();
+    stream
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    read_setup_success(&mut stream, XByteOrder::LittleEndian);
+
+    stream
+        .write_all(&create_window_request(
+            XByteOrder::LittleEndian,
+            0x220201,
+            1,
+            2,
+            300,
+            200,
+        ))
+        .unwrap();
+    let configure = read_x_record(&mut stream);
+    assert_eq!(configure[0], 22);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &configure[8..12]),
+        0x220201
+    );
+
+    stream
+        .write_all(&resource_request(XByteOrder::LittleEndian, 8, 0x220201))
+        .unwrap();
+    let map = read_x_record(&mut stream);
+    assert_eq!(map[0], 19);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &map[8..12]), 0x220201);
+
+    drop(stream);
+    let _ = std::fs::remove_file(&socket_path);
+    server.join().unwrap();
+}
+
 fn context(namespace: NamespaceId, transaction: u64, byte_order: XByteOrder) -> XWireClientContext {
     XWireClientContext {
         byte_order,
         namespace,
         transaction: TransactionId::from_raw(transaction),
+    }
+}
+
+fn dispatch_context(
+    namespace: NamespaceId,
+    sequence: u16,
+    byte_order: XByteOrder,
+    major_opcode: u8,
+) -> XDispatchContext {
+    XDispatchContext {
+        byte_order,
+        namespace,
+        sequence,
+        major_opcode,
     }
 }
 
@@ -561,4 +780,25 @@ fn wait_for_socket(path: &std::path::Path) {
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     panic!("timed out waiting for socket {}", path.display());
+}
+
+#[cfg(unix)]
+fn read_setup_success(stream: &mut std::os::unix::net::UnixStream, byte_order: XByteOrder) {
+    use std::io::Read;
+
+    let mut prefix = [0; X_SETUP_REPLY_PREFIX_LEN];
+    stream.read_exact(&mut prefix).unwrap();
+    assert_eq!(prefix[0], 1);
+    let body_len = usize::from(read_u16(byte_order, &prefix[6..8])) * 4;
+    let mut body = vec![0; body_len];
+    stream.read_exact(&mut body).unwrap();
+}
+
+#[cfg(unix)]
+fn read_x_record(stream: &mut std::os::unix::net::UnixStream) -> [u8; 32] {
+    use std::io::Read;
+
+    let mut record = [0; 32];
+    stream.read_exact(&mut record).unwrap();
+    record
 }

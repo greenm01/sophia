@@ -6,28 +6,28 @@ evidence belong in `docs/research-log.md`.
 
 ---
 
-## Active Focus - Sophia X Authority: Minimal X Event/Reply Emission
+## Active Focus - Sophia X Authority: Atom And Property Names
 
-The X11 setup parser and first core request decoder exist. The next
-architecture step is producing the minimal X replies, errors, and events needed
-for a tiny synthetic X client to observe normal protocol outcomes after setup.
+The X11 setup parser, first core request decoder, and minimal client-visible
+event/error output exist. The next architecture step is resolving numeric atoms
+into bounded authority-owned names so ICCCM/EWMH properties can feed sanitized
+metadata candidates without exposing raw metadata to the WM.
 
 **Now**
-- [ ] Add bounded X error reply artifacts for malformed or rejected decoded
-  requests.
-- [ ] Add minimal event artifacts for `MapNotify`, `ConfigureNotify`, property
-  changes, and selection outcomes.
-- [ ] Add reply/event encoders that respect the connected client's byte order.
-- [ ] Add integration tests proving decoded requests produce runtime responses
-  plus client-visible X reply/error/event bytes.
+- [ ] Add bounded atom-name records for predefined atoms and client interned
+  atoms.
+- [ ] Decode `InternAtom` and `GetAtomName` enough for synthetic clients.
+- [ ] Tie `ChangeProperty` records to atom names for ICCCM/EWMH candidates such
+  as `WM_CLASS`, `WM_NAME`, `_NET_WM_NAME`, and `WM_PROTOCOLS`.
+- [ ] Keep metadata broker output sanitized and separate from WM layout data.
 
 **Next**
-- [ ] Extend the local Unix socket smoke from setup-only to setup plus
-  `CreateWindow` and `MapWindow`.
-- [ ] Add first atom-name handling for metadata-relevant properties without
-  exposing raw metadata to the WM.
 - [ ] Define the tiny Xlib real-client smoke after the synthetic request/reply
   path is green.
+- [ ] Add minimal `GetProperty` reply support for bounded metadata-relevant
+  properties.
+- [ ] Start a first real Xlib smoke with setup, atom lookup, create, map, and
+  event observation.
 
 ---
 
@@ -92,6 +92,9 @@ not the long-term target architecture.
 - [x] Sophia X Authority X11 wire start: setup parser, setup success/failure
   encoders, first core request decoder, minimal property table, and setup
   socket smoke.
+- [x] Sophia X Authority client-visible output: bounded X error/event records,
+  `ConfigureNotify`, `MapNotify`, `PropertyNotify`, `SelectionNotify`, and
+  setup/create/map socket smoke.
 - [x] Future Wayland Authority boundary documented as a later protocol
   authority, not the architectural center.
 - [x] Backend skeletons: frame clock, renderer/import abstraction, DRM/KMS

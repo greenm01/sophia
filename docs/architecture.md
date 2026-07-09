@@ -76,8 +76,8 @@ IPC frame protocol. That socket protocol is a harness, not the X11 wire
 protocol. The first real X11 wire layer now parses connection setup and decodes
 early core requests into existing internal authority requests. Wire parsing
 feeds `XAuthorityRuntime`; it must not grow a second resource table or a
-parallel authority path. The next architecture step is minimal X reply, error,
-and event emission for decoded requests.
+parallel authority path. The next architecture step is atom and property naming
+for ICCCM/EWMH-compatible metadata without weakening the blind WM boundary.
 
 ## Load-Bearing Boundaries
 

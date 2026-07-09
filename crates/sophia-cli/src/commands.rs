@@ -32,9 +32,10 @@ mod prelude {
     };
     pub(crate) use sophia_wm_demo::{ExternalWmClient, tile_workspace};
     pub(crate) use sophia_x_authority::{
-        XAuthorityRequestKind, XAuthorityRequestPacket, XResourceId,
+        XAuthorityRequestKind, XAuthorityRequestPacket, XByteOrder, XResourceId,
         XSelectionChangeKind as XAuthoritySelectionChangeKind, read_x_authority_response,
-        run_x_authority_socket_server_once, write_x_authority_request,
+        run_x_authority_socket_server_once, run_x11_core_socket_server_once,
+        write_x_authority_request,
     };
     pub(crate) use sophia_x_bridge::{
         ClipboardSelectionFailureRequest, TestClientConfig, XMirrorState, XSelectionChangeKind,
