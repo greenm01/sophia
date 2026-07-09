@@ -11,12 +11,12 @@ evidence belong in `docs/research-log.md`.
 **Now**
 - [ ] Keep `DEFAULT_DISPLAY` clear-color smoke as fallback until GBM-backed
   drawing is validated against real render nodes.
-- [ ] Record repeated passing `SOPHIA_RUN_REAL_GBM_SMOKE=1` runs before retiring
-  `DEFAULT_DISPLAY`.
+- [ ] Decide whether `DEFAULT_DISPLAY` should retire now or remain as a host
+  compatibility smoke.
 
 **Next**
-- [ ] Add local evidence to `docs/research-log.md` after a passing
-  `SOPHIA_RUN_REAL_GBM_SMOKE=1` run.
+- [ ] Document the `DEFAULT_DISPLAY` retirement decision in
+  `docs/validation.md` and `docs/renderer-import-boundary.md`.
 
 ---
 
@@ -271,6 +271,8 @@ evidence belong in `docs/research-log.md`.
   are proven.
 - [x] Add a reduced real-GBM-smoke evidence record shape for validation output.
 - [x] Record a passing `SOPHIA_RUN_REAL_GBM_SMOKE=1` run before retiring
+  `DEFAULT_DISPLAY`.
+- [x] Record repeated passing `SOPHIA_RUN_REAL_GBM_SMOKE=1` runs before retiring
   `DEFAULT_DISPLAY`.
 
 ---

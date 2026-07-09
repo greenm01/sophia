@@ -766,6 +766,8 @@ On July 9, 2026, the opt-in real GBM/EGL validation passed on a host exposing
 The child smoke asserted `EglDrawSmokeStatus::ClearColorReady` and
 `LiveRendererPresentationStatus::Ready`; public evidence remains reduced to
 `LiveRealGbmSmokeEvidence` status, draw status, and presentation status.
+A second run of the same command passed on the same host in the same session,
+again exercising the child-process real render-node path.
 
 ## Open Questions
 
