@@ -6,20 +6,20 @@ evidence belong in `docs/research-log.md`.
 
 ---
 
-## Active Focus - Sophia X Authority: Tiny Real Xlib Smoke
+## Active Focus - Sophia X Authority: Broader X Client Compatibility
 
 **Now**
-- [ ] Define the smallest real Xlib client target: connect, intern atoms,
-  create a window, set/read a title, map, and observe events.
-- [ ] Add a CLI smoke wrapper that starts the Sophia X Authority socket and
-  runs the tiny client against it.
-- [ ] Record the next missing X11 opcode or reply shape found by the real
-  client instead of guessing ahead.
+- [ ] Add the next real-client probe that uses a broader X11 library path
+  beyond the successful `x11rb` connect/create/map/property smoke.
+- [ ] Record the first missing opcode/reply shape from that probe as the next
+  implementation target.
+- [ ] Keep each new compatibility step covered by both a direct wire test and a
+  CLI smoke when feasible.
 
 **Next**
+- [ ] Decide whether the next probe is C Xlib, `xmessage`, or a tiny toolkit
+  client, depending on what is available locally without adding dependencies.
 - [ ] Add minimal request coverage for the first real-client failure.
-- [ ] Re-run the Xlib smoke until the connect/create/map/property path is
-  stable.
 
 ---
 
@@ -28,8 +28,8 @@ evidence belong in `docs/research-log.md`.
 - [x] Expand X11 atom/property tables for ICCCM names and metadata-broker
   candidates.
 - [x] Add minimal bounded `GetProperty` replies and socket smoke coverage.
-- [ ] Define the first real-client target after synthetic setup succeeds:
-  likely a tiny Xlib window before GTK/Qt/browser paths.
+- [x] Define and pass the first real-client-library target with `x11rb`: setup,
+  atom lookup, create, property write/read, map, and event observation.
 - [ ] Revisit compositor backend work after X Authority can create, map, draw,
   and expose a simple client through the authority transaction model.
 

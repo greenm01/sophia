@@ -280,7 +280,13 @@ property writes such as `WM_CLASS`, `WM_NAME`, `_NET_WM_NAME`, and
 window, atom names, type names, value length, and generation. They do not emit
 raw titles, classes, icons, paths, or namespace labels to the window manager.
 
-Minimal `GetProperty` is now present. The next milestone is a tiny real Xlib
-client that uses the normal library path to connect, intern atoms, create and
-map a window, and round-trip a bounded title property. Its first failure should
-drive the next opcode or reply implementation.
+Minimal `GetProperty` is now present. The first real-client-library smoke uses
+`x11rb` against the Sophia X Authority socket. That path requires a
+client-compatible setup reply with one root, one pixmap format, one depth, and
+one TrueColor visual. The smoke connects through the normal X11 setup path,
+interns `_NET_WM_NAME` and `UTF8_STRING`, creates a window, writes and reads a
+bounded title property, maps the window, and observes `ConfigureNotify` and
+`MapNotify`.
+
+The next milestone is a broader X client probe. Its first failure should drive
+the next opcode or reply implementation rather than guessing ahead.

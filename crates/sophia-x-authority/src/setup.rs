@@ -66,6 +66,9 @@ pub const X_SETUP_MAX_AUTH_FIELD_LEN: usize = 1024;
 pub const X_SETUP_DEFAULT_RESOURCE_ID_BASE: u32 = 0x0020_0000;
 pub const X_SETUP_DEFAULT_RESOURCE_ID_MASK: u32 = 0x001f_ffff;
 pub const X_SETUP_DEFAULT_MAX_REQUEST_UNITS: u16 = u16::MAX;
+pub const X_SETUP_DEFAULT_ROOT: u32 = 0x20;
+pub const X_SETUP_DEFAULT_COLORMAP: u32 = 0x21;
+pub const X_SETUP_DEFAULT_VISUAL: u32 = 0x22;
 
 const X_SETUP_SUCCESS: u8 = 1;
 const X_SETUP_FAILURE: u8 = 0;
@@ -73,6 +76,12 @@ const X_PROTOCOL_MAJOR: u16 = 11;
 const X_PROTOCOL_MINOR: u16 = 0;
 const X_SETUP_VENDOR: &[u8] = b"Sophia";
 const X_SETUP_RELEASE: u32 = 1;
+const X_SETUP_PIXMAP_FORMAT_LEN: usize = 8;
+const X_SETUP_ROOT_LEN: usize = 40;
+const X_SETUP_DEPTH_LEN: usize = 8;
+const X_SETUP_VISUAL_LEN: usize = 24;
+const X_SETUP_ROOT_DEPTH: u8 = 24;
+const X_SETUP_TRUE_COLOR: u8 = 4;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct XSetupRequest {
@@ -108,6 +117,14 @@ impl XSetupSuccess {
             vendor: X_SETUP_VENDOR.to_vec(),
             roots: 0,
             formats: 0,
+        }
+    }
+
+    pub fn client_compatible() -> Self {
+        Self {
+            roots: 1,
+            formats: 1,
+            ..Self::minimal()
         }
     }
 }
@@ -248,7 +265,24 @@ pub fn encode_x11_setup_success(
         });
     }
 
-    let body_len = X_SETUP_SUCCESS_BODY_LEN + padded_len(setup.vendor.len());
+    let root_section_len = usize::from(setup.roots)
+        .checked_mul(X_SETUP_ROOT_LEN + X_SETUP_DEPTH_LEN + X_SETUP_VISUAL_LEN)
+        .ok_or(XSetupParseError::ReplyFieldTooLarge {
+            field: "setup_roots",
+            len: usize::MAX,
+            max: u16::MAX as usize * 4,
+        })?;
+    let format_section_len = usize::from(setup.formats)
+        .checked_mul(X_SETUP_PIXMAP_FORMAT_LEN)
+        .ok_or(XSetupParseError::ReplyFieldTooLarge {
+            field: "setup_formats",
+            len: usize::MAX,
+            max: u16::MAX as usize * 4,
+        })?;
+    let body_len = X_SETUP_SUCCESS_BODY_LEN
+        + padded_len(setup.vendor.len())
+        + format_section_len
+        + root_section_len;
     let body_units =
         u16::try_from(body_len / 4).map_err(|_| XSetupParseError::ReplyFieldTooLarge {
             field: "setup_success_body",
@@ -280,6 +314,12 @@ pub fn encode_x11_setup_success(
     byte_order.push_u32(&mut out, 0);
     out.extend_from_slice(&setup.vendor);
     pad_to_four(&mut out);
+    for _ in 0..setup.formats {
+        encode_pixmap_format(&mut out);
+    }
+    for _ in 0..setup.roots {
+        encode_root(byte_order, &mut out);
+    }
 
     Ok(out)
 }
@@ -331,6 +371,46 @@ fn validate_auth_len(field: &'static str, len: usize) -> Result<(), XSetupParseE
 
 fn pad_to_four(out: &mut Vec<u8>) {
     out.resize(padded_len(out.len()), 0);
+}
+
+fn encode_pixmap_format(out: &mut Vec<u8>) {
+    out.push(X_SETUP_ROOT_DEPTH);
+    out.push(32);
+    out.push(32);
+    out.extend_from_slice(&[0; 5]);
+}
+
+fn encode_root(byte_order: XByteOrder, out: &mut Vec<u8>) {
+    byte_order.push_u32(out, X_SETUP_DEFAULT_ROOT);
+    byte_order.push_u32(out, X_SETUP_DEFAULT_COLORMAP);
+    byte_order.push_u32(out, 0x00ff_ffff);
+    byte_order.push_u32(out, 0x0000_0000);
+    byte_order.push_u32(out, 0);
+    byte_order.push_u16(out, 1280);
+    byte_order.push_u16(out, 720);
+    byte_order.push_u16(out, 340);
+    byte_order.push_u16(out, 190);
+    byte_order.push_u16(out, 1);
+    byte_order.push_u16(out, 1);
+    byte_order.push_u32(out, X_SETUP_DEFAULT_VISUAL);
+    out.push(0);
+    out.push(0);
+    out.push(X_SETUP_ROOT_DEPTH);
+    out.push(1);
+
+    out.push(X_SETUP_ROOT_DEPTH);
+    out.push(0);
+    byte_order.push_u16(out, 1);
+    byte_order.push_u32(out, 0);
+
+    byte_order.push_u32(out, X_SETUP_DEFAULT_VISUAL);
+    out.push(X_SETUP_TRUE_COLOR);
+    out.push(8);
+    byte_order.push_u16(out, 256);
+    byte_order.push_u32(out, 0x00ff_0000);
+    byte_order.push_u32(out, 0x0000_ff00);
+    byte_order.push_u32(out, 0x0000_00ff);
+    byte_order.push_u32(out, 0);
 }
 
 const fn byte_order_code(byte_order: XByteOrder) -> u8 {

@@ -103,10 +103,12 @@ pub fn serve_x11_setup_socket_client(
     stream: &mut UnixStream,
 ) -> Result<XSetupRequest, X11SetupSocketError> {
     let request = read_x11_setup_request(stream)?;
-    let response = encode_x11_setup_success(request.byte_order, &XSetupSuccess::minimal())
-        .map_err(|error| {
-            X11SetupSocketError::new(format!("failed to encode X11 setup success: {error}"))
-        })?;
+    let response =
+        encode_x11_setup_success(request.byte_order, &XSetupSuccess::client_compatible()).map_err(
+            |error| {
+                X11SetupSocketError::new(format!("failed to encode X11 setup success: {error}"))
+            },
+        )?;
     stream
         .write_all(&response)
         .map_err(|error| X11SetupSocketError::new(format!("failed to write X11 setup: {error}")))?;

@@ -108,6 +108,23 @@ fn x11_setup_success_reply_encodes_resource_id_facts() {
 }
 
 #[test]
+fn x11_setup_success_reply_can_advertise_minimal_root_screen() {
+    let reply = encode_x11_setup_success(
+        XByteOrder::LittleEndian,
+        &XSetupSuccess::client_compatible(),
+    )
+    .unwrap();
+
+    assert_eq!(reply[0], 1);
+    assert_eq!(reply[28], 1);
+    assert_eq!(reply[29], 1);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &reply[56..60]), 0x20);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &reply[88..92]), 0x22);
+    assert_eq!(reply[94], 24);
+    assert_eq!(reply[95], 1);
+}
+
+#[test]
 fn x11_setup_failure_reply_encodes_native_failure() {
     let reply = encode_x11_setup_failure(
         XByteOrder::BigEndian,
