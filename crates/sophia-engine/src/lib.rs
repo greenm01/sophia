@@ -146,6 +146,29 @@ pub enum SurfaceTransactionCommitReadiness {
     StaleGeneration { current: u64, expected: u64 },
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum SurfaceTimeoutPolicy {
+    #[default]
+    PreserveCommitted,
+    DegradeToPending,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SlowClientVisualDecision {
+    PreserveCommitted {
+        surface: SurfaceId,
+        committed: Option<CommittedSurfaceState>,
+    },
+    DegradeToPending {
+        surface: SurfaceId,
+        degraded: CommittedSurfaceState,
+    },
+    NotTimedOut {
+        surface: SurfaceId,
+        readiness: SurfaceTransactionCommitReadiness,
+    },
+}
+
 impl SurfaceVisualStateTable {
     pub fn new() -> Self {
         Self::default()
@@ -218,6 +241,44 @@ impl SurfaceVisualStateTable {
         }
 
         SurfaceTransactionCommitReadiness::Ready
+    }
+
+    pub fn slow_client_timeout_decision(
+        &self,
+        transaction: &SurfaceTransaction,
+        policy: SurfaceTimeoutPolicy,
+    ) -> SlowClientVisualDecision {
+        let readiness = self.transaction_commit_readiness(transaction);
+        if !matches!(
+            readiness,
+            SurfaceTransactionCommitReadiness::NotReady(SurfaceTransactionReadiness::TimedOut)
+        ) {
+            return SlowClientVisualDecision::NotTimedOut {
+                surface: transaction.surface,
+                readiness,
+            };
+        }
+
+        match policy {
+            SurfaceTimeoutPolicy::PreserveCommitted => {
+                SlowClientVisualDecision::PreserveCommitted {
+                    surface: transaction.surface,
+                    committed: self.committed(transaction.surface).cloned(),
+                }
+            }
+            SurfaceTimeoutPolicy::DegradeToPending => SlowClientVisualDecision::DegradeToPending {
+                surface: transaction.surface,
+                degraded: CommittedSurfaceState {
+                    surface: transaction.surface,
+                    committed_generation: transaction
+                        .previous_committed_generation
+                        .saturating_add(1),
+                    geometry: transaction.target_geometry,
+                    buffer: transaction.target_buffer,
+                    damage: transaction.damage.clone(),
+                },
+            },
+        }
     }
 
     pub fn upsert_committed(&mut self, committed: CommittedSurfaceState) {

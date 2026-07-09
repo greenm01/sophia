@@ -10,10 +10,11 @@ use sophia_engine::{
     MetadataChromeUpdate, NotificationChromePresenter, NotificationChromeRejectReason,
     NotificationChromeUpdate, RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction,
     RoutedInputRequestError, SanitizedChromeMetadata, SessionCommand, SessionEvent,
-    SessionLayerSource, SessionTickRequest, SurfaceTransactionCommitReadiness,
-    SurfaceVisualStateTable, WmIpcError, WmRestartReason, WmRuntimeAction, WmTransactionUpdate,
-    explicit_sync_surfaces, hit_test_scene_for_input, layout_epoch_for_explicit_sync,
-    measure_resize_behavior, notification_chrome_command_from_portal, request_wm_over_stream,
+    SessionLayerSource, SessionTickRequest, SlowClientVisualDecision, SurfaceTimeoutPolicy,
+    SurfaceTransactionCommitReadiness, SurfaceVisualStateTable, WmIpcError, WmRestartReason,
+    WmRuntimeAction, WmTransactionUpdate, explicit_sync_surfaces, hit_test_scene_for_input,
+    layout_epoch_for_explicit_sync, measure_resize_behavior,
+    notification_chrome_command_from_portal, request_wm_over_stream,
     routed_input_request_from_physical_event, routed_input_requests_from_flush,
     runtime_observation_from_authority_transaction_commit,
     runtime_observation_from_metadata_chrome_updates,
@@ -732,6 +733,96 @@ fn malformed_surface_transactions_do_not_commit_visual_state() {
     assert_eq!(commit.outcome, TransactionOutcome::RejectedInvalidSurface);
     assert!(commit.applied_surfaces.is_empty());
     assert_eq!(committed, before);
+}
+
+#[test]
+fn slow_client_timeout_preserves_committed_state_by_default() {
+    let engine = HeadlessEngine::default();
+    let old_layer = test_layer(0, 0, 0, Region::empty());
+    let committed = engine.committed_state_from_layer(&old_layer);
+    let table = SurfaceVisualStateTable::from_committed_states([committed.clone()]);
+    let mut timed_out = old_layer.to_surface_transaction(
+        TransactionId::from_raw(86),
+        AuthorityKind::SophiaX,
+        SurfaceTransactionReadiness::TimedOut,
+        250,
+        committed.committed_generation,
+    );
+    timed_out.target_geometry.width = 700;
+    timed_out.target_buffer = BufferSource::DmaBuf { handle: 700 };
+
+    assert_eq!(
+        table.slow_client_timeout_decision(&timed_out, SurfaceTimeoutPolicy::default()),
+        SlowClientVisualDecision::PreserveCommitted {
+            surface: old_layer.surface,
+            committed: Some(committed.clone())
+        }
+    );
+    assert_eq!(
+        table.committed(old_layer.surface),
+        Some(&committed),
+        "timeout decision must not mutate committed visual state"
+    );
+}
+
+#[test]
+fn slow_client_timeout_degrades_only_when_policy_explicitly_allows_it() {
+    let engine = HeadlessEngine::default();
+    let old_layer = test_layer(0, 0, 0, Region::empty());
+    let committed = engine.committed_state_from_layer(&old_layer);
+    let table = SurfaceVisualStateTable::from_committed_states([committed.clone()]);
+    let mut timed_out = old_layer.to_surface_transaction(
+        TransactionId::from_raw(87),
+        AuthorityKind::SophiaX,
+        SurfaceTransactionReadiness::TimedOut,
+        250,
+        committed.committed_generation,
+    );
+    timed_out.target_geometry.width = 701;
+    timed_out.target_buffer = BufferSource::DmaBuf { handle: 701 };
+
+    let SlowClientVisualDecision::DegradeToPending { surface, degraded } =
+        table.slow_client_timeout_decision(&timed_out, SurfaceTimeoutPolicy::DegradeToPending)
+    else {
+        panic!("expected explicit degrade decision");
+    };
+
+    assert_eq!(surface, old_layer.surface);
+    assert_eq!(degraded.surface, old_layer.surface);
+    assert_eq!(
+        degraded.committed_generation,
+        committed.committed_generation + 1
+    );
+    assert_eq!(degraded.geometry.width, 701);
+    assert_eq!(degraded.buffer, BufferSource::DmaBuf { handle: 701 });
+    assert_eq!(
+        table.committed(old_layer.surface),
+        Some(&committed),
+        "degrade decision is an artifact until caller commits it explicitly"
+    );
+}
+
+#[test]
+fn slow_client_timeout_decision_ignores_non_timeout_transactions() {
+    let engine = HeadlessEngine::default();
+    let old_layer = test_layer(0, 0, 0, Region::empty());
+    let committed = engine.committed_state_from_layer(&old_layer);
+    let table = SurfaceVisualStateTable::from_committed_states([committed.clone()]);
+    let ready = old_layer.to_surface_transaction(
+        TransactionId::from_raw(88),
+        AuthorityKind::SophiaX,
+        SurfaceTransactionReadiness::Ready,
+        250,
+        committed.committed_generation,
+    );
+
+    assert_eq!(
+        table.slow_client_timeout_decision(&ready, SurfaceTimeoutPolicy::DegradeToPending),
+        SlowClientVisualDecision::NotTimedOut {
+            surface: old_layer.surface,
+            readiness: SurfaceTransactionCommitReadiness::Ready
+        }
+    );
 }
 
 #[test]

@@ -86,7 +86,7 @@ Make macOS-style transaction integrity a first-class Sophia invariant.
 - [x] Define pending versus committed surface state in the engine data model.
 - [x] Define buffer/geometry readiness and the conditions required to commit a
   visual transaction.
-- [ ] Define fail-closed slow-client behavior: keep the last committed visual
+- [x] Define fail-closed slow-client behavior: keep the last committed visual
   state unless timeout policy explicitly degrades.
 - [ ] Define timeout/degrade reporting so chronic offenders can be measured
   without leaking protocol metadata to the WM.
