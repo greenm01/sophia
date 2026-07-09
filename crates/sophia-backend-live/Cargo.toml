@@ -10,12 +10,13 @@ rust-version.workspace = true
 sophia-engine = { path = "../sophia-engine" }
 sophia-protocol = { path = "../sophia-protocol" }
 sophia-renderer-live = { path = "../sophia-renderer-live" }
+drm = { version = "0.15", optional = true, default-features = false }
 
 [features]
 default = []
 gbm-probe = ["sophia-renderer-live/gbm-probe"]
 egl-probe = ["sophia-renderer-live/egl-probe"]
-libdrm-events = []
+libdrm-events = ["dep:drm"]
 
 [lints]
 workspace = true

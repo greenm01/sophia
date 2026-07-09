@@ -3,11 +3,22 @@
 use std::sync::mpsc;
 
 use sophia_backend_live::{
-    CompositorBackendTickInput, FakeLibdrmPageFlipEventPoller, LibdrmPageFlipEventPollReport,
-    LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller, LiveBackendConfig,
-    LivePageFlipCallback, LivePageFlipCallbackQueue, LivePageFlipCallbackSourceReport,
-    LivePageFlipEvent, LivePageFlipEventStatus, OutputId, QueuedInputPoller, discover_live_backend,
+    CompositorBackendTickInput, FakeLibdrmPageFlipEventPoller, LibdrmDependencyAdmissionReport,
+    LibdrmDependencyAdmissionStatus, LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus,
+    LibdrmPageFlipEventPoller, LiveBackendConfig, LivePageFlipCallback, LivePageFlipCallbackQueue,
+    LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus, OutputId,
+    QueuedInputPoller, discover_live_backend, libdrm_dependency_admission_report,
 };
+
+#[test]
+fn libdrm_dependency_is_admitted_without_exposing_native_event_shape() {
+    assert_eq!(
+        libdrm_dependency_admission_report(),
+        LibdrmDependencyAdmissionReport {
+            status: LibdrmDependencyAdmissionStatus::TypedPageFlipEventAvailable,
+        }
+    );
+}
 
 #[test]
 fn libdrm_event_poll_report_projects_source_state_without_native_identity() {

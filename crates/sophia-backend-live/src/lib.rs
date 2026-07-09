@@ -457,6 +457,35 @@ impl FakePageFlipCallbackSource {
 
 #[cfg(feature = "libdrm-events")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LibdrmDependencyAdmissionReport {
+    pub status: LibdrmDependencyAdmissionStatus,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibdrmDependencyAdmissionStatus {
+    TypedPageFlipEventAvailable,
+}
+
+#[cfg(feature = "libdrm-events")]
+pub fn libdrm_dependency_admission_report() -> LibdrmDependencyAdmissionReport {
+    native_drm_admission::dependency_admission_report()
+}
+
+#[cfg(feature = "libdrm-events")]
+mod native_drm_admission {
+    use super::{LibdrmDependencyAdmissionReport, LibdrmDependencyAdmissionStatus};
+
+    pub(super) fn dependency_admission_report() -> LibdrmDependencyAdmissionReport {
+        let _ = core::mem::size_of::<drm::control::PageFlipEvent>();
+        LibdrmDependencyAdmissionReport {
+            status: LibdrmDependencyAdmissionStatus::TypedPageFlipEventAvailable,
+        }
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LibdrmPageFlipEventPollReport {
     pub status: LibdrmPageFlipEventPollStatus,
     pub callbacks: LivePageFlipCallbackSourceReport,

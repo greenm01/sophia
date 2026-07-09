@@ -158,10 +158,13 @@ on them directly unless the safe crate cannot support the narrow page-flip poll
 adapter. A direct FFI dependency would enlarge the unsafe audit surface before
 the reduced callback path needs it.
 
-The next admission step may add `drm = "0.15"` as an optional
-`sophia-backend-live` dependency behind `libdrm-events`, with the native adapter
-kept in a small private module. That step must still keep default workspace
-tests dependency-light and deterministic.
+`drm = "0.15"` is admitted as an optional `sophia-backend-live` dependency
+behind `libdrm-events`. The first code path is only an admission probe that
+checks the typed page-flip event is available and returns a reduced
+`LibdrmDependencyAdmissionReport`. It does not open a card, poll a file
+descriptor, read native events, or expose `drm` types publicly. Native polling
+must still land in a small private adapter module and preserve the existing
+callback queue contracts.
 
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
