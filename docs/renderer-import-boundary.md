@@ -49,6 +49,12 @@ import capable, or degraded. Per-path status is reduced to disabled, enabled, or
 degraded for XPixmap and DMA-BUF. No renderer-private handle, file descriptor,
 device path, or client buffer identity belongs in that health report.
 
+`sophia-backend-live` consumes that startup health when it builds its live
+runtime assembly wrapper. Each tick report can carry the same reduced renderer
+observation beside the engine's protocol-neutral tick report. The engine remains
+free of renderer-live dependencies, and runtime consumers still learn whether
+the session is using CPU fallback or a native import-capable renderer.
+
 Real MIT-SHM mapping remains outside this boundary until Sophia has a bounded
 shared-memory upload path with size checks, namespace validation, lifetime
 tracking, and fail-closed errors.

@@ -2,11 +2,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use sophia_backend_live::{
-    DeviceId, HeadlessOutput, LibinputDeviceDescriptor, LibinputDeviceKind, LiveBackendConfig,
-    LiveBackendDependencyDecision, LiveBackendDependencyKind, LiveBackendDependencyUse,
-    LiveCompositorBackendDiscoveryStatus, LiveRendererImportBoundary, LiveRendererImportHealth,
-    LiveRendererImportPathStatus, LiveRendererImportStartupStatus, OutputId, QueuedInputPoller,
-    RendererSelection, SeatId, Size, discover_live_backend, live_backend_dependency_decision,
+    CompositorBackendTickInput, DeviceId, HeadlessOutput, LibinputDeviceDescriptor,
+    LibinputDeviceKind, LiveBackendConfig, LiveBackendDependencyDecision,
+    LiveBackendDependencyKind, LiveBackendDependencyUse, LiveCompositorBackendDiscoveryStatus,
+    LiveRendererImportBoundary, LiveRendererImportHealth, LiveRendererImportPathStatus,
+    LiveRendererImportStartupStatus, LiveRendererRuntimeObservation,
+    LiveRendererSelectionObservation, OutputId, QueuedInputPoller, RendererSelection, SeatId, Size,
+    discover_live_backend, live_backend_dependency_decision,
 };
 
 #[test]
@@ -128,6 +130,35 @@ fn live_backend_startup_admits_native_renderer_import_only_when_configured() {
             import_dmabuf: false,
         }
     );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_runtime_assembly_reports_reduced_renderer_health_on_tick() {
+    let root = ready_drm_sysfs_fixture("runtime-renderer-health");
+    let config = LiveBackendConfig::new(&root).with_renderer_import_boundary(
+        LiveRendererImportBoundary::with_native_imports(true, false),
+    );
+
+    let report = discover_live_backend(&config);
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed live assembly");
+
+    assert_eq!(
+        assembly.renderer_observation(),
+        LiveRendererRuntimeObservation {
+            health: LiveRendererImportHealth::NativeImportCapable,
+            xpixmap: LiveRendererImportPathStatus::Enabled,
+            dmabuf: LiveRendererImportPathStatus::Disabled,
+            selection: LiveRendererSelectionObservation::NativeImportCapable,
+        }
+    );
+    let tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should succeed");
+    assert_eq!(tick.renderer, assembly.renderer_observation());
 
     fs::remove_dir_all(root).unwrap();
 }

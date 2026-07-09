@@ -9,8 +9,9 @@
 use std::path::PathBuf;
 
 pub use sophia_engine::{
-    BufferImportPath, DrmKmsOutputRegistry, HeadlessCompositorBackendAssembly, HeadlessOutput,
-    LibinputDeviceDescriptor, LibinputDeviceKind, LibinputEventSource,
+    BufferImportPath, CompositorBackendAssemblyError, CompositorBackendTickInput,
+    CompositorBackendTickReport, DrmKmsOutputRegistry, HeadlessCompositorBackendAssembly,
+    HeadlessOutput, LibinputDeviceDescriptor, LibinputDeviceKind, LibinputEventSource,
     LiveCompositorBackendDiscoveryReport, LiveCompositorBackendDiscoveryStatus, QueuedInputPoller,
     RendererSelection,
 };
@@ -141,6 +142,23 @@ impl LiveBackendStartupReport {
         self.into_headless_assembly(poller, renderer)
     }
 
+    pub fn into_live_runtime_assembly(
+        self,
+        poller: QueuedInputPoller,
+    ) -> Option<LiveBackendRuntimeAssembly> {
+        let renderer_status = self.renderer_import_status();
+        let renderer_selection = self.renderer_selection();
+        let renderer_observation = LiveRendererRuntimeObservation::from_startup_status(
+            renderer_status,
+            selection_observation(renderer_selection),
+        );
+        self.into_headless_assembly(poller, renderer_selection)
+            .map(|assembly| LiveBackendRuntimeAssembly {
+                assembly,
+                renderer_observation,
+            })
+    }
+
     pub fn into_headless_assembly(
         self,
         poller: QueuedInputPoller,
@@ -150,6 +168,43 @@ impl LiveBackendStartupReport {
     }
 }
 
+pub struct LiveBackendRuntimeAssembly {
+    assembly: HeadlessCompositorBackendAssembly,
+    renderer_observation: LiveRendererRuntimeObservation,
+}
+
+impl LiveBackendRuntimeAssembly {
+    pub fn assembly(&self) -> &HeadlessCompositorBackendAssembly {
+        &self.assembly
+    }
+
+    pub fn assembly_mut(&mut self) -> &mut HeadlessCompositorBackendAssembly {
+        &mut self.assembly
+    }
+
+    pub fn renderer_observation(&self) -> LiveRendererRuntimeObservation {
+        self.renderer_observation
+    }
+
+    pub fn run_tick(
+        &mut self,
+        input: CompositorBackendTickInput,
+    ) -> Result<LiveBackendRuntimeTickReport, CompositorBackendAssemblyError> {
+        let engine = self.assembly.run_tick(input)?;
+
+        Ok(LiveBackendRuntimeTickReport {
+            engine,
+            renderer: self.renderer_observation,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LiveBackendRuntimeTickReport {
+    pub engine: CompositorBackendTickReport,
+    pub renderer: LiveRendererRuntimeObservation,
+}
+
 pub fn discover_live_backend(config: &LiveBackendConfig) -> LiveBackendStartupReport {
     let output_backend = SysfsDrmKmsOutputBackend::new(&config.drm_sysfs_root);
     let input_backend = StaticInputDiscoveryBackend::new(config.input_devices.clone());
@@ -157,5 +212,14 @@ pub fn discover_live_backend(config: &LiveBackendConfig) -> LiveBackendStartupRe
     LiveBackendStartupReport {
         discovery: discover_live_compositor_backend(&output_backend, &input_backend),
         renderer_import: config.renderer_import,
+    }
+}
+
+fn selection_observation(selection: RendererSelection) -> LiveRendererSelectionObservation {
+    match selection {
+        RendererSelection::CpuFallback => LiveRendererSelectionObservation::CpuFallback,
+        RendererSelection::ImportCapable { .. } => {
+            LiveRendererSelectionObservation::NativeImportCapable
+        }
     }
 }

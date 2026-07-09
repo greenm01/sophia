@@ -9,16 +9,16 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Add a reduced runtime observation for renderer import health once startup
-  health is consumed by the runtime assembly.
 - [ ] Keep real GBM/EGL/DMA-BUF dependencies deferred until
   `sophia-renderer-live` has deterministic fake coverage.
-
-**Next**
-- [ ] Decide where the runtime assembly should store renderer import startup
-  health.
 - [ ] Add fake degraded renderer coverage before modeling any real native import
   failure.
+
+**Next**
+- [ ] Decide whether degraded renderer health should be sourced from failed
+  capability probes, failed imports, or both.
+- [ ] Keep the live runtime wrapper outside `sophia-engine` unless engine-local
+  renderer policy becomes unavoidable.
 
 ---
 
@@ -116,6 +116,10 @@ evidence belong in `docs/research-log.md`.
   DMA-BUF, or real MIT-SHM mapping.
 - [x] Decide the first runtime observation shape for CPU fallback versus native
   import-capable renderer selection.
+- [x] Decide that renderer import startup health is stored in the
+  `sophia-backend-live` runtime wrapper, not inside `sophia-engine`.
+- [x] Add a reduced runtime observation for renderer import health once startup
+  health is consumed by the runtime assembly.
 
 ---
 
