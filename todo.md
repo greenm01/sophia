@@ -6,37 +6,35 @@ evidence belong in `docs/research-log.md`.
 
 ---
 
-## Active Focus - Sophia X Authority: X11 Setup Parser
+## Active Focus - Sophia X Authority: Minimal X Event/Reply Emission
 
-The internal X Authority runtime is executable. The next architecture step is
-real X11 connection setup parsing that feeds the existing `XAuthorityRuntime`
-reducers instead of creating a second authority path.
+The X11 setup parser and first core request decoder exist. The next
+architecture step is producing the minimal X replies, errors, and events needed
+for a tiny synthetic X client to observe normal protocol outcomes after setup.
 
 **Now**
-- [ ] Add an X11 setup parser fixture for byte order, protocol version,
-  authorization name/data, resource ID base, and resource ID mask.
-- [ ] Model setup success and failure replies as bounded authority artifacts.
-- [ ] Add integration tests for little-endian and big-endian setup handshakes.
-- [ ] Add malformed setup tests for truncated input, unsupported major version,
-  and overlarge auth fields.
+- [ ] Add bounded X error reply artifacts for malformed or rejected decoded
+  requests.
+- [ ] Add minimal event artifacts for `MapNotify`, `ConfigureNotify`, property
+  changes, and selection outcomes.
+- [ ] Add reply/event encoders that respect the connected client's byte order.
+- [ ] Add integration tests proving decoded requests produce runtime responses
+  plus client-visible X reply/error/event bytes.
 
 **Next**
-- [ ] Decode first core X11 request fixtures into existing internal authority
-  requests: `CreateWindow`, `MapWindow`, `ChangeProperty`, and selection
-  ownership.
-- [ ] Add a local Unix socket smoke that completes an X11 setup handshake with a
-  tiny synthetic client without running full applications yet.
-- [ ] Keep request decoding isolated from runtime reducers: wire parsing should
-  produce internal request packets, then `XAuthorityRuntime` executes them.
+- [ ] Extend the local Unix socket smoke from setup-only to setup plus
+  `CreateWindow` and `MapWindow`.
+- [ ] Add first atom-name handling for metadata-relevant properties without
+  exposing raw metadata to the WM.
+- [ ] Define the tiny Xlib real-client smoke after the synthetic request/reply
+  path is green.
 
 ---
 
 ## Next Architecture Milestones
 
-- [ ] Add X11 atom/property tables needed by `ChangeProperty`, ICCCM names, and
-  metadata-broker candidates.
-- [ ] Add minimal X event/reply emission for setup, errors, map/configure, and
-  selection request outcomes.
+- [ ] Expand X11 atom/property tables for ICCCM names and metadata-broker
+  candidates.
 - [ ] Define the first real-client target after synthetic setup succeeds:
   likely a tiny Xlib window before GTK/Qt/browser paths.
 - [ ] Revisit compositor backend work after X Authority can create, map, draw,
@@ -89,6 +87,9 @@ not the long-term target architecture.
 - [x] Sophia X Authority v0 runtime: internal request/response packets, bounded
   codec, reducer-backed runtime, Unix socket helper, and
   `x-authority-runtime-smoke`.
+- [x] Sophia X Authority X11 wire start: setup parser, setup success/failure
+  encoders, first core request decoder, minimal property table, and setup
+  socket smoke.
 - [x] Future Wayland Authority boundary documented as a later protocol
   authority, not the architectural center.
 - [x] Backend skeletons: frame clock, renderer/import abstraction, DRM/KMS

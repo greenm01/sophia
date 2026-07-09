@@ -73,10 +73,11 @@ and returns command packets.
 
 The internal Sophia X Authority runtime is now executable over a Sophia-owned
 IPC frame protocol. That socket protocol is a harness, not the X11 wire
-protocol. The next architecture step is to parse real X11 connection setup
-bytes and translate core request fixtures into the existing internal authority
-requests. Wire parsing must feed `XAuthorityRuntime`; it must not grow a second
-resource table or a parallel authority path.
+protocol. The first real X11 wire layer now parses connection setup and decodes
+early core requests into existing internal authority requests. Wire parsing
+feeds `XAuthorityRuntime`; it must not grow a second resource table or a
+parallel authority path. The next architecture step is minimal X reply, error,
+and event emission for decoded requests.
 
 ## Load-Bearing Boundaries
 

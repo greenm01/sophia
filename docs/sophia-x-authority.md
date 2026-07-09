@@ -237,20 +237,19 @@ The CLI smoke command is:
 cargo run --offline -q -p sophia-cli -- x-authority-runtime-smoke
 ```
 
-Real X11 connection setup and request parsing starts after this seam stays
-green. The next parser should translate X11 setup bytes and a few core request
-fixtures into these existing internal request packets rather than bypassing the
-authority reducers.
+Real X11 connection setup and first core request parsing now sit beside this
+internal socket seam. The wire parser translates X11 bytes into existing
+internal request packets rather than bypassing the authority reducers.
 
-## Next: Real X11 Setup Parsing
+## X11 Wire Start
 
-The next milestone is connection setup, not application compatibility. The
-parser should accept byte-order markers, protocol version fields, authorization
-name/data fields, and resource ID allocation facts. It should produce bounded
-setup success or failure artifacts and leave client resources owned by Sophia X
-Authority.
+The first X11 wire milestone is connection setup, not application
+compatibility. Sophia X Authority now has a bounded setup parser for byte-order
+markers, protocol version fields, authorization name/data fields, and resource
+ID allocation facts. It also has setup success/failure encoders and a local
+Unix socket smoke that completes a setup handshake with a synthetic client.
 
-First fixtures should cover:
+The covered setup fixtures are:
 
 - little-endian and big-endian setup requests;
 - valid setup with resource ID base and mask;
@@ -259,7 +258,12 @@ First fixtures should cover:
 - overlarge authorization fields;
 - setup success and setup failure reply encoding.
 
-After setup is covered, core request parsing should start with fixtures for
-`CreateWindow`, `MapWindow`, `ChangeProperty`, and selection ownership. Those
-wire requests must translate into existing internal `XAuthorityRequestPacket`
-values before they reach `XAuthorityRuntime`.
+Core request parsing now starts with fixtures for `CreateWindow`, `MapWindow`,
+`ChangeProperty`, `SetSelectionOwner`, and `ConvertSelection`. Runtime-backed
+wire requests translate into existing internal `XAuthorityRequestPacket` values
+before they reach `XAuthorityRuntime`; `ChangeProperty` lands in a minimal
+namespace-keyed property table and is not metadata broker output yet.
+
+The next milestone is minimal X reply, error, and event emission for decoded
+requests. That is the step needed before a tiny Xlib client can observe normal
+protocol outcomes after setup.
