@@ -6,15 +6,16 @@ use sophia_backend_live::{
     CompositorBackendTickInput, DeviceId, FakePageFlipCallbackSource, HeadlessOutput,
     LibinputDeviceDescriptor, LibinputDeviceKind, LiveBackendConfig, LiveBackendDependencyDecision,
     LiveBackendDependencyKind, LiveBackendDependencyUse, LiveCompositorBackendDiscoveryStatus,
-    LiveLibdrmPollerDiagnostics, LiveLibdrmPollerDiagnosticsStatus, LivePageFlipCallback,
-    LivePageFlipCallbackDecision, LivePageFlipCallbackIntake, LivePageFlipCallbackQueue,
-    LivePageFlipCallbackQueueReport, LivePageFlipCallbackReport, LivePageFlipCallbackSourceReport,
-    LivePageFlipEvent, LivePageFlipEventStatus, LiveRendererImportBoundary,
-    LiveRendererImportHealth, LiveRendererImportPathStatus, LiveRendererImportStartupStatus,
-    LiveRendererPreference, LiveRendererPresentationReport, LiveRendererPresentationStatus,
-    LiveRendererRuntimeObservation, LiveRendererSelectionObservation, LiveScanoutReadinessReport,
-    LiveScanoutReadinessStatus, OutputId, PageFlipCommitOutcome, QueuedInputPoller,
-    RendererSelection, SeatId, Size, discover_live_backend, live_backend_dependency_decision,
+    LiveGbmEglFrameTargetRecord, LiveGbmEglFrameTargetStatus, LiveLibdrmPollerDiagnostics,
+    LiveLibdrmPollerDiagnosticsStatus, LivePageFlipCallback, LivePageFlipCallbackDecision,
+    LivePageFlipCallbackIntake, LivePageFlipCallbackQueue, LivePageFlipCallbackQueueReport,
+    LivePageFlipCallbackReport, LivePageFlipCallbackSourceReport, LivePageFlipEvent,
+    LivePageFlipEventStatus, LiveRendererImportBoundary, LiveRendererImportHealth,
+    LiveRendererImportPathStatus, LiveRendererImportStartupStatus, LiveRendererPreference,
+    LiveRendererPresentationReport, LiveRendererPresentationStatus, LiveRendererRuntimeObservation,
+    LiveRendererSelectionObservation, LiveScanoutReadinessReport, LiveScanoutReadinessStatus,
+    OutputId, PageFlipCommitOutcome, QueuedInputPoller, RendererSelection, SeatId, Size,
+    discover_live_backend, live_backend_dependency_decision,
 };
 use sophia_protocol::{TransactionCommit, TransactionId, TransactionOutcome};
 
@@ -50,6 +51,16 @@ fn live_backend_startup_can_seed_headless_assembly_from_sysfs_and_static_input()
             scale: 1,
         })
     );
+    assert_eq!(
+        report.selected_gbm_egl_frame_target(),
+        Some(LiveGbmEglFrameTargetRecord {
+            status: LiveGbmEglFrameTargetStatus::Ready,
+            size: Size {
+                width: 1920,
+                height: 1080,
+            },
+        })
+    );
     let assembly = report
         .into_headless_assembly(QueuedInputPoller::default(), RendererSelection::CpuFallback)
         .expect("ready startup should seed assembly");
@@ -70,6 +81,7 @@ fn live_backend_startup_fails_closed_without_connected_outputs() {
         &LiveCompositorBackendDiscoveryStatus::NoOutputs
     );
     assert_eq!(report.selected_output(), None);
+    assert_eq!(report.selected_gbm_egl_frame_target(), None);
     assert!(
         report
             .into_headless_assembly(QueuedInputPoller::default(), RendererSelection::CpuFallback)

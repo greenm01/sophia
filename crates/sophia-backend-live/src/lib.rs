@@ -36,9 +36,10 @@ pub use sophia_renderer_live::{EglDrawSmokeReport, EglDrawSmokeStatus};
 #[cfg(feature = "gbm-probe")]
 pub use sophia_renderer_live::{GbmCapabilityProbeReport, NativeGbmCapabilityProbe};
 pub use sophia_renderer_live::{
-    LiveRendererImportBoundary, LiveRendererImportDecision, LiveRendererImportHealth,
-    LiveRendererImportPathStatus, LiveRendererImportRejection, LiveRendererImportStartupStatus,
-    LiveRendererPresentationReport, LiveRendererPresentationStatus, LiveRendererRuntimeObservation,
+    LiveGbmEglFrameTargetRecord, LiveGbmEglFrameTargetStatus, LiveRendererImportBoundary,
+    LiveRendererImportDecision, LiveRendererImportHealth, LiveRendererImportPathStatus,
+    LiveRendererImportRejection, LiveRendererImportStartupStatus, LiveRendererPresentationReport,
+    LiveRendererPresentationStatus, LiveRendererRuntimeObservation,
     LiveRendererSelectionObservation,
 };
 #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
@@ -1174,6 +1175,11 @@ impl LiveBackendStartupReport {
         presentation: LiveRendererPresentationReport,
     ) -> LiveScanoutReadinessReport {
         LiveScanoutReadinessReport::from_backend_and_presentation(self, presentation)
+    }
+
+    pub fn selected_gbm_egl_frame_target(&self) -> Option<LiveGbmEglFrameTargetRecord> {
+        self.selected_output()
+            .map(|output| LiveGbmEglFrameTargetRecord::new(output.size))
     }
 
     #[cfg(feature = "libdrm-events")]

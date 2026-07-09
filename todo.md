@@ -9,12 +9,12 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Decide whether the frame-target record should be threaded into
-  backend-live startup reports or stay renderer-local for one more step.
+- [ ] Decide the first runtime observation shape for reduced GBM/EGL frame
+  target readiness.
 
 **Next**
-- [ ] Add backend-live projection for reduced GBM/EGL frame target readiness if
-  the renderer-local record proves stable.
+- [ ] Add runtime tick projection for reduced GBM/EGL frame target readiness if
+  startup projection remains stable.
 
 ---
 
@@ -282,6 +282,10 @@ evidence belong in `docs/research-log.md`.
   presentation smoke evidence.
 - [x] Define the first reduced GBM/EGL frame target record for future renderer
   integration.
+- [x] Decide whether the frame-target record should be threaded into
+  backend-live startup reports or stay renderer-local for one more step.
+- [x] Add backend-live projection for reduced GBM/EGL frame target readiness if
+  the renderer-local record proves stable.
 
 ---
 
