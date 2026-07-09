@@ -373,6 +373,12 @@ Fields should describe:
 The descriptor is not authority to scan out by itself. It is the data contract
 between future device discovery and existing frame planning.
 
+`DrmKmsSysfsDiscovery` is the first real discovery adapter. It reads connected
+connector directories, mode lists, optional connector/CRTC IDs, and optional
+scale values from a sysfs-style tree. Missing CRTC IDs must remain explicit as
+`0`; only a later libdrm/ioctl backend can authoritatively bind connectors to
+CRTCs, planes, and page-flip timing.
+
 ### RenderCommand
 
 Render commands are the final planned compositor work for one frame.

@@ -123,7 +123,7 @@ Do this after the authority transaction model has a clear shape.
 - [x] Add DRM/KMS output skeleton.
 - [x] Add libinput event source skeleton.
 - [x] Integrate physical input with routed-input request generation.
-- [ ] Replace skeleton DRM/KMS descriptors with a real device/output discovery
+- [x] Replace skeleton DRM/KMS descriptors with a real device/output discovery
   adapter.
 - [ ] Replace libinput descriptor intake with a real non-blocking physical input
   poller.

@@ -12,9 +12,9 @@ use sophia_engine::{
     RoutedInputRequestError, SanitizedChromeMetadata, SessionCommand, SessionEvent,
     SessionLayerSource, SessionTickRequest, SlowClientVisualDecision, SurfaceTimeoutPolicy,
     SurfaceTransactionCommitReadiness, SurfaceVisualStateTable, WmIpcError, WmRestartReason,
-    WmRuntimeAction, WmTransactionUpdate, explicit_sync_surfaces, hit_test_scene_for_input,
-    layout_epoch_for_explicit_sync, measure_resize_behavior,
-    notification_chrome_command_from_portal, request_wm_over_stream,
+    WmRuntimeAction, WmTransactionUpdate, discover_drm_kms_outputs_from_sysfs,
+    explicit_sync_surfaces, hit_test_scene_for_input, layout_epoch_for_explicit_sync,
+    measure_resize_behavior, notification_chrome_command_from_portal, request_wm_over_stream,
     routed_input_request_from_physical_event, routed_input_requests_from_flush,
     runtime_observation_from_authority_transaction_commit,
     runtime_observation_from_metadata_chrome_updates,
@@ -41,7 +41,9 @@ use sophia_runtime::{
     RestartPolicy, SessionRuntimeCommand, SessionRuntimeObservation, SessionRuntimePhase,
     SupervisedProcessKind, SupervisorCommand, SupervisorState,
 };
+use std::fs;
 use std::io::{Cursor, Read, Result as IoResult, Write};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 #[test]
@@ -113,6 +115,61 @@ fn drm_kms_descriptor_can_seed_engine_output() {
 
     assert_eq!(frame.output_size, descriptor.mode.size);
     assert_eq!(frame.output_scale, descriptor.scale);
+}
+
+#[test]
+fn drm_kms_sysfs_discovery_finds_connected_outputs() {
+    let root = drm_sysfs_fixture("connected");
+    let connector = root.join("card0-HDMI-A-1");
+    fs::create_dir_all(&connector).unwrap();
+    write_fixture_file(&connector, "status", "connected\n");
+    write_fixture_file(&connector, "modes", "1920x1080\n1280x720\n");
+    write_fixture_file(&connector, "connector_id", "42\n");
+    write_fixture_file(&connector, "crtc_id", "99\n");
+    write_fixture_file(&connector, "scale", "2\n");
+
+    let registry = discover_drm_kms_outputs_from_sysfs(&root).unwrap();
+    let output = registry.get(OutputId::from_raw(1)).unwrap();
+
+    assert_eq!(registry.outputs().count(), 1);
+    assert_eq!(output.connector_id, 42);
+    assert_eq!(output.crtc_id, 99);
+    assert_eq!(output.mode, DrmKmsMode::new(1920, 1080, 60_000));
+    assert_eq!(output.scale, 2);
+    assert_eq!(
+        registry.primary_engine_output(),
+        Some(output.as_engine_output())
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn drm_kms_sysfs_discovery_ignores_disconnected_or_modeless_outputs() {
+    let root = drm_sysfs_fixture("filtered");
+    let disconnected = root.join("card0-DP-1");
+    let modeless = root.join("card0-HDMI-A-1");
+    let connected = root.join("card0-eDP-1");
+    fs::create_dir_all(&disconnected).unwrap();
+    fs::create_dir_all(&modeless).unwrap();
+    fs::create_dir_all(&connected).unwrap();
+    write_fixture_file(&disconnected, "status", "disconnected\n");
+    write_fixture_file(&disconnected, "modes", "3840x2160\n");
+    write_fixture_file(&modeless, "status", "connected\n");
+    write_fixture_file(&modeless, "modes", "\n");
+    write_fixture_file(&connected, "status", "connected\n");
+    write_fixture_file(&connected, "modes", "2560x1440\n");
+
+    let registry = discover_drm_kms_outputs_from_sysfs(&root).unwrap();
+    let output = registry.get(OutputId::from_raw(3)).unwrap();
+
+    assert_eq!(registry.outputs().count(), 1);
+    assert_eq!(output.connector_id, 3);
+    assert_eq!(output.crtc_id, 0);
+    assert_eq!(output.mode, DrmKmsMode::new(2560, 1440, 60_000));
+    assert_eq!(output.scale, 1);
+
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
@@ -2887,4 +2944,15 @@ fn layout_node(surface: SurfaceId, generation: u64, closable: bool) -> LayoutNod
         },
         generation,
     }
+}
+
+fn drm_sysfs_fixture(name: &str) -> PathBuf {
+    let root = std::env::temp_dir().join(format!("sophia-drm-sysfs-{name}-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    root
+}
+
+fn write_fixture_file(root: &Path, name: &str, contents: &str) {
+    fs::write(root.join(name), contents).unwrap();
 }

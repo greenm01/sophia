@@ -650,11 +650,13 @@ If the epoch times out, Sophia clears the pending set, renders the fallback
 frame from committed state, and leaves the bridge to decide whether the client
 class should be downgraded for future snapshots.
 
-The DRM/KMS output backend starts as a data-only skeleton. `DrmKmsMode`,
+The DRM/KMS output backend now has a discovery boundary. `DrmKmsMode`,
 `DrmKmsOutputDescriptor`, and `DrmKmsOutputRegistry` preserve connector ID,
-CRTC ID, mode, scale, and Sophia `OutputId` without opening devices yet. The
-descriptor can seed an engine output, which lets frame planning consume the same
-shape the real backend will later discover from KMS.
+CRTC ID, mode, scale, and Sophia `OutputId`. `DrmKmsSysfsDiscovery` can discover
+connected outputs and active modes from a sysfs-style `/sys/class/drm` tree and
+seed engine output state from that data. Sysfs cannot fully replace a libdrm
+ioctl backend: when CRTC IDs are not available, `crtc_id = 0` means the output
+is discovered but not yet scanout-bound.
 
 The libinput backend starts the same way. `LibinputDeviceDescriptor` records the
 seat, device, and broad device kind that future libinput discovery will
