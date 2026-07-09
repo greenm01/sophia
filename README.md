@@ -1,134 +1,118 @@
 # Sophia
 
-Sophia is a research prototype for an Engine-centered, transaction-first desktop
-architecture.
+Sophia is a secure, frame-perfect session stack for X11 and Wayland.
 
-Sophia Engine owns physical input, the scene graph, frame scheduling, atomic
-visual commits, rendering, and scanout. Client protocols are handled by
-namespace-aware **protocol authorities** that translate their native semantics
-into Sophia surfaces and transactions. The first long-term authority target is a
-modern X protocol subset inspired by Phoenix, not a permanent dependency on
-Xorg or XLibre internals.
+The project starts from a plain frustration: Linux graphics stacks make you
+choose too often. X11 is open and hackable, but it lets clients share too much
+state and makes tear-free resizing a negotiation. Wayland fixes the visual
+model, then pushes every desktop feature through a compositor and a protocol
+process that can move slowly.
 
-The core rendering rule is:
+Sophia takes a different route. The compositor is the visual authority. Protocol
+servers for X11, Wayland, and future clients sit behind it as translation
+layers. The window manager stays outside the hot path and sees only opaque
+layout nodes. Portals handle deliberate namespace crossing. The goal is a
+desktop that keeps the sharp edges people like about X11 without making every
+client part of one shared trust domain.
+
+One rule drives the design:
 
 ```text
-Sophia must not present new geometry unless it also has the matching committed
-pixels for that geometry.
+Do not present new geometry unless the matching pixels are ready.
 ```
 
-This borrows the macOS lesson: visual state changes should become atomic
-transactions. Slow or non-cooperative clients may lag behind the user's request,
-but the compositor should keep presenting the last known good surface state
-instead of exposing black borders, half-resized buffers, or torn layouts.
+Slow clients may lag. Misbehaving clients may get degraded. They should not
+tear the desktop, expose black borders, or force the compositor to present a
+half-finished resize.
 
-## Engine-Centered Architecture
+## Architecture
 
-```mermaid
-flowchart TB
-    input["Physical input devices<br/>keyboard / pointer"]
-    kernel["Linux kernel<br/>libinput + DRM/KMS"]
-    display["Display output<br/>GPU scanout"]
+```text
+================================================================================
+                         HARDWARE AND KERNEL
+================================================================================
+ [ physical input devices ]                                  [ display output ]
+            │                                                        ▲
+            │ raw input via libinput                                 │ DRM/KMS
+            ▼                                                        │
 
-    engine["Sophia Engine<br/>atomic compositor authority<br/>scene graph / spatial index / frame loop"]
-    chrome["Metadata broker + compositor chrome<br/>redacted labels / icon tokens / trust badges"]
-    wm["Sophia WM<br/>blind TEA policy process<br/>layout / focus / workspaces"]
-    portals["Sophia Portals<br/>cross-namespace policy"]
+================================================================================
+                    SOPHIA ENGINE: COMPOSITOR AUTHORITY
+================================================================================
+ ┌────────────────────────────────────────────────────────────────────────────┐
+ │ Scene graph | spatial hit-testing | damage tracking | frame scheduling     │
+ │ Atomic visual commits | rendering | scanout                                │
+ └──────────────┬───────────────────┬────────────────────┬───────────────────┘
+        ▲      │                   │                    │      ▲
+        │      │ opaque snapshots  │ portal events      │      │ chrome data
+        │      ▼                   ▼                    ▼      │
+ ┌───────────────┐        ┌────────────────┐       ┌─────────────────────────┐
+ │  SOPHIA WM    │        │ SOPHIA PORTALS │       │ METADATA BROKER/CHROME │
+ │ blind policy  │        │ allow/deny     │       │ redacted UI only       │
+ │ layout/focus  │        │ handoff/revoke │       │ labels/icons/badges    │
+ └───────┬───────┘        └────────┬───────┘       └────────────┬────────────┘
+         │                         │                            ▲
+         │ layout proposals        │ portal commands            │ sanitized
+         ▼                         ▼                            │ metadata
 
-    xauth["Sophia X Authority<br/>modern X subset / namespace-aware resources"]
-    wayauth["Sophia Wayland Authority<br/>future Wayland frontend"]
-    nativeauth["Sophia Native Authority<br/>future Sophia-first protocol"]
+================================================================================
+                         PROTOCOL AUTHORITY LAYER
+================================================================================
+ ┌────────────────────────────────────────────────────────────────────────────┐
+ │ Sophia X Authority | Sophia Wayland Authority | Sophia Native Authority    │
+ │ protocol resources | grabs/focus | selections | namespace checks           │
+ └────────────────────────────────┬───────────────────────────────────────────┘
+                                  │
+                                  │ namespace-checked surface transactions
+                                  │ routed input / configure / lifecycle
+                                  ▲
 
-    subgraph ns_a["Namespace A: trusted clients"]
-        terminal["X terminal"]
-        files["Wayland file manager"]
-    end
-
-    subgraph ns_b["Namespace B: untrusted clients"]
-        browser["X browser"]
-        chat["Wayland chat app"]
-    end
-
-    input -->|"raw device events"| kernel
-    kernel -->|"input events"| engine
-    engine -->|"GPU composition"| display
-
-    engine -->|"LayoutNodeSnapshot + policy events"| wm
-    wm -->|"LayoutTransaction proposals"| engine
-    engine -->|"portal prompts / transfer events"| portals
-    portals -->|"allow / deny / revoke / handoff"| engine
-    chrome -->|"compositor-owned presentation"| engine
-
-    terminal -->|"X protocol"| xauth
-    browser -->|"X protocol"| xauth
-    files -->|"Wayland protocol"| wayauth
-    chat -->|"Wayland protocol"| wayauth
-
-    xauth -->|"namespace-checked surface transactions"| engine
-    wayauth -->|"namespace-checked surface transactions"| engine
-    nativeauth -->|"namespace-checked surface transactions"| engine
-    xauth -->|"sanitized metadata candidates"| chrome
-    wayauth -->|"sanitized metadata candidates"| chrome
+================================================================================
+                         SANDBOXED CLIENT NAMESPACES
+================================================================================
+ ┌────────────────────────────────────┐     ┌─────────────────────────────────┐
+ │ Namespace A: trusted               │     │ Namespace B: untrusted          │
+ │ X terminal | Wayland file manager  │  X  │ X browser | Wayland chat app    │
+ └────────────────────────────────────┘     └─────────────────────────────────┘
 ```
 
-## Data Path
+## How It Works
 
-**Input path.** Input reaches Sophia Engine first. The engine owns the actual
-scene graph, transforms, and output geometry, so it maps physical coordinates to
-visual surfaces before asking a protocol authority to perform protocol-specific
-delivery semantics.
+Input reaches Sophia Engine first. The engine owns the scene graph, transforms,
+outputs, and frame loop, so it maps physical input to the surface the user can
+see. A protocol authority then performs the protocol-specific delivery rules:
+focus, grabs, event masks, serials, and namespace checks.
 
-**Authority path.** Each authority terminates one client protocol. A Sophia X
-Authority speaks a modern X subset; a future Sophia Wayland Authority speaks
-Wayland; future native tools may use a Sophia-native authority. Authorities own
-protocol semantics, resource tables, and namespace checks for their clients, but
-they do not own layout, scanout, global shortcuts, compositor chrome, or
-cross-namespace policy.
+Each authority terminates one client protocol. The Sophia X Authority speaks a
+modern X subset. A later Wayland Authority can speak Wayland. A native authority
+can serve Sophia-first clients. Authorities own protocol resources and client
+semantics; they do not own layout, scanout, global shortcuts, compositor chrome,
+or portal policy.
 
-**Atomic render path.** The WM sends layout proposals to Sophia Engine. Protocol
-authorities provide pending buffers, damage, constraints, and readiness. The
-engine commits geometry and matching pixels as a unit on a frame boundary. If a
-surface is not ready, Sophia keeps scanning out the last committed good state
-until policy explicitly degrades.
+The WM is a policy process. It manages workspaces, focus policy, layouts,
+keybindings, and launch decisions, but it does that through opaque handles. It
+does not need XIDs, namespace IDs, window titles, app classes, or clipboard
+payloads.
+
+Rendering is transaction-based. The WM proposes layout. Authorities provide
+pending buffers, damage, constraints, and readiness. Sophia Engine commits
+geometry and pixels together on a frame boundary. If a surface is not ready, the
+engine keeps the last committed state until policy says otherwise.
 
 ## Project Shape
 
-- **Sophia Engine** owns physical input, visual state, frame scheduling, atomic
-  transactions, rendering, and display output.
-- **Protocol Authorities** own client-protocol compatibility and translate
-  protocol state into Sophia surface transactions.
-- **Sophia WM** owns policy: layout, focus policy, keybindings, workspaces, and
-  launch decisions.
-- **Sophia Portals** mediate intentional namespace crossing for clipboard,
-  drag-and-drop, file access, screenshots, notifications, and URI handoff.
-- **Metadata Broker and Chrome** turn protocol metadata into sanitized
-  compositor-owned presentation state without granting the WM namespace
-  visibility.
+Sophia is split by authority, not by convenience.
 
-## Reference Map
-
-Sophia should borrow from existing systems at the right boundary, not copy any
-one project wholesale.
-
-- **Phoenix** is the modern X authority reference: a clean-room X server can
-  support real applications without carrying all Xorg/XLibre baggage.
-- **macOS WindowServer/Core Animation** is the transaction reference: geometry
-  and pixels must commit together.
-- **niri** is the Rust compositor reference: Smithay backend structure,
-  KMS/libinput integration, frame-clock behavior, transaction timeouts, headless
-  test patterns, and visual-test style.
-- **picom** remains an X-side research reference: XComposite, Damage, X window
-  tree mirroring, top-level/client detection, and damage calculation across
-  buffered layouts.
-- **river** is the policy split reference: the compositor keeps the hot path and
-  the external WM receives only policy-relevant sequences.
-- **XLibre** remains useful as a prototype/reference for Xnamespace, X11
-  delivery semantics, and routed-input research, but it is no longer the target
-  center of the architecture.
-
-The first implementation should combine these lessons without becoming any of
-them. Sophia is not a niri fork, not a picom-style X compositor, not Xwayland,
-and not a permanent wrapper around XLibre.
+- **Sophia Engine** owns physical input, visual state, frame scheduling,
+  transaction commits, rendering, and display output.
+- **Protocol Authorities** own client compatibility and translate protocol
+  state into Sophia surface transactions.
+- **Sophia WM** owns layout, focus policy, keybindings, workspaces, and launch
+  decisions.
+- **Sophia Portals** handle intentional namespace crossing: clipboard,
+  drag-and-drop, files, screenshots, notifications, and URI handoff.
+- **Metadata Broker and Chrome** turn protocol metadata into redacted
+  compositor UI without giving the WM namespace visibility.
 
 ## Documentation
 
@@ -139,6 +123,13 @@ and not a permanent wrapper around XLibre.
 - `docs/research-log.md` captures early decisions and open research questions.
 - `docs/xlibre-prototype-regression-map.md` classifies XLibre prototype checks.
 - `todo.md` tracks build phases and research milestones.
+
+## Status
+
+Sophia is a research prototype. The current codebase is mostly headless and
+test-driven. That is deliberate. The project is first making the data model,
+transaction rules, IPC boundaries, portal policy, and authority seams hard to
+misuse. Real backend work comes after those contracts hold.
 
 ## License
 
