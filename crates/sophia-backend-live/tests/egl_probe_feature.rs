@@ -86,6 +86,7 @@ mod gbm_projection {
     use super::*;
     use sophia_backend_live::{
         LiveGbmBackedEglPlatformReport, LiveGpuStartupReport, LiveGpuStartupStatus,
+        LiveRendererPresentationStatus,
     };
 
     #[test]
@@ -191,6 +192,37 @@ mod gbm_projection {
                 | EglDrawSmokeStatus::SurfaceUnavailable
                 | EglDrawSmokeStatus::MakeCurrentUnavailable
                 | EglDrawSmokeStatus::GlUnavailable
+        ));
+    }
+
+    #[test]
+    fn native_gbm_backed_egl_presentation_smoke_maps_open_failure_to_unavailable() {
+        let report = discover_live_backend(&LiveBackendConfig::new("/does/not/matter"));
+        let missing_device = Err(std::io::Error::from_raw_os_error(19));
+
+        assert_eq!(
+            report
+                .native_gbm_backed_egl_presentation_smoke_report_from_device_result::<
+                    std::fs::File,
+                >(missing_device)
+                .status,
+            LiveRendererPresentationStatus::Unavailable,
+        );
+    }
+
+    #[test]
+    fn native_gbm_backed_egl_presentation_smoke_stays_reduced_for_invalid_device() {
+        let report = discover_live_backend(&LiveBackendConfig::new("/does/not/matter"));
+        let invalid_render_device = std::fs::File::open("/dev/null");
+        let smoke = report.native_gbm_backed_egl_presentation_smoke_report_from_device_result(
+            invalid_render_device,
+        );
+
+        assert!(matches!(
+            smoke.status,
+            LiveRendererPresentationStatus::Ready
+                | LiveRendererPresentationStatus::Unavailable
+                | LiveRendererPresentationStatus::Degraded
         ));
     }
 

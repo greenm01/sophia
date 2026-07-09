@@ -256,16 +256,19 @@ complete without exposing the display.
 
 The GBM-backed private target smoke now reuses that private platform to create a
 1x1 GBM surface, create an EGL window surface from the private GBM surface, make
-an OpenGL context current, clear the target, and tear everything down. It
-returns the existing reduced `EglDrawSmokeReport` shape. It does not lock a GBM
-front buffer, export a DMA-BUF, create a KMS framebuffer, or present to scanout.
+an OpenGL context current, clear the target, optionally cross an offscreen
+presentation boundary with `eglSwapBuffers`, and tear everything down. It
+returns either the existing reduced `EglDrawSmokeReport` shape or the reduced
+`LiveRendererPresentationReport` shape. It does not lock a GBM front buffer,
+export a DMA-BUF, create a KMS framebuffer, or present to scanout.
 The path is:
 
 1. Backend-live discovers a render node and holds the opened device authority.
 2. Renderer-live proves GBM native capability with a private allocation smoke.
 3. The native EGL adapter receives only backend-owned authority, creates a GBM
    platform display, initializes it, chooses a window-capable config, creates a
-   private GBM/EGL target, clears it, and tears it down.
+   private GBM/EGL target, clears it, optionally swaps it through the offscreen
+   presentation smoke, and tears it down.
 4. Buffer export, front-buffer locking, and scanout stay out of scope until the
    next boundary admits them.
 
@@ -297,11 +300,11 @@ Presentation is the next boundary after private drawing. A presentation smoke
 must prove that renderer-live can advance a frame to a reduced presentation
 status without exposing the GPU objects that made it happen.
 
-The first presentation smoke should not be real KMS scanout. It should be a
-renderer-owned, offscreen presentation boundary that models the final
-PageFlipCommitGate shape: a frame is staged, a presentation boundary is reached,
-and the public result says only whether presentation was ready, unavailable, or
-degraded.
+The first native presentation smoke is not real KMS scanout. It is a
+renderer-owned, offscreen GBM/EGL boundary that models the final
+PageFlipCommitGate shape: a frame is staged, `eglSwapBuffers` reaches the
+presentation boundary, and the public result says only whether presentation was
+ready, unavailable, or degraded.
 
 The presentation smoke must not expose:
 
@@ -313,8 +316,10 @@ The presentation smoke must not expose:
 
 The admitted public shape is `LiveRendererPresentationReport` with only three
 statuses: ready, unavailable, or degraded. The fake presentation smoke exercises
-those statuses without native dependencies. Only after a native implementation
-can preserve that shape should Sophia admit scanout-facing code. This keeps the
+those statuses without native dependencies. The native offscreen smoke preserves
+the same shape while keeping GBM surfaces, EGL surfaces, driver errors, pixels,
+and GL object names private. Only after this reduced shape holds under real
+render-node validation should Sophia admit scanout-facing code. This keeps the
 macOS-style invariant intact: the Engine can learn that a presentation boundary
 happened, but it cannot accidentally present partially assembled native state
 through a leaky renderer API.

@@ -35,6 +35,14 @@ pub enum NativeGbmBackedEglPlatformStatus {
     PlatformDegraded,
 }
 
+#[cfg(feature = "gbm-platform")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativePresentationSmokeStatus {
+    Ready,
+    Unavailable,
+    Degraded,
+}
+
 pub fn probe_default_display_context() -> NativeEglProbeStatus {
     match probe_context() {
         Ok(()) => NativeEglProbeStatus::NativeDrawingCapable,
@@ -67,11 +75,29 @@ pub fn smoke_gbm_backed_private_target_from_backend_device_result<T: std::os::fd
     device: std::io::Result<T>,
 ) -> NativeEglDrawSmokeStatus {
     match device {
-        Ok(device) => match smoke_gbm_backed_private_target(device) {
+        Ok(device) => match smoke_gbm_backed_private_target(device, GbmTargetAction::ClearOnly) {
             Ok(()) => NativeEglDrawSmokeStatus::ClearColorReady,
             Err(error) => error,
         },
         Err(_error) => NativeEglDrawSmokeStatus::PlatformUnavailable,
+    }
+}
+
+#[cfg(feature = "gbm-platform")]
+pub fn present_gbm_backed_offscreen_from_backend_device_result<T: std::os::fd::AsFd>(
+    device: std::io::Result<T>,
+) -> NativePresentationSmokeStatus {
+    match device {
+        Ok(device) => {
+            match smoke_gbm_backed_private_target(device, GbmTargetAction::SwapAfterClear) {
+                Ok(()) => NativePresentationSmokeStatus::Ready,
+                Err(NativeEglDrawSmokeStatus::PlatformUnavailable) => {
+                    NativePresentationSmokeStatus::Unavailable
+                }
+                Err(_error) => NativePresentationSmokeStatus::Degraded,
+            }
+        }
+        Err(_error) => NativePresentationSmokeStatus::Unavailable,
     }
 }
 
@@ -224,8 +250,16 @@ fn probe_gbm_backed_platform<T: std::os::fd::AsFd>(
 }
 
 #[cfg(feature = "gbm-platform")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GbmTargetAction {
+    ClearOnly,
+    SwapAfterClear,
+}
+
+#[cfg(feature = "gbm-platform")]
 fn smoke_gbm_backed_private_target<T: std::os::fd::AsFd>(
     device: T,
+    action: GbmTargetAction,
 ) -> Result<(), NativeEglDrawSmokeStatus> {
     use gbm::AsRaw as _;
 
@@ -246,7 +280,7 @@ fn smoke_gbm_backed_private_target<T: std::os::fd::AsFd>(
 
     egl.initialize(display)
         .map_err(|_error| NativeEglDrawSmokeStatus::PlatformDegraded)?;
-    let result = smoke_initialized_gbm_private_target(&egl, display, &gbm_device);
+    let result = smoke_initialized_gbm_private_target(&egl, display, &gbm_device, action);
     let _ = egl.terminate(display);
     result
 }
@@ -256,6 +290,7 @@ fn smoke_initialized_gbm_private_target<T: std::os::fd::AsFd>(
     egl: &khronos_egl::DynamicInstance<khronos_egl::EGL1_5>,
     display: khronos_egl::Display,
     gbm_device: &gbm::Device<T>,
+    action: GbmTargetAction,
 ) -> Result<(), NativeEglDrawSmokeStatus> {
     use gbm::AsRaw as _;
 
@@ -293,6 +328,14 @@ fn smoke_initialized_gbm_private_target<T: std::os::fd::AsFd>(
                 egl.get_proc_address(name)
                     .map_or(ptr::null(), |proc| proc as *const c_void)
             })
+        })
+        .and_then(|()| {
+            if action == GbmTargetAction::SwapAfterClear {
+                egl.swap_buffers(display, surface)
+                    .map_err(|_error| NativeEglDrawSmokeStatus::SurfaceUnavailable)
+            } else {
+                Ok(())
+            }
         });
     let _ = egl.make_current(display, None, None, None);
     let _ = egl.destroy_context(display, context);

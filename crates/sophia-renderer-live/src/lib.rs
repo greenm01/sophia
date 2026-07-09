@@ -20,7 +20,10 @@ pub use egl_probe::{
     NativeEglCapabilityProbe, NativeEglDrawSmoke,
 };
 #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
-pub use egl_probe::{NativeGbmBackedEglDrawSmoke, NativeGbmBackedEglPlatformProbe};
+pub use egl_probe::{
+    NativeGbmBackedEglDrawSmoke, NativeGbmBackedEglPlatformProbe,
+    NativeGbmBackedEglPresentationSmoke,
+};
 
 #[cfg(feature = "gbm-probe")]
 pub use gbm_probe::{

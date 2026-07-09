@@ -36,10 +36,14 @@ pub use sophia_renderer_live::{GbmCapabilityProbeReport, NativeGbmCapabilityProb
 pub use sophia_renderer_live::{
     LiveRendererImportBoundary, LiveRendererImportDecision, LiveRendererImportHealth,
     LiveRendererImportPathStatus, LiveRendererImportRejection, LiveRendererImportStartupStatus,
-    LiveRendererRuntimeObservation, LiveRendererSelectionObservation,
+    LiveRendererPresentationReport, LiveRendererPresentationStatus, LiveRendererRuntimeObservation,
+    LiveRendererSelectionObservation,
 };
 #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
-use sophia_renderer_live::{NativeGbmBackedEglDrawSmoke, NativeGbmBackedEglPlatformProbe};
+use sophia_renderer_live::{
+    NativeGbmBackedEglDrawSmoke, NativeGbmBackedEglPlatformProbe,
+    NativeGbmBackedEglPresentationSmoke,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LiveBackendDependencyKind {
@@ -260,6 +264,27 @@ impl LiveBackendStartupReport {
         D: RenderDeviceDiscoveryBackend,
     {
         self.native_gbm_backed_egl_draw_smoke_report_from_device_result(
+            discovery.open_render_device(),
+        )
+    }
+
+    #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
+    pub fn native_gbm_backed_egl_presentation_smoke_report_from_device_result<T: AsFd>(
+        &self,
+        device: io::Result<T>,
+    ) -> LiveRendererPresentationReport {
+        NativeGbmBackedEglPresentationSmoke::smoke_report_from_backend_device_result(device)
+    }
+
+    #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
+    pub fn native_gbm_backed_egl_presentation_smoke_report_with_gbm_device<D>(
+        &self,
+        discovery: &D,
+    ) -> LiveRendererPresentationReport
+    where
+        D: RenderDeviceDiscoveryBackend,
+    {
+        self.native_gbm_backed_egl_presentation_smoke_report_from_device_result(
             discovery.open_render_device(),
         )
     }

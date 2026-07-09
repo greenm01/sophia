@@ -79,18 +79,19 @@ tears down the EGL display from private GBM state while exposing only reduced
 platform status. The first native GBM-backed EGL platform smoke now stops at
 display initialize/terminate. The first GBM-backed private target smoke creates
 a private GBM surface, creates an EGL window surface from it, clears that target,
-and tears everything down. It does not lock front buffers, export buffers,
-present frames, or replace the `DEFAULT_DISPLAY` clear-color fallback for broad
-host compatibility.
+optionally crosses an offscreen presentation boundary with `eglSwapBuffers`, and
+tears everything down. It does not lock front buffers, export buffers, present to
+KMS scanout, or replace the `DEFAULT_DISPLAY` clear-color fallback for broad host
+compatibility.
 
 Presentation is the next renderer boundary after private drawing. The admitted
 public shape is a reduced renderer-live report: ready, unavailable, or degraded.
-The fake smoke covers those statuses without native dependencies. The future
-native smoke must stay offscreen at first: stage a frame, cross a
-presentation-like boundary, and return the same reduced status without exposing
-GBM buffers, DRM object IDs, DMA-BUF fds, EGLImages, fences, pixels, native
-errors, or GL object names. Real scanout is deferred until that reduced shape is
-preserved by native code.
+The fake smoke covers those statuses without native dependencies. The native
+offscreen smoke stages a frame, crosses a presentation-like boundary, and
+returns the same reduced status without exposing GBM buffers, DRM object IDs,
+DMA-BUF fds, EGLImages, fences, pixels, native errors, or GL object names. Real
+scanout is deferred until that reduced shape is validated against real render
+nodes.
 
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout

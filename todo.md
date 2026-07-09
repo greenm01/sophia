@@ -9,15 +9,16 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Add a native offscreen presentation smoke that preserves reduced
-  presentation status.
+- [ ] Add opt-in real render-node validation for GBM-backed EGL drawing and
+  offscreen presentation.
 - [ ] Keep `DEFAULT_DISPLAY` clear-color smoke as fallback until GBM-backed
   drawing is validated against real render nodes.
 
 **Next**
 - [ ] Keep wgpu deferred until GBM/EGL startup, drawing, and presentation seams
   are proven.
-- [ ] Add opt-in real render-node validation for GBM-backed EGL drawing.
+- [ ] Define the first scanout-adjacent status without exposing KMS object
+  identity.
 
 ---
 
@@ -227,6 +228,8 @@ evidence belong in `docs/research-log.md`.
 - [x] Add a GBM-backed EGL private target smoke without exporting buffers.
 - [x] Keep `DEFAULT_DISPLAY` clear-color smoke as fallback until GBM-backed
   drawing passes.
+- [x] Add a native offscreen presentation smoke that preserves reduced
+  presentation status.
 
 ---
 

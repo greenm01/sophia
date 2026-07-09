@@ -92,6 +92,21 @@ impl NativeGbmBackedEglDrawSmoke {
     }
 }
 
+#[cfg(feature = "gbm-probe")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeGbmBackedEglPresentationSmoke;
+
+#[cfg(feature = "gbm-probe")]
+impl NativeGbmBackedEglPresentationSmoke {
+    pub fn smoke_report_from_backend_device_result<T: std::os::fd::AsFd>(
+        device: std::io::Result<T>,
+    ) -> crate::LiveRendererPresentationReport {
+        crate::LiveRendererPresentationReport {
+            status: native::gbm_backed_presentation_status_from_backend_device_result(device),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EglCapabilityProbeReport {
     pub status: EglCapabilityProbeStatus,
@@ -272,6 +287,27 @@ mod native {
             }
             sophia_renderer_native_egl::NativeEglDrawSmokeStatus::GlUnavailable => {
                 EglDrawSmokeResult::GlUnavailable
+            }
+        }
+    }
+
+    #[cfg(feature = "gbm-probe")]
+    pub(super) fn gbm_backed_presentation_status_from_backend_device_result<
+        T: std::os::fd::AsFd,
+    >(
+        device: std::io::Result<T>,
+    ) -> crate::LiveRendererPresentationStatus {
+        match sophia_renderer_native_egl::present_gbm_backed_offscreen_from_backend_device_result(
+            device,
+        ) {
+            sophia_renderer_native_egl::NativePresentationSmokeStatus::Ready => {
+                crate::LiveRendererPresentationStatus::Ready
+            }
+            sophia_renderer_native_egl::NativePresentationSmokeStatus::Unavailable => {
+                crate::LiveRendererPresentationStatus::Unavailable
+            }
+            sophia_renderer_native_egl::NativePresentationSmokeStatus::Degraded => {
+                crate::LiveRendererPresentationStatus::Degraded
             }
         }
     }
