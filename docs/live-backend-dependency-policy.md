@@ -224,6 +224,12 @@ most the caller-provided limit, reports decoded and rejected counts through
 emit-limit state through `LibdrmPageFlipEventPollReport`. It still does not read
 from a file descriptor or expose native DRM/KMS resource identity.
 
+The non-polling `NativeLibdrmPageFlipEventPoller` may drain injected callback
+batches through that helper. This gives the eventual native fd reader a place to
+hand off already-reduced callback facts while preserving queue backpressure and
+retaining undelivered callbacks. It remains a testable seam, not a live fd
+poller.
+
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
 authority. On Linux, wgpu will usually target Vulkan, but Sophia must first prove

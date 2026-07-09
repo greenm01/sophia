@@ -703,16 +703,47 @@ pub enum LibdrmNativePageFlipDecodeStatus {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeLibdrmPageFlipEventPoller {
     source: LibdrmNativePageFlipSource,
+    routes: Vec<LibdrmNativeOutputRoute>,
+    pending_callbacks: VecDeque<LibdrmNativePageFlipCallback>,
+    last_read_loop: LibdrmNativeReadLoopReport,
 }
 
 #[cfg(feature = "libdrm-events")]
 impl NativeLibdrmPageFlipEventPoller {
-    pub const fn new(source: LibdrmNativePageFlipSource) -> Self {
-        Self { source }
+    pub fn new(source: LibdrmNativePageFlipSource) -> Self {
+        Self {
+            source,
+            routes: Vec::new(),
+            pending_callbacks: VecDeque::new(),
+            last_read_loop: LibdrmNativeReadLoopReport::idle(),
+        }
+    }
+
+    pub fn with_routes(
+        mut self,
+        routes: impl IntoIterator<Item = LibdrmNativeOutputRoute>,
+    ) -> Self {
+        self.routes.extend(routes);
+        self
+    }
+
+    pub fn inject_callbacks(
+        &mut self,
+        callbacks: impl IntoIterator<Item = LibdrmNativePageFlipCallback>,
+    ) {
+        self.pending_callbacks.extend(callbacks);
     }
 
     pub const fn source_report(&self) -> LibdrmNativePageFlipSourceReport {
         self.source.report()
+    }
+
+    pub const fn last_read_loop_report(&self) -> LibdrmNativeReadLoopReport {
+        self.last_read_loop
+    }
+
+    pub fn pending_callback_count(&self) -> usize {
+        self.pending_callbacks.len()
     }
 }
 
@@ -947,11 +978,27 @@ impl LibdrmPageFlipEventPoller for FakeLibdrmPageFlipEventPoller {
 impl LibdrmPageFlipEventPoller for NativeLibdrmPageFlipEventPoller {
     fn poll_page_flip_events(
         &mut self,
-        _sender: &SyncSender<LivePageFlipCallback>,
-        _max_emit: usize,
+        sender: &SyncSender<LivePageFlipCallback>,
+        max_emit: usize,
     ) -> LibdrmPageFlipEventPollReport {
         let _ = self.source.report();
-        LibdrmNativeReadLoopReport::idle().into_poll_report()
+        if self.pending_callbacks.is_empty() {
+            self.last_read_loop = LibdrmNativeReadLoopReport::idle();
+            return self.last_read_loop.into_poll_report();
+        }
+
+        let pending = self.pending_callbacks.iter().copied().collect::<Vec<_>>();
+        let report = decode_native_page_flip_batch(&pending, &self.routes, sender, max_emit);
+        let processed_callbacks = pending
+            .len()
+            .saturating_sub(report.poll.callbacks.queued_remaining);
+
+        for _ in 0..processed_callbacks {
+            let _ = self.pending_callbacks.pop_front();
+        }
+
+        self.last_read_loop = report.read_loop;
+        report.poll
     }
 }
 

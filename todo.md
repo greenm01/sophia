@@ -11,7 +11,7 @@ evidence belong in `docs/research-log.md`.
 **Now**
 - [ ] Keep `DEFAULT_DISPLAY` clear-color smoke as fallback until GBM-backed
   drawing is validated against real render nodes.
-- [ ] Let the non-polling native libdrm poller drain an injected callback batch.
+- [ ] Add reduced native libdrm poller disconnected-queue retention coverage.
 
 **Next**
 - [ ] Keep wgpu deferred until GBM/EGL startup, drawing, and presentation seams
@@ -259,6 +259,7 @@ evidence belong in `docs/research-log.md`.
 - [x] Thread reduced native page-flip callback decode counts into read-loop
   reports.
 - [x] Add a bounded native page-flip decode batch helper before real fd polling.
+- [x] Let the non-polling native libdrm poller drain an injected callback batch.
 
 ---
 

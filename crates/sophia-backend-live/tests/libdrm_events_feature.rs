@@ -154,6 +154,105 @@ fn native_libdrm_poller_skeleton_reports_idle_without_emitting_callbacks() {
 }
 
 #[test]
+fn native_libdrm_poller_drains_injected_callback_batch_without_fd_polling() {
+    let authority =
+        LibdrmBackendFdAuthority::new(15).expect("nonzero generation should mint authority token");
+    let slot = LibdrmNativeOutputSlot::new(2).expect("nonzero slot should be valid");
+    let source = LibdrmNativePageFlipSource::from_authority(authority);
+    let mut poller =
+        NativeLibdrmPageFlipEventPoller::new(source).with_routes([LibdrmNativeOutputRoute {
+            slot,
+            output: OutputId::from_raw(7),
+        }]);
+    let (sender, receiver) = mpsc::sync_channel(4);
+
+    poller.inject_callbacks([
+        LibdrmNativePageFlipCallback::new(slot, 81),
+        LibdrmNativePageFlipCallback::new(slot, 0),
+        LibdrmNativePageFlipCallback::new(slot, 82),
+    ]);
+    assert_eq!(poller.pending_callback_count(), 3);
+
+    let report = poller.poll_page_flip_events(&sender, 4);
+
+    assert_eq!(report.status, LibdrmPageFlipEventPollStatus::Emitted);
+    assert_eq!(report.callbacks.emitted, 2);
+    assert_eq!(poller.pending_callback_count(), 0);
+    assert_eq!(
+        poller.last_read_loop_report().status,
+        LibdrmNativeReadLoopStatus::CallbackDecoded
+    );
+    assert_eq!(poller.last_read_loop_report().decoded_callbacks, 2);
+    assert_eq!(poller.last_read_loop_report().rejected_callbacks, 1);
+    assert_eq!(
+        receiver
+            .try_recv()
+            .expect("first callback should be queued"),
+        LivePageFlipCallback {
+            output: OutputId::from_raw(7),
+            frame_serial: 81,
+        }
+    );
+    assert_eq!(
+        receiver
+            .try_recv()
+            .expect("second callback should be queued"),
+        LivePageFlipCallback {
+            output: OutputId::from_raw(7),
+            frame_serial: 82,
+        }
+    );
+}
+
+#[test]
+fn native_libdrm_poller_retains_injected_callbacks_on_backpressure() {
+    let authority =
+        LibdrmBackendFdAuthority::new(16).expect("nonzero generation should mint authority token");
+    let slot = LibdrmNativeOutputSlot::new(2).expect("nonzero slot should be valid");
+    let source = LibdrmNativePageFlipSource::from_authority(authority);
+    let mut poller =
+        NativeLibdrmPageFlipEventPoller::new(source).with_routes([LibdrmNativeOutputRoute {
+            slot,
+            output: OutputId::from_raw(7),
+        }]);
+    let (sender, receiver) = mpsc::sync_channel(1);
+
+    poller.inject_callbacks([
+        LibdrmNativePageFlipCallback::new(slot, 81),
+        LibdrmNativePageFlipCallback::new(slot, 82),
+    ]);
+
+    let first = poller.poll_page_flip_events(&sender, 4);
+    assert_eq!(first.status, LibdrmPageFlipEventPollStatus::Backpressure);
+    assert_eq!(first.callbacks.emitted, 1);
+    assert_eq!(first.callbacks.queued_remaining, 1);
+    assert_eq!(poller.pending_callback_count(), 1);
+    assert_eq!(
+        receiver
+            .try_recv()
+            .expect("first callback should be queued"),
+        LivePageFlipCallback {
+            output: OutputId::from_raw(7),
+            frame_serial: 81,
+        }
+    );
+
+    let second = poller.poll_page_flip_events(&sender, 4);
+    assert_eq!(second.status, LibdrmPageFlipEventPollStatus::Emitted);
+    assert_eq!(second.callbacks.emitted, 1);
+    assert_eq!(poller.pending_callback_count(), 0);
+    assert_eq!(
+        receiver
+            .try_recv()
+            .expect("retained callback should be queued"),
+        LivePageFlipCallback {
+            output: OutputId::from_raw(7),
+            frame_serial: 82,
+        }
+    );
+}
+
+#[test]
 fn native_libdrm_page_flip_callback_decodes_without_native_resource_identity() {
     assert_eq!(LibdrmNativeOutputSlot::new(0), None);
     let slot = LibdrmNativeOutputSlot::new(2).expect("nonzero slot should be valid");
