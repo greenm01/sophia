@@ -28,6 +28,7 @@ pub(crate) fn print(verbose: bool) {
     println!("commands: x-authority-runtime-smoke");
     println!("commands: x-authority-x11-smoke");
     println!("commands: x-authority-x11rb-smoke");
+    println!("commands: x-authority-xdpyinfo-smoke");
 
     if verbose {
         tracing::debug!("verbose tracing enabled");

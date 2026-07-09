@@ -15,6 +15,12 @@ const X_CHANGE_PROPERTY: u8 = 18;
 const X_GET_PROPERTY: u8 = 20;
 const X_SET_SELECTION_OWNER: u8 = 22;
 const X_CONVERT_SELECTION: u8 = 24;
+const X_GET_INPUT_FOCUS: u8 = 43;
+const X_CREATE_GC: u8 = 55;
+const X_FREE_GC: u8 = 60;
+const X_QUERY_EXTENSION: u8 = 98;
+const X_LIST_EXTENSIONS: u8 = 99;
+const X_QUERY_BEST_SIZE: u8 = 97;
 
 const X_CREATE_WINDOW_REQ_LEN: usize = 32;
 const X_MAP_WINDOW_REQ_LEN: usize = 8;
@@ -24,6 +30,12 @@ const X_CHANGE_PROPERTY_REQ_LEN: usize = 24;
 const X_GET_PROPERTY_REQ_LEN: usize = 24;
 const X_SET_SELECTION_OWNER_REQ_LEN: usize = 16;
 const X_CONVERT_SELECTION_REQ_LEN: usize = 24;
+const X_GET_INPUT_FOCUS_REQ_LEN: usize = 4;
+const X_CREATE_GC_REQ_LEN: usize = 16;
+const X_FREE_GC_REQ_LEN: usize = 8;
+const X_QUERY_EXTENSION_REQ_LEN: usize = 8;
+const X_LIST_EXTENSIONS_REQ_LEN: usize = 4;
+const X_QUERY_BEST_SIZE_REQ_LEN: usize = 12;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct XWireClientContext {
@@ -35,10 +47,33 @@ pub struct XWireClientContext {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum XWireRequest {
     Authority(XAuthorityRequestPacket),
-    InternAtom { only_if_exists: bool, name: String },
-    GetAtomName { atom: XAtom },
+    InternAtom {
+        only_if_exists: bool,
+        name: String,
+    },
+    GetAtomName {
+        atom: XAtom,
+    },
     ChangeProperty(XPropertyChange),
     GetProperty(XPropertyRead),
+    CreateGraphicsContext {
+        gc: XResourceId,
+        drawable: XResourceId,
+    },
+    FreeGraphicsContext {
+        gc: XResourceId,
+    },
+    GetInputFocus,
+    QueryExtension {
+        name: String,
+    },
+    ListExtensions,
+    QueryBestSize {
+        class: u8,
+        drawable: XResourceId,
+        width: u16,
+        height: u16,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -109,8 +144,37 @@ pub fn decode_x11_core_request(
         X_GET_PROPERTY => decode_get_property(context, bytes),
         X_SET_SELECTION_OWNER => decode_set_selection_owner(context, bytes),
         X_CONVERT_SELECTION => decode_convert_selection(context, bytes),
+        X_GET_INPUT_FOCUS => decode_get_input_focus(bytes),
+        X_CREATE_GC => decode_create_gc(context, bytes),
+        X_FREE_GC => decode_free_gc(context, bytes),
+        X_QUERY_BEST_SIZE => decode_query_best_size(context, bytes),
+        X_QUERY_EXTENSION => decode_query_extension(context, bytes),
+        X_LIST_EXTENSIONS => decode_list_extensions(bytes),
         other => Err(XWireParseError::UnknownOpcode(other)),
     }
+}
+
+fn decode_free_gc(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_FREE_GC, X_FREE_GC_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::FreeGraphicsContext {
+        gc: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+    })
+}
+
+fn decode_query_best_size(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_QUERY_BEST_SIZE, X_QUERY_BEST_SIZE_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::QueryBestSize {
+        class: bytes[1],
+        drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        width: context.byte_order.u16(&bytes[8..10]),
+        height: context.byte_order.u16(&bytes[10..12]),
+    })
 }
 
 fn decode_get_property(
@@ -126,6 +190,49 @@ fn decode_get_property(
         long_offset: context.byte_order.u32(&bytes[16..20]),
         long_length: context.byte_order.u32(&bytes[20..24]),
     }))
+}
+
+fn decode_create_gc(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_len(X_CREATE_GC, X_CREATE_GC_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::CreateGraphicsContext {
+        gc: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
+    })
+}
+
+fn decode_query_extension(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_len(X_QUERY_EXTENSION, X_QUERY_EXTENSION_REQ_LEN, bytes.len())?;
+    let name_len = usize::from(context.byte_order.u16(&bytes[4..6]));
+    let expected_len = X_QUERY_EXTENSION_REQ_LEN + padded_len(name_len);
+    if bytes.len() != expected_len {
+        return Err(XWireParseError::InvalidLength {
+            opcode: X_QUERY_EXTENSION,
+            expected_at_least: expected_len,
+            actual: bytes.len(),
+        });
+    }
+    let name = core::str::from_utf8(
+        &bytes[X_QUERY_EXTENSION_REQ_LEN..X_QUERY_EXTENSION_REQ_LEN + name_len],
+    )
+    .map_err(|_| XWireParseError::InvalidLength {
+        opcode: X_QUERY_EXTENSION,
+        expected_at_least: expected_len,
+        actual: bytes.len(),
+    })?;
+    Ok(XWireRequest::QueryExtension {
+        name: name.to_owned(),
+    })
+}
+
+fn decode_list_extensions(bytes: &[u8]) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_LIST_EXTENSIONS, X_LIST_EXTENSIONS_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::ListExtensions)
 }
 
 fn decode_intern_atom(
@@ -163,6 +270,11 @@ fn decode_get_atom_name(
     Ok(XWireRequest::GetAtomName {
         atom: context.byte_order.u32(&bytes[4..8]),
     })
+}
+
+fn decode_get_input_focus(bytes: &[u8]) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_GET_INPUT_FOCUS, X_GET_INPUT_FOCUS_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::GetInputFocus)
 }
 
 fn decode_create_window(

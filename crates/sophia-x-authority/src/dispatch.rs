@@ -137,6 +137,11 @@ pub fn dispatch_x11_wire_request(
                     minor_code: 0,
                     major_code: context.major_opcode,
                 })
+            } else if read.window.local.raw() == u64::from(crate::X_SETUP_DEFAULT_ROOT) {
+                x_client_output_from_property_read(
+                    &context,
+                    properties.read_property(context.namespace, read),
+                )
             } else if let Err(error) =
                 runtime.validate_window_access(context.namespace, read.window)
             {
@@ -147,23 +152,10 @@ pub fn dispatch_x11_wire_request(
                     u32::try_from(read.window.local.raw()).unwrap_or(0),
                 ))
             } else {
-                match properties.read_property(context.namespace, read) {
-                    Ok(reply) => XClientOutput::Reply(XClientReply::GetProperty {
-                        sequence: context.sequence,
-                        property_type: reply.property_type,
-                        format: reply.format,
-                        bytes_after: reply.bytes_after,
-                        item_count: reply.item_count,
-                        bytes: reply.bytes,
-                    }),
-                    Err(error) => XClientOutput::Error(crate::XClientError {
-                        code: x_error_from_property_read(error),
-                        sequence: context.sequence,
-                        resource_id: 0,
-                        minor_code: 0,
-                        major_code: context.major_opcode,
-                    }),
-                }
+                x_client_output_from_property_read(
+                    &context,
+                    properties.read_property(context.namespace, read),
+                )
             };
             XDispatchResult {
                 response: None,
@@ -171,6 +163,46 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
+        XWireRequest::CreateGraphicsContext { .. } | XWireRequest::FreeGraphicsContext { .. } => {
+            XDispatchResult {
+                response: None,
+                outputs: Vec::new(),
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::GetInputFocus => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::GetInputFocus {
+                sequence: context.sequence,
+                focus: XResourceId::new(u64::from(crate::X_SETUP_DEFAULT_ROOT), 1),
+                revert_to: 1,
+            })],
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::QueryExtension { .. } => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::QueryExtension {
+                sequence: context.sequence,
+                present: false,
+            })],
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::ListExtensions => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::ListExtensions {
+                sequence: context.sequence,
+            })],
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::QueryBestSize { width, height, .. } => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::QueryBestSize {
+                sequence: context.sequence,
+                width,
+                height,
+            })],
+            metadata_candidates: Vec::new(),
+        },
     }
 }
 
@@ -266,6 +298,29 @@ fn resource_from_kind(kind: &XAuthorityRequestKind) -> u32 {
 
 fn atom_type_is_unknown(atoms: &XAtomTable, atom: u32) -> bool {
     atom != crate::X_PROPERTY_ANY_TYPE && atoms.name(atom).is_none()
+}
+
+fn x_client_output_from_property_read(
+    context: &XDispatchContext,
+    result: Result<crate::XPropertyReadReply, XPropertyError>,
+) -> XClientOutput {
+    match result {
+        Ok(reply) => XClientOutput::Reply(XClientReply::GetProperty {
+            sequence: context.sequence,
+            property_type: reply.property_type,
+            format: reply.format,
+            bytes_after: reply.bytes_after,
+            item_count: reply.item_count,
+            bytes: reply.bytes,
+        }),
+        Err(error) => XClientOutput::Error(crate::XClientError {
+            code: x_error_from_property_read(error),
+            sequence: context.sequence,
+            resource_id: 0,
+            minor_code: 0,
+            major_code: context.major_opcode,
+        }),
+    }
 }
 
 fn x_error_from_property_read(error: XPropertyError) -> XErrorCode {

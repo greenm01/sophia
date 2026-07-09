@@ -260,10 +260,11 @@ The covered setup fixtures are:
 
 Core request parsing now starts with fixtures for `CreateWindow`, `MapWindow`,
 `InternAtom`, `GetAtomName`, `ChangeProperty`, `GetProperty`,
-`SetSelectionOwner`, and `ConvertSelection`. Runtime-backed wire requests
-translate into existing internal `XAuthorityRequestPacket` values before they
-reach `XAuthorityRuntime`; property writes and reads land in a minimal
-namespace-keyed property table.
+`SetSelectionOwner`, `ConvertSelection`, `CreateGC`, `FreeGC`,
+`GetInputFocus`, `QueryExtension`, `ListExtensions`, and `QueryBestSize`.
+Runtime-backed wire requests translate into existing internal
+`XAuthorityRequestPacket` values before they reach `XAuthorityRuntime`;
+property writes and reads land in a minimal namespace-keyed property table.
 
 Minimal client-visible output now covers bounded X error records, 32-byte core
 events for `ConfigureNotify`, `MapNotify`, `PropertyNotify`, and
@@ -273,8 +274,9 @@ atoms, sends synthetic `CreateWindow` and `MapWindow` requests, writes a title
 property, reads it back, and observes the expected events.
 
 Atom naming is authority-owned and bounded. Sophia preloads the small predefined
-set needed by the prototype, allocates dynamic client-interned atoms after the
-X11 predefined range, and caps atom names at 256 bytes. Metadata-relevant
+set needed by the prototype, preloads the X11 predefined atom range, allocates
+dynamic client-interned atoms after that range, and caps atom names at 256
+bytes. Metadata-relevant
 property writes such as `WM_CLASS`, `WM_NAME`, `_NET_WM_NAME`, and
 `WM_PROTOCOLS` produce metadata broker candidates that include only namespace,
 window, atom names, type names, value length, and generation. They do not emit
@@ -290,3 +292,10 @@ bounded title property, maps the window, and observes `ConfigureNotify` and
 
 The next milestone is a broader X client probe. Its first failure should drive
 the next opcode or reply implementation rather than guessing ahead.
+
+`xdpyinfo` now passes as the first broader probe. It forced a minimal root
+screen in setup, empty extension discovery replies, root property reads for
+standard predefined atoms, root input-focus reporting, and no-reply GC lifecycle
+requests. The next probe is a tiny C Xlib client compiled into `/tmp` by the
+CLI smoke so Sophia can exercise a different client stack without adding a repo
+dependency.

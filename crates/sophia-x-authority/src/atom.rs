@@ -7,12 +7,14 @@ pub const X_ATOM_LAST_PREDEFINED: XAtom = 68;
 
 pub const X_ATOM_PRIMARY: XAtom = 1;
 pub const X_ATOM_ATOM: XAtom = 4;
+pub const X_ATOM_RESOURCE_MANAGER: XAtom = 23;
 pub const X_ATOM_STRING: XAtom = 31;
 pub const X_ATOM_WM_NAME: XAtom = 39;
 pub const X_ATOM_WM_CLASS: XAtom = 67;
 
 pub const X_ATOM_NAME_PRIMARY: &str = "PRIMARY";
 pub const X_ATOM_NAME_ATOM: &str = "ATOM";
+pub const X_ATOM_NAME_RESOURCE_MANAGER: &str = "RESOURCE_MANAGER";
 pub const X_ATOM_NAME_STRING: &str = "STRING";
 pub const X_ATOM_NAME_WM_NAME: &str = "WM_NAME";
 pub const X_ATOM_NAME_WM_CLASS: &str = "WM_CLASS";
@@ -56,11 +58,9 @@ impl XAtomTable {
             atoms_by_name: BTreeMap::new(),
             next_dynamic: X_ATOM_LAST_PREDEFINED + 1,
         };
-        table.insert_predefined(X_ATOM_PRIMARY, X_ATOM_NAME_PRIMARY);
-        table.insert_predefined(X_ATOM_ATOM, X_ATOM_NAME_ATOM);
-        table.insert_predefined(X_ATOM_STRING, X_ATOM_NAME_STRING);
-        table.insert_predefined(X_ATOM_WM_NAME, X_ATOM_NAME_WM_NAME);
-        table.insert_predefined(X_ATOM_WM_CLASS, X_ATOM_NAME_WM_CLASS);
+        for (atom, name) in X_PREDEFINED_ATOMS {
+            table.insert_predefined(*atom, name);
+        }
         table
     }
 
@@ -104,6 +104,77 @@ impl XAtomTable {
         self.atoms_by_name.insert(name.to_owned(), atom);
     }
 }
+
+const X_PREDEFINED_ATOMS: &[(XAtom, &str)] = &[
+    (X_ATOM_PRIMARY, X_ATOM_NAME_PRIMARY),
+    (2, "SECONDARY"),
+    (3, "ARC"),
+    (X_ATOM_ATOM, X_ATOM_NAME_ATOM),
+    (5, "BITMAP"),
+    (6, "CARDINAL"),
+    (7, "COLORMAP"),
+    (8, "CURSOR"),
+    (9, "CUT_BUFFER0"),
+    (10, "CUT_BUFFER1"),
+    (11, "CUT_BUFFER2"),
+    (12, "CUT_BUFFER3"),
+    (13, "CUT_BUFFER4"),
+    (14, "CUT_BUFFER5"),
+    (15, "CUT_BUFFER6"),
+    (16, "CUT_BUFFER7"),
+    (17, "DRAWABLE"),
+    (18, "FONT"),
+    (19, "INTEGER"),
+    (20, "PIXMAP"),
+    (21, "POINT"),
+    (22, "RECTANGLE"),
+    (X_ATOM_RESOURCE_MANAGER, X_ATOM_NAME_RESOURCE_MANAGER),
+    (24, "RGB_COLOR_MAP"),
+    (25, "RGB_BEST_MAP"),
+    (26, "RGB_BLUE_MAP"),
+    (27, "RGB_DEFAULT_MAP"),
+    (28, "RGB_GRAY_MAP"),
+    (29, "RGB_GREEN_MAP"),
+    (30, "RGB_RED_MAP"),
+    (X_ATOM_STRING, X_ATOM_NAME_STRING),
+    (32, "VISUALID"),
+    (33, "WINDOW"),
+    (34, "WM_COMMAND"),
+    (35, "WM_HINTS"),
+    (36, "WM_CLIENT_MACHINE"),
+    (37, "WM_ICON_NAME"),
+    (38, "WM_ICON_SIZE"),
+    (X_ATOM_WM_NAME, X_ATOM_NAME_WM_NAME),
+    (40, "WM_NORMAL_HINTS"),
+    (41, "WM_SIZE_HINTS"),
+    (42, "WM_ZOOM_HINTS"),
+    (43, "MIN_SPACE"),
+    (44, "NORM_SPACE"),
+    (45, "MAX_SPACE"),
+    (46, "END_SPACE"),
+    (47, "SUPERSCRIPT_X"),
+    (48, "SUPERSCRIPT_Y"),
+    (49, "SUBSCRIPT_X"),
+    (50, "SUBSCRIPT_Y"),
+    (51, "UNDERLINE_POSITION"),
+    (52, "UNDERLINE_THICKNESS"),
+    (53, "STRIKEOUT_ASCENT"),
+    (54, "STRIKEOUT_DESCENT"),
+    (55, "ITALIC_ANGLE"),
+    (56, "X_HEIGHT"),
+    (57, "QUAD_WIDTH"),
+    (58, "WEIGHT"),
+    (59, "POINT_SIZE"),
+    (60, "RESOLUTION"),
+    (61, "COPYRIGHT"),
+    (62, "NOTICE"),
+    (63, "FONT_NAME"),
+    (64, "FAMILY_NAME"),
+    (65, "FULL_NAME"),
+    (66, "CAP_HEIGHT"),
+    (X_ATOM_WM_CLASS, X_ATOM_NAME_WM_CLASS),
+    (68, "WM_TRANSIENT_FOR"),
+];
 
 pub fn is_metadata_candidate_name(name: &str) -> bool {
     matches!(

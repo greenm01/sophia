@@ -1,6 +1,20 @@
 use super::prelude::*;
 
 pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
+    if args.iter().any(|arg| arg == "x-authority-xdpyinfo-smoke") {
+        let report = run_x_authority_xdpyinfo_smoke()?;
+        println!(
+            "x-authority-xdpyinfo-smoke display={} status={} stdout_bytes={} stderr_bytes={} mentions_sophia={} mentions_root={}",
+            report.display,
+            report.status,
+            report.stdout_bytes,
+            report.stderr_bytes,
+            report.mentions_sophia,
+            report.mentions_root
+        );
+        return Ok(true);
+    }
+
     if args.iter().any(|arg| arg == "x-authority-x11rb-smoke") {
         let report = run_x_authority_x11rb_smoke()?;
         println!(
@@ -56,6 +70,16 @@ struct XAuthorityX11rbSmokeReport {
     configure_notify: usize,
     map_notify: usize,
     errors: usize,
+}
+
+#[derive(Clone, Debug)]
+struct XAuthorityXdpyinfoSmokeReport {
+    display: String,
+    status: i32,
+    stdout_bytes: usize,
+    stderr_bytes: usize,
+    mentions_sophia: bool,
+    mentions_root: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -229,6 +253,50 @@ fn run_x_authority_x11rb_smoke() -> Result<XAuthorityX11rbSmokeReport, Box<dyn s
         map_notify,
         errors,
     })
+}
+
+fn run_x_authority_xdpyinfo_smoke()
+-> Result<XAuthorityXdpyinfoSmokeReport, Box<dyn std::error::Error>> {
+    let display_number = 1600 + (std::process::id() % 1000);
+    let display = format!(":{display_number}");
+    let socket_path = std::path::PathBuf::from(format!("/tmp/.X11-unix/X{display_number}"));
+    std::fs::create_dir_all("/tmp/.X11-unix")?;
+    let server_path = socket_path.clone();
+    let server = std::thread::spawn(move || {
+        run_x11_core_socket_server_once(&server_path, NamespaceId::from_raw(43))
+    });
+
+    wait_for_socket_path(&socket_path)?;
+    let output = std::process::Command::new("xdpyinfo")
+        .arg("-display")
+        .arg(&display)
+        .output()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let status = output.status.code().unwrap_or(-1);
+    let report = XAuthorityXdpyinfoSmokeReport {
+        display: display.clone(),
+        status,
+        stdout_bytes: output.stdout.len(),
+        stderr_bytes: output.stderr.len(),
+        mentions_sophia: stdout.contains("Sophia") || stderr.contains("Sophia"),
+        mentions_root: stdout.contains("root window id") || stderr.contains("root window id"),
+    };
+
+    let _ = std::fs::remove_file(&socket_path);
+    server
+        .join()
+        .map_err(|_| "X authority X11 socket server thread panicked")??;
+
+    if !output.status.success() {
+        return Err(format!(
+            "xdpyinfo failed for {display}: status={status} stderr={}",
+            stderr.trim()
+        )
+        .into());
+    }
+
+    Ok(report)
 }
 
 fn run_x_authority_runtime_smoke()

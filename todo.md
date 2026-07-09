@@ -6,20 +6,19 @@ evidence belong in `docs/research-log.md`.
 
 ---
 
-## Active Focus - Sophia X Authority: Broader X Client Compatibility
+## Active Focus - Sophia X Authority: C Xlib Probe
 
 **Now**
-- [ ] Add the next real-client probe that uses a broader X11 library path
-  beyond the successful `x11rb` connect/create/map/property smoke.
+- [ ] Add a tiny C Xlib probe compiled into `/tmp` by the CLI smoke.
+- [ ] Exercise `XOpenDisplay`, `XInternAtom`, `XCreateSimpleWindow`,
+  `XStoreName` or `XChangeProperty`, `XGetWindowProperty`, and `XMapWindow`.
 - [ ] Record the first missing opcode/reply shape from that probe as the next
   implementation target.
-- [ ] Keep each new compatibility step covered by both a direct wire test and a
-  CLI smoke when feasible.
 
 **Next**
-- [ ] Decide whether the next probe is C Xlib, `xmessage`, or a tiny toolkit
-  client, depending on what is available locally without adding dependencies.
 - [ ] Add minimal request coverage for the first real-client failure.
+- [ ] Keep each new compatibility step covered by both a direct wire test and a
+  CLI smoke when feasible.
 
 ---
 
@@ -30,6 +29,9 @@ evidence belong in `docs/research-log.md`.
 - [x] Add minimal bounded `GetProperty` replies and socket smoke coverage.
 - [x] Define and pass the first real-client-library target with `x11rb`: setup,
   atom lookup, create, property write/read, map, and event observation.
+- [x] Pass `xdpyinfo` as a broader setup/introspection probe with minimal
+  `CreateGC`, `FreeGC`, `GetInputFocus`, `QueryExtension`, `ListExtensions`,
+  `QueryBestSize`, full predefined atom, and root-property read support.
 - [ ] Revisit compositor backend work after X Authority can create, map, draw,
   and expose a simple client through the authority transaction model.
 

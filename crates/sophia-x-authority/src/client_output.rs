@@ -94,6 +94,23 @@ pub enum XClientReply {
         sequence: u16,
         name: String,
     },
+    QueryExtension {
+        sequence: u16,
+        present: bool,
+    },
+    ListExtensions {
+        sequence: u16,
+    },
+    QueryBestSize {
+        sequence: u16,
+        width: u16,
+        height: u16,
+    },
+    GetInputFocus {
+        sequence: u16,
+        focus: XResourceId,
+        revert_to: u8,
+    },
     GetProperty {
         sequence: u16,
         property_type: u32,
@@ -144,6 +161,40 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             );
             out[X_CLIENT_OUTPUT_RECORD_LEN..X_CLIENT_OUTPUT_RECORD_LEN + bytes.len()]
                 .copy_from_slice(bytes);
+            out
+        }
+        XClientReply::QueryExtension { sequence, present } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            out[8] = u8::from(present);
+            out
+        }
+        XClientReply::ListExtensions { sequence } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            out[1] = 0;
+            out
+        }
+        XClientReply::QueryBestSize {
+            sequence,
+            width,
+            height,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            put_u16(byte_order, &mut out[8..10], width);
+            put_u16(byte_order, &mut out[10..12], height);
+            out
+        }
+        XClientReply::GetInputFocus {
+            sequence,
+            focus,
+            revert_to,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            out[1] = revert_to;
+            put_resource(byte_order, &mut out[8..12], focus);
             out
         }
         XClientReply::GetProperty {
