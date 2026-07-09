@@ -109,6 +109,13 @@ pub enum XClientReply {
         width: u16,
         height: u16,
     },
+    ShmQueryVersion {
+        sequence: u16,
+        major_version: u16,
+        minor_version: u16,
+        shared_pixmaps: bool,
+        pixmap_format: u8,
+    },
     GetInputFocus {
         sequence: u16,
         focus: XResourceId,
@@ -196,6 +203,21 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             write_reply_header(byte_order, &mut out, sequence, 0);
             put_u16(byte_order, &mut out[8..10], width);
             put_u16(byte_order, &mut out[10..12], height);
+            out
+        }
+        XClientReply::ShmQueryVersion {
+            sequence,
+            major_version,
+            minor_version,
+            shared_pixmaps,
+            pixmap_format,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            out[1] = u8::from(shared_pixmaps);
+            put_u16(byte_order, &mut out[8..10], major_version);
+            put_u16(byte_order, &mut out[10..12], minor_version);
+            out[16] = pixmap_format;
             out
         }
         XClientReply::GetInputFocus {

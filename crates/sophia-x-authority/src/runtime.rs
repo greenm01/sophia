@@ -5,14 +5,16 @@ use crate::{
     ClipboardSelectionFailureRequest, XAuthorityPortalCommand, XAuthorityRequestKind,
     XAuthorityRequestPacket, XAuthorityResponsePacket, XAuthorityRuntimeError,
     XAuthoritySelectionArtifact, XDrawingUpdate, XResourceKind, XResourceTable, XSelectionEvent,
-    XSelectionMonitor, XWindowLifecycleEvent, XWindowTable, clipboard_selection_failure_notify,
-    dispatch_clipboard_selection_request, surface_transaction_from_drawing_update,
+    XSelectionMonitor, XShmSegmentTable, XWindowLifecycleEvent, XWindowTable,
+    clipboard_selection_failure_notify, dispatch_clipboard_selection_request,
+    surface_transaction_from_drawing_update,
 };
 
 #[derive(Debug, Default)]
 pub struct XAuthorityRuntime {
     resources: XResourceTable,
     windows: XWindowTable,
+    shm_segments: XShmSegmentTable,
     selections: XSelectionMonitor,
     clipboard: ClipboardPortal,
 }
@@ -171,6 +173,44 @@ impl XAuthorityRuntime {
 
     pub fn window_count(&self) -> usize {
         self.windows.len()
+    }
+
+    pub fn shm_segment_count(&self) -> usize {
+        self.shm_segments.len()
+    }
+
+    pub fn attach_shm_segment(
+        &mut self,
+        namespace: NamespaceId,
+        segment: crate::XResourceId,
+        shmid: u32,
+        read_only: bool,
+        generation: u64,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        self.shm_segments
+            .attach(namespace, segment, shmid, read_only, generation)
+            .map_err(Into::into)
+    }
+
+    pub fn detach_shm_segment(
+        &mut self,
+        namespace: NamespaceId,
+        segment: crate::XResourceId,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        self.shm_segments
+            .detach(namespace, segment)
+            .map_err(Into::into)
+    }
+
+    pub fn validate_shm_segment_access(
+        &self,
+        namespace: NamespaceId,
+        segment: crate::XResourceId,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        self.shm_segments
+            .lookup(namespace, segment)
+            .map(|_| ())
+            .map_err(Into::into)
     }
 
     pub fn validate_window_access(

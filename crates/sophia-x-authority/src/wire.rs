@@ -28,6 +28,12 @@ const X_QUERY_BEST_SIZE: u8 = 97;
 pub const X_SOPHIA_PRESENT_EXTENSION_NAME: &str = "SOPHIA-PRESENT";
 pub const X_SOPHIA_PRESENT_MAJOR_OPCODE: u8 = 130;
 pub const X_SOPHIA_PRESENT_PIXMAP_MINOR_OPCODE: u8 = 0;
+pub const X_MIT_SHM_EXTENSION_NAME: &str = "MIT-SHM";
+pub const X_MIT_SHM_MAJOR_OPCODE: u8 = 131;
+pub const X_MIT_SHM_QUERY_VERSION_MINOR_OPCODE: u8 = 0;
+pub const X_MIT_SHM_ATTACH_MINOR_OPCODE: u8 = 1;
+pub const X_MIT_SHM_DETACH_MINOR_OPCODE: u8 = 2;
+pub const X_MIT_SHM_PUT_IMAGE_MINOR_OPCODE: u8 = 3;
 
 const X_CREATE_WINDOW_REQ_LEN: usize = 32;
 const X_DESTROY_WINDOW_REQ_LEN: usize = 8;
@@ -47,6 +53,10 @@ const X_QUERY_EXTENSION_REQ_LEN: usize = 8;
 const X_LIST_EXTENSIONS_REQ_LEN: usize = 4;
 const X_QUERY_BEST_SIZE_REQ_LEN: usize = 12;
 const X_SOPHIA_PRESENT_PIXMAP_REQ_LEN: usize = 32;
+const X_MIT_SHM_QUERY_VERSION_REQ_LEN: usize = 4;
+const X_MIT_SHM_ATTACH_REQ_LEN: usize = 16;
+const X_MIT_SHM_DETACH_REQ_LEN: usize = 8;
+const X_MIT_SHM_PUT_IMAGE_REQ_LEN: usize = 40;
 
 pub const X_PUT_IMAGE_MAX_DATA_BYTES: usize = crate::X_PROPERTY_MAX_VALUE_BYTES;
 
@@ -106,6 +116,32 @@ pub enum XWireRequest {
         drawable: XResourceId,
         width: u16,
         height: u16,
+    },
+    ShmQueryVersion,
+    ShmAttach {
+        segment: XResourceId,
+        shmid: u32,
+        read_only: bool,
+    },
+    ShmDetach {
+        segment: XResourceId,
+    },
+    ShmPutImage {
+        drawable: XResourceId,
+        gc: XResourceId,
+        total_width: u16,
+        total_height: u16,
+        src_x: u16,
+        src_y: u16,
+        src_width: u16,
+        src_height: u16,
+        dst_x: i16,
+        dst_y: i16,
+        depth: u8,
+        format: u8,
+        send_event: bool,
+        segment: XResourceId,
+        offset: u32,
     },
 }
 
@@ -187,7 +223,72 @@ pub fn decode_x11_core_request(
         X_QUERY_EXTENSION => decode_query_extension(context, bytes),
         X_LIST_EXTENSIONS => decode_list_extensions(bytes),
         X_SOPHIA_PRESENT_MAJOR_OPCODE => decode_sophia_present(context, bytes),
+        X_MIT_SHM_MAJOR_OPCODE => decode_mit_shm(context, bytes),
         other => Err(XWireParseError::UnknownOpcode(other)),
+    }
+}
+
+fn decode_mit_shm(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    match bytes[1] {
+        X_MIT_SHM_QUERY_VERSION_MINOR_OPCODE => {
+            require_exact_len(
+                X_MIT_SHM_MAJOR_OPCODE,
+                X_MIT_SHM_QUERY_VERSION_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::ShmQueryVersion)
+        }
+        X_MIT_SHM_ATTACH_MINOR_OPCODE => {
+            require_exact_len(
+                X_MIT_SHM_MAJOR_OPCODE,
+                X_MIT_SHM_ATTACH_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::ShmAttach {
+                segment: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+                shmid: context.byte_order.u32(&bytes[8..12]),
+                read_only: bytes[12] != 0,
+            })
+        }
+        X_MIT_SHM_DETACH_MINOR_OPCODE => {
+            require_exact_len(
+                X_MIT_SHM_MAJOR_OPCODE,
+                X_MIT_SHM_DETACH_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::ShmDetach {
+                segment: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+            })
+        }
+        X_MIT_SHM_PUT_IMAGE_MINOR_OPCODE => {
+            require_exact_len(
+                X_MIT_SHM_MAJOR_OPCODE,
+                X_MIT_SHM_PUT_IMAGE_REQ_LEN,
+                bytes.len(),
+            )?;
+            validate_wire_image_format(bytes[29])?;
+            Ok(XWireRequest::ShmPutImage {
+                drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+                gc: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
+                total_width: context.byte_order.u16(&bytes[12..14]),
+                total_height: context.byte_order.u16(&bytes[14..16]),
+                src_x: context.byte_order.u16(&bytes[16..18]),
+                src_y: context.byte_order.u16(&bytes[18..20]),
+                src_width: context.byte_order.u16(&bytes[20..22]),
+                src_height: context.byte_order.u16(&bytes[22..24]),
+                dst_x: context.byte_order.i16(&bytes[24..26]),
+                dst_y: context.byte_order.i16(&bytes[26..28]),
+                depth: bytes[28],
+                format: bytes[29],
+                send_event: bytes[30] != 0,
+                segment: XResourceId::new(u64::from(context.byte_order.u32(&bytes[32..36])), 1),
+                offset: context.byte_order.u32(&bytes[36..40]),
+            })
+        }
+        _ => Err(XWireParseError::UnknownOpcode(bytes[0])),
     }
 }
 

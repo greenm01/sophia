@@ -352,3 +352,23 @@ transaction intake while preserving the fail-closed rule.
 
 The callback observer helpers remain for focused tests and smoke probes. They
 are not the production transport shape.
+
+## MIT-SHM Negotiation
+
+Sophia X Authority advertises a minimal `MIT-SHM` extension surface. This is a
+compatibility step, not a shared-memory import implementation.
+
+`QueryExtension("MIT-SHM")` returns a private major opcode, and minor opcode `0`
+replies to `ShmQueryVersion` with protocol version `1.2`, `shared_pixmaps =
+false`. Unsupported minor opcodes fail closed as native X request errors.
+
+`ShmAttach` records only namespace-local segment metadata: the synthetic segment
+XID, the client-provided `shmid`, the read-only bit, and a generation. The
+authority does not call `shmat`, map host memory, or expose the segment to
+Sophia Engine in this first pass.
+
+`XShmPutImage` is decoded, but it does not emit a surface transaction yet. A
+missing or cross-namespace segment returns a bounded `BadAccess` error. An
+attached segment with a valid target window currently returns
+`BadImplementation`, preserving the fail-closed rule until the authority owns a
+real bounded SHM import path.

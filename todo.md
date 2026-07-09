@@ -6,15 +6,15 @@ evidence belong in `docs/research-log.md`.
 
 ---
 
-## Active Focus - Sophia X Authority: MIT-SHM Negotiation
+## Active Focus - Sophia X Authority: SHM Import Decision
 
 **Now**
-- [ ] Add minimal `MIT-SHM` `QueryExtension` advertisement only if the authority
-  can fail closed for unsupported minor opcodes.
-- [ ] Model `ShmAttach` as namespace-local metadata without mapping host memory
-  in the first pass.
-- [ ] Add an `XShmPutImage` decode path that rejects missing segments and emits
-  a bounded native X error rather than a surface transaction.
+- [ ] Decide whether the next X Authority step should map real MIT-SHM segments
+  or defer memory import until compositor backend work needs it.
+- [ ] If SHM import proceeds, document the bounded `shmat`/detach lifetime and
+  namespace cleanup rules before code.
+- [ ] If SHM import is deferred, move active focus to compositor backend
+  assembly with the current core draw, PutImage, and Present seams as inputs.
 
 **Next**
 - [ ] Revisit compositor backend work after X Authority can create, map, draw,
@@ -63,6 +63,11 @@ evidence belong in `docs/research-log.md`.
   tests.
 - [x] Document side-channel backpressure: full or disconnected queues fail
   closed instead of allocating unbounded buffers or dropping visual facts.
+- [x] Add minimal `MIT-SHM` `QueryExtension` and `ShmQueryVersion` support with
+  unsupported minor opcodes failing closed.
+- [x] Model `ShmAttach` as namespace-local metadata without mapping host memory.
+- [x] Decode `XShmPutImage` and reject it with bounded native X errors until a
+  real SHM import path exists.
 
 ---
 

@@ -563,6 +563,58 @@ fn x11_core_decoder_captures_sophia_present_pixmap_requests() {
 }
 
 #[test]
+fn x11_core_decoder_captures_mit_shm_requests() {
+    let namespace = NamespaceId::from_raw(45);
+
+    let query = decode_x11_core_request(
+        context(namespace, 530, XByteOrder::LittleEndian),
+        &mit_shm_query_version_request(XByteOrder::LittleEndian),
+    )
+    .unwrap();
+    assert_eq!(query, XWireRequest::ShmQueryVersion);
+
+    let attach = decode_x11_core_request(
+        context(namespace, 531, XByteOrder::LittleEndian),
+        &mit_shm_attach_request(XByteOrder::LittleEndian, 0x440001, 77, true),
+    )
+    .unwrap();
+    assert_eq!(
+        attach,
+        XWireRequest::ShmAttach {
+            segment: XResourceId::new(0x440001, 1),
+            shmid: 77,
+            read_only: true,
+        }
+    );
+
+    let put = decode_x11_core_request(
+        context(namespace, 532, XByteOrder::LittleEndian),
+        &mit_shm_put_image_request(XByteOrder::LittleEndian, 0x220701, 0x220702, 0x440001, 128),
+    )
+    .unwrap();
+    assert_eq!(
+        put,
+        XWireRequest::ShmPutImage {
+            drawable: XResourceId::new(0x220701, 1),
+            gc: XResourceId::new(0x220702, 1),
+            total_width: 64,
+            total_height: 48,
+            src_x: 0,
+            src_y: 0,
+            src_width: 32,
+            src_height: 24,
+            dst_x: 3,
+            dst_y: 5,
+            depth: 24,
+            format: 2,
+            send_event: false,
+            segment: XResourceId::new(0x440001, 1),
+            offset: 128,
+        }
+    );
+}
+
+#[test]
 fn x11_dispatch_reports_root_input_focus_for_minimal_server() {
     let namespace = NamespaceId::from_raw(45);
     let mut runtime = XAuthorityRuntime::new();
@@ -713,6 +765,164 @@ fn x11_dispatch_advertises_sophia_present_extension() {
     assert_eq!(encoded[0][9], X_SOPHIA_PRESENT_MAJOR_OPCODE);
     assert_eq!(encoded[0][10], 0);
     assert_eq!(encoded[0][11], 0);
+}
+
+#[test]
+fn x11_dispatch_advertises_mit_shm_and_replies_to_query_version() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let query = decode_x11_core_request(
+        context(namespace, 526, XByteOrder::LittleEndian),
+        &query_extension_request(XByteOrder::LittleEndian, X_MIT_SHM_EXTENSION_NAME),
+    )
+    .unwrap();
+
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 98),
+        query,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(encoded[0][8], 1);
+    assert_eq!(encoded[0][9], X_MIT_SHM_MAJOR_OPCODE);
+
+    let version = decode_x11_core_request(
+        context(namespace, 527, XByteOrder::LittleEndian),
+        &mit_shm_query_version_request(XByteOrder::LittleEndian),
+    )
+    .unwrap();
+    let version = dispatch_x11_wire_request(
+        dispatch_context(
+            namespace,
+            2,
+            XByteOrder::LittleEndian,
+            X_MIT_SHM_MAJOR_OPCODE,
+        ),
+        version,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = version.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(encoded[0][1], 0);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][8..10]), 1);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][10..12]), 2);
+}
+
+#[test]
+fn x11_dispatch_mit_shm_attach_is_namespace_local_metadata() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let attach = decode_x11_core_request(
+        context(namespace, 528, XByteOrder::LittleEndian),
+        &mit_shm_attach_request(XByteOrder::LittleEndian, 0x440010, 88, false),
+    )
+    .unwrap();
+
+    let result = dispatch_x11_wire_request(
+        dispatch_context(
+            namespace,
+            1,
+            XByteOrder::LittleEndian,
+            X_MIT_SHM_MAJOR_OPCODE,
+        ),
+        attach,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    assert!(result.outputs.is_empty());
+    assert_eq!(runtime.shm_segment_count(), 1);
+    assert!(
+        runtime
+            .validate_shm_segment_access(namespace, XResourceId::new(0x440010, 1))
+            .is_ok()
+    );
+    assert!(
+        runtime
+            .validate_shm_segment_access(NamespaceId::from_raw(46), XResourceId::new(0x440010, 1))
+            .is_err()
+    );
+}
+
+#[test]
+fn x11_dispatch_mit_shm_put_image_fails_closed_without_mapping_memory() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+
+    let missing = decode_x11_core_request(
+        context(namespace, 529, XByteOrder::LittleEndian),
+        &mit_shm_put_image_request(XByteOrder::LittleEndian, 0x220701, 0x220702, 0x440020, 0),
+    )
+    .unwrap();
+    let missing = dispatch_x11_wire_request(
+        dispatch_context(
+            namespace,
+            1,
+            XByteOrder::LittleEndian,
+            X_MIT_SHM_MAJOR_OPCODE,
+        ),
+        missing,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = missing.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(missing.response, None);
+    assert_eq!(encoded[0][0], 0);
+    assert_eq!(encoded[0][1], XErrorCode::BadAccess.wire_code());
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &encoded[0][4..8]),
+        0x440020
+    );
+
+    runtime
+        .attach_shm_segment(namespace, XResourceId::new(0x440020, 1), 88, false, 1)
+        .unwrap();
+    let create = decode_x11_core_request(
+        context(namespace, 530, XByteOrder::LittleEndian),
+        &create_window_request(XByteOrder::LittleEndian, 0x220701, 0, 0, 300, 200),
+    )
+    .unwrap();
+    dispatch_x11_wire_request(
+        dispatch_context(namespace, 2, XByteOrder::LittleEndian, 1),
+        create,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let attached = decode_x11_core_request(
+        context(namespace, 531, XByteOrder::LittleEndian),
+        &mit_shm_put_image_request(XByteOrder::LittleEndian, 0x220701, 0x220702, 0x440020, 0),
+    )
+    .unwrap();
+    let attached = dispatch_x11_wire_request(
+        dispatch_context(
+            namespace,
+            3,
+            XByteOrder::LittleEndian,
+            X_MIT_SHM_MAJOR_OPCODE,
+        ),
+        attached,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = attached.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(attached.response, None);
+    assert_eq!(encoded[0][0], 0);
+    assert_eq!(encoded[0][1], XErrorCode::BadImplementation.wire_code());
 }
 
 #[test]
@@ -1076,6 +1286,16 @@ fn x11_core_decoder_rejects_bad_lengths_and_unknown_opcodes() {
             &unknown
         ),
         Err(XWireParseError::UnknownOpcode(127))
+    );
+
+    let mut unsupported_shm_minor = vec![X_MIT_SHM_MAJOR_OPCODE, 99];
+    push_u16(&mut unsupported_shm_minor, XByteOrder::LittleEndian, 1);
+    assert_eq!(
+        decode_x11_core_request(
+            context(NamespaceId::from_raw(45), 507, XByteOrder::LittleEndian),
+            &unsupported_shm_minor
+        ),
+        Err(XWireParseError::UnknownOpcode(X_MIT_SHM_MAJOR_OPCODE))
     );
 
     let mut oversized_map = vec![8, 0];
@@ -2256,6 +2476,55 @@ fn sophia_present_pixmap_request(
     push_u16(&mut out, byte_order, damage.3);
     push_u64(&mut out, byte_order, previous_committed_generation);
     push_u32(&mut out, byte_order, timeout_msec);
+    out
+}
+
+fn mit_shm_query_version_request(byte_order: XByteOrder) -> Vec<u8> {
+    let mut out = vec![X_MIT_SHM_MAJOR_OPCODE, X_MIT_SHM_QUERY_VERSION_MINOR_OPCODE];
+    push_u16(&mut out, byte_order, 1);
+    out
+}
+
+fn mit_shm_attach_request(
+    byte_order: XByteOrder,
+    segment: u32,
+    shmid: u32,
+    read_only: bool,
+) -> Vec<u8> {
+    let mut out = vec![X_MIT_SHM_MAJOR_OPCODE, X_MIT_SHM_ATTACH_MINOR_OPCODE];
+    push_u16(&mut out, byte_order, 4);
+    push_u32(&mut out, byte_order, segment);
+    push_u32(&mut out, byte_order, shmid);
+    out.push(u8::from(read_only));
+    out.extend_from_slice(&[0, 0, 0]);
+    out
+}
+
+fn mit_shm_put_image_request(
+    byte_order: XByteOrder,
+    drawable: u32,
+    gc: u32,
+    segment: u32,
+    offset: u32,
+) -> Vec<u8> {
+    let mut out = vec![X_MIT_SHM_MAJOR_OPCODE, X_MIT_SHM_PUT_IMAGE_MINOR_OPCODE];
+    push_u16(&mut out, byte_order, 10);
+    push_u32(&mut out, byte_order, drawable);
+    push_u32(&mut out, byte_order, gc);
+    push_u16(&mut out, byte_order, 64);
+    push_u16(&mut out, byte_order, 48);
+    push_u16(&mut out, byte_order, 0);
+    push_u16(&mut out, byte_order, 0);
+    push_u16(&mut out, byte_order, 32);
+    push_u16(&mut out, byte_order, 24);
+    push_i16(&mut out, byte_order, 3);
+    push_i16(&mut out, byte_order, 5);
+    out.push(24);
+    out.push(2);
+    out.push(0);
+    out.push(0);
+    push_u32(&mut out, byte_order, segment);
+    push_u32(&mut out, byte_order, offset);
     out
 }
 

@@ -1,10 +1,11 @@
 use crate::{
-    X_SOPHIA_PRESENT_EXTENSION_NAME, X_SOPHIA_PRESENT_MAJOR_OPCODE, XAtomTable,
-    XAuthorityRequestKind, XAuthorityResponseOutcome, XAuthorityResponsePacket, XAuthorityRuntime,
-    XByteOrder, XClientEvent, XClientOutput, XClientReply, XErrorCode, XMetadataPropertyCandidate,
-    XPropertyError, XPropertyTable, XResourceId, XWireParseError, XWireRequest,
-    encode_x_client_output, metadata_property_candidate, x_error_from_runtime,
-    x_error_from_wire_parse, x_selection_failure_event,
+    X_MIT_SHM_EXTENSION_NAME, X_MIT_SHM_MAJOR_OPCODE, X_SOPHIA_PRESENT_EXTENSION_NAME,
+    X_SOPHIA_PRESENT_MAJOR_OPCODE, XAtomTable, XAuthorityRequestKind, XAuthorityResponseOutcome,
+    XAuthorityResponsePacket, XAuthorityRuntime, XByteOrder, XClientEvent, XClientOutput,
+    XClientReply, XErrorCode, XMetadataPropertyCandidate, XPropertyError, XPropertyTable,
+    XResourceId, XWireParseError, XWireRequest, encode_x_client_output,
+    metadata_property_candidate, x_error_from_runtime, x_error_from_wire_parse,
+    x_selection_failure_event,
 };
 use sophia_protocol::{NamespaceId, Rect, Region, TransactionId};
 
@@ -199,19 +200,15 @@ pub fn dispatch_x11_wire_request(
             metadata_candidates: Vec::new(),
         },
         XWireRequest::QueryExtension { name } => {
-            let present = name == X_SOPHIA_PRESENT_EXTENSION_NAME;
+            let extension = extension_query_result(&name);
             XDispatchResult {
                 response: None,
                 outputs: vec![XClientOutput::Reply(XClientReply::QueryExtension {
                     sequence: context.sequence,
-                    present,
-                    major_opcode: if present {
-                        X_SOPHIA_PRESENT_MAJOR_OPCODE
-                    } else {
-                        0
-                    },
-                    first_event: 0,
-                    first_error: 0,
+                    present: extension.present,
+                    major_opcode: extension.major_opcode,
+                    first_event: extension.first_event,
+                    first_error: extension.first_error,
                 })],
                 metadata_candidates: Vec::new(),
             }
@@ -232,6 +229,95 @@ pub fn dispatch_x11_wire_request(
             })],
             metadata_candidates: Vec::new(),
         },
+        XWireRequest::ShmQueryVersion => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::ShmQueryVersion {
+                sequence: context.sequence,
+                major_version: 1,
+                minor_version: 2,
+                shared_pixmaps: false,
+                pixmap_format: 0,
+            })],
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::ShmAttach {
+            segment,
+            shmid,
+            read_only,
+        } => {
+            let outputs = match runtime.attach_shm_segment(
+                context.namespace,
+                segment,
+                shmid,
+                read_only,
+                u64::from(context.sequence),
+            ) {
+                Ok(()) => Vec::new(),
+                Err(error) => vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(segment.local.raw()).unwrap_or(0),
+                ))],
+            };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::ShmDetach { segment } => {
+            let outputs = match runtime.detach_shm_segment(context.namespace, segment) {
+                Ok(()) => Vec::new(),
+                Err(error) => vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(segment.local.raw()).unwrap_or(0),
+                ))],
+            };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::ShmPutImage {
+            drawable, segment, ..
+        } => {
+            let output = if runtime
+                .validate_shm_segment_access(context.namespace, segment)
+                .is_err()
+            {
+                XClientOutput::Error(crate::XClientError {
+                    code: XErrorCode::BadAccess,
+                    sequence: context.sequence,
+                    resource_id: u32::try_from(segment.local.raw()).unwrap_or(0),
+                    minor_code: 3,
+                    major_code: context.major_opcode,
+                })
+            } else if let Err(error) = runtime.validate_window_access(context.namespace, drawable) {
+                XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(drawable.local.raw()).unwrap_or(0),
+                ))
+            } else {
+                XClientOutput::Error(crate::XClientError {
+                    code: XErrorCode::BadImplementation,
+                    sequence: context.sequence,
+                    resource_id: u32::try_from(segment.local.raw()).unwrap_or(0),
+                    minor_code: 3,
+                    major_code: context.major_opcode,
+                })
+            };
+            XDispatchResult {
+                response: None,
+                outputs: vec![output],
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::PolyFillRectangle {
             drawable,
             rectangles,
@@ -294,6 +380,37 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct XExtensionQueryResult {
+    present: bool,
+    major_opcode: u8,
+    first_event: u8,
+    first_error: u8,
+}
+
+fn extension_query_result(name: &str) -> XExtensionQueryResult {
+    match name {
+        X_SOPHIA_PRESENT_EXTENSION_NAME => XExtensionQueryResult {
+            present: true,
+            major_opcode: X_SOPHIA_PRESENT_MAJOR_OPCODE,
+            first_event: 0,
+            first_error: 0,
+        },
+        X_MIT_SHM_EXTENSION_NAME => XExtensionQueryResult {
+            present: true,
+            major_opcode: X_MIT_SHM_MAJOR_OPCODE,
+            first_event: 0,
+            first_error: 0,
+        },
+        _ => XExtensionQueryResult {
+            present: false,
+            major_opcode: 0,
+            first_event: 0,
+            first_error: 0,
+        },
     }
 }
 
