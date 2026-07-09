@@ -134,6 +134,7 @@ and not a permanent wrapper around XLibre.
 
 - `docs/architecture.md` maps processes and load-bearing boundaries.
 - `docs/dod.md` defines Sophia's data-oriented design rules.
+- `docs/sophia-x-authority.md` defines the long-term modern X authority.
 - `docs/style-guide.md` records implementation discipline.
 - `docs/research-log.md` captures early decisions and open research questions.
 - `docs/xlibre-prototype-regression-map.md` classifies XLibre prototype checks.

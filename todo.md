@@ -6,13 +6,33 @@ belong in `docs/research-log.md`.
 
 ---
 
-## Active Focus - Executable Authority Transactions
+## Active Focus - Sophia X Authority Design
 
-Turn the authority-centered architecture into shared Rust data and engine
-behavior. Sophia Engine remains the visual authority; protocol authorities emit
-bounded transactions that the engine may commit, delay, reject, or time out.
+Define the long-term X protocol authority that replaces XLibre/Xorg as the
+target dependency while preserving Engine-owned atomic visual commits and
+namespace boundaries.
 
 **Now**
+- [x] Start `docs/sophia-x-authority.md` with authority ownership boundaries,
+  minimum protocol subset, namespace resource model, drawing-to-buffer
+  readiness, selections/portals, lifecycle, input delivery, Phoenix study
+  targets, and first implementation milestones.
+
+**Next**
+- [x] Add a `sophia-x-authority` crate skeleton with passive resource tables
+  and no live socket yet.
+- [x] Model namespace-scoped X resource lookup and event subscription in tests.
+- [x] Model `AuthoritySurface` creation from synthetic X window lifecycle
+  events.
+- [ ] Convert a synthetic Present/SHM/CoreDraw update into a ready
+  `SurfaceTransaction`.
+- [ ] Convert a synthetic selection request into a portal request and native X
+  denial/handoff artifact.
+
+---
+
+## Completed Focus - Executable Authority Transactions
+
 - [x] Add protocol-neutral `AuthorityKind`, `AuthorityLocalId`,
   `AuthoritySurface`, `SurfaceTransaction`, `SurfaceTransactionReadiness`, and
   `CommittedSurfaceState` data records.
@@ -36,11 +56,6 @@ bounded transactions that the engine may commit, delay, reject, or time out.
   should retire once Sophia X Authority has equivalent coverage. See
   `docs/xlibre-prototype-regression-map.md`.
 
-**Next**
-- [ ] Start Sophia X Authority design: minimum protocol subset, namespace
-  resource model, drawing-to-buffer readiness, selections/portals, lifecycle,
-  and input delivery.
-
 ---
 
 ## Sophia X Authority Track
@@ -49,18 +64,18 @@ Replace the long-term dependency on XLibre/Xorg with a Sophia-owned modern X
 protocol subset that can run real applications without carrying the full legacy
 server object graph.
 
-- [ ] Define the minimum X protocol subset for real app compatibility:
+- [x] Define the minimum X protocol subset for real app compatibility:
   core windows/pixmaps/atoms/properties/events, ICCCM/EWMH, XKB, XFixes, Sync,
   Render, SHM, DRI3/Present, RandR, and selected GLX compatibility.
-- [ ] Define namespace-aware X resource ownership, lookup, event subscription,
+- [x] Define namespace-aware X resource ownership, lookup, event subscription,
   selection, focus, grab, and property access rules.
-- [ ] Define how X drawing paths become Sophia pending buffers:
+- [x] Define how X drawing paths become Sophia pending buffers:
   PresentPixmap, DRI3 DMA-BUF, SHM/software updates, Render, and core drawing.
-- [ ] Define X selection, clipboard, drag-and-drop, URI, notification, and
+- [x] Define X selection, clipboard, drag-and-drop, URI, notification, and
   screen-capture requests as protocol-specific inputs to Sophia Portals.
-- [ ] Define X lifecycle and polite close semantics as authority commands that
+- [x] Define X lifecycle and polite close semantics as authority commands that
   preserve the blind WM boundary.
-- [ ] Identify Phoenix components and tests worth studying before implementation.
+- [x] Identify Phoenix components and tests worth studying before implementation.
 
 ---
 

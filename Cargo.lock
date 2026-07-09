@@ -218,6 +218,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sophia-x-authority"
+version = "0.1.0"
+dependencies = [
+ "sophia-protocol",
+]
+
+[[package]]
 name = "sophia-x-bridge"
 version = "0.1.0"
 dependencies = [
