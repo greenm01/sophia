@@ -244,6 +244,78 @@ pub enum LivePageFlipEventStatus {
     Degraded,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LivePageFlipCallback {
+    pub output: OutputId,
+    pub frame_serial: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LivePageFlipCallbackReport {
+    pub decision: LivePageFlipCallbackDecision,
+    pub event: LivePageFlipEvent,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LivePageFlipCallbackDecision {
+    Accepted,
+    RejectedUnexpectedOutput,
+    RejectedStaleFrameSerial,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LivePageFlipCallbackIntake {
+    expected_output: OutputId,
+    last_frame_serial: Option<u64>,
+}
+
+impl LivePageFlipCallbackIntake {
+    pub const fn new(expected_output: OutputId) -> Self {
+        Self {
+            expected_output,
+            last_frame_serial: None,
+        }
+    }
+
+    pub const fn last_frame_serial(&self) -> Option<u64> {
+        self.last_frame_serial
+    }
+
+    pub fn observe(&mut self, callback: LivePageFlipCallback) -> LivePageFlipCallbackReport {
+        if callback.output != self.expected_output {
+            return LivePageFlipCallbackReport {
+                decision: LivePageFlipCallbackDecision::RejectedUnexpectedOutput,
+                event: LivePageFlipEvent {
+                    status: LivePageFlipEventStatus::WaitingForOutput,
+                    frame_serial: None,
+                },
+            };
+        }
+
+        if self
+            .last_frame_serial
+            .is_some_and(|last_frame_serial| callback.frame_serial <= last_frame_serial)
+        {
+            return LivePageFlipCallbackReport {
+                decision: LivePageFlipCallbackDecision::RejectedStaleFrameSerial,
+                event: LivePageFlipEvent {
+                    status: LivePageFlipEventStatus::Rejected,
+                    frame_serial: Some(callback.frame_serial),
+                },
+            };
+        }
+
+        self.last_frame_serial = Some(callback.frame_serial);
+        LivePageFlipCallbackReport {
+            decision: LivePageFlipCallbackDecision::Accepted,
+            event: LivePageFlipEvent {
+                status: LivePageFlipEventStatus::Presented,
+                frame_serial: Some(callback.frame_serial),
+            },
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct LiveBackendStartupReport {
     pub discovery: LiveCompositorBackendDiscoveryReport,
@@ -562,6 +634,7 @@ impl LiveBackendStartupReport {
         renderer_status: LiveRendererImportStartupStatus,
     ) -> Option<LiveBackendRuntimeAssembly> {
         let renderer_selection = self.renderer_selection_for_status(renderer_status)?;
+        let selected_output = self.selected_output()?;
         let renderer_observation = LiveRendererRuntimeObservation::from_startup_status(
             renderer_status,
             selection_observation(renderer_selection),
@@ -570,12 +643,14 @@ impl LiveBackendStartupReport {
             status: LiveRendererPresentationStatus::Ready,
         });
         let page_flip_event = LivePageFlipEvent::from_scanout_status(scanout_readiness.status);
+        let page_flip_callback_intake = LivePageFlipCallbackIntake::new(selected_output.id);
         self.into_headless_assembly(poller, renderer_selection)
             .map(|assembly| LiveBackendRuntimeAssembly {
                 assembly,
                 renderer_observation,
                 scanout_readiness,
                 page_flip_event,
+                page_flip_callback_intake,
             })
     }
 }
@@ -746,6 +821,7 @@ pub struct LiveBackendRuntimeAssembly {
     renderer_observation: LiveRendererRuntimeObservation,
     scanout_readiness: LiveScanoutReadinessReport,
     page_flip_event: LivePageFlipEvent,
+    page_flip_callback_intake: LivePageFlipCallbackIntake,
 }
 
 impl LiveBackendRuntimeAssembly {
@@ -778,6 +854,15 @@ impl LiveBackendRuntimeAssembly {
 
     pub fn observe_page_flip_outcome(&mut self, outcome: &PageFlipCommitOutcome) {
         self.page_flip_event = LivePageFlipEvent::from_commit_outcome(outcome);
+    }
+
+    pub fn observe_page_flip_callback(
+        &mut self,
+        callback: LivePageFlipCallback,
+    ) -> LivePageFlipCallbackReport {
+        let report = self.page_flip_callback_intake.observe(callback);
+        self.page_flip_event = report.event;
+        report
     }
 
     pub fn run_tick(

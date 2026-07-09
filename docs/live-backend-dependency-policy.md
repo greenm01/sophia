@@ -116,6 +116,13 @@ diagnostics useful without introducing KMS dependencies or leaking native object
 identity. Native presentation and future page-flip callbacks should update those
 fields through reduced reports before the next runtime tick observes them.
 
+The deterministic page-flip callback intake seam accepts only backend-local
+facts: the Sophia output selected by startup and a frame serial. It rejects
+callbacks for unexpected outputs and non-monotonic frame serials before updating
+runtime observation. The callback report exposes only a reduced decision and
+`LivePageFlipEvent`; it must not expose connector IDs, CRTC IDs, plane IDs,
+framebuffer IDs, native timestamps, fds, driver errors, or KMS callback payloads.
+
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
 authority. On Linux, wgpu will usually target Vulkan, but Sophia must first prove

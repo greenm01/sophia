@@ -5,12 +5,14 @@ use sophia_backend_live::{
     CompositorBackendTickInput, DeviceId, HeadlessOutput, LibinputDeviceDescriptor,
     LibinputDeviceKind, LiveBackendConfig, LiveBackendDependencyDecision,
     LiveBackendDependencyKind, LiveBackendDependencyUse, LiveCompositorBackendDiscoveryStatus,
-    LivePageFlipEvent, LivePageFlipEventStatus, LiveRendererImportBoundary,
-    LiveRendererImportHealth, LiveRendererImportPathStatus, LiveRendererImportStartupStatus,
-    LiveRendererPreference, LiveRendererPresentationReport, LiveRendererPresentationStatus,
-    LiveRendererRuntimeObservation, LiveRendererSelectionObservation, LiveScanoutReadinessReport,
-    LiveScanoutReadinessStatus, OutputId, PageFlipCommitOutcome, QueuedInputPoller,
-    RendererSelection, SeatId, Size, discover_live_backend, live_backend_dependency_decision,
+    LivePageFlipCallback, LivePageFlipCallbackDecision, LivePageFlipCallbackIntake,
+    LivePageFlipCallbackReport, LivePageFlipEvent, LivePageFlipEventStatus,
+    LiveRendererImportBoundary, LiveRendererImportHealth, LiveRendererImportPathStatus,
+    LiveRendererImportStartupStatus, LiveRendererPreference, LiveRendererPresentationReport,
+    LiveRendererPresentationStatus, LiveRendererRuntimeObservation,
+    LiveRendererSelectionObservation, LiveScanoutReadinessReport, LiveScanoutReadinessStatus,
+    OutputId, PageFlipCommitOutcome, QueuedInputPoller, RendererSelection, SeatId, Size,
+    discover_live_backend, live_backend_dependency_decision,
 };
 use sophia_protocol::{TransactionCommit, TransactionId, TransactionOutcome};
 
@@ -323,6 +325,93 @@ fn live_runtime_assembly_threads_scanout_and_page_flip_observations() {
         LivePageFlipEvent {
             status: LivePageFlipEventStatus::Presented,
             frame_serial: Some(121),
+        }
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn page_flip_callback_intake_accepts_only_matching_monotonic_callbacks() {
+    let mut intake = LivePageFlipCallbackIntake::new(OutputId::from_raw(7));
+
+    assert_eq!(
+        intake.observe(LivePageFlipCallback {
+            output: OutputId::from_raw(8),
+            frame_serial: 41,
+        }),
+        LivePageFlipCallbackReport {
+            decision: LivePageFlipCallbackDecision::RejectedUnexpectedOutput,
+            event: LivePageFlipEvent {
+                status: LivePageFlipEventStatus::WaitingForOutput,
+                frame_serial: None,
+            },
+        }
+    );
+    assert_eq!(intake.last_frame_serial(), None);
+
+    assert_eq!(
+        intake.observe(LivePageFlipCallback {
+            output: OutputId::from_raw(7),
+            frame_serial: 41,
+        }),
+        LivePageFlipCallbackReport {
+            decision: LivePageFlipCallbackDecision::Accepted,
+            event: LivePageFlipEvent {
+                status: LivePageFlipEventStatus::Presented,
+                frame_serial: Some(41),
+            },
+        }
+    );
+    assert_eq!(intake.last_frame_serial(), Some(41));
+
+    assert_eq!(
+        intake.observe(LivePageFlipCallback {
+            output: OutputId::from_raw(7),
+            frame_serial: 41,
+        }),
+        LivePageFlipCallbackReport {
+            decision: LivePageFlipCallbackDecision::RejectedStaleFrameSerial,
+            event: LivePageFlipEvent {
+                status: LivePageFlipEventStatus::Rejected,
+                frame_serial: Some(41),
+            },
+        }
+    );
+    assert_eq!(intake.last_frame_serial(), Some(41));
+}
+
+#[test]
+fn live_runtime_assembly_observes_reduced_page_flip_callbacks() {
+    let root = ready_drm_sysfs_fixture("runtime-page-flip-callback");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed live assembly");
+
+    assert_eq!(
+        assembly.observe_page_flip_callback(LivePageFlipCallback {
+            output: OutputId::from_raw(1),
+            frame_serial: 17,
+        }),
+        LivePageFlipCallbackReport {
+            decision: LivePageFlipCallbackDecision::Accepted,
+            event: LivePageFlipEvent {
+                status: LivePageFlipEventStatus::Presented,
+                frame_serial: Some(17),
+            },
+        }
+    );
+
+    let tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should succeed");
+
+    assert_eq!(
+        tick.page_flip,
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(17),
         }
     );
 

@@ -11,7 +11,7 @@ evidence belong in `docs/research-log.md`.
 **Now**
 - [ ] Keep `DEFAULT_DISPLAY` clear-color smoke as fallback until GBM-backed
   drawing is validated against real render nodes.
-- [ ] Define the first deterministic page-flip callback intake seam.
+- [ ] Wire page-flip callbacks into a runtime-owned bounded queue.
 
 **Next**
 - [ ] Keep wgpu deferred until GBM/EGL startup, drawing, and presentation seams
@@ -237,6 +237,7 @@ evidence belong in `docs/research-log.md`.
   retire `DEFAULT_DISPLAY` as a fallback smoke.
 - [x] Add the first reduced page-flip event shape without KMS object identity.
 - [x] Thread reduced scanout and page-flip events into runtime observation.
+- [x] Define the first deterministic page-flip callback intake seam.
 
 ---
 
