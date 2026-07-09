@@ -77,6 +77,21 @@ impl NativeGbmBackedEglPlatformProbe {
     }
 }
 
+#[cfg(feature = "gbm-probe")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeGbmBackedEglDrawSmoke;
+
+#[cfg(feature = "gbm-probe")]
+impl NativeGbmBackedEglDrawSmoke {
+    pub fn smoke_report_from_backend_device_result<T: std::os::fd::AsFd>(
+        device: std::io::Result<T>,
+    ) -> EglDrawSmokeReport {
+        draw_report_from_smoke_result(
+            native::gbm_backed_draw_smoke_result_from_backend_device_result(device),
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EglCapabilityProbeReport {
     pub status: EglCapabilityProbeStatus,
@@ -226,6 +241,37 @@ mod native {
             }
             sophia_renderer_native_egl::NativeGbmBackedEglPlatformStatus::PlatformDegraded => {
                 super::EglPlatformStatus::PlatformDegraded
+            }
+        }
+    }
+
+    #[cfg(feature = "gbm-probe")]
+    pub(super) fn gbm_backed_draw_smoke_result_from_backend_device_result<T: std::os::fd::AsFd>(
+        device: std::io::Result<T>,
+    ) -> EglDrawSmokeResult {
+        match sophia_renderer_native_egl::smoke_gbm_backed_private_target_from_backend_device_result(
+            device,
+        ) {
+            sophia_renderer_native_egl::NativeEglDrawSmokeStatus::ClearColorReady => {
+                EglDrawSmokeResult::ClearColorReady
+            }
+            sophia_renderer_native_egl::NativeEglDrawSmokeStatus::PlatformUnavailable => {
+                EglDrawSmokeResult::PlatformUnavailable
+            }
+            sophia_renderer_native_egl::NativeEglDrawSmokeStatus::PlatformDegraded => {
+                EglDrawSmokeResult::PlatformDegraded
+            }
+            sophia_renderer_native_egl::NativeEglDrawSmokeStatus::ContextUnavailable => {
+                EglDrawSmokeResult::ContextUnavailable
+            }
+            sophia_renderer_native_egl::NativeEglDrawSmokeStatus::SurfaceUnavailable => {
+                EglDrawSmokeResult::SurfaceUnavailable
+            }
+            sophia_renderer_native_egl::NativeEglDrawSmokeStatus::MakeCurrentUnavailable => {
+                EglDrawSmokeResult::MakeCurrentUnavailable
+            }
+            sophia_renderer_native_egl::NativeEglDrawSmokeStatus::GlUnavailable => {
+                EglDrawSmokeResult::GlUnavailable
             }
         }
     }

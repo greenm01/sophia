@@ -247,20 +247,27 @@ protocol authorities, and safe renderer-live API must still see only reduced
 status. They must not see the GBM device, EGL display, driver path, fd, surface,
 native visual, or driver error text.
 
-The admitted reduced status shape is `LiveGbmBackedEglPlatformReport`. It
+The admitted reduced platform shape is `LiveGbmBackedEglPlatformReport`. It
 projects GBM startup into EGL platform readiness without exposing the render
-device or EGL objects. The native platform smoke now proves that backend-owned
+device or EGL objects. The native platform smoke proves that backend-owned
 device authority can become a private GBM device, that EGL can create and
 initialize a GBM platform display from that private state, and that teardown can
-complete without exposing the display. The path is:
+complete without exposing the display.
+
+The GBM-backed private target smoke now reuses that private platform to create a
+1x1 GBM surface, create an EGL window surface from the private GBM surface, make
+an OpenGL context current, clear the target, and tear everything down. It
+returns the existing reduced `EglDrawSmokeReport` shape. It does not lock a GBM
+front buffer, export a DMA-BUF, create a KMS framebuffer, or present to scanout.
+The path is:
 
 1. Backend-live discovers a render node and holds the opened device authority.
 2. Renderer-live proves GBM native capability with a private allocation smoke.
-3. The native EGL adapter receives only backend-owned authority, creates an EGL
-   display using the GBM platform path, initializes it, and tears it down.
-4. A later draw smoke may reuse that platform to clear a private GBM-backed
-   target, but surface creation, buffer export, and scanout stay out of scope
-   until the next boundary admits them.
+3. The native EGL adapter receives only backend-owned authority, creates a GBM
+   platform display, initializes it, chooses a window-capable config, creates a
+   private GBM/EGL target, clears it, and tears it down.
+4. Buffer export, front-buffer locking, and scanout stay out of scope until the
+   next boundary admits them.
 
 Admission rules for the GBM-backed EGL platform:
 
@@ -272,8 +279,8 @@ Admission rules for the GBM-backed EGL platform:
   error text, and driver details inside live adapters;
 - do not expose DMA-BUF, KMS framebuffer IDs, GBM buffer handles, EGLImages, or
   GL object names;
-- keep `DEFAULT_DISPLAY` as a fallback host smoke until the GBM-backed path
-  covers private target creation and drawing.
+- keep `DEFAULT_DISPLAY` as a fallback host smoke until GBM-backed drawing is
+  exercised against real render nodes in validation.
 
 Rejected shortcuts:
 

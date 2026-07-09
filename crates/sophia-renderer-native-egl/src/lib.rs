@@ -62,6 +62,19 @@ pub fn probe_gbm_backed_platform_from_backend_device_result<T: std::os::fd::AsFd
     }
 }
 
+#[cfg(feature = "gbm-platform")]
+pub fn smoke_gbm_backed_private_target_from_backend_device_result<T: std::os::fd::AsFd>(
+    device: std::io::Result<T>,
+) -> NativeEglDrawSmokeStatus {
+    match device {
+        Ok(device) => match smoke_gbm_backed_private_target(device) {
+            Ok(()) => NativeEglDrawSmokeStatus::ClearColorReady,
+            Err(error) => error,
+        },
+        Err(_error) => NativeEglDrawSmokeStatus::PlatformUnavailable,
+    }
+}
+
 fn probe_context() -> Result<(), NativeEglProbeStatus> {
     // The loaded library is not trusted beyond this adapter; all failures reduce
     // to NativeEglProbeStatus before returning to safe Sophia crates.
@@ -151,15 +164,20 @@ fn smoke_initialized_pbuffer(
 fn smoke_current_gl_context(
     egl: &khronos_egl::DynamicInstance<khronos_egl::EGL1_4>,
 ) -> Result<(), NativeEglDrawSmokeStatus> {
+    smoke_current_gl_context_with_loader(|name| {
+        egl.get_proc_address(name)
+            .map_or(ptr::null(), |proc| proc as *const c_void)
+    })
+}
+
+fn smoke_current_gl_context_with_loader<F>(mut loader: F) -> Result<(), NativeEglDrawSmokeStatus>
+where
+    F: FnMut(&str) -> *const c_void,
+{
     let result = catch_unwind(AssertUnwindSafe(|| {
         // GL function pointers are loaded only after the EGL context is current
         // and never escape this adapter.
-        let gl = unsafe {
-            glow::Context::from_loader_function(|name| {
-                egl.get_proc_address(name)
-                    .map_or(ptr::null(), |proc| proc as *const c_void)
-            })
-        };
+        let gl = unsafe { glow::Context::from_loader_function(|name| loader(name)) };
 
         unsafe {
             gl.clear_color(0.02, 0.03, 0.05, 1.0);
@@ -205,10 +223,107 @@ fn probe_gbm_backed_platform<T: std::os::fd::AsFd>(
     Ok(())
 }
 
+#[cfg(feature = "gbm-platform")]
+fn smoke_gbm_backed_private_target<T: std::os::fd::AsFd>(
+    device: T,
+) -> Result<(), NativeEglDrawSmokeStatus> {
+    use gbm::AsRaw as _;
+
+    let gbm_device =
+        gbm::Device::new(device).map_err(|_error| NativeEglDrawSmokeStatus::PlatformDegraded)?;
+    let egl = unsafe { khronos_egl::DynamicInstance::<khronos_egl::EGL1_5>::load_required() }
+        .map_err(|_error| NativeEglDrawSmokeStatus::PlatformUnavailable)?;
+
+    let native_display = gbm_device.as_raw() as khronos_egl::NativeDisplayType;
+    let display = unsafe {
+        egl.get_platform_display(
+            EGL_PLATFORM_GBM_KHR,
+            native_display,
+            &[khronos_egl::ATTRIB_NONE],
+        )
+    }
+    .map_err(|_error| NativeEglDrawSmokeStatus::PlatformUnavailable)?;
+
+    egl.initialize(display)
+        .map_err(|_error| NativeEglDrawSmokeStatus::PlatformDegraded)?;
+    let result = smoke_initialized_gbm_private_target(&egl, display, &gbm_device);
+    let _ = egl.terminate(display);
+    result
+}
+
+#[cfg(feature = "gbm-platform")]
+fn smoke_initialized_gbm_private_target<T: std::os::fd::AsFd>(
+    egl: &khronos_egl::DynamicInstance<khronos_egl::EGL1_5>,
+    display: khronos_egl::Display,
+    gbm_device: &gbm::Device<T>,
+) -> Result<(), NativeEglDrawSmokeStatus> {
+    use gbm::AsRaw as _;
+
+    egl.bind_api(khronos_egl::OPENGL_API)
+        .map_err(|_error| NativeEglDrawSmokeStatus::ContextUnavailable)?;
+
+    let config = egl
+        .choose_first_config(display, &window_config_attributes())
+        .map_err(|_error| NativeEglDrawSmokeStatus::ContextUnavailable)?
+        .ok_or(NativeEglDrawSmokeStatus::ContextUnavailable)?;
+    let gbm_surface = gbm_device
+        .create_surface::<()>(
+            1,
+            1,
+            gbm::Format::Argb8888,
+            gbm::BufferObjectFlags::RENDERING,
+        )
+        .map_err(|_error| NativeEglDrawSmokeStatus::SurfaceUnavailable)?;
+    let native_window = gbm_surface.as_raw() as khronos_egl::NativeWindowType;
+    let surface = unsafe { egl.create_window_surface(display, config, native_window, None) }
+        .map_err(|_error| NativeEglDrawSmokeStatus::SurfaceUnavailable)?;
+    let context = match egl.create_context(display, config, None, &context_attributes()) {
+        Ok(context) => context,
+        Err(_error) => {
+            let _ = egl.destroy_surface(display, surface);
+            return Err(NativeEglDrawSmokeStatus::ContextUnavailable);
+        }
+    };
+
+    let result = egl
+        .make_current(display, Some(surface), Some(surface), Some(context))
+        .map_err(|_error| NativeEglDrawSmokeStatus::MakeCurrentUnavailable)
+        .and_then(|()| {
+            smoke_current_gl_context_with_loader(|name| {
+                egl.get_proc_address(name)
+                    .map_or(ptr::null(), |proc| proc as *const c_void)
+            })
+        });
+    let _ = egl.make_current(display, None, None, None);
+    let _ = egl.destroy_context(display, context);
+    let _ = egl.destroy_surface(display, surface);
+
+    result
+}
+
 fn config_attributes() -> [khronos_egl::Int; 13] {
     [
         khronos_egl::SURFACE_TYPE,
         khronos_egl::PBUFFER_BIT,
+        khronos_egl::RENDERABLE_TYPE,
+        khronos_egl::OPENGL_BIT,
+        khronos_egl::RED_SIZE,
+        8,
+        khronos_egl::GREEN_SIZE,
+        8,
+        khronos_egl::BLUE_SIZE,
+        8,
+        khronos_egl::ALPHA_SIZE,
+        8,
+        khronos_egl::NONE,
+    ]
+}
+
+#[cfg(feature = "gbm-platform")]
+fn window_config_attributes() -> [khronos_egl::Int; 13] {
+    [
+        khronos_egl::SURFACE_TYPE,
+        khronos_egl::WINDOW_BIT,
         khronos_egl::RENDERABLE_TYPE,
         khronos_egl::OPENGL_BIT,
         khronos_egl::RED_SIZE,

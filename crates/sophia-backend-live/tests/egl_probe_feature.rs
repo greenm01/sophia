@@ -161,6 +161,40 @@ mod gbm_projection {
     }
 
     #[test]
+    fn native_gbm_backed_egl_draw_smoke_maps_open_failure_to_platform_unavailable() {
+        let report = discover_live_backend(&LiveBackendConfig::new("/does/not/matter"));
+        let missing_device = Err(std::io::Error::from_raw_os_error(19));
+
+        assert_eq!(
+            report
+                .native_gbm_backed_egl_draw_smoke_report_from_device_result::<std::fs::File>(
+                    missing_device,
+                )
+                .status,
+            EglDrawSmokeStatus::PlatformUnavailable,
+        );
+    }
+
+    #[test]
+    fn native_gbm_backed_egl_draw_smoke_stays_reduced_for_invalid_device() {
+        let report = discover_live_backend(&LiveBackendConfig::new("/does/not/matter"));
+        let invalid_render_device = std::fs::File::open("/dev/null");
+        let smoke = report
+            .native_gbm_backed_egl_draw_smoke_report_from_device_result(invalid_render_device);
+
+        assert!(matches!(
+            smoke.status,
+            EglDrawSmokeStatus::ClearColorReady
+                | EglDrawSmokeStatus::PlatformUnavailable
+                | EglDrawSmokeStatus::PlatformDegraded
+                | EglDrawSmokeStatus::ContextUnavailable
+                | EglDrawSmokeStatus::SurfaceUnavailable
+                | EglDrawSmokeStatus::MakeCurrentUnavailable
+                | EglDrawSmokeStatus::GlUnavailable
+        ));
+    }
+
+    #[test]
     fn egl_probe_uses_native_gbm_startup_as_ready_platform() {
         let report = discover_live_backend(&LiveBackendConfig::new("/does/not/matter"));
 

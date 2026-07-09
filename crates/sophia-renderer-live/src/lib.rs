@@ -13,14 +13,14 @@ mod egl_probe;
 #[cfg(feature = "gbm-probe")]
 mod gbm_probe;
 
-#[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
-pub use egl_probe::NativeGbmBackedEglPlatformProbe;
 #[cfg(feature = "egl-probe")]
 pub use egl_probe::{
     EglCapabilityProbeReport, EglCapabilityProbeStatus, EglContextProbeStatus, EglDrawSmokeReport,
     EglDrawSmokeStatus, EglPlatformStatus, FakeEglCapabilityProbe, FakeEglDrawSmoke,
     NativeEglCapabilityProbe, NativeEglDrawSmoke,
 };
+#[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
+pub use egl_probe::{NativeGbmBackedEglDrawSmoke, NativeGbmBackedEglPlatformProbe};
 
 #[cfg(feature = "gbm-probe")]
 pub use gbm_probe::{

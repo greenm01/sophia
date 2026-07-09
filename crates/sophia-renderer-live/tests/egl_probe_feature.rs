@@ -113,7 +113,10 @@ fn native_egl_draw_smoke_stays_reduced_at_public_boundary() {
 
 #[cfg(feature = "gbm-probe")]
 mod gbm_backed_platform {
-    use sophia_renderer_live::{EglPlatformStatus, NativeGbmBackedEglPlatformProbe};
+    use sophia_renderer_live::{
+        EglDrawSmokeStatus, EglPlatformStatus, NativeGbmBackedEglDrawSmoke,
+        NativeGbmBackedEglPlatformProbe,
+    };
 
     #[test]
     fn native_gbm_backed_platform_maps_open_failure_to_unavailable() {
@@ -139,6 +142,38 @@ mod gbm_backed_platform {
             EglPlatformStatus::NativePlatformCapable
                 | EglPlatformStatus::PlatformUnavailable
                 | EglPlatformStatus::PlatformDegraded
+        ));
+    }
+
+    #[test]
+    fn native_gbm_backed_draw_smoke_maps_open_failure_to_platform_unavailable() {
+        let missing_device = Err(std::io::Error::from_raw_os_error(19));
+
+        assert_eq!(
+            NativeGbmBackedEglDrawSmoke::smoke_report_from_backend_device_result::<std::fs::File>(
+                missing_device,
+            )
+            .status,
+            EglDrawSmokeStatus::PlatformUnavailable,
+        );
+    }
+
+    #[test]
+    fn native_gbm_backed_draw_smoke_stays_reduced_for_invalid_device() {
+        let invalid_render_device = std::fs::File::open("/dev/null");
+        let smoke = NativeGbmBackedEglDrawSmoke::smoke_report_from_backend_device_result(
+            invalid_render_device,
+        );
+
+        assert!(matches!(
+            smoke.status,
+            EglDrawSmokeStatus::ClearColorReady
+                | EglDrawSmokeStatus::PlatformUnavailable
+                | EglDrawSmokeStatus::PlatformDegraded
+                | EglDrawSmokeStatus::ContextUnavailable
+                | EglDrawSmokeStatus::SurfaceUnavailable
+                | EglDrawSmokeStatus::MakeCurrentUnavailable
+                | EglDrawSmokeStatus::GlUnavailable
         ));
     }
 }
