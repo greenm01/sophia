@@ -11,8 +11,8 @@ evidence belong in `docs/research-log.md`.
 **Now**
 - [ ] Keep `DEFAULT_DISPLAY` clear-color smoke as fallback until GBM-backed
   drawing is validated against real render nodes.
-- [ ] Let the private libdrm adapter accept backend-owned authority without
-  polling.
+- [ ] Define reduced native libdrm page-flip source construction from authority
+  without reading events.
 
 **Next**
 - [ ] Keep wgpu deferred until GBM/EGL startup, drawing, and presentation seams
@@ -248,6 +248,8 @@ evidence belong in `docs/research-log.md`.
 - [x] Add a private native libdrm event adapter module skeleton without opening
   devices.
 - [x] Define backend-owned libdrm fd authority shape without exposing fds.
+- [x] Let the private libdrm adapter accept backend-owned authority without
+  polling.
 
 ---
 

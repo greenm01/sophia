@@ -11,7 +11,7 @@ use sophia_backend_live::{
     LivePageFlipCallback, LivePageFlipCallbackQueue, LivePageFlipCallbackSourceReport,
     LivePageFlipEvent, LivePageFlipEventStatus, OutputId, QueuedInputPoller, discover_live_backend,
     libdrm_dependency_admission_report, libdrm_fd_authority_report,
-    native_libdrm_event_adapter_report,
+    native_libdrm_event_adapter_report, native_libdrm_event_adapter_report_for_authority,
 };
 
 #[test]
@@ -43,6 +43,19 @@ fn libdrm_fd_authority_is_generation_checked_and_reduced() {
 fn native_libdrm_event_adapter_skeleton_reports_ready_without_opening_devices() {
     assert_eq!(
         native_libdrm_event_adapter_report(),
+        LibdrmNativeEventAdapterReport {
+            status: LibdrmNativeEventAdapterStatus::SkeletonReady,
+        }
+    );
+}
+
+#[test]
+fn native_libdrm_event_adapter_accepts_authority_without_polling() {
+    let authority =
+        LibdrmBackendFdAuthority::new(12).expect("nonzero generation should mint authority token");
+
+    assert_eq!(
+        native_libdrm_event_adapter_report_for_authority(authority),
         LibdrmNativeEventAdapterReport {
             status: LibdrmNativeEventAdapterStatus::SkeletonReady,
         }

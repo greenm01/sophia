@@ -478,6 +478,13 @@ pub fn native_libdrm_event_adapter_report() -> LibdrmNativeEventAdapterReport {
 }
 
 #[cfg(feature = "libdrm-events")]
+pub fn native_libdrm_event_adapter_report_for_authority(
+    authority: LibdrmBackendFdAuthority,
+) -> LibdrmNativeEventAdapterReport {
+    native_libdrm_events::adapter_report_for_authority(authority)
+}
+
+#[cfg(feature = "libdrm-events")]
 pub fn libdrm_fd_authority_report(
     authority: LibdrmBackendFdAuthority,
 ) -> LibdrmBackendFdAuthorityReport {
@@ -553,6 +560,13 @@ mod native_libdrm_events {
         LibdrmNativeEventAdapterReport {
             status: LibdrmNativeEventAdapterStatus::SkeletonReady,
         }
+    }
+
+    pub(super) fn adapter_report_for_authority(
+        authority: LibdrmBackendFdAuthority,
+    ) -> LibdrmNativeEventAdapterReport {
+        let _ = fd_authority_report(authority);
+        adapter_report()
     }
 
     pub(super) fn fd_authority_report(

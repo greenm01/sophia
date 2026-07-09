@@ -181,6 +181,13 @@ be minted only with a nonzero generation and currently reduces to
 adapter a future place to receive private fd ownership without letting runtime,
 WM IPC, docs, or tests depend on raw descriptors.
 
+`native_libdrm_event_adapter_report_for_authority` proves that the private
+adapter can accept backend-owned authority while remaining a non-polling
+readiness seam. It consumes the token only to reduce authority into
+`LibdrmNativeEventAdapterReport { SkeletonReady }`. It still does not open a
+card, register callbacks, poll a file descriptor, expose a descriptor, or emit a
+native event shape.
+
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
 authority. On Linux, wgpu will usually target Vulkan, but Sophia must first prove
