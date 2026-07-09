@@ -112,6 +112,28 @@ Admission tests for the first real dependency must prove:
 - no raw file descriptor, device path, or renderer-private handle crosses into
   `sophia-engine`, WM IPC, portals, or protocol authorities.
 
+Sophia should not expose a third-party GBM crate directly through its public
+renderer-live API. The native binding belongs behind a tiny adapter module that
+translates from reduced Sophia tokens into reduced capability health. This keeps
+crate-specific handles, error types, lifetime rules, and unsafe requirements
+contained inside renderer-live.
+
+The adapter module may later own:
+
+- native GBM crate imports behind the `gbm-probe` feature;
+- conversion from backend-owned device authority into renderer-private probe
+  context;
+- reduced degraded-health mapping for missing devices, unsupported GBM
+  operations, or native probe errors.
+
+It must not export:
+
+- raw GBM handles;
+- raw file descriptors;
+- device paths;
+- native error payloads;
+- renderer-private allocation objects.
+
 ## Failure Shape
 
 Unsupported import paths fail closed as reduced decisions. They do not panic, do

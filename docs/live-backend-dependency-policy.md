@@ -37,6 +37,9 @@ workspace tests must continue to run without native renderer dependencies.
 The public probe shape is a backend-provided reduced render-device token, not a
 device path or borrowed file descriptor. The required default and feature-enabled
 local checks are listed in `docs/validation.md`.
+Any concrete GBM crate must be isolated behind a renderer-live adapter module;
+do not expose third-party GBM handles, errors, paths, or descriptors through
+Sophia's public data model.
 
 Phase 4 is the shared-memory import boundary. Real MIT-SHM mapping stays
 deferred until mapped bytes can pass through a bounded renderer upload path with

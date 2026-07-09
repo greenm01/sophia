@@ -15,9 +15,9 @@ evidence belong in `docs/research-log.md`.
   and checking its offline/system dependency behavior.
 
 **Next**
-- [ ] Decide whether to use a low-level GBM binding directly or isolate it
-  behind a tiny adapter module.
 - [ ] Add dependency-admission notes for the selected GBM crate before adding it.
+- [ ] Evaluate concrete GBM crate options and choose one only if it can remain
+  optional, feature-gated, and isolated behind the adapter.
 
 ---
 
@@ -146,6 +146,8 @@ evidence belong in `docs/research-log.md`.
 - [x] Keep default workspace tests independent of native renderer libraries.
 - [x] Add documented local check coverage for
   `cargo test --offline -p sophia-renderer-live --features gbm-probe`.
+- [x] Decide to isolate any concrete GBM binding behind a tiny renderer-live
+  adapter module rather than exposing it directly.
 
 ---
 
