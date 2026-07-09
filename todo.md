@@ -9,16 +9,16 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Add opt-in real render-node validation for GBM-backed EGL drawing and
-  offscreen presentation.
 - [ ] Keep `DEFAULT_DISPLAY` clear-color smoke as fallback until GBM-backed
   drawing is validated against real render nodes.
+- [ ] Define the first scanout-adjacent status without exposing KMS object
+  identity.
 
 **Next**
 - [ ] Keep wgpu deferred until GBM/EGL startup, drawing, and presentation seams
   are proven.
-- [ ] Define the first scanout-adjacent status without exposing KMS object
-  identity.
+- [ ] Decide when `SOPHIA_RUN_REAL_GBM_SMOKE=1` results are strong enough to
+  retire `DEFAULT_DISPLAY` as a fallback smoke.
 
 ---
 
@@ -230,6 +230,8 @@ evidence belong in `docs/research-log.md`.
   drawing passes.
 - [x] Add a native offscreen presentation smoke that preserves reduced
   presentation status.
+- [x] Add opt-in real render-node validation for GBM-backed EGL drawing and
+  offscreen presentation.
 
 ---
 

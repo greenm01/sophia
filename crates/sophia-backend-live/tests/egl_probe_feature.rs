@@ -84,10 +84,24 @@ fn native_egl_draw_smoke_reports_only_reduced_status() {
 #[cfg(feature = "gbm-probe")]
 mod gbm_projection {
     use super::*;
+    use std::path::PathBuf;
+
     use sophia_backend_live::{
         LiveGbmBackedEglPlatformReport, LiveGpuStartupReport, LiveGpuStartupStatus,
-        LiveRendererPresentationStatus,
+        LiveRendererPresentationStatus, RenderDeviceDiscoveryBackend,
     };
+
+    struct ExplicitRenderDevice {
+        path: PathBuf,
+    }
+
+    impl RenderDeviceDiscoveryBackend for ExplicitRenderDevice {
+        type Device = std::fs::File;
+
+        fn open_render_device(&self) -> std::io::Result<Self::Device> {
+            std::fs::File::open(&self.path)
+        }
+    }
 
     #[test]
     fn gbm_backed_egl_platform_report_uses_native_gbm_as_ready_platform() {
@@ -227,6 +241,51 @@ mod gbm_projection {
     }
 
     #[test]
+    fn native_gbm_backed_egl_smokes_real_render_device_when_enabled() {
+        if std::env::var_os("SOPHIA_RUN_REAL_GBM_SMOKE").is_none() {
+            return;
+        }
+
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("gbm_projection::native_gbm_backed_egl_real_render_device_child")
+            .arg("--nocapture")
+            .env("SOPHIA_REAL_GBM_EGL_CHILD", "1")
+            .status()
+            .expect("real GBM/EGL smoke child should start");
+
+        assert!(
+            status.success(),
+            "real GBM/EGL smoke child failed with status {status}"
+        );
+    }
+
+    #[test]
+    fn native_gbm_backed_egl_real_render_device_child() {
+        if std::env::var_os("SOPHIA_REAL_GBM_EGL_CHILD").is_none() {
+            return;
+        }
+
+        let Some(render_device_path) = first_openable_render_node() else {
+            return;
+        };
+        let report = discover_live_backend(&LiveBackendConfig::new("/does/not/matter"));
+
+        let draw =
+            report.native_gbm_backed_egl_draw_smoke_report_with_gbm_device(&ExplicitRenderDevice {
+                path: render_device_path.clone(),
+            });
+        let presentation = report.native_gbm_backed_egl_presentation_smoke_report_with_gbm_device(
+            &ExplicitRenderDevice {
+                path: render_device_path,
+            },
+        );
+
+        assert_eq!(draw.status, EglDrawSmokeStatus::ClearColorReady);
+        assert_eq!(presentation.status, LiveRendererPresentationStatus::Ready);
+    }
+
+    #[test]
     fn egl_probe_uses_native_gbm_startup_as_ready_platform() {
         let report = discover_live_backend(&LiveBackendConfig::new("/does/not/matter"));
 
@@ -258,5 +317,23 @@ mod gbm_projection {
                 status: LiveEglStartupStatus::PlatformDegraded,
             }
         );
+    }
+
+    fn first_openable_render_node() -> Option<PathBuf> {
+        let entries = std::fs::read_dir("/dev/dri").ok()?;
+        let mut candidates = Vec::new();
+
+        for entry in entries.flatten() {
+            let file_name = entry.file_name();
+            let file_name = file_name.to_string_lossy();
+            if file_name.starts_with("renderD") {
+                candidates.push(entry.path());
+            }
+        }
+
+        candidates.sort();
+        candidates
+            .into_iter()
+            .find(|path| std::fs::File::open(path).is_ok())
     }
 }
