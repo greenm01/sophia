@@ -227,6 +227,7 @@ fn native_libdrm_poller_retains_injected_callbacks_on_backpressure() {
     assert_eq!(first.callbacks.emitted, 1);
     assert_eq!(first.callbacks.queued_remaining, 1);
     assert_eq!(poller.pending_callback_count(), 1);
+    assert_eq!(poller.last_read_loop_report().decoded_callbacks, 2);
     assert_eq!(
         receiver
             .try_recv()
@@ -241,6 +242,7 @@ fn native_libdrm_poller_retains_injected_callbacks_on_backpressure() {
     assert_eq!(second.status, LibdrmPageFlipEventPollStatus::Emitted);
     assert_eq!(second.callbacks.emitted, 1);
     assert_eq!(poller.pending_callback_count(), 0);
+    assert_eq!(poller.last_read_loop_report().decoded_callbacks, 1);
     assert_eq!(
         receiver
             .try_recv()
@@ -250,6 +252,34 @@ fn native_libdrm_poller_retains_injected_callbacks_on_backpressure() {
             frame_serial: 82,
         }
     );
+}
+
+#[test]
+fn native_libdrm_poller_retains_injected_callbacks_on_disconnected_queue() {
+    let authority =
+        LibdrmBackendFdAuthority::new(17).expect("nonzero generation should mint authority token");
+    let slot = LibdrmNativeOutputSlot::new(2).expect("nonzero slot should be valid");
+    let source = LibdrmNativePageFlipSource::from_authority(authority);
+    let mut poller =
+        NativeLibdrmPageFlipEventPoller::new(source).with_routes([LibdrmNativeOutputRoute {
+            slot,
+            output: OutputId::from_raw(7),
+        }]);
+    let (sender, receiver) = mpsc::sync_channel(1);
+
+    poller.inject_callbacks([
+        LibdrmNativePageFlipCallback::new(slot, 81),
+        LibdrmNativePageFlipCallback::new(slot, 82),
+    ]);
+    drop(receiver);
+
+    let report = poller.poll_page_flip_events(&sender, 4);
+
+    assert_eq!(report.status, LibdrmPageFlipEventPollStatus::Disconnected);
+    assert_eq!(report.callbacks.emitted, 0);
+    assert_eq!(report.callbacks.queued_remaining, 2);
+    assert_eq!(poller.pending_callback_count(), 2);
+    assert_eq!(poller.last_read_loop_report().decoded_callbacks, 1);
 }
 
 #[test]
@@ -361,7 +391,7 @@ fn native_libdrm_page_flip_decode_batch_reports_backpressure_without_native_iden
 
     let report = decode_native_page_flip_batch(&callbacks, &routes, &sender, 4);
 
-    assert_eq!(report.read_loop.decoded_callbacks, 1);
+    assert_eq!(report.read_loop.decoded_callbacks, 2);
     assert_eq!(report.read_loop.rejected_callbacks, 0);
     assert_eq!(
         report.poll.status,

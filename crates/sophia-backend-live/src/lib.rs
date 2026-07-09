@@ -637,10 +637,10 @@ pub fn decode_native_page_flip_batch(
             rejected_callbacks = rejected_callbacks.saturating_add(1);
             continue;
         };
+        decoded_callbacks = decoded_callbacks.saturating_add(1);
 
         match sender.try_send(callback) {
             Ok(()) => {
-                decoded_callbacks = decoded_callbacks.saturating_add(1);
                 source_report.emitted = source_report.emitted.saturating_add(1);
             }
             Err(TrySendError::Full(_)) => {

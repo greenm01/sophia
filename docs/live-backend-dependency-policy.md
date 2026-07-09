@@ -229,6 +229,10 @@ batches through that helper. This gives the eventual native fd reader a place to
 hand off already-reduced callback facts while preserving queue backpressure and
 retaining undelivered callbacks. It remains a testable seam, not a live fd
 poller.
+Decoded callback counts describe native callback facts that passed reduction
+before queue handoff; emitted callback counts describe facts that actually
+entered the runtime queue. If the queue is disconnected, pending injected
+callbacks remain owned by the poller.
 
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
