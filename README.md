@@ -42,14 +42,14 @@ half-finished resize.
  ┌────────────────────────────────────────────────────────────────────────────┐
  │ Scene graph | spatial hit-testing | damage tracking | frame scheduling     │
  │ Atomic visual commits | rendering | scanout                                │
- └──────────────┬───────────────────┬────────────────────┬───────────────────┘
-        ▲      │                   │                    │      ▲
-        │      │ opaque snapshots  │ portal events      │      │ chrome data
-        │      ▼                   ▼                    ▼      │
+ └───────────────┬───────────────────┬────────────────────┬───────────────────┘
+          ▲      │                   │                    │      ▲
+          │      │ opaque snapshots  │ portal events      │      │ chrome data
+          │      ▼                   ▼                    ▼      │
  ┌───────────────┐        ┌────────────────┐       ┌─────────────────────────┐
- │  SOPHIA WM    │        │ SOPHIA PORTALS │       │ METADATA BROKER/CHROME │
- │ blind policy  │        │ allow/deny     │       │ redacted UI only       │
- │ layout/focus  │        │ handoff/revoke │       │ labels/icons/badges    │
+ │  SOPHIA WM    │        │ SOPHIA PORTALS │       │ METADATA BROKER/CHROME  │
+ │ blind policy  │        │ allow/deny     │       │ redacted UI only        │
+ │ layout/focus  │        │ handoff/revoke │       │ labels/icons/badges     │
  └───────┬───────┘        └────────┬───────┘       └────────────┬────────────┘
          │                         │                            ▲
          │ layout proposals        │ portal commands            │ sanitized
