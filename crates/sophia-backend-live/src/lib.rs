@@ -1683,6 +1683,7 @@ pub struct LiveRealGbmSmokeEvidence {
     pub status: LiveRealGbmSmokeEvidenceStatus,
     pub draw: EglDrawSmokeStatus,
     pub presentation: LiveRendererPresentationStatus,
+    pub frame_target_allocation: LiveGbmEglFrameTargetAllocationStatus,
 }
 
 #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
@@ -1690,11 +1691,18 @@ impl LiveRealGbmSmokeEvidence {
     pub const fn from_reports(
         draw: EglDrawSmokeReport,
         presentation: LiveRendererPresentationReport,
+        frame_target_allocation: LiveGbmEglFrameTargetAllocationReport,
     ) -> Self {
-        let status = match (draw.status, presentation.status) {
-            (EglDrawSmokeStatus::ClearColorReady, LiveRendererPresentationStatus::Ready) => {
-                LiveRealGbmSmokeEvidenceStatus::Passed
-            }
+        let status = match (
+            draw.status,
+            presentation.status,
+            frame_target_allocation.status,
+        ) {
+            (
+                EglDrawSmokeStatus::ClearColorReady,
+                LiveRendererPresentationStatus::Ready,
+                LiveGbmEglFrameTargetAllocationStatus::Ready,
+            ) => LiveRealGbmSmokeEvidenceStatus::Passed,
             _ => LiveRealGbmSmokeEvidenceStatus::Failed,
         };
 
@@ -1702,6 +1710,7 @@ impl LiveRealGbmSmokeEvidence {
             status,
             draw: draw.status,
             presentation: presentation.status,
+            frame_target_allocation: frame_target_allocation.status,
         }
     }
 }

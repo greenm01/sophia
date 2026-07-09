@@ -87,8 +87,9 @@ mod gbm_projection {
     use std::path::PathBuf;
 
     use sophia_backend_live::{
-        EglDrawSmokeReport, LiveGbmBackedEglPlatformReport, LiveGbmEglFrameTargetAllocationRequest,
-        LiveGbmEglFrameTargetAllocationStatus, LiveGbmEglFrameTargetStatus, LiveGpuStartupReport,
+        EglDrawSmokeReport, LiveGbmBackedEglPlatformReport, LiveGbmEglFrameTargetAllocationReport,
+        LiveGbmEglFrameTargetAllocationRequest, LiveGbmEglFrameTargetAllocationStatus,
+        LiveGbmEglFrameTargetRecord, LiveGbmEglFrameTargetStatus, LiveGpuStartupReport,
         LiveGpuStartupStatus, LiveRealGbmSmokeEvidence, LiveRealGbmSmokeEvidenceStatus,
         LiveRendererPresentationReport, LiveRendererPresentationStatus,
         RenderDeviceDiscoveryBackend, Size,
@@ -322,11 +323,19 @@ mod gbm_projection {
                 LiveRendererPresentationReport {
                     status: LiveRendererPresentationStatus::Ready,
                 },
+                LiveGbmEglFrameTargetAllocationReport {
+                    status: LiveGbmEglFrameTargetAllocationStatus::Ready,
+                    target: LiveGbmEglFrameTargetRecord::new(Size {
+                        width: 64,
+                        height: 64,
+                    }),
+                },
             ),
             LiveRealGbmSmokeEvidence {
                 status: LiveRealGbmSmokeEvidenceStatus::Passed,
                 draw: EglDrawSmokeStatus::ClearColorReady,
                 presentation: LiveRendererPresentationStatus::Ready,
+                frame_target_allocation: LiveGbmEglFrameTargetAllocationStatus::Ready,
             }
         );
 
@@ -338,11 +347,19 @@ mod gbm_projection {
                 LiveRendererPresentationReport {
                     status: LiveRendererPresentationStatus::Unavailable,
                 },
+                LiveGbmEglFrameTargetAllocationReport {
+                    status: LiveGbmEglFrameTargetAllocationStatus::Unavailable,
+                    target: LiveGbmEglFrameTargetRecord::new(Size {
+                        width: 64,
+                        height: 64,
+                    }),
+                },
             ),
             LiveRealGbmSmokeEvidence {
                 status: LiveRealGbmSmokeEvidenceStatus::Failed,
                 draw: EglDrawSmokeStatus::SurfaceUnavailable,
                 presentation: LiveRendererPresentationStatus::Unavailable,
+                frame_target_allocation: LiveGbmEglFrameTargetAllocationStatus::Unavailable,
             }
         );
     }
@@ -384,12 +401,29 @@ mod gbm_projection {
             });
         let presentation = report.native_gbm_backed_egl_presentation_smoke_report_with_gbm_device(
             &ExplicitRenderDevice {
-                path: render_device_path,
+                path: render_device_path.clone(),
             },
         );
+        let frame_target_allocation = report
+            .native_gbm_backed_egl_frame_target_allocation_report_with_gbm_device(
+                &ExplicitRenderDevice {
+                    path: render_device_path,
+                },
+                LiveGbmEglFrameTargetAllocationRequest::new(Size {
+                    width: 64,
+                    height: 64,
+                }),
+            );
+        let evidence =
+            LiveRealGbmSmokeEvidence::from_reports(draw, presentation, frame_target_allocation);
 
         assert_eq!(draw.status, EglDrawSmokeStatus::ClearColorReady);
         assert_eq!(presentation.status, LiveRendererPresentationStatus::Ready);
+        assert_eq!(
+            frame_target_allocation.status,
+            LiveGbmEglFrameTargetAllocationStatus::Ready
+        );
+        assert_eq!(evidence.status, LiveRealGbmSmokeEvidenceStatus::Passed);
     }
 
     #[test]

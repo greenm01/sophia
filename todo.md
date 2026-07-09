@@ -14,14 +14,14 @@ active milestone to `docs/roadmap-history.md`.
 
 ### Real Backend Evidence
 
-- [ ] Decide the opt-in real-device evidence shape for native GBM/EGL
+- [x] Decide the opt-in real-device evidence shape for native GBM/EGL
   frame-target allocation.
-- [ ] Extend `LiveRealGbmSmokeEvidence` with reduced frame-target allocation
+- [x] Extend `LiveRealGbmSmokeEvidence` with reduced frame-target allocation
   status.
-- [ ] Update validation docs so the real GBM/EGL smoke records draw,
+- [x] Update validation docs so the real GBM/EGL smoke records draw,
   presentation, and allocation status without exposing render-node paths, file
   descriptors, GBM/EGL handles, pixels, driver errors, or KMS object identity.
-- [ ] Run and record the opt-in real-device validation:
+- [x] Run and record the opt-in real-device validation:
   `SOPHIA_RUN_REAL_GBM_SMOKE=1 cargo test --offline -p sophia-backend-live --features gbm-probe,egl-probe`.
 
 ---

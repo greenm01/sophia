@@ -763,11 +763,15 @@ instead of hand-writing runtime command sequencing.
 On July 9, 2026, the opt-in real GBM/EGL validation passed on a host exposing
 `/dev/dri/renderD128` and `/dev/dri/renderD129`:
 `SOPHIA_RUN_REAL_GBM_SMOKE=1 cargo test --offline -p sophia-backend-live --features gbm-probe,egl-probe`.
-The child smoke asserted `EglDrawSmokeStatus::ClearColorReady` and
-`LiveRendererPresentationStatus::Ready`; public evidence remains reduced to
-`LiveRealGbmSmokeEvidence` status, draw status, and presentation status.
+The child smoke asserted `EglDrawSmokeStatus::ClearColorReady`,
+`LiveRendererPresentationStatus::Ready`, and
+`LiveGbmEglFrameTargetAllocationStatus::Ready`; public evidence remains
+reduced to `LiveRealGbmSmokeEvidence` status, draw status, presentation status,
+and frame-target allocation status.
 A second run of the same command passed on the same host in the same session,
 again exercising the child-process real render-node path.
+After expanding `LiveRealGbmSmokeEvidence` to include reduced frame-target
+allocation status, the same opt-in command passed again on July 9, 2026.
 
 ## Open Questions
 

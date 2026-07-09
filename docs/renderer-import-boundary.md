@@ -361,9 +361,10 @@ plane IDs, framebuffer IDs, fds, paths, driver errors, or framebuffer handles.
 
 Real GBM-backed validation evidence is reduced through
 `LiveRealGbmSmokeEvidence`. It records only whether the opt-in smoke passed, the
-reduced EGL draw-smoke status, and the reduced presentation status. It does not
-store the render-node path, fd, GBM/EGL objects, driver errors, pixels, or KMS
-identity.
+reduced EGL draw-smoke status, the reduced presentation status, and the reduced
+frame-target allocation status. It does not store the render-node path, fd,
+GBM/EGL objects, driver errors, pixels, renderer-private frame-target handles,
+or KMS identity.
 
 The next production-shaped step after offscreen presentation evidence is a
 reduced GBM/EGL frame-target record. `LiveGbmEglFrameTargetRecord` records only
