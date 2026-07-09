@@ -1,7 +1,8 @@
 use sophia_portal::{ClipboardPortal, PortalCommand};
 use sophia_protocol::{
-    AuthorityKind, BufferSource, NamespaceId, PortalDecision, PortalTransferId, Rect, Region,
-    SurfaceConstraints, SurfaceId, SurfaceTransactionReadiness, TransactionId,
+    AuthorityKind, BufferSource, IpcCodecError, IpcMessageKind, NamespaceId, PortalDecision,
+    PortalTransferId, Rect, Region, SOPHIA_IPC_MAGIC, SurfaceConstraints, SurfaceId,
+    SurfaceTransactionReadiness, TransactionId, encode_frame,
 };
 use sophia_x_authority::*;
 
@@ -440,6 +441,254 @@ fn selection_requests_fail_closed_without_cross_namespace_boundary() {
     );
 }
 
+#[test]
+fn x_authority_request_codec_round_trips_create_window() {
+    let request = create_window_request(TransactionId::from_raw(100), NamespaceId::from_raw(21));
+
+    let frame = encode_x_authority_request_frame(&request).unwrap();
+    let decoded = decode_x_authority_request_frame(&frame).unwrap();
+
+    assert_eq!(decoded, request);
+}
+
+#[test]
+fn x_authority_response_codec_round_trips_runtime_outputs() {
+    let namespace = NamespaceId::from_raw(22);
+    let mut runtime = XAuthorityRuntime::new();
+    let create = runtime.apply(create_window_request(
+        TransactionId::from_raw(101),
+        namespace,
+    ));
+    let map = runtime.apply(XAuthorityRequestPacket {
+        transaction: TransactionId::from_raw(102),
+        namespace,
+        kind: XAuthorityRequestKind::MapWindow {
+            window: XResourceId::new(0xc0, 1),
+            generation: 2,
+        },
+    });
+    let present = runtime.apply(XAuthorityRequestPacket {
+        transaction: TransactionId::from_raw(103),
+        namespace,
+        kind: XAuthorityRequestKind::PresentPixmap {
+            window: XResourceId::new(0xc0, 1),
+            pixmap: 0x777,
+            damage: Region::single(Rect {
+                x: 1,
+                y: 2,
+                width: 3,
+                height: 4,
+            }),
+            previous_committed_generation: 2,
+            timeout_msec: 250,
+        },
+    });
+
+    assert_eq!(create.surfaces.len(), 1);
+    assert_eq!(map.surfaces.len(), 1);
+    assert_eq!(present.transactions.len(), 1);
+
+    let frame = encode_x_authority_response_frame(&present).unwrap();
+    let decoded = decode_x_authority_response_frame(&frame).unwrap();
+
+    assert_eq!(decoded, present);
+}
+
+#[test]
+fn x_authority_codec_rejects_wrong_message_kind() {
+    let payload = Vec::new();
+    let frame = encode_frame(
+        IpcMessageKind::WmRequest,
+        TransactionId::from_raw(104),
+        &payload,
+    )
+    .unwrap();
+
+    assert_eq!(
+        decode_x_authority_request_frame(&frame),
+        Err(IpcCodecError::InvalidEnum {
+            field: "message_kind",
+            value: IpcMessageKind::WmRequest as u32,
+        })
+    );
+}
+
+#[test]
+fn x_authority_codec_rejects_bad_magic_and_trailing_bytes() {
+    let request = create_window_request(TransactionId::from_raw(105), NamespaceId::from_raw(23));
+    let mut bad_magic = encode_x_authority_request_frame(&request).unwrap();
+    bad_magic[0..4].copy_from_slice(&(SOPHIA_IPC_MAGIC ^ 0xffff).to_le_bytes());
+
+    assert_eq!(
+        decode_x_authority_request_frame(&bad_magic),
+        Err(IpcCodecError::BadMagic)
+    );
+
+    let mut trailing = encode_x_authority_request_frame(&request).unwrap();
+    trailing.push(0);
+
+    assert_eq!(
+        decode_x_authority_request_frame(&trailing),
+        Err(IpcCodecError::TrailingBytes(1))
+    );
+}
+
+#[test]
+fn x_authority_runtime_sequence_emits_surface_transaction_and_portal_prompt() {
+    let source_namespace = NamespaceId::from_raw(24);
+    let target_namespace = NamespaceId::from_raw(25);
+    let mut runtime = XAuthorityRuntime::new();
+
+    assert_eq!(
+        runtime
+            .apply(create_window_request(
+                TransactionId::from_raw(106),
+                source_namespace
+            ))
+            .surfaces
+            .len(),
+        1
+    );
+    assert_eq!(
+        runtime
+            .apply(create_second_window_request(
+                TransactionId::from_raw(107),
+                target_namespace
+            ))
+            .surfaces
+            .len(),
+        1
+    );
+    runtime.apply(XAuthorityRequestPacket {
+        transaction: TransactionId::from_raw(108),
+        namespace: source_namespace,
+        kind: XAuthorityRequestKind::SetSelectionOwner {
+            selection: 77,
+            owner: Some(XResourceId::new(0xc0, 1)),
+            timestamp: 10,
+            selection_timestamp: 10,
+            kind: XSelectionChangeKind::SetOwner,
+        },
+    });
+    let present = runtime.apply(XAuthorityRequestPacket {
+        transaction: TransactionId::from_raw(109),
+        namespace: source_namespace,
+        kind: XAuthorityRequestKind::PresentPixmap {
+            window: XResourceId::new(0xc0, 1),
+            pixmap: 0x778,
+            damage: Region::single(Rect {
+                x: 0,
+                y: 0,
+                width: 50,
+                height: 60,
+            }),
+            previous_committed_generation: 1,
+            timeout_msec: 250,
+        },
+    });
+    let selection = runtime.apply(XAuthorityRequestPacket {
+        transaction: TransactionId::from_raw(110),
+        namespace: target_namespace,
+        kind: XAuthorityRequestKind::RequestSelection {
+            requestor: XResourceId::new(0xc1, 1),
+            selection: 77,
+            target: 78,
+            target_name: "UTF8_STRING".to_owned(),
+            property: 79,
+            time: 11,
+            transfer: PortalTransferId::from_raw(12),
+        },
+    });
+
+    assert_eq!(runtime.resource_count(), 2);
+    assert_eq!(runtime.window_count(), 2);
+    assert_eq!(present.transactions.len(), 1);
+    assert_eq!(
+        present.transactions[0].readiness,
+        SurfaceTransactionReadiness::Ready
+    );
+    assert_eq!(selection.portal_commands.len(), 1);
+}
+
+#[test]
+fn x_authority_runtime_selection_error_emits_native_failure_artifact() {
+    let namespace = NamespaceId::from_raw(26);
+    let mut runtime = XAuthorityRuntime::new();
+    runtime.apply(create_window_request(
+        TransactionId::from_raw(111),
+        namespace,
+    ));
+
+    let response = runtime.apply(XAuthorityRequestPacket {
+        transaction: TransactionId::from_raw(112),
+        namespace,
+        kind: XAuthorityRequestKind::RequestSelection {
+            requestor: XResourceId::new(0xc0, 1),
+            selection: 88,
+            target: 89,
+            target_name: "UTF8_STRING".to_owned(),
+            property: 90,
+            time: 12,
+            transfer: PortalTransferId::from_raw(13),
+        },
+    });
+
+    assert_eq!(
+        response.outcome,
+        XAuthorityResponseOutcome::Rejected(XAuthorityRuntimeError::UnknownSourceOwner)
+    );
+    assert_eq!(response.selection_artifacts.len(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn x_authority_socket_round_trips_repeated_requests() {
+    use std::os::unix::net::UnixStream;
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let socket_path = std::env::temp_dir().join(format!(
+        "sophia-x-authority-test-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let server_path = socket_path.clone();
+    let server = thread::spawn(move || {
+        run_x_authority_socket_server_once(&server_path).unwrap();
+    });
+
+    wait_for_socket(&socket_path);
+    let mut stream = UnixStream::connect(&socket_path).unwrap();
+    write_x_authority_request(
+        &mut stream,
+        &create_window_request(TransactionId::from_raw(113), NamespaceId::from_raw(27)),
+    )
+    .unwrap();
+    let first = read_x_authority_response(&mut stream).unwrap();
+    write_x_authority_request(
+        &mut stream,
+        &XAuthorityRequestPacket {
+            transaction: TransactionId::from_raw(114),
+            namespace: NamespaceId::from_raw(27),
+            kind: XAuthorityRequestKind::MapWindow {
+                window: XResourceId::new(0xc0, 1),
+                generation: 2,
+            },
+        },
+    )
+    .unwrap();
+    let second = read_x_authority_response(&mut stream).unwrap();
+
+    assert_eq!(first.surfaces.len(), 1);
+    assert_eq!(second.surfaces.len(), 1);
+    drop(stream);
+    let _ = std::fs::remove_file(&socket_path);
+    let _ = server.join();
+}
+
 fn window_table_with_surface(window: XResourceId, namespace: NamespaceId) -> XWindowTable {
     let mut windows = XWindowTable::new();
     windows
@@ -507,4 +756,65 @@ fn window_table_with_two_surfaces(
         })
         .unwrap();
     windows
+}
+
+fn create_window_request(
+    transaction: TransactionId,
+    namespace: NamespaceId,
+) -> XAuthorityRequestPacket {
+    XAuthorityRequestPacket {
+        transaction,
+        namespace,
+        kind: XAuthorityRequestKind::CreateWindow {
+            window: XResourceId::new(0xc0, 1),
+            surface: SurfaceId::new(30, 1),
+            geometry: Rect {
+                x: 10,
+                y: 20,
+                width: 640,
+                height: 480,
+            },
+            constraints: SurfaceConstraints {
+                min_size: None,
+                max_size: None,
+            },
+            generation: 1,
+        },
+    }
+}
+
+fn create_second_window_request(
+    transaction: TransactionId,
+    namespace: NamespaceId,
+) -> XAuthorityRequestPacket {
+    XAuthorityRequestPacket {
+        transaction,
+        namespace,
+        kind: XAuthorityRequestKind::CreateWindow {
+            window: XResourceId::new(0xc1, 1),
+            surface: SurfaceId::new(31, 1),
+            geometry: Rect {
+                x: 700,
+                y: 20,
+                width: 320,
+                height: 240,
+            },
+            constraints: SurfaceConstraints {
+                min_size: None,
+                max_size: None,
+            },
+            generation: 1,
+        },
+    }
+}
+
+#[cfg(unix)]
+fn wait_for_socket(path: &std::path::Path) {
+    for _ in 0..100 {
+        if path.exists() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    panic!("timed out waiting for socket {}", path.display());
 }

@@ -6,19 +6,41 @@ belong in `docs/research-log.md`.
 
 ---
 
-## Active Focus - Sophia X Authority Design
+## Active Focus - Sophia X Authority Runtime
 
-Define the long-term X protocol authority that replaces XLibre/Xorg as the
-target dependency while preserving Engine-owned atomic visual commits and
-namespace boundaries.
+Turn the passive Sophia X Authority model into an executable authority process
+before taking on real X11 wire parsing.
 
 **Now**
+- [x] Add internal `XAuthorityRequestPacket` and `XAuthorityResponsePacket`
+  types for the reducer-backed authority runtime.
+- [x] Reuse the 24-byte Sophia IPC frame header for internal authority request
+  and response frames.
+- [x] Add bounded explicit encode/decode coverage for authority frames.
+- [x] Add `XAuthorityRuntime` over resource, window, selection, and portal
+  reducers.
+- [x] Add a one-client Unix socket server/client helper and
+  `x-authority-runtime-smoke`.
+- [x] Document that this v0 socket protocol is an internal harness, not real
+  X11 client wire parsing.
+
+**Next**
+- [ ] Add a real X11 connection setup parser fixture for byte order, protocol
+  version, resource ID base/mask, and setup success/failure replies.
+- [ ] Decode the first core X11 request fixtures into existing internal
+  authority requests: `CreateWindow`, `MapWindow`, `ChangeProperty`, and
+  selection ownership.
+- [ ] Add a local Unix socket smoke that completes an X11 setup handshake with a
+  tiny synthetic client without running full applications yet.
+
+---
+
+## Completed Focus - Sophia X Authority Design
+
 - [x] Start `docs/sophia-x-authority.md` with authority ownership boundaries,
   minimum protocol subset, namespace resource model, drawing-to-buffer
   readiness, selections/portals, lifecycle, input delivery, Phoenix study
   targets, and first implementation milestones.
-
-**Next**
 - [x] Add a `sophia-x-authority` crate skeleton with passive resource tables
   and no live socket yet.
 - [x] Model namespace-scoped X resource lookup and event subscription in tests.

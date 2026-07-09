@@ -210,3 +210,34 @@ boundaries, blind WM policy, and Engine-owned atomic visual commits.
    denial/handoff artifact.
 6. Add a local socket parser only after the resource and transaction reducers
    are covered by integration tests.
+
+## v0 Internal Socket Runtime
+
+The first executable authority seam is an internal Sophia frame protocol over a
+Unix socket. It is not the X11 wire protocol. It exists to prove that the X
+Authority can run across a process boundary while preserving the same reducer
+behavior already covered by tests.
+
+The v0 socket path uses the shared 24-byte Sophia IPC header and two message
+kinds: `XAuthorityRequest` and `XAuthorityResponse`. Payloads are decoded with
+explicit little-endian parsing, bounded counts, and bounded text. No generic
+serializer is used.
+
+The internal request surface covers only the reducer-backed behaviors that exist
+today:
+
+- create and map a window;
+- present a pixmap as a ready `SurfaceTransaction`;
+- set a selection owner;
+- convert a selection request into a portal prompt or native failure artifact.
+
+The CLI smoke command is:
+
+```sh
+cargo run --offline -q -p sophia-cli -- x-authority-runtime-smoke
+```
+
+Real X11 connection setup and request parsing starts after this seam stays
+green. The next parser should translate X11 setup bytes and a few core request
+fixtures into these existing internal request packets rather than bypassing the
+authority reducers.

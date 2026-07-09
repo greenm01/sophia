@@ -11,6 +11,8 @@ pub enum IpcMessageKind {
     WmRequest = 1,
     WmResponse = 2,
     BrokerHealth = 3,
+    XAuthorityRequest = 4,
+    XAuthorityResponse = 5,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

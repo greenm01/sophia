@@ -175,6 +175,7 @@ dependencies = [
  "sophia-protocol",
  "sophia-runtime",
  "sophia-wm-demo",
+ "sophia-x-authority",
  "sophia-x-bridge",
  "tracing",
  "x11rb",

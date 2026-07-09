@@ -46,6 +46,8 @@ pub fn decode_frame(frame: &[u8]) -> Result<(IpcFrameHeader, &[u8]), IpcCodecErr
         1 => IpcMessageKind::WmRequest,
         2 => IpcMessageKind::WmResponse,
         3 => IpcMessageKind::BrokerHealth,
+        4 => IpcMessageKind::XAuthorityRequest,
+        5 => IpcMessageKind::XAuthorityResponse,
         other => return Err(IpcCodecError::UnknownMessageKind(other)),
     };
     let transaction = TransactionId::from_raw(cursor.u64()?);

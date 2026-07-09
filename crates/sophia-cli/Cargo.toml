@@ -16,6 +16,7 @@ sophia-portal = { path = "../sophia-portal" }
 sophia-protocol = { path = "../sophia-protocol" }
 sophia-runtime = { path = "../sophia-runtime" }
 sophia-wm-demo = { path = "../sophia-wm-demo" }
+sophia-x-authority = { path = "../sophia-x-authority" }
 sophia-x-bridge = { path = "../sophia-x-bridge" }
 tracing.workspace = true
 x11rb = "0.13.1"

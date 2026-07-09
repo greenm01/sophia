@@ -3,6 +3,7 @@ mod portal;
 mod routed_input;
 mod runtime;
 mod x;
+mod x_authority;
 
 mod prelude {
     pub(crate) use crate::support::*;
@@ -30,6 +31,11 @@ mod prelude {
         SupervisedProcessKind, SupervisorEvent, update_supervisor,
     };
     pub(crate) use sophia_wm_demo::{ExternalWmClient, tile_workspace};
+    pub(crate) use sophia_x_authority::{
+        XAuthorityRequestKind, XAuthorityRequestPacket, XResourceId,
+        XSelectionChangeKind as XAuthoritySelectionChangeKind, read_x_authority_response,
+        run_x_authority_socket_server_once, write_x_authority_request,
+    };
     pub(crate) use sophia_x_bridge::{
         ClipboardSelectionFailureRequest, TestClientConfig, XMirrorState, XSelectionChangeKind,
         XSelectionEvent, XSelectionMonitor, capture_readback_display,
@@ -55,6 +61,9 @@ pub(crate) fn run(args: &[String], verbose: bool) -> Result<(), Box<dyn std::err
         return Ok(());
     }
     if routed_input::try_run(args)? {
+        return Ok(());
+    }
+    if x_authority::try_run(args)? {
         return Ok(());
     }
 
