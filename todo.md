@@ -11,7 +11,7 @@ evidence belong in `docs/research-log.md`.
 **Now**
 - [ ] Keep `DEFAULT_DISPLAY` clear-color smoke as fallback until GBM-backed
   drawing is validated against real render nodes.
-- [ ] Add a fake page-flip callback source before real libdrm event polling.
+- [ ] Define the feature-gated libdrm page-flip event polling adapter shape.
 
 **Next**
 - [ ] Keep wgpu deferred until GBM/EGL startup, drawing, and presentation seams
@@ -239,6 +239,7 @@ evidence belong in `docs/research-log.md`.
 - [x] Thread reduced scanout and page-flip events into runtime observation.
 - [x] Define the first deterministic page-flip callback intake seam.
 - [x] Wire page-flip callbacks into a runtime-owned bounded queue.
+- [x] Add a fake page-flip callback source before real libdrm event polling.
 
 ---
 

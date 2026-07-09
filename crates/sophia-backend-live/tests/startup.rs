@@ -3,17 +3,18 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 use sophia_backend_live::{
-    CompositorBackendTickInput, DeviceId, HeadlessOutput, LibinputDeviceDescriptor,
-    LibinputDeviceKind, LiveBackendConfig, LiveBackendDependencyDecision,
+    CompositorBackendTickInput, DeviceId, FakePageFlipCallbackSource, HeadlessOutput,
+    LibinputDeviceDescriptor, LibinputDeviceKind, LiveBackendConfig, LiveBackendDependencyDecision,
     LiveBackendDependencyKind, LiveBackendDependencyUse, LiveCompositorBackendDiscoveryStatus,
     LivePageFlipCallback, LivePageFlipCallbackDecision, LivePageFlipCallbackIntake,
     LivePageFlipCallbackQueue, LivePageFlipCallbackQueueReport, LivePageFlipCallbackReport,
-    LivePageFlipEvent, LivePageFlipEventStatus, LiveRendererImportBoundary,
-    LiveRendererImportHealth, LiveRendererImportPathStatus, LiveRendererImportStartupStatus,
-    LiveRendererPreference, LiveRendererPresentationReport, LiveRendererPresentationStatus,
-    LiveRendererRuntimeObservation, LiveRendererSelectionObservation, LiveScanoutReadinessReport,
-    LiveScanoutReadinessStatus, OutputId, PageFlipCommitOutcome, QueuedInputPoller,
-    RendererSelection, SeatId, Size, discover_live_backend, live_backend_dependency_decision,
+    LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus,
+    LiveRendererImportBoundary, LiveRendererImportHealth, LiveRendererImportPathStatus,
+    LiveRendererImportStartupStatus, LiveRendererPreference, LiveRendererPresentationReport,
+    LiveRendererPresentationStatus, LiveRendererRuntimeObservation,
+    LiveRendererSelectionObservation, LiveScanoutReadinessReport, LiveScanoutReadinessStatus,
+    OutputId, PageFlipCommitOutcome, QueuedInputPoller, RendererSelection, SeatId, Size,
+    discover_live_backend, live_backend_dependency_decision,
 };
 use sophia_protocol::{TransactionCommit, TransactionId, TransactionOutcome};
 
@@ -498,6 +499,73 @@ fn live_runtime_assembly_drains_bounded_page_flip_callback_queue() {
             rejected_stale_frame_serial: 0,
             disconnected: true,
             max_reached: false,
+        }
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn fake_page_flip_callback_source_feeds_bounded_runtime_queue() {
+    let root = ready_drm_sysfs_fixture("fake-page-flip-source");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let (sender, receiver) = mpsc::sync_channel(1);
+    let mut source = FakePageFlipCallbackSource::new([
+        LivePageFlipCallback {
+            output: OutputId::from_raw(1),
+            frame_serial: 31,
+        },
+        LivePageFlipCallback {
+            output: OutputId::from_raw(1),
+            frame_serial: 32,
+        },
+    ]);
+
+    assert_eq!(
+        source.emit_ready(&sender, 4),
+        LivePageFlipCallbackSourceReport {
+            emitted: 1,
+            queued_remaining: 1,
+            backpressure: true,
+            disconnected: false,
+            max_reached: false,
+        }
+    );
+    assert_eq!(source.queued_len(), 1);
+
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed live assembly")
+        .with_page_flip_callback_queue(LivePageFlipCallbackQueue::new(receiver, 4));
+    let first_tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should drain first fake callback");
+    assert_eq!(
+        first_tick.page_flip,
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(31),
+        }
+    );
+
+    assert_eq!(
+        source.emit_ready(&sender, 4),
+        LivePageFlipCallbackSourceReport {
+            emitted: 1,
+            queued_remaining: 0,
+            backpressure: false,
+            disconnected: false,
+            max_reached: false,
+        }
+    );
+    let second_tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should drain second fake callback");
+    assert_eq!(
+        second_tick.page_flip,
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(32),
         }
     );
 

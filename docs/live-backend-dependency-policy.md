@@ -129,6 +129,12 @@ counts, and reports queue disconnection or drain-limit pressure explicitly. It
 does not allocate unbounded callback history, and queue observations retain the
 same reduced shape as direct callback intake.
 
+`FakePageFlipCallbackSource` is the deterministic stand-in for future libdrm
+event polling. It emits queued callback facts through the same bounded sender,
+retains unsent callbacks on backpressure or disconnection, and reports only
+counts plus queue state. Real libdrm event handling should replace the source,
+not the intake, queue, or reduced runtime observation contracts.
+
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
 authority. On Linux, wgpu will usually target Vulkan, but Sophia must first prove
