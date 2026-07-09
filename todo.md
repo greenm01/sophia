@@ -9,15 +9,16 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Define the renderer import boundary separately from backend discovery.
-- [ ] Sketch the first reduced renderer import records without adding GBM, EGL,
-  DMA-BUF, or real MIT-SHM mapping yet.
+- [ ] Decide whether the first real renderer implementation belongs in
+  `sophia-backend-live` or a dedicated `sophia-renderer-live` crate.
+- [ ] Thread live renderer import admission into backend startup without adding
+  GBM, EGL, DMA-BUF, or real MIT-SHM mapping yet.
 
 **Next**
-- [ ] Add deterministic tests for renderer import admission and fail-closed
-  unsupported import paths.
-- [ ] Decide whether the renderer import boundary belongs in `sophia-engine`,
-  `sophia-backend-live`, or a dedicated `sophia-renderer-live` crate.
+- [ ] Add a startup smoke proving native renderer import remains disabled until
+  explicitly configured.
+- [ ] Define the first live renderer health observation for degraded import
+  capability.
 
 ---
 
@@ -95,6 +96,11 @@ evidence belong in `docs/research-log.md`.
 - [x] Decide that libdrm and libinput may enter through
   `sophia-backend-live`, while GPU imports and real MIT-SHM mapping remain
   deferred until renderer import boundaries exist.
+- [x] Define the renderer import boundary separately from backend discovery.
+- [x] Sketch reduced renderer import admission records without adding GBM, EGL,
+  DMA-BUF, or real MIT-SHM mapping.
+- [x] Add deterministic tests for renderer import admission and fail-closed
+  unsupported import paths.
 
 ---
 

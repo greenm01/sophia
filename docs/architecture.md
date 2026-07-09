@@ -750,6 +750,13 @@ tracked in `docs/live-backend-dependency-policy.md`: libdrm and libinput may
 enter through live discovery and polling seams, while GPU imports and MIT-SHM
 mapping stay deferred until separate renderer import boundaries exist.
 
+The renderer import boundary is its own seam, documented in
+`docs/renderer-import-boundary.md`. Backend discovery produces reduced output
+and input records; renderer import admission consumes already-validated
+`BufferSource` values and decides whether CPU upload, XPixmap import, DMA-BUF
+import, or a future shared-memory path may be used for this frame. This prevents
+device enumeration code from growing into buffer ownership.
+
 Physical input now has a request-generation seam. After Sophia Engine produces
 an `InputRoute`, `routed_input_request_from_physical_event` combines the
 physical `InputEventPacket` with the accepted route and emits an
