@@ -11,8 +11,7 @@ evidence belong in `docs/research-log.md`.
 **Now**
 - [ ] Keep `DEFAULT_DISPLAY` clear-color smoke as fallback until GBM-backed
   drawing is validated against real render nodes.
-- [ ] Thread reduced native page-flip callback decode counts into read-loop
-  reports.
+- [ ] Add a bounded native page-flip decode batch helper before real fd polling.
 
 **Next**
 - [ ] Keep wgpu deferred until GBM/EGL startup, drawing, and presentation seams
@@ -257,6 +256,8 @@ evidence belong in `docs/research-log.md`.
   report contracts.
 - [x] Define reduced native page-flip callback decoding without exposing KMS
   resource identity.
+- [x] Thread reduced native page-flip callback decode counts into read-loop
+  reports.
 
 ---
 

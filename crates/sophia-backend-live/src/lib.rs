@@ -656,6 +656,7 @@ impl NativeLibdrmPageFlipEventPoller {
 pub struct LibdrmNativeReadLoopReport {
     pub status: LibdrmNativeReadLoopStatus,
     pub decoded_callbacks: usize,
+    pub rejected_callbacks: usize,
 }
 
 #[cfg(feature = "libdrm-events")]
@@ -664,6 +665,7 @@ impl LibdrmNativeReadLoopReport {
         Self {
             status: LibdrmNativeReadLoopStatus::Idle,
             decoded_callbacks: 0,
+            rejected_callbacks: 0,
         }
     }
 
@@ -671,24 +673,38 @@ impl LibdrmNativeReadLoopReport {
         Self {
             status: LibdrmNativeReadLoopStatus::WouldBlock,
             decoded_callbacks: 0,
+            rejected_callbacks: 0,
         }
     }
 
-    pub const fn callback_decoded(decoded_callbacks: usize) -> Option<Self> {
-        if decoded_callbacks == 0 {
+    pub const fn callbacks_decoded(
+        decoded_callbacks: usize,
+        rejected_callbacks: usize,
+    ) -> Option<Self> {
+        if decoded_callbacks == 0 && rejected_callbacks == 0 {
             return None;
         }
 
         Some(Self {
-            status: LibdrmNativeReadLoopStatus::CallbackDecoded,
+            status: if decoded_callbacks > 0 {
+                LibdrmNativeReadLoopStatus::CallbackDecoded
+            } else {
+                LibdrmNativeReadLoopStatus::CallbackRejected
+            },
             decoded_callbacks,
+            rejected_callbacks,
         })
+    }
+
+    pub const fn callback_decoded(decoded_callbacks: usize) -> Option<Self> {
+        Self::callbacks_decoded(decoded_callbacks, 0)
     }
 
     pub const fn read_failed() -> Self {
         Self {
             status: LibdrmNativeReadLoopStatus::ReadFailed,
             decoded_callbacks: 0,
+            rejected_callbacks: 0,
         }
     }
 
@@ -713,6 +729,7 @@ pub enum LibdrmNativeReadLoopStatus {
     Idle,
     WouldBlock,
     CallbackDecoded,
+    CallbackRejected,
     ReadFailed,
 }
 

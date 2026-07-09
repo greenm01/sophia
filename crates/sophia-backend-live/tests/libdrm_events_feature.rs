@@ -103,6 +103,27 @@ fn native_libdrm_read_loop_result_maps_to_reduced_poll_report() {
     );
 
     assert_eq!(LibdrmNativeReadLoopReport::callback_decoded(0), None);
+    let rejected =
+        LibdrmNativeReadLoopReport::callbacks_decoded(0, 2).expect("rejection count is observable");
+    assert_eq!(
+        rejected.status,
+        LibdrmNativeReadLoopStatus::CallbackRejected
+    );
+    assert_eq!(rejected.decoded_callbacks, 0);
+    assert_eq!(rejected.rejected_callbacks, 2);
+    assert_eq!(
+        rejected.into_poll_report().status,
+        LibdrmPageFlipEventPollStatus::Idle
+    );
+
+    let mixed = LibdrmNativeReadLoopReport::callbacks_decoded(2, 1)
+        .expect("decoded or rejected counts should produce a report");
+    assert_eq!(mixed.status, LibdrmNativeReadLoopStatus::CallbackDecoded);
+    assert_eq!(mixed.decoded_callbacks, 2);
+    assert_eq!(mixed.rejected_callbacks, 1);
+    assert_eq!(mixed.into_poll_report().callbacks.emitted, 2);
+
+    assert_eq!(LibdrmNativeReadLoopReport::callbacks_decoded(0, 0), None);
     assert_eq!(
         LibdrmNativeReadLoopReport::read_failed()
             .into_poll_report()

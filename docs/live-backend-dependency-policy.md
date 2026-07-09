@@ -200,6 +200,9 @@ real fd polling exists. Native idle and would-block states collapse to an idle
 poll report, decoded callbacks become an emitted poll report with only a count,
 and read failure becomes a disconnected poll report. The mapping carries no
 native errno, fd, CRTC, connector, or raw event identity.
+The report may count rejected native callbacks separately from decoded
+callbacks. Rejection counts stay inside backend-live diagnostics and do not emit
+runtime callbacks.
 
 `NativeLibdrmPageFlipEventPoller` is a non-polling skeleton over
 `LibdrmNativePageFlipSource`. It implements the same `LibdrmPageFlipEventPoller`
