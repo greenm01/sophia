@@ -9,18 +9,17 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Sophia X Authority: Transaction Exposure
 
 **Now**
-- [ ] Expose X Authority socket response transactions from live X11 requests to
-  the session/runtime observation path.
-- [ ] Preserve the existing client-visible X11 behavior: core draw requests
-  still produce no direct X reply on success.
-- [ ] Add a smoke that confirms `PolyFillRectangle` creates one ready
-  `CoreDraw` surface transaction outside the unit-test-only dispatch path.
+- [ ] Feed observed X Authority drawing transactions into the existing headless
+  session runtime adapter.
+- [ ] Convert ready `CoreDraw` observations into authority transaction commits
+  without leaking XIDs or namespace metadata upward.
+- [ ] Add a runtime smoke that proves an observed live X11 drawing transaction
+  increments authority transaction counters.
 
 **Next**
-- [ ] Decide whether transaction exposure should be a callback, channel, or
-  explicit server result object before a long-running authority process lands.
-- [ ] Feed exposed drawing transactions into the existing headless session
-  runtime adapter.
+- [ ] Decide whether the long-running X Authority process should keep the
+  callback shape or move to a bounded channel owned by the session runtime.
+- [ ] Extend observed transactions beyond core drawing to SHM and Present paths.
 
 ---
 
@@ -39,6 +38,10 @@ evidence belong in `docs/research-log.md`.
   `XGetWindowProperty`, `XMapWindow`, and `XDestroyWindow`.
 - [x] Pass a drawing-oriented C Xlib probe using `XFillRectangle`; opcode 70
   now decodes to a ready `CoreDraw` surface transaction.
+- [x] Expose live X11 socket dispatch results through an out-of-band observer,
+  preserving no-reply success semantics for core draw requests.
+- [x] Add socket-level smoke coverage proving `PolyFillRectangle` creates one
+  ready `CoreDraw` transaction outside unit-test-only dispatch.
 - [ ] Revisit compositor backend work after X Authority can create, map, draw,
   and expose a simple client through the authority transaction model.
 

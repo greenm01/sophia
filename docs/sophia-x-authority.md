@@ -310,7 +310,7 @@ destroys the window. This added `PolyFillRectangle` decode support. Successful
 fill requests produce no client-visible X reply, but they do emit a ready
 `CoreDraw` surface transaction with rectangle damage in the dispatch path.
 
-The next milestone is transaction exposure from the live X Authority socket.
-The long-running socket path currently writes client-visible X11 output; it also
-needs a way to hand ready surface transactions to Sophia Runtime without
-turning successful core drawing into an X protocol reply.
+The live X11 socket path exposes those dispatch results through an out-of-band
+observer callback. This keeps the client-visible X11 stream pure: successful
+core drawing still produces no direct X reply, while Sophia Runtime can receive
+the ready `SurfaceTransaction` facts through the session side channel.

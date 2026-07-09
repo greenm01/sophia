@@ -7,12 +7,13 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
     {
         let report = run_x_authority_xlib_drawing_smoke()?;
         println!(
-            "x-authority-xlib-drawing-smoke display={} status={} stdout_bytes={} stderr_bytes={} draw_ops={}",
+            "x-authority-xlib-drawing-smoke display={} status={} stdout_bytes={} stderr_bytes={} draw_ops={} transactions={}",
             report.display,
             report.status,
             report.stdout_bytes,
             report.stderr_bytes,
-            report.draw_ops
+            report.draw_ops,
+            report.transactions
         );
         return Ok(true);
     }
@@ -129,6 +130,7 @@ struct XAuthorityXlibDrawingSmokeReport {
     stdout_bytes: usize,
     stderr_bytes: usize,
     draw_ops: usize,
+    transactions: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -387,8 +389,19 @@ fn run_x_authority_xlib_drawing_smoke()
 -> Result<XAuthorityXlibDrawingSmokeReport, Box<dyn std::error::Error>> {
     let (display, socket_path) = temp_xauthority_display(3600)?;
     let server_path = socket_path.clone();
-    let server = std::thread::spawn(move || {
-        run_x11_core_socket_server_once(&server_path, NamespaceId::from_raw(45))
+    let server = std::thread::spawn(move || -> Result<usize, String> {
+        let mut transactions = 0usize;
+        run_x11_core_socket_server_once_observed(
+            &server_path,
+            NamespaceId::from_raw(45),
+            |result| {
+                if let Some(response) = &result.response {
+                    transactions = transactions.saturating_add(response.transactions.len());
+                }
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        Ok(transactions)
     });
     wait_for_socket_path(&socket_path)?;
     let output = run_compiled_xlib_probe(&display, "xlib-drawing", XLIB_DRAWING_SMOKE_SOURCE)?;
@@ -398,9 +411,10 @@ fn run_x_authority_xlib_drawing_smoke()
     let draw_ops = xlib_smoke_field(&stdout, "draw_ops").unwrap_or(0);
 
     let _ = std::fs::remove_file(&socket_path);
-    server
+    let transactions = server
         .join()
-        .map_err(|_| "X authority X11 socket server thread panicked")??;
+        .map_err(|_| "X authority X11 socket server thread panicked")?
+        .map_err(|error| format!("X authority X11 socket server failed: {error}"))?;
 
     if !output.status.success() {
         return Err(format!(
@@ -417,6 +431,7 @@ fn run_x_authority_xlib_drawing_smoke()
         stdout_bytes: output.stdout.len(),
         stderr_bytes: output.stderr.len(),
         draw_ops,
+        transactions,
     })
 }
 

@@ -9,9 +9,10 @@ use std::{
 #[cfg(unix)]
 use crate::{
     X_SETUP_CLIENT_PREFIX_LEN, X_SETUP_MAX_AUTH_FIELD_LEN, XAtomTable, XAuthorityRuntime,
-    XDispatchContext, XPropertyTable, XSetupRequest, XSetupSuccess, XWireClientContext,
-    decode_x11_core_request, dispatch_x11_parse_error, dispatch_x11_wire_request,
-    encode_x11_setup_success, parse_x11_setup_request, x11_setup_request_total_len,
+    XDispatchContext, XDispatchResult, XPropertyTable, XSetupRequest, XSetupSuccess,
+    XWireClientContext, decode_x11_core_request, dispatch_x11_parse_error,
+    dispatch_x11_wire_request, encode_x11_setup_success, parse_x11_setup_request,
+    x11_setup_request_total_len,
 };
 #[cfg(unix)]
 use sophia_protocol::{NamespaceId, TransactionId};
@@ -71,6 +72,15 @@ pub fn run_x11_core_socket_server_once(
     path: impl AsRef<Path>,
     namespace: NamespaceId,
 ) -> Result<(), X11SetupSocketError> {
+    run_x11_core_socket_server_once_observed(path, namespace, |_| {})
+}
+
+#[cfg(unix)]
+pub fn run_x11_core_socket_server_once_observed(
+    path: impl AsRef<Path>,
+    namespace: NamespaceId,
+    observer: impl FnMut(&XDispatchResult),
+) -> Result<(), X11SetupSocketError> {
     let path = path.as_ref();
     match std::fs::remove_file(path) {
         Ok(()) => {}
@@ -95,7 +105,7 @@ pub fn run_x11_core_socket_server_once(
             path.display()
         ))
     })?;
-    serve_x11_core_socket_client(&mut stream, namespace)
+    serve_x11_core_socket_client_observed(&mut stream, namespace, observer)
 }
 
 #[cfg(unix)]
@@ -122,6 +132,15 @@ pub fn serve_x11_setup_socket_client(
 pub fn serve_x11_core_socket_client(
     stream: &mut UnixStream,
     namespace: NamespaceId,
+) -> Result<(), X11SetupSocketError> {
+    serve_x11_core_socket_client_observed(stream, namespace, |_| {})
+}
+
+#[cfg(unix)]
+pub fn serve_x11_core_socket_client_observed(
+    stream: &mut UnixStream,
+    namespace: NamespaceId,
+    mut observer: impl FnMut(&XDispatchResult),
 ) -> Result<(), X11SetupSocketError> {
     let setup = serve_x11_setup_socket_client(stream)?;
     let mut runtime = XAuthorityRuntime::new();
@@ -154,6 +173,7 @@ pub fn serve_x11_core_socket_client(
             ),
             Err(error) => dispatch_x11_parse_error(dispatch_context, error),
         };
+        observer(&output);
         for record in output.encoded_outputs(setup.byte_order) {
             stream.write_all(&record).map_err(|error| {
                 X11SetupSocketError::new(format!("failed to write X11 output: {error}"))
