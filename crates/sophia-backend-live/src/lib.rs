@@ -1790,6 +1790,12 @@ impl LiveBackendRuntimeAssembly {
         self.gbm_egl_frame_target
     }
 
+    pub fn observe_gbm_egl_frame_target_size(&mut self, size: Size) -> LiveGbmEglFrameTargetRecord {
+        let record = LiveGbmEglFrameTargetRecord::new(size);
+        self.gbm_egl_frame_target = Some(record);
+        record
+    }
+
     pub fn page_flip_observation(&self) -> LivePageFlipEvent {
         self.page_flip_event
     }

@@ -374,6 +374,57 @@ fn live_runtime_assembly_threads_scanout_and_page_flip_observations() {
 }
 
 #[test]
+fn live_runtime_assembly_updates_reduced_gbm_egl_frame_target_size() {
+    let root = ready_drm_sysfs_fixture("runtime-frame-target-size");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed live assembly");
+
+    let resized = assembly.observe_gbm_egl_frame_target_size(Size {
+        width: 2560,
+        height: 1440,
+    });
+    assert_eq!(
+        resized,
+        LiveGbmEglFrameTargetRecord {
+            status: LiveGbmEglFrameTargetStatus::Ready,
+            size: Size {
+                width: 2560,
+                height: 1440,
+            },
+        }
+    );
+
+    let tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should report resized target");
+    assert_eq!(tick.gbm_egl_frame_target, Some(resized));
+
+    let invalid = assembly.observe_gbm_egl_frame_target_size(Size {
+        width: 0,
+        height: 1440,
+    });
+    assert_eq!(
+        invalid,
+        LiveGbmEglFrameTargetRecord {
+            status: LiveGbmEglFrameTargetStatus::InvalidSize,
+            size: Size {
+                width: 0,
+                height: 1440,
+            },
+        }
+    );
+
+    let invalid_tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should report invalid reduced target");
+    assert_eq!(invalid_tick.gbm_egl_frame_target, Some(invalid));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn page_flip_callback_intake_accepts_only_matching_monotonic_callbacks() {
     let mut intake = LivePageFlipCallbackIntake::new(OutputId::from_raw(7));
 

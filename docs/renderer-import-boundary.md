@@ -374,6 +374,9 @@ allocation code exists.
 Backend-live may project the selected startup output into this record because
 the projection contains no renderer-private authority. That projection is a
 startup readiness hint, not a native allocation request.
+Backend-live runtime may also update the record from an output-size change. The
+update accepts only `Size`, derives the reduced status again, and does not own
+or borrow native renderer resources.
 
 The next reduced boundary is `LivePageFlipEvent`. It can be derived from
 scanout readiness or from the engine's `PageFlipCommitOutcome`, but it drops the

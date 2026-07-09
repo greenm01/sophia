@@ -9,12 +9,12 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Decide the first runtime mutation path for GBM/EGL frame-target readiness
-  when output size changes.
+- [ ] Define the first renderer-private allocation seam for GBM/EGL frame
+  targets.
 
 **Next**
-- [ ] Add a reduced frame-target update method on backend-live runtime assembly
-  if output-size mutation belongs outside startup.
+- [ ] Add a fake allocation smoke that proves native frame-target handles stay
+  renderer-private while runtime observes only reduced status.
 
 ---
 
@@ -290,6 +290,10 @@ evidence belong in `docs/research-log.md`.
   target readiness.
 - [x] Add runtime tick projection for reduced GBM/EGL frame target readiness if
   startup projection remains stable.
+- [x] Decide the first runtime mutation path for GBM/EGL frame-target readiness
+  when output size changes.
+- [x] Add a reduced frame-target update method on backend-live runtime assembly
+  if output-size mutation belongs outside startup.
 
 ---
 

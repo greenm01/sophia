@@ -119,6 +119,9 @@ Runtime ticks also carry the reduced GBM/EGL frame-target observation when a
 startup output is selected. That observation is only a size/status record; it is
 not a GBM surface, EGL surface, framebuffer, DMA-BUF, file descriptor, or native
 allocation request.
+Runtime output-size changes update that observation through a size-only method.
+The method may report an invalid target size, but it still must not allocate or
+retain native renderer resources.
 
 The deterministic page-flip callback intake seam accepts only backend-local
 facts: the Sophia output selected by startup and a frame serial. It rejects
