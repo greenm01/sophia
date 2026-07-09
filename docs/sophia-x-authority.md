@@ -241,3 +241,25 @@ Real X11 connection setup and request parsing starts after this seam stays
 green. The next parser should translate X11 setup bytes and a few core request
 fixtures into these existing internal request packets rather than bypassing the
 authority reducers.
+
+## Next: Real X11 Setup Parsing
+
+The next milestone is connection setup, not application compatibility. The
+parser should accept byte-order markers, protocol version fields, authorization
+name/data fields, and resource ID allocation facts. It should produce bounded
+setup success or failure artifacts and leave client resources owned by Sophia X
+Authority.
+
+First fixtures should cover:
+
+- little-endian and big-endian setup requests;
+- valid setup with resource ID base and mask;
+- truncated setup input;
+- unsupported major protocol version;
+- overlarge authorization fields;
+- setup success and setup failure reply encoding.
+
+After setup is covered, core request parsing should start with fixtures for
+`CreateWindow`, `MapWindow`, `ChangeProperty`, and selection ownership. Those
+wire requests must translate into existing internal `XAuthorityRequestPacket`
+values before they reach `XAuthorityRuntime`.

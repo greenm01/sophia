@@ -15,65 +15,68 @@ Xnamespace, XComposite/Damage, and routed-input experiments.
 
 ## Processes
 
-```mermaid
-flowchart TB
-    subgraph hardware["Hardware & Kernel Layer"]
-        input["Physical input devices"]
-        kernel["Linux kernel<br/>libinput + DRM/KMS"]
-        display["Display output<br/>GPU scanout"]
-    end
+```text
+================================================================================
+                         HARDWARE AND KERNEL
+================================================================================
+ [ physical input devices ]                                  [ display output ]
+            │                                                        ▲
+            │ raw input via libinput                                 │ DRM/KMS
+            ▼                                                        │
 
-    subgraph compositor["Compositor Layer: Security Broker"]
-        engine["Sophia Engine<br/>atomic visual authority<br/>scene graph / spatial hit-testing / damage tracking / frame scheduling"]
-        wm["Sophia WM<br/>blind policy model / TEA update"]
-        portal["Sophia Portals<br/>cross-namespace policy / TEA update"]
-        chrome["Metadata Broker + Compositor Chrome<br/>redacted labels / icon tokens / trust badges"]
-    end
+================================================================================
+                    SOPHIA ENGINE: COMPOSITOR AUTHORITY
+================================================================================
+ ┌────────────────────────────────────────────────────────────────────────────┐
+ │ Scene graph | spatial hit-testing | damage tracking | frame scheduling     │
+ │ Atomic visual commits | rendering | scanout                                │
+ └──────────────┬───────────────────┬────────────────────┬───────────────────┘
+        ▲      │                   │                    │      ▲
+        │      │ opaque snapshots  │ portal events      │      │ chrome data
+        │      ▼                   ▼                    ▼      │
+ ┌───────────────┐        ┌────────────────┐       ┌─────────────────────────┐
+ │  SOPHIA WM    │        │ SOPHIA PORTALS │       │ METADATA BROKER/CHROME │
+ │ blind policy  │        │ allow/deny     │       │ redacted UI only       │
+ │ layout/focus  │        │ handoff/revoke │       │ labels/icons/badges    │
+ └───────┬───────┘        └────────┬───────┘       └────────────┬────────────┘
+         │                         │                            ▲
+         │ layout proposals        │ portal commands            │ sanitized
+         ▼                         ▼                            │ metadata
 
-    subgraph authorities["Protocol Authority Layer"]
-        xauth["Sophia X Authority<br/>modern X subset / resources / selections / grabs"]
-        wayauth["Sophia Wayland Authority<br/>future Wayland frontend"]
-        nativeauth["Sophia Native Authority<br/>future Sophia-first protocol"]
-    end
+================================================================================
+                         PROTOCOL AUTHORITY LAYER
+================================================================================
+ ┌────────────────────────────────────────────────────────────────────────────┐
+ │ Sophia X Authority | Sophia Wayland Authority | Sophia Native Authority    │
+ │ protocol resources | grabs/focus | selections | namespace checks           │
+ └────────────────────────────────┬───────────────────────────────────────────┘
+                                  │
+                                  │ namespace-checked surface transactions
+                                  │ routed input / configure / lifecycle
+                                  ▲
 
-    subgraph trusted["Namespace A: Trusted"]
-        terminal["X terminal"]
-        password["Wayland password manager"]
-    end
-
-    subgraph untrusted["Namespace B: Untrusted"]
-        browser["X web browser"]
-        chat["Wayland chat app"]
-    end
-
-    input -->|"raw input"| kernel
-    kernel -->|"libinput events"| engine
-    engine -->|"DRM/KMS scanout"| display
-
-    engine -->|"opaque snapshots + events"| wm
-    wm -->|"command packets"| engine
-    engine -->|"portal prompts / transfer events"| portal
-    portal -->|"allow / deny / revoke / handoff"| engine
-
-    engine -->|"protocol-routed input / configure / lifecycle"| xauth
-    engine -->|"protocol-routed input / configure / lifecycle"| wayauth
-    xauth -->|"surface transactions / damage / constraints"| engine
-    wayauth -->|"surface transactions / damage / constraints"| engine
-    nativeauth -->|"surface transactions / damage / constraints"| engine
-    xauth -->|"sanitized metadata candidates"| chrome
-    wayauth -->|"sanitized metadata candidates"| chrome
-    chrome -->|"compositor-owned UI data"| engine
-
-    terminal -->|"X protocol"| xauth
-    browser -->|"X protocol"| xauth
-    password -->|"Wayland protocol"| wayauth
-    chat -->|"Wayland protocol"| wayauth
+================================================================================
+                         SANDBOXED CLIENT NAMESPACES
+================================================================================
+ ┌────────────────────────────────────┐     ┌─────────────────────────────────┐
+ │ Namespace A: trusted               │     │ Namespace B: untrusted          │
+ │ X terminal | Wayland password mgr  │  X  │ X browser | Wayland chat app    │
+ └────────────────────────────────────┘     └─────────────────────────────────┘
 ```
 
 The critical split is that protocol authorities produce reduced, namespace-
 checked surface transactions for Sophia Engine, while sanitized chrome
 descriptors flow to the metadata broker. The WM receives only opaque policy data
 and returns command packets.
+
+## Current Architecture Focus
+
+The internal Sophia X Authority runtime is now executable over a Sophia-owned
+IPC frame protocol. That socket protocol is a harness, not the X11 wire
+protocol. The next architecture step is to parse real X11 connection setup
+bytes and translate core request fixtures into the existing internal authority
+requests. Wire parsing must feed `XAuthorityRuntime`; it must not grow a second
+resource table or a parallel authority path.
 
 ## Load-Bearing Boundaries
 

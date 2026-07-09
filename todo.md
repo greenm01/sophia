@@ -1,155 +1,46 @@
 # Sophia Active Roadmap
 
-Sophia is a research prototype. This file tracks active architecture work and
-keeps completed milestones compact. Detailed rationale and historical evidence
-belong in `docs/research-log.md`.
+Sophia is a research prototype. This file tracks the active architecture path
+and keeps completed milestones compact. Detailed rationale and historical
+evidence belong in `docs/research-log.md`.
 
 ---
 
-## Active Focus - Sophia X Authority Runtime
+## Active Focus - Sophia X Authority: X11 Setup Parser
 
-Turn the passive Sophia X Authority model into an executable authority process
-before taking on real X11 wire parsing.
+The internal X Authority runtime is executable. The next architecture step is
+real X11 connection setup parsing that feeds the existing `XAuthorityRuntime`
+reducers instead of creating a second authority path.
 
 **Now**
-- [x] Add internal `XAuthorityRequestPacket` and `XAuthorityResponsePacket`
-  types for the reducer-backed authority runtime.
-- [x] Reuse the 24-byte Sophia IPC frame header for internal authority request
-  and response frames.
-- [x] Add bounded explicit encode/decode coverage for authority frames.
-- [x] Add `XAuthorityRuntime` over resource, window, selection, and portal
-  reducers.
-- [x] Add a one-client Unix socket server/client helper and
-  `x-authority-runtime-smoke`.
-- [x] Document that this v0 socket protocol is an internal harness, not real
-  X11 client wire parsing.
+- [ ] Add an X11 setup parser fixture for byte order, protocol version,
+  authorization name/data, resource ID base, and resource ID mask.
+- [ ] Model setup success and failure replies as bounded authority artifacts.
+- [ ] Add integration tests for little-endian and big-endian setup handshakes.
+- [ ] Add malformed setup tests for truncated input, unsupported major version,
+  and overlarge auth fields.
 
 **Next**
-- [ ] Add a real X11 connection setup parser fixture for byte order, protocol
-  version, resource ID base/mask, and setup success/failure replies.
-- [ ] Decode the first core X11 request fixtures into existing internal
-  authority requests: `CreateWindow`, `MapWindow`, `ChangeProperty`, and
-  selection ownership.
+- [ ] Decode first core X11 request fixtures into existing internal authority
+  requests: `CreateWindow`, `MapWindow`, `ChangeProperty`, and selection
+  ownership.
 - [ ] Add a local Unix socket smoke that completes an X11 setup handshake with a
   tiny synthetic client without running full applications yet.
+- [ ] Keep request decoding isolated from runtime reducers: wire parsing should
+  produce internal request packets, then `XAuthorityRuntime` executes them.
 
 ---
 
-## Completed Focus - Sophia X Authority Design
+## Next Architecture Milestones
 
-- [x] Start `docs/sophia-x-authority.md` with authority ownership boundaries,
-  minimum protocol subset, namespace resource model, drawing-to-buffer
-  readiness, selections/portals, lifecycle, input delivery, Phoenix study
-  targets, and first implementation milestones.
-- [x] Add a `sophia-x-authority` crate skeleton with passive resource tables
-  and no live socket yet.
-- [x] Model namespace-scoped X resource lookup and event subscription in tests.
-- [x] Model `AuthoritySurface` creation from synthetic X window lifecycle
-  events.
-- [x] Convert a synthetic Present/SHM/CoreDraw update into a ready
-  `SurfaceTransaction`.
-- [x] Convert a synthetic selection request into a portal request and native X
-  denial/handoff artifact.
-
----
-
-## Completed Focus - Executable Authority Transactions
-
-- [x] Add protocol-neutral `AuthorityKind`, `AuthorityLocalId`,
-  `AuthoritySurface`, `SurfaceTransaction`, `SurfaceTransactionReadiness`, and
-  `CommittedSurfaceState` data records.
-- [x] Map existing `SurfaceSnapshot`, `LayerSnapshot`, `DamageFrame`, and
-  `LayoutEpochState` concepts into `SurfaceTransaction` records and readiness
-  states for the XLibre prototype path.
-- [x] Add engine helpers that commit ready surface transactions atomically while
-  preserving the previous committed state for pending, failed, timed-out,
-  stale, or invalid transactions.
-- [x] Project committed surface state back into renderable `LayerSnapshot`
-  values so render planning can consume committed visual truth rather than raw
-  authority snapshots.
-- [x] Thread authority transaction outcomes into headless session runtime
-  observations as reduced outcome/count data without exposing protocol-local
-  IDs, namespace metadata, or surface IDs to the WM.
-- [x] Add a headless/live session adapter path that projects committed state
-  before frame planning when authority transactions are present.
-- [x] Keep an XLibre bridge regression that marks the old snapshot path as
-  `AuthorityKind::XLibrePrototype`.
-- [x] Define which XLibre bridge smokes remain prototype references and which
-  should retire once Sophia X Authority has equivalent coverage. See
-  `docs/xlibre-prototype-regression-map.md`.
-
----
-
-## Sophia X Authority Track
-
-Replace the long-term dependency on XLibre/Xorg with a Sophia-owned modern X
-protocol subset that can run real applications without carrying the full legacy
-server object graph.
-
-- [x] Define the minimum X protocol subset for real app compatibility:
-  core windows/pixmaps/atoms/properties/events, ICCCM/EWMH, XKB, XFixes, Sync,
-  Render, SHM, DRI3/Present, RandR, and selected GLX compatibility.
-- [x] Define namespace-aware X resource ownership, lookup, event subscription,
-  selection, focus, grab, and property access rules.
-- [x] Define how X drawing paths become Sophia pending buffers:
-  PresentPixmap, DRI3 DMA-BUF, SHM/software updates, Render, and core drawing.
-- [x] Define X selection, clipboard, drag-and-drop, URI, notification, and
-  screen-capture requests as protocol-specific inputs to Sophia Portals.
-- [x] Define X lifecycle and polite close semantics as authority commands that
-  preserve the blind WM boundary.
-- [x] Identify Phoenix components and tests worth studying before implementation.
-
----
-
-## Atomic Transaction Track
-
-Make macOS-style transaction integrity a first-class Sophia invariant.
-
-- [x] Define pending versus committed surface state in the engine data model.
-- [x] Define buffer/geometry readiness and the conditions required to commit a
-  visual transaction.
-- [x] Define fail-closed slow-client behavior: keep the last committed visual
-  state unless timeout policy explicitly degrades.
-- [x] Define timeout/degrade reporting so chronic offenders can be measured
-  without leaking protocol metadata to the WM.
-- [x] Update frame scheduling docs so layout epochs become a prototype-specific
-  compatibility mechanism, while authority-native commits use explicit
-  readiness.
-
----
-
-## Future Wayland Authority Track
-
-Document the later path for Wayland-only applications without turning Sophia
-into a Wayland compositor as the architectural center.
-
-- [x] Map `wl_surface` attach/damage/commit into Sophia `SurfaceTransaction`
-  readiness.
-- [x] Map `xdg_toplevel` configure/ack/lifecycle into authority-owned protocol
-  semantics and Engine-owned visual commits.
-- [x] Define Wayland input delivery as Engine-routed, authority-delivered, and
-  namespace-checked.
-- [x] Define Wayland clipboard/data-device/screencopy-style requests as portal
-  inputs instead of compositor-wide privileges.
-- [x] Document that Wayland Authority must not own workspaces, global shortcuts,
-  compositor chrome, or scanout.
-
----
-
-## Backend Track - Real Compositor Work
-
-Do this after the authority transaction model has a clear shape.
-
-- [x] Add frame-clock abstraction while preserving headless determinism.
-- [x] Add renderer/import abstraction with CPU readback kept as fallback.
-- [x] Add DRM/KMS output skeleton.
-- [x] Add libinput event source skeleton.
-- [x] Integrate physical input with routed-input request generation.
-- [x] Replace skeleton DRM/KMS descriptors with a real device/output discovery
-  adapter.
-- [x] Replace libinput descriptor intake with a real non-blocking physical input
-  poller.
-- [x] Connect real frame-clock/page-flip timing to transaction commits.
+- [ ] Add X11 atom/property tables needed by `ChangeProperty`, ICCCM names, and
+  metadata-broker candidates.
+- [ ] Add minimal X event/reply emission for setup, errors, map/configure, and
+  selection request outcomes.
+- [ ] Define the first real-client target after synthetic setup succeeds:
+  likely a tiny Xlib window before GTK/Qt/browser paths.
+- [ ] Revisit compositor backend work after X Authority can create, map, draw,
+  and expose a simple client through the authority transaction model.
 
 ---
 
@@ -163,8 +54,8 @@ not the long-term target architecture.
 - [x] Keep XLibre routed-input extension docs as a compatibility lesson.
 - [x] Keep XComposite/Damage bridge smokes as reference tests until Sophia X
   Authority has equivalent transaction tests.
-- [x] Keep XLibre namespace smoke as isolation evidence until the Sophia X
-  Authority namespace model has live coverage.
+- [x] Keep XLibre namespace smoke as isolation evidence until Sophia X
+  Authority namespace enforcement has live coverage.
 
 ---
 
@@ -172,20 +63,34 @@ not the long-term target architecture.
 
 - [x] Engine-centered authority reframe: README, architecture docs, atomic
   rendering invariant, and XLibre prototype/reference status.
-- [x] Refactor finish pass: split production source files at clear domain seams,
-  keep public facades stable, and document the roughly 250-line cleanup rule.
-- [x] Phase 0-2: repository shape, Rust skeleton, protocol/data model, headless
-  engine.
+- [x] Data-oriented design and style rules, including domain-first file
+  cohesion guidance.
+- [x] Phase 0-2: repository shape, Rust skeleton, protocol/data model, and
+  headless engine.
 - [x] Phase 3-4: XLibre mirror probe, XComposite/Damage capture, CPU readback,
-  first X11 surface in headless frames.
+  and first X11 surface in headless frames.
 - [x] Phase 5-6.5: blind WM protocol, bounded IPC codec, external WM demo,
-  routed-input XLibre patch and smoke/stress coverage.
-- [x] Phase 7-8: portal reducers, compositor chrome action reducer, polite X11
-  close helper.
-- [x] Phase 9 supervisor work: restart policy, process supervisor, WM restart
-  adapter, last committed layout cache.
-- [x] Session runtime assembly: data-only runtime reducer, bounded observation
-  intake, headless session driver, broker health/control packets, and live X/WM
-  socket smoke.
-- [x] Portal execution prototype: X11 `SelectionRequest` conversion, denial as
-  native selection failure, approved bounded text handoff, and live X smoke.
+  routed-input XLibre patch, and smoke/stress coverage.
+- [x] Phase 7-8: portal reducers, compositor chrome action reducer, and polite
+  X11 close helper.
+- [x] Phase 9: process supervisor, restart policy, WM restart adapter, and last
+  committed layout cache.
+- [x] Session runtime assembly: runtime reducer, bounded observation intake,
+  headless session driver, broker health/control packets, and live X/WM socket
+  smoke.
+- [x] Portal execution prototype: X11 `SelectionRequest` conversion, native
+  denial, approved bounded text handoff, and live X smoke.
+- [x] Protocol-neutral authority transactions: `AuthoritySurface`,
+  `SurfaceTransaction`, readiness states, and committed surface projection into
+  renderable layers.
+- [x] Sophia X Authority design: namespace-scoped resources, event
+  subscriptions, synthetic lifecycle, drawing updates, and selection portal
+  conversion.
+- [x] Sophia X Authority v0 runtime: internal request/response packets, bounded
+  codec, reducer-backed runtime, Unix socket helper, and
+  `x-authority-runtime-smoke`.
+- [x] Future Wayland Authority boundary documented as a later protocol
+  authority, not the architectural center.
+- [x] Backend skeletons: frame clock, renderer/import abstraction, DRM/KMS
+  discovery, libinput polling, physical input routing, and page-flip timing
+  seams.
