@@ -125,6 +125,72 @@ pending buffers, damage, constraints, and readiness. Sophia Engine commits
 geometry and pixels together on a frame boundary. If a surface is not ready, the
 engine keeps the last committed state until policy says otherwise.
 
+## Security Architecture
+
+Sophia starts from a blunt assumption: every client may lie. The window manager
+may crash. A protocol may carry thirty years of bad habits. Security is not a
+feature added after the desktop works. It is the shape of the system.
+
+### Namespaces At The Edge
+
+Protocol Authorities sit at the edge of the session. When an application
+connects, the authority assigns it to a namespace before it can create useful
+state. An untrusted browser in one namespace cannot query, inspect, or send
+events to a trusted terminal in another.
+
+This is where Sophia breaks with old X11. There is no shared property tree where
+every client becomes a potential observer. Cross-namespace lookup fails closed
+unless a portal grants a narrow handoff.
+
+### A Blind Window Manager
+
+The WM manages layout, focus, and workspaces, but it does not receive client
+identity. It sees opaque layout nodes and `SurfaceId` handles. It does not see
+XIDs, Wayland object IDs, namespaces, titles, classes, PIDs, paths, or clipboard
+payloads.
+
+That blindness is deliberate. If the WM is compromised, the attacker gets a
+geometry calculator, not a desktop-wide spyglass. The process can propose where
+rectangles go. Sophia Engine still validates the proposal before anything
+reaches the screen.
+
+### Portals, Not Privileged APIs
+
+Namespaces sometimes need to cross. Clipboard, drag-and-drop, file handoff,
+screenshots, notifications, and URI opens all require controlled transfer.
+Sophia routes those requests through portals.
+
+A portal request is a state machine, not a backdoor:
+
+- **Pending:** the request exists, but the target does not receive the payload;
+- **Prompt:** user or policy code sees bounded, sanitized facts;
+- **Approval:** a single-use, generation-bound handoff is granted;
+- **Revocation:** owner changes, expiry, or policy denial close the transfer.
+
+Denial maps back to native protocol failure. Clients do not get synthetic input.
+They do not get to freeze the session while they wait.
+
+### The Engine Owns Visual Truth
+
+Sophia Engine is the only component with global visual knowledge. It owns
+hit-testing, frame scheduling, rendering, and scanout. It does not own high-level
+layout policy.
+
+The engine enforces the visual security rule: geometry and pixels commit
+together. A slow or hostile client cannot make Sophia present a half-resized
+window, black border, or stale buffer stretched into a new shape. The last good
+frame stays visible until a complete transaction is ready or explicit policy
+chooses to degrade it.
+
+### Small Surface Area
+
+Sophia keeps protocol complexity at the edges. Authorities translate client
+protocols. The WM receives blind policy data. Portals handle deliberate
+cross-namespace transfer. The rendering hot path stays small and data-oriented.
+
+That is the security pitch: fewer global privileges, fewer trusted processes,
+and fewer ways for one client to learn what another client is doing.
+
 ## Project Shape
 
 Sophia is split by authority, not by convenience.

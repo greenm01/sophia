@@ -212,6 +212,13 @@ Those IPC failures produce a runtime restart decision for the WM process. A
 valid response whose proposed layout is rejected does not restart the WM; it is
 a policy proposal failure, not a transport/protocol failure.
 
+A legacy compatibility policy process may sit in this same slot. The
+[Sophia X11 WM Bridge](sophia-x11-wm-bridge.md) is a prototype facade that
+presents a fake, headless X11 server to existing X11 window managers while
+speaking the normal blind Sophia WM IPC to Sophia Engine. It is a stopgap for
+reusing legacy layout engines, not a protocol authority and not a path around
+the namespace or metadata boundaries.
+
 The protocol should be sequence-oriented:
 
 - **Manage sequence** for state that affects clients: size, focus, fullscreen,

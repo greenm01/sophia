@@ -54,6 +54,8 @@ not the long-term target architecture.
   Authority has equivalent transaction tests.
 - [x] Keep XLibre namespace smoke as isolation evidence until Sophia X
   Authority namespace enforcement has live coverage.
+- [x] Keep the documented Sophia X11 WM Bridge as a stopgap for reusing legacy
+  tiling WMs without weakening the native blind WM IPC boundary.
 
 ---
 
