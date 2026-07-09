@@ -9,16 +9,15 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Add optional `glow` dependency for clear-color smoke inside the native EGL
-  adapter.
-- [ ] Extend the EGL draw smoke from private pbuffer readiness to a clear-color
-  smoke without exporting handles.
+- [ ] Add a GBM-backed EGL platform candidate doc before moving beyond
+  `DEFAULT_DISPLAY`.
+- [ ] Define the first presentation smoke boundary without exposing GPU handles.
 
 **Next**
-- [ ] Add reduced clear-color smoke status and validation docs for GL failure
-  modes.
 - [ ] Keep wgpu deferred until GBM/EGL startup, drawing, and presentation seams
   are proven.
+- [ ] Add renderer-live reduced presentation status before admitting scanout or
+  exported buffer paths.
 
 ---
 
@@ -206,6 +205,12 @@ evidence belong in `docs/research-log.md`.
   candidate for the first clear-color smoke.
 - [x] Add GL function-loading dependency-admission notes before admitting
   `glow`.
+- [x] Add optional `glow` dependency for clear-color smoke inside the native EGL
+  adapter.
+- [x] Extend the EGL draw smoke from private pbuffer readiness to a clear-color
+  smoke without exporting handles.
+- [x] Add reduced clear-color smoke status and validation docs for GL failure
+  modes.
 
 ---
 

@@ -63,17 +63,15 @@ or GBM handles.
 
 EGL/OpenGL is the first compositor drawing API above the GBM platform boundary.
 The `egl-probe` feature models reduced platform/context startup status and
-admits `khronos-egl` only through the internal `sophia-renderer-native-egl`
-adapter. The adapter owns unavoidable unsafe dynamic EGL calls; backend-live and
-renderer-live expose only reduced startup status.
-The first draw smoke proves only private pbuffer target readiness and
-`make_current` success. It does not admit GL function loading, shaders, exported
-buffers, or presentation.
-The first GL function loading candidate is `glow` 0.17.0, but it is not admitted
-until the clear-color smoke patch needs it. When admitted, it stays inside
-`sophia-renderer-native-egl`, loads procedures only after an EGL context is
-current, and exposes no GL contexts, procedure pointers, object names, native
-errors, or pbuffer details across the safe renderer/backend boundary.
+admits `khronos-egl` and `glow` only through the internal
+`sophia-renderer-native-egl` adapter. The adapter owns unavoidable unsafe
+dynamic EGL calls and GL function loading; backend-live and renderer-live expose
+only reduced startup and draw-smoke status.
+The first draw smoke proves private pbuffer target readiness, `make_current`
+success, GL procedure loading, clear-color execution, and teardown. It does not
+admit shaders, exported buffers, presentation, GL object handles, procedure
+pointers, native errors, or pbuffer details across the safe renderer/backend
+boundary.
 
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout

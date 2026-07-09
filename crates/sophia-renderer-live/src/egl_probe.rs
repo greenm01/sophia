@@ -97,12 +97,13 @@ pub enum EglContextProbeStatus {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EglDrawSmokeStatus {
-    OffscreenTargetReady,
+    ClearColorReady,
     PlatformUnavailable,
     PlatformDegraded,
     ContextUnavailable,
     SurfaceUnavailable,
     MakeCurrentUnavailable,
+    GlUnavailable,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -115,12 +116,13 @@ enum EglProbeResult {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EglDrawSmokeResult {
-    OffscreenTargetReady,
+    ClearColorReady,
     PlatformUnavailable,
     PlatformDegraded,
     ContextUnavailable,
     SurfaceUnavailable,
     MakeCurrentUnavailable,
+    GlUnavailable,
 }
 
 fn report_from_probe_result(result: EglProbeResult) -> EglCapabilityProbeReport {
@@ -137,7 +139,7 @@ fn report_from_probe_result(result: EglProbeResult) -> EglCapabilityProbeReport 
 fn draw_report_from_smoke_result(result: EglDrawSmokeResult) -> EglDrawSmokeReport {
     EglDrawSmokeReport {
         status: match result {
-            EglDrawSmokeResult::OffscreenTargetReady => EglDrawSmokeStatus::OffscreenTargetReady,
+            EglDrawSmokeResult::ClearColorReady => EglDrawSmokeStatus::ClearColorReady,
             EglDrawSmokeResult::PlatformUnavailable => EglDrawSmokeStatus::PlatformUnavailable,
             EglDrawSmokeResult::PlatformDegraded => EglDrawSmokeStatus::PlatformDegraded,
             EglDrawSmokeResult::ContextUnavailable => EglDrawSmokeStatus::ContextUnavailable,
@@ -145,6 +147,7 @@ fn draw_report_from_smoke_result(result: EglDrawSmokeResult) -> EglDrawSmokeRepo
             EglDrawSmokeResult::MakeCurrentUnavailable => {
                 EglDrawSmokeStatus::MakeCurrentUnavailable
             }
+            EglDrawSmokeResult::GlUnavailable => EglDrawSmokeStatus::GlUnavailable,
         },
     }
 }
@@ -171,8 +174,8 @@ mod native {
 
     pub(super) fn draw_smoke() -> EglDrawSmokeResult {
         match sophia_renderer_native_egl::smoke_default_display_pbuffer() {
-            sophia_renderer_native_egl::NativeEglDrawSmokeStatus::OffscreenTargetReady => {
-                EglDrawSmokeResult::OffscreenTargetReady
+            sophia_renderer_native_egl::NativeEglDrawSmokeStatus::ClearColorReady => {
+                EglDrawSmokeResult::ClearColorReady
             }
             sophia_renderer_native_egl::NativeEglDrawSmokeStatus::PlatformUnavailable => {
                 EglDrawSmokeResult::PlatformUnavailable
@@ -188,6 +191,9 @@ mod native {
             }
             sophia_renderer_native_egl::NativeEglDrawSmokeStatus::MakeCurrentUnavailable => {
                 EglDrawSmokeResult::MakeCurrentUnavailable
+            }
+            sophia_renderer_native_egl::NativeEglDrawSmokeStatus::GlUnavailable => {
+                EglDrawSmokeResult::GlUnavailable
             }
         }
     }

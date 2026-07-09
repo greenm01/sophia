@@ -71,12 +71,13 @@ fn native_egl_draw_smoke_reports_only_reduced_status() {
 
     assert!(matches!(
         smoke.status,
-        EglDrawSmokeStatus::OffscreenTargetReady
+        EglDrawSmokeStatus::ClearColorReady
             | EglDrawSmokeStatus::PlatformUnavailable
             | EglDrawSmokeStatus::PlatformDegraded
             | EglDrawSmokeStatus::ContextUnavailable
             | EglDrawSmokeStatus::SurfaceUnavailable
             | EglDrawSmokeStatus::MakeCurrentUnavailable
+            | EglDrawSmokeStatus::GlUnavailable
     ));
 }
 

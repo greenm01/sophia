@@ -1,3 +1,10 @@
+use glow::HasContext;
+use std::{
+    ffi::c_void,
+    panic::{AssertUnwindSafe, catch_unwind},
+    ptr,
+};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeEglProbeStatus {
     NativeDrawingCapable,
@@ -8,12 +15,13 @@ pub enum NativeEglProbeStatus {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeEglDrawSmokeStatus {
-    OffscreenTargetReady,
+    ClearColorReady,
     PlatformUnavailable,
     PlatformDegraded,
     ContextUnavailable,
     SurfaceUnavailable,
     MakeCurrentUnavailable,
+    GlUnavailable,
 }
 
 pub fn probe_default_display_context() -> NativeEglProbeStatus {
@@ -25,7 +33,7 @@ pub fn probe_default_display_context() -> NativeEglProbeStatus {
 
 pub fn smoke_default_display_pbuffer() -> NativeEglDrawSmokeStatus {
     match smoke_pbuffer() {
-        Ok(()) => NativeEglDrawSmokeStatus::OffscreenTargetReady,
+        Ok(()) => NativeEglDrawSmokeStatus::ClearColorReady,
         Err(error) => error,
     }
 }
@@ -107,12 +115,42 @@ fn smoke_initialized_pbuffer(
 
     let result = egl
         .make_current(display, Some(surface), Some(surface), Some(context))
-        .map_err(|_error| NativeEglDrawSmokeStatus::MakeCurrentUnavailable);
+        .map_err(|_error| NativeEglDrawSmokeStatus::MakeCurrentUnavailable)
+        .and_then(|()| smoke_current_gl_context(egl));
     let _ = egl.make_current(display, None, None, None);
     let _ = egl.destroy_context(display, context);
     let _ = egl.destroy_surface(display, surface);
 
     result
+}
+
+fn smoke_current_gl_context(
+    egl: &khronos_egl::DynamicInstance<khronos_egl::EGL1_4>,
+) -> Result<(), NativeEglDrawSmokeStatus> {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        // GL function pointers are loaded only after the EGL context is current
+        // and never escape this adapter.
+        let gl = unsafe {
+            glow::Context::from_loader_function(|name| {
+                egl.get_proc_address(name)
+                    .map_or(ptr::null(), |proc| proc as *const c_void)
+            })
+        };
+
+        unsafe {
+            gl.clear_color(0.02, 0.03, 0.05, 1.0);
+            gl.clear(glow::COLOR_BUFFER_BIT);
+            gl.finish();
+            gl.get_error()
+        }
+    }))
+    .map_err(|_panic| NativeEglDrawSmokeStatus::GlUnavailable)?;
+
+    if result == glow::NO_ERROR {
+        Ok(())
+    } else {
+        Err(NativeEglDrawSmokeStatus::GlUnavailable)
+    }
 }
 
 fn config_attributes() -> [khronos_egl::Int; 13] {

@@ -221,11 +221,12 @@ The EGL probe boundary must not expose:
 - native driver error text;
 - renderer-private allocation objects.
 
-The first native EGL draw smoke stops at private offscreen target readiness. It
-creates a private 1x1 pbuffer target, creates a context, makes that context
-current against the pbuffer, and tears everything down inside the native adapter.
-It does not load GL functions, issue clear calls, compile shaders, export
-buffers, or hand native handles to renderer-live.
+The first native EGL draw smoke proves a private clear-color path. It creates a
+private 1x1 pbuffer target, creates a context, makes that context current
+against the pbuffer, loads GL procedures inside the adapter, clears the target,
+and tears everything down inside the native adapter. It does not compile
+shaders, export buffers, present frames, or hand native handles to
+renderer-live.
 
 When both `gbm-probe` and `egl-probe` are enabled, backend-live may project a
 reduced GBM startup report into EGL platform status. Degraded GBM startup maps
@@ -256,11 +257,6 @@ Admission rules for `khronos-egl`:
 - run `cargo test --offline -p sophia-backend-live --features egl-probe`;
 - run `cargo test --offline -p sophia-backend-live --features gbm-probe,egl-probe`.
 
-The next native rendering dependency must be GL function loading for the first
-clear-color smoke. Admit that only after reduced draw-smoke status records exist
-and continue to hide GL procedure pointers, contexts, surfaces, and native error
-text.
-
 Rejected candidates:
 
 - `egl` 0.2.7: older low-level binding with 0% docs.rs documentation, and the
@@ -272,15 +268,14 @@ Rejected candidates:
   but adopting Smithay would pull in a large compositor framework surface before
   Sophia has proven its own reduced GBM/EGL boundary.
 
-## GL Function Loading Candidate
+## GL Function Loading Dependency
 
-The first GL function loading candidate is `glow` 0.17.0. It is the narrowest
-fit for the next smoke: load GL entry points from the current EGL context,
-clear a private 1x1 pbuffer, and return only reduced smoke status to
-renderer-live. Do not admit the dependency until the clear-color smoke patch
-uses it.
+The admitted GL function loading dependency is `glow` 0.17.0. Sophia admits it
+only inside `sophia-renderer-native-egl` for the first clear-color smoke: load
+GL entry points from the current EGL context, clear a private 1x1 pbuffer, and
+return only reduced smoke status to renderer-live.
 
-Admission rules for GL function loading:
+Admission rules for `glow`:
 
 - keep GL loading optional under the existing `egl-probe` feature path;
 - keep it inside `sophia-renderer-native-egl`, after the EGL context is current;
@@ -291,7 +286,7 @@ Admission rules for GL function loading:
 - limit the first smoke to setting a clear color, clearing the current private
   target, and flushing or finishing as required for a deterministic reduced
   result;
-- map every native GL failure to reduced draw-smoke status;
+- map every native GL failure to reduced `GlUnavailable` draw-smoke status;
 - keep wgpu deferred until GBM/EGL startup, drawing, and presentation seams are
   proven.
 

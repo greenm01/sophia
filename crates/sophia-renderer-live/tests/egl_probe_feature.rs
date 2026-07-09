@@ -76,11 +76,11 @@ fn native_egl_probe_stays_reduced_at_public_boundary() {
 }
 
 #[test]
-fn fake_egl_draw_smoke_reports_reduced_offscreen_target_status() {
+fn fake_egl_draw_smoke_reports_reduced_clear_color_status() {
     assert_eq!(
-        FakeEglDrawSmoke::new(EglDrawSmokeStatus::OffscreenTargetReady).smoke_report(),
+        FakeEglDrawSmoke::new(EglDrawSmokeStatus::ClearColorReady).smoke_report(),
         EglDrawSmokeReport {
-            status: EglDrawSmokeStatus::OffscreenTargetReady,
+            status: EglDrawSmokeStatus::ClearColorReady,
         }
     );
 }
@@ -101,11 +101,12 @@ fn native_egl_draw_smoke_stays_reduced_at_public_boundary() {
 
     assert!(matches!(
         report.status,
-        EglDrawSmokeStatus::OffscreenTargetReady
+        EglDrawSmokeStatus::ClearColorReady
             | EglDrawSmokeStatus::PlatformUnavailable
             | EglDrawSmokeStatus::PlatformDegraded
             | EglDrawSmokeStatus::ContextUnavailable
             | EglDrawSmokeStatus::SurfaceUnavailable
             | EglDrawSmokeStatus::MakeCurrentUnavailable
+            | EglDrawSmokeStatus::GlUnavailable
     ));
 }
