@@ -44,6 +44,11 @@ Live backend startup therefore defaults to CPU fallback. Native import-capable
 rendering must be selected through startup configuration; it is not implied by
 discovering a DRM/KMS output.
 
+Startup reports expose only reduced renderer import health: CPU fallback, native
+import capable, or degraded. Per-path status is reduced to disabled, enabled, or
+degraded for XPixmap and DMA-BUF. No renderer-private handle, file descriptor,
+device path, or client buffer identity belongs in that health report.
+
 Real MIT-SHM mapping remains outside this boundary until Sophia has a bounded
 shared-memory upload path with size checks, namespace validation, lifetime
 tracking, and fail-closed errors.

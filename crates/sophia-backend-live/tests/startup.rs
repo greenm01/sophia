@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use sophia_backend_live::{
     DeviceId, HeadlessOutput, LibinputDeviceDescriptor, LibinputDeviceKind, LiveBackendConfig,
     LiveBackendDependencyDecision, LiveBackendDependencyKind, LiveBackendDependencyUse,
-    LiveCompositorBackendDiscoveryStatus, LiveRendererImportBoundary, OutputId, QueuedInputPoller,
+    LiveCompositorBackendDiscoveryStatus, LiveRendererImportBoundary, LiveRendererImportHealth,
+    LiveRendererImportPathStatus, LiveRendererImportStartupStatus, OutputId, QueuedInputPoller,
     RendererSelection, SeatId, Size, discover_live_backend, live_backend_dependency_decision,
 };
 
@@ -77,6 +78,14 @@ fn live_backend_startup_uses_cpu_renderer_until_native_import_is_configured() {
     let report = discover_live_backend(&config);
 
     assert_eq!(report.renderer_selection(), RendererSelection::CpuFallback);
+    assert_eq!(
+        report.renderer_import_status(),
+        LiveRendererImportStartupStatus {
+            health: LiveRendererImportHealth::CpuFallback,
+            xpixmap: LiveRendererImportPathStatus::Disabled,
+            dmabuf: LiveRendererImportPathStatus::Disabled,
+        }
+    );
     let assembly = report
         .into_configured_headless_assembly(QueuedInputPoller::default())
         .expect("ready startup should seed assembly");
@@ -99,6 +108,14 @@ fn live_backend_startup_admits_native_renderer_import_only_when_configured() {
         RendererSelection::ImportCapable {
             import_xpixmap: true,
             import_dmabuf: false,
+        }
+    );
+    assert_eq!(
+        report.renderer_import_status(),
+        LiveRendererImportStartupStatus {
+            health: LiveRendererImportHealth::NativeImportCapable,
+            xpixmap: LiveRendererImportPathStatus::Enabled,
+            dmabuf: LiveRendererImportPathStatus::Disabled,
         }
     );
     let assembly = report

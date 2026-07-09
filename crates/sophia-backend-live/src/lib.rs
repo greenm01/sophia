@@ -117,6 +117,26 @@ impl LiveRendererImportBoundary {
             },
         }
     }
+
+    pub fn startup_status(self) -> LiveRendererImportStartupStatus {
+        LiveRendererImportStartupStatus {
+            health: if self.import_xpixmap || self.import_dmabuf {
+                LiveRendererImportHealth::NativeImportCapable
+            } else {
+                LiveRendererImportHealth::CpuFallback
+            },
+            xpixmap: if self.import_xpixmap {
+                LiveRendererImportPathStatus::Enabled
+            } else {
+                LiveRendererImportPathStatus::Disabled
+            },
+            dmabuf: if self.import_dmabuf {
+                LiveRendererImportPathStatus::Enabled
+            } else {
+                LiveRendererImportPathStatus::Disabled
+            },
+        }
+    }
 }
 
 impl Default for LiveRendererImportBoundary {
@@ -142,6 +162,27 @@ pub enum LiveRendererImportDecision {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LiveRendererImportRejection {
     EmptySource,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveRendererImportStartupStatus {
+    pub health: LiveRendererImportHealth,
+    pub xpixmap: LiveRendererImportPathStatus,
+    pub dmabuf: LiveRendererImportPathStatus,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveRendererImportHealth {
+    CpuFallback,
+    NativeImportCapable,
+    Degraded,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveRendererImportPathStatus {
+    Disabled,
+    Enabled,
+    Degraded,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -198,6 +239,10 @@ impl LiveBackendStartupReport {
         } else {
             RendererSelection::CpuFallback
         }
+    }
+
+    pub fn renderer_import_status(&self) -> LiveRendererImportStartupStatus {
+        self.renderer_import.startup_status()
     }
 
     pub fn into_configured_headless_assembly(
