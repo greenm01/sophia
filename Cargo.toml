@@ -5,6 +5,7 @@ members = [
     "crates/sophia-engine",
     "crates/sophia-portal",
     "crates/sophia-protocol",
+    "crates/sophia-renderer-live",
     "crates/sophia-runtime",
     "crates/sophia-wm-demo",
     "crates/sophia-x-authority",

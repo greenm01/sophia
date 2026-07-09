@@ -53,11 +53,13 @@ Real MIT-SHM mapping remains outside this boundary until Sophia has a bounded
 shared-memory upload path with size checks, namespace validation, lifetime
 tracking, and fail-closed errors.
 
-The first real renderer implementation should live in a dedicated
-`sophia-renderer-live` crate once it needs GBM, EGL, DMA-BUF, explicit sync
-fences, or renderer-private resource caches. `sophia-backend-live` should remain
-the session assembly boundary that wires discovery, input, renderer admission,
-and startup health together.
+The first real renderer implementation lives behind the `sophia-renderer-live`
+crate boundary. Today that crate has no GBM, EGL, DMA-BUF, MIT-SHM, or explicit
+sync dependencies; it only models reduced import admission, startup health, and
+runtime observation shape. Future renderer-private resource caches and native
+imports should land there, while `sophia-backend-live` remains the session
+assembly boundary that wires discovery, input, renderer admission, and startup
+health together.
 
 ## Failure Shape
 

@@ -27,8 +27,9 @@ The output is still reduced data: output readiness, input packets, frame-clock
 observations, and fail-closed health reports.
 
 Phase 3 is the renderer import boundary. GBM, EGL, DMA-BUF, and explicit sync
-fence handling stay deferred until Sophia has a separate live renderer import
-interface. Discovery code must not grow into buffer ownership by accident.
+fence handling stay deferred until the `sophia-renderer-live` boundary has
+deterministic fake coverage for the same path. Discovery code must not grow into
+buffer ownership by accident.
 
 Phase 4 is the shared-memory import boundary. Real MIT-SHM mapping stays
 deferred until mapped bytes can pass through a bounded renderer upload path with

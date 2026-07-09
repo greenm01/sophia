@@ -1,0 +1,154 @@
+//! Live renderer boundary.
+//!
+//! This crate is the future home for renderer-private resources such as GBM,
+//! EGL, DMA-BUF import, explicit sync fences, and upload caches. The current
+//! implementation is dependency-free beyond Sophia's own data crates and only
+//! models reduced import admission.
+
+pub use sophia_engine::BufferImportPath;
+pub use sophia_protocol::BufferSource;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveRendererImportBoundary {
+    pub import_xpixmap: bool,
+    pub import_dmabuf: bool,
+}
+
+impl LiveRendererImportBoundary {
+    pub const fn cpu_only() -> Self {
+        Self {
+            import_xpixmap: false,
+            import_dmabuf: false,
+        }
+    }
+
+    pub const fn with_native_imports(import_xpixmap: bool, import_dmabuf: bool) -> Self {
+        Self {
+            import_xpixmap,
+            import_dmabuf,
+        }
+    }
+
+    pub fn decide(self, source: BufferSource) -> LiveRendererImportDecision {
+        match source {
+            BufferSource::None => LiveRendererImportDecision::Rejected {
+                reason: LiveRendererImportRejection::EmptySource,
+            },
+            BufferSource::CpuBuffer { .. } => LiveRendererImportDecision::Accepted {
+                path: BufferImportPath::CpuReadback,
+            },
+            BufferSource::XPixmap { .. } if self.import_xpixmap => {
+                LiveRendererImportDecision::Accepted {
+                    path: BufferImportPath::XPixmap,
+                }
+            }
+            BufferSource::DmaBuf { .. } if self.import_dmabuf => {
+                LiveRendererImportDecision::Accepted {
+                    path: BufferImportPath::DmaBuf,
+                }
+            }
+            BufferSource::XPixmap { .. } => LiveRendererImportDecision::Deferred {
+                requested: BufferImportPath::XPixmap,
+                required_boundary: "live XPixmap renderer import",
+            },
+            BufferSource::DmaBuf { .. } => LiveRendererImportDecision::Deferred {
+                requested: BufferImportPath::DmaBuf,
+                required_boundary: "live DMA-BUF renderer import",
+            },
+        }
+    }
+
+    pub fn startup_status(self) -> LiveRendererImportStartupStatus {
+        LiveRendererImportStartupStatus {
+            health: if self.import_xpixmap || self.import_dmabuf {
+                LiveRendererImportHealth::NativeImportCapable
+            } else {
+                LiveRendererImportHealth::CpuFallback
+            },
+            xpixmap: if self.import_xpixmap {
+                LiveRendererImportPathStatus::Enabled
+            } else {
+                LiveRendererImportPathStatus::Disabled
+            },
+            dmabuf: if self.import_dmabuf {
+                LiveRendererImportPathStatus::Enabled
+            } else {
+                LiveRendererImportPathStatus::Disabled
+            },
+        }
+    }
+}
+
+impl Default for LiveRendererImportBoundary {
+    fn default() -> Self {
+        Self::cpu_only()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveRendererImportDecision {
+    Accepted {
+        path: BufferImportPath,
+    },
+    Deferred {
+        requested: BufferImportPath,
+        required_boundary: &'static str,
+    },
+    Rejected {
+        reason: LiveRendererImportRejection,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveRendererImportRejection {
+    EmptySource,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveRendererImportStartupStatus {
+    pub health: LiveRendererImportHealth,
+    pub xpixmap: LiveRendererImportPathStatus,
+    pub dmabuf: LiveRendererImportPathStatus,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveRendererImportHealth {
+    CpuFallback,
+    NativeImportCapable,
+    Degraded,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveRendererImportPathStatus {
+    Disabled,
+    Enabled,
+    Degraded,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveRendererRuntimeObservation {
+    pub health: LiveRendererImportHealth,
+    pub xpixmap: LiveRendererImportPathStatus,
+    pub dmabuf: LiveRendererImportPathStatus,
+    pub selection: LiveRendererSelectionObservation,
+}
+
+impl LiveRendererRuntimeObservation {
+    pub fn from_startup_status(
+        status: LiveRendererImportStartupStatus,
+        selection: LiveRendererSelectionObservation,
+    ) -> Self {
+        Self {
+            health: status.health,
+            xpixmap: status.xpixmap,
+            dmabuf: status.dmabuf,
+            selection,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveRendererSelectionObservation {
+    CpuFallback,
+    NativeImportCapable,
+}

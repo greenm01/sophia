@@ -18,6 +18,11 @@ use sophia_engine::{
     StaticInputDiscoveryBackend, SysfsDrmKmsOutputBackend, discover_live_compositor_backend,
 };
 pub use sophia_protocol::{BufferSource, DeviceId, OutputId, SeatId, Size};
+pub use sophia_renderer_live::{
+    LiveRendererImportBoundary, LiveRendererImportDecision, LiveRendererImportHealth,
+    LiveRendererImportPathStatus, LiveRendererImportRejection, LiveRendererImportStartupStatus,
+    LiveRendererRuntimeObservation, LiveRendererSelectionObservation,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LiveBackendDependencyKind {
@@ -66,123 +71,6 @@ pub fn live_backend_dependency_decision(
             required_boundary: "live renderer import boundary",
         },
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct LiveRendererImportBoundary {
-    pub import_xpixmap: bool,
-    pub import_dmabuf: bool,
-}
-
-impl LiveRendererImportBoundary {
-    pub const fn cpu_only() -> Self {
-        Self {
-            import_xpixmap: false,
-            import_dmabuf: false,
-        }
-    }
-
-    pub const fn with_native_imports(import_xpixmap: bool, import_dmabuf: bool) -> Self {
-        Self {
-            import_xpixmap,
-            import_dmabuf,
-        }
-    }
-
-    pub fn decide(self, source: BufferSource) -> LiveRendererImportDecision {
-        match source {
-            BufferSource::None => LiveRendererImportDecision::Rejected {
-                reason: LiveRendererImportRejection::EmptySource,
-            },
-            BufferSource::CpuBuffer { .. } => LiveRendererImportDecision::Accepted {
-                path: BufferImportPath::CpuReadback,
-            },
-            BufferSource::XPixmap { .. } if self.import_xpixmap => {
-                LiveRendererImportDecision::Accepted {
-                    path: BufferImportPath::XPixmap,
-                }
-            }
-            BufferSource::DmaBuf { .. } if self.import_dmabuf => {
-                LiveRendererImportDecision::Accepted {
-                    path: BufferImportPath::DmaBuf,
-                }
-            }
-            BufferSource::XPixmap { .. } => LiveRendererImportDecision::Deferred {
-                requested: BufferImportPath::XPixmap,
-                required_boundary: "live XPixmap renderer import",
-            },
-            BufferSource::DmaBuf { .. } => LiveRendererImportDecision::Deferred {
-                requested: BufferImportPath::DmaBuf,
-                required_boundary: "live DMA-BUF renderer import",
-            },
-        }
-    }
-
-    pub fn startup_status(self) -> LiveRendererImportStartupStatus {
-        LiveRendererImportStartupStatus {
-            health: if self.import_xpixmap || self.import_dmabuf {
-                LiveRendererImportHealth::NativeImportCapable
-            } else {
-                LiveRendererImportHealth::CpuFallback
-            },
-            xpixmap: if self.import_xpixmap {
-                LiveRendererImportPathStatus::Enabled
-            } else {
-                LiveRendererImportPathStatus::Disabled
-            },
-            dmabuf: if self.import_dmabuf {
-                LiveRendererImportPathStatus::Enabled
-            } else {
-                LiveRendererImportPathStatus::Disabled
-            },
-        }
-    }
-}
-
-impl Default for LiveRendererImportBoundary {
-    fn default() -> Self {
-        Self::cpu_only()
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LiveRendererImportDecision {
-    Accepted {
-        path: BufferImportPath,
-    },
-    Deferred {
-        requested: BufferImportPath,
-        required_boundary: &'static str,
-    },
-    Rejected {
-        reason: LiveRendererImportRejection,
-    },
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LiveRendererImportRejection {
-    EmptySource,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct LiveRendererImportStartupStatus {
-    pub health: LiveRendererImportHealth,
-    pub xpixmap: LiveRendererImportPathStatus,
-    pub dmabuf: LiveRendererImportPathStatus,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LiveRendererImportHealth {
-    CpuFallback,
-    NativeImportCapable,
-    Degraded,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LiveRendererImportPathStatus {
-    Disabled,
-    Enabled,
-    Degraded,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

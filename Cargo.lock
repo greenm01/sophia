@@ -172,6 +172,7 @@ version = "0.1.0"
 dependencies = [
  "sophia-engine",
  "sophia-protocol",
+ "sophia-renderer-live",
 ]
 
 [[package]]
@@ -209,6 +210,14 @@ dependencies = [
 [[package]]
 name = "sophia-protocol"
 version = "0.1.0"
+
+[[package]]
+name = "sophia-renderer-live"
+version = "0.1.0"
+dependencies = [
+ "sophia-engine",
+ "sophia-protocol",
+]
 
 [[package]]
 name = "sophia-runtime"

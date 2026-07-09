@@ -1,5 +1,5 @@
 [package]
-name = "sophia-backend-live"
+name = "sophia-renderer-live"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
@@ -9,7 +9,6 @@ rust-version.workspace = true
 [dependencies]
 sophia-engine = { path = "../sophia-engine" }
 sophia-protocol = { path = "../sophia-protocol" }
-sophia-renderer-live = { path = "../sophia-renderer-live" }
 
 [lints]
 workspace = true

@@ -1,6 +1,8 @@
-use sophia_backend_live::{
+use sophia_renderer_live::{
     BufferImportPath, BufferSource, LiveRendererImportBoundary, LiveRendererImportDecision,
-    LiveRendererImportRejection,
+    LiveRendererImportHealth, LiveRendererImportPathStatus, LiveRendererImportRejection,
+    LiveRendererImportStartupStatus, LiveRendererRuntimeObservation,
+    LiveRendererSelectionObservation,
 };
 
 #[test]
@@ -61,6 +63,28 @@ fn native_import_sources_can_be_admitted_by_an_explicit_renderer_boundary() {
         boundary.decide(BufferSource::DmaBuf { handle: 55 }),
         LiveRendererImportDecision::Accepted {
             path: BufferImportPath::DmaBuf,
+        }
+    );
+}
+
+#[test]
+fn runtime_observation_reports_reduced_renderer_selection_without_handles() {
+    let status = LiveRendererImportStartupStatus {
+        health: LiveRendererImportHealth::NativeImportCapable,
+        xpixmap: LiveRendererImportPathStatus::Enabled,
+        dmabuf: LiveRendererImportPathStatus::Disabled,
+    };
+
+    assert_eq!(
+        LiveRendererRuntimeObservation::from_startup_status(
+            status,
+            LiveRendererSelectionObservation::NativeImportCapable,
+        ),
+        LiveRendererRuntimeObservation {
+            health: LiveRendererImportHealth::NativeImportCapable,
+            xpixmap: LiveRendererImportPathStatus::Enabled,
+            dmabuf: LiveRendererImportPathStatus::Disabled,
+            selection: LiveRendererSelectionObservation::NativeImportCapable,
         }
     );
 }
