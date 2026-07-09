@@ -166,6 +166,14 @@ descriptor, read native events, or expose `drm` types publicly. Native polling
 must still land in a small private adapter module and preserve the existing
 callback queue contracts.
 
+The first private native adapter module exists as a skeleton only:
+`native_libdrm_events`. Its public surface is reduced to
+`LibdrmNativeEventAdapterReport`, currently `SkeletonReady`. The module may
+reference `drm::control::PageFlipEvent` privately, but it does not own a device,
+open a card, register callbacks, or poll file descriptors. The next native step
+must introduce backend-owned fd authority explicitly and keep all `drm` handles
+inside the module.
+
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
 authority. On Linux, wgpu will usually target Vulkan, but Sophia must first prove

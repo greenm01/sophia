@@ -473,6 +473,11 @@ pub fn libdrm_dependency_admission_report() -> LibdrmDependencyAdmissionReport {
 }
 
 #[cfg(feature = "libdrm-events")]
+pub fn native_libdrm_event_adapter_report() -> LibdrmNativeEventAdapterReport {
+    native_libdrm_events::adapter_report()
+}
+
+#[cfg(feature = "libdrm-events")]
 mod native_drm_admission {
     use super::{LibdrmDependencyAdmissionReport, LibdrmDependencyAdmissionStatus};
 
@@ -480,6 +485,30 @@ mod native_drm_admission {
         let _ = core::mem::size_of::<drm::control::PageFlipEvent>();
         LibdrmDependencyAdmissionReport {
             status: LibdrmDependencyAdmissionStatus::TypedPageFlipEventAvailable,
+        }
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LibdrmNativeEventAdapterReport {
+    pub status: LibdrmNativeEventAdapterStatus,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibdrmNativeEventAdapterStatus {
+    SkeletonReady,
+}
+
+#[cfg(feature = "libdrm-events")]
+mod native_libdrm_events {
+    use super::{LibdrmNativeEventAdapterReport, LibdrmNativeEventAdapterStatus};
+
+    pub(super) fn adapter_report() -> LibdrmNativeEventAdapterReport {
+        let _ = core::mem::align_of::<drm::control::PageFlipEvent>();
+        LibdrmNativeEventAdapterReport {
+            status: LibdrmNativeEventAdapterStatus::SkeletonReady,
         }
     }
 }

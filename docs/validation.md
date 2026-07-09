@@ -36,9 +36,9 @@ only reduced EGL startup and draw-smoke status.
 
 The `libdrm-events` feature admits Smithay's `drm` crate as an optional
 backend-live dependency. It checks only the reduced dependency-admission report,
-page-flip event polling adapter shape, and deterministic fake poller that feeds
-the runtime-owned bounded callback queue. Native page-flip values must be
-reduced before they reach runtime observation.
+private native adapter skeleton, page-flip event polling adapter shape, and
+deterministic fake poller that feeds the runtime-owned bounded callback queue.
+Native page-flip values must be reduced before they reach runtime observation.
 
 The backend-live GBM feature suite includes an opt-in real-device smoke. Set
 `SOPHIA_RUN_REAL_GBM_SMOKE=1` to let the test look for an openable

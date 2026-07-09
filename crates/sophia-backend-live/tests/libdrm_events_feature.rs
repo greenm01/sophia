@@ -4,10 +4,12 @@ use std::sync::mpsc;
 
 use sophia_backend_live::{
     CompositorBackendTickInput, FakeLibdrmPageFlipEventPoller, LibdrmDependencyAdmissionReport,
-    LibdrmDependencyAdmissionStatus, LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus,
+    LibdrmDependencyAdmissionStatus, LibdrmNativeEventAdapterReport,
+    LibdrmNativeEventAdapterStatus, LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus,
     LibdrmPageFlipEventPoller, LiveBackendConfig, LivePageFlipCallback, LivePageFlipCallbackQueue,
     LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus, OutputId,
     QueuedInputPoller, discover_live_backend, libdrm_dependency_admission_report,
+    native_libdrm_event_adapter_report,
 };
 
 #[test]
@@ -16,6 +18,16 @@ fn libdrm_dependency_is_admitted_without_exposing_native_event_shape() {
         libdrm_dependency_admission_report(),
         LibdrmDependencyAdmissionReport {
             status: LibdrmDependencyAdmissionStatus::TypedPageFlipEventAvailable,
+        }
+    );
+}
+
+#[test]
+fn native_libdrm_event_adapter_skeleton_reports_ready_without_opening_devices() {
+    assert_eq!(
+        native_libdrm_event_adapter_report(),
+        LibdrmNativeEventAdapterReport {
+            status: LibdrmNativeEventAdapterStatus::SkeletonReady,
         }
     );
 }
