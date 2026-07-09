@@ -69,6 +69,11 @@ renderer-live expose only reduced startup status.
 The first draw smoke proves only private pbuffer target readiness and
 `make_current` success. It does not admit GL function loading, shaders, exported
 buffers, or presentation.
+The first GL function loading candidate is `glow` 0.17.0, but it is not admitted
+until the clear-color smoke patch needs it. When admitted, it stays inside
+`sophia-renderer-native-egl`, loads procedures only after an EGL context is
+current, and exposes no GL contexts, procedure pointers, object names, native
+errors, or pbuffer details across the safe renderer/backend boundary.
 
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout

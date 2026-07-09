@@ -272,6 +272,39 @@ Rejected candidates:
   but adopting Smithay would pull in a large compositor framework surface before
   Sophia has proven its own reduced GBM/EGL boundary.
 
+## GL Function Loading Candidate
+
+The first GL function loading candidate is `glow` 0.17.0. It is the narrowest
+fit for the next smoke: load GL entry points from the current EGL context,
+clear a private 1x1 pbuffer, and return only reduced smoke status to
+renderer-live. Do not admit the dependency until the clear-color smoke patch
+uses it.
+
+Admission rules for GL function loading:
+
+- keep GL loading optional under the existing `egl-probe` feature path;
+- keep it inside `sophia-renderer-native-egl`, after the EGL context is current;
+- load procedures only through the adapter's EGL procedure lookup path;
+- do not expose `glow::Context`, GL procedure pointers, GL object names,
+  shaders, textures, framebuffers, programs, native error strings, or pbuffer
+  details outside the adapter;
+- limit the first smoke to setting a clear color, clearing the current private
+  target, and flushing or finishing as required for a deterministic reduced
+  result;
+- map every native GL failure to reduced draw-smoke status;
+- keep wgpu deferred until GBM/EGL startup, drawing, and presentation seams are
+  proven.
+
+Rejected GL-loading candidates for the first smoke:
+
+- `gl` 0.14.0: its global `load_with` model and generated unsafe function
+  surface are broader than the current adapter needs;
+- `gl_generator` 0.14.0: generated bindings may be useful later, but they add a
+  build-time binding surface before Sophia needs it;
+- raw manual `eglGetProcAddress` calls: smallest in dependency count, but they
+  would hand-roll procedure pointer safety and duplicate a tested loader
+  boundary.
+
 ## Failure Shape
 
 Unsupported import paths fail closed as reduced decisions. They do not panic, do
