@@ -393,6 +393,9 @@ device result and a reduced allocation request, performs any native work inside
 the renderer adapter, and returns only the reduced allocation report.
 Backend-live exposes this through feature-gated helpers so startup and runtime
 code can test the native seam without importing renderer-private handles.
+`LiveBackendRuntimeAssembly` may invoke the native seam explicitly and retain
+only the reduced allocation report. A runtime tick must not allocate native
+frame targets implicitly.
 
 The next reduced boundary is `LivePageFlipEvent`. It can be derived from
 scanout readiness or from the engine's `PageFlipCommitOutcome`, but it drops the

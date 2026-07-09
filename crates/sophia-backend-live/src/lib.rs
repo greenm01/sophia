@@ -1847,6 +1847,24 @@ impl LiveBackendRuntimeAssembly {
         Some(report)
     }
 
+    #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
+    pub fn allocate_native_gbm_egl_frame_target_with_gbm_device<D>(
+        &mut self,
+        discovery: &D,
+    ) -> Option<LiveGbmEglFrameTargetAllocationReport>
+    where
+        D: RenderDeviceDiscoveryBackend,
+    {
+        let target = self.gbm_egl_frame_target?;
+        let report =
+            NativeGbmBackedEglFrameTargetAllocator::allocation_report_from_backend_device_result(
+                discovery.open_render_device(),
+                LiveGbmEglFrameTargetAllocationRequest { target },
+            );
+        self.gbm_egl_frame_target_allocation = Some(report);
+        Some(report)
+    }
+
     pub fn page_flip_observation(&self) -> LivePageFlipEvent {
         self.page_flip_event
     }

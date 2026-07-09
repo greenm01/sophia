@@ -134,6 +134,9 @@ native skeleton accepts backend-owned device results and emits the same reduced
 report shape; it must not return handles, native errors, or driver identity.
 Backend-live may call that skeleton through feature-gated helpers, but the
 runtime-facing observation remains the same reduced allocation report.
+Runtime assembly keeps native frame-target allocation as an explicit action.
+Ticks report the most recent reduced allocation result, but they do not trigger
+native allocation by themselves.
 
 The deterministic page-flip callback intake seam accepts only backend-local
 facts: the Sophia output selected by startup and a frame serial. It rejects

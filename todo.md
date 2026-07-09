@@ -9,12 +9,12 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Decide whether native frame-target allocation should feed
-  `LiveBackendRuntimeAssembly` directly or remain an explicit caller action.
+- [ ] Decide the opt-in real-device evidence shape for native GBM/EGL
+  frame-target allocation.
 
 **Next**
-- [ ] Add runtime assembly helper for native frame-target allocation if the
-  explicit caller action remains stable.
+- [ ] Extend the existing real GBM smoke evidence to include reduced
+  frame-target allocation status.
 
 ---
 
@@ -309,6 +309,10 @@ evidence belong in `docs/research-log.md`.
   allocator skeleton.
 - [x] Add backend-live feature-gated coverage for native frame-target allocation
   using invalid and missing render devices.
+- [x] Decide whether native frame-target allocation should feed
+  `LiveBackendRuntimeAssembly` directly or remain an explicit caller action.
+- [x] Add runtime assembly helper for native frame-target allocation if the
+  explicit caller action remains stable.
 
 ---
 

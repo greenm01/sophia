@@ -512,6 +512,75 @@ fn live_runtime_assembly_reports_invalid_and_clears_stale_frame_target_allocatio
     fs::remove_dir_all(root).unwrap();
 }
 
+#[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
+struct MissingRenderDevice;
+
+#[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
+impl sophia_backend_live::RenderDeviceDiscoveryBackend for MissingRenderDevice {
+    type Device = std::fs::File;
+
+    fn open_render_device(&self) -> std::io::Result<Self::Device> {
+        Err(std::io::Error::from_raw_os_error(19))
+    }
+}
+
+#[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
+#[test]
+fn live_runtime_assembly_reports_native_frame_target_allocation_without_handles() {
+    let root = ready_drm_sysfs_fixture("runtime-native-frame-target-allocation");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed live assembly");
+
+    let allocation = assembly
+        .allocate_native_gbm_egl_frame_target_with_gbm_device(&MissingRenderDevice)
+        .expect("ready startup target should produce reduced native allocation report");
+    assert_eq!(
+        allocation.status,
+        LiveGbmEglFrameTargetAllocationStatus::Unavailable
+    );
+    assert_eq!(
+        assembly.gbm_egl_frame_target_allocation_observation(),
+        Some(allocation)
+    );
+
+    let tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should report reduced native allocation");
+    assert_eq!(tick.gbm_egl_frame_target_allocation, Some(allocation));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
+#[test]
+fn live_runtime_assembly_rejects_invalid_native_frame_target_before_device_open() {
+    let root = ready_drm_sysfs_fixture("runtime-native-frame-target-allocation-invalid");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed live assembly");
+
+    let invalid_target = assembly.observe_gbm_egl_frame_target_size(Size {
+        width: 0,
+        height: 720,
+    });
+    let allocation = assembly
+        .allocate_native_gbm_egl_frame_target_with_gbm_device(&MissingRenderDevice)
+        .expect("invalid startup target should produce reduced native allocation report");
+
+    assert_eq!(
+        allocation,
+        LiveGbmEglFrameTargetAllocationReport {
+            status: LiveGbmEglFrameTargetAllocationStatus::InvalidTarget,
+            target: invalid_target,
+        }
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn page_flip_callback_intake_accepts_only_matching_monotonic_callbacks() {
     let mut intake = LivePageFlipCallbackIntake::new(OutputId::from_raw(7));
