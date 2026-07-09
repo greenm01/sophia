@@ -590,6 +590,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             portal_commands: Vec::new(),
             chrome_command_count: 0,
             layers,
+            committed_surfaces: Vec::new(),
         });
         let report = driver.run_with_adapter(output.id, 7, &mut adapter)?;
         let session_tick = report

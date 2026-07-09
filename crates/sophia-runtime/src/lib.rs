@@ -8,7 +8,9 @@ use std::ffi::OsString;
 use std::process::{Child, Command};
 use std::time::Duration;
 
-use sophia_protocol::{BrokerHealthState, BrokerKind, SOPHIA_BROKER_HEALTH_MAX_MESSAGE_LEN};
+use sophia_protocol::{
+    BrokerHealthState, BrokerKind, SOPHIA_BROKER_HEALTH_MAX_MESSAGE_LEN, TransactionOutcome,
+};
 use tracing_subscriber::EnvFilter;
 
 pub type SophiaResult<T, E = SophiaError> = Result<T, E>;
@@ -123,6 +125,10 @@ pub struct SessionRuntimeState {
     pub portal_commands_drained: u64,
     pub chrome_commands_presented: u64,
     pub wm_restart_requests: u64,
+    pub authority_transactions_committed: u64,
+    pub authority_transactions_rejected: u64,
+    pub authority_transactions_timed_out: u64,
+    pub authority_surfaces_applied: u64,
     pub last_frame_serial: Option<u64>,
     pub portal_broker_health: Option<RuntimeBrokerHealth>,
     pub metadata_broker_health: Option<RuntimeBrokerHealth>,
@@ -160,6 +166,10 @@ pub enum SessionRuntimeEvent {
         state: BrokerHealthState,
         generation: u64,
         status_message_len: usize,
+    },
+    AuthorityTransactionObserved {
+        outcome: TransactionOutcome,
+        applied_surface_count: u32,
     },
     TickCompleted,
 }
@@ -203,6 +213,10 @@ pub enum SessionRuntimeObservation {
         state: BrokerHealthState,
         generation: u64,
         status_message_len: usize,
+    },
+    AuthorityTransactionObserved {
+        outcome: TransactionOutcome,
+        applied_surface_count: u32,
     },
     TickCompleted,
 }
@@ -320,6 +334,13 @@ pub fn session_runtime_event_from_observation(
                 status_message_len,
             })
         }
+        SessionRuntimeObservation::AuthorityTransactionObserved {
+            outcome,
+            applied_surface_count,
+        } => Ok(SessionRuntimeEvent::AuthorityTransactionObserved {
+            outcome,
+            applied_surface_count,
+        }),
         SessionRuntimeObservation::TickCompleted => Ok(SessionRuntimeEvent::TickCompleted),
     }
 }
@@ -449,6 +470,30 @@ pub fn update_session_runtime(
                     if accepts_broker_health(state.metadata_broker_health, generation) {
                         state.metadata_broker_health = Some(health);
                     }
+                }
+            }
+            SessionRuntimeCommand::None
+        }
+        SessionRuntimeEvent::AuthorityTransactionObserved {
+            outcome,
+            applied_surface_count,
+        } => {
+            state.authority_surfaces_applied = state
+                .authority_surfaces_applied
+                .saturating_add(u64::from(applied_surface_count));
+            match outcome {
+                TransactionOutcome::Committed => {
+                    state.authority_transactions_committed =
+                        state.authority_transactions_committed.saturating_add(1);
+                }
+                TransactionOutcome::TimedOut => {
+                    state.authority_transactions_timed_out =
+                        state.authority_transactions_timed_out.saturating_add(1);
+                }
+                TransactionOutcome::RejectedStaleSurface
+                | TransactionOutcome::RejectedInvalidSurface => {
+                    state.authority_transactions_rejected =
+                        state.authority_transactions_rejected.saturating_add(1);
                 }
             }
             SessionRuntimeCommand::None

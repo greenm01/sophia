@@ -22,19 +22,24 @@ bounded transactions that the engine may commit, delay, reject, or time out.
 - [x] Add engine helpers that commit ready surface transactions atomically while
   preserving the previous committed state for pending, failed, timed-out,
   stale, or invalid transactions.
+- [x] Project committed surface state back into renderable `LayerSnapshot`
+  values so render planning can consume committed visual truth rather than raw
+  authority snapshots.
+- [x] Thread authority transaction outcomes into headless session runtime
+  observations as reduced outcome/count data without exposing protocol-local
+  IDs, namespace metadata, or surface IDs to the WM.
+- [x] Add a headless/live session adapter path that projects committed state
+  before frame planning when authority transactions are present.
 - [x] Keep an XLibre bridge regression that marks the old snapshot path as
   `AuthorityKind::XLibrePrototype`.
+- [x] Define which XLibre bridge smokes remain prototype references and which
+  should retire once Sophia X Authority has equivalent coverage. See
+  `docs/xlibre-prototype-regression-map.md`.
 
 **Next**
-- [ ] Project committed surface state back into renderable `LayerSnapshot`
-  values so render planning consumes committed visual truth rather than raw
-  authority snapshots.
-- [ ] Thread authority transaction outcomes into the headless session runtime
-  observations without exposing protocol-local IDs or namespace metadata to the
-  WM.
-- [ ] Define which XLibre bridge smoke tests remain permanent prototype
-  regressions and which are retired once Sophia X Authority has equivalent
-  coverage.
+- [ ] Start Sophia X Authority design: minimum protocol subset, namespace
+  resource model, drawing-to-buffer readiness, selections/portals, lifecycle,
+  and input delivery.
 
 ---
 
@@ -116,12 +121,12 @@ Do this after the authority transaction model has a clear shape.
 These items are useful evidence from the XLibre-centered prototype, but they are
 not the long-term target architecture.
 
-- [ ] Keep SHM routed input deferred unless repeated routed-input stress
+- [x] Keep SHM routed input deferred unless repeated routed-input stress
   measurements exceed the documented threshold.
-- [ ] Keep XLibre routed-input extension docs as a compatibility lesson.
-- [ ] Keep XComposite/Damage bridge smokes as reference tests until Sophia X
+- [x] Keep XLibre routed-input extension docs as a compatibility lesson.
+- [x] Keep XComposite/Damage bridge smokes as reference tests until Sophia X
   Authority has equivalent transaction tests.
-- [ ] Keep XLibre namespace smoke as isolation evidence until the Sophia X
+- [x] Keep XLibre namespace smoke as isolation evidence until the Sophia X
   Authority namespace model has live coverage.
 
 ---

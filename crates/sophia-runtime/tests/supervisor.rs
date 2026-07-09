@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use sophia_protocol::{BrokerHealthState, BrokerKind};
+use sophia_protocol::{BrokerHealthState, BrokerKind, TransactionOutcome};
 use sophia_runtime::{
     MAX_SESSION_RUNTIME_OBSERVATION_BATCH, ProcessLaunchSpec, ProcessSupervisor,
     ProcessSupervisorError, RestartPolicy, RuntimeBrokerHealth, RuntimeBrokerSupervisors,
@@ -147,6 +147,78 @@ fn session_runtime_records_broker_health_without_status_payload() {
             status_message_len: 8,
         })
     );
+}
+
+#[test]
+fn session_runtime_records_authority_transaction_outcomes_without_ids() {
+    let state = SessionRuntimeState::default();
+
+    let (state, command) = update_session_runtime(
+        state,
+        SessionRuntimeEvent::AuthorityTransactionObserved {
+            outcome: TransactionOutcome::Committed,
+            applied_surface_count: 2,
+        },
+    );
+
+    assert_eq!(command, SessionRuntimeCommand::None);
+    assert_eq!(state.authority_transactions_committed, 1);
+    assert_eq!(state.authority_transactions_rejected, 0);
+    assert_eq!(state.authority_transactions_timed_out, 0);
+    assert_eq!(state.authority_surfaces_applied, 2);
+
+    let (state, command) = update_session_runtime(
+        state,
+        SessionRuntimeEvent::AuthorityTransactionObserved {
+            outcome: TransactionOutcome::RejectedInvalidSurface,
+            applied_surface_count: 0,
+        },
+    );
+
+    assert_eq!(command, SessionRuntimeCommand::None);
+    assert_eq!(state.authority_transactions_committed, 1);
+    assert_eq!(state.authority_transactions_rejected, 1);
+    assert_eq!(state.authority_transactions_timed_out, 0);
+    assert_eq!(state.authority_surfaces_applied, 2);
+
+    let (state, command) = update_session_runtime(
+        state,
+        SessionRuntimeEvent::AuthorityTransactionObserved {
+            outcome: TransactionOutcome::TimedOut,
+            applied_surface_count: 0,
+        },
+    );
+
+    assert_eq!(command, SessionRuntimeCommand::None);
+    assert_eq!(state.authority_transactions_committed, 1);
+    assert_eq!(state.authority_transactions_rejected, 1);
+    assert_eq!(state.authority_transactions_timed_out, 1);
+    assert_eq!(state.authority_surfaces_applied, 2);
+}
+
+#[test]
+fn authority_transaction_observation_roundtrips_through_batch_loop() {
+    let mut runtime = SessionRuntimeLoop::default();
+
+    let report = runtime
+        .step_observations([
+            SessionRuntimeObservation::AuthorityTransactionObserved {
+                outcome: TransactionOutcome::Committed,
+                applied_surface_count: 3,
+            },
+            SessionRuntimeObservation::AuthorityTransactionObserved {
+                outcome: TransactionOutcome::RejectedStaleSurface,
+                applied_surface_count: 0,
+            },
+        ])
+        .expect("authority transaction observations should be accepted");
+
+    assert_eq!(report.events_processed, 2);
+    assert!(report.commands.is_empty());
+    assert_eq!(runtime.state().authority_transactions_committed, 1);
+    assert_eq!(runtime.state().authority_transactions_rejected, 1);
+    assert_eq!(runtime.state().authority_transactions_timed_out, 0);
+    assert_eq!(runtime.state().authority_surfaces_applied, 3);
 }
 
 #[test]

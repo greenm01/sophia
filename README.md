@@ -136,6 +136,7 @@ and not a permanent wrapper around XLibre.
 - `docs/dod.md` defines Sophia's data-oriented design rules.
 - `docs/style-guide.md` records implementation discipline.
 - `docs/research-log.md` captures early decisions and open research questions.
+- `docs/xlibre-prototype-regression-map.md` classifies XLibre prototype checks.
 - `todo.md` tracks build phases and research milestones.
 
 ## License

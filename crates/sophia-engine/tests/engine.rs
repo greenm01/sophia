@@ -15,6 +15,7 @@ use sophia_engine::{
     layout_epoch_for_explicit_sync, measure_resize_behavior,
     notification_chrome_command_from_portal, request_wm_over_stream,
     routed_input_request_from_physical_event, routed_input_requests_from_flush,
+    runtime_observation_from_authority_transaction_commit,
     runtime_observation_from_metadata_chrome_updates,
     runtime_observation_from_notification_chrome_updates, runtime_observation_from_portal_commands,
     runtime_observation_from_render_frame_report, runtime_observation_from_session_tick_report,
@@ -448,6 +449,121 @@ fn ready_surface_transaction_commits_geometry_and_buffer_together() {
     assert_eq!(committed[0].committed_generation, 2);
     assert_eq!(committed[0].geometry.width, 400);
     assert_eq!(committed[0].buffer, BufferSource::DmaBuf { handle: 44 });
+}
+
+#[test]
+fn committed_surface_state_projects_to_layer_with_committed_visual_truth() {
+    let engine = HeadlessEngine::default();
+    let mut template = test_layer(0, 9, 0, Region::empty());
+    template.window = Some(XWindowId::new(0x44, 1));
+    template.namespace = Some(NamespaceId::from_raw(7));
+    template.crop = Some(Rect {
+        x: 0,
+        y: 0,
+        width: 50,
+        height: 50,
+    });
+    let committed = CommittedSurfaceState {
+        surface: template.surface,
+        committed_generation: 12,
+        geometry: Rect {
+            x: 40,
+            y: 50,
+            width: 640,
+            height: 480,
+        },
+        buffer: BufferSource::DmaBuf { handle: 90 },
+        damage: Region::single(Rect {
+            x: 40,
+            y: 50,
+            width: 12,
+            height: 12,
+        }),
+    };
+
+    let layer = engine
+        .project_committed_surface_state(&committed, &template)
+        .unwrap();
+
+    assert_eq!(layer.surface, template.surface);
+    assert_eq!(layer.window, Some(XWindowId::new(0x44, 1)));
+    assert_eq!(layer.namespace, Some(NamespaceId::from_raw(7)));
+    assert_eq!(layer.stack_rank, 9);
+    assert_eq!(layer.crop, template.crop);
+    assert_eq!(layer.geometry, committed.geometry);
+    assert_eq!(layer.source, BufferSource::DmaBuf { handle: 90 });
+    assert_eq!(layer.damage.rects.len(), 1);
+    assert_eq!(layer.generation, 12);
+}
+
+#[test]
+fn committed_surface_projection_drives_frame_planning() {
+    let engine = HeadlessEngine::default();
+    let template = test_layer(0, 0, 0, Region::empty());
+    let committed = CommittedSurfaceState {
+        surface: template.surface,
+        committed_generation: 2,
+        geometry: Rect {
+            x: 100,
+            y: 120,
+            width: 300,
+            height: 240,
+        },
+        buffer: BufferSource::CpuBuffer { handle: 55 },
+        damage: Region::single(Rect {
+            x: 100,
+            y: 120,
+            width: 300,
+            height: 240,
+        }),
+    };
+    let layers = engine
+        .project_committed_surface_states(&[committed.clone()], &[template])
+        .unwrap();
+
+    let frame = engine
+        .plan_frame(
+            FramePlanRequest {
+                output: engine.output().id,
+                frame_serial: 77,
+            },
+            layers,
+        )
+        .unwrap();
+
+    assert_eq!(frame.layers[0].geometry, committed.geometry);
+    assert_eq!(
+        frame.layers[0].source,
+        BufferSource::CpuBuffer { handle: 55 }
+    );
+    assert_eq!(frame.commands[0].target.rects[0], committed.geometry);
+}
+
+#[test]
+fn committed_surface_projection_rejects_missing_or_mismatched_templates() {
+    let engine = HeadlessEngine::default();
+    let committed = CommittedSurfaceState {
+        surface: SurfaceId::new(0, 1),
+        committed_generation: 1,
+        geometry: Rect {
+            x: 0,
+            y: 0,
+            width: 100,
+            height: 100,
+        },
+        buffer: BufferSource::CpuBuffer { handle: 1 },
+        damage: Region::empty(),
+    };
+    let other_template = test_layer(1, 0, 0, Region::empty());
+
+    assert_eq!(
+        engine.project_committed_surface_state(&committed, &other_template),
+        Err(EngineError::InvalidSurface)
+    );
+    assert_eq!(
+        engine.project_committed_surface_states(&[committed], &[other_template]),
+        Err(EngineError::InvalidSurface)
+    );
 }
 
 #[test]
@@ -1553,6 +1669,23 @@ fn wm_transaction_update_maps_to_runtime_observation() {
 }
 
 #[test]
+fn authority_transaction_commit_maps_to_reduced_runtime_observation() {
+    let commit = TransactionCommit {
+        transaction: TransactionId::from_raw(88),
+        outcome: TransactionOutcome::Committed,
+        applied_surfaces: vec![SurfaceId::new(1, 1), SurfaceId::new(2, 1)],
+    };
+
+    assert_eq!(
+        runtime_observation_from_authority_transaction_commit(&commit),
+        SessionRuntimeObservation::AuthorityTransactionObserved {
+            outcome: TransactionOutcome::Committed,
+            applied_surface_count: 2,
+        }
+    );
+}
+
+#[test]
 fn frame_reports_map_to_runtime_render_observations() {
     let engine = HeadlessEngine::default();
     let output = engine.output();
@@ -1729,6 +1862,7 @@ fn live_runtime_driver_adapter_executes_through_shared_command_executor() {
         }],
         chrome_command_count: 1,
         layers: vec![test_layer(1, 0, 0, Region::empty())],
+        committed_surfaces: Vec::new(),
     });
 
     let report = driver
@@ -1767,6 +1901,7 @@ fn live_runtime_driver_adapter_builds_from_nonblocking_intake_values() {
         }],
         chrome_command_count: 4,
         layers: vec![test_layer(1, 0, 0, Region::empty())],
+        committed_surfaces: Vec::new(),
     });
 
     assert_eq!(adapter.x, LiveXRuntimeAdapter::from_polled_event_count(2));
@@ -1929,6 +2064,46 @@ fn live_portal_chrome_and_renderer_adapters_emit_counts_and_frame_serials() {
         ),
         SessionRuntimeObservation::FrameRendered { frame_serial: 94 }
     );
+}
+
+#[test]
+fn live_renderer_runtime_adapter_projects_committed_state_before_frame_planning() {
+    let engine = HeadlessEngine::default();
+    let output = engine.output();
+    let mut last_committed = LastCommittedLayout::default();
+    let template = test_layer(1, 0, 0, Region::empty());
+    let committed = CommittedSurfaceState {
+        surface: template.surface,
+        committed_generation: 3,
+        geometry: Rect {
+            x: 200,
+            y: 220,
+            width: 320,
+            height: 240,
+        },
+        buffer: BufferSource::DmaBuf { handle: 701 },
+        damage: Region::single(Rect {
+            x: 200,
+            y: 220,
+            width: 320,
+            height: 240,
+        }),
+    };
+    let mut renderer = LiveRendererRuntimeAdapter::from_committed_surface_states(
+        vec![committed.clone()],
+        vec![template],
+    );
+
+    let report = renderer
+        .render_frame(&engine, output.id, 95, &mut last_committed)
+        .unwrap();
+
+    assert_eq!(report.frame.layers[0].geometry, committed.geometry);
+    assert_eq!(
+        report.frame.layers[0].source,
+        BufferSource::DmaBuf { handle: 701 }
+    );
+    assert_eq!(report.frame.commands[0].target.rects[0], committed.geometry);
 }
 
 #[test]

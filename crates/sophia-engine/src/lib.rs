@@ -184,6 +184,15 @@ pub fn runtime_observation_from_wm_transaction_update(
     }
 }
 
+pub fn runtime_observation_from_authority_transaction_commit(
+    commit: &TransactionCommit,
+) -> SessionRuntimeObservation {
+    SessionRuntimeObservation::AuthorityTransactionObserved {
+        outcome: commit.outcome,
+        applied_surface_count: u32::try_from(commit.applied_surfaces.len()).unwrap_or(u32::MAX),
+    }
+}
+
 pub fn runtime_observation_from_session_tick_report(
     report: &SessionTickReport,
 ) -> SessionRuntimeObservation {
@@ -473,11 +482,25 @@ impl LiveChromeRuntimeAdapter {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LiveRendererRuntimeAdapter {
     pub layers: Vec<LayerSnapshot>,
+    pub committed_surfaces: Vec<CommittedSurfaceState>,
 }
 
 impl LiveRendererRuntimeAdapter {
     pub fn from_layers(layers: Vec<LayerSnapshot>) -> Self {
-        Self { layers }
+        Self {
+            layers,
+            committed_surfaces: Vec::new(),
+        }
+    }
+
+    pub fn from_committed_surface_states(
+        committed_surfaces: Vec<CommittedSurfaceState>,
+        layer_templates: Vec<LayerSnapshot>,
+    ) -> Self {
+        Self {
+            layers: layer_templates,
+            committed_surfaces,
+        }
     }
 
     pub fn render_frame(
@@ -487,11 +510,17 @@ impl LiveRendererRuntimeAdapter {
         frame_serial: u64,
         last_committed: &mut LastCommittedLayout,
     ) -> Result<SessionTickReport, EngineError> {
+        let layers = if self.committed_surfaces.is_empty() {
+            self.layers.clone()
+        } else {
+            engine.project_committed_surface_states(&self.committed_surfaces, &self.layers)?
+        };
+
         engine.run_session_tick(
             SessionTickRequest {
                 output,
                 frame_serial,
-                layers: SessionLayerSource::Fresh(self.layers.clone()),
+                layers: SessionLayerSource::Fresh(layers),
             },
             last_committed,
         )
@@ -513,6 +542,7 @@ pub struct LiveRuntimeDriverIntake {
     pub portal_commands: Vec<PortalCommand>,
     pub chrome_command_count: u32,
     pub layers: Vec<LayerSnapshot>,
+    pub committed_surfaces: Vec<CommittedSurfaceState>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -533,7 +563,10 @@ impl LiveRuntimeDriverAdapter {
             },
             portal: LivePortalRuntimeAdapter::from_commands(intake.portal_commands),
             chrome: LiveChromeRuntimeAdapter::from_command_count(intake.chrome_command_count),
-            renderer: LiveRendererRuntimeAdapter::from_layers(intake.layers),
+            renderer: LiveRendererRuntimeAdapter::from_committed_surface_states(
+                intake.committed_surfaces,
+                intake.layers,
+            ),
         }
     }
 }
@@ -2376,6 +2409,47 @@ impl HeadlessEngine {
 
     pub fn committed_state_from_layer(&self, layer: &LayerSnapshot) -> CommittedSurfaceState {
         CommittedSurfaceState::from_layer_snapshot(layer)
+    }
+
+    pub fn project_committed_surface_state(
+        &self,
+        committed: &CommittedSurfaceState,
+        template: &LayerSnapshot,
+    ) -> Result<LayerSnapshot, EngineError> {
+        if !committed.surface.is_valid() || !template.surface.is_valid() {
+            return Err(EngineError::InvalidSurface);
+        }
+        if committed.surface != template.surface {
+            return Err(EngineError::InvalidSurface);
+        }
+
+        let mut layer = template.clone();
+        layer.geometry = committed.geometry;
+        layer.source = committed.buffer;
+        layer.damage = committed.damage.clone();
+        layer.generation = committed.committed_generation;
+        Ok(layer)
+    }
+
+    pub fn project_committed_surface_states(
+        &self,
+        committed: &[CommittedSurfaceState],
+        templates: &[LayerSnapshot],
+    ) -> Result<Vec<LayerSnapshot>, EngineError> {
+        let templates_by_surface = templates
+            .iter()
+            .map(|template| (template.surface, template))
+            .collect::<BTreeMap<_, _>>();
+
+        committed
+            .iter()
+            .map(|state| {
+                let Some(template) = templates_by_surface.get(&state.surface) else {
+                    return Err(EngineError::InvalidSurface);
+                };
+                self.project_committed_surface_state(state, template)
+            })
+            .collect()
     }
 
     #[instrument(skip_all, fields(
