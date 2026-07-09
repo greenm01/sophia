@@ -233,6 +233,10 @@ Decoded callback counts describe native callback facts that passed reduction
 before queue handoff; emitted callback counts describe facts that actually
 entered the runtime queue. If the queue is disconnected, pending injected
 callbacks remain owned by the poller.
+Route replacement is explicit through `NativeLibdrmPageFlipEventPoller`; hotplug
+or modeset-shaped changes replace backend-local slots without exposing native
+KMS identifiers. Pending callbacks are decoded against the current route table
+at poll time.
 
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout

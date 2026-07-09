@@ -283,6 +283,72 @@ fn native_libdrm_poller_retains_injected_callbacks_on_disconnected_queue() {
 }
 
 #[test]
+fn native_libdrm_poller_replaces_routes_without_dropping_pending_callbacks() {
+    let authority =
+        LibdrmBackendFdAuthority::new(18).expect("nonzero generation should mint authority token");
+    let slot = LibdrmNativeOutputSlot::new(2).expect("nonzero slot should be valid");
+    let source = LibdrmNativePageFlipSource::from_authority(authority);
+    let mut poller =
+        NativeLibdrmPageFlipEventPoller::new(source).with_routes([LibdrmNativeOutputRoute {
+            slot,
+            output: OutputId::from_raw(7),
+        }]);
+    let (sender, receiver) = mpsc::sync_channel(2);
+
+    poller.inject_callbacks([LibdrmNativePageFlipCallback::new(slot, 81)]);
+    poller.replace_routes([LibdrmNativeOutputRoute {
+        slot,
+        output: OutputId::from_raw(9),
+    }]);
+
+    assert_eq!(poller.route_count(), 1);
+    assert_eq!(poller.pending_callback_count(), 1);
+
+    let report = poller.poll_page_flip_events(&sender, 2);
+
+    assert_eq!(report.status, LibdrmPageFlipEventPollStatus::Emitted);
+    assert_eq!(poller.pending_callback_count(), 0);
+    assert_eq!(
+        receiver
+            .try_recv()
+            .expect("callback should use replaced route"),
+        LivePageFlipCallback {
+            output: OutputId::from_raw(9),
+            frame_serial: 81,
+        }
+    );
+}
+
+#[test]
+fn native_libdrm_poller_rejects_pending_callbacks_after_route_removal() {
+    let authority =
+        LibdrmBackendFdAuthority::new(19).expect("nonzero generation should mint authority token");
+    let slot = LibdrmNativeOutputSlot::new(2).expect("nonzero slot should be valid");
+    let source = LibdrmNativePageFlipSource::from_authority(authority);
+    let mut poller =
+        NativeLibdrmPageFlipEventPoller::new(source).with_routes([LibdrmNativeOutputRoute {
+            slot,
+            output: OutputId::from_raw(7),
+        }]);
+    let (sender, receiver) = mpsc::sync_channel(2);
+
+    poller.inject_callbacks([LibdrmNativePageFlipCallback::new(slot, 81)]);
+    poller.replace_routes([]);
+
+    let report = poller.poll_page_flip_events(&sender, 2);
+
+    assert_eq!(report.status, LibdrmPageFlipEventPollStatus::Idle);
+    assert_eq!(report.callbacks.emitted, 0);
+    assert_eq!(poller.pending_callback_count(), 0);
+    assert_eq!(
+        poller.last_read_loop_report().status,
+        LibdrmNativeReadLoopStatus::CallbackRejected
+    );
+    assert_eq!(poller.last_read_loop_report().rejected_callbacks, 1);
+    assert!(receiver.try_recv().is_err());
+}
+
+#[test]
 fn native_libdrm_page_flip_callback_decodes_without_native_resource_identity() {
     assert_eq!(LibdrmNativeOutputSlot::new(0), None);
     let slot = LibdrmNativeOutputSlot::new(2).expect("nonzero slot should be valid");

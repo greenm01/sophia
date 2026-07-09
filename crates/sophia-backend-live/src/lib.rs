@@ -723,8 +723,13 @@ impl NativeLibdrmPageFlipEventPoller {
         mut self,
         routes: impl IntoIterator<Item = LibdrmNativeOutputRoute>,
     ) -> Self {
-        self.routes.extend(routes);
+        self.replace_routes(routes);
         self
+    }
+
+    pub fn replace_routes(&mut self, routes: impl IntoIterator<Item = LibdrmNativeOutputRoute>) {
+        self.routes.clear();
+        self.routes.extend(routes);
     }
 
     pub fn inject_callbacks(
@@ -744,6 +749,10 @@ impl NativeLibdrmPageFlipEventPoller {
 
     pub fn pending_callback_count(&self) -> usize {
         self.pending_callbacks.len()
+    }
+
+    pub fn route_count(&self) -> usize {
+        self.routes.len()
     }
 }
 
