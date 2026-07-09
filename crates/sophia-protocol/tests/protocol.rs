@@ -89,6 +89,127 @@ fn layer_snapshot_is_cloneable_frame_data() {
 }
 
 #[test]
+fn authority_local_id_preserves_raw_id_and_generation() {
+    let local = AuthorityLocalId::from(XWindowId::new(0x1200042, 7));
+
+    assert!(local.is_valid());
+    assert_eq!(local.raw(), 0x1200042);
+    assert_eq!(local.generation(), 7);
+}
+
+#[test]
+fn authority_surface_carries_protocol_ownership_without_metadata() {
+    let surface = SurfaceSnapshot {
+        surface: SurfaceId::new(3, 1),
+        window: XWindowId::new(0x42, 5),
+        toplevel: None,
+        client: None,
+        namespace: Some(NamespaceId::from_raw(2)),
+        mapped: true,
+        stack_rank: 4,
+        geometry: Rect {
+            x: 10,
+            y: 20,
+            width: 640,
+            height: 480,
+        },
+        source: BufferSource::XPixmap { pixmap: 77 },
+        damage: Region::empty(),
+        generation: 9,
+        resize_sync: ResizeSyncCapability::ExplicitSync,
+    };
+
+    let authority_surface = surface.to_authority_surface(AuthorityKind::XLibrePrototype);
+
+    assert_eq!(authority_surface.authority, AuthorityKind::XLibrePrototype);
+    assert_eq!(authority_surface.local_id, AuthorityLocalId::new(0x42, 5));
+    assert_eq!(authority_surface.surface, SurfaceId::new(3, 1));
+    assert_eq!(authority_surface.namespace, Some(NamespaceId::from_raw(2)));
+    assert!(authority_surface.mapped);
+    assert_eq!(authority_surface.generation, 9);
+}
+
+#[test]
+fn surface_transaction_carries_atomic_geometry_buffer_and_readiness() {
+    let layer = LayerSnapshot {
+        surface: SurfaceId::new(4, 1),
+        window: Some(XWindowId::new(0x99, 2)),
+        namespace: Some(NamespaceId::from_raw(8)),
+        stack_rank: 0,
+        geometry: Rect {
+            x: 30,
+            y: 40,
+            width: 800,
+            height: 600,
+        },
+        source: BufferSource::DmaBuf { handle: 55 },
+        damage: Region::single(Rect {
+            x: 30,
+            y: 40,
+            width: 10,
+            height: 10,
+        }),
+        opacity: 1.0,
+        crop: None,
+        transform: Transform::IDENTITY,
+        generation: 6,
+        resize_sync: ResizeSyncCapability::ExplicitSync,
+    };
+
+    let transaction = SurfaceTransaction::from_layer_snapshot(
+        TransactionId::from_raw(12),
+        AuthorityKind::SophiaX,
+        &layer,
+        SurfaceTransactionReadiness::Ready,
+        250,
+        5,
+    );
+
+    assert_eq!(transaction.transaction, TransactionId::from_raw(12));
+    assert_eq!(transaction.authority, AuthorityKind::SophiaX);
+    assert_eq!(transaction.surface, SurfaceId::new(4, 1));
+    assert_eq!(transaction.target_geometry.width, 800);
+    assert_eq!(
+        transaction.target_buffer,
+        BufferSource::DmaBuf { handle: 55 }
+    );
+    assert_eq!(transaction.damage.rects.len(), 1);
+    assert_eq!(transaction.readiness, SurfaceTransactionReadiness::Ready);
+    assert_eq!(transaction.previous_committed_generation, 5);
+}
+
+#[test]
+fn committed_surface_state_is_cloneable_visual_state() {
+    let layer = LayerSnapshot {
+        surface: SurfaceId::new(5, 1),
+        window: None,
+        namespace: None,
+        stack_rank: 0,
+        geometry: Rect {
+            x: 0,
+            y: 0,
+            width: 320,
+            height: 240,
+        },
+        source: BufferSource::CpuBuffer { handle: 3 },
+        damage: Region::empty(),
+        opacity: 1.0,
+        crop: None,
+        transform: Transform::IDENTITY,
+        generation: 11,
+        resize_sync: ResizeSyncCapability::ImplicitOnly,
+    };
+
+    let state = CommittedSurfaceState::from_layer_snapshot(&layer);
+    let cloned = state.clone();
+
+    assert_eq!(cloned.surface, SurfaceId::new(5, 1));
+    assert_eq!(cloned.committed_generation, 11);
+    assert_eq!(cloned.geometry.width, 320);
+    assert_eq!(cloned.buffer, BufferSource::CpuBuffer { handle: 3 });
+}
+
+#[test]
 fn layout_node_snapshot_carries_only_opaque_policy_data() {
     let node = LayoutNodeSnapshot {
         surface: SurfaceId::new(7, 1),

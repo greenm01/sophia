@@ -19,20 +19,20 @@ use sophia_engine::{
     runtime_observation_from_notification_chrome_updates, runtime_observation_from_portal_commands,
     runtime_observation_from_render_frame_report, runtime_observation_from_session_tick_report,
     runtime_observation_from_wm_transaction_update, schedule_frame_from_damage,
-    update_wm_supervisor_from_runtime_action,
+    surface_transaction_readiness_for_epoch, update_wm_supervisor_from_runtime_action,
 };
 use sophia_portal::{NotificationRequest, NotificationUrgency, PortalCommand};
 use sophia_protocol::{
-    AttentionState, BrokerHealthPacket, BrokerHealthState, BrokerKind, BufferSource,
-    ChromeActionKind, ChromeActionRequest, ChromeDescriptor, DamageFrame, DeviceId, DisplayLabel,
-    IconTokenId, InputEventKind, InputEventPacket, InputRoute, InputRouteOutcome, IpcCodecError,
-    LayerSnapshot, LayoutNodeCapabilities, LayoutNodeKind, LayoutNodeSnapshot, LayoutNodeState,
-    LayoutTransaction, NamespaceId, OutputId, Point, PortalTransferId, Rect, Region,
-    ResizeSyncCapability, SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAGIC, SOPHIA_IPC_MAX_PAYLOAD_LEN,
-    SOPHIA_IPC_VERSION, SeatId, SurfaceConstraints, SurfaceId, SurfacePlacement, TransactionCommit,
-    TransactionId, TransactionOutcome, Transform, TrustLevel, WmCommand, WmRequestKind,
-    WmRequestPacket, WmResponsePacket, WorkspaceId, XWindowId, decode_wm_request_frame,
-    encode_wm_response_frame,
+    AttentionState, AuthorityKind, BrokerHealthPacket, BrokerHealthState, BrokerKind, BufferSource,
+    ChromeActionKind, ChromeActionRequest, ChromeDescriptor, CommittedSurfaceState, DamageFrame,
+    DeviceId, DisplayLabel, IconTokenId, InputEventKind, InputEventPacket, InputRoute,
+    InputRouteOutcome, IpcCodecError, LayerSnapshot, LayoutNodeCapabilities, LayoutNodeKind,
+    LayoutNodeSnapshot, LayoutNodeState, LayoutTransaction, NamespaceId, OutputId, Point,
+    PortalTransferId, Rect, Region, ResizeSyncCapability, SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAGIC,
+    SOPHIA_IPC_MAX_PAYLOAD_LEN, SOPHIA_IPC_VERSION, SeatId, SurfaceConstraints, SurfaceId,
+    SurfacePlacement, SurfaceTransactionReadiness, TransactionCommit, TransactionId,
+    TransactionOutcome, Transform, TrustLevel, WmCommand, WmRequestKind, WmRequestPacket,
+    WmResponsePacket, WorkspaceId, XWindowId, decode_wm_request_frame, encode_wm_response_frame,
 };
 use sophia_runtime::{
     RestartPolicy, SessionRuntimeCommand, SessionRuntimeObservation, SessionRuntimePhase,
@@ -408,6 +408,148 @@ fn absent_wm_preserves_committed_layers() {
     assert_eq!(commit.outcome, TransactionOutcome::TimedOut);
     assert!(commit.applied_surfaces.is_empty());
     assert_eq!(layers, before);
+}
+
+#[test]
+fn ready_surface_transaction_commits_geometry_and_buffer_together() {
+    let engine = HeadlessEngine::default();
+    let old_layer = test_layer(0, 0, 0, Region::empty());
+    let mut committed = vec![engine.committed_state_from_layer(&old_layer)];
+    let mut next_layer = old_layer.clone();
+    next_layer.geometry = Rect {
+        x: 25,
+        y: 30,
+        width: 400,
+        height: 300,
+    };
+    next_layer.source = BufferSource::DmaBuf { handle: 44 };
+    next_layer.damage = Region::single(Rect {
+        x: 25,
+        y: 30,
+        width: 400,
+        height: 300,
+    });
+    let transaction = next_layer.to_surface_transaction(
+        TransactionId::from_raw(70),
+        AuthorityKind::XLibrePrototype,
+        SurfaceTransactionReadiness::Ready,
+        250,
+        1,
+    );
+
+    let commit = engine.commit_surface_transactions(
+        TransactionId::from_raw(70),
+        &[transaction],
+        &mut committed,
+    );
+
+    assert_eq!(commit.outcome, TransactionOutcome::Committed);
+    assert_eq!(commit.applied_surfaces, vec![SurfaceId::new(0, 1)]);
+    assert_eq!(committed[0].committed_generation, 2);
+    assert_eq!(committed[0].geometry.width, 400);
+    assert_eq!(committed[0].buffer, BufferSource::DmaBuf { handle: 44 });
+}
+
+#[test]
+fn pending_surface_transaction_preserves_committed_state() {
+    let engine = HeadlessEngine::default();
+    let old_layer = test_layer(0, 0, 0, Region::empty());
+    let mut committed = vec![engine.committed_state_from_layer(&old_layer)];
+    let before = committed.clone();
+    let mut next_layer = old_layer.clone();
+    next_layer.geometry.width = 500;
+    let transaction = next_layer.to_surface_transaction(
+        TransactionId::from_raw(71),
+        AuthorityKind::XLibrePrototype,
+        SurfaceTransactionReadiness::Pending,
+        250,
+        1,
+    );
+
+    let commit = engine.commit_surface_transactions(
+        TransactionId::from_raw(71),
+        &[transaction],
+        &mut committed,
+    );
+
+    assert_eq!(commit.outcome, TransactionOutcome::TimedOut);
+    assert!(commit.applied_surfaces.is_empty());
+    assert_eq!(committed, before);
+}
+
+#[test]
+fn failed_surface_transaction_preserves_committed_state() {
+    let engine = HeadlessEngine::default();
+    let old_layer = test_layer(0, 0, 0, Region::empty());
+    let mut committed = vec![engine.committed_state_from_layer(&old_layer)];
+    let before = committed.clone();
+    let transaction = old_layer.to_surface_transaction(
+        TransactionId::from_raw(72),
+        AuthorityKind::SophiaX,
+        SurfaceTransactionReadiness::Failed,
+        250,
+        1,
+    );
+
+    let commit = engine.commit_surface_transactions(
+        TransactionId::from_raw(72),
+        &[transaction],
+        &mut committed,
+    );
+
+    assert_eq!(commit.outcome, TransactionOutcome::RejectedStaleSurface);
+    assert!(commit.applied_surfaces.is_empty());
+    assert_eq!(committed, before);
+}
+
+#[test]
+fn stale_surface_transaction_preserves_committed_state() {
+    let engine = HeadlessEngine::default();
+    let old_layer = test_layer(0, 0, 0, Region::empty());
+    let mut committed = vec![engine.committed_state_from_layer(&old_layer)];
+    let before = committed.clone();
+    let transaction = old_layer.to_surface_transaction(
+        TransactionId::from_raw(73),
+        AuthorityKind::SophiaX,
+        SurfaceTransactionReadiness::Ready,
+        250,
+        99,
+    );
+
+    let commit = engine.commit_surface_transactions(
+        TransactionId::from_raw(73),
+        &[transaction],
+        &mut committed,
+    );
+
+    assert_eq!(commit.outcome, TransactionOutcome::RejectedStaleSurface);
+    assert!(commit.applied_surfaces.is_empty());
+    assert_eq!(committed, before);
+}
+
+#[test]
+fn invalid_surface_transaction_fails_closed() {
+    let engine = HeadlessEngine::default();
+    let mut committed = Vec::<CommittedSurfaceState>::new();
+    let mut layer = test_layer(0, 0, 0, Region::empty());
+    layer.surface = SurfaceId::INVALID;
+    let transaction = layer.to_surface_transaction(
+        TransactionId::from_raw(74),
+        AuthorityKind::SophiaX,
+        SurfaceTransactionReadiness::Ready,
+        250,
+        0,
+    );
+
+    let commit = engine.commit_surface_transactions(
+        TransactionId::from_raw(74),
+        &[transaction],
+        &mut committed,
+    );
+
+    assert_eq!(commit.outcome, TransactionOutcome::RejectedInvalidSurface);
+    assert!(commit.applied_surfaces.is_empty());
+    assert!(committed.is_empty());
 }
 
 #[test]
@@ -1242,6 +1384,28 @@ fn layout_epoch_for_explicit_sync_skips_implicit_only_layers() {
 
     assert_eq!(explicit_sync_surfaces(&layers), Vec::<SurfaceId>::new());
     assert_eq!(layout_epoch_for_explicit_sync(13, 100, 250, &layers), None);
+}
+
+#[test]
+fn layout_epoch_maps_damage_wait_to_surface_transaction_readiness() {
+    let surface = SurfaceId::new(1, 1);
+    let mut epoch = LayoutEpochState::with_timing(15, [surface], 100, 250);
+
+    assert_eq!(
+        surface_transaction_readiness_for_epoch(surface, Some(&epoch)),
+        SurfaceTransactionReadiness::Pending
+    );
+
+    epoch.observe_damage(&damage_frame(4, &[surface]));
+
+    assert_eq!(
+        surface_transaction_readiness_for_epoch(surface, Some(&epoch)),
+        SurfaceTransactionReadiness::Ready
+    );
+    assert_eq!(
+        surface_transaction_readiness_for_epoch(surface, None),
+        SurfaceTransactionReadiness::Ready
+    );
 }
 
 #[test]

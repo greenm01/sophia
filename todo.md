@@ -6,29 +6,35 @@ belong in `docs/research-log.md`.
 
 ---
 
-## Active Focus - Engine-Centered Authorities
+## Active Focus - Executable Authority Transactions
 
-Reframe Sophia around Sophia Engine as the permanent visual authority and
-protocol authorities as client-protocol adapters.
+Turn the authority-centered architecture into shared Rust data and engine
+behavior. Sophia Engine remains the visual authority; protocol authorities emit
+bounded transactions that the engine may commit, delay, reject, or time out.
 
 **Now**
-- [x] Reframe README around Engine-owned input, atomic rendering, and protocol
-  authorities.
-- [x] Update architecture docs with Sophia X Authority, future Wayland
-  Authority, future Native Authority, and protocol-neutral namespace boundaries.
-- [x] Add docs-level atomic rendering invariant: never present new geometry
-  without matching committed pixels.
-- [x] Move XLibre bridge/routed-input work into prototype/reference status
-  instead of long-term architecture status.
+- [x] Add protocol-neutral `AuthorityKind`, `AuthorityLocalId`,
+  `AuthoritySurface`, `SurfaceTransaction`, `SurfaceTransactionReadiness`, and
+  `CommittedSurfaceState` data records.
+- [x] Map existing `SurfaceSnapshot`, `LayerSnapshot`, `DamageFrame`, and
+  `LayoutEpochState` concepts into `SurfaceTransaction` records and readiness
+  states for the XLibre prototype path.
+- [x] Add engine helpers that commit ready surface transactions atomically while
+  preserving the previous committed state for pending, failed, timed-out,
+  stale, or invalid transactions.
+- [x] Keep an XLibre bridge regression that marks the old snapshot path as
+  `AuthorityKind::XLibrePrototype`.
 
 **Next**
-- [ ] Define authority-facing docs-level `AuthoritySurface`,
-  `SurfaceTransaction`, and `CommittedSurfaceState` acceptance criteria in more
-  implementation-ready terms.
-- [ ] Map existing `SurfaceSnapshot`, `LayerSnapshot`, `DamageFrame`, and
-  `LayoutEpochState` concepts onto the new transaction model.
-- [ ] Decide which existing XLibre bridge tests remain regression references
-  and which should be retired once Sophia X Authority starts.
+- [ ] Project committed surface state back into renderable `LayerSnapshot`
+  values so render planning consumes committed visual truth rather than raw
+  authority snapshots.
+- [ ] Thread authority transaction outcomes into the headless session runtime
+  observations without exposing protocol-local IDs or namespace metadata to the
+  WM.
+- [ ] Define which XLibre bridge smoke tests remain permanent prototype
+  regressions and which are retired once Sophia X Authority has equivalent
+  coverage.
 
 ---
 
@@ -122,6 +128,8 @@ not the long-term target architecture.
 
 ## Completed Milestones
 
+- [x] Engine-centered authority reframe: README, architecture docs, atomic
+  rendering invariant, and XLibre prototype/reference status.
 - [x] Phase 0-2: repository shape, Rust skeleton, protocol/data model, headless
   engine.
 - [x] Phase 3-4: XLibre mirror probe, XComposite/Damage capture, CPU readback,

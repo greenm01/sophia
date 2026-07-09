@@ -1022,6 +1022,54 @@ mod tests {
     }
 
     #[test]
+    fn xlibre_surface_snapshot_maps_to_prototype_surface_transaction() {
+        let surface = SurfaceSnapshot {
+            surface: SurfaceId::new(1, 1),
+            window: xid(0x20),
+            toplevel: Some(xid(0x20)),
+            client: Some(xid(0x20)),
+            namespace: Some(NamespaceId::from_raw(3)),
+            mapped: true,
+            stack_rank: 7,
+            geometry: Rect {
+                x: 10,
+                y: 20,
+                width: 320,
+                height: 200,
+            },
+            source: BufferSource::CpuBuffer { handle: 9 },
+            damage: Region::single(Rect {
+                x: 10,
+                y: 20,
+                width: 320,
+                height: 200,
+            }),
+            generation: 3,
+            resize_sync: ResizeSyncCapability::ExplicitSync,
+        };
+
+        let authority_surface = surface.to_authority_surface(AuthorityKind::XLibrePrototype);
+        let transaction = surface.to_surface_transaction(
+            TransactionId::from_raw(12),
+            AuthorityKind::XLibrePrototype,
+            SurfaceTransactionReadiness::Ready,
+            250,
+            2,
+        );
+
+        assert_eq!(authority_surface.authority, AuthorityKind::XLibrePrototype);
+        assert_eq!(authority_surface.local_id, AuthorityLocalId::new(0x20, 1));
+        assert_eq!(transaction.authority, AuthorityKind::XLibrePrototype);
+        assert_eq!(transaction.namespace, Some(NamespaceId::from_raw(3)));
+        assert_eq!(
+            transaction.target_buffer,
+            BufferSource::CpuBuffer { handle: 9 }
+        );
+        assert_eq!(transaction.readiness, SurfaceTransactionReadiness::Ready);
+        assert_eq!(transaction.previous_committed_generation, 2);
+    }
+
+    #[test]
     fn damage_tracker_maps_damage_handles_to_windows() {
         let mut tracker = DamageTracker::default();
         let window = xid(0x20);

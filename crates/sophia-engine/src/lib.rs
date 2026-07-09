@@ -11,13 +11,14 @@ use sophia_portal::{
 };
 use sophia_protocol::{
     AttentionState, BrokerHealthPacket, BufferSource, ChromeActionKind, ChromeActionRequest,
-    ChromeDescriptor, DamageFrame, DeviceId, DisplayLabel, FrameSnapshot, IconTokenId,
-    InputEventKind, InputEventPacket, InputRoute, InputRouteOutcome, IpcCodecError, LayerSnapshot,
-    LayoutNodeSnapshot, LayoutTransaction, OutputId, Point, PortalTransferId, Rect, Region,
-    RenderCommand, RenderCommandKind, ResizeSyncCapability, SOPHIA_IPC_HEADER_LEN,
-    SOPHIA_IPC_MAX_PAYLOAD_LEN, SeatId, Size, SurfaceId, TransactionCommit, TransactionId,
-    TransactionOutcome, TrustLevel, WmRequestKind, WmRequestPacket, WmResponsePacket, WorkspaceId,
-    XLibreRoutedInputRequest, XWindowId, decode_wm_response_frame, encode_wm_request_frame,
+    ChromeDescriptor, CommittedSurfaceState, DamageFrame, DeviceId, DisplayLabel, FrameSnapshot,
+    IconTokenId, InputEventKind, InputEventPacket, InputRoute, InputRouteOutcome, IpcCodecError,
+    LayerSnapshot, LayoutNodeSnapshot, LayoutTransaction, OutputId, Point, PortalTransferId, Rect,
+    Region, RenderCommand, RenderCommandKind, ResizeSyncCapability, SOPHIA_IPC_HEADER_LEN,
+    SOPHIA_IPC_MAX_PAYLOAD_LEN, SeatId, Size, SurfaceId, SurfaceTransaction,
+    SurfaceTransactionReadiness, TransactionCommit, TransactionId, TransactionOutcome, TrustLevel,
+    WmRequestKind, WmRequestPacket, WmResponsePacket, WorkspaceId, XLibreRoutedInputRequest,
+    XWindowId, decode_wm_response_frame, encode_wm_request_frame,
 };
 use sophia_runtime::{
     RestartPolicy, SessionRuntimeCommand, SessionRuntimeLoop, SessionRuntimeObservation,
@@ -1184,6 +1185,14 @@ impl LayoutEpochState {
         self.pending_surfaces.iter().copied().collect()
     }
 
+    pub fn readiness_for_surface(&self, surface: SurfaceId) -> SurfaceTransactionReadiness {
+        if self.pending_surfaces.contains(&surface) {
+            SurfaceTransactionReadiness::Pending
+        } else {
+            SurfaceTransactionReadiness::Ready
+        }
+    }
+
     pub fn started_msec(&self) -> u64 {
         self.started_msec
     }
@@ -1274,6 +1283,15 @@ pub fn layout_epoch_for_explicit_sync(
         started_msec,
         timeout_msec,
     ))
+}
+
+pub fn surface_transaction_readiness_for_epoch(
+    surface: SurfaceId,
+    layout_epoch: Option<&LayoutEpochState>,
+) -> SurfaceTransactionReadiness {
+    layout_epoch
+        .map(|epoch| epoch.readiness_for_surface(surface))
+        .unwrap_or(SurfaceTransactionReadiness::Ready)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2353,6 +2371,146 @@ impl HeadlessEngine {
                     applied_surfaces: Vec::new(),
                 }
             }
+        }
+    }
+
+    pub fn committed_state_from_layer(&self, layer: &LayerSnapshot) -> CommittedSurfaceState {
+        CommittedSurfaceState::from_layer_snapshot(layer)
+    }
+
+    #[instrument(skip_all, fields(
+        transaction = transaction.raw(),
+        transaction_count = transactions.len(),
+        committed_count = committed.len()
+    ))]
+    pub fn commit_surface_transactions(
+        &self,
+        transaction: TransactionId,
+        transactions: &[SurfaceTransaction],
+        committed: &mut Vec<CommittedSurfaceState>,
+    ) -> TransactionCommit {
+        let applied_surfaces = transactions
+            .iter()
+            .map(|surface_transaction| surface_transaction.surface)
+            .collect::<Vec<_>>();
+
+        let indexes = committed
+            .iter()
+            .enumerate()
+            .map(|(index, state)| (state.surface, index))
+            .collect::<BTreeMap<_, _>>();
+
+        for surface_transaction in transactions {
+            if surface_transaction.transaction != transaction {
+                warn!(
+                    expected_transaction = transaction.raw(),
+                    actual_transaction = surface_transaction.transaction.raw(),
+                    "rejected authority transaction batch with mismatched transaction ID"
+                );
+                return TransactionCommit {
+                    transaction,
+                    outcome: TransactionOutcome::RejectedStaleSurface,
+                    applied_surfaces: Vec::new(),
+                };
+            }
+
+            if !surface_transaction.surface.is_valid() {
+                warn!(
+                    transaction = transaction.raw(),
+                    "rejected authority transaction with invalid surface"
+                );
+                return TransactionCommit {
+                    transaction,
+                    outcome: TransactionOutcome::RejectedInvalidSurface,
+                    applied_surfaces: Vec::new(),
+                };
+            }
+
+            match surface_transaction.readiness {
+                SurfaceTransactionReadiness::Ready => {}
+                SurfaceTransactionReadiness::Pending | SurfaceTransactionReadiness::TimedOut => {
+                    warn!(
+                        transaction = transaction.raw(),
+                        surface_index = surface_transaction.surface.index(),
+                        readiness = ?surface_transaction.readiness,
+                        "preserving committed surface state because authority transaction is not ready"
+                    );
+                    return TransactionCommit {
+                        transaction,
+                        outcome: TransactionOutcome::TimedOut,
+                        applied_surfaces: Vec::new(),
+                    };
+                }
+                SurfaceTransactionReadiness::Failed => {
+                    warn!(
+                        transaction = transaction.raw(),
+                        surface_index = surface_transaction.surface.index(),
+                        "rejected failed authority transaction"
+                    );
+                    return TransactionCommit {
+                        transaction,
+                        outcome: TransactionOutcome::RejectedStaleSurface,
+                        applied_surfaces: Vec::new(),
+                    };
+                }
+            }
+
+            let current_generation = indexes
+                .get(&surface_transaction.surface)
+                .map(|index| committed[*index].committed_generation)
+                .unwrap_or(0);
+
+            if current_generation != surface_transaction.previous_committed_generation {
+                warn!(
+                    transaction = transaction.raw(),
+                    surface_index = surface_transaction.surface.index(),
+                    current_generation,
+                    previous_committed_generation =
+                        surface_transaction.previous_committed_generation,
+                    "rejected stale authority transaction"
+                );
+                return TransactionCommit {
+                    transaction,
+                    outcome: TransactionOutcome::RejectedStaleSurface,
+                    applied_surfaces: Vec::new(),
+                };
+            }
+        }
+
+        let mut next_committed = committed.clone();
+        for surface_transaction in transactions {
+            let next_state = CommittedSurfaceState {
+                surface: surface_transaction.surface,
+                committed_generation: surface_transaction
+                    .previous_committed_generation
+                    .saturating_add(1),
+                geometry: surface_transaction.target_geometry,
+                buffer: surface_transaction.target_buffer,
+                damage: surface_transaction.damage.clone(),
+            };
+
+            if let Some(index) = next_committed
+                .iter()
+                .position(|state| state.surface == surface_transaction.surface)
+            {
+                next_committed[index] = next_state;
+            } else {
+                next_committed.push(next_state);
+            }
+        }
+
+        *committed = next_committed;
+        debug!(
+            transaction = transaction.raw(),
+            applied_surfaces = applied_surfaces.len(),
+            outcome = ?TransactionOutcome::Committed,
+            "committed authority surface transactions"
+        );
+
+        TransactionCommit {
+            transaction,
+            outcome: TransactionOutcome::Committed,
+            applied_surfaces,
         }
     }
 
