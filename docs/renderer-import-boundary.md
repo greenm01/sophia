@@ -89,9 +89,9 @@ device and create renderer-private allocation context. That probe must be gated
 behind an optional crate feature and must not be required for the default
 workspace test suite.
 
-The initial `gbm-probe` feature is dependency-free scaffolding. It exposes only
-fake GBM capability probes, so the feature path can be tested before a real GBM
-crate is admitted.
+The initial `gbm-probe` feature admits only the safe `gbm` crate and keeps it
+behind an optional feature. It exposes fake probes for deterministic default
+coverage and native reduced probes for feature-enabled validation.
 
 The GBM probe API uses a backend-provided reduced render-device token. It does
 not accept a public device path, and it does not expose borrowed file descriptors
@@ -101,8 +101,9 @@ capability health. This keeps raw kernel authority out of engine state, WM IPC,
 portals, and protocol authorities.
 
 The feature-enabled local validation command is documented in
-`docs/validation.md`. Real GBM admission is deferred until that validation path
-is part of the expected check set.
+`docs/validation.md`. The GBM crate is admitted only through that path. Real
+device probing remains deferred until backend-live can hand renderer-live
+backend-owned device authority without exposing fds through public Sophia data.
 
 Admission tests for the first real dependency must prove:
 
@@ -118,9 +119,14 @@ translates from reduced Sophia tokens into reduced capability health. This keeps
 crate-specific handles, error types, lifetime rules, and unsafe requirements
 contained inside renderer-live.
 
-The adapter module may later own:
+The adapter module owns:
 
 - native GBM crate imports behind the `gbm-probe` feature;
+- fake GBM capability probes for deterministic default-style coverage;
+- reduced native GBM capability probes for feature-enabled validation.
+
+The adapter module may later own:
+
 - conversion from backend-owned device authority into renderer-private probe
   context;
 - reduced degraded-health mapping for missing devices, unsupported GBM
@@ -136,27 +142,28 @@ It must not export:
 
 ## Candidate Dependency
 
-The first candidate is the safe `gbm` crate, currently documented as `gbm`
+The first admitted candidate is the safe `gbm` crate, currently documented as `gbm`
 0.18.0 on docs.rs. It wraps `libgbm`, documents itself as safe GBM bindings, and
 depends on `gbm-sys`. Its optional `drm-support` feature is useful later, but
 the first Sophia probe should not require it. The initial probe only needs to
-prove that renderer-live can translate a reduced render-device token into
-reduced GBM capability health.
+prove that renderer-live can compile the native GBM boundary and translate a
+reduced render-device token into reduced GBM capability health. Opening real GBM
+devices is the next step.
 
 `gbm-sys` is not the first choice. It exposes raw FFI functions and low-level GBM
 types directly. Keep it as a fallback only if the safe `gbm` crate cannot support
 the narrow capability probe without pulling in broader rendering or DRM policy.
 
-Admission notes before adding `gbm`:
+Admission notes for the admitted `gbm` dependency:
 
-- add it only as an optional dependency under the existing `gbm-probe` feature;
+- keep it only as an optional dependency under the existing `gbm-probe` feature;
 - keep `default = []`;
 - keep all native GBM calls inside a private adapter module;
 - map native errors to reduced degraded health;
 - keep the fake probe tests as the default path;
 - run `cargo test --workspace --offline` without feature flags;
 - run `cargo test --offline -p sophia-renderer-live --features gbm-probe`
-  separately after the dependency is cached locally.
+  separately for native probe changes.
 
 ## Failure Shape
 

@@ -9,13 +9,14 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Add the optional `gbm` dependency only after confirming the local system
-  has the needed `libgbm` development files.
-- [ ] Keep the native GBM adapter private and preserve fake default tests.
+- [ ] Teach the private native GBM probe to consume backend-owned device
+  authority without exposing raw fds through public Sophia data.
+- [ ] Map real native GBM probe failures to reduced degraded renderer health.
 
 **Next**
-- [ ] Add the private adapter module with fake/native split under `gbm-probe`.
-- [ ] Map native GBM probe errors to reduced degraded renderer health.
+- [ ] Wire backend-live render-device discovery into the reduced GBM probe path.
+- [ ] Keep CPU fallback startup as the default when GBM probing is absent,
+  unavailable, or degraded.
 
 ---
 
@@ -153,6 +154,10 @@ evidence belong in `docs/research-log.md`.
 - [x] Evaluate concrete GBM crate options and choose the safe `gbm` crate as the
   first candidate, keeping `gbm-sys` as a fallback only.
 - [x] Add dependency-admission notes for the selected GBM crate before adding it.
+- [x] Confirm local `libgbm` development visibility through `pkg-config`.
+- [x] Add the optional `gbm` dependency under `gbm-probe` with default features
+  disabled.
+- [x] Add the private adapter module with fake/native split under `gbm-probe`.
 
 ---
 

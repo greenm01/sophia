@@ -8,6 +8,12 @@
 pub use sophia_engine::BufferImportPath;
 pub use sophia_protocol::BufferSource;
 
+#[cfg(feature = "gbm-probe")]
+mod gbm_probe;
+
+#[cfg(feature = "gbm-probe")]
+pub use gbm_probe::{FakeGbmCapabilityProbe, GbmRenderDeviceToken, NativeGbmCapabilityProbe};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LiveRendererImportBoundary {
     pub import_xpixmap: bool,
@@ -149,43 +155,6 @@ impl FakeLiveRendererCapabilityProbe {
 
     pub fn startup_status(self) -> LiveRendererImportStartupStatus {
         LiveRendererImportStartupStatus::from_path_statuses(self.xpixmap, self.dmabuf)
-    }
-}
-
-#[cfg(feature = "gbm-probe")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct GbmRenderDeviceToken {
-    pub raw: u64,
-}
-
-#[cfg(feature = "gbm-probe")]
-impl GbmRenderDeviceToken {
-    pub const fn from_raw(raw: u64) -> Option<Self> {
-        if raw == 0 { None } else { Some(Self { raw }) }
-    }
-}
-
-#[cfg(feature = "gbm-probe")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct FakeGbmCapabilityProbe {
-    pub device: Option<GbmRenderDeviceToken>,
-}
-
-#[cfg(feature = "gbm-probe")]
-impl FakeGbmCapabilityProbe {
-    pub const fn new(device: Option<GbmRenderDeviceToken>) -> Self {
-        Self { device }
-    }
-
-    pub fn startup_status(self) -> LiveRendererImportStartupStatus {
-        LiveRendererImportStartupStatus::from_path_statuses(
-            LiveRendererImportPathStatus::Disabled,
-            if self.device.is_some() {
-                LiveRendererImportPathStatus::Enabled
-            } else {
-                LiveRendererImportPathStatus::Degraded
-            },
-        )
     }
 }
 

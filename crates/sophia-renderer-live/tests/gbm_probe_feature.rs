@@ -2,7 +2,7 @@
 
 use sophia_renderer_live::{
     FakeGbmCapabilityProbe, GbmRenderDeviceToken, LiveRendererImportHealth,
-    LiveRendererImportPathStatus, LiveRendererImportStartupStatus,
+    LiveRendererImportPathStatus, LiveRendererImportStartupStatus, NativeGbmCapabilityProbe,
 };
 
 #[test]
@@ -34,6 +34,30 @@ fn fake_gbm_probe_reports_degraded_health_when_unavailable() {
             health: LiveRendererImportHealth::Degraded,
             xpixmap: LiveRendererImportPathStatus::Disabled,
             dmabuf: LiveRendererImportPathStatus::Degraded,
+        }
+    );
+}
+
+#[test]
+fn native_gbm_probe_maps_missing_reduced_device_to_degraded_health() {
+    assert_eq!(
+        NativeGbmCapabilityProbe::new(None).startup_status(),
+        LiveRendererImportStartupStatus {
+            health: LiveRendererImportHealth::Degraded,
+            xpixmap: LiveRendererImportPathStatus::Disabled,
+            dmabuf: LiveRendererImportPathStatus::Degraded,
+        }
+    );
+}
+
+#[test]
+fn native_gbm_probe_stays_reduced_at_public_boundary() {
+    assert_eq!(
+        NativeGbmCapabilityProbe::new(GbmRenderDeviceToken::from_raw(42)).startup_status(),
+        LiveRendererImportStartupStatus {
+            health: LiveRendererImportHealth::NativeImportCapable,
+            xpixmap: LiveRendererImportPathStatus::Disabled,
+            dmabuf: LiveRendererImportPathStatus::Enabled,
         }
     );
 }

@@ -7,12 +7,13 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+gbm = { version = "0.18.0", optional = true, default-features = false }
 sophia-engine = { path = "../sophia-engine" }
 sophia-protocol = { path = "../sophia-protocol" }
 
 [features]
 default = []
-gbm-probe = []
+gbm-probe = ["dep:gbm"]
 
 [lints]
 workspace = true
