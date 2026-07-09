@@ -14,6 +14,7 @@ sophia-protocol = { path = "../sophia-protocol" }
 [features]
 default = []
 gbm-probe = ["dep:gbm"]
+egl-probe = []
 
 [lints]
 workspace = true

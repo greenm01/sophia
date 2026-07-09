@@ -61,12 +61,16 @@ device rejection and private allocation failure, but those reports remain
 reduced. They do not expose native driver text, device paths, file descriptors,
 or GBM handles.
 
+EGL/OpenGL is the first compositor drawing API above the GBM platform boundary.
+The initial `egl-probe` feature is dependency-free and models only reduced
+platform/context startup status. A real EGL binding must not be admitted until
+those reduced records and backend projections are documented and tested.
+
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
 authority. On Linux, wgpu will usually target Vulkan, but Sophia must first prove
-render-device authority, GBM allocation, reduced startup health, atomic
-presentation, and buffer import before admitting that higher-level renderer
-dependency.
+GBM/EGL startup, drawing, presentation, and buffer import before admitting that
+higher-level renderer dependency.
 
 Phase 4 is the shared-memory import boundary. Real MIT-SHM mapping stays
 deferred until mapped bytes can pass through a bounded renderer upload path with

@@ -201,6 +201,31 @@ Admission notes for the admitted `gbm` dependency:
 - run `cargo test --offline -p sophia-backend-live --features gbm-probe`
   separately for backend-owned device discovery changes.
 
+## EGL Context Boundary
+
+EGL/OpenGL is Sophia's first compositor drawing API above the GBM platform
+boundary. GBM remains responsible for render-device authority and allocation
+capability; EGL is only the context/drawing layer that sits on top of a proven
+platform.
+
+The first `egl-probe` feature is intentionally dependency-free. It adds fake
+reduced records for platform readiness and context readiness, then projects
+those records through backend-live as reduced startup status. This locks the API
+shape before Sophia admits a native EGL binding.
+
+The EGL probe boundary must not expose:
+
+- EGL displays, contexts, configs, or surfaces;
+- GBM devices, buffers, handles, paths, or file descriptors;
+- native driver error text;
+- renderer-private allocation objects.
+
+When both `gbm-probe` and `egl-probe` are enabled, backend-live may project a
+reduced GBM startup report into EGL platform status. Degraded GBM startup maps
+to degraded EGL platform status; it must not become native drawing capability.
+wgpu remains deferred until GBM/EGL startup, drawing, and presentation seams are
+proven.
+
 ## Failure Shape
 
 Unsupported import paths fail closed as reduced decisions. They do not panic, do

@@ -8,8 +8,16 @@
 pub use sophia_engine::BufferImportPath;
 pub use sophia_protocol::BufferSource;
 
+#[cfg(feature = "egl-probe")]
+mod egl_probe;
 #[cfg(feature = "gbm-probe")]
 mod gbm_probe;
+
+#[cfg(feature = "egl-probe")]
+pub use egl_probe::{
+    EglCapabilityProbeReport, EglCapabilityProbeStatus, EglContextProbeStatus, EglPlatformStatus,
+    FakeEglCapabilityProbe,
+};
 
 #[cfg(feature = "gbm-probe")]
 pub use gbm_probe::{

@@ -14,6 +14,7 @@ sophia-renderer-live = { path = "../sophia-renderer-live" }
 [features]
 default = []
 gbm-probe = ["sophia-renderer-live/gbm-probe"]
+egl-probe = ["sophia-renderer-live/egl-probe"]
 
 [lints]
 workspace = true

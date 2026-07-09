@@ -23,6 +23,10 @@ use sophia_engine::{
 pub use sophia_protocol::{BufferSource, DeviceId, OutputId, SeatId, Size};
 #[cfg(feature = "gbm-probe")]
 use sophia_renderer_live::GbmCapabilityProbeStatus;
+#[cfg(feature = "egl-probe")]
+use sophia_renderer_live::{EglCapabilityProbeStatus, FakeEglCapabilityProbe};
+#[cfg(feature = "egl-probe")]
+pub use sophia_renderer_live::{EglContextProbeStatus, EglPlatformStatus};
 #[cfg(feature = "gbm-probe")]
 pub use sophia_renderer_live::{GbmCapabilityProbeReport, NativeGbmCapabilityProbe};
 pub use sophia_renderer_live::{
@@ -175,6 +179,28 @@ impl LiveBackendStartupReport {
 
     pub fn renderer_import_status(&self) -> LiveRendererImportStartupStatus {
         self.renderer_import.startup_status()
+    }
+
+    #[cfg(feature = "egl-probe")]
+    pub fn egl_probe_report(
+        &self,
+        platform: EglPlatformStatus,
+        context: EglContextProbeStatus,
+    ) -> LiveEglStartupReport {
+        LiveEglStartupReport::from_probe_status(
+            FakeEglCapabilityProbe::new(platform, context)
+                .probe_report()
+                .status,
+        )
+    }
+
+    #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
+    pub fn egl_probe_report_from_gbm_startup(
+        &self,
+        gpu_startup: LiveGpuStartupReport,
+        context: EglContextProbeStatus,
+    ) -> LiveEglStartupReport {
+        self.egl_probe_report(EglPlatformStatus::from(gpu_startup.status), context)
     }
 
     #[cfg(feature = "gbm-probe")]
@@ -429,6 +455,59 @@ pub enum LiveGpuStartupStatus {
     RenderDeviceUnavailable,
     GbmDeviceRejected,
     PrivateAllocationUnavailable,
+}
+
+#[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
+impl From<LiveGpuStartupStatus> for EglPlatformStatus {
+    fn from(status: LiveGpuStartupStatus) -> Self {
+        match status {
+            LiveGpuStartupStatus::NativeCapable => EglPlatformStatus::NativePlatformCapable,
+            LiveGpuStartupStatus::NotRequested | LiveGpuStartupStatus::RenderDeviceUnavailable => {
+                EglPlatformStatus::PlatformUnavailable
+            }
+            LiveGpuStartupStatus::GbmDeviceRejected
+            | LiveGpuStartupStatus::PrivateAllocationUnavailable => {
+                EglPlatformStatus::PlatformDegraded
+            }
+        }
+    }
+}
+
+#[cfg(feature = "egl-probe")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveEglStartupReport {
+    pub status: LiveEglStartupStatus,
+}
+
+#[cfg(feature = "egl-probe")]
+impl LiveEglStartupReport {
+    fn from_probe_status(status: EglCapabilityProbeStatus) -> Self {
+        Self {
+            status: match status {
+                EglCapabilityProbeStatus::NativeDrawingCapable => {
+                    LiveEglStartupStatus::NativeDrawingCapable
+                }
+                EglCapabilityProbeStatus::PlatformUnavailable => {
+                    LiveEglStartupStatus::PlatformUnavailable
+                }
+                EglCapabilityProbeStatus::PlatformDegraded => {
+                    LiveEglStartupStatus::PlatformDegraded
+                }
+                EglCapabilityProbeStatus::ContextUnavailable => {
+                    LiveEglStartupStatus::ContextUnavailable
+                }
+            },
+        }
+    }
+}
+
+#[cfg(feature = "egl-probe")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveEglStartupStatus {
+    NativeDrawingCapable,
+    PlatformUnavailable,
+    PlatformDegraded,
+    ContextUnavailable,
 }
 
 pub struct LiveBackendRuntimeAssembly {

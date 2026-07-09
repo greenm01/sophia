@@ -9,11 +9,13 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Decide when to introduce EGL or wgpu above the GBM platform boundary.
+- [ ] Evaluate concrete EGL binding options for a native context probe.
+- [ ] Add dependency-admission notes before admitting a real EGL crate.
 
 **Next**
-- [ ] Choose whether the first compositor drawing API above GBM is EGL/OpenGL,
-  raw Vulkan, or wgpu.
+- [ ] Add a real EGL context probe behind the `egl-probe` feature.
+- [ ] Keep wgpu deferred until GBM/EGL startup, drawing, and presentation seams
+  are proven.
 
 ---
 
@@ -183,6 +185,10 @@ evidence belong in `docs/research-log.md`.
   without leaking native error text.
 - [x] Add opt-in backend-owned fd injection smoke coverage around a real render
   device when the host test environment exposes one.
+- [x] Decide EGL/OpenGL is the first compositor drawing API above GBM; raw
+  Vulkan and wgpu remain deferred.
+- [x] Add `egl-probe` feature scaffolding without admitting a native EGL crate.
+- [x] Add fake reduced EGL capability records and backend startup projection.
 
 ---
 
