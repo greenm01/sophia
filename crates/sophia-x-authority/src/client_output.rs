@@ -1,5 +1,6 @@
 use crate::{
     X_ATOM_NONE, XAuthorityRuntimeError, XByteOrder, XResourceId, XTimestamp, XWireParseError,
+    padded_len,
 };
 
 pub const X_CLIENT_OUTPUT_RECORD_LEN: usize = 32;
@@ -83,19 +84,54 @@ pub enum XClientEvent {
     },
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum XClientReply {
+    InternAtom { sequence: u16, atom: u32 },
+    GetAtomName { sequence: u16, name: String },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum XClientOutput {
     Error(XClientError),
     Event(XClientEvent),
+    Reply(XClientReply),
 }
 
-pub fn encode_x_client_output(
-    byte_order: XByteOrder,
-    output: XClientOutput,
-) -> [u8; X_CLIENT_OUTPUT_RECORD_LEN] {
+pub fn encode_x_client_output(byte_order: XByteOrder, output: XClientOutput) -> Vec<u8> {
     match output {
-        XClientOutput::Error(error) => encode_x_client_error(byte_order, error),
-        XClientOutput::Event(event) => encode_x_client_event(byte_order, event),
+        XClientOutput::Error(error) => encode_x_client_error(byte_order, error).to_vec(),
+        XClientOutput::Event(event) => encode_x_client_event(byte_order, event).to_vec(),
+        XClientOutput::Reply(reply) => encode_x_client_reply(byte_order, reply),
+    }
+}
+
+pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec<u8> {
+    match reply {
+        XClientReply::InternAtom { sequence, atom } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            put_u32(byte_order, &mut out[8..12], atom);
+            out
+        }
+        XClientReply::GetAtomName { sequence, name } => {
+            let bytes = name.as_bytes();
+            let padded_name_len = padded_len(bytes.len());
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN + padded_name_len];
+            write_reply_header(
+                byte_order,
+                &mut out[..X_CLIENT_OUTPUT_RECORD_LEN],
+                sequence,
+                u32::try_from(padded_name_len / 4).unwrap_or(0),
+            );
+            put_u16(
+                byte_order,
+                &mut out[8..10],
+                u16::try_from(bytes.len()).unwrap_or(0),
+            );
+            out[X_CLIENT_OUTPUT_RECORD_LEN..X_CLIENT_OUTPUT_RECORD_LEN + bytes.len()]
+                .copy_from_slice(bytes);
+            out
+        }
     }
 }
 
@@ -269,6 +305,12 @@ fn write_event_header(
     out[0] = event_type;
     out[1] = detail;
     put_u16(byte_order, &mut out[2..4], sequence);
+}
+
+fn write_reply_header(byte_order: XByteOrder, out: &mut [u8], sequence: u16, length_units: u32) {
+    out[0] = 1;
+    put_u16(byte_order, &mut out[2..4], sequence);
+    put_u32(byte_order, &mut out[4..8], length_units);
 }
 
 fn put_resource(byte_order: XByteOrder, out: &mut [u8], resource: XResourceId) {

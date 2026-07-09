@@ -3,6 +3,7 @@
 //! This crate intentionally starts without a live socket parser. It models the
 //! authority-owned tables that later X protocol dispatch will mutate.
 
+mod atom;
 mod client_output;
 mod clipboard;
 mod codec;
@@ -20,6 +21,7 @@ mod window;
 mod wire;
 mod x11_socket;
 
+pub use atom::*;
 pub use client_output::*;
 pub use clipboard::*;
 pub use codec::*;

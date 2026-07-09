@@ -303,6 +303,175 @@ fn x11_property_table_appends_and_rejects_type_mismatch() {
 }
 
 #[test]
+fn x11_atom_table_resolves_predefined_and_dynamic_names() {
+    let mut atoms = XAtomTable::new();
+
+    assert_eq!(atoms.atom(X_ATOM_NAME_WM_CLASS), Some(X_ATOM_WM_CLASS));
+    assert_eq!(atoms.name(X_ATOM_WM_NAME), Some(X_ATOM_NAME_WM_NAME));
+
+    let net_wm_name = atoms.intern(X_ATOM_NAME_NET_WM_NAME, false).unwrap();
+    assert!(net_wm_name.is_some());
+    assert_eq!(
+        atoms.intern(X_ATOM_NAME_NET_WM_NAME, true).unwrap(),
+        net_wm_name
+    );
+    assert_eq!(atoms.intern("SOPHIA_UNKNOWN", true).unwrap(), None);
+    assert!(atoms.intern("", false).is_err());
+}
+
+#[test]
+fn x11_core_decoder_captures_atom_requests() {
+    let namespace = NamespaceId::from_raw(45);
+    let intern = decode_x11_core_request(
+        context(namespace, 506, XByteOrder::LittleEndian),
+        &intern_atom_request(XByteOrder::LittleEndian, false, X_ATOM_NAME_NET_WM_NAME),
+    )
+    .unwrap();
+    assert_eq!(
+        intern,
+        XWireRequest::InternAtom {
+            only_if_exists: false,
+            name: X_ATOM_NAME_NET_WM_NAME.to_owned(),
+        }
+    );
+
+    let get_name = decode_x11_core_request(
+        context(namespace, 507, XByteOrder::BigEndian),
+        &get_atom_name_request(XByteOrder::BigEndian, X_ATOM_WM_CLASS),
+    )
+    .unwrap();
+    assert_eq!(
+        get_name,
+        XWireRequest::GetAtomName {
+            atom: X_ATOM_WM_CLASS
+        }
+    );
+}
+
+#[test]
+fn x11_dispatch_replies_to_atom_requests_and_rejects_unknown_names() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+
+    let intern = decode_x11_core_request(
+        context(namespace, 508, XByteOrder::LittleEndian),
+        &intern_atom_request(XByteOrder::LittleEndian, false, X_ATOM_NAME_NET_WM_NAME),
+    )
+    .unwrap();
+    let intern = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 16),
+        intern,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = intern.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded.len(), 1);
+    assert_eq!(encoded[0][0], 1);
+    let net_wm_name = read_u32(XByteOrder::LittleEndian, &encoded[0][8..12]);
+    assert_ne!(net_wm_name, 0);
+
+    let missing = decode_x11_core_request(
+        context(namespace, 509, XByteOrder::LittleEndian),
+        &intern_atom_request(XByteOrder::LittleEndian, true, "SOPHIA_MISSING"),
+    )
+    .unwrap();
+    let missing = dispatch_x11_wire_request(
+        dispatch_context(namespace, 2, XByteOrder::LittleEndian, 16),
+        missing,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = missing.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][8..12]), 0);
+
+    let get_name = decode_x11_core_request(
+        context(namespace, 510, XByteOrder::LittleEndian),
+        &get_atom_name_request(XByteOrder::LittleEndian, net_wm_name),
+    )
+    .unwrap();
+    let get_name = dispatch_x11_wire_request(
+        dispatch_context(namespace, 3, XByteOrder::LittleEndian, 17),
+        get_name,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = get_name.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][8..10]), 12);
+    assert_eq!(&encoded[0][32..44], X_ATOM_NAME_NET_WM_NAME.as_bytes());
+
+    let unknown = decode_x11_core_request(
+        context(namespace, 511, XByteOrder::LittleEndian),
+        &get_atom_name_request(XByteOrder::LittleEndian, 0x00ff_ffff),
+    )
+    .unwrap();
+    let unknown = dispatch_x11_wire_request(
+        dispatch_context(namespace, 4, XByteOrder::LittleEndian, 17),
+        unknown,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = unknown.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][0], 0);
+    assert_eq!(encoded[0][1], XErrorCode::BadAtom.wire_code());
+}
+
+#[test]
+fn x11_property_records_emit_metadata_candidates_without_raw_payloads() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let utf8 = atoms
+        .intern(X_ATOM_NAME_UTF8_STRING, false)
+        .unwrap()
+        .unwrap();
+    let net_wm_name = atoms
+        .intern(X_ATOM_NAME_NET_WM_NAME, false)
+        .unwrap()
+        .unwrap();
+    let window = 0x220006;
+    let decoded = decode_x11_core_request(
+        context(namespace, 512, XByteOrder::LittleEndian),
+        &change_property_request(
+            XByteOrder::LittleEndian,
+            XPropertyMode::Replace,
+            window,
+            net_wm_name,
+            utf8,
+            8,
+            b"Secret Terminal Title",
+        ),
+    )
+    .unwrap();
+
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 5, XByteOrder::LittleEndian, 18),
+        decoded,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    assert_eq!(result.outputs.len(), 1);
+    assert_eq!(result.metadata_candidates.len(), 1);
+    let candidate = &result.metadata_candidates[0];
+    assert_eq!(candidate.namespace, namespace);
+    assert_eq!(candidate.window, XResourceId::new(u64::from(window), 1));
+    assert_eq!(candidate.property_name, X_ATOM_NAME_NET_WM_NAME);
+    assert_eq!(
+        candidate.property_type_name.as_deref(),
+        Some(X_ATOM_NAME_UTF8_STRING)
+    );
+    assert_eq!(candidate.byte_len, b"Secret Terminal Title".len());
+}
+
+#[test]
 fn x11_core_decoder_rejects_bad_lengths_and_unknown_opcodes() {
     assert_eq!(
         decode_x11_core_request(
@@ -409,6 +578,7 @@ fn x11_client_error_encoder_and_parse_mapping_use_core_error_shape() {
 fn x11_dispatch_emits_configure_map_property_and_selection_failure_outputs() {
     let namespace = NamespaceId::from_raw(46);
     let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
     let mut properties = XPropertyTable::new();
 
     let create = decode_x11_core_request(
@@ -420,11 +590,12 @@ fn x11_dispatch_emits_configure_map_property_and_selection_failure_outputs() {
         dispatch_context(namespace, 1, XByteOrder::LittleEndian, 1),
         create,
         &mut runtime,
+        &mut atoms,
         &mut properties,
     );
     assert_eq!(create.outputs.len(), 1);
     assert_eq!(
-        encode_x_client_output(XByteOrder::LittleEndian, create.outputs[0])[0],
+        encode_x_client_output(XByteOrder::LittleEndian, create.outputs[0].clone())[0],
         22
     );
 
@@ -437,11 +608,12 @@ fn x11_dispatch_emits_configure_map_property_and_selection_failure_outputs() {
         dispatch_context(namespace, 2, XByteOrder::LittleEndian, 8),
         map,
         &mut runtime,
+        &mut atoms,
         &mut properties,
     );
     assert_eq!(map.outputs.len(), 1);
     assert_eq!(
-        encode_x_client_output(XByteOrder::LittleEndian, map.outputs[0])[0],
+        encode_x_client_output(XByteOrder::LittleEndian, map.outputs[0].clone())[0],
         19
     );
 
@@ -462,11 +634,12 @@ fn x11_dispatch_emits_configure_map_property_and_selection_failure_outputs() {
         dispatch_context(namespace, 3, XByteOrder::LittleEndian, 18),
         property,
         &mut runtime,
+        &mut atoms,
         &mut properties,
     );
     assert_eq!(property.outputs.len(), 1);
     assert_eq!(
-        encode_x_client_output(XByteOrder::LittleEndian, property.outputs[0])[0],
+        encode_x_client_output(XByteOrder::LittleEndian, property.outputs[0].clone())[0],
         28
     );
 
@@ -479,10 +652,11 @@ fn x11_dispatch_emits_configure_map_property_and_selection_failure_outputs() {
         dispatch_context(namespace, 4, XByteOrder::LittleEndian, 24),
         selection,
         &mut runtime,
+        &mut atoms,
         &mut properties,
     );
     assert_eq!(selection.outputs.len(), 1);
-    let encoded = encode_x_client_output(XByteOrder::LittleEndian, selection.outputs[0]);
+    let encoded = encode_x_client_output(XByteOrder::LittleEndian, selection.outputs[0].clone());
     assert_eq!(encoded[0], 31);
     assert_eq!(
         read_u32(XByteOrder::LittleEndian, &encoded[20..24]),
@@ -665,6 +839,24 @@ fn resource_request(byte_order: XByteOrder, opcode: u8, id: u32) -> Vec<u8> {
     let mut out = vec![opcode, 0];
     push_u16(&mut out, byte_order, 2);
     push_u32(&mut out, byte_order, id);
+    out
+}
+
+fn intern_atom_request(byte_order: XByteOrder, only_if_exists: bool, name: &str) -> Vec<u8> {
+    let mut out = vec![16, u8::from(only_if_exists)];
+    let len_units = (8 + padded_len_for_test(name.len())) / 4;
+    push_u16(&mut out, byte_order, len_units as u16);
+    push_u16(&mut out, byte_order, name.len() as u16);
+    push_u16(&mut out, byte_order, 0);
+    out.extend_from_slice(name.as_bytes());
+    pad_to_four(&mut out);
+    out
+}
+
+fn get_atom_name_request(byte_order: XByteOrder, atom: u32) -> Vec<u8> {
+    let mut out = vec![17, 0];
+    push_u16(&mut out, byte_order, 2);
+    push_u32(&mut out, byte_order, atom);
     out
 }
 

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use sophia_protocol::NamespaceId;
 
-use crate::{XAtom, XResourceId};
+use crate::{XAtom, XAtomTable, XResourceId, is_metadata_candidate_name};
 
 pub const X_PROPERTY_MAX_VALUE_BYTES: usize = 64 * 1024;
 
@@ -35,12 +35,48 @@ pub struct XPropertyRecord {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct XMetadataPropertyCandidate {
+    pub namespace: NamespaceId,
+    pub window: XResourceId,
+    pub property: XAtom,
+    pub property_name: String,
+    pub property_type: XAtom,
+    pub property_type_name: Option<String>,
+    pub format: u8,
+    pub byte_len: usize,
+    pub generation: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum XPropertyError {
     InvalidNamespace,
     InvalidWindow,
     InvalidFormat(u8),
     ValueTooLarge { len: usize, max: usize },
     TypeMismatch,
+}
+
+pub fn metadata_property_candidate(
+    record: &XPropertyRecord,
+    atoms: &XAtomTable,
+) -> Option<XMetadataPropertyCandidate> {
+    let property_name = atoms.name(record.property)?;
+    if !is_metadata_candidate_name(property_name) {
+        return None;
+    }
+    Some(XMetadataPropertyCandidate {
+        namespace: record.namespace,
+        window: record.window,
+        property: record.property,
+        property_name: property_name.to_owned(),
+        property_type: record.property_type,
+        property_type_name: atoms
+            .name(record.property_type)
+            .map(std::borrow::ToOwned::to_owned),
+        format: record.format,
+        byte_len: record.bytes.len(),
+        generation: record.generation,
+    })
 }
 
 impl core::fmt::Display for XPropertyError {

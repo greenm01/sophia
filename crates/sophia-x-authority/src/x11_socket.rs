@@ -8,9 +8,9 @@ use std::{
 
 #[cfg(unix)]
 use crate::{
-    X_SETUP_CLIENT_PREFIX_LEN, X_SETUP_MAX_AUTH_FIELD_LEN, XAuthorityRuntime, XDispatchContext,
-    XPropertyTable, XSetupRequest, XSetupSuccess, XWireClientContext, decode_x11_core_request,
-    dispatch_x11_parse_error, dispatch_x11_wire_request, encode_x_client_output,
+    X_SETUP_CLIENT_PREFIX_LEN, X_SETUP_MAX_AUTH_FIELD_LEN, XAtomTable, XAuthorityRuntime,
+    XDispatchContext, XPropertyTable, XSetupRequest, XSetupSuccess, XWireClientContext,
+    decode_x11_core_request, dispatch_x11_parse_error, dispatch_x11_wire_request,
     encode_x11_setup_success, parse_x11_setup_request, x11_setup_request_total_len,
 };
 #[cfg(unix)]
@@ -123,6 +123,7 @@ pub fn serve_x11_core_socket_client(
 ) -> Result<(), X11SetupSocketError> {
     let setup = serve_x11_setup_socket_client(stream)?;
     let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
     let mut properties = XPropertyTable::new();
     let mut sequence = 0u16;
 
@@ -142,17 +143,19 @@ pub fn serve_x11_core_socket_client(
             },
             &request,
         ) {
-            Ok(request) => {
-                dispatch_x11_wire_request(dispatch_context, request, &mut runtime, &mut properties)
-            }
+            Ok(request) => dispatch_x11_wire_request(
+                dispatch_context,
+                request,
+                &mut runtime,
+                &mut atoms,
+                &mut properties,
+            ),
             Err(error) => dispatch_x11_parse_error(dispatch_context, error),
         };
-        for record in output.outputs {
-            stream
-                .write_all(&encode_x_client_output(setup.byte_order, record))
-                .map_err(|error| {
-                    X11SetupSocketError::new(format!("failed to write X11 output: {error}"))
-                })?;
+        for record in output.encoded_outputs(setup.byte_order) {
+            stream.write_all(&record).map_err(|error| {
+                X11SetupSocketError::new(format!("failed to write X11 output: {error}"))
+            })?;
         }
         stream.flush().map_err(|error| {
             X11SetupSocketError::new(format!("failed to flush X11 output: {error}"))

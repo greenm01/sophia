@@ -259,17 +259,26 @@ The covered setup fixtures are:
 - setup success and setup failure reply encoding.
 
 Core request parsing now starts with fixtures for `CreateWindow`, `MapWindow`,
-`ChangeProperty`, `SetSelectionOwner`, and `ConvertSelection`. Runtime-backed
-wire requests translate into existing internal `XAuthorityRequestPacket` values
-before they reach `XAuthorityRuntime`; `ChangeProperty` lands in a minimal
-namespace-keyed property table and is not metadata broker output yet.
+`InternAtom`, `GetAtomName`, `ChangeProperty`, `SetSelectionOwner`, and
+`ConvertSelection`. Runtime-backed wire requests translate into existing
+internal `XAuthorityRequestPacket` values before they reach
+`XAuthorityRuntime`; `ChangeProperty` lands in a minimal namespace-keyed
+property table.
 
-Minimal client-visible output now covers bounded X error records and 32-byte
-core events for `ConfigureNotify`, `MapNotify`, `PropertyNotify`, and
-`SelectionNotify`. The X11 socket smoke completes setup, sends synthetic
+Minimal client-visible output now covers bounded X error records, 32-byte core
+events for `ConfigureNotify`, `MapNotify`, `PropertyNotify`, and
+`SelectionNotify`, and variable-length replies for `InternAtom` and
+`GetAtomName`. The X11 socket smoke completes setup, sends synthetic
 `CreateWindow` and `MapWindow` requests, and observes the expected events.
 
-The next milestone is atom and property naming. Sophia X Authority needs enough
-`InternAtom`, `GetAtomName`, and metadata-relevant property handling for a tiny
-Xlib client to use normal ICCCM/EWMH names without leaking raw metadata to the
-WM.
+Atom naming is authority-owned and bounded. Sophia preloads the small predefined
+set needed by the prototype, allocates dynamic client-interned atoms after the
+X11 predefined range, and caps atom names at 256 bytes. Metadata-relevant
+property writes such as `WM_CLASS`, `WM_NAME`, `_NET_WM_NAME`, and
+`WM_PROTOCOLS` produce metadata broker candidates that include only namespace,
+window, atom names, type names, value length, and generation. They do not emit
+raw titles, classes, icons, paths, or namespace labels to the window manager.
+
+The next milestone is minimal `GetProperty` support so a tiny Xlib client can
+round-trip normal ICCCM/EWMH property reads through the synthetic socket before
+we move to a real-client smoke.

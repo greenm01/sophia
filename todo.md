@@ -6,26 +6,21 @@ evidence belong in `docs/research-log.md`.
 
 ---
 
-## Active Focus - Sophia X Authority: Atom And Property Names
-
-The X11 setup parser, first core request decoder, and minimal client-visible
-event/error output exist. The next architecture step is resolving numeric atoms
-into bounded authority-owned names so ICCCM/EWMH properties can feed sanitized
-metadata candidates without exposing raw metadata to the WM.
+## Active Focus - Sophia X Authority: Minimal GetProperty
 
 **Now**
-- [ ] Add bounded atom-name records for predefined atoms and client interned
-  atoms.
-- [ ] Decode `InternAtom` and `GetAtomName` enough for synthetic clients.
-- [ ] Tie `ChangeProperty` records to atom names for ICCCM/EWMH candidates such
-  as `WM_CLASS`, `WM_NAME`, `_NET_WM_NAME`, and `WM_PROTOCOLS`.
-- [ ] Keep metadata broker output sanitized and separate from WM layout data.
+- [ ] Add minimal `GetProperty` decode and reply support for bounded
+  metadata-relevant properties.
+- [ ] Return normal X11 failure shapes for unknown windows, unknown atoms, bad
+  offsets, and oversized reads.
+- [ ] Extend the synthetic socket smoke through atom lookup, property write,
+  and property read.
+- [ ] Keep full property payloads inside the authority; metadata broker
+  candidates remain length/name/type summaries only.
 
 **Next**
 - [ ] Define the tiny Xlib real-client smoke after the synthetic request/reply
   path is green.
-- [ ] Add minimal `GetProperty` reply support for bounded metadata-relevant
-  properties.
 - [ ] Start a first real Xlib smoke with setup, atom lookup, create, map, and
   event observation.
 
@@ -33,7 +28,7 @@ metadata candidates without exposing raw metadata to the WM.
 
 ## Next Architecture Milestones
 
-- [ ] Expand X11 atom/property tables for ICCCM names and metadata-broker
+- [x] Expand X11 atom/property tables for ICCCM names and metadata-broker
   candidates.
 - [ ] Define the first real-client target after synthetic setup succeeds:
   likely a tiny Xlib window before GTK/Qt/browser paths.
