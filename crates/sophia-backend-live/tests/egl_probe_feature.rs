@@ -87,8 +87,10 @@ mod gbm_projection {
     use std::path::PathBuf;
 
     use sophia_backend_live::{
-        LiveGbmBackedEglPlatformReport, LiveGpuStartupReport, LiveGpuStartupStatus,
-        LiveRendererPresentationStatus, RenderDeviceDiscoveryBackend,
+        EglDrawSmokeReport, LiveGbmBackedEglPlatformReport, LiveGpuStartupReport,
+        LiveGpuStartupStatus, LiveRealGbmSmokeEvidence, LiveRealGbmSmokeEvidenceStatus,
+        LiveRendererPresentationReport, LiveRendererPresentationStatus,
+        RenderDeviceDiscoveryBackend,
     };
 
     struct ExplicitRenderDevice {
@@ -238,6 +240,41 @@ mod gbm_projection {
                 | LiveRendererPresentationStatus::Unavailable
                 | LiveRendererPresentationStatus::Degraded
         ));
+    }
+
+    #[test]
+    fn real_gbm_smoke_evidence_records_only_reduced_statuses() {
+        assert_eq!(
+            LiveRealGbmSmokeEvidence::from_reports(
+                EglDrawSmokeReport {
+                    status: EglDrawSmokeStatus::ClearColorReady,
+                },
+                LiveRendererPresentationReport {
+                    status: LiveRendererPresentationStatus::Ready,
+                },
+            ),
+            LiveRealGbmSmokeEvidence {
+                status: LiveRealGbmSmokeEvidenceStatus::Passed,
+                draw: EglDrawSmokeStatus::ClearColorReady,
+                presentation: LiveRendererPresentationStatus::Ready,
+            }
+        );
+
+        assert_eq!(
+            LiveRealGbmSmokeEvidence::from_reports(
+                EglDrawSmokeReport {
+                    status: EglDrawSmokeStatus::SurfaceUnavailable,
+                },
+                LiveRendererPresentationReport {
+                    status: LiveRendererPresentationStatus::Unavailable,
+                },
+            ),
+            LiveRealGbmSmokeEvidence {
+                status: LiveRealGbmSmokeEvidenceStatus::Failed,
+                draw: EglDrawSmokeStatus::SurfaceUnavailable,
+                presentation: LiveRendererPresentationStatus::Unavailable,
+            }
+        );
     }
 
     #[test]

@@ -348,6 +348,12 @@ is reduced to ready, output unavailable, presentation unavailable, or degraded.
 It is not a KMS page-flip result and must not contain connector IDs, CRTC IDs,
 plane IDs, framebuffer IDs, fds, paths, driver errors, or framebuffer handles.
 
+Real GBM-backed validation evidence is reduced through
+`LiveRealGbmSmokeEvidence`. It records only whether the opt-in smoke passed, the
+reduced EGL draw-smoke status, and the reduced presentation status. It does not
+store the render-node path, fd, GBM/EGL objects, driver errors, pixels, or KMS
+identity.
+
 The next reduced boundary is `LivePageFlipEvent`. It can be derived from
 scanout readiness or from the engine's `PageFlipCommitOutcome`, but it drops the
 output ID, transaction ID, surface IDs, commit payload, and all native KMS

@@ -55,6 +55,8 @@ It still exposes no render-node path, fd, GBM object, EGL object, pixel, driver
 error, or KMS identity through Sophia's public reports. The real GBM/EGL smoke
 runs the native path in a child test process so a driver crash reports as an
 opt-in validation failure instead of terminating ordinary deterministic tests.
+The stable evidence shape for that run is `LiveRealGbmSmokeEvidence`: status,
+draw status, and presentation status only.
 
 When touching renderer-native code, run both paths:
 
@@ -89,6 +91,7 @@ Before removing it, record evidence that:
   machine;
 - the GBM-backed draw smoke reaches `ClearColorReady`;
 - the offscreen presentation smoke reaches `Ready`;
+- `LiveRealGbmSmokeEvidence` records `Passed` without exposing native identity;
 - driver crashes remain isolated to child-process validation failures;
 - no public report exposes render-node paths, file descriptors, GBM/EGL objects,
   native errors, pixels, KMS framebuffer IDs, connector IDs, CRTC IDs, or plane

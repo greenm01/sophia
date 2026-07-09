@@ -15,7 +15,8 @@ evidence belong in `docs/research-log.md`.
   `DEFAULT_DISPLAY`.
 
 **Next**
-- [ ] Add a reduced real-GBM-smoke evidence record shape for validation output.
+- [ ] Add local evidence to `docs/research-log.md` after a passing
+  `SOPHIA_RUN_REAL_GBM_SMOKE=1` run.
 
 ---
 
@@ -268,6 +269,7 @@ evidence belong in `docs/research-log.md`.
 - [x] Add a reduced page-flip poller startup status for ready/no-output cases.
 - [x] Keep wgpu deferred until GBM/EGL startup, drawing, and presentation seams
   are proven.
+- [x] Add a reduced real-GBM-smoke evidence record shape for validation output.
 
 ---
 

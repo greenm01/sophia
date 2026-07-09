@@ -1641,6 +1641,42 @@ impl LiveGbmBackedEglPlatformReport {
     }
 }
 
+#[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveRealGbmSmokeEvidence {
+    pub status: LiveRealGbmSmokeEvidenceStatus,
+    pub draw: EglDrawSmokeStatus,
+    pub presentation: LiveRendererPresentationStatus,
+}
+
+#[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
+impl LiveRealGbmSmokeEvidence {
+    pub const fn from_reports(
+        draw: EglDrawSmokeReport,
+        presentation: LiveRendererPresentationReport,
+    ) -> Self {
+        let status = match (draw.status, presentation.status) {
+            (EglDrawSmokeStatus::ClearColorReady, LiveRendererPresentationStatus::Ready) => {
+                LiveRealGbmSmokeEvidenceStatus::Passed
+            }
+            _ => LiveRealGbmSmokeEvidenceStatus::Failed,
+        };
+
+        Self {
+            status,
+            draw: draw.status,
+            presentation: presentation.status,
+        }
+    }
+}
+
+#[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveRealGbmSmokeEvidenceStatus {
+    Passed,
+    Failed,
+}
+
 #[cfg(feature = "egl-probe")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LiveEglStartupReport {
