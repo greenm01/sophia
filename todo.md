@@ -9,15 +9,13 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Keep real GBM dependency optional until CI or release checks exercise both
-  default and feature-enabled paths.
-- [ ] Revisit real GBM crate admission only after selecting the concrete crate
-  and checking its offline/system dependency behavior.
+- [ ] Add the optional `gbm` dependency only after confirming the local system
+  has the needed `libgbm` development files.
+- [ ] Keep the native GBM adapter private and preserve fake default tests.
 
 **Next**
-- [ ] Add dependency-admission notes for the selected GBM crate before adding it.
-- [ ] Evaluate concrete GBM crate options and choose one only if it can remain
-  optional, feature-gated, and isolated behind the adapter.
+- [ ] Add the private adapter module with fake/native split under `gbm-probe`.
+- [ ] Map native GBM probe errors to reduced degraded renderer health.
 
 ---
 
@@ -148,6 +146,13 @@ evidence belong in `docs/research-log.md`.
   `cargo test --offline -p sophia-renderer-live --features gbm-probe`.
 - [x] Decide to isolate any concrete GBM binding behind a tiny renderer-live
   adapter module rather than exposing it directly.
+- [x] Keep real GBM dependency optional until release checks exercise both
+  default and feature-enabled paths.
+- [x] Revisit real GBM crate admission after selecting the concrete crate and
+  checking its offline/system dependency behavior.
+- [x] Evaluate concrete GBM crate options and choose the safe `gbm` crate as the
+  first candidate, keeping `gbm-sys` as a fallback only.
+- [x] Add dependency-admission notes for the selected GBM crate before adding it.
 
 ---
 

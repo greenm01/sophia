@@ -134,6 +134,30 @@ It must not export:
 - native error payloads;
 - renderer-private allocation objects.
 
+## Candidate Dependency
+
+The first candidate is the safe `gbm` crate, currently documented as `gbm`
+0.18.0 on docs.rs. It wraps `libgbm`, documents itself as safe GBM bindings, and
+depends on `gbm-sys`. Its optional `drm-support` feature is useful later, but
+the first Sophia probe should not require it. The initial probe only needs to
+prove that renderer-live can translate a reduced render-device token into
+reduced GBM capability health.
+
+`gbm-sys` is not the first choice. It exposes raw FFI functions and low-level GBM
+types directly. Keep it as a fallback only if the safe `gbm` crate cannot support
+the narrow capability probe without pulling in broader rendering or DRM policy.
+
+Admission notes before adding `gbm`:
+
+- add it only as an optional dependency under the existing `gbm-probe` feature;
+- keep `default = []`;
+- keep all native GBM calls inside a private adapter module;
+- map native errors to reduced degraded health;
+- keep the fake probe tests as the default path;
+- run `cargo test --workspace --offline` without feature flags;
+- run `cargo test --offline -p sophia-renderer-live --features gbm-probe`
+  separately after the dependency is cached locally.
+
 ## Failure Shape
 
 Unsupported import paths fail closed as reduced decisions. They do not panic, do

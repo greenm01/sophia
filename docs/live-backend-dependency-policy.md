@@ -40,6 +40,8 @@ local checks are listed in `docs/validation.md`.
 Any concrete GBM crate must be isolated behind a renderer-live adapter module;
 do not expose third-party GBM handles, errors, paths, or descriptors through
 Sophia's public data model.
+The selected first candidate is the safe `gbm` crate, with `gbm-sys` kept as a
+fallback only if the safe crate cannot support the narrow capability probe.
 
 Phase 4 is the shared-memory import boundary. Real MIT-SHM mapping stays
 deferred until mapped bytes can pass through a bounded renderer upload path with
