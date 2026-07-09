@@ -6,19 +6,21 @@ evidence belong in `docs/research-log.md`.
 
 ---
 
-## Active Focus - Sophia X Authority: First Drawing Probe
+## Active Focus - Sophia X Authority: Transaction Exposure
 
 **Now**
-- [ ] Define the first drawing-oriented Xlib probe: create a window, map it,
-  issue a tiny draw/fill/text request, and close cleanly.
-- [ ] Record whether the next gap belongs in core drawing decode, pixmap/buffer
-  presentation, or event exposure.
-- [ ] Keep the smoke headless and deterministic.
+- [ ] Expose X Authority socket response transactions from live X11 requests to
+  the session/runtime observation path.
+- [ ] Preserve the existing client-visible X11 behavior: core draw requests
+  still produce no direct X reply on success.
+- [ ] Add a smoke that confirms `PolyFillRectangle` creates one ready
+  `CoreDraw` surface transaction outside the unit-test-only dispatch path.
 
 **Next**
-- [ ] Add minimal request coverage for the first real-client failure.
-- [ ] Keep each new compatibility step covered by both a direct wire test and a
-  CLI smoke when feasible.
+- [ ] Decide whether transaction exposure should be a callback, channel, or
+  explicit server result object before a long-running authority process lands.
+- [ ] Feed exposed drawing transactions into the existing headless session
+  runtime adapter.
 
 ---
 
@@ -35,6 +37,8 @@ evidence belong in `docs/research-log.md`.
 - [x] Pass a tiny compiled C Xlib probe covering `XOpenDisplay`,
   `XInternAtom`, `XCreateSimpleWindow`, `XStoreName`, `XChangeProperty`,
   `XGetWindowProperty`, `XMapWindow`, and `XDestroyWindow`.
+- [x] Pass a drawing-oriented C Xlib probe using `XFillRectangle`; opcode 70
+  now decodes to a ready `CoreDraw` surface transaction.
 - [ ] Revisit compositor backend work after X Authority can create, map, draw,
   and expose a simple client through the authority transaction model.
 

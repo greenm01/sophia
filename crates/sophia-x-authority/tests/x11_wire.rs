@@ -1,4 +1,4 @@
-use sophia_protocol::{NamespaceId, Rect, SurfaceConstraints, SurfaceId, TransactionId};
+use sophia_protocol::{NamespaceId, Rect, Region, SurfaceConstraints, SurfaceId, TransactionId};
 use sophia_x_authority::*;
 
 #[test]
@@ -430,6 +430,43 @@ fn x11_core_decoder_captures_create_gc_requests() {
         XWireRequest::CreateGraphicsContext {
             gc: XResourceId::new(0x220010, 1),
             drawable: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+        }
+    );
+}
+
+#[test]
+fn x11_core_decoder_captures_poly_fill_rectangle_requests() {
+    let namespace = NamespaceId::from_raw(45);
+    let fill = decode_x11_core_request(
+        context(namespace, 507, XByteOrder::LittleEndian),
+        &poly_fill_rectangle_request(
+            XByteOrder::LittleEndian,
+            0x220010,
+            0x220011,
+            &[(5, 6, 40, 30), (10, 12, 8, 9)],
+        ),
+    )
+    .unwrap();
+
+    assert_eq!(
+        fill,
+        XWireRequest::PolyFillRectangle {
+            drawable: XResourceId::new(0x220010, 1),
+            gc: XResourceId::new(0x220011, 1),
+            rectangles: vec![
+                Rect {
+                    x: 5,
+                    y: 6,
+                    width: 40,
+                    height: 30,
+                },
+                Rect {
+                    x: 10,
+                    y: 12,
+                    width: 8,
+                    height: 9,
+                },
+            ],
         }
     );
 }
@@ -1144,6 +1181,61 @@ fn x11_dispatch_accepts_destroy_window_for_known_namespace_window() {
     assert!(destroy.outputs.is_empty());
 }
 
+#[test]
+fn x11_dispatch_poly_fill_rectangle_emits_core_draw_transaction() {
+    let namespace = NamespaceId::from_raw(46);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let create = decode_x11_core_request(
+        context(namespace, 601, XByteOrder::LittleEndian),
+        &create_window_request(XByteOrder::LittleEndian, 0x220101, 10, 20, 640, 480),
+    )
+    .unwrap();
+    dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 1),
+        create,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    let fill = decode_x11_core_request(
+        context(namespace, 602, XByteOrder::LittleEndian),
+        &poly_fill_rectangle_request(
+            XByteOrder::LittleEndian,
+            0x220101,
+            0x220102,
+            &[(5, 6, 40, 30)],
+        ),
+    )
+    .unwrap();
+    let fill = dispatch_x11_wire_request(
+        dispatch_context(namespace, 2, XByteOrder::LittleEndian, 70),
+        fill,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    assert!(fill.outputs.is_empty());
+    let response = fill.response.unwrap();
+    assert_eq!(response.transactions.len(), 1);
+    assert_eq!(
+        response.transactions[0].surface,
+        SurfaceId::new(0x220101, 1)
+    );
+    assert_eq!(
+        response.transactions[0].damage,
+        Region::single(Rect {
+            x: 5,
+            y: 6,
+            width: 40,
+            height: 30,
+        })
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn x11_setup_socket_smoke_completes_handshake() {
@@ -1484,6 +1576,26 @@ fn create_gc_request(byte_order: XByteOrder, gc: u32, drawable: u32) -> Vec<u8> 
     push_u32(&mut out, byte_order, gc);
     push_u32(&mut out, byte_order, drawable);
     push_u32(&mut out, byte_order, 0);
+    out
+}
+
+fn poly_fill_rectangle_request(
+    byte_order: XByteOrder,
+    drawable: u32,
+    gc: u32,
+    rectangles: &[(i16, i16, u16, u16)],
+) -> Vec<u8> {
+    let mut out = vec![70, 0];
+    let len_units = 3 + rectangles.len() * 2;
+    push_u16(&mut out, byte_order, len_units as u16);
+    push_u32(&mut out, byte_order, drawable);
+    push_u32(&mut out, byte_order, gc);
+    for (x, y, width, height) in rectangles {
+        push_i16(&mut out, byte_order, *x);
+        push_i16(&mut out, byte_order, *y);
+        push_u16(&mut out, byte_order, *width);
+        push_u16(&mut out, byte_order, *height);
+    }
     out
 }
 

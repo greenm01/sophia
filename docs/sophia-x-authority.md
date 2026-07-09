@@ -304,6 +304,13 @@ and reads the title through normal Xlib property calls, maps the window, and
 destroys it cleanly. That probe added the first minimal `DestroyWindow`
 compatibility path.
 
-The next milestone is a drawing-oriented Xlib probe. Its first failure should
-decide whether the next implementation belongs in core drawing decode,
-pixmap/buffer presentation, or event exposure.
+A drawing-oriented C Xlib client now passes as well. It creates a window,
+creates a GC, maps the window, calls `XFillRectangle`, syncs, frees the GC, and
+destroys the window. This added `PolyFillRectangle` decode support. Successful
+fill requests produce no client-visible X reply, but they do emit a ready
+`CoreDraw` surface transaction with rectangle damage in the dispatch path.
+
+The next milestone is transaction exposure from the live X Authority socket.
+The long-running socket path currently writes client-visible X11 output; it also
+needs a way to hand ready surface transactions to Sophia Runtime without
+turning successful core drawing into an X protocol reply.

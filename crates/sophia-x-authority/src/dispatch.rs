@@ -5,7 +5,7 @@ use crate::{
     XWireRequest, encode_x_client_output, metadata_property_candidate, x_error_from_runtime,
     x_error_from_wire_parse, x_selection_failure_event,
 };
-use sophia_protocol::NamespaceId;
+use sophia_protocol::{NamespaceId, Region, TransactionId};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct XDispatchContext {
@@ -221,6 +221,34 @@ pub fn dispatch_x11_wire_request(
             })],
             metadata_candidates: Vec::new(),
         },
+        XWireRequest::PolyFillRectangle {
+            drawable,
+            rectangles,
+            ..
+        } => {
+            let transaction = TransactionId::from_raw(u64::from(context.sequence));
+            let mut damage = Region::empty();
+            for rectangle in rectangles {
+                damage.push(rectangle);
+            }
+            let response =
+                runtime.apply_core_draw(transaction, context.namespace, drawable, damage);
+            let outputs = if let XAuthorityResponseOutcome::Rejected(error) = response.outcome {
+                vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(drawable.local.raw()).unwrap_or(0),
+                ))]
+            } else {
+                Vec::new()
+            };
+            XDispatchResult {
+                response: Some(response),
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
     }
 }
 

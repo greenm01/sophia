@@ -1,6 +1,22 @@
 use super::prelude::*;
 
 pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
+    if args
+        .iter()
+        .any(|arg| arg == "x-authority-xlib-drawing-smoke")
+    {
+        let report = run_x_authority_xlib_drawing_smoke()?;
+        println!(
+            "x-authority-xlib-drawing-smoke display={} status={} stdout_bytes={} stderr_bytes={} draw_ops={}",
+            report.display,
+            report.status,
+            report.stdout_bytes,
+            report.stderr_bytes,
+            report.draw_ops
+        );
+        return Ok(true);
+    }
+
     if args.iter().any(|arg| arg == "x-authority-xlib-smoke") {
         let report = run_x_authority_xlib_smoke()?;
         println!(
@@ -104,6 +120,15 @@ struct XAuthorityXlibSmokeReport {
     stderr_bytes: usize,
     title_bytes: usize,
     title_match: bool,
+}
+
+#[derive(Clone, Debug)]
+struct XAuthorityXlibDrawingSmokeReport {
+    display: String,
+    status: i32,
+    stdout_bytes: usize,
+    stderr_bytes: usize,
+    draw_ops: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -322,35 +347,12 @@ fn run_x_authority_xdpyinfo_smoke()
 
 fn run_x_authority_xlib_smoke() -> Result<XAuthorityXlibSmokeReport, Box<dyn std::error::Error>> {
     let (display, socket_path) = temp_xauthority_display(2600)?;
-    let source_path = std::env::temp_dir().join(format!(
-        "sophia-xauthority-xlib-{}-{}.c",
-        std::process::id(),
-        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
-    ));
-    let binary_path = source_path.with_extension("bin");
-    std::fs::write(&source_path, XLIB_SMOKE_SOURCE)?;
-    let compile = std::process::Command::new("gcc")
-        .arg(&source_path)
-        .arg("-o")
-        .arg(&binary_path)
-        .arg("-lX11")
-        .output()?;
-    if !compile.status.success() {
-        return Err(format!(
-            "failed to compile Xlib smoke: {}",
-            String::from_utf8_lossy(&compile.stderr).trim()
-        )
-        .into());
-    }
-
     let server_path = socket_path.clone();
     let server = std::thread::spawn(move || {
         run_x11_core_socket_server_once(&server_path, NamespaceId::from_raw(44))
     });
     wait_for_socket_path(&socket_path)?;
-    let output = std::process::Command::new(&binary_path)
-        .env("DISPLAY", &display)
-        .output()?;
+    let output = run_compiled_xlib_probe(&display, "xlib", XLIB_SMOKE_SOURCE)?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     let status = output.status.code().unwrap_or(-1);
@@ -358,8 +360,6 @@ fn run_x_authority_xlib_smoke() -> Result<XAuthorityXlibSmokeReport, Box<dyn std
     let title_match = stdout.contains("title_match=1");
 
     let _ = std::fs::remove_file(&socket_path);
-    let _ = std::fs::remove_file(&source_path);
-    let _ = std::fs::remove_file(&binary_path);
     server
         .join()
         .map_err(|_| "X authority X11 socket server thread panicked")??;
@@ -380,6 +380,43 @@ fn run_x_authority_xlib_smoke() -> Result<XAuthorityXlibSmokeReport, Box<dyn std
         stderr_bytes: output.stderr.len(),
         title_bytes,
         title_match,
+    })
+}
+
+fn run_x_authority_xlib_drawing_smoke()
+-> Result<XAuthorityXlibDrawingSmokeReport, Box<dyn std::error::Error>> {
+    let (display, socket_path) = temp_xauthority_display(3600)?;
+    let server_path = socket_path.clone();
+    let server = std::thread::spawn(move || {
+        run_x11_core_socket_server_once(&server_path, NamespaceId::from_raw(45))
+    });
+    wait_for_socket_path(&socket_path)?;
+    let output = run_compiled_xlib_probe(&display, "xlib-drawing", XLIB_DRAWING_SMOKE_SOURCE)?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let status = output.status.code().unwrap_or(-1);
+    let draw_ops = xlib_smoke_field(&stdout, "draw_ops").unwrap_or(0);
+
+    let _ = std::fs::remove_file(&socket_path);
+    server
+        .join()
+        .map_err(|_| "X authority X11 socket server thread panicked")??;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Xlib drawing smoke failed for {display}: status={status} stdout={} stderr={}",
+            stdout.trim(),
+            stderr.trim()
+        )
+        .into());
+    }
+
+    Ok(XAuthorityXlibDrawingSmokeReport {
+        display,
+        status,
+        stdout_bytes: output.stdout.len(),
+        stderr_bytes: output.stderr.len(),
+        draw_ops,
     })
 }
 
@@ -705,10 +742,49 @@ fn temp_xauthority_display(
     Ok((display, socket_path))
 }
 
+fn run_compiled_xlib_probe(
+    display: &str,
+    name: &str,
+    source: &str,
+) -> Result<std::process::Output, Box<dyn std::error::Error>> {
+    let source_path = std::env::temp_dir().join(format!(
+        "sophia-xauthority-{name}-{}-{}.c",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    ));
+    let binary_path = source_path.with_extension("bin");
+    std::fs::write(&source_path, source)?;
+    let compile = std::process::Command::new("gcc")
+        .arg(&source_path)
+        .arg("-o")
+        .arg(&binary_path)
+        .arg("-lX11")
+        .output()?;
+    if !compile.status.success() {
+        let _ = std::fs::remove_file(&source_path);
+        return Err(format!(
+            "failed to compile {name} smoke: {}",
+            String::from_utf8_lossy(&compile.stderr).trim()
+        )
+        .into());
+    }
+    let output = std::process::Command::new(&binary_path)
+        .env("DISPLAY", display)
+        .output()?;
+    let _ = std::fs::remove_file(&source_path);
+    let _ = std::fs::remove_file(&binary_path);
+    Ok(output)
+}
+
 fn xlib_smoke_title_bytes(stdout: &str) -> Option<usize> {
+    xlib_smoke_field(stdout, "title_bytes")
+}
+
+fn xlib_smoke_field(stdout: &str, name: &str) -> Option<usize> {
+    let prefix = format!("{name}=");
     stdout
         .split_whitespace()
-        .find_map(|field| field.strip_prefix("title_bytes="))
+        .find_map(|field| field.strip_prefix(&prefix))
         .and_then(|value| value.parse().ok())
 }
 
@@ -779,5 +855,31 @@ int main(void) {
     XDestroyWindow(display, window);
     XCloseDisplay(display);
     return title_match ? 0 : 4;
+}
+"#;
+
+const XLIB_DRAWING_SMOKE_SOURCE: &str = r#"
+#include <X11/Xlib.h>
+#include <stdio.h>
+
+int main(void) {
+    Display *display = XOpenDisplay(NULL);
+    if (!display) {
+        fprintf(stderr, "open_display=0\n");
+        return 2;
+    }
+
+    int screen = DefaultScreen(display);
+    Window root = RootWindow(display, screen);
+    Window window = XCreateSimpleWindow(display, root, 10, 20, 240, 160, 0, 0, 0);
+    GC gc = XCreateGC(display, window, 0, NULL);
+    XMapWindow(display, window);
+    XFillRectangle(display, window, gc, 5, 6, 40, 30);
+    XSync(display, False);
+    printf("window=0x%lx draw_ops=1\n", window);
+    XFreeGC(display, gc);
+    XDestroyWindow(display, window);
+    XCloseDisplay(display);
+    return 0;
 }
 "#;

@@ -1,4 +1,5 @@
 use sophia_portal::ClipboardPortal;
+use sophia_protocol::{NamespaceId, Region, TransactionId};
 
 use crate::{
     ClipboardSelectionFailureRequest, XAuthorityPortalCommand, XAuthorityRequestKind,
@@ -174,7 +175,7 @@ impl XAuthorityRuntime {
 
     pub fn validate_window_access(
         &self,
-        namespace: sophia_protocol::NamespaceId,
+        namespace: NamespaceId,
         window: crate::XResourceId,
     ) -> Result<(), XAuthorityRuntimeError> {
         self.resources
@@ -182,4 +183,41 @@ impl XAuthorityRuntime {
             .map(|_| ())
             .map_err(Into::into)
     }
+
+    pub fn apply_core_draw(
+        &self,
+        transaction: TransactionId,
+        namespace: NamespaceId,
+        window: crate::XResourceId,
+        damage: Region,
+    ) -> XAuthorityResponsePacket {
+        let Some(record) = self.windows.get(window) else {
+            return XAuthorityResponsePacket::rejected(
+                transaction,
+                XAuthorityRuntimeError::UnknownResource,
+            );
+        };
+        let handle = core_draw_buffer_handle(window, transaction);
+        let mut response = XAuthorityResponsePacket::accepted(transaction);
+        match surface_transaction_from_drawing_update(
+            &self.windows,
+            XDrawingUpdate::core_draw(
+                transaction,
+                namespace,
+                window,
+                handle,
+                damage,
+                record.generation,
+                250,
+            ),
+        ) {
+            Ok(transaction) => response.transactions.push(transaction),
+            Err(error) => return XAuthorityResponsePacket::rejected(transaction, error.into()),
+        }
+        response
+    }
+}
+
+fn core_draw_buffer_handle(window: crate::XResourceId, transaction: TransactionId) -> u64 {
+    window.local.raw().rotate_left(32) ^ transaction.raw()
 }

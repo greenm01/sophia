@@ -30,6 +30,7 @@ pub(crate) fn print(verbose: bool) {
     println!("commands: x-authority-x11rb-smoke");
     println!("commands: x-authority-xdpyinfo-smoke");
     println!("commands: x-authority-xlib-smoke");
+    println!("commands: x-authority-xlib-drawing-smoke");
 
     if verbose {
         tracing::debug!("verbose tracing enabled");

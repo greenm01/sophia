@@ -19,6 +19,7 @@ const X_CONVERT_SELECTION: u8 = 24;
 const X_GET_INPUT_FOCUS: u8 = 43;
 const X_CREATE_GC: u8 = 55;
 const X_FREE_GC: u8 = 60;
+const X_POLY_FILL_RECTANGLE: u8 = 70;
 const X_QUERY_EXTENSION: u8 = 98;
 const X_LIST_EXTENSIONS: u8 = 99;
 const X_QUERY_BEST_SIZE: u8 = 97;
@@ -35,6 +36,7 @@ const X_CONVERT_SELECTION_REQ_LEN: usize = 24;
 const X_GET_INPUT_FOCUS_REQ_LEN: usize = 4;
 const X_CREATE_GC_REQ_LEN: usize = 16;
 const X_FREE_GC_REQ_LEN: usize = 8;
+const X_POLY_FILL_RECTANGLE_REQ_LEN: usize = 12;
 const X_QUERY_EXTENSION_REQ_LEN: usize = 8;
 const X_LIST_EXTENSIONS_REQ_LEN: usize = 4;
 const X_QUERY_BEST_SIZE_REQ_LEN: usize = 12;
@@ -67,6 +69,11 @@ pub enum XWireRequest {
     },
     FreeGraphicsContext {
         gc: XResourceId,
+    },
+    PolyFillRectangle {
+        drawable: XResourceId,
+        gc: XResourceId,
+        rectangles: Vec<Rect>,
     },
     GetInputFocus,
     QueryExtension {
@@ -153,11 +160,45 @@ pub fn decode_x11_core_request(
         X_GET_INPUT_FOCUS => decode_get_input_focus(bytes),
         X_CREATE_GC => decode_create_gc(context, bytes),
         X_FREE_GC => decode_free_gc(context, bytes),
+        X_POLY_FILL_RECTANGLE => decode_poly_fill_rectangle(context, bytes),
         X_QUERY_BEST_SIZE => decode_query_best_size(context, bytes),
         X_QUERY_EXTENSION => decode_query_extension(context, bytes),
         X_LIST_EXTENSIONS => decode_list_extensions(bytes),
         other => Err(XWireParseError::UnknownOpcode(other)),
     }
+}
+
+fn decode_poly_fill_rectangle(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_len(
+        X_POLY_FILL_RECTANGLE,
+        X_POLY_FILL_RECTANGLE_REQ_LEN,
+        bytes.len(),
+    )?;
+    let rectangle_bytes = &bytes[X_POLY_FILL_RECTANGLE_REQ_LEN..];
+    if rectangle_bytes.len() % 8 != 0 {
+        return Err(XWireParseError::InvalidLength {
+            opcode: X_POLY_FILL_RECTANGLE,
+            expected_at_least: X_POLY_FILL_RECTANGLE_REQ_LEN + ((rectangle_bytes.len() + 7) & !7),
+            actual: bytes.len(),
+        });
+    }
+    let mut rectangles = Vec::with_capacity(rectangle_bytes.len() / 8);
+    for rectangle in rectangle_bytes.chunks_exact(8) {
+        rectangles.push(Rect {
+            x: i32::from(context.byte_order.i16(&rectangle[0..2])),
+            y: i32::from(context.byte_order.i16(&rectangle[2..4])),
+            width: i32::from(context.byte_order.u16(&rectangle[4..6])),
+            height: i32::from(context.byte_order.u16(&rectangle[6..8])),
+        });
+    }
+    Ok(XWireRequest::PolyFillRectangle {
+        drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        gc: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
+        rectangles,
+    })
 }
 
 fn decode_free_gc(
