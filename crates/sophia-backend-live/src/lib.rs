@@ -455,6 +455,81 @@ impl FakePageFlipCallbackSource {
     }
 }
 
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LibdrmPageFlipEventPollReport {
+    pub status: LibdrmPageFlipEventPollStatus,
+    pub callbacks: LivePageFlipCallbackSourceReport,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibdrmPageFlipEventPollStatus {
+    Idle,
+    Emitted,
+    Backpressure,
+    Disconnected,
+    EmitLimitReached,
+}
+
+#[cfg(feature = "libdrm-events")]
+impl LibdrmPageFlipEventPollReport {
+    pub fn from_source_report(callbacks: LivePageFlipCallbackSourceReport) -> Self {
+        let status = if callbacks.disconnected {
+            LibdrmPageFlipEventPollStatus::Disconnected
+        } else if callbacks.backpressure {
+            LibdrmPageFlipEventPollStatus::Backpressure
+        } else if callbacks.max_reached {
+            LibdrmPageFlipEventPollStatus::EmitLimitReached
+        } else if callbacks.emitted > 0 {
+            LibdrmPageFlipEventPollStatus::Emitted
+        } else {
+            LibdrmPageFlipEventPollStatus::Idle
+        };
+
+        Self { status, callbacks }
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+pub trait LibdrmPageFlipEventPoller {
+    fn poll_page_flip_events(
+        &mut self,
+        sender: &SyncSender<LivePageFlipCallback>,
+        max_emit: usize,
+    ) -> LibdrmPageFlipEventPollReport;
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct FakeLibdrmPageFlipEventPoller {
+    source: FakePageFlipCallbackSource,
+}
+
+#[cfg(feature = "libdrm-events")]
+impl FakeLibdrmPageFlipEventPoller {
+    pub fn new(callbacks: impl IntoIterator<Item = LivePageFlipCallback>) -> Self {
+        Self {
+            source: FakePageFlipCallbackSource::new(callbacks),
+        }
+    }
+
+    pub fn queued_len(&self) -> usize {
+        self.source.queued_len()
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+impl LibdrmPageFlipEventPoller for FakeLibdrmPageFlipEventPoller {
+    fn poll_page_flip_events(
+        &mut self,
+        sender: &SyncSender<LivePageFlipCallback>,
+        max_emit: usize,
+    ) -> LibdrmPageFlipEventPollReport {
+        LibdrmPageFlipEventPollReport::from_source_report(self.source.emit_ready(sender, max_emit))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct LiveBackendStartupReport {
     pub discovery: LiveCompositorBackendDiscoveryReport,

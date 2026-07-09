@@ -135,6 +135,14 @@ retains unsent callbacks on backpressure or disconnection, and reports only
 counts plus queue state. Real libdrm event handling should replace the source,
 not the intake, queue, or reduced runtime observation contracts.
 
+The `libdrm-events` feature defines the first libdrm page-flip polling adapter
+shape without admitting a native libdrm crate. `LibdrmPageFlipEventPoller`
+accepts a bounded callback sender and returns `LibdrmPageFlipEventPollReport`,
+which reduces native event-loop state to idle, emitted, backpressure,
+disconnected, or emit-limit-reached. The fake feature poller exercises this
+shape deterministically; a later native poller must preserve the same public
+report and callback queue contracts.
+
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
 authority. On Linux, wgpu will usually target Vulkan, but Sophia must first prove

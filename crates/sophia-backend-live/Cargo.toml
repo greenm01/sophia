@@ -15,6 +15,7 @@ sophia-renderer-live = { path = "../sophia-renderer-live" }
 default = []
 gbm-probe = ["sophia-renderer-live/gbm-probe"]
 egl-probe = ["sophia-renderer-live/egl-probe"]
+libdrm-events = []
 
 [lints]
 workspace = true

@@ -20,6 +20,7 @@ cargo test --offline -p sophia-backend-live --features gbm-probe
 cargo test --offline -p sophia-renderer-live --features egl-probe
 cargo test --offline -p sophia-backend-live --features egl-probe
 cargo test --offline -p sophia-backend-live --features gbm-probe,egl-probe
+cargo test --offline -p sophia-backend-live --features libdrm-events
 ```
 
 The `gbm-probe` feature admits the safe `gbm` crate behind an optional feature.
@@ -32,6 +33,10 @@ The `egl-probe` feature admits `khronos-egl` through the internal
 `sophia-renderer-native-egl` adapter crate. That crate owns the unavoidable
 unsafe dynamic EGL calls. Public renderer-live and backend-live tests assert
 only reduced EGL startup and draw-smoke status.
+
+The `libdrm-events` feature does not admit a native libdrm crate yet. It checks
+the reduced page-flip event polling adapter shape and deterministic fake poller
+that feeds the runtime-owned bounded callback queue.
 
 The backend-live GBM feature suite includes an opt-in real-device smoke. Set
 `SOPHIA_RUN_REAL_GBM_SMOKE=1` to let the test look for an openable
@@ -58,6 +63,7 @@ cargo test --offline -p sophia-backend-live --features gbm-probe
 cargo test --offline -p sophia-renderer-live --features egl-probe
 cargo test --offline -p sophia-backend-live --features egl-probe
 cargo test --offline -p sophia-backend-live --features gbm-probe,egl-probe
+cargo test --offline -p sophia-backend-live --features libdrm-events
 ```
 
 Run the opt-in local hardware smoke only when you want real render-node
