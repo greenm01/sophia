@@ -9,16 +9,16 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Add a live render-device discovery abstraction that can later choose a DRM
-  render node without leaking paths into engine state.
-- [ ] Decide whether render-node discovery belongs in backend-live directly or
-  behind a narrower libdrm adapter crate.
-
-**Next**
 - [ ] Add feature-enabled startup assembly that selects CPU fallback when GBM
   probing degrades a requested DMA-BUF path.
 - [ ] Add a runtime observation for degraded GBM startup that remains count-only
   and path-free.
+
+**Next**
+- [ ] Decide the first real render-node discovery source: sysfs renderD scan,
+  libdrm enumeration, or explicit backend-owned fd injection.
+- [ ] Add docs for why degraded native import must not partially enable the
+  import-capable renderer.
 
 ---
 
@@ -167,6 +167,10 @@ evidence belong in `docs/research-log.md`.
 - [x] Keep CPU fallback startup as the default when GBM probing is absent,
   unavailable, or degraded.
 - [x] Add feature-enabled backend-live coverage for GBM degraded startup health.
+- [x] Add a live render-device discovery abstraction that can later choose a DRM
+  render node without leaking paths into engine state.
+- [x] Decide render-node discovery stays in backend-live for now, behind a
+  narrower feature-gated trait.
 
 ---
 

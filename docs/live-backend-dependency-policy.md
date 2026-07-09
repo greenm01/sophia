@@ -42,6 +42,11 @@ do not expose third-party GBM handles, errors, paths, or descriptors through
 Sophia's public data model.
 The selected first candidate is the safe `gbm` crate, with `gbm-sys` kept as a
 fallback only if the safe crate cannot support the narrow capability probe.
+Render-node discovery stays in `sophia-backend-live` for now, behind a narrow
+feature-gated trait. That trait may open backend-owned fd-like authority, but it
+reports only path-free discovery state such as not requested, opened, or
+unavailable. If the later libdrm implementation needs broader policy, move it
+behind a smaller live adapter crate before exposing more surface area.
 
 Phase 4 is the shared-memory import boundary. Real MIT-SHM mapping stays
 deferred until mapped bytes can pass through a bounded renderer upload path with

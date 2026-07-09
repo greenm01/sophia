@@ -146,7 +146,35 @@ impl LiveBackendStartupReport {
     where
         D: RenderDeviceDiscoveryBackend,
     {
-        self.renderer_import_status_from_gbm_device_result(discovery.open_render_device())
+        self.renderer_probe_report_with_gbm_device(discovery)
+            .renderer_import
+    }
+
+    #[cfg(feature = "gbm-probe")]
+    pub fn renderer_probe_report_with_gbm_device<D>(
+        &self,
+        discovery: &D,
+    ) -> LiveBackendRendererProbeReport
+    where
+        D: RenderDeviceDiscoveryBackend,
+    {
+        if !self.renderer_import.import_dmabuf {
+            return LiveBackendRendererProbeReport {
+                render_device: LiveRenderDeviceDiscoveryReport {
+                    status: LiveRenderDeviceDiscoveryStatus::NotRequested,
+                },
+                renderer_import: self.renderer_import_status(),
+            };
+        }
+
+        let device = discovery.open_render_device();
+        let render_device = LiveRenderDeviceDiscoveryReport::from_open_result(&device);
+        let renderer_import = self.renderer_import_status_from_gbm_device_result(device);
+
+        LiveBackendRendererProbeReport {
+            render_device,
+            renderer_import,
+        }
     }
 
     #[cfg(feature = "gbm-probe")]
@@ -204,6 +232,40 @@ pub trait RenderDeviceDiscoveryBackend {
     type Device: AsFd;
 
     fn open_render_device(&self) -> io::Result<Self::Device>;
+}
+
+#[cfg(feature = "gbm-probe")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveBackendRendererProbeReport {
+    pub render_device: LiveRenderDeviceDiscoveryReport,
+    pub renderer_import: LiveRendererImportStartupStatus,
+}
+
+#[cfg(feature = "gbm-probe")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveRenderDeviceDiscoveryReport {
+    pub status: LiveRenderDeviceDiscoveryStatus,
+}
+
+#[cfg(feature = "gbm-probe")]
+impl LiveRenderDeviceDiscoveryReport {
+    fn from_open_result<T>(device: &io::Result<T>) -> Self {
+        Self {
+            status: if device.is_ok() {
+                LiveRenderDeviceDiscoveryStatus::Opened
+            } else {
+                LiveRenderDeviceDiscoveryStatus::Unavailable
+            },
+        }
+    }
+}
+
+#[cfg(feature = "gbm-probe")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveRenderDeviceDiscoveryStatus {
+    NotRequested,
+    Opened,
+    Unavailable,
 }
 
 pub struct LiveBackendRuntimeAssembly {

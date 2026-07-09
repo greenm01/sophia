@@ -105,6 +105,9 @@ The feature-enabled local validation command is documented in
 device probing is available only through backend-owned fd-like authority. It
 still collapses native failures into reduced degraded health and does not expose
 fds, paths, GBM handles, or native errors through Sophia's public data model.
+Backend-live reports render-device discovery separately as reduced path-free
+state so startup diagnostics can distinguish "not requested" from "unavailable"
+without leaking device identity.
 
 Admission tests for the first real dependency must prove:
 
