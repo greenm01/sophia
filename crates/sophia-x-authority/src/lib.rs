@@ -5,9 +5,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use sophia_portal::{
+    ClipboardPortal, ClipboardTarget, ClipboardTransferRequest, PortalCommand, PortalError,
+};
 use sophia_protocol::{
-    AuthorityKind, AuthorityLocalId, AuthoritySurface, BufferSource, NamespaceId, Rect, Region,
-    SurfaceConstraints, SurfaceId, SurfaceTransaction, SurfaceTransactionReadiness, TransactionId,
+    AuthorityKind, AuthorityLocalId, AuthoritySurface, BufferSource, NamespaceId, PortalTransferId,
+    Rect, Region, SurfaceConstraints, SurfaceId, SurfaceTransaction, SurfaceTransactionReadiness,
+    TransactionId,
 };
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -452,5 +456,330 @@ pub fn surface_transaction_from_drawing_update(
         readiness: SurfaceTransactionReadiness::Ready,
         timeout_msec: update.timeout_msec,
         previous_committed_generation: update.previous_committed_generation,
+    })
+}
+
+pub type XAtom = u32;
+pub type XTimestamp = u32;
+
+pub const X_ATOM_NONE: XAtom = 0;
+pub const MAX_CLIPBOARD_TEXT_HANDOFF_BYTES: usize = 64 * 1024;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum XSelectionChangeKind {
+    SetOwner,
+    ClearOwner,
+    SelectionWindowDestroyed,
+    SelectionClientClosed,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XSelectionEvent {
+    pub selection: XAtom,
+    pub owner: Option<XResourceId>,
+    pub timestamp: XTimestamp,
+    pub selection_timestamp: XTimestamp,
+    pub kind: XSelectionChangeKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XSelectionOwnerRecord {
+    pub selection: XAtom,
+    pub namespace: Option<NamespaceId>,
+    pub owner: Option<XResourceId>,
+    pub generation: u64,
+    pub timestamp: XTimestamp,
+    pub selection_timestamp: XTimestamp,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XSelectionOwnerUpdate {
+    pub previous: Option<XSelectionOwnerRecord>,
+    pub current: XSelectionOwnerRecord,
+    pub kind: XSelectionChangeKind,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct XSelectionMonitor {
+    owners: BTreeMap<(XAtom, Option<NamespaceId>), XSelectionOwnerRecord>,
+}
+
+impl XSelectionMonitor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn owner(
+        &self,
+        selection: XAtom,
+        namespace: Option<NamespaceId>,
+    ) -> Option<XSelectionOwnerRecord> {
+        self.owners.get(&(selection, namespace)).copied()
+    }
+
+    pub fn current_owner_for_selection(&self, selection: XAtom) -> Option<XSelectionOwnerRecord> {
+        self.owners
+            .values()
+            .filter(|record| record.selection == selection && record.owner.is_some())
+            .max_by_key(|record| record.generation)
+            .copied()
+    }
+
+    pub fn apply_event(
+        &mut self,
+        event: XSelectionEvent,
+        windows: &XWindowTable,
+    ) -> XSelectionOwnerUpdate {
+        let namespace_from_owner = event
+            .owner
+            .and_then(|owner| windows.get(owner).map(|window| window.namespace));
+        let namespace =
+            namespace_from_owner.or_else(|| self.namespace_for_existing_selection(event.selection));
+        let key = (event.selection, namespace);
+        let previous = self.owners.get(&key).copied();
+        let generation = previous
+            .map(|record| record.generation.saturating_add(1))
+            .unwrap_or(1);
+        let current = XSelectionOwnerRecord {
+            selection: event.selection,
+            namespace,
+            owner: event.owner,
+            generation,
+            timestamp: event.timestamp,
+            selection_timestamp: event.selection_timestamp,
+        };
+
+        self.owners.insert(key, current);
+
+        XSelectionOwnerUpdate {
+            previous,
+            current,
+            kind: event.kind,
+        }
+    }
+
+    fn namespace_for_existing_selection(&self, selection: XAtom) -> Option<NamespaceId> {
+        self.owners
+            .iter()
+            .find_map(|((record_selection, namespace), record)| {
+                if *record_selection == selection && record.owner.is_some() {
+                    *namespace
+                } else {
+                    None
+                }
+            })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct XSelectionRequest {
+    pub requestor: XResourceId,
+    pub selection: XAtom,
+    pub target: XAtom,
+    pub target_name: String,
+    pub property: XAtom,
+    pub time: XTimestamp,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClipboardSelectionPortalRequest {
+    pub request: ClipboardTransferRequest,
+    pub failure: ClipboardSelectionFailureRequest,
+    pub property: XAtom,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ClipboardSelectionRequestError {
+    UnknownRequestorNamespace,
+    UnknownSourceOwner,
+    MissingSourceNamespace,
+    SameNamespace,
+    Portal(PortalError),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClipboardSelectionDispatch {
+    pub portal_request: ClipboardSelectionPortalRequest,
+    pub command: PortalCommand,
+}
+
+pub fn dispatch_clipboard_selection_request(
+    request: XSelectionRequest,
+    monitor: &XSelectionMonitor,
+    windows: &XWindowTable,
+    transfer: PortalTransferId,
+    portal: &mut ClipboardPortal,
+) -> Result<ClipboardSelectionDispatch, ClipboardSelectionRequestError> {
+    let portal_request =
+        clipboard_portal_request_from_selection_request(request, monitor, windows, transfer)?;
+    let command = portal
+        .request_import(portal_request.request.clone())
+        .map_err(ClipboardSelectionRequestError::Portal)?;
+
+    Ok(ClipboardSelectionDispatch {
+        portal_request,
+        command,
+    })
+}
+
+pub fn clipboard_portal_request_from_selection_request(
+    request: XSelectionRequest,
+    monitor: &XSelectionMonitor,
+    windows: &XWindowTable,
+    transfer: PortalTransferId,
+) -> Result<ClipboardSelectionPortalRequest, ClipboardSelectionRequestError> {
+    let requestor = windows
+        .get(request.requestor)
+        .ok_or(ClipboardSelectionRequestError::UnknownRequestorNamespace)?;
+    let source_owner = monitor
+        .current_owner_for_selection(request.selection)
+        .ok_or(ClipboardSelectionRequestError::UnknownSourceOwner)?;
+    let source_namespace = source_owner
+        .namespace
+        .ok_or(ClipboardSelectionRequestError::MissingSourceNamespace)?;
+
+    if source_namespace == requestor.namespace {
+        return Err(ClipboardSelectionRequestError::SameNamespace);
+    }
+
+    Ok(ClipboardSelectionPortalRequest {
+        request: ClipboardTransferRequest {
+            transfer,
+            source_namespace,
+            target_namespace: requestor.namespace,
+            target: ClipboardTarget::Atom(request.target_name),
+            byte_size: 0,
+            generation: source_owner.generation,
+        },
+        failure: ClipboardSelectionFailureRequest {
+            transfer,
+            requestor: request.requestor,
+            selection: request.selection,
+            target: request.target,
+            time: request.time,
+        },
+        property: request.property,
+    })
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ClipboardSelectionFailureRequest {
+    pub transfer: PortalTransferId,
+    pub requestor: XResourceId,
+    pub selection: XAtom,
+    pub target: XAtom,
+    pub time: XTimestamp,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ClipboardSelectionNotify {
+    pub time: XTimestamp,
+    pub requestor: XResourceId,
+    pub selection: XAtom,
+    pub target: XAtom,
+    pub property: XAtom,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ClipboardSelectionFailure {
+    pub transfer: PortalTransferId,
+    pub notify: ClipboardSelectionNotify,
+}
+
+impl ClipboardSelectionFailure {
+    pub fn failed_normally(&self) -> bool {
+        self.notify.property == X_ATOM_NONE
+    }
+}
+
+pub fn clipboard_selection_failure_notify(
+    request: ClipboardSelectionFailureRequest,
+) -> ClipboardSelectionFailure {
+    ClipboardSelectionFailure {
+        transfer: request.transfer,
+        notify: ClipboardSelectionNotify {
+            time: request.time,
+            requestor: request.requestor,
+            selection: request.selection,
+            target: request.target,
+            property: X_ATOM_NONE,
+        },
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClipboardTextProperty {
+    pub requestor: XResourceId,
+    pub property: XAtom,
+    pub target: XAtom,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClipboardSelectionHandoff {
+    pub transfer: PortalTransferId,
+    pub property: ClipboardTextProperty,
+    pub notify: ClipboardSelectionNotify,
+}
+
+impl ClipboardSelectionHandoff {
+    pub fn succeeded_normally(&self) -> bool {
+        self.notify.property == self.property.property && self.notify.property != X_ATOM_NONE
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ClipboardSelectionHandoffError {
+    NotHandoffCommand,
+    TransferMismatch,
+    MissingProperty,
+    UnsupportedTarget,
+    TextTooLarge { len: usize, max: usize },
+}
+
+pub fn clipboard_selection_text_handoff_artifact(
+    command: &PortalCommand,
+    request: &ClipboardSelectionPortalRequest,
+    text: impl AsRef<str>,
+) -> Result<ClipboardSelectionHandoff, ClipboardSelectionHandoffError> {
+    let PortalCommand::HandoffClipboard { transfer } = command else {
+        return Err(ClipboardSelectionHandoffError::NotHandoffCommand);
+    };
+
+    if *transfer != request.request.transfer {
+        return Err(ClipboardSelectionHandoffError::TransferMismatch);
+    }
+    if request.property == X_ATOM_NONE {
+        return Err(ClipboardSelectionHandoffError::MissingProperty);
+    }
+    if !request.request.target.is_text() {
+        return Err(ClipboardSelectionHandoffError::UnsupportedTarget);
+    }
+
+    let bytes = text.as_ref().as_bytes();
+    if bytes.len() > MAX_CLIPBOARD_TEXT_HANDOFF_BYTES {
+        return Err(ClipboardSelectionHandoffError::TextTooLarge {
+            len: bytes.len(),
+            max: MAX_CLIPBOARD_TEXT_HANDOFF_BYTES,
+        });
+    }
+
+    let failure = request.failure;
+    Ok(ClipboardSelectionHandoff {
+        transfer: *transfer,
+        property: ClipboardTextProperty {
+            requestor: failure.requestor,
+            property: request.property,
+            target: failure.target,
+            bytes: bytes.to_vec(),
+        },
+        notify: ClipboardSelectionNotify {
+            time: failure.time,
+            requestor: failure.requestor,
+            selection: failure.selection,
+            target: failure.target,
+            property: request.property,
+        },
     })
 }

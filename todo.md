@@ -26,7 +26,7 @@ namespace boundaries.
   events.
 - [x] Convert a synthetic Present/SHM/CoreDraw update into a ready
   `SurfaceTransaction`.
-- [ ] Convert a synthetic selection request into a portal request and native X
+- [x] Convert a synthetic selection request into a portal request and native X
   denial/handoff artifact.
 
 ---

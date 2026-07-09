@@ -221,6 +221,7 @@ dependencies = [
 name = "sophia-x-authority"
 version = "0.1.0"
 dependencies = [
+ "sophia-portal",
  "sophia-protocol",
 ]
 
