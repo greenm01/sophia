@@ -30,11 +30,11 @@ active milestone to `docs/roadmap-history.md`.
 
 ### 1. Frame-Target Lifecycle
 
-- [ ] Define renderer-private frame-target lifecycle states: create, retain,
+- [x] Define renderer-private frame-target lifecycle states: create, retain,
   resize, invalidate, and retire.
-- [ ] Keep runtime observations reduced to target size, allocation status, and
+- [x] Keep runtime observations reduced to target size, allocation status, and
   lifecycle status.
-- [ ] Preserve the current rule that runtime ticks do not allocate native frame
+- [x] Preserve the current rule that runtime ticks do not allocate native frame
   targets implicitly.
 
 ### 2. Scanout Path

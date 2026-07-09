@@ -388,6 +388,12 @@ runtime observations.
 Backend-live observes this seam by invoking the allocator with its current
 reduced target and storing only the returned reduced report. A target-size
 change invalidates the retained report.
+Frame-target lifecycle is also reduced before it leaves renderer/backend code.
+`LiveGbmEglFrameTargetLifecycleReport` records only the reduced target and one
+of five states: created, retained, resized, invalidated, or retired. A retained
+target may keep the previous reduced allocation report; resize, invalidation,
+and retirement clear it. Runtime ticks may report the current reduced lifecycle
+state, but they must not allocate native frame targets implicitly.
 The first native skeleton is `NativeGbmBackedEglFrameTargetAllocator`, gated
 behind the existing GBM/EGL probe features. It accepts a backend-owned render
 device result and a reduced allocation request, performs any native work inside

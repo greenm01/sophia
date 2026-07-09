@@ -1,7 +1,8 @@
 use sophia_renderer_live::{
     FakeGbmEglFrameTargetAllocator, FakePresentationSmoke, LiveGbmEglFrameTargetAllocationReport,
     LiveGbmEglFrameTargetAllocationRequest, LiveGbmEglFrameTargetAllocationStatus,
-    LiveGbmEglFrameTargetAllocator, LiveGbmEglFrameTargetRecord, LiveGbmEglFrameTargetStatus,
+    LiveGbmEglFrameTargetAllocator, LiveGbmEglFrameTargetLifecycleReport,
+    LiveGbmEglFrameTargetLifecycleStatus, LiveGbmEglFrameTargetRecord, LiveGbmEglFrameTargetStatus,
     LiveRendererPresentationReport, LiveRendererPresentationStatus, Size,
 };
 
@@ -66,6 +67,52 @@ fn gbm_egl_frame_target_record_rejects_invalid_size_without_native_errors() {
                 height: 1080,
             },
         }
+    );
+}
+
+#[test]
+fn gbm_egl_frame_target_lifecycle_reports_reduced_transitions_without_handles() {
+    let target = LiveGbmEglFrameTargetRecord::new(Size {
+        width: 1920,
+        height: 1080,
+    });
+
+    assert_eq!(
+        LiveGbmEglFrameTargetLifecycleReport::created(target),
+        LiveGbmEglFrameTargetLifecycleReport {
+            status: LiveGbmEglFrameTargetLifecycleStatus::Created,
+            target,
+        }
+    );
+    assert_eq!(
+        LiveGbmEglFrameTargetLifecycleReport::from_size_update(Some(target), target).status,
+        LiveGbmEglFrameTargetLifecycleStatus::Retained
+    );
+    assert_eq!(
+        LiveGbmEglFrameTargetLifecycleReport::from_size_update(
+            Some(target),
+            LiveGbmEglFrameTargetRecord::new(Size {
+                width: 1280,
+                height: 720,
+            }),
+        )
+        .status,
+        LiveGbmEglFrameTargetLifecycleStatus::Resized
+    );
+    assert_eq!(
+        LiveGbmEglFrameTargetLifecycleReport::from_size_update(
+            Some(target),
+            LiveGbmEglFrameTargetRecord::new(Size {
+                width: 0,
+                height: 720,
+            }),
+        )
+        .status,
+        LiveGbmEglFrameTargetLifecycleStatus::Invalidated
+    );
+    assert_eq!(
+        LiveGbmEglFrameTargetLifecycleReport::retired(target).status,
+        LiveGbmEglFrameTargetLifecycleStatus::Retired
     );
 }
 

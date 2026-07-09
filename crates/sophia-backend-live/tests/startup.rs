@@ -8,6 +8,7 @@ use sophia_backend_live::{
     LiveBackendConfig, LiveBackendDependencyDecision, LiveBackendDependencyKind,
     LiveBackendDependencyUse, LiveCompositorBackendDiscoveryStatus,
     LiveGbmEglFrameTargetAllocationReport, LiveGbmEglFrameTargetAllocationStatus,
+    LiveGbmEglFrameTargetLifecycleReport, LiveGbmEglFrameTargetLifecycleStatus,
     LiveGbmEglFrameTargetRecord, LiveGbmEglFrameTargetStatus, LiveLibdrmPollerDiagnostics,
     LiveLibdrmPollerDiagnosticsStatus, LivePageFlipCallback, LivePageFlipCallbackDecision,
     LivePageFlipCallbackIntake, LivePageFlipCallbackQueue, LivePageFlipCallbackQueueReport,
@@ -427,6 +428,58 @@ fn live_runtime_assembly_updates_reduced_gbm_egl_frame_target_size() {
 }
 
 #[test]
+fn live_runtime_assembly_reports_reduced_gbm_egl_frame_target_lifecycle() {
+    let root = ready_drm_sysfs_fixture("runtime-frame-target-lifecycle");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed live assembly");
+    let startup_target = assembly
+        .gbm_egl_frame_target_observation()
+        .expect("startup should seed reduced target");
+
+    assert_eq!(
+        assembly.gbm_egl_frame_target_lifecycle_observation(),
+        Some(LiveGbmEglFrameTargetLifecycleReport {
+            status: LiveGbmEglFrameTargetLifecycleStatus::Created,
+            target: startup_target,
+        })
+    );
+
+    let retained = assembly.observe_gbm_egl_frame_target_size(startup_target.size);
+    assert_eq!(retained, startup_target);
+    assert_eq!(
+        assembly.gbm_egl_frame_target_lifecycle_observation(),
+        Some(LiveGbmEglFrameTargetLifecycleReport {
+            status: LiveGbmEglFrameTargetLifecycleStatus::Retained,
+            target: startup_target,
+        })
+    );
+
+    let resized = assembly.observe_gbm_egl_frame_target_size(Size {
+        width: 1920,
+        height: 1080,
+    });
+    assert_eq!(
+        assembly.gbm_egl_frame_target_lifecycle_observation(),
+        Some(LiveGbmEglFrameTargetLifecycleReport {
+            status: LiveGbmEglFrameTargetLifecycleStatus::Resized,
+            target: resized,
+        })
+    );
+
+    let tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should report reduced lifecycle");
+    assert_eq!(
+        tick.gbm_egl_frame_target_lifecycle,
+        assembly.gbm_egl_frame_target_lifecycle_observation()
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn live_runtime_assembly_reports_reduced_gbm_egl_frame_target_allocation() {
     let root = ready_drm_sysfs_fixture("runtime-frame-target-allocation");
     let report = discover_live_backend(&LiveBackendConfig::new(&root));
@@ -508,6 +561,63 @@ fn live_runtime_assembly_reports_invalid_and_clears_stale_frame_target_allocatio
         tick.gbm_egl_frame_target_allocation,
         Some(invalid_allocation)
     );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_runtime_assembly_retains_or_retires_reduced_frame_target_allocation() {
+    let root = ready_drm_sysfs_fixture("runtime-frame-target-lifecycle-allocation");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed live assembly");
+    let mut allocator =
+        FakeGbmEglFrameTargetAllocator::new(LiveGbmEglFrameTargetAllocationStatus::Ready);
+
+    let allocation = assembly
+        .allocate_gbm_egl_frame_target(&mut allocator)
+        .expect("ready startup target should allocate through reduced seam");
+    let target = allocation.target;
+
+    assembly.observe_gbm_egl_frame_target_size(target.size);
+    assert_eq!(
+        assembly.gbm_egl_frame_target_lifecycle_observation(),
+        Some(LiveGbmEglFrameTargetLifecycleReport {
+            status: LiveGbmEglFrameTargetLifecycleStatus::Retained,
+            target,
+        })
+    );
+    assert_eq!(
+        assembly.gbm_egl_frame_target_allocation_observation(),
+        Some(allocation)
+    );
+
+    let retired = assembly
+        .retire_gbm_egl_frame_target()
+        .expect("ready target should retire");
+    assert_eq!(
+        retired,
+        LiveGbmEglFrameTargetLifecycleReport {
+            status: LiveGbmEglFrameTargetLifecycleStatus::Retired,
+            target,
+        }
+    );
+    assert_eq!(assembly.gbm_egl_frame_target_observation(), None);
+    assert_eq!(assembly.gbm_egl_frame_target_allocation_observation(), None);
+
+    let tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should report reduced retire lifecycle");
+    assert_eq!(tick.gbm_egl_frame_target, None);
+    assert_eq!(
+        tick.gbm_egl_frame_target_lifecycle,
+        Some(LiveGbmEglFrameTargetLifecycleReport {
+            status: LiveGbmEglFrameTargetLifecycleStatus::Retired,
+            target,
+        })
+    );
+    assert_eq!(tick.gbm_egl_frame_target_allocation, None);
 
     fs::remove_dir_all(root).unwrap();
 }

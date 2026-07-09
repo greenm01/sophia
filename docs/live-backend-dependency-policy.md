@@ -137,6 +137,11 @@ runtime-facing observation remains the same reduced allocation report.
 Runtime assembly keeps native frame-target allocation as an explicit action.
 Ticks report the most recent reduced allocation result, but they do not trigger
 native allocation by themselves.
+Frame-target lifecycle observations follow the same rule. Runtime assembly may
+report created, retained, resized, invalidated, and retired target states, but
+those observations contain only reduced target size/status and lifecycle status.
+Retaining a target may retain the reduced allocation report; resizing,
+invalidating, or retiring clears it. A runtime tick must observe this state only.
 
 The deterministic page-flip callback intake seam accepts only backend-local
 facts: the Sophia output selected by startup and a frame serial. It rejects

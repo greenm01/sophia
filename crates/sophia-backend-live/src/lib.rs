@@ -36,7 +36,8 @@ pub use sophia_renderer_live::{EglDrawSmokeReport, EglDrawSmokeStatus};
 pub use sophia_renderer_live::{
     FakeGbmEglFrameTargetAllocator, LiveGbmEglFrameTargetAllocationReport,
     LiveGbmEglFrameTargetAllocationRequest, LiveGbmEglFrameTargetAllocationStatus,
-    LiveGbmEglFrameTargetAllocator, LiveGbmEglFrameTargetRecord, LiveGbmEglFrameTargetStatus,
+    LiveGbmEglFrameTargetAllocator, LiveGbmEglFrameTargetLifecycleReport,
+    LiveGbmEglFrameTargetLifecycleStatus, LiveGbmEglFrameTargetRecord, LiveGbmEglFrameTargetStatus,
     LiveRendererImportBoundary, LiveRendererImportDecision, LiveRendererImportHealth,
     LiveRendererImportPathStatus, LiveRendererImportRejection, LiveRendererImportStartupStatus,
     LiveRendererPresentationReport, LiveRendererPresentationStatus, LiveRendererRuntimeObservation,
@@ -1538,12 +1539,16 @@ impl LiveBackendStartupReport {
         });
         let page_flip_event = LivePageFlipEvent::from_scanout_status(scanout_readiness.status);
         let page_flip_callback_intake = LivePageFlipCallbackIntake::new(selected_output.id);
+        let gbm_egl_frame_target = LiveGbmEglFrameTargetRecord::new(selected_output.size);
         self.into_headless_assembly(poller, renderer_selection)
             .map(|assembly| LiveBackendRuntimeAssembly {
                 assembly,
                 renderer_observation,
                 scanout_readiness,
-                gbm_egl_frame_target: Some(LiveGbmEglFrameTargetRecord::new(selected_output.size)),
+                gbm_egl_frame_target: Some(gbm_egl_frame_target),
+                gbm_egl_frame_target_lifecycle: Some(
+                    LiveGbmEglFrameTargetLifecycleReport::created(gbm_egl_frame_target),
+                ),
                 gbm_egl_frame_target_allocation: None,
                 page_flip_event,
                 page_flip_callback_intake,
@@ -1764,6 +1769,7 @@ pub struct LiveBackendRuntimeAssembly {
     renderer_observation: LiveRendererRuntimeObservation,
     scanout_readiness: LiveScanoutReadinessReport,
     gbm_egl_frame_target: Option<LiveGbmEglFrameTargetRecord>,
+    gbm_egl_frame_target_lifecycle: Option<LiveGbmEglFrameTargetLifecycleReport>,
     gbm_egl_frame_target_allocation: Option<LiveGbmEglFrameTargetAllocationReport>,
     page_flip_event: LivePageFlipEvent,
     page_flip_callback_intake: LivePageFlipCallbackIntake,
@@ -1829,6 +1835,12 @@ impl LiveBackendRuntimeAssembly {
         self.gbm_egl_frame_target
     }
 
+    pub fn gbm_egl_frame_target_lifecycle_observation(
+        &self,
+    ) -> Option<LiveGbmEglFrameTargetLifecycleReport> {
+        self.gbm_egl_frame_target_lifecycle
+    }
+
     pub fn gbm_egl_frame_target_allocation_observation(
         &self,
     ) -> Option<LiveGbmEglFrameTargetAllocationReport> {
@@ -1836,10 +1848,23 @@ impl LiveBackendRuntimeAssembly {
     }
 
     pub fn observe_gbm_egl_frame_target_size(&mut self, size: Size) -> LiveGbmEglFrameTargetRecord {
+        let previous = self.gbm_egl_frame_target;
         let record = LiveGbmEglFrameTargetRecord::new(size);
+        let lifecycle = LiveGbmEglFrameTargetLifecycleReport::from_size_update(previous, record);
         self.gbm_egl_frame_target = Some(record);
-        self.gbm_egl_frame_target_allocation = None;
+        self.gbm_egl_frame_target_lifecycle = Some(lifecycle);
+        if lifecycle.status != LiveGbmEglFrameTargetLifecycleStatus::Retained {
+            self.gbm_egl_frame_target_allocation = None;
+        }
         record
+    }
+
+    pub fn retire_gbm_egl_frame_target(&mut self) -> Option<LiveGbmEglFrameTargetLifecycleReport> {
+        let target = self.gbm_egl_frame_target.take()?;
+        let lifecycle = LiveGbmEglFrameTargetLifecycleReport::retired(target);
+        self.gbm_egl_frame_target_lifecycle = Some(lifecycle);
+        self.gbm_egl_frame_target_allocation = None;
+        Some(lifecycle)
     }
 
     pub fn allocate_gbm_egl_frame_target<A>(
@@ -1919,6 +1944,7 @@ impl LiveBackendRuntimeAssembly {
             renderer: self.renderer_observation,
             scanout: self.scanout_readiness,
             gbm_egl_frame_target: self.gbm_egl_frame_target,
+            gbm_egl_frame_target_lifecycle: self.gbm_egl_frame_target_lifecycle,
             gbm_egl_frame_target_allocation: self.gbm_egl_frame_target_allocation,
             page_flip: self.page_flip_event,
             page_flip_callbacks,
@@ -1933,6 +1959,7 @@ pub struct LiveBackendRuntimeTickReport {
     pub renderer: LiveRendererRuntimeObservation,
     pub scanout: LiveScanoutReadinessReport,
     pub gbm_egl_frame_target: Option<LiveGbmEglFrameTargetRecord>,
+    pub gbm_egl_frame_target_lifecycle: Option<LiveGbmEglFrameTargetLifecycleReport>,
     pub gbm_egl_frame_target_allocation: Option<LiveGbmEglFrameTargetAllocationReport>,
     pub page_flip: LivePageFlipEvent,
     pub page_flip_callbacks: LivePageFlipCallbackQueueReport,
