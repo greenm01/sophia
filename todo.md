@@ -11,12 +11,11 @@ evidence belong in `docs/research-log.md`.
 **Now**
 - [ ] Keep `DEFAULT_DISPLAY` clear-color smoke as fallback until GBM-backed
   drawing is validated against real render nodes.
-- [ ] Keep wgpu deferred until GBM/EGL startup, drawing, and presentation seams
-  are proven.
-
-**Next**
 - [ ] Record a passing `SOPHIA_RUN_REAL_GBM_SMOKE=1` run before retiring
   `DEFAULT_DISPLAY`.
+
+**Next**
+- [ ] Add a reduced real-GBM-smoke evidence record shape for validation output.
 
 ---
 
@@ -267,6 +266,8 @@ evidence belong in `docs/research-log.md`.
 - [x] Add startup wiring for reduced native libdrm poller diagnostics.
 - [x] Add native libdrm poller construction from discovered output routes.
 - [x] Add a reduced page-flip poller startup status for ready/no-output cases.
+- [x] Keep wgpu deferred until GBM/EGL startup, drawing, and presentation seams
+  are proven.
 
 ---
 

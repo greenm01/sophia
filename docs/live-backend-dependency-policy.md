@@ -257,6 +257,9 @@ platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
 authority. On Linux, wgpu will usually target Vulkan, but Sophia must first prove
 GBM/EGL startup, drawing, presentation, and buffer import before admitting that
 higher-level renderer dependency.
+`LiveBackendDependencyKind::Wgpu` therefore fails closed for every use case until
+that evidence exists. It must not enter through the generic renderer-import
+admission path.
 
 Phase 4 is the shared-memory import boundary. Real MIT-SHM mapping stays
 deferred until mapped bytes can pass through a bounded renderer upload path with

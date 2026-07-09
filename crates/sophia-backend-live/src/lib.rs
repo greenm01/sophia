@@ -56,6 +56,7 @@ pub enum LiveBackendDependencyKind {
     Gbm,
     Egl,
     DmaBuf,
+    Wgpu,
     MitShm,
 }
 
@@ -84,13 +85,16 @@ pub fn live_backend_dependency_decision(
     use_case: LiveBackendDependencyUse,
 ) -> LiveBackendDependencyDecision {
     use LiveBackendDependencyDecision::{Allowed, Deferred};
-    use LiveBackendDependencyKind::{DmaBuf, Egl, Gbm, LibDrm, LibInput, MitShm};
+    use LiveBackendDependencyKind::{DmaBuf, Egl, Gbm, LibDrm, LibInput, MitShm, Wgpu};
     use LiveBackendDependencyUse::{Discovery, RendererImport, RuntimePolling, SharedMemoryImport};
 
     match (kind, use_case) {
         (LibDrm | LibInput, Discovery | RuntimePolling) => Allowed,
         (MitShm, _) | (_, SharedMemoryImport) => Deferred {
             required_boundary: "bounded shared-memory import boundary",
+        },
+        (Wgpu, _) => Deferred {
+            required_boundary: "validated GBM/EGL startup, drawing, and presentation seams",
         },
         (Gbm | Egl | DmaBuf, _) | (_, RendererImport) => Deferred {
             required_boundary: "live renderer import boundary",

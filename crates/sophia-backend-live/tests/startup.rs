@@ -633,6 +633,24 @@ fn dependency_policy_defers_gpu_and_shared_memory_imports() {
             required_boundary: "bounded shared-memory import boundary",
         }
     );
+    assert_eq!(
+        live_backend_dependency_decision(
+            LiveBackendDependencyKind::Wgpu,
+            LiveBackendDependencyUse::RendererImport,
+        ),
+        LiveBackendDependencyDecision::Deferred {
+            required_boundary: "validated GBM/EGL startup, drawing, and presentation seams",
+        }
+    );
+    assert_eq!(
+        live_backend_dependency_decision(
+            LiveBackendDependencyKind::Wgpu,
+            LiveBackendDependencyUse::RuntimePolling,
+        ),
+        LiveBackendDependencyDecision::Deferred {
+            required_boundary: "validated GBM/EGL startup, drawing, and presentation seams",
+        }
+    );
 }
 
 #[test]
