@@ -84,7 +84,51 @@ fn native_egl_draw_smoke_reports_only_reduced_status() {
 #[cfg(feature = "gbm-probe")]
 mod gbm_projection {
     use super::*;
-    use sophia_backend_live::{LiveGpuStartupReport, LiveGpuStartupStatus};
+    use sophia_backend_live::{
+        LiveGbmBackedEglPlatformReport, LiveGpuStartupReport, LiveGpuStartupStatus,
+    };
+
+    #[test]
+    fn gbm_backed_egl_platform_report_uses_native_gbm_as_ready_platform() {
+        let report = discover_live_backend(&LiveBackendConfig::new("/does/not/matter"));
+
+        assert_eq!(
+            report.gbm_backed_egl_platform_report(LiveGpuStartupReport {
+                status: LiveGpuStartupStatus::NativeCapable,
+            }),
+            LiveGbmBackedEglPlatformReport {
+                status: EglPlatformStatus::NativePlatformCapable,
+            }
+        );
+    }
+
+    #[test]
+    fn gbm_backed_egl_platform_report_keeps_missing_gbm_unavailable() {
+        let report = discover_live_backend(&LiveBackendConfig::new("/does/not/matter"));
+
+        assert_eq!(
+            report.gbm_backed_egl_platform_report(LiveGpuStartupReport {
+                status: LiveGpuStartupStatus::RenderDeviceUnavailable,
+            }),
+            LiveGbmBackedEglPlatformReport {
+                status: EglPlatformStatus::PlatformUnavailable,
+            }
+        );
+    }
+
+    #[test]
+    fn gbm_backed_egl_platform_report_maps_degraded_gbm_to_degraded_platform() {
+        let report = discover_live_backend(&LiveBackendConfig::new("/does/not/matter"));
+
+        assert_eq!(
+            report.gbm_backed_egl_platform_report(LiveGpuStartupReport {
+                status: LiveGpuStartupStatus::PrivateAllocationUnavailable,
+            }),
+            LiveGbmBackedEglPlatformReport {
+                status: EglPlatformStatus::PlatformDegraded,
+            }
+        );
+    }
 
     #[test]
     fn egl_probe_uses_native_gbm_startup_as_ready_platform() {

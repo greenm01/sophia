@@ -9,15 +9,16 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Add a GBM-backed EGL platform candidate doc before moving beyond
-  `DEFAULT_DISPLAY`.
-- [ ] Define the first presentation smoke boundary without exposing GPU handles.
+- [ ] Add a native GBM-backed EGL platform smoke that preserves
+  `LiveGbmBackedEglPlatformReport`.
+- [ ] Keep `DEFAULT_DISPLAY` as fallback smoke until the GBM-backed platform
+  smoke passes.
 
 **Next**
 - [ ] Keep wgpu deferred until GBM/EGL startup, drawing, and presentation seams
   are proven.
-- [ ] Add renderer-live reduced presentation status before admitting scanout or
-  exported buffer paths.
+- [ ] Add a native offscreen presentation smoke that preserves reduced
+  presentation status.
 
 ---
 
@@ -211,6 +212,15 @@ evidence belong in `docs/research-log.md`.
   smoke without exporting handles.
 - [x] Add reduced clear-color smoke status and validation docs for GL failure
   modes.
+- [x] Add a GBM-backed EGL platform candidate doc before moving beyond
+  `DEFAULT_DISPLAY`.
+- [x] Define the first presentation smoke boundary without exposing GPU handles.
+- [x] Add renderer-live reduced presentation status before admitting scanout or
+  exported buffer paths.
+- [x] Add fake presentation smoke coverage for ready, unavailable, and degraded
+  statuses.
+- [x] Add a GBM-backed EGL platform status model behind `gbm-probe,egl-probe`.
+- [x] Add fake GBM-backed EGL platform projection coverage before native code.
 
 ---
 

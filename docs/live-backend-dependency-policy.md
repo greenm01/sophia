@@ -72,6 +72,20 @@ success, GL procedure loading, clear-color execution, and teardown. It does not
 admit shaders, exported buffers, presentation, GL object handles, procedure
 pointers, native errors, or pbuffer details across the safe renderer/backend
 boundary.
+`DEFAULT_DISPLAY` is a temporary host smoke only. The production-shaped Linux
+path must be GBM-backed EGL: backend-live owns render-device authority,
+renderer-live proves GBM capability, and the native EGL adapter creates and
+tears down the EGL display from private GBM state while exposing only reduced
+platform status.
+
+Presentation is the next renderer boundary after private drawing. The admitted
+public shape is a reduced renderer-live report: ready, unavailable, or degraded.
+The fake smoke covers those statuses without native dependencies. The future
+native smoke must stay offscreen at first: stage a frame, cross a
+presentation-like boundary, and return the same reduced status without exposing
+GBM buffers, DRM object IDs, DMA-BUF fds, EGLImages, fences, pixels, native
+errors, or GL object names. Real scanout is deferred until that reduced shape is
+preserved by native code.
 
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout

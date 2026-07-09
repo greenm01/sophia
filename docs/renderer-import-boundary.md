@@ -234,6 +234,82 @@ to degraded EGL platform status; it must not become native drawing capability.
 wgpu remains deferred until GBM/EGL startup, drawing, and presentation seams are
 proven.
 
+## GBM-Backed EGL Platform Candidate
+
+The current native EGL clear-color smoke uses `DEFAULT_DISPLAY` only as a
+temporary platform probe. The first production-shaped Linux path must move EGL
+onto backend-owned GBM authority: backend-live discovers and opens the render
+device, renderer-live proves GBM capability with a reduced token or owned fd,
+and the native EGL adapter creates an EGL display from the private GBM device.
+
+This is a platform handoff, not a public handle handoff. The Engine, WM,
+protocol authorities, and safe renderer-live API must still see only reduced
+status. They must not see the GBM device, EGL display, driver path, fd, surface,
+native visual, or driver error text.
+
+The admitted reduced status shape is `LiveGbmBackedEglPlatformReport`. It
+projects GBM startup into EGL platform readiness without exposing the render
+device or EGL objects. The candidate native path is:
+
+1. Backend-live discovers a render node and holds the opened device authority.
+2. Renderer-live proves GBM native capability with a private allocation smoke.
+3. The native EGL adapter receives only backend-owned authority, creates an EGL
+   display using the GBM platform path, initializes it, chooses a compatible
+   config, and tears it down.
+4. A later draw smoke may reuse that platform to clear a private GBM-backed
+   target, but buffer export and scanout stay out of scope until presentation
+   status exists.
+
+Admission rules for the GBM-backed EGL platform:
+
+- keep it behind the combined `gbm-probe,egl-probe` feature path;
+- require GBM native capability before attempting GBM-backed EGL;
+- return reduced platform status only: ready, unavailable, degraded, or context
+  unavailable;
+- keep all fd ownership, GBM devices, EGL displays, configs, surfaces, native
+  error text, and driver details inside live adapters;
+- do not expose DMA-BUF, KMS framebuffer IDs, GBM buffer handles, EGLImages, or
+  GL object names;
+- keep `DEFAULT_DISPLAY` only as a temporary host smoke until the GBM-backed
+  path exists.
+
+Rejected shortcuts:
+
+- using `DEFAULT_DISPLAY` as the production compositor platform: it does not
+  prove Sophia controls the backend-owned render device;
+- exporting a GBM handle to renderer-live so safe code can assemble EGL state:
+  that would leak renderer-private authority across the boundary;
+- moving directly to DMA-BUF or scanout before the reduced presentation status
+  exists.
+
+## Presentation Smoke Boundary
+
+Presentation is the next boundary after private drawing. A presentation smoke
+must prove that renderer-live can advance a frame to a reduced presentation
+status without exposing the GPU objects that made it happen.
+
+The first presentation smoke should not be real KMS scanout. It should be a
+renderer-owned, offscreen presentation boundary that models the final
+PageFlipCommitGate shape: a frame is staged, a presentation boundary is reached,
+and the public result says only whether presentation was ready, unavailable, or
+degraded.
+
+The presentation smoke must not expose:
+
+- GBM buffer handles or buffer object pointers;
+- DRM framebuffer IDs, connector IDs, CRTC IDs, plane IDs, or device paths;
+- DMA-BUF fds, modifiers, fences, or EGLImages;
+- native driver errors or GL object names;
+- frame pixels or readback data.
+
+The admitted public shape is `LiveRendererPresentationReport` with only three
+statuses: ready, unavailable, or degraded. The fake presentation smoke exercises
+those statuses without native dependencies. Only after a native implementation
+can preserve that shape should Sophia admit scanout-facing code. This keeps the
+macOS-style invariant intact: the Engine can learn that a presentation boundary
+happened, but it cannot accidentally present partially assembled native state
+through a leaky renderer API.
+
 ## EGL Candidate Dependency
 
 The admitted native EGL dependency is `khronos-egl` 6.0.0. It binds the Khronos

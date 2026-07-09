@@ -209,12 +209,23 @@ impl LiveBackendStartupReport {
     }
 
     #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
+    pub fn gbm_backed_egl_platform_report(
+        &self,
+        gpu_startup: LiveGpuStartupReport,
+    ) -> LiveGbmBackedEglPlatformReport {
+        LiveGbmBackedEglPlatformReport::from_gpu_startup(gpu_startup)
+    }
+
+    #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
     pub fn egl_probe_report_from_gbm_startup(
         &self,
         gpu_startup: LiveGpuStartupReport,
         context: EglContextProbeStatus,
     ) -> LiveEglStartupReport {
-        self.egl_probe_report(EglPlatformStatus::from(gpu_startup.status), context)
+        self.egl_probe_report(
+            self.gbm_backed_egl_platform_report(gpu_startup).status,
+            context,
+        )
     }
 
     #[cfg(feature = "gbm-probe")]
@@ -483,6 +494,21 @@ impl From<LiveGpuStartupStatus> for EglPlatformStatus {
             | LiveGpuStartupStatus::PrivateAllocationUnavailable => {
                 EglPlatformStatus::PlatformDegraded
             }
+        }
+    }
+}
+
+#[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveGbmBackedEglPlatformReport {
+    pub status: EglPlatformStatus,
+}
+
+#[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
+impl LiveGbmBackedEglPlatformReport {
+    pub fn from_gpu_startup(gpu_startup: LiveGpuStartupReport) -> Self {
+        Self {
+            status: EglPlatformStatus::from(gpu_startup.status),
         }
     }
 }
