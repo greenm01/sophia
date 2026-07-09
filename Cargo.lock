@@ -167,6 +167,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
+name = "sophia-backend-live"
+version = "0.1.0"
+dependencies = [
+ "sophia-engine",
+ "sophia-protocol",
+]
+
+[[package]]
 name = "sophia-cli"
 version = "0.1.0"
 dependencies = [

@@ -9,16 +9,15 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Sketch the first live compositor backend crate boundary and keep kernel
-  IO behind traits that preserve deterministic headless tests.
-- [ ] Add one smoke that proves backend discovery can fail closed without
-  affecting protocol authority or WM IPC contracts.
-
-**Next**
 - [ ] Decide when to introduce real libdrm/libinput dependencies and keep them
   outside `sophia-engine` if possible.
 - [ ] Keep GPU imports and real MIT-SHM mapping deferred until a live renderer
   import boundary exists.
+
+**Next**
+- [ ] Add a live backend dependency policy doc before adding crates that touch
+  `/dev/dri`, `/dev/input`, GBM, EGL, or DMA-BUF.
+- [ ] Define the renderer import boundary separately from backend discovery.
 
 ---
 
@@ -87,6 +86,10 @@ evidence belong in `docs/research-log.md`.
   libinput without changing the Engine/WM/Authority packet contracts.
 - [x] Keep real DRM/KMS ioctls, GPU imports, and real MIT-SHM mapping deferred
   behind deterministic backend discovery and assembly seams.
+- [x] Sketch the first live compositor backend crate boundary and keep kernel
+  IO behind traits that preserve deterministic headless tests.
+- [x] Add one smoke that proves backend discovery can fail closed without
+  affecting protocol authority or WM IPC contracts.
 
 ---
 

@@ -740,6 +740,13 @@ assembly. That is the fail-closed rule for the live compositor seam: protocol
 authorities, WM IPC, and portal state are not started just because kernel
 discovery partially succeeded.
 
+`sophia-backend-live` is the crate boundary for real kernel-facing backend
+dependencies. Today it only wraps the dependency-neutral discovery traits and
+can seed a headless assembly from sysfs fixtures and static input descriptors.
+Future libdrm, libinput, GBM/EGL, or renderer import code should land in that
+crate first. `sophia-engine` should continue to expose stable data contracts
+and deterministic tests, not direct kernel IO ownership.
+
 Physical input now has a request-generation seam. After Sophia Engine produces
 an `InputRoute`, `routed_input_request_from_physical_event` combines the
 physical `InputEventPacket` with the accepted route and emits an
