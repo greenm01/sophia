@@ -6,6 +6,23 @@ validation evidence in `docs/research-log.md`.
 
 ---
 
+## Completed Real Backend Evidence and Runtime Seams
+
+- [x] Recorded opt-in real GBM/EGL validation with reduced draw, presentation,
+  and frame-target allocation evidence.
+- [x] Defined renderer-private GBM/EGL frame-target lifecycle states: created,
+  retained, resized, invalidated, and retired.
+- [x] Added reduced runtime observations for frame-target lifecycle and
+  allocation without implicit native allocation during ticks.
+- [x] Added the first reduced KMS scanout target report and derived page-flip
+  readiness from it.
+- [x] Preserved CPU fallback and degraded GPU paths while scanout matures.
+- [x] Added a fake live compositor loop smoke covering input polling, authority
+  transaction intake, WM policy, renderer target observation, frame commit, and
+  reduced page-flip observation.
+
+---
+
 ## Active Focus - Real Backend Boundaries
 
 **Now**

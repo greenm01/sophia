@@ -178,6 +178,11 @@ event polling. It emits queued callback facts through the same bounded sender,
 retains unsent callbacks on backpressure or disconnection, and reports only
 counts plus queue state. Real libdrm event handling should replace the source,
 not the intake, queue, or reduced runtime observation contracts.
+The native-shaped libdrm reader contract sits before that poller. It reads a
+bounded batch of backend-local page-flip callback facts, reports only
+`LibdrmNativeReadLoopReport`, and hands those facts to the existing output-route
+decoder. Read failure reports reduced failure and must not drop already-pending
+callbacks.
 
 The `libdrm-events` feature defines the first libdrm page-flip polling adapter
 shape without admitting a native libdrm crate. `LibdrmPageFlipEventPoller`
@@ -295,6 +300,14 @@ native DRM/KMS identifier.
 Native libdrm poller startup status is likewise reduced to ready/no-output or
 backend-not-ready state plus route count. It is a startup health record, not a
 native resource inventory.
+
+The `libinput-events` feature defines the first native-shaped live input intake
+contract without admitting a concrete libinput crate. `LiveLibinputEventReader`
+returns bounded `InputEventPacket` batches plus `LibinputNativeEventReadReport`;
+`NativeLibinputEventPoller` implements Sophia Engine's `NonBlockingInputPoller`
+contract. The public report exposes only read status, event count, and remaining
+queued count. A later real libinput adapter must replace the reader, not the
+engine input adapter or runtime loop contract.
 
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout

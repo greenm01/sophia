@@ -12,47 +12,42 @@ active milestone to `docs/roadmap-history.md`.
 
 ## Active Milestone
 
-### Real Backend Evidence
+### Native Backend Event Intake
 
-- [x] Decide the opt-in real-device evidence shape for native GBM/EGL
-  frame-target allocation.
-- [x] Extend `LiveRealGbmSmokeEvidence` with reduced frame-target allocation
-  status.
-- [x] Update validation docs so the real GBM/EGL smoke records draw,
-  presentation, and allocation status without exposing render-node paths, file
-  descriptors, GBM/EGL handles, pixels, driver errors, or KMS object identity.
-- [x] Run and record the opt-in real-device validation:
-  `SOPHIA_RUN_REAL_GBM_SMOKE=1 cargo test --offline -p sophia-backend-live --features gbm-probe,egl-probe`.
+- [x] Add a bounded native libdrm page-flip reader contract that feeds the
+  existing reduced callback queue without exposing KMS identity.
+- [x] Add a feature-gated native libinput event poller shape that implements the
+  engine's non-blocking input contract without admitting a concrete libinput
+  dependency.
+- [x] Validate both native-shaped event intake features:
+  `cargo test --offline -p sophia-backend-live --features libdrm-events,libinput-events`.
 
 ---
 
 ## Next 3 Milestones
 
-### 1. Frame-Target Lifecycle
+### 1. Generic Runtime Backend Pollers
 
-- [x] Define renderer-private frame-target lifecycle states: create, retain,
-  resize, invalidate, and retire.
-- [x] Keep runtime observations reduced to target size, allocation status, and
-  lifecycle status.
-- [x] Preserve the current rule that runtime ticks do not allocate native frame
-  targets implicitly.
+- [ ] Decide whether `LiveBackendRuntimeAssembly` should become generic over
+  input poller type or accept boxed poller adapters.
+- [ ] Keep `QueuedInputPoller` as the deterministic default.
+- [ ] Add one smoke proving native-shaped input polling can drive runtime
+  assembly without changing Sophia Engine.
 
-### 2. Scanout Path
+### 2. Real Backend Hardware Gates
 
-- [x] Define the first reduced KMS scanout target report.
-- [x] Connect renderer presentation readiness to page-flip readiness without
-  exposing connector, CRTC, plane, framebuffer, fd, or driver identity.
-- [x] Keep CPU fallback and degraded GPU paths valid while scanout matures.
+- [ ] Define opt-in environment gates for real libdrm and libinput validation.
+- [ ] Require native hardware tests to fail closed and return reduced reports.
+- [ ] Keep default workspace validation independent of device nodes and seats.
 
-### 3. Live Compositor Runtime Loop
+### 3. Authority Probe Selection
 
-- [x] Assemble a runtime-owned loop that sequences input polling, authority
-  transaction intake, WM policy, renderer target updates, frame commit, and
-  reduced page-flip observation.
-- [x] Keep Sophia Engine independent of protocol authority policy and
-  renderer-private resource ownership.
-- [x] Add one smoke proving the loop can run with fake backend components before
-  real DRM/KMS scanout is admitted.
+- [ ] Choose the next real Sophia X Authority app probe after backend intake
+  seams settle.
+- [ ] Prefer probes that exercise bounded drawing/upload/present paths over
+  broad X11 completeness.
+- [ ] Keep Wayland Authority deferred until backend event intake and scanout
+  timing are stable.
 
 ---
 
@@ -72,6 +67,11 @@ active milestone to `docs/roadmap-history.md`.
 
 ## Done Recently
 
+- [x] Recorded real GBM/EGL evidence with frame-target allocation status.
+- [x] Added reduced frame-target lifecycle observations.
+- [x] Added reduced KMS scanout target reports and page-flip readiness
+  projection.
+- [x] Added a fake live compositor loop smoke before admitting real scanout.
 - [x] Added reduced GBM/EGL frame-target readiness to backend startup and runtime
   ticks.
 - [x] Added explicit runtime mutation for reduced frame-target size changes.

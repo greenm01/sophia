@@ -3,13 +3,14 @@
 use std::sync::mpsc;
 
 use sophia_backend_live::{
-    CompositorBackendTickInput, FakeLibdrmPageFlipEventPoller, LibdrmBackendFdAuthority,
-    LibdrmBackendFdAuthorityReport, LibdrmBackendFdAuthorityStatus,
+    CompositorBackendTickInput, FakeLibdrmNativePageFlipReader, FakeLibdrmPageFlipEventPoller,
+    LibdrmBackendFdAuthority, LibdrmBackendFdAuthorityReport, LibdrmBackendFdAuthorityStatus,
     LibdrmDependencyAdmissionReport, LibdrmDependencyAdmissionStatus,
     LibdrmNativeEventAdapterReport, LibdrmNativeEventAdapterStatus, LibdrmNativeOutputRoute,
     LibdrmNativeOutputSlot, LibdrmNativePageFlipCallback, LibdrmNativePageFlipDecodeReport,
-    LibdrmNativePageFlipDecodeStatus, LibdrmNativePageFlipSource, LibdrmNativePageFlipSourceReport,
-    LibdrmNativePageFlipSourceStatus, LibdrmNativePollerDiagnostics, LibdrmNativeReadLoopReport,
+    LibdrmNativePageFlipDecodeStatus, LibdrmNativePageFlipReadResult, LibdrmNativePageFlipReader,
+    LibdrmNativePageFlipSource, LibdrmNativePageFlipSourceReport, LibdrmNativePageFlipSourceStatus,
+    LibdrmNativePollerDiagnostics, LibdrmNativeReadAndPollReport, LibdrmNativeReadLoopReport,
     LibdrmNativeReadLoopStatus, LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus,
     LibdrmPageFlipEventPoller, LiveBackendConfig, LiveLibdrmPollerDiagnostics,
     LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
@@ -204,6 +205,115 @@ fn native_libdrm_poller_drains_injected_callback_batch_without_fd_polling() {
             frame_serial: 82,
         }
     );
+}
+
+#[test]
+fn native_libdrm_reader_reads_bounded_callbacks_without_kms_identity() {
+    let slot = LibdrmNativeOutputSlot::new(2).expect("nonzero slot should be valid");
+    let mut reader = FakeLibdrmNativePageFlipReader::new([
+        LibdrmNativePageFlipCallback::new(slot, 81),
+        LibdrmNativePageFlipCallback::new(slot, 82),
+    ]);
+
+    let first = reader.read_ready_page_flip_callbacks(1);
+    assert_eq!(
+        first,
+        LibdrmNativePageFlipReadResult {
+            report: LibdrmNativeReadLoopReport::callback_decoded(1)
+                .expect("one callback should produce a read report"),
+            callbacks: vec![LibdrmNativePageFlipCallback::new(slot, 81)],
+        }
+    );
+    assert_eq!(reader.queued_len(), 1);
+
+    let second = reader.read_ready_page_flip_callbacks(4);
+    assert_eq!(second.report.decoded_callbacks, 1);
+    assert_eq!(
+        second.callbacks,
+        vec![LibdrmNativePageFlipCallback::new(slot, 82)]
+    );
+    assert_eq!(reader.queued_len(), 0);
+
+    let empty = reader.read_ready_page_flip_callbacks(4);
+    assert_eq!(empty.report, LibdrmNativeReadLoopReport::would_block());
+    assert!(empty.callbacks.is_empty());
+}
+
+#[test]
+fn native_libdrm_poller_reads_and_polls_bounded_callbacks() {
+    let authority =
+        LibdrmBackendFdAuthority::new(24).expect("nonzero generation should mint authority token");
+    let slot = LibdrmNativeOutputSlot::new(2).expect("nonzero slot should be valid");
+    let source = LibdrmNativePageFlipSource::from_authority(authority);
+    let mut poller =
+        NativeLibdrmPageFlipEventPoller::new(source).with_routes([LibdrmNativeOutputRoute {
+            slot,
+            output: OutputId::from_raw(7),
+        }]);
+    let mut reader = FakeLibdrmNativePageFlipReader::new([
+        LibdrmNativePageFlipCallback::new(slot, 81),
+        LibdrmNativePageFlipCallback::new(slot, 82),
+    ]);
+    let (sender, receiver) = mpsc::sync_channel(4);
+
+    let report = poller.read_and_poll_page_flip_events(&mut reader, &sender, 1, 4);
+
+    assert_eq!(
+        report,
+        LibdrmNativeReadAndPollReport {
+            read_loop: LibdrmNativeReadLoopReport::callback_decoded(1)
+                .expect("one callback should produce a read report"),
+            poll: LibdrmPageFlipEventPollReport {
+                status: LibdrmPageFlipEventPollStatus::Emitted,
+                callbacks: LivePageFlipCallbackSourceReport {
+                    emitted: 1,
+                    queued_remaining: 0,
+                    backpressure: false,
+                    disconnected: false,
+                    max_reached: false,
+                },
+            },
+        }
+    );
+    assert_eq!(reader.queued_len(), 1);
+    assert_eq!(poller.pending_callback_count(), 0);
+    assert_eq!(
+        receiver
+            .try_recv()
+            .expect("callback should be reduced and queued"),
+        LivePageFlipCallback {
+            output: OutputId::from_raw(7),
+            frame_serial: 81,
+        }
+    );
+}
+
+#[test]
+fn native_libdrm_poller_reports_read_failure_without_dropping_pending_callbacks() {
+    let authority =
+        LibdrmBackendFdAuthority::new(25).expect("nonzero generation should mint authority token");
+    let slot = LibdrmNativeOutputSlot::new(2).expect("nonzero slot should be valid");
+    let source = LibdrmNativePageFlipSource::from_authority(authority);
+    let mut poller =
+        NativeLibdrmPageFlipEventPoller::new(source).with_routes([LibdrmNativeOutputRoute {
+            slot,
+            output: OutputId::from_raw(7),
+        }]);
+    let mut reader =
+        FakeLibdrmNativePageFlipReader::new([LibdrmNativePageFlipCallback::new(slot, 81)]);
+    reader.fail_next_read();
+    poller.inject_callbacks([LibdrmNativePageFlipCallback::new(slot, 80)]);
+    let (sender, receiver) = mpsc::sync_channel(4);
+
+    let report = poller.read_and_poll_page_flip_events(&mut reader, &sender, 4, 4);
+
+    assert_eq!(report.read_loop, LibdrmNativeReadLoopReport::read_failed());
+    assert_eq!(
+        report.poll.status,
+        LibdrmPageFlipEventPollStatus::Disconnected
+    );
+    assert_eq!(poller.pending_callback_count(), 1);
+    assert!(receiver.try_recv().is_err());
 }
 
 #[test]

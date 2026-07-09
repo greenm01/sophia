@@ -21,6 +21,8 @@ cargo test --offline -p sophia-renderer-live --features egl-probe
 cargo test --offline -p sophia-backend-live --features egl-probe
 cargo test --offline -p sophia-backend-live --features gbm-probe,egl-probe
 cargo test --offline -p sophia-backend-live --features libdrm-events
+cargo test --offline -p sophia-backend-live --features libinput-events
+cargo test --offline -p sophia-backend-live --features libdrm-events,libinput-events
 ```
 
 The `gbm-probe` feature admits the safe `gbm` crate behind an optional feature.
@@ -39,6 +41,14 @@ backend-live dependency. It checks only the reduced dependency-admission report,
 private native adapter skeleton, page-flip event polling adapter shape, and
 deterministic fake poller that feeds the runtime-owned bounded callback queue.
 Native page-flip values must be reduced before they reach runtime observation.
+The native-shaped reader contract is still deterministic: tests feed reduced
+native callback facts through a bounded reader before the poller decodes them
+through backend-local output routes.
+
+The `libinput-events` feature currently admits no native dependency. It defines
+the first reduced live input event reader and poller shape, then proves that the
+poller implements Sophia Engine's non-blocking input contract. A later concrete
+libinput dependency must plug into this seam without changing runtime reports.
 
 The backend-live GBM feature suite includes an opt-in real-device smoke. Set
 `SOPHIA_RUN_REAL_GBM_SMOKE=1` to let the test look for an openable
@@ -68,6 +78,8 @@ cargo test --offline -p sophia-renderer-live --features egl-probe
 cargo test --offline -p sophia-backend-live --features egl-probe
 cargo test --offline -p sophia-backend-live --features gbm-probe,egl-probe
 cargo test --offline -p sophia-backend-live --features libdrm-events
+cargo test --offline -p sophia-backend-live --features libinput-events
+cargo test --offline -p sophia-backend-live --features libdrm-events,libinput-events
 ```
 
 Run the opt-in local hardware smoke only when you want real render-node

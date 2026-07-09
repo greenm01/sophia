@@ -17,6 +17,7 @@ default = []
 gbm-probe = ["sophia-renderer-live/gbm-probe"]
 egl-probe = ["sophia-renderer-live/egl-probe"]
 libdrm-events = ["dep:drm"]
+libinput-events = []
 
 [lints]
 workspace = true

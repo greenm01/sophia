@@ -779,6 +779,14 @@ authority transaction intake, runtime policy scheduling, CPU-backed frame
 rendering, reduced frame-target lifecycle observation, reduced KMS scanout
 target observation, and reduced page-flip readiness.
 
+Native backend event intake now has deterministic reduced seams for both output
+and input. The `libdrm-events` path includes a bounded native-shaped page-flip
+reader feeding the existing reduced callback queue. The `libinput-events` path
+includes a bounded native-shaped input reader and `NonBlockingInputPoller`
+adapter without admitting a concrete libinput dependency. The combined
+validation passed with
+`cargo test --offline -p sophia-backend-live --features libdrm-events,libinput-events`.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new
