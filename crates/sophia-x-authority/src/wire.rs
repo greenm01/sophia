@@ -8,6 +8,7 @@ use crate::{
 };
 
 const X_CREATE_WINDOW: u8 = 1;
+const X_DESTROY_WINDOW: u8 = 4;
 const X_MAP_WINDOW: u8 = 8;
 const X_INTERN_ATOM: u8 = 16;
 const X_GET_ATOM_NAME: u8 = 17;
@@ -23,6 +24,7 @@ const X_LIST_EXTENSIONS: u8 = 99;
 const X_QUERY_BEST_SIZE: u8 = 97;
 
 const X_CREATE_WINDOW_REQ_LEN: usize = 32;
+const X_DESTROY_WINDOW_REQ_LEN: usize = 8;
 const X_MAP_WINDOW_REQ_LEN: usize = 8;
 const X_INTERN_ATOM_REQ_LEN: usize = 8;
 const X_GET_ATOM_NAME_REQ_LEN: usize = 8;
@@ -47,6 +49,9 @@ pub struct XWireClientContext {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum XWireRequest {
     Authority(XAuthorityRequestPacket),
+    DestroyWindow {
+        window: XResourceId,
+    },
     InternAtom {
         only_if_exists: bool,
         name: String,
@@ -137,6 +142,7 @@ pub fn decode_x11_core_request(
 
     match opcode {
         X_CREATE_WINDOW => decode_create_window(context, bytes),
+        X_DESTROY_WINDOW => decode_destroy_window(context, bytes),
         X_MAP_WINDOW => decode_map_window(context, bytes),
         X_INTERN_ATOM => decode_intern_atom(context, bytes),
         X_GET_ATOM_NAME => decode_get_atom_name(context, bytes),
@@ -233,6 +239,16 @@ fn decode_query_extension(
 fn decode_list_extensions(bytes: &[u8]) -> Result<XWireRequest, XWireParseError> {
     require_exact_len(X_LIST_EXTENSIONS, X_LIST_EXTENSIONS_REQ_LEN, bytes.len())?;
     Ok(XWireRequest::ListExtensions)
+}
+
+fn decode_destroy_window(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_DESTROY_WINDOW, X_DESTROY_WINDOW_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::DestroyWindow {
+        window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+    })
 }
 
 fn decode_intern_atom(

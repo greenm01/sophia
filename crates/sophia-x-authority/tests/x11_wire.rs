@@ -193,6 +193,23 @@ fn x11_core_decoder_maps_create_and_map_to_authority_packets() {
 }
 
 #[test]
+fn x11_core_decoder_captures_destroy_window_requests() {
+    let namespace = NamespaceId::from_raw(41);
+    let destroy = decode_x11_core_request(
+        context(namespace, 502, XByteOrder::LittleEndian),
+        &resource_request(XByteOrder::LittleEndian, 4, 0x220001),
+    )
+    .unwrap();
+
+    assert_eq!(
+        destroy,
+        XWireRequest::DestroyWindow {
+            window: XResourceId::new(0x220001, 1),
+        }
+    );
+}
+
+#[test]
 fn x11_core_decoder_maps_selection_requests_to_authority_packets() {
     let namespace = NamespaceId::from_raw(42);
     let set_owner = decode_x11_core_request(
@@ -1090,6 +1107,41 @@ fn x11_dispatch_emits_configure_map_property_and_selection_failure_outputs() {
         read_u32(XByteOrder::LittleEndian, &encoded[20..24]),
         X_ATOM_NONE
     );
+}
+
+#[test]
+fn x11_dispatch_accepts_destroy_window_for_known_namespace_window() {
+    let namespace = NamespaceId::from_raw(46);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let create = decode_x11_core_request(
+        context(namespace, 601, XByteOrder::LittleEndian),
+        &create_window_request(XByteOrder::LittleEndian, 0x220101, 10, 20, 640, 480),
+    )
+    .unwrap();
+    dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 1),
+        create,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    let destroy = decode_x11_core_request(
+        context(namespace, 602, XByteOrder::LittleEndian),
+        &resource_request(XByteOrder::LittleEndian, 4, 0x220101),
+    )
+    .unwrap();
+    let destroy = dispatch_x11_wire_request(
+        dispatch_context(namespace, 2, XByteOrder::LittleEndian, 4),
+        destroy,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    assert!(destroy.outputs.is_empty());
 }
 
 #[cfg(unix)]

@@ -1,6 +1,20 @@
 use super::prelude::*;
 
 pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
+    if args.iter().any(|arg| arg == "x-authority-xlib-smoke") {
+        let report = run_x_authority_xlib_smoke()?;
+        println!(
+            "x-authority-xlib-smoke display={} status={} stdout_bytes={} stderr_bytes={} title_bytes={} title_match={}",
+            report.display,
+            report.status,
+            report.stdout_bytes,
+            report.stderr_bytes,
+            report.title_bytes,
+            report.title_match
+        );
+        return Ok(true);
+    }
+
     if args.iter().any(|arg| arg == "x-authority-xdpyinfo-smoke") {
         let report = run_x_authority_xdpyinfo_smoke()?;
         println!(
@@ -80,6 +94,16 @@ struct XAuthorityXdpyinfoSmokeReport {
     stderr_bytes: usize,
     mentions_sophia: bool,
     mentions_root: bool,
+}
+
+#[derive(Clone, Debug)]
+struct XAuthorityXlibSmokeReport {
+    display: String,
+    status: i32,
+    stdout_bytes: usize,
+    stderr_bytes: usize,
+    title_bytes: usize,
+    title_match: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -257,10 +281,7 @@ fn run_x_authority_x11rb_smoke() -> Result<XAuthorityX11rbSmokeReport, Box<dyn s
 
 fn run_x_authority_xdpyinfo_smoke()
 -> Result<XAuthorityXdpyinfoSmokeReport, Box<dyn std::error::Error>> {
-    let display_number = 1600 + (std::process::id() % 1000);
-    let display = format!(":{display_number}");
-    let socket_path = std::path::PathBuf::from(format!("/tmp/.X11-unix/X{display_number}"));
-    std::fs::create_dir_all("/tmp/.X11-unix")?;
+    let (display, socket_path) = temp_xauthority_display(1600)?;
     let server_path = socket_path.clone();
     let server = std::thread::spawn(move || {
         run_x11_core_socket_server_once(&server_path, NamespaceId::from_raw(43))
@@ -297,6 +318,69 @@ fn run_x_authority_xdpyinfo_smoke()
     }
 
     Ok(report)
+}
+
+fn run_x_authority_xlib_smoke() -> Result<XAuthorityXlibSmokeReport, Box<dyn std::error::Error>> {
+    let (display, socket_path) = temp_xauthority_display(2600)?;
+    let source_path = std::env::temp_dir().join(format!(
+        "sophia-xauthority-xlib-{}-{}.c",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    ));
+    let binary_path = source_path.with_extension("bin");
+    std::fs::write(&source_path, XLIB_SMOKE_SOURCE)?;
+    let compile = std::process::Command::new("gcc")
+        .arg(&source_path)
+        .arg("-o")
+        .arg(&binary_path)
+        .arg("-lX11")
+        .output()?;
+    if !compile.status.success() {
+        return Err(format!(
+            "failed to compile Xlib smoke: {}",
+            String::from_utf8_lossy(&compile.stderr).trim()
+        )
+        .into());
+    }
+
+    let server_path = socket_path.clone();
+    let server = std::thread::spawn(move || {
+        run_x11_core_socket_server_once(&server_path, NamespaceId::from_raw(44))
+    });
+    wait_for_socket_path(&socket_path)?;
+    let output = std::process::Command::new(&binary_path)
+        .env("DISPLAY", &display)
+        .output()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let status = output.status.code().unwrap_or(-1);
+    let title_bytes = xlib_smoke_title_bytes(&stdout).unwrap_or(0);
+    let title_match = stdout.contains("title_match=1");
+
+    let _ = std::fs::remove_file(&socket_path);
+    let _ = std::fs::remove_file(&source_path);
+    let _ = std::fs::remove_file(&binary_path);
+    server
+        .join()
+        .map_err(|_| "X authority X11 socket server thread panicked")??;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Xlib smoke failed for {display}: status={status} stdout={} stderr={}",
+            stdout.trim(),
+            stderr.trim()
+        )
+        .into());
+    }
+
+    Ok(XAuthorityXlibSmokeReport {
+        display,
+        status,
+        stdout_bytes: output.stdout.len(),
+        stderr_bytes: output.stderr.len(),
+        title_bytes,
+        title_match,
+    })
 }
 
 fn run_x_authority_runtime_smoke()
@@ -611,6 +695,23 @@ fn send_request(
     Ok(read_x_authority_response(stream)?)
 }
 
+fn temp_xauthority_display(
+    base: u32,
+) -> Result<(String, std::path::PathBuf), Box<dyn std::error::Error>> {
+    let display_number = base + (std::process::id() % 1000);
+    let display = format!(":{display_number}");
+    let socket_path = std::path::PathBuf::from(format!("/tmp/.X11-unix/X{display_number}"));
+    std::fs::create_dir_all("/tmp/.X11-unix")?;
+    Ok((display, socket_path))
+}
+
+fn xlib_smoke_title_bytes(stdout: &str) -> Option<usize> {
+    stdout
+        .split_whitespace()
+        .find_map(|field| field.strip_prefix("title_bytes="))
+        .and_then(|value| value.parse().ok())
+}
+
 fn wait_for_socket_path(path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     while std::time::Instant::now() < deadline {
@@ -626,3 +727,57 @@ fn wait_for_socket_path(path: &std::path::Path) -> Result<(), Box<dyn std::error
     )
     .into())
 }
+
+const XLIB_SMOKE_SOURCE: &str = r#"
+#include <X11/Xlib.h>
+#include <X11/Xatom.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+int main(void) {
+    Display *display = XOpenDisplay(NULL);
+    if (!display) {
+        fprintf(stderr, "open_display=0\n");
+        return 2;
+    }
+
+    int screen = DefaultScreen(display);
+    Window root = RootWindow(display, screen);
+    Window window = XCreateSimpleWindow(display, root, 10, 20, 240, 160, 0, 0, 0);
+    Atom net_wm_name = XInternAtom(display, "_NET_WM_NAME", False);
+    Atom utf8 = XInternAtom(display, "UTF8_STRING", False);
+    const char *title = "Sophia Xlib";
+    XStoreName(display, window, title);
+    XChangeProperty(display, window, net_wm_name, utf8, 8, PropModeReplace,
+                    (const unsigned char *)title, (int)strlen(title));
+
+    Atom actual_type = None;
+    int actual_format = 0;
+    unsigned long nitems = 0;
+    unsigned long bytes_after = 0;
+    unsigned char *value = NULL;
+    int property_status = XGetWindowProperty(display, window, net_wm_name, 0, 64, False,
+                                             AnyPropertyType, &actual_type, &actual_format,
+                                             &nitems, &bytes_after, &value);
+    if (property_status != Success) {
+        fprintf(stderr, "get_property=%d\n", property_status);
+        XDestroyWindow(display, window);
+        XCloseDisplay(display);
+        return 3;
+    }
+
+    int title_match = value != NULL && nitems == strlen(title) &&
+        memcmp(value, title, strlen(title)) == 0;
+    if (value) {
+        XFree(value);
+    }
+
+    XMapWindow(display, window);
+    XSync(display, False);
+    printf("window=0x%lx title_bytes=%lu title_match=%d\n", window, nitems, title_match);
+    XDestroyWindow(display, window);
+    XCloseDisplay(display);
+    return title_match ? 0 : 4;
+}
+"#;

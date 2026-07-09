@@ -296,6 +296,14 @@ the next opcode or reply implementation rather than guessing ahead.
 `xdpyinfo` now passes as the first broader probe. It forced a minimal root
 screen in setup, empty extension discovery replies, root property reads for
 standard predefined atoms, root input-focus reporting, and no-reply GC lifecycle
-requests. The next probe is a tiny C Xlib client compiled into `/tmp` by the
-CLI smoke so Sophia can exercise a different client stack without adding a repo
-dependency.
+requests.
+
+A tiny C Xlib client now also passes. The CLI smoke compiles the probe into
+`/tmp`, connects through libX11, interns atoms, creates a simple window, writes
+and reads the title through normal Xlib property calls, maps the window, and
+destroys it cleanly. That probe added the first minimal `DestroyWindow`
+compatibility path.
+
+The next milestone is a drawing-oriented Xlib probe. Its first failure should
+decide whether the next implementation belongs in core drawing decode,
+pixmap/buffer presentation, or event exposure.

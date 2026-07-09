@@ -6,14 +6,14 @@ evidence belong in `docs/research-log.md`.
 
 ---
 
-## Active Focus - Sophia X Authority: C Xlib Probe
+## Active Focus - Sophia X Authority: First Drawing Probe
 
 **Now**
-- [ ] Add a tiny C Xlib probe compiled into `/tmp` by the CLI smoke.
-- [ ] Exercise `XOpenDisplay`, `XInternAtom`, `XCreateSimpleWindow`,
-  `XStoreName` or `XChangeProperty`, `XGetWindowProperty`, and `XMapWindow`.
-- [ ] Record the first missing opcode/reply shape from that probe as the next
-  implementation target.
+- [ ] Define the first drawing-oriented Xlib probe: create a window, map it,
+  issue a tiny draw/fill/text request, and close cleanly.
+- [ ] Record whether the next gap belongs in core drawing decode, pixmap/buffer
+  presentation, or event exposure.
+- [ ] Keep the smoke headless and deterministic.
 
 **Next**
 - [ ] Add minimal request coverage for the first real-client failure.
@@ -32,6 +32,9 @@ evidence belong in `docs/research-log.md`.
 - [x] Pass `xdpyinfo` as a broader setup/introspection probe with minimal
   `CreateGC`, `FreeGC`, `GetInputFocus`, `QueryExtension`, `ListExtensions`,
   `QueryBestSize`, full predefined atom, and root-property read support.
+- [x] Pass a tiny compiled C Xlib probe covering `XOpenDisplay`,
+  `XInternAtom`, `XCreateSimpleWindow`, `XStoreName`, `XChangeProperty`,
+  `XGetWindowProperty`, `XMapWindow`, and `XDestroyWindow`.
 - [ ] Revisit compositor backend work after X Authority can create, map, draw,
   and expose a simple client through the authority transaction model.
 
