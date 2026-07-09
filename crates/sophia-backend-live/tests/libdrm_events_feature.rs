@@ -13,8 +13,8 @@ use sophia_backend_live::{
     LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller,
     LiveBackendConfig, LivePageFlipCallback, LivePageFlipCallbackQueue,
     LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus,
-    NativeLibdrmPageFlipEventPoller, OutputId, QueuedInputPoller, discover_live_backend,
-    libdrm_dependency_admission_report, libdrm_fd_authority_report,
+    NativeLibdrmPageFlipEventPoller, OutputId, QueuedInputPoller, decode_native_page_flip_batch,
+    discover_live_backend, libdrm_dependency_admission_report, libdrm_fd_authority_report,
     native_libdrm_event_adapter_report, native_libdrm_event_adapter_report_for_authority,
 };
 
@@ -191,6 +191,85 @@ fn native_libdrm_page_flip_callback_decodes_without_native_resource_identity() {
             callback: None,
         }
     );
+}
+
+#[test]
+fn native_libdrm_page_flip_decode_batch_is_bounded_and_reduced() {
+    let slot = LibdrmNativeOutputSlot::new(2).expect("nonzero slot should be valid");
+    let unknown_slot = LibdrmNativeOutputSlot::new(3).expect("nonzero slot should be valid");
+    let routes = [LibdrmNativeOutputRoute {
+        slot,
+        output: OutputId::from_raw(7),
+    }];
+    let callbacks = [
+        LibdrmNativePageFlipCallback::new(slot, 81),
+        LibdrmNativePageFlipCallback::new(slot, 0),
+        LibdrmNativePageFlipCallback::new(unknown_slot, 82),
+        LibdrmNativePageFlipCallback::new(slot, 83),
+    ];
+    let (sender, receiver) = mpsc::sync_channel(4);
+
+    let report = decode_native_page_flip_batch(&callbacks, &routes, &sender, 4);
+
+    assert_eq!(
+        report.read_loop.status,
+        LibdrmNativeReadLoopStatus::CallbackDecoded
+    );
+    assert_eq!(report.read_loop.decoded_callbacks, 2);
+    assert_eq!(report.read_loop.rejected_callbacks, 2);
+    assert_eq!(report.poll.status, LibdrmPageFlipEventPollStatus::Emitted);
+    assert_eq!(report.poll.callbacks.emitted, 2);
+    assert_eq!(
+        receiver
+            .try_recv()
+            .expect("first callback should be queued"),
+        LivePageFlipCallback {
+            output: OutputId::from_raw(7),
+            frame_serial: 81,
+        }
+    );
+    assert_eq!(
+        receiver
+            .try_recv()
+            .expect("second callback should be queued"),
+        LivePageFlipCallback {
+            output: OutputId::from_raw(7),
+            frame_serial: 83,
+        }
+    );
+    assert!(receiver.try_recv().is_err());
+
+    let (sender, _receiver) = mpsc::sync_channel(4);
+    let limited = decode_native_page_flip_batch(&callbacks, &routes, &sender, 1);
+    assert_eq!(limited.read_loop.decoded_callbacks, 1);
+    assert_eq!(limited.poll.callbacks.emitted, 1);
+    assert_eq!(limited.poll.callbacks.max_reached, true);
+    assert_eq!(limited.poll.callbacks.queued_remaining, 3);
+}
+
+#[test]
+fn native_libdrm_page_flip_decode_batch_reports_backpressure_without_native_identity() {
+    let slot = LibdrmNativeOutputSlot::new(2).expect("nonzero slot should be valid");
+    let routes = [LibdrmNativeOutputRoute {
+        slot,
+        output: OutputId::from_raw(7),
+    }];
+    let callbacks = [
+        LibdrmNativePageFlipCallback::new(slot, 81),
+        LibdrmNativePageFlipCallback::new(slot, 82),
+    ];
+    let (sender, _receiver) = mpsc::sync_channel(1);
+
+    let report = decode_native_page_flip_batch(&callbacks, &routes, &sender, 4);
+
+    assert_eq!(report.read_loop.decoded_callbacks, 1);
+    assert_eq!(report.read_loop.rejected_callbacks, 0);
+    assert_eq!(
+        report.poll.status,
+        LibdrmPageFlipEventPollStatus::Backpressure
+    );
+    assert_eq!(report.poll.callbacks.emitted, 1);
+    assert_eq!(report.poll.callbacks.queued_remaining, 1);
 }
 
 #[test]

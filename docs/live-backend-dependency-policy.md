@@ -217,6 +217,13 @@ callback may only produce `LivePageFlipCallback { output, frame_serial }`.
 Unknown slots and zero frame serials fail closed before they can enter the
 runtime callback queue.
 
+`decode_native_page_flip_batch` is the bounded bridge between already
+materialized native callback facts and the runtime callback queue. It decodes at
+most the caller-provided limit, reports decoded and rejected counts through
+`LibdrmNativeReadLoopReport`, and reports queue backpressure, disconnection, or
+emit-limit state through `LibdrmPageFlipEventPollReport`. It still does not read
+from a file descriptor or expose native DRM/KMS resource identity.
+
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
 authority. On Linux, wgpu will usually target Vulkan, but Sophia must first prove
