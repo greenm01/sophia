@@ -313,4 +313,8 @@ fill requests produce no client-visible X reply, but they do emit a ready
 The live X11 socket path exposes those dispatch results through an out-of-band
 observer callback. This keeps the client-visible X11 stream pure: successful
 core drawing still produces no direct X reply, while Sophia Runtime can receive
-the ready `SurfaceTransaction` facts through the session side channel.
+the ready `SurfaceTransaction` facts through the session side channel. The
+compiled Xlib drawing smoke now validates the whole reduced path: `XFillRectangle`
+produces one observed transaction, Sophia Engine commits it, and the live
+runtime adapter records one authority transaction without exposing XIDs or
+namespace metadata.

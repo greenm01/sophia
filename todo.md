@@ -6,20 +6,20 @@ evidence belong in `docs/research-log.md`.
 
 ---
 
-## Active Focus - Sophia X Authority: Transaction Exposure
+## Active Focus - Sophia X Authority: Drawing Surface Coverage
 
 **Now**
-- [ ] Feed observed X Authority drawing transactions into the existing headless
-  session runtime adapter.
-- [ ] Convert ready `CoreDraw` observations into authority transaction commits
-  without leaking XIDs or namespace metadata upward.
-- [ ] Add a runtime smoke that proves an observed live X11 drawing transaction
-  increments authority transaction counters.
+- [ ] Add the first bounded SHM/PutImage request model that emits ready
+  software-backed `SurfaceTransaction` records.
+- [ ] Add a socket or CLI smoke proving a client-visible software drawing path
+  reaches Sophia Runtime counters.
+- [ ] Keep successful drawing requests reply-free unless the X11 request
+  explicitly requires a reply.
 
 **Next**
 - [ ] Decide whether the long-running X Authority process should keep the
   callback shape or move to a bounded channel owned by the session runtime.
-- [ ] Extend observed transactions beyond core drawing to SHM and Present paths.
+- [ ] Extend observed transactions to Present-style explicit buffer handoff.
 
 ---
 
@@ -42,6 +42,10 @@ evidence belong in `docs/research-log.md`.
   preserving no-reply success semantics for core draw requests.
 - [x] Add socket-level smoke coverage proving `PolyFillRectangle` creates one
   ready `CoreDraw` transaction outside unit-test-only dispatch.
+- [x] Feed observed X Authority drawing transactions into the live runtime
+  adapter as reduced authority commit summaries.
+- [x] Validate the C Xlib drawing smoke through Engine commit and Runtime
+  authority transaction counters without leaking XIDs or namespace metadata.
 - [ ] Revisit compositor backend work after X Authority can create, map, draw,
   and expose a simple client through the authority transaction model.
 

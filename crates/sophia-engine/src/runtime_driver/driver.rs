@@ -80,8 +80,8 @@ impl HeadlessSessionCommandExecutor<'_> {
             match command {
                 SessionRuntimeCommand::None => {}
                 SessionRuntimeCommand::PollXEvents => {
-                    let observation = self.adapter.poll_x_events()?;
-                    self.observe([observation])?;
+                    let observations = self.adapter.poll_x_observations()?;
+                    self.observe(observations)?;
                 }
                 SessionRuntimeCommand::RequestWmLayout => {
                     let observation = self.adapter.request_wm_layout()?;

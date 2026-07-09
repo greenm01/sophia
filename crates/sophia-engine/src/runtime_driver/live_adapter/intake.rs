@@ -9,6 +9,7 @@ use super::{
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LiveRuntimeDriverIntake {
     pub x_event_count: u32,
+    pub authority_commits: Vec<TransactionCommit>,
     pub wm_update: Option<WmTransactionUpdate>,
     pub portal_commands: Vec<PortalCommand>,
     pub chrome_command_count: u32,
@@ -39,5 +40,11 @@ impl LiveRuntimeDriverAdapter {
                 intake.layers,
             ),
         }
+        .with_authority_commits(intake.authority_commits)
+    }
+
+    fn with_authority_commits(mut self, authority_commits: Vec<TransactionCommit>) -> Self {
+        self.x.authority_commits = authority_commits;
+        self
     }
 }

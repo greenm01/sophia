@@ -324,6 +324,7 @@ fn live_runtime_driver_adapter_executes_through_shared_command_executor() {
     let mut driver = HeadlessSessionDriver::new(engine);
     let mut adapter = LiveRuntimeDriverAdapter::from_intake(LiveRuntimeDriverIntake {
         x_event_count: 1,
+        authority_commits: Vec::new(),
         wm_update: None,
         portal_commands: vec![PortalCommand::DropNotification {
             transfer: PortalTransferId::from_raw(3),
@@ -363,6 +364,7 @@ fn live_runtime_driver_adapter_builds_from_nonblocking_intake_values() {
 
     let adapter = LiveRuntimeDriverAdapter::from_intake(LiveRuntimeDriverIntake {
         x_event_count: 2,
+        authority_commits: Vec::new(),
         wm_update: Some(update.clone()),
         portal_commands: vec![PortalCommand::DropNotification {
             transfer: PortalTransferId::from_raw(3),
@@ -386,6 +388,34 @@ fn live_runtime_driver_adapter_builds_from_nonblocking_intake_values() {
         SessionRuntimeObservation::ChromeCommandsReady { count: 4 }
     );
     assert_eq!(adapter.renderer.layers.len(), 1);
+}
+
+#[test]
+fn live_runtime_driver_adapter_records_authority_transaction_commits() {
+    let engine = HeadlessEngine::default();
+    let output = engine.output();
+    let mut driver = HeadlessSessionDriver::new(engine);
+    let mut adapter = LiveRuntimeDriverAdapter::from_intake(LiveRuntimeDriverIntake {
+        x_event_count: 1,
+        authority_commits: vec![TransactionCommit {
+            transaction: TransactionId::from_raw(84),
+            outcome: TransactionOutcome::Committed,
+            applied_surfaces: vec![SurfaceId::new(7, 1)],
+        }],
+        wm_update: None,
+        portal_commands: Vec::new(),
+        chrome_command_count: 0,
+        layers: vec![test_layer(7, 0, 0, Region::empty())],
+        committed_surfaces: Vec::new(),
+    });
+
+    let report = driver
+        .run_with_adapter(output.id, 94, &mut adapter)
+        .expect("authority transaction observations should feed runtime state");
+
+    assert_eq!(report.runtime_state.x_events_polled, 1);
+    assert_eq!(report.runtime_state.authority_transactions_committed, 1);
+    assert_eq!(report.runtime_state.authority_surfaces_applied, 1);
 }
 
 #[test]
@@ -434,11 +464,35 @@ fn headless_session_driver_stops_before_rendering_when_wm_restart_is_requested()
 fn live_x_runtime_adapter_emits_bounded_event_count_observation() {
     let adapter = LiveXRuntimeAdapter {
         pending_event_count: 12,
+        authority_commits: Vec::new(),
     };
 
     assert_eq!(
         adapter.poll_observation(),
         SessionRuntimeObservation::XEventsPolled { count: 12 }
+    );
+}
+
+#[test]
+fn live_x_runtime_adapter_emits_authority_commit_observations() {
+    let adapter = LiveXRuntimeAdapter {
+        pending_event_count: 2,
+        authority_commits: vec![TransactionCommit {
+            transaction: TransactionId::from_raw(85),
+            outcome: TransactionOutcome::Committed,
+            applied_surfaces: vec![SurfaceId::new(8, 1)],
+        }],
+    };
+
+    assert_eq!(
+        adapter.poll_observations(),
+        vec![
+            SessionRuntimeObservation::XEventsPolled { count: 2 },
+            SessionRuntimeObservation::AuthorityTransactionObserved {
+                outcome: TransactionOutcome::Committed,
+                applied_surface_count: 1,
+            },
+        ]
     );
 }
 

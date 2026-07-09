@@ -19,11 +19,12 @@ mod prelude {
         ClipboardPortal, ClipboardTarget, ClipboardTransferRequest, PortalCommand,
     };
     pub(crate) use sophia_protocol::{
-        BrokerHealthPacket, BrokerHealthState, BrokerKind, DamageFrame, LayoutNodeCapabilities,
-        LayoutNodeKind, LayoutNodeSnapshot, LayoutNodeState, NamespaceId, PortalTransferId, Rect,
-        Region, Size, SurfaceConstraints, SurfaceId, TransactionCommit, TransactionId,
-        TransactionOutcome, WmRelayoutWorkspace, WmRequestKind, WmRequestPacket, WorkspaceId,
-        XWindowId, decode_broker_health_frame, encode_broker_health_frame,
+        BrokerHealthPacket, BrokerHealthState, BrokerKind, BufferSource, CommittedSurfaceState,
+        DamageFrame, LayerSnapshot, LayoutNodeCapabilities, LayoutNodeKind, LayoutNodeSnapshot,
+        LayoutNodeState, NamespaceId, PortalTransferId, Rect, Region, ResizeSyncCapability, Size,
+        SurfaceConstraints, SurfaceId, SurfaceTransaction, TransactionCommit, TransactionId,
+        TransactionOutcome, Transform, WmRelayoutWorkspace, WmRequestKind, WmRequestPacket,
+        WorkspaceId, XWindowId, decode_broker_health_frame, encode_broker_health_frame,
     };
     pub(crate) use sophia_runtime::{
         ProcessLaunchSpec, ProcessSupervisor, RestartPolicy, RuntimeBrokerSupervisors,

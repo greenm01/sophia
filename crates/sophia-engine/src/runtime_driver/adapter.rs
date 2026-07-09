@@ -12,6 +12,10 @@ use super::types::HeadlessSessionDriverTick;
 pub trait RuntimeDriverAdapter {
     fn poll_x_events(&mut self) -> Result<SessionRuntimeObservation, EngineError>;
 
+    fn poll_x_observations(&mut self) -> Result<Vec<SessionRuntimeObservation>, EngineError> {
+        self.poll_x_events().map(|observation| vec![observation])
+    }
+
     fn request_wm_layout(&mut self) -> Result<SessionRuntimeObservation, EngineError>;
 
     fn schedule_frame(

@@ -7,13 +7,15 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
     {
         let report = run_x_authority_xlib_drawing_smoke()?;
         println!(
-            "x-authority-xlib-drawing-smoke display={} status={} stdout_bytes={} stderr_bytes={} draw_ops={} transactions={}",
+            "x-authority-xlib-drawing-smoke display={} status={} stdout_bytes={} stderr_bytes={} draw_ops={} transactions={} runtime_committed={} runtime_surfaces={}",
             report.display,
             report.status,
             report.stdout_bytes,
             report.stderr_bytes,
             report.draw_ops,
-            report.transactions
+            report.transactions,
+            report.runtime_committed,
+            report.runtime_surfaces
         );
         return Ok(true);
     }
@@ -131,6 +133,8 @@ struct XAuthorityXlibDrawingSmokeReport {
     stderr_bytes: usize,
     draw_ops: usize,
     transactions: usize,
+    runtime_committed: u64,
+    runtime_surfaces: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -389,14 +393,14 @@ fn run_x_authority_xlib_drawing_smoke()
 -> Result<XAuthorityXlibDrawingSmokeReport, Box<dyn std::error::Error>> {
     let (display, socket_path) = temp_xauthority_display(3600)?;
     let server_path = socket_path.clone();
-    let server = std::thread::spawn(move || -> Result<usize, String> {
-        let mut transactions = 0usize;
+    let server = std::thread::spawn(move || -> Result<Vec<SurfaceTransaction>, String> {
+        let mut transactions = Vec::new();
         run_x11_core_socket_server_once_observed(
             &server_path,
             NamespaceId::from_raw(45),
             |result| {
                 if let Some(response) = &result.response {
-                    transactions = transactions.saturating_add(response.transactions.len());
+                    transactions.extend(response.transactions.iter().cloned());
                 }
             },
         )
@@ -415,6 +419,7 @@ fn run_x_authority_xlib_drawing_smoke()
         .join()
         .map_err(|_| "X authority X11 socket server thread panicked")?
         .map_err(|error| format!("X authority X11 socket server failed: {error}"))?;
+    let runtime_state = runtime_state_from_observed_transactions(&transactions)?;
 
     if !output.status.success() {
         return Err(format!(
@@ -431,8 +436,78 @@ fn run_x_authority_xlib_drawing_smoke()
         stdout_bytes: output.stdout.len(),
         stderr_bytes: output.stderr.len(),
         draw_ops,
-        transactions,
+        transactions: transactions.len(),
+        runtime_committed: runtime_state.authority_transactions_committed,
+        runtime_surfaces: runtime_state.authority_surfaces_applied,
     })
+}
+
+fn runtime_state_from_observed_transactions(
+    transactions: &[SurfaceTransaction],
+) -> Result<sophia_runtime::SessionRuntimeState, Box<dyn std::error::Error>> {
+    let engine = HeadlessEngine::default();
+    let output = engine.output();
+    let mut committed = seed_committed_states_for_transactions(transactions);
+    let mut commits = Vec::new();
+
+    for transaction in transactions {
+        commits.push(engine.commit_surface_transactions(
+            transaction.transaction,
+            std::slice::from_ref(transaction),
+            &mut committed,
+        ));
+    }
+
+    let mut driver = HeadlessSessionDriver::new(engine);
+    let mut adapter = LiveRuntimeDriverAdapter::from_intake(LiveRuntimeDriverIntake {
+        x_event_count: u32::try_from(transactions.len()).unwrap_or(u32::MAX),
+        authority_commits: commits,
+        wm_update: None,
+        portal_commands: Vec::new(),
+        chrome_command_count: 0,
+        layers: layer_templates_from_surface_transactions(transactions),
+        committed_surfaces: committed,
+    });
+    let report = driver.run_with_adapter(output.id, 1, &mut adapter)?;
+    Ok(report.runtime_state)
+}
+
+fn seed_committed_states_for_transactions(
+    transactions: &[SurfaceTransaction],
+) -> Vec<CommittedSurfaceState> {
+    transactions
+        .iter()
+        .map(|transaction| CommittedSurfaceState {
+            surface: transaction.surface,
+            committed_generation: transaction.previous_committed_generation,
+            geometry: transaction.target_geometry,
+            buffer: transaction.target_buffer,
+            damage: Region::empty(),
+        })
+        .collect()
+}
+
+fn layer_templates_from_surface_transactions(
+    transactions: &[SurfaceTransaction],
+) -> Vec<LayerSnapshot> {
+    transactions
+        .iter()
+        .enumerate()
+        .map(|(index, transaction)| LayerSnapshot {
+            surface: transaction.surface,
+            window: None,
+            namespace: None,
+            stack_rank: u32::try_from(index).unwrap_or(u32::MAX),
+            geometry: transaction.target_geometry,
+            source: BufferSource::None,
+            damage: transaction.damage.clone(),
+            opacity: 1.0,
+            crop: None,
+            transform: Transform::IDENTITY,
+            generation: transaction.previous_committed_generation,
+            resize_sync: ResizeSyncCapability::ImplicitOnly,
+        })
+        .collect()
 }
 
 fn run_x_authority_runtime_smoke()
