@@ -127,6 +127,8 @@ reduced allocator seam. Public reports may say ready, invalid target,
 unavailable, or degraded, and may echo the reduced target record. They must not
 contain GBM surfaces, EGL surfaces, framebuffers, DMA-BUFs, file descriptors, or
 driver error payloads.
+Backend-live may retain that reduced allocation report for the next runtime
+tick, but it must clear the report whenever the frame-target size changes.
 
 The deterministic page-flip callback intake seam accepts only backend-local
 facts: the Sophia output selected by startup and a frame serial. It rejects

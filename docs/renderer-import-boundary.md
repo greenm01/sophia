@@ -384,6 +384,9 @@ The first allocation seam is `LiveGbmEglFrameTargetAllocator`. It accepts a
 reduced target record. Implementations may allocate native GBM/EGL resources
 privately, but those handles must not appear in renderer-live, backend-live, or
 runtime observations.
+Backend-live observes this seam by invoking the allocator with its current
+reduced target and storing only the returned reduced report. A target-size
+change invalidates the retained report.
 
 The next reduced boundary is `LivePageFlipEvent`. It can be derived from
 scanout readiness or from the engine's `PageFlipCommitOutcome`, but it drops the

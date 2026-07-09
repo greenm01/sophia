@@ -9,12 +9,11 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Decide how backend-live should observe reduced GBM/EGL frame-target
-  allocation reports.
+- [ ] Decide the first native GBM/EGL frame-target allocator skeleton shape.
 
 **Next**
-- [ ] Thread fake frame-target allocation reports into backend-live without
-  exposing renderer-private handles.
+- [ ] Add a native allocator skeleton behind existing GBM/EGL features that
+  returns reduced allocation status without exporting handles.
 
 ---
 
@@ -298,6 +297,10 @@ evidence belong in `docs/research-log.md`.
   targets.
 - [x] Add a fake allocation smoke that proves native frame-target handles stay
   renderer-private while runtime observes only reduced status.
+- [x] Decide how backend-live should observe reduced GBM/EGL frame-target
+  allocation reports.
+- [x] Thread fake frame-target allocation reports into backend-live without
+  exposing renderer-private handles.
 
 ---
 

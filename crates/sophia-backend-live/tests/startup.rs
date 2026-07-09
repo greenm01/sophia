@@ -3,9 +3,11 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 use sophia_backend_live::{
-    CompositorBackendTickInput, DeviceId, FakePageFlipCallbackSource, HeadlessOutput,
-    LibinputDeviceDescriptor, LibinputDeviceKind, LiveBackendConfig, LiveBackendDependencyDecision,
-    LiveBackendDependencyKind, LiveBackendDependencyUse, LiveCompositorBackendDiscoveryStatus,
+    CompositorBackendTickInput, DeviceId, FakeGbmEglFrameTargetAllocator,
+    FakePageFlipCallbackSource, HeadlessOutput, LibinputDeviceDescriptor, LibinputDeviceKind,
+    LiveBackendConfig, LiveBackendDependencyDecision, LiveBackendDependencyKind,
+    LiveBackendDependencyUse, LiveCompositorBackendDiscoveryStatus,
+    LiveGbmEglFrameTargetAllocationReport, LiveGbmEglFrameTargetAllocationStatus,
     LiveGbmEglFrameTargetRecord, LiveGbmEglFrameTargetStatus, LiveLibdrmPollerDiagnostics,
     LiveLibdrmPollerDiagnosticsStatus, LivePageFlipCallback, LivePageFlipCallbackDecision,
     LivePageFlipCallbackIntake, LivePageFlipCallbackQueue, LivePageFlipCallbackQueueReport,
@@ -420,6 +422,92 @@ fn live_runtime_assembly_updates_reduced_gbm_egl_frame_target_size() {
         .run_tick(CompositorBackendTickInput::default())
         .expect("runtime tick should report invalid reduced target");
     assert_eq!(invalid_tick.gbm_egl_frame_target, Some(invalid));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_runtime_assembly_reports_reduced_gbm_egl_frame_target_allocation() {
+    let root = ready_drm_sysfs_fixture("runtime-frame-target-allocation");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed live assembly");
+    let mut allocator =
+        FakeGbmEglFrameTargetAllocator::new(LiveGbmEglFrameTargetAllocationStatus::Ready);
+
+    let allocation = assembly
+        .allocate_gbm_egl_frame_target(&mut allocator)
+        .expect("ready startup target should allocate through reduced seam");
+    assert_eq!(
+        allocation,
+        LiveGbmEglFrameTargetAllocationReport {
+            status: LiveGbmEglFrameTargetAllocationStatus::Ready,
+            target: LiveGbmEglFrameTargetRecord {
+                status: LiveGbmEglFrameTargetStatus::Ready,
+                size: Size {
+                    width: 1280,
+                    height: 720,
+                },
+            },
+        }
+    );
+    assert_eq!(
+        assembly.gbm_egl_frame_target_allocation_observation(),
+        Some(allocation)
+    );
+
+    let tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should report reduced allocation");
+    assert_eq!(tick.gbm_egl_frame_target_allocation, Some(allocation));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_runtime_assembly_reports_invalid_and_clears_stale_frame_target_allocation() {
+    let root = ready_drm_sysfs_fixture("runtime-frame-target-allocation-invalid");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed live assembly");
+    let mut allocator =
+        FakeGbmEglFrameTargetAllocator::new(LiveGbmEglFrameTargetAllocationStatus::Ready);
+
+    let ready = assembly
+        .allocate_gbm_egl_frame_target(&mut allocator)
+        .expect("ready startup target should allocate through reduced seam");
+    assert_eq!(ready.status, LiveGbmEglFrameTargetAllocationStatus::Ready);
+
+    let invalid_target = assembly.observe_gbm_egl_frame_target_size(Size {
+        width: 0,
+        height: 720,
+    });
+    assert_eq!(
+        invalid_target.status,
+        LiveGbmEglFrameTargetStatus::InvalidSize
+    );
+    assert_eq!(assembly.gbm_egl_frame_target_allocation_observation(), None);
+
+    let invalid_allocation = assembly
+        .allocate_gbm_egl_frame_target(&mut allocator)
+        .expect("invalid target still reports a reduced allocation result");
+    assert_eq!(
+        invalid_allocation,
+        LiveGbmEglFrameTargetAllocationReport {
+            status: LiveGbmEglFrameTargetAllocationStatus::InvalidTarget,
+            target: invalid_target,
+        }
+    );
+
+    let tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should report reduced invalid allocation");
+    assert_eq!(
+        tick.gbm_egl_frame_target_allocation,
+        Some(invalid_allocation)
+    );
 
     fs::remove_dir_all(root).unwrap();
 }

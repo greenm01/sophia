@@ -33,15 +33,17 @@ use sophia_renderer_live::{
 pub use sophia_renderer_live::{EglContextProbeStatus, EglPlatformStatus};
 #[cfg(feature = "egl-probe")]
 pub use sophia_renderer_live::{EglDrawSmokeReport, EglDrawSmokeStatus};
-#[cfg(feature = "gbm-probe")]
-pub use sophia_renderer_live::{GbmCapabilityProbeReport, NativeGbmCapabilityProbe};
 pub use sophia_renderer_live::{
-    LiveGbmEglFrameTargetRecord, LiveGbmEglFrameTargetStatus, LiveRendererImportBoundary,
-    LiveRendererImportDecision, LiveRendererImportHealth, LiveRendererImportPathStatus,
-    LiveRendererImportRejection, LiveRendererImportStartupStatus, LiveRendererPresentationReport,
-    LiveRendererPresentationStatus, LiveRendererRuntimeObservation,
+    FakeGbmEglFrameTargetAllocator, LiveGbmEglFrameTargetAllocationReport,
+    LiveGbmEglFrameTargetAllocationRequest, LiveGbmEglFrameTargetAllocationStatus,
+    LiveGbmEglFrameTargetAllocator, LiveGbmEglFrameTargetRecord, LiveGbmEglFrameTargetStatus,
+    LiveRendererImportBoundary, LiveRendererImportDecision, LiveRendererImportHealth,
+    LiveRendererImportPathStatus, LiveRendererImportRejection, LiveRendererImportStartupStatus,
+    LiveRendererPresentationReport, LiveRendererPresentationStatus, LiveRendererRuntimeObservation,
     LiveRendererSelectionObservation,
 };
+#[cfg(feature = "gbm-probe")]
+pub use sophia_renderer_live::{GbmCapabilityProbeReport, NativeGbmCapabilityProbe};
 #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
 use sophia_renderer_live::{
     NativeGbmBackedEglDrawSmoke, NativeGbmBackedEglPlatformProbe,
@@ -1516,6 +1518,7 @@ impl LiveBackendStartupReport {
                 renderer_observation,
                 scanout_readiness,
                 gbm_egl_frame_target: Some(LiveGbmEglFrameTargetRecord::new(selected_output.size)),
+                gbm_egl_frame_target_allocation: None,
                 page_flip_event,
                 page_flip_callback_intake,
                 page_flip_callback_queue: None,
@@ -1726,6 +1729,7 @@ pub struct LiveBackendRuntimeAssembly {
     renderer_observation: LiveRendererRuntimeObservation,
     scanout_readiness: LiveScanoutReadinessReport,
     gbm_egl_frame_target: Option<LiveGbmEglFrameTargetRecord>,
+    gbm_egl_frame_target_allocation: Option<LiveGbmEglFrameTargetAllocationReport>,
     page_flip_event: LivePageFlipEvent,
     page_flip_callback_intake: LivePageFlipCallbackIntake,
     page_flip_callback_queue: Option<LivePageFlipCallbackQueue>,
@@ -1790,10 +1794,31 @@ impl LiveBackendRuntimeAssembly {
         self.gbm_egl_frame_target
     }
 
+    pub fn gbm_egl_frame_target_allocation_observation(
+        &self,
+    ) -> Option<LiveGbmEglFrameTargetAllocationReport> {
+        self.gbm_egl_frame_target_allocation
+    }
+
     pub fn observe_gbm_egl_frame_target_size(&mut self, size: Size) -> LiveGbmEglFrameTargetRecord {
         let record = LiveGbmEglFrameTargetRecord::new(size);
         self.gbm_egl_frame_target = Some(record);
+        self.gbm_egl_frame_target_allocation = None;
         record
+    }
+
+    pub fn allocate_gbm_egl_frame_target<A>(
+        &mut self,
+        allocator: &mut A,
+    ) -> Option<LiveGbmEglFrameTargetAllocationReport>
+    where
+        A: LiveGbmEglFrameTargetAllocator,
+    {
+        let target = self.gbm_egl_frame_target?;
+        let report =
+            allocator.allocate_frame_target(LiveGbmEglFrameTargetAllocationRequest { target });
+        self.gbm_egl_frame_target_allocation = Some(report);
+        Some(report)
     }
 
     pub fn page_flip_observation(&self) -> LivePageFlipEvent {
@@ -1841,6 +1866,7 @@ impl LiveBackendRuntimeAssembly {
             renderer: self.renderer_observation,
             scanout: self.scanout_readiness,
             gbm_egl_frame_target: self.gbm_egl_frame_target,
+            gbm_egl_frame_target_allocation: self.gbm_egl_frame_target_allocation,
             page_flip: self.page_flip_event,
             page_flip_callbacks,
             libdrm_poller: self.libdrm_poller_diagnostics,
@@ -1854,6 +1880,7 @@ pub struct LiveBackendRuntimeTickReport {
     pub renderer: LiveRendererRuntimeObservation,
     pub scanout: LiveScanoutReadinessReport,
     pub gbm_egl_frame_target: Option<LiveGbmEglFrameTargetRecord>,
+    pub gbm_egl_frame_target_allocation: Option<LiveGbmEglFrameTargetAllocationReport>,
     pub page_flip: LivePageFlipEvent,
     pub page_flip_callbacks: LivePageFlipCallbackQueueReport,
     pub libdrm_poller: LiveLibdrmPollerDiagnostics,
