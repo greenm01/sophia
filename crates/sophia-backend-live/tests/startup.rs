@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 use sophia_backend_live::{
-    CompositorBackendTickInput, DeviceId, FakeGbmEglFrameTargetAllocator,
+    BufferSource, CompositorBackendTickInput, DeviceId, FakeGbmEglFrameTargetAllocator,
     FakePageFlipCallbackSource, HeadlessOutput, LibinputDeviceDescriptor, LibinputDeviceKind,
     LiveBackendConfig, LiveBackendDependencyDecision, LiveBackendDependencyKind,
     LiveBackendDependencyUse, LiveCompositorBackendDiscoveryStatus,
@@ -20,6 +20,11 @@ use sophia_backend_live::{
     LiveRendererSelectionObservation, LiveScanoutReadinessReport, LiveScanoutReadinessStatus,
     OutputId, PageFlipCommitOutcome, QueuedInputPoller, RendererSelection, SeatId, Size,
     discover_live_backend, live_backend_dependency_decision,
+};
+use sophia_engine::AuthorityTransactionIntake;
+use sophia_protocol::{
+    AuthorityKind, InputEventKind, InputEventPacket, LayerSnapshot, NamespaceId, Point, Rect,
+    Region, ResizeSyncCapability, SurfaceId, SurfaceTransactionReadiness, Transform,
 };
 use sophia_protocol::{TransactionCommit, TransactionId, TransactionOutcome};
 
@@ -401,6 +406,92 @@ fn live_runtime_assembly_threads_scanout_and_page_flip_observations() {
         LivePageFlipEvent {
             status: LivePageFlipEventStatus::Presented,
             frame_serial: Some(121),
+        }
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_runtime_assembly_runs_fake_compositor_loop_without_native_scanout() {
+    let root = ready_drm_sysfs_fixture("runtime-fake-compositor-loop");
+    let config = LiveBackendConfig::new(&root).with_input_device(LibinputDeviceDescriptor {
+        seat: SeatId::from_raw(1),
+        device: DeviceId::from_raw(2),
+        kind: LibinputDeviceKind::Pointer,
+    });
+    let report = discover_live_backend(&config);
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::new(vec![motion_event(1, 10.0, 20.0)]))
+        .expect("ready startup should seed live assembly");
+    let mut layer = test_layer(42);
+    let transaction_id = TransactionId::from_raw(420);
+    let transaction = layer.to_surface_transaction(
+        transaction_id,
+        AuthorityKind::SophiaX,
+        SurfaceTransactionReadiness::Ready,
+        250,
+        0,
+    );
+
+    layer.geometry.x = 25;
+    layer.geometry.y = 30;
+    let tick = assembly
+        .run_tick(CompositorBackendTickInput {
+            x_event_count: 1,
+            authority_batches: vec![AuthorityTransactionIntake::new(
+                transaction_id,
+                vec![transaction],
+            )],
+            wm_update: None,
+            portal_commands: Vec::new(),
+            chrome_command_count: 1,
+            layer_templates: vec![layer],
+        })
+        .expect("fake compositor runtime tick should complete");
+
+    assert_eq!(tick.engine.input_poll.polled, 1);
+    assert_eq!(tick.engine.input_poll.accepted, 1);
+    assert!(tick.engine.input_poll.rejected.is_empty());
+    assert_eq!(tick.engine.runtime.runtime_state.x_events_polled, 1);
+    assert_eq!(
+        tick.engine
+            .runtime
+            .runtime_state
+            .authority_transactions_committed,
+        1
+    );
+    assert_eq!(
+        tick.engine.runtime.runtime_state.authority_surfaces_applied,
+        1
+    );
+    assert_eq!(tick.engine.runtime.runtime_state.frames_rendered, 1);
+    assert_eq!(
+        tick.engine.runtime.runtime_state.chrome_commands_presented,
+        1
+    );
+    assert!(tick.engine.render.is_some());
+    assert_eq!(
+        tick.gbm_egl_frame_target_lifecycle
+            .expect("startup target lifecycle should be observed")
+            .status,
+        LiveGbmEglFrameTargetLifecycleStatus::Created,
+    );
+    assert_eq!(
+        tick.kms_scanout_target,
+        LiveKmsScanoutTargetReport {
+            status: LiveKmsScanoutTargetStatus::Ready,
+            size: Some(Size {
+                width: 1280,
+                height: 720,
+            }),
+        }
+    );
+    assert_eq!(
+        tick.page_flip,
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Ready,
+            frame_serial: None,
         }
     );
 
@@ -1411,4 +1502,45 @@ fn ready_drm_sysfs_fixture(name: &str) -> PathBuf {
 
 fn write_fixture_file(root: &Path, name: &str, contents: &str) {
     fs::write(root.join(name), contents).unwrap();
+}
+
+fn motion_event(serial: u64, x: f64, y: f64) -> InputEventPacket {
+    InputEventPacket {
+        serial,
+        seat: SeatId::from_raw(1),
+        device: DeviceId::from_raw(2),
+        time_msec: serial * 10,
+        kind: InputEventKind::PointerMotion,
+        global_position: Some(Point { x, y }),
+        target_surface: None,
+        target_window: None,
+        local_position: None,
+    }
+}
+
+fn test_layer(raw_surface: u32) -> LayerSnapshot {
+    LayerSnapshot {
+        surface: SurfaceId::new(raw_surface, 1),
+        window: None,
+        namespace: Some(NamespaceId::from_raw(7)),
+        stack_rank: 0,
+        geometry: Rect {
+            x: 0,
+            y: 0,
+            width: 160,
+            height: 90,
+        },
+        source: BufferSource::CpuBuffer { handle: 900 },
+        damage: Region::single(Rect {
+            x: 0,
+            y: 0,
+            width: 160,
+            height: 90,
+        }),
+        opacity: 1.0,
+        crop: None,
+        transform: Transform::IDENTITY,
+        generation: 1,
+        resize_sync: ResizeSyncCapability::ImplicitOnly,
+    }
 }

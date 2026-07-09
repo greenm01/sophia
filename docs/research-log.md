@@ -773,6 +773,12 @@ again exercising the child-process real render-node path.
 After expanding `LiveRealGbmSmokeEvidence` to include reduced frame-target
 allocation status, the same opt-in command passed again on July 9, 2026.
 
+The live backend fake compositor loop smoke now proves the runtime-owned
+sequencing path without real scanout: queued input polling, protocol-neutral
+authority transaction intake, runtime policy scheduling, CPU-backed frame
+rendering, reduced frame-target lifecycle observation, reduced KMS scanout
+target observation, and reduced page-flip readiness.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

@@ -126,6 +126,12 @@ keeps the runtime-facing diagnostics useful without introducing KMS dependencies
 or leaking native object identity. Native presentation and future page-flip
 callbacks should update those fields through reduced reports before the next
 runtime tick observes them.
+The deterministic fake compositor loop smoke runs through the same runtime-owned
+tick shape: poll queued input, commit protocol-neutral authority transactions,
+request policy through the runtime adapter, update reduced frame-target and
+scanout observations, render a CPU-backed frame, and report reduced page-flip
+readiness. This is the required proof before admitting real DRM/KMS scanout into
+the loop.
 Runtime ticks also carry the reduced GBM/EGL frame-target observation when a
 startup output is selected. That observation is only a size/status record; it is
 not a GBM surface, EGL surface, framebuffer, DMA-BUF, file descriptor, or native

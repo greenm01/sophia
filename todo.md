@@ -46,12 +46,12 @@ active milestone to `docs/roadmap-history.md`.
 
 ### 3. Live Compositor Runtime Loop
 
-- [ ] Assemble a runtime-owned loop that sequences input polling, authority
+- [x] Assemble a runtime-owned loop that sequences input polling, authority
   transaction intake, WM policy, renderer target updates, frame commit, and
   reduced page-flip observation.
-- [ ] Keep Sophia Engine independent of protocol authority policy and
+- [x] Keep Sophia Engine independent of protocol authority policy and
   renderer-private resource ownership.
-- [ ] Add one smoke proving the loop can run with fake backend components before
+- [x] Add one smoke proving the loop can run with fake backend components before
   real DRM/KMS scanout is admitted.
 
 ---
