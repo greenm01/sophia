@@ -659,6 +659,14 @@ validator: valid surface, non-empty target geometry, concrete buffer source,
 failed, malformed, or stale transactions keep the last committed visual state
 unless an explicit timeout policy produces a degraded artifact.
 
+The live runtime adapter now has a protocol-neutral authority batch intake.
+`AuthorityTransactionIntake` carries only a Sophia `TransactionId` and bounded
+`SurfaceTransaction` values. The adapter commits those batches through
+`HeadlessEngine::commit_surface_transactions` before projecting committed
+surface state into renderable layers. Sophia X Authority can adapt its bounded
+`XAuthorityObservedTransactionBatch` into this shape at the process/runtime
+edge without making Sophia Engine depend on the X Authority crate.
+
 Resize behavior measurement is tied to the same epoch state. `LayoutEpochState`
 records start time and timeout policy, and `measure_resize_behavior` reports
 elapsed time, pending surfaces, completion, and timeout status. Slow or

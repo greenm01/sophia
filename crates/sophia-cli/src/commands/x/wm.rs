@@ -138,6 +138,7 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
         let mut adapter = LiveRuntimeDriverAdapter::from_intake(LiveRuntimeDriverIntake {
             x_event_count: u32::try_from(capture.report.mirrored_windows).unwrap_or(u32::MAX),
             authority_commits: Vec::new(),
+            authority_batches: Vec::new(),
             wm_update: Some(update),
             portal_commands: Vec::new(),
             chrome_command_count: 0,

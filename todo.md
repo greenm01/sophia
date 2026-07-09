@@ -6,21 +6,22 @@ evidence belong in `docs/research-log.md`.
 
 ---
 
-## Active Focus - Sophia X Authority: SHM Import Decision
+## Active Focus - Compositor Backend Assembly
 
 **Now**
-- [ ] Decide whether the next X Authority step should map real MIT-SHM segments
-  or defer memory import until compositor backend work needs it.
-- [ ] If SHM import proceeds, document the bounded `shmat`/detach lifetime and
-  namespace cleanup rules before code.
-- [ ] If SHM import is deferred, move active focus to compositor backend
-  assembly with the current core draw, PutImage, and Present seams as inputs.
+- [ ] Define the first runtime-owned backend assembly struct that holds output
+  discovery, input polling, frame clock, authority transaction intake, and
+  renderer selection without owning protocol policy.
+- [ ] Add a headless assembly smoke that drains authority batches into committed
+  surface state and renders through the existing runtime driver.
+- [ ] Keep real DRM/KMS ioctls, GPU imports, and real MIT-SHM mapping deferred
+  until the assembly seam is proven with deterministic tests.
 
 **Next**
-- [ ] Revisit compositor backend work after X Authority can create, map, draw,
-  and expose a simple client through the authority transaction model.
 - [ ] Convert the bounded X Authority transaction channel into the session
   supervisor path once the long-running authority process exists.
+- [ ] Decide the first real backend dependency boundary for DRM/KMS and
+  libinput without changing the Engine/WM/Authority packet contracts.
 
 ---
 
@@ -68,6 +69,10 @@ evidence belong in `docs/research-log.md`.
 - [x] Model `ShmAttach` as namespace-local metadata without mapping host memory.
 - [x] Decode `XShmPutImage` and reject it with bounded native X errors until a
   real SHM import path exists.
+- [x] Defer real MIT-SHM memory mapping until a compositor backend can consume
+  mapped bytes through a bounded renderer import path.
+- [x] Add protocol-neutral `AuthorityTransactionIntake` so runtime can commit
+  authority batches without making Sophia Engine depend on Sophia X Authority.
 
 ---
 

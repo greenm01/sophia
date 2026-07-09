@@ -649,6 +649,7 @@ fn runtime_state_from_observed_transactions(
     let mut adapter = LiveRuntimeDriverAdapter::from_intake(LiveRuntimeDriverIntake {
         x_event_count: u32::try_from(transactions.len()).unwrap_or(u32::MAX),
         authority_commits: commits,
+        authority_batches: Vec::new(),
         wm_update: None,
         portal_commands: Vec::new(),
         chrome_command_count: 0,

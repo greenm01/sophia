@@ -1,15 +1,39 @@
-use crate::WmTransactionUpdate;
 use crate::prelude::*;
+use crate::{HeadlessEngine, WmTransactionUpdate};
 
 use super::{
     LiveChromeRuntimeAdapter, LivePortalRuntimeAdapter, LiveRendererRuntimeAdapter,
     LiveWmRuntimeAdapter, LiveXRuntimeAdapter,
 };
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuthorityTransactionIntake {
+    pub transaction: TransactionId,
+    pub transactions: Vec<SurfaceTransaction>,
+}
+
+impl AuthorityTransactionIntake {
+    pub fn new(transaction: TransactionId, transactions: Vec<SurfaceTransaction>) -> Self {
+        Self {
+            transaction,
+            transactions,
+        }
+    }
+
+    pub fn commit(
+        &self,
+        engine: &HeadlessEngine,
+        committed: &mut Vec<CommittedSurfaceState>,
+    ) -> TransactionCommit {
+        engine.commit_surface_transactions(self.transaction, &self.transactions, committed)
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LiveRuntimeDriverIntake {
     pub x_event_count: u32,
     pub authority_commits: Vec<TransactionCommit>,
+    pub authority_batches: Vec<AuthorityTransactionIntake>,
     pub wm_update: Option<WmTransactionUpdate>,
     pub portal_commands: Vec<PortalCommand>,
     pub chrome_command_count: u32,
@@ -27,6 +51,21 @@ pub struct LiveRuntimeDriverAdapter {
 }
 
 impl LiveRuntimeDriverAdapter {
+    pub fn from_authority_batches(
+        engine: &HeadlessEngine,
+        mut intake: LiveRuntimeDriverIntake,
+    ) -> Self {
+        let mut committed_surfaces = intake.committed_surfaces.clone();
+        intake.authority_commits.extend(
+            intake
+                .authority_batches
+                .iter()
+                .map(|batch| batch.commit(engine, &mut committed_surfaces)),
+        );
+        intake.committed_surfaces = committed_surfaces;
+        Self::from_intake(intake)
+    }
+
     pub fn from_intake(intake: LiveRuntimeDriverIntake) -> Self {
         Self {
             x: LiveXRuntimeAdapter::from_polled_event_count(intake.x_event_count),

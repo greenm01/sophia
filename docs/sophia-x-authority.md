@@ -372,3 +372,10 @@ missing or cross-namespace segment returns a bounded `BadAccess` error. An
 attached segment with a valid target window currently returns
 `BadImplementation`, preserving the fail-closed rule until the authority owns a
 real bounded SHM import path.
+
+Real MIT-SHM import is deferred until Sophia has a compositor backend that can
+consume the mapped bytes through a bounded renderer import path. Mapping
+client-provided shared memory with `shmat` would add host-memory lifetime,
+detach, namespace cleanup, and crash-recovery obligations before the engine can
+use the data. Until that backend exists, core `PutImage` and private
+`SOPHIA-PRESENT` remain the supported pixel handoff seams.
