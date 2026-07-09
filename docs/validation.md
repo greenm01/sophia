@@ -31,7 +31,7 @@ feature flags.
 The `egl-probe` feature admits `khronos-egl` through the internal
 `sophia-renderer-native-egl` adapter crate. That crate owns the unavoidable
 unsafe dynamic EGL calls. Public renderer-live and backend-live tests assert
-only reduced EGL startup status.
+only reduced EGL startup and draw-smoke status.
 
 The backend-live GBM feature suite includes an opt-in real-device smoke. Set
 `SOPHIA_RUN_REAL_GBM_SMOKE=1` to let the test look for an openable

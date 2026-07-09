@@ -39,8 +39,39 @@ impl NativeEglCapabilityProbe {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FakeEglDrawSmoke {
+    pub status: EglDrawSmokeStatus,
+}
+
+impl FakeEglDrawSmoke {
+    pub const fn new(status: EglDrawSmokeStatus) -> Self {
+        Self { status }
+    }
+
+    pub const fn smoke_report(self) -> EglDrawSmokeReport {
+        EglDrawSmokeReport {
+            status: self.status,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeEglDrawSmoke;
+
+impl NativeEglDrawSmoke {
+    pub fn smoke_report() -> EglDrawSmokeReport {
+        draw_report_from_smoke_result(native::draw_smoke())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EglCapabilityProbeReport {
     pub status: EglCapabilityProbeStatus,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EglDrawSmokeReport {
+    pub status: EglDrawSmokeStatus,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -65,11 +96,31 @@ pub enum EglContextProbeStatus {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EglDrawSmokeStatus {
+    OffscreenTargetReady,
+    PlatformUnavailable,
+    PlatformDegraded,
+    ContextUnavailable,
+    SurfaceUnavailable,
+    MakeCurrentUnavailable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EglProbeResult {
     NativeDrawingCapable,
     PlatformUnavailable,
     PlatformDegraded,
     ContextUnavailable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EglDrawSmokeResult {
+    OffscreenTargetReady,
+    PlatformUnavailable,
+    PlatformDegraded,
+    ContextUnavailable,
+    SurfaceUnavailable,
+    MakeCurrentUnavailable,
 }
 
 fn report_from_probe_result(result: EglProbeResult) -> EglCapabilityProbeReport {
@@ -83,8 +134,23 @@ fn report_from_probe_result(result: EglProbeResult) -> EglCapabilityProbeReport 
     }
 }
 
+fn draw_report_from_smoke_result(result: EglDrawSmokeResult) -> EglDrawSmokeReport {
+    EglDrawSmokeReport {
+        status: match result {
+            EglDrawSmokeResult::OffscreenTargetReady => EglDrawSmokeStatus::OffscreenTargetReady,
+            EglDrawSmokeResult::PlatformUnavailable => EglDrawSmokeStatus::PlatformUnavailable,
+            EglDrawSmokeResult::PlatformDegraded => EglDrawSmokeStatus::PlatformDegraded,
+            EglDrawSmokeResult::ContextUnavailable => EglDrawSmokeStatus::ContextUnavailable,
+            EglDrawSmokeResult::SurfaceUnavailable => EglDrawSmokeStatus::SurfaceUnavailable,
+            EglDrawSmokeResult::MakeCurrentUnavailable => {
+                EglDrawSmokeStatus::MakeCurrentUnavailable
+            }
+        },
+    }
+}
+
 mod native {
-    use super::EglProbeResult;
+    use super::{EglDrawSmokeResult, EglProbeResult};
 
     pub(super) fn probe() -> EglProbeResult {
         match sophia_renderer_native_egl::probe_default_display_context() {
@@ -99,6 +165,29 @@ mod native {
             }
             sophia_renderer_native_egl::NativeEglProbeStatus::ContextUnavailable => {
                 EglProbeResult::ContextUnavailable
+            }
+        }
+    }
+
+    pub(super) fn draw_smoke() -> EglDrawSmokeResult {
+        match sophia_renderer_native_egl::smoke_default_display_pbuffer() {
+            sophia_renderer_native_egl::NativeEglDrawSmokeStatus::OffscreenTargetReady => {
+                EglDrawSmokeResult::OffscreenTargetReady
+            }
+            sophia_renderer_native_egl::NativeEglDrawSmokeStatus::PlatformUnavailable => {
+                EglDrawSmokeResult::PlatformUnavailable
+            }
+            sophia_renderer_native_egl::NativeEglDrawSmokeStatus::PlatformDegraded => {
+                EglDrawSmokeResult::PlatformDegraded
+            }
+            sophia_renderer_native_egl::NativeEglDrawSmokeStatus::ContextUnavailable => {
+                EglDrawSmokeResult::ContextUnavailable
+            }
+            sophia_renderer_native_egl::NativeEglDrawSmokeStatus::SurfaceUnavailable => {
+                EglDrawSmokeResult::SurfaceUnavailable
+            }
+            sophia_renderer_native_egl::NativeEglDrawSmokeStatus::MakeCurrentUnavailable => {
+                EglDrawSmokeResult::MakeCurrentUnavailable
             }
         }
     }

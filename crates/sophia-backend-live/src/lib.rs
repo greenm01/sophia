@@ -25,10 +25,12 @@ pub use sophia_protocol::{BufferSource, DeviceId, OutputId, SeatId, Size};
 use sophia_renderer_live::GbmCapabilityProbeStatus;
 #[cfg(feature = "egl-probe")]
 use sophia_renderer_live::{
-    EglCapabilityProbeStatus, FakeEglCapabilityProbe, NativeEglCapabilityProbe,
+    EglCapabilityProbeStatus, FakeEglCapabilityProbe, NativeEglCapabilityProbe, NativeEglDrawSmoke,
 };
 #[cfg(feature = "egl-probe")]
 pub use sophia_renderer_live::{EglContextProbeStatus, EglPlatformStatus};
+#[cfg(feature = "egl-probe")]
+pub use sophia_renderer_live::{EglDrawSmokeReport, EglDrawSmokeStatus};
 #[cfg(feature = "gbm-probe")]
 pub use sophia_renderer_live::{GbmCapabilityProbeReport, NativeGbmCapabilityProbe};
 pub use sophia_renderer_live::{
@@ -199,6 +201,11 @@ impl LiveBackendStartupReport {
     #[cfg(feature = "egl-probe")]
     pub fn native_egl_probe_report(&self) -> LiveEglStartupReport {
         LiveEglStartupReport::from_probe_status(NativeEglCapabilityProbe::probe_report().status)
+    }
+
+    #[cfg(feature = "egl-probe")]
+    pub fn native_egl_draw_smoke_report(&self) -> EglDrawSmokeReport {
+        NativeEglDrawSmoke::smoke_report()
     }
 
     #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]

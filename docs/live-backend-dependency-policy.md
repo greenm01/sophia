@@ -66,6 +66,9 @@ The `egl-probe` feature models reduced platform/context startup status and
 admits `khronos-egl` only through the internal `sophia-renderer-native-egl`
 adapter. The adapter owns unavoidable unsafe dynamic EGL calls; backend-live and
 renderer-live expose only reduced startup status.
+The first draw smoke proves only private pbuffer target readiness and
+`make_current` success. It does not admit GL function loading, shaders, exported
+buffers, or presentation.
 
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout

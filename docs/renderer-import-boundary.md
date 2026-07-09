@@ -221,6 +221,12 @@ The EGL probe boundary must not expose:
 - native driver error text;
 - renderer-private allocation objects.
 
+The first native EGL draw smoke stops at private offscreen target readiness. It
+creates a private 1x1 pbuffer target, creates a context, makes that context
+current against the pbuffer, and tears everything down inside the native adapter.
+It does not load GL functions, issue clear calls, compile shaders, export
+buffers, or hand native handles to renderer-live.
+
 When both `gbm-probe` and `egl-probe` are enabled, backend-live may project a
 reduced GBM startup report into EGL platform status. Degraded GBM startup maps
 to degraded EGL platform status; it must not become native drawing capability.
@@ -249,6 +255,11 @@ Admission rules for `khronos-egl`:
 - run `cargo test --offline -p sophia-renderer-live --features egl-probe`;
 - run `cargo test --offline -p sophia-backend-live --features egl-probe`;
 - run `cargo test --offline -p sophia-backend-live --features gbm-probe,egl-probe`.
+
+The next native rendering dependency must be GL function loading for the first
+clear-color smoke. Admit that only after reduced draw-smoke status records exist
+and continue to hide GL procedure pointers, contexts, surfaces, and native error
+text.
 
 Rejected candidates:
 

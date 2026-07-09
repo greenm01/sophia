@@ -1,8 +1,8 @@
 #![cfg(feature = "egl-probe")]
 
 use sophia_backend_live::{
-    EglContextProbeStatus, EglPlatformStatus, LiveBackendConfig, LiveEglStartupReport,
-    LiveEglStartupStatus, discover_live_backend,
+    EglContextProbeStatus, EglDrawSmokeStatus, EglPlatformStatus, LiveBackendConfig,
+    LiveEglStartupReport, LiveEglStartupStatus, discover_live_backend,
 };
 
 #[test]
@@ -61,6 +61,22 @@ fn native_egl_probe_reports_only_reduced_startup_status() {
             | LiveEglStartupStatus::PlatformUnavailable
             | LiveEglStartupStatus::PlatformDegraded
             | LiveEglStartupStatus::ContextUnavailable
+    ));
+}
+
+#[test]
+fn native_egl_draw_smoke_reports_only_reduced_status() {
+    let report = discover_live_backend(&LiveBackendConfig::new("/does/not/matter"));
+    let smoke = report.native_egl_draw_smoke_report();
+
+    assert!(matches!(
+        smoke.status,
+        EglDrawSmokeStatus::OffscreenTargetReady
+            | EglDrawSmokeStatus::PlatformUnavailable
+            | EglDrawSmokeStatus::PlatformDegraded
+            | EglDrawSmokeStatus::ContextUnavailable
+            | EglDrawSmokeStatus::SurfaceUnavailable
+            | EglDrawSmokeStatus::MakeCurrentUnavailable
     ));
 }
 

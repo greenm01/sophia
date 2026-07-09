@@ -9,12 +9,13 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Define the first EGL offscreen draw smoke: clear color into a private
-  pbuffer or GBM-backed target, with no exported handles.
-- [ ] Add reduced draw-smoke status records before admitting GL function
-  loading or shader code.
+- [ ] Evaluate concrete GL function loading options for the first clear-color
+  smoke.
+- [ ] Add dependency-admission notes before admitting GL function loading.
 
 **Next**
+- [ ] Extend the EGL draw smoke from private pbuffer readiness to a clear-color
+  smoke without exporting handles.
 - [ ] Keep wgpu deferred until GBM/EGL startup, drawing, and presentation seams
   are proven.
 
@@ -197,6 +198,9 @@ evidence belong in `docs/research-log.md`.
   loading only.
 - [x] Add a real EGL context probe behind the `egl-probe` feature, isolated in
   a tiny native adapter crate that returns only reduced status.
+- [x] Add reduced EGL draw-smoke status records.
+- [x] Add the first native EGL offscreen target smoke: create a private pbuffer,
+  make a context current against it, and return only reduced status.
 
 ---
 
