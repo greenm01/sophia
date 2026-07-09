@@ -628,28 +628,27 @@ fn runtime_state_from_observed_batches(
         .flat_map(|batch| batch.transactions.iter().cloned())
         .collect::<Vec<_>>();
     let engine = HeadlessEngine::default();
-    let output = engine.output();
     let committed = seed_committed_states_for_transactions(&transactions);
-    let authority_batches = batches
+    let (sender, receiver) = sync_channel(batches.len().max(1));
+    for batch in batches
         .iter()
         .map(|batch| AuthorityTransactionIntake::new(batch.transaction, batch.transactions.clone()))
-        .collect();
-    let mut driver = HeadlessSessionDriver::new(engine.clone());
-    let mut adapter = LiveRuntimeDriverAdapter::from_authority_batches(
-        &engine,
-        LiveRuntimeDriverIntake {
-            x_event_count: u32::try_from(transactions.len()).unwrap_or(u32::MAX),
-            authority_commits: Vec::new(),
-            authority_batches,
-            wm_update: None,
-            portal_commands: Vec::new(),
-            chrome_command_count: 0,
-            layers: layer_templates_from_surface_transactions(&transactions),
-            committed_surfaces: committed,
-        },
-    );
-    let report = driver.run_with_adapter(output.id, 1, &mut adapter)?;
-    Ok(report.runtime_state)
+    {
+        sender.try_send(batch)?;
+    }
+    let inbox = AuthorityTransactionInbox::new(receiver, batches.len().max(1));
+    let mut assembly = HeadlessCompositorBackendAssembly::new(engine.output())
+        .with_committed_surfaces(committed)
+        .with_authority_inbox(inbox);
+    let report = assembly.run_tick(CompositorBackendTickInput {
+        x_event_count: u32::try_from(transactions.len()).unwrap_or(u32::MAX),
+        authority_batches: Vec::new(),
+        wm_update: None,
+        portal_commands: Vec::new(),
+        chrome_command_count: 0,
+        layer_templates: layer_templates_from_surface_transactions(&transactions),
+    })?;
+    Ok(report.runtime.runtime_state)
 }
 
 fn runtime_state_from_observed_transactions(

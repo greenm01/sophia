@@ -1,11 +1,11 @@
 #![allow(dead_code, unused_imports)]
 
 pub use sophia_engine::{
-    AuthorityTransactionIntake, BufferImportPath, ChromeActionDecision, ChromeActionRejectReason,
-    ChromeBroker, CompositorBackendTickInput, DeterministicFrameClock, DrmKmsMode,
-    DrmKmsOutputDescriptor, DrmKmsOutputRegistry, EngineError, FrameClock, FramePlanRequest,
-    FrameScheduleDecision, HeadlessCompositorBackendAssembly, HeadlessEngine, HeadlessOutput,
-    HeadlessRuntimeAdapter, HeadlessSessionDriver, HeadlessSessionDriverTick,
+    AuthorityTransactionInbox, AuthorityTransactionIntake, BufferImportPath, ChromeActionDecision,
+    ChromeActionRejectReason, ChromeBroker, CompositorBackendTickInput, DeterministicFrameClock,
+    DrmKmsMode, DrmKmsOutputDescriptor, DrmKmsOutputRegistry, EngineError, FrameClock,
+    FramePlanRequest, FrameScheduleDecision, HeadlessCompositorBackendAssembly, HeadlessEngine,
+    HeadlessOutput, HeadlessRuntimeAdapter, HeadlessSessionDriver, HeadlessSessionDriverTick,
     ImportCapableRenderer, ImportedBufferHandle, LastCommittedLayout, LayoutEpochState,
     LibinputDeviceDescriptor, LibinputDeviceKind, LibinputEventIngest, LibinputEventSource,
     LibinputPhysicalInputAdapter, LiveBrokerRuntimeAdapter, LiveChromeRuntimeAdapter,

@@ -190,3 +190,51 @@ fn renderer_selection_uses_xpixmap_imports_and_falls_back_for_unsupported_paths(
     );
     assert!(dmabuf_import.used_fallback);
 }
+
+#[test]
+fn backend_assembly_drains_bounded_authority_inbox_before_runtime_tick() {
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let transaction = TransactionId::from_raw(92);
+    let mut template = test_layer(6, 0, 0, Region::empty());
+    template.source = BufferSource::XPixmap { pixmap: 66 };
+    let surface_transaction = template.to_surface_transaction(
+        transaction,
+        AuthorityKind::SophiaX,
+        SurfaceTransactionReadiness::Ready,
+        250,
+        0,
+    );
+    sender
+        .try_send(AuthorityTransactionIntake::new(
+            transaction,
+            vec![surface_transaction],
+        ))
+        .expect("test channel should accept one authority batch");
+    let inbox = AuthorityTransactionInbox::new(receiver, 4);
+    let mut assembly = HeadlessCompositorBackendAssembly::new(HeadlessOutput::deterministic())
+        .with_authority_inbox(inbox);
+
+    let report = assembly
+        .run_tick(CompositorBackendTickInput {
+            layer_templates: vec![template],
+            ..CompositorBackendTickInput::default()
+        })
+        .expect("backend tick should drain authority inbox");
+
+    assert_eq!(report.authority_inbox.drained, 1);
+    assert!(!report.authority_inbox.disconnected);
+    assert!(!report.authority_inbox.max_reached);
+    assert_eq!(
+        report
+            .runtime
+            .runtime_state
+            .authority_transactions_committed,
+        1
+    );
+    assert_eq!(report.runtime.runtime_state.authority_surfaces_applied, 1);
+    assert_eq!(assembly.committed_surfaces().len(), 1);
+    assert_eq!(
+        assembly.committed_surfaces()[0].buffer,
+        BufferSource::XPixmap { pixmap: 66 }
+    );
+}

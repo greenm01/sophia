@@ -6,6 +6,7 @@ mod prelude {
     #[cfg(unix)]
     pub(crate) use std::os::unix::net::UnixStream;
     pub(crate) use std::path::Path;
+    pub(crate) use std::sync::mpsc::{Receiver, TryRecvError};
     pub(crate) use std::time::Duration;
 
     pub(crate) use sophia_portal::{

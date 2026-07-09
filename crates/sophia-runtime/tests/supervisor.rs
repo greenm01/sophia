@@ -5,11 +5,12 @@ use sophia_protocol::{
 };
 use sophia_runtime::{
     MAX_SESSION_RUNTIME_OBSERVATION_BATCH, ProcessLaunchSpec, ProcessSupervisor,
-    ProcessSupervisorError, RestartPolicy, RuntimeAuthorityHealth, RuntimeBrokerHealth,
-    RuntimeBrokerSupervisors, SessionRuntimeCommand, SessionRuntimeEvent, SessionRuntimeEventBatch,
-    SessionRuntimeLoop, SessionRuntimeObservation, SessionRuntimeObservationError,
-    SessionRuntimePhase, SessionRuntimeState, SupervisedProcessKind, SupervisorCommand,
-    SupervisorEvent, SupervisorState, update_session_runtime, update_supervisor,
+    ProcessSupervisorError, RestartPolicy, RuntimeAuthorityHealth, RuntimeAuthoritySupervisor,
+    RuntimeBrokerHealth, RuntimeBrokerSupervisors, SessionRuntimeCommand, SessionRuntimeEvent,
+    SessionRuntimeEventBatch, SessionRuntimeLoop, SessionRuntimeObservation,
+    SessionRuntimeObservationError, SessionRuntimePhase, SessionRuntimeState,
+    SupervisedProcessKind, SupervisorCommand, SupervisorEvent, SupervisorState,
+    update_session_runtime, update_supervisor,
 };
 
 #[test]
@@ -651,6 +652,66 @@ fn runtime_broker_supervisors_start_and_observe_placeholder_exits() {
     assert_eq!(metadata_exit, Some(SupervisorEvent::ProcessExited));
     assert_eq!(supervisors.portal.child_id(), None);
     assert_eq!(supervisors.metadata.child_id(), None);
+}
+
+#[test]
+fn runtime_authority_supervisor_reports_reduced_x_authority_health() {
+    let mut supervisor =
+        RuntimeAuthoritySupervisor::new_x_authority(ProcessLaunchSpec::new("/usr/bin/true"));
+
+    let report = supervisor
+        .start()
+        .expect("placeholder X authority should start");
+
+    assert_eq!(report.start, Some(SupervisorEvent::ProcessStarted));
+    assert_eq!(
+        report.observations[0],
+        SessionRuntimeObservation::AuthorityProcessHealthChanged {
+            process: SupervisedProcessKind::SophiaXAuthority,
+            state: BrokerHealthState::Ready,
+            generation: 1,
+            status_message_len: 0,
+        }
+    );
+
+    let mut runtime = SessionRuntimeLoop::default();
+    let mut observations = report.observations;
+    let mut exit = report.poll;
+
+    for _ in 0..100 {
+        if exit == Some(SupervisorEvent::ProcessExited) {
+            break;
+        }
+        let (event, next_observations) = supervisor.poll().expect("poll should succeed");
+        exit = exit.or(event);
+        observations.extend(next_observations);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+
+    runtime
+        .step_observations(observations.clone())
+        .expect("authority health observation should be accepted");
+
+    assert_eq!(exit, Some(SupervisorEvent::ProcessExited));
+    assert_eq!(observations.len(), 2);
+    assert_eq!(
+        observations[1],
+        SessionRuntimeObservation::AuthorityProcessHealthChanged {
+            process: SupervisedProcessKind::SophiaXAuthority,
+            state: BrokerHealthState::Stopped,
+            generation: 2,
+            status_message_len: 0,
+        }
+    );
+    assert_eq!(
+        runtime.state().x_authority_health,
+        Some(RuntimeAuthorityHealth {
+            process: SupervisedProcessKind::SophiaXAuthority,
+            state: BrokerHealthState::Stopped,
+            generation: 2,
+            status_message_len: 0,
+        })
+    );
 }
 
 #[test]

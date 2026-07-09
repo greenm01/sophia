@@ -6,21 +6,19 @@ evidence belong in `docs/research-log.md`.
 
 ---
 
-## Active Focus - X Authority Supervisor Integration
+## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Convert the bounded X Authority transaction channel into the session
-  supervisor path once the long-running authority process exists.
-- [ ] Add a supervised long-running X Authority process wrapper that owns the
-  X11 socket lifecycle and emits reduced authority health observations.
-- [ ] Feed the bounded channel into the compositor backend assembly once the
-  supervised process wrapper exists.
-
-**Next**
 - [ ] Decide the first real backend dependency boundary for DRM/KMS and
   libinput without changing the Engine/WM/Authority packet contracts.
 - [ ] Keep real DRM/KMS ioctls, GPU imports, and real MIT-SHM mapping deferred
   until the deterministic backend assembly needs a live backend implementation.
+
+**Next**
+- [ ] Sketch the first live compositor backend crate boundary and keep kernel
+  IO behind traits that preserve deterministic headless tests.
+- [ ] Add one smoke that proves backend discovery can fail closed without
+  affecting protocol authority or WM IPC contracts.
 
 ---
 
@@ -81,6 +79,10 @@ evidence belong in `docs/research-log.md`.
   state without leaking X11 resource IDs or namespace metadata.
 - [x] Move the Present-style smoke to the bounded X Authority transaction
   channel path; callback observers remain for focused tests.
+- [x] Add a supervised X Authority process wrapper that emits reduced authority
+  health observations.
+- [x] Feed bounded authority transaction batches into the compositor backend
+  assembly through a protocol-neutral inbox.
 
 ---
 

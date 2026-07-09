@@ -678,16 +678,24 @@ observers remain useful for focused tests, but the session path should consume
 the bounded channel so backpressure and disconnection fail closed instead of
 allocating unbounded transaction history.
 
+`RuntimeAuthoritySupervisor` is the first process wrapper for this path. It
+owns a `ProcessSupervisor` for `SupervisedProcessKind::SophiaXAuthority` and
+translates process start, health, exit, and termination into reduced
+`AuthorityProcessHealthChanged` observations. It does not carry socket paths,
+XIDs, namespace IDs, or authority resource tables into the runtime reducer.
+
 The first runtime-owned compositor backend assembly is deterministic and
 headless. `HeadlessCompositorBackendAssembly` holds the Engine, session driver,
 frame clock, DRM/KMS output registry, libinput adapter, renderer selection, and
 committed surface cache. One `run_tick` polls physical input once, advances the
 frame clock, commits authority transaction batches through the live runtime
 adapter, runs the common session driver, and renders the produced frame through
-the selected renderer. This proves the ownership boundary before real kernel
-file descriptors enter the loop: the assembly coordinates backends, but it does
-not own protocol policy, WM layout semantics, portal policy, or client
-resources.
+the selected renderer. When configured with an `AuthorityTransactionInbox`, the
+same tick drains ready protocol-neutral authority batches from a bounded channel
+before running the session driver. This proves the ownership boundary before
+real kernel file descriptors enter the loop: the assembly coordinates backends,
+but it does not own protocol policy, WM layout semantics, portal policy, or
+client resources.
 
 Resize behavior measurement is tied to the same epoch state. `LayoutEpochState`
 records start time and timeout policy, and `measure_resize_behavior` reports

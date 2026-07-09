@@ -51,8 +51,55 @@ pub struct CompositorBackendTickInput {
 pub struct CompositorBackendTickReport {
     pub tick: FrameClockTick,
     pub input_poll: LibinputPollReport,
+    pub authority_inbox: AuthorityTransactionInboxReport,
     pub runtime: HeadlessSessionDriverReport,
     pub render: Option<RenderFrameReport>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct AuthorityTransactionInboxReport {
+    pub drained: usize,
+    pub disconnected: bool,
+    pub max_reached: bool,
+}
+
+#[derive(Debug)]
+pub struct AuthorityTransactionInbox {
+    receiver: Receiver<AuthorityTransactionIntake>,
+    max_drain_per_tick: usize,
+}
+
+impl AuthorityTransactionInbox {
+    pub fn new(receiver: Receiver<AuthorityTransactionIntake>, max_drain_per_tick: usize) -> Self {
+        Self {
+            receiver,
+            max_drain_per_tick,
+        }
+    }
+
+    pub fn drain_ready(
+        &self,
+        out: &mut Vec<AuthorityTransactionIntake>,
+    ) -> AuthorityTransactionInboxReport {
+        let mut report = AuthorityTransactionInboxReport::default();
+
+        for _ in 0..self.max_drain_per_tick {
+            match self.receiver.try_recv() {
+                Ok(batch) => {
+                    out.push(batch);
+                    report.drained = report.drained.saturating_add(1);
+                }
+                Err(TryRecvError::Empty) => return report,
+                Err(TryRecvError::Disconnected) => {
+                    report.disconnected = true;
+                    return report;
+                }
+            }
+        }
+
+        report.max_reached = true;
+        report
+    }
 }
 
 #[derive(Debug)]
@@ -91,6 +138,7 @@ pub struct HeadlessCompositorBackendAssembly {
     clock: DeterministicFrameClock,
     outputs: DrmKmsOutputRegistry,
     input: LibinputPhysicalInputAdapter<QueuedInputPoller>,
+    authority_inbox: Option<AuthorityTransactionInbox>,
     renderer: RendererSelection,
     committed_surfaces: Vec<CommittedSurfaceState>,
 }
@@ -128,9 +176,23 @@ impl HeadlessCompositorBackendAssembly {
             clock,
             outputs,
             input,
+            authority_inbox: None,
             renderer,
             committed_surfaces: Vec::new(),
         }
+    }
+
+    pub fn with_authority_inbox(mut self, inbox: AuthorityTransactionInbox) -> Self {
+        self.authority_inbox = Some(inbox);
+        self
+    }
+
+    pub fn with_committed_surfaces(
+        mut self,
+        committed_surfaces: Vec<CommittedSurfaceState>,
+    ) -> Self {
+        self.committed_surfaces = committed_surfaces;
+        self
     }
 
     pub fn engine(&self) -> &HeadlessEngine {
@@ -170,12 +232,18 @@ impl HeadlessCompositorBackendAssembly {
             .poll_once()
             .map_err(CompositorBackendAssemblyError::InputPoll)?;
         let tick = self.clock.next_frame(self.engine.output().id);
+        let mut authority_batches = input.authority_batches;
+        let authority_inbox = self
+            .authority_inbox
+            .as_ref()
+            .map(|inbox| inbox.drain_ready(&mut authority_batches))
+            .unwrap_or_default();
         let mut adapter = LiveRuntimeDriverAdapter::from_authority_batches(
             &self.engine,
             LiveRuntimeDriverIntake {
                 x_event_count: input.x_event_count,
                 authority_commits: Vec::new(),
-                authority_batches: input.authority_batches,
+                authority_batches,
                 wm_update: input.wm_update,
                 portal_commands: input.portal_commands,
                 chrome_command_count: input.chrome_command_count,
@@ -204,6 +272,8 @@ impl HeadlessCompositorBackendAssembly {
             input_polled = input_poll.polled,
             input_accepted = input_poll.accepted,
             input_rejected = input_poll.rejected.len(),
+            authority_batches_drained = authority_inbox.drained,
+            authority_inbox_disconnected = authority_inbox.disconnected,
             committed_surfaces = self.committed_surfaces.len(),
             rendered = render.is_some(),
             "ran deterministic compositor backend tick"
@@ -212,6 +282,7 @@ impl HeadlessCompositorBackendAssembly {
         Ok(CompositorBackendTickReport {
             tick,
             input_poll,
+            authority_inbox,
             runtime,
             render,
         })

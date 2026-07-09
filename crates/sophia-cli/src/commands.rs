@@ -9,7 +9,8 @@ mod prelude {
     pub(crate) use crate::support::*;
 
     pub(crate) use sophia_engine::{
-        AuthorityTransactionIntake, FrameClockTick, FramePlanRequest, FrameScheduleDecision,
+        AuthorityTransactionInbox, AuthorityTransactionIntake, CompositorBackendTickInput,
+        FrameClockTick, FramePlanRequest, FrameScheduleDecision, HeadlessCompositorBackendAssembly,
         HeadlessEngine, HeadlessSessionDriver, HeadlessSessionDriverTick, LayoutEpochState,
         LiveRuntimeDriverAdapter, LiveRuntimeDriverIntake, WmSocketTransport,
         WmSocketTransportConfig, WmTransactionUpdate,
