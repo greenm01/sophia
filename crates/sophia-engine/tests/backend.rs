@@ -236,3 +236,115 @@ fn libinput_physical_input_adapter_reports_rejected_events() {
     );
     assert_eq!(adapter.source().pending_len(), 0);
 }
+
+#[test]
+fn live_backend_discovery_can_seed_headless_assembly_without_policy_changes() {
+    let root = drm_sysfs_fixture("live-ready");
+    let connector = root.join("card0-HDMI-A-1");
+    fs::create_dir_all(&connector).unwrap();
+    write_fixture_file(&connector, "status", "connected\n");
+    write_fixture_file(&connector, "modes", "1920x1080\n");
+    write_fixture_file(&connector, "connector_id", "42\n");
+    write_fixture_file(&connector, "crtc_id", "99\n");
+    let output_backend = SysfsDrmKmsOutputBackend::new(&root);
+    let input_backend = StaticInputDiscoveryBackend::new(vec![LibinputDeviceDescriptor {
+        seat: SeatId::from_raw(1),
+        device: DeviceId::from_raw(2),
+        kind: LibinputDeviceKind::Pointer,
+    }]);
+
+    let report = discover_live_compositor_backend(&output_backend, &input_backend);
+
+    assert!(report.is_ready());
+    assert_eq!(report.status, LiveCompositorBackendDiscoveryStatus::Ready);
+    assert_eq!(
+        report.selected_output,
+        Some(HeadlessOutput {
+            id: OutputId::from_raw(1),
+            size: Size {
+                width: 1920,
+                height: 1080,
+            },
+            scale: 1,
+        })
+    );
+    assert_eq!(report.input_source.devices().count(), 1);
+
+    let assembly = report
+        .into_headless_assembly(QueuedInputPoller::default(), RendererSelection::CpuFallback)
+        .expect("ready backend discovery should create a deterministic assembly");
+    assert_eq!(
+        assembly.outputs().primary_engine_output(),
+        Some(HeadlessOutput {
+            id: OutputId::from_raw(1),
+            size: Size {
+                width: 1920,
+                height: 1080,
+            },
+            scale: 1,
+        })
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_backend_discovery_fails_closed_when_no_outputs_exist() {
+    let root = drm_sysfs_fixture("live-no-outputs");
+    let output_backend = SysfsDrmKmsOutputBackend::new(&root);
+    let input_backend = StaticInputDiscoveryBackend::new(vec![LibinputDeviceDescriptor {
+        seat: SeatId::from_raw(1),
+        device: DeviceId::from_raw(2),
+        kind: LibinputDeviceKind::Pointer,
+    }]);
+
+    let report = discover_live_compositor_backend(&output_backend, &input_backend);
+
+    assert_eq!(
+        report.status,
+        LiveCompositorBackendDiscoveryStatus::NoOutputs
+    );
+    assert!(!report.is_ready());
+    assert_eq!(report.selected_output, None);
+    assert_eq!(report.input_source.devices().count(), 0);
+    assert!(
+        report
+            .into_headless_assembly(QueuedInputPoller::default(), RendererSelection::CpuFallback)
+            .is_none()
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[derive(Clone, Debug)]
+struct FailingOutputBackend;
+
+impl OutputDiscoveryBackend for FailingOutputBackend {
+    fn discover_outputs(&self) -> IoResult<DrmKmsOutputRegistry> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "denied",
+        ))
+    }
+}
+
+#[test]
+fn live_backend_discovery_reports_output_errors_without_starting_assembly() {
+    let input_backend = StaticInputDiscoveryBackend::new(Vec::new());
+
+    let report = discover_live_compositor_backend(&FailingOutputBackend, &input_backend);
+
+    assert_eq!(
+        report.status,
+        LiveCompositorBackendDiscoveryStatus::OutputDiscoveryFailed {
+            message: "denied".to_owned(),
+        }
+    );
+    assert_eq!(report.outputs.outputs().count(), 0);
+    assert_eq!(report.selected_output, None);
+    assert!(
+        report
+            .into_headless_assembly(QueuedInputPoller::default(), RendererSelection::CpuFallback)
+            .is_none()
+    );
+}

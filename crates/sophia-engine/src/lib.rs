@@ -5,7 +5,7 @@ mod prelude {
     pub(crate) use std::io::{self, Read, Write};
     #[cfg(unix)]
     pub(crate) use std::os::unix::net::UnixStream;
-    pub(crate) use std::path::Path;
+    pub(crate) use std::path::{Path, PathBuf};
     pub(crate) use std::sync::mpsc::{Receiver, TryRecvError};
     pub(crate) use std::time::Duration;
 
@@ -41,6 +41,7 @@ mod engine;
 mod error;
 mod frame;
 mod input;
+mod live_backend;
 mod output;
 mod render;
 mod runtime_driver;
@@ -55,6 +56,7 @@ pub use engine::*;
 pub use error::*;
 pub use frame::*;
 pub use input::*;
+pub use live_backend::*;
 pub use output::*;
 pub use render::*;
 pub use runtime_driver::*;

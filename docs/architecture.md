@@ -728,6 +728,18 @@ will dispatch ready file-descriptor events without blocking the engine loop,
 while the deterministic `QueuedInputPoller` keeps tests independent of kernel
 devices.
 
+The first live compositor backend boundary is dependency-neutral. An
+`OutputDiscoveryBackend` produces a `DrmKmsOutputRegistry`; an
+`InputDiscoveryBackend` produces a `LibinputEventSource`. The current concrete
+implementations are still conservative: `SysfsDrmKmsOutputBackend` reads
+sysfs-style connector data and `StaticInputDiscoveryBackend` seeds deterministic
+input devices. `discover_live_compositor_backend` returns a reduced
+`LiveCompositorBackendDiscoveryReport`. If output discovery fails, or no
+connected output exists, it returns no selected output and creates no backend
+assembly. That is the fail-closed rule for the live compositor seam: protocol
+authorities, WM IPC, and portal state are not started just because kernel
+discovery partially succeeded.
+
 Physical input now has a request-generation seam. After Sophia Engine produces
 an `InputRoute`, `routed_input_request_from_physical_event` combines the
 physical `InputEventPacket` with the accepted route and emits an
