@@ -24,7 +24,7 @@ namespace boundaries.
 - [x] Model namespace-scoped X resource lookup and event subscription in tests.
 - [x] Model `AuthoritySurface` creation from synthetic X window lifecycle
   events.
-- [ ] Convert a synthetic Present/SHM/CoreDraw update into a ready
+- [x] Convert a synthetic Present/SHM/CoreDraw update into a ready
   `SurfaceTransaction`.
 - [ ] Convert a synthetic selection request into a portal request and native X
   denial/handoff artifact.
