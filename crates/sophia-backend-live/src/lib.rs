@@ -1149,6 +1149,41 @@ impl LiveBackendStartupReport {
         LiveScanoutReadinessReport::from_backend_and_presentation(self, presentation)
     }
 
+    #[cfg(feature = "libdrm-events")]
+    pub fn native_libdrm_output_routes(&self) -> Vec<LibdrmNativeOutputRoute> {
+        self.discovery
+            .outputs
+            .outputs()
+            .enumerate()
+            .filter_map(|(index, output)| {
+                LibdrmNativeOutputSlot::new(
+                    u16::try_from(index.saturating_add(1)).unwrap_or(u16::MAX),
+                )
+                .map(|slot| LibdrmNativeOutputRoute {
+                    slot,
+                    output: output.output,
+                })
+            })
+            .collect()
+    }
+
+    #[cfg(feature = "libdrm-events")]
+    pub fn native_libdrm_poller_from_authority(
+        &self,
+        authority: LibdrmBackendFdAuthority,
+    ) -> Option<NativeLibdrmPageFlipEventPoller> {
+        if !self.discovery.is_ready() {
+            return None;
+        }
+
+        Some(
+            NativeLibdrmPageFlipEventPoller::new(LibdrmNativePageFlipSource::from_authority(
+                authority,
+            ))
+            .with_routes(self.native_libdrm_output_routes()),
+        )
+    }
+
     #[cfg(feature = "egl-probe")]
     pub fn egl_probe_report(
         &self,

@@ -244,6 +244,10 @@ native KMS identity.
 Live runtime assemblies may carry those diagnostics through startup and tick
 reports as reduced status plus counts. Engine state still receives no native
 poller handles, routes, or output identity.
+Native libdrm poller construction derives backend-local output slots from the
+already-discovered output registry. Those slots are process-local routing
+indices; they must not mirror connector IDs, CRTC IDs, fd numbers, or any other
+native DRM/KMS identifier.
 
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout

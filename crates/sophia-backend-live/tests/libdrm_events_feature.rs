@@ -484,6 +484,63 @@ fn live_runtime_assembly_reports_reduced_native_libdrm_poller_diagnostics() {
 }
 
 #[test]
+fn native_libdrm_poller_constructs_routes_from_discovered_outputs_without_kms_identity() {
+    let root = multi_output_drm_sysfs_fixture("native-libdrm-discovered-routes");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let authority =
+        LibdrmBackendFdAuthority::new(22).expect("nonzero generation should mint authority token");
+    let routes = report.native_libdrm_output_routes();
+
+    assert_eq!(routes.len(), 2);
+    assert_eq!(routes[0].slot.raw(), 1);
+    assert_eq!(routes[0].output, OutputId::from_raw(1));
+    assert_eq!(routes[1].slot.raw(), 2);
+    assert_eq!(routes[1].output, OutputId::from_raw(2));
+
+    let mut poller = report
+        .native_libdrm_poller_from_authority(authority)
+        .expect("ready discovery should construct native poller");
+    let (sender, receiver) = mpsc::sync_channel(2);
+
+    assert_eq!(poller.diagnostics().route_count, 2);
+    poller.inject_callbacks([LibdrmNativePageFlipCallback::new(routes[1].slot, 90)]);
+
+    let poll_report = poller.poll_page_flip_events(&sender, 4);
+
+    assert_eq!(poll_report.status, LibdrmPageFlipEventPollStatus::Emitted);
+    assert_eq!(
+        receiver
+            .try_recv()
+            .expect("callback should map through reduced output route"),
+        LivePageFlipCallback {
+            output: OutputId::from_raw(2),
+            frame_serial: 90,
+        }
+    );
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn native_libdrm_poller_construction_fails_closed_without_outputs() {
+    let root = std::env::temp_dir().join("sophia-backend-live-native-libdrm-no-routes");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let authority =
+        LibdrmBackendFdAuthority::new(23).expect("nonzero generation should mint authority token");
+
+    assert!(report.native_libdrm_output_routes().is_empty());
+    assert!(
+        report
+            .native_libdrm_poller_from_authority(authority)
+            .is_none()
+    );
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn native_libdrm_page_flip_callback_decodes_without_native_resource_identity() {
     assert_eq!(LibdrmNativeOutputSlot::new(0), None);
     let slot = LibdrmNativeOutputSlot::new(2).expect("nonzero slot should be valid");
@@ -703,6 +760,24 @@ fn ready_drm_sysfs_fixture(name: &str) -> std::path::PathBuf {
     write_fixture_file(&connector, "modes", "1920x1080\n");
     write_fixture_file(&connector, "connector_id", "42\n");
     write_fixture_file(&connector, "crtc_id", "99\n");
+    root
+}
+
+fn multi_output_drm_sysfs_fixture(name: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("sophia-backend-live-{name}"));
+    let _ = std::fs::remove_dir_all(&root);
+    let first = root.join("card0-DP-1");
+    let second = root.join("card0-HDMI-A-1");
+    std::fs::create_dir_all(&first).unwrap();
+    std::fs::create_dir_all(&second).unwrap();
+    write_fixture_file(&first, "status", "connected\n");
+    write_fixture_file(&first, "modes", "1920x1080\n");
+    write_fixture_file(&first, "connector_id", "1234\n");
+    write_fixture_file(&first, "crtc_id", "2234\n");
+    write_fixture_file(&second, "status", "connected\n");
+    write_fixture_file(&second, "modes", "2560x1440\n");
+    write_fixture_file(&second, "connector_id", "9876\n");
+    write_fixture_file(&second, "crtc_id", "8876\n");
     root
 }
 
