@@ -30,10 +30,19 @@ pub struct SessionRuntimeState {
     pub last_frame_serial: Option<u64>,
     pub portal_broker_health: Option<RuntimeBrokerHealth>,
     pub metadata_broker_health: Option<RuntimeBrokerHealth>,
+    pub x_authority_health: Option<RuntimeAuthorityHealth>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RuntimeBrokerHealth {
+    pub state: BrokerHealthState,
+    pub generation: u64,
+    pub status_message_len: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RuntimeAuthorityHealth {
+    pub process: SupervisedProcessKind,
     pub state: BrokerHealthState,
     pub generation: u64,
     pub status_message_len: usize,
@@ -61,6 +70,12 @@ pub enum SessionRuntimeEvent {
     },
     BrokerHealthChanged {
         broker: BrokerKind,
+        state: BrokerHealthState,
+        generation: u64,
+        status_message_len: usize,
+    },
+    AuthorityProcessHealthChanged {
+        process: SupervisedProcessKind,
         state: BrokerHealthState,
         generation: u64,
         status_message_len: usize,

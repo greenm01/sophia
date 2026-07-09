@@ -557,19 +557,9 @@ fn run_x_authority_present_pixmap_smoke()
 
     let (display, socket_path) = temp_xauthority_display(5600)?;
     let server_path = socket_path.clone();
-    let server = std::thread::spawn(move || -> Result<Vec<SurfaceTransaction>, String> {
-        let mut transactions = Vec::new();
-        run_x11_core_socket_server_once_observed(
-            &server_path,
-            NamespaceId::from_raw(47),
-            |result| {
-                if let Some(response) = &result.response {
-                    transactions.extend(response.transactions.iter().cloned());
-                }
-            },
-        )
-        .map_err(|error| error.to_string())?;
-        Ok(transactions)
+    let (sender, receiver) = sync_channel(8);
+    let server = std::thread::spawn(move || {
+        run_x11_core_socket_server_once_channel(&server_path, NamespaceId::from_raw(47), sender)
     });
 
     wait_for_socket_path(&socket_path)?;
@@ -614,19 +604,52 @@ fn run_x_authority_present_pixmap_smoke()
 
     drop(stream);
     let _ = std::fs::remove_file(&socket_path);
-    let transactions = server
+    server
         .join()
         .map_err(|_| "X authority X11 socket server thread panicked")?
         .map_err(|error| format!("X authority X11 socket server failed: {error}"))?;
-    let runtime_state = runtime_state_from_observed_transactions(&transactions)?;
+    let batches = receiver.try_iter().collect::<Vec<_>>();
+    let runtime_state = runtime_state_from_observed_batches(&batches)?;
 
     Ok(XAuthorityPresentPixmapSmokeReport {
         display,
         extension_opcode: extension[9],
-        transactions: transactions.len(),
+        transactions: batches.iter().map(|batch| batch.transactions.len()).sum(),
         runtime_committed: runtime_state.authority_transactions_committed,
         runtime_surfaces: runtime_state.authority_surfaces_applied,
     })
+}
+
+fn runtime_state_from_observed_batches(
+    batches: &[XAuthorityObservedTransactionBatch],
+) -> Result<sophia_runtime::SessionRuntimeState, Box<dyn std::error::Error>> {
+    let transactions = batches
+        .iter()
+        .flat_map(|batch| batch.transactions.iter().cloned())
+        .collect::<Vec<_>>();
+    let engine = HeadlessEngine::default();
+    let output = engine.output();
+    let committed = seed_committed_states_for_transactions(&transactions);
+    let authority_batches = batches
+        .iter()
+        .map(|batch| AuthorityTransactionIntake::new(batch.transaction, batch.transactions.clone()))
+        .collect();
+    let mut driver = HeadlessSessionDriver::new(engine.clone());
+    let mut adapter = LiveRuntimeDriverAdapter::from_authority_batches(
+        &engine,
+        LiveRuntimeDriverIntake {
+            x_event_count: u32::try_from(transactions.len()).unwrap_or(u32::MAX),
+            authority_commits: Vec::new(),
+            authority_batches,
+            wm_update: None,
+            portal_commands: Vec::new(),
+            chrome_command_count: 0,
+            layers: layer_templates_from_surface_transactions(&transactions),
+            committed_surfaces: committed,
+        },
+    );
+    let report = driver.run_with_adapter(output.id, 1, &mut adapter)?;
+    Ok(report.runtime_state)
 }
 
 fn runtime_state_from_observed_transactions(

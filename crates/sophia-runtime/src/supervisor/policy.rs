@@ -22,6 +22,7 @@ pub enum SupervisedProcessKind {
     WindowManager,
     PortalBroker,
     MetadataBroker,
+    SophiaXAuthority,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

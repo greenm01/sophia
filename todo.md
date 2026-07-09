@@ -11,10 +11,10 @@ evidence belong in `docs/research-log.md`.
 **Now**
 - [ ] Convert the bounded X Authority transaction channel into the session
   supervisor path once the long-running authority process exists.
-- [ ] Define the runtime event that reports authority process ready/degraded
-  state without leaking X11 resource IDs or namespace metadata.
-- [ ] Preserve callback observers only for focused tests; runtime code should
-  consume the bounded channel path.
+- [ ] Add a supervised long-running X Authority process wrapper that owns the
+  X11 socket lifecycle and emits reduced authority health observations.
+- [ ] Feed the bounded channel into the compositor backend assembly once the
+  supervised process wrapper exists.
 
 **Next**
 - [ ] Decide the first real backend dependency boundary for DRM/KMS and
@@ -77,6 +77,10 @@ evidence belong in `docs/research-log.md`.
   renderer selection without owning protocol policy.
 - [x] Add a headless assembly smoke that drains authority batches into committed
   surface state and renders through the existing runtime driver.
+- [x] Define the runtime event that reports authority process ready/degraded
+  state without leaking X11 resource IDs or namespace metadata.
+- [x] Move the Present-style smoke to the bounded X Authority transaction
+  channel path; callback observers remain for focused tests.
 
 ---
 

@@ -543,10 +543,13 @@ values, then feed the loop.
 `SessionRuntimeObservation` is the bounded intake form for those adapters. It
 admits only scalar runtime facts: X event counts, WM layout/restart outcomes,
 frame serials, portal/chrome command counts, and broker health state plus
-status-message length. `SessionRuntimeEventBatch` rejects batches larger than
-`MAX_SESSION_RUNTIME_OBSERVATION_BATCH` and rejects broker status lengths beyond
-the broker health packet cap. It does not carry raw X events, XIDs, namespace
-tokens, clipboard bytes, labels, icons, or renderer buffers.
+status-message length. Authority process health follows the same rule:
+`AuthorityProcessHealthChanged` records only supervised process kind, coarse
+health state, generation, and status-message length. `SessionRuntimeEventBatch`
+rejects batches larger than `MAX_SESSION_RUNTIME_OBSERVATION_BATCH` and rejects
+broker or authority status lengths beyond the broker health packet cap. It does
+not carry raw X events, XIDs, namespace tokens, clipboard bytes, labels, icons,
+or renderer buffers.
 
 Concrete producer wiring now follows that rule. Sophia Engine exposes helper
 conversions from `WmTransactionUpdate`, `SessionTickReport`,
@@ -666,6 +669,14 @@ The live runtime adapter now has a protocol-neutral authority batch intake.
 surface state into renderable layers. Sophia X Authority can adapt its bounded
 `XAuthorityObservedTransactionBatch` into this shape at the process/runtime
 edge without making Sophia Engine depend on the X Authority crate.
+
+The long-running Sophia X Authority side channel is the preferred runtime path
+for observed drawing and presentation transactions. Socket dispatch attempts a
+nonblocking send of `XAuthorityObservedTransactionBatch` into a bounded channel;
+the runtime edge converts that batch into `AuthorityTransactionIntake`. Callback
+observers remain useful for focused tests, but the session path should consume
+the bounded channel so backpressure and disconnection fail closed instead of
+allocating unbounded transaction history.
 
 The first runtime-owned compositor backend assembly is deterministic and
 headless. `HeadlessCompositorBackendAssembly` holds the Engine, session driver,

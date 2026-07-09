@@ -1,8 +1,8 @@
 use crate::prelude::*;
 
 use super::types::{
-    RuntimeBrokerHealth, SessionRuntimeCommand, SessionRuntimeEvent, SessionRuntimePhase,
-    SessionRuntimeState,
+    RuntimeAuthorityHealth, RuntimeBrokerHealth, SessionRuntimeCommand, SessionRuntimeEvent,
+    SessionRuntimePhase, SessionRuntimeState,
 };
 
 pub fn update_session_runtime(
@@ -82,6 +82,24 @@ pub fn update_session_runtime(
             }
             SessionRuntimeCommand::None
         }
+        SessionRuntimeEvent::AuthorityProcessHealthChanged {
+            process,
+            state: authority_state,
+            generation,
+            status_message_len,
+        } => {
+            if process == SupervisedProcessKind::SophiaXAuthority
+                && accepts_authority_health(state.x_authority_health, generation)
+            {
+                state.x_authority_health = Some(RuntimeAuthorityHealth {
+                    process,
+                    state: authority_state,
+                    generation,
+                    status_message_len,
+                });
+            }
+            SessionRuntimeCommand::None
+        }
         SessionRuntimeEvent::AuthorityTransactionObserved {
             outcome,
             applied_surface_count,
@@ -132,5 +150,9 @@ pub fn update_session_runtime(
 }
 
 fn accepts_broker_health(current: Option<RuntimeBrokerHealth>, generation: u64) -> bool {
+    current.is_none_or(|health| generation >= health.generation)
+}
+
+fn accepts_authority_health(current: Option<RuntimeAuthorityHealth>, generation: u64) -> bool {
     current.is_none_or(|health| generation >= health.generation)
 }

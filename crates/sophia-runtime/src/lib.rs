@@ -19,6 +19,7 @@ mod prelude {
     };
     pub(crate) use tracing_subscriber::EnvFilter;
 
+    pub(crate) use crate::SupervisedProcessKind;
     pub(crate) use crate::{SophiaErrorExt, SophiaErrorKind};
 }
 

@@ -9,8 +9,8 @@ mod prelude {
     pub(crate) use crate::support::*;
 
     pub(crate) use sophia_engine::{
-        FrameClockTick, FramePlanRequest, FrameScheduleDecision, HeadlessEngine,
-        HeadlessSessionDriver, HeadlessSessionDriverTick, LayoutEpochState,
+        AuthorityTransactionIntake, FrameClockTick, FramePlanRequest, FrameScheduleDecision,
+        HeadlessEngine, HeadlessSessionDriver, HeadlessSessionDriverTick, LayoutEpochState,
         LiveRuntimeDriverAdapter, LiveRuntimeDriverIntake, WmSocketTransport,
         WmSocketTransportConfig, WmTransactionUpdate,
         runtime_observation_from_wm_transaction_update, schedule_frame_from_damage,
@@ -34,10 +34,11 @@ mod prelude {
     pub(crate) use sophia_wm_demo::{ExternalWmClient, tile_workspace};
     pub(crate) use sophia_x_authority::{
         X_SOPHIA_PRESENT_EXTENSION_NAME, X_SOPHIA_PRESENT_MAJOR_OPCODE,
-        X_SOPHIA_PRESENT_PIXMAP_MINOR_OPCODE, XAuthorityRequestKind, XAuthorityRequestPacket,
-        XByteOrder, XResourceId, XSelectionChangeKind as XAuthoritySelectionChangeKind,
-        read_x_authority_response, run_x_authority_socket_server_once,
-        run_x11_core_socket_server_once, run_x11_core_socket_server_once_observed,
+        X_SOPHIA_PRESENT_PIXMAP_MINOR_OPCODE, XAuthorityObservedTransactionBatch,
+        XAuthorityRequestKind, XAuthorityRequestPacket, XByteOrder, XResourceId,
+        XSelectionChangeKind as XAuthoritySelectionChangeKind, read_x_authority_response,
+        run_x_authority_socket_server_once, run_x11_core_socket_server_once,
+        run_x11_core_socket_server_once_channel, run_x11_core_socket_server_once_observed,
         write_x_authority_request,
     };
     pub(crate) use sophia_x_bridge::{
@@ -49,6 +50,7 @@ mod prelude {
         stress_routed_input,
     };
     pub(crate) use std::os::unix::net::UnixStream;
+    pub(crate) use std::sync::mpsc::sync_channel;
     pub(crate) use std::time::{Duration, SystemTime, UNIX_EPOCH};
     pub(crate) use x11rb::protocol::Event;
     pub(crate) use x11rb::protocol::xproto::SelectionRequestEvent;

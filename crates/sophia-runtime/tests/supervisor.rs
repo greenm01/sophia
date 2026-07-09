@@ -1,13 +1,15 @@
 use std::time::Duration;
 
-use sophia_protocol::{BrokerHealthState, BrokerKind, TransactionOutcome};
+use sophia_protocol::{
+    BrokerHealthState, BrokerKind, SOPHIA_BROKER_HEALTH_MAX_MESSAGE_LEN, TransactionOutcome,
+};
 use sophia_runtime::{
     MAX_SESSION_RUNTIME_OBSERVATION_BATCH, ProcessLaunchSpec, ProcessSupervisor,
-    ProcessSupervisorError, RestartPolicy, RuntimeBrokerHealth, RuntimeBrokerSupervisors,
-    SessionRuntimeCommand, SessionRuntimeEvent, SessionRuntimeEventBatch, SessionRuntimeLoop,
-    SessionRuntimeObservation, SessionRuntimeObservationError, SessionRuntimePhase,
-    SessionRuntimeState, SupervisedProcessKind, SupervisorCommand, SupervisorEvent,
-    SupervisorState, update_session_runtime, update_supervisor,
+    ProcessSupervisorError, RestartPolicy, RuntimeAuthorityHealth, RuntimeBrokerHealth,
+    RuntimeBrokerSupervisors, SessionRuntimeCommand, SessionRuntimeEvent, SessionRuntimeEventBatch,
+    SessionRuntimeLoop, SessionRuntimeObservation, SessionRuntimeObservationError,
+    SessionRuntimePhase, SessionRuntimeState, SupervisedProcessKind, SupervisorCommand,
+    SupervisorEvent, SupervisorState, update_session_runtime, update_supervisor,
 };
 
 #[test]
@@ -145,6 +147,70 @@ fn session_runtime_records_broker_health_without_status_payload() {
             state: BrokerHealthState::Degraded,
             generation: 2,
             status_message_len: 8,
+        })
+    );
+}
+
+#[test]
+fn session_runtime_records_authority_health_without_resource_identity() {
+    let state = SessionRuntimeState::default();
+
+    let (state, command) = update_session_runtime(
+        state,
+        SessionRuntimeEvent::AuthorityProcessHealthChanged {
+            process: SupervisedProcessKind::SophiaXAuthority,
+            state: BrokerHealthState::Ready,
+            generation: 11,
+            status_message_len: 9,
+        },
+    );
+
+    assert_eq!(command, SessionRuntimeCommand::None);
+    assert_eq!(
+        state.x_authority_health,
+        Some(RuntimeAuthorityHealth {
+            process: SupervisedProcessKind::SophiaXAuthority,
+            state: BrokerHealthState::Ready,
+            generation: 11,
+            status_message_len: 9,
+        })
+    );
+
+    let (state, _command) = update_session_runtime(
+        state,
+        SessionRuntimeEvent::AuthorityProcessHealthChanged {
+            process: SupervisedProcessKind::SophiaXAuthority,
+            state: BrokerHealthState::Stopped,
+            generation: 10,
+            status_message_len: 0,
+        },
+    );
+
+    assert_eq!(
+        state.x_authority_health,
+        Some(RuntimeAuthorityHealth {
+            process: SupervisedProcessKind::SophiaXAuthority,
+            state: BrokerHealthState::Ready,
+            generation: 11,
+            status_message_len: 9,
+        })
+    );
+}
+
+#[test]
+fn authority_health_observation_rejects_unbounded_status_lengths() {
+    assert_eq!(
+        SessionRuntimeEventBatch::from_observations([
+            SessionRuntimeObservation::AuthorityProcessHealthChanged {
+                process: SupervisedProcessKind::SophiaXAuthority,
+                state: BrokerHealthState::Degraded,
+                generation: 12,
+                status_message_len: 1025,
+            }
+        ]),
+        Err(SessionRuntimeObservationError::BrokerStatusMessageTooLong {
+            len: 1025,
+            max: SOPHIA_BROKER_HEALTH_MAX_MESSAGE_LEN,
         })
     );
 }

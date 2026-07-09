@@ -30,6 +30,12 @@ pub enum SessionRuntimeObservation {
         generation: u64,
         status_message_len: usize,
     },
+    AuthorityProcessHealthChanged {
+        process: SupervisedProcessKind,
+        state: BrokerHealthState,
+        generation: u64,
+        status_message_len: usize,
+    },
     AuthorityTransactionObserved {
         outcome: TransactionOutcome,
         applied_surface_count: u32,
@@ -150,6 +156,26 @@ pub fn session_runtime_event_from_observation(
 
             Ok(SessionRuntimeEvent::BrokerHealthChanged {
                 broker,
+                state,
+                generation,
+                status_message_len,
+            })
+        }
+        SessionRuntimeObservation::AuthorityProcessHealthChanged {
+            process,
+            state,
+            generation,
+            status_message_len,
+        } => {
+            if status_message_len > SOPHIA_BROKER_HEALTH_MAX_MESSAGE_LEN {
+                return Err(SessionRuntimeObservationError::BrokerStatusMessageTooLong {
+                    len: status_message_len,
+                    max: SOPHIA_BROKER_HEALTH_MAX_MESSAGE_LEN,
+                });
+            }
+
+            Ok(SessionRuntimeEvent::AuthorityProcessHealthChanged {
+                process,
                 state,
                 generation,
                 status_message_len,
