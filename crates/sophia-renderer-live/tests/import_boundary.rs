@@ -122,3 +122,26 @@ fn degraded_path_status_takes_precedence_over_partial_native_import() {
         }
     );
 }
+
+#[test]
+fn failed_native_import_can_degrade_runtime_observation_without_gpu_deps() {
+    let status = LiveRendererImportStartupStatus {
+        health: LiveRendererImportHealth::NativeImportCapable,
+        xpixmap: LiveRendererImportPathStatus::Enabled,
+        dmabuf: LiveRendererImportPathStatus::Enabled,
+    };
+    let observation = LiveRendererRuntimeObservation::from_startup_status(
+        status,
+        LiveRendererSelectionObservation::NativeImportCapable,
+    );
+
+    assert_eq!(
+        observation.degraded_by_failed_import(BufferImportPath::DmaBuf),
+        LiveRendererRuntimeObservation {
+            health: LiveRendererImportHealth::Degraded,
+            xpixmap: LiveRendererImportPathStatus::Enabled,
+            dmabuf: LiveRendererImportPathStatus::Degraded,
+            selection: LiveRendererSelectionObservation::NativeImportCapable,
+        }
+    );
+}

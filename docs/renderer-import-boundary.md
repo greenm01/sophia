@@ -55,9 +55,11 @@ observation beside the engine's protocol-neutral tick report. The engine remains
 free of renderer-live dependencies, and runtime consumers still learn whether
 the session is using CPU fallback or a native import-capable renderer.
 
-Degraded renderer health is currently modeled through deterministic fake
-capability probes in `sophia-renderer-live`. That lets Sophia exercise reduced
-failure shape before adding GBM, EGL, DMA-BUF, explicit sync, or renderer-private
+Degraded renderer health has two sources. Startup capability probes can mark a
+path degraded before the session starts, and per-frame import failures can
+degrade runtime observation after startup. Both are modeled through deterministic
+fake paths in `sophia-renderer-live`, which lets Sophia exercise reduced failure
+shape before adding GBM, EGL, DMA-BUF, explicit sync, or renderer-private
 resource caches.
 
 Real MIT-SHM mapping remains outside this boundary until Sophia has a bounded

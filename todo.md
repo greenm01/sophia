@@ -9,16 +9,16 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Decide whether degraded renderer health should be sourced from failed
-  capability probes, failed imports, or both.
 - [ ] Keep the live runtime wrapper outside `sophia-engine` unless engine-local
   renderer policy becomes unavoidable.
-
-**Next**
-- [ ] Add a fake failed-import path in `sophia-renderer-live` if degraded health
-  should cover per-frame import failures, not just startup probes.
 - [ ] Revisit real GBM/EGL/DMA-BUF admission only after the degraded-health
   source decision is documented.
+
+**Next**
+- [ ] Decide the first real native renderer dependency candidate and admission
+  test shape.
+- [ ] Keep first real renderer dependency behind an optional crate feature if it
+  would break offline deterministic tests.
 
 ---
 
@@ -124,6 +124,10 @@ evidence belong in `docs/research-log.md`.
   `sophia-renderer-live` has deterministic fake coverage.
 - [x] Add fake degraded renderer coverage before modeling any real native import
   failure.
+- [x] Decide that degraded renderer health is sourced from both failed startup
+  capability probes and per-frame failed imports.
+- [x] Add a fake failed-import path in `sophia-renderer-live` for per-frame
+  degraded runtime observation.
 
 ---
 

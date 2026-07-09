@@ -188,6 +188,25 @@ impl LiveRendererRuntimeObservation {
             selection,
         }
     }
+
+    pub fn degraded_by_failed_import(self, requested: BufferImportPath) -> Self {
+        let mut degraded = Self {
+            health: LiveRendererImportHealth::Degraded,
+            ..self
+        };
+
+        match requested {
+            BufferImportPath::XPixmap => {
+                degraded.xpixmap = LiveRendererImportPathStatus::Degraded;
+            }
+            BufferImportPath::DmaBuf => {
+                degraded.dmabuf = LiveRendererImportPathStatus::Degraded;
+            }
+            BufferImportPath::CpuReadback => {}
+        }
+
+        degraded
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
