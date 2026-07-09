@@ -101,7 +101,7 @@ Make macOS-style transaction integrity a first-class Sophia invariant.
 Document the later path for Wayland-only applications without turning Sophia
 into a Wayland compositor as the architectural center.
 
-- [ ] Map `wl_surface` attach/damage/commit into Sophia `SurfaceTransaction`
+- [x] Map `wl_surface` attach/damage/commit into Sophia `SurfaceTransaction`
   readiness.
 - [ ] Map `xdg_toplevel` configure/ack/lifecycle into authority-owned protocol
   semantics and Engine-owned visual commits.

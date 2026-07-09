@@ -112,8 +112,9 @@ from Sophia's existing XLibre prototype seams.
 A later **Sophia Wayland Authority** can support Wayland-only applications by
 terminating `wl_surface`, `xdg_toplevel`, buffer attach, damage, and commit
 semantics, then emitting the same internal surface transactions as the X
-authority. It must not become a second compositor; Sophia Engine remains the
-only visual authority.
+authority. Its first boundary is documented in
+[sophia-wayland-authority.md](sophia-wayland-authority.md). It must not become a
+second compositor; Sophia Engine remains the only visual authority.
 
 Every authority must preserve the same namespace model. `NamespaceId`,
 `SurfaceId`, portal transfer state, and sanitized metadata are Sophia concepts,
