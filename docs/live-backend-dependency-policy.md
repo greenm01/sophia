@@ -207,6 +207,13 @@ trait as the deterministic fake, but currently returns the idle reduced report
 and emits no callbacks. Real polling must replace only the private read-loop
 implementation, not the public queue, report, or runtime observation contracts.
 
+Native page-flip callback decoding uses `LibdrmNativeOutputSlot` and
+`LibdrmNativeOutputRoute`. The slot is backend-local routing data, not a KMS
+connector id, CRTC id, fd, device path, or native event handle. A decoded native
+callback may only produce `LivePageFlipCallback { output, frame_serial }`.
+Unknown slots and zero frame serials fail closed before they can enter the
+runtime callback queue.
+
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
 authority. On Linux, wgpu will usually target Vulkan, but Sophia must first prove

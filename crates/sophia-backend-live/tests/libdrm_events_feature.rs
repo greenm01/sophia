@@ -6,10 +6,12 @@ use sophia_backend_live::{
     CompositorBackendTickInput, FakeLibdrmPageFlipEventPoller, LibdrmBackendFdAuthority,
     LibdrmBackendFdAuthorityReport, LibdrmBackendFdAuthorityStatus,
     LibdrmDependencyAdmissionReport, LibdrmDependencyAdmissionStatus,
-    LibdrmNativeEventAdapterReport, LibdrmNativeEventAdapterStatus, LibdrmNativePageFlipSource,
-    LibdrmNativePageFlipSourceReport, LibdrmNativePageFlipSourceStatus, LibdrmNativeReadLoopReport,
-    LibdrmNativeReadLoopStatus, LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus,
-    LibdrmPageFlipEventPoller, LiveBackendConfig, LivePageFlipCallback, LivePageFlipCallbackQueue,
+    LibdrmNativeEventAdapterReport, LibdrmNativeEventAdapterStatus, LibdrmNativeOutputRoute,
+    LibdrmNativeOutputSlot, LibdrmNativePageFlipCallback, LibdrmNativePageFlipDecodeReport,
+    LibdrmNativePageFlipDecodeStatus, LibdrmNativePageFlipSource, LibdrmNativePageFlipSourceReport,
+    LibdrmNativePageFlipSourceStatus, LibdrmNativeReadLoopReport, LibdrmNativeReadLoopStatus,
+    LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller,
+    LiveBackendConfig, LivePageFlipCallback, LivePageFlipCallbackQueue,
     LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus,
     NativeLibdrmPageFlipEventPoller, OutputId, QueuedInputPoller, discover_live_backend,
     libdrm_dependency_admission_report, libdrm_fd_authority_report,
@@ -128,6 +130,46 @@ fn native_libdrm_poller_skeleton_reports_idle_without_emitting_callbacks() {
         LibdrmPageFlipEventPollStatus::Idle
     );
     assert!(receiver.try_recv().is_err());
+}
+
+#[test]
+fn native_libdrm_page_flip_callback_decodes_without_native_resource_identity() {
+    assert_eq!(LibdrmNativeOutputSlot::new(0), None);
+    let slot = LibdrmNativeOutputSlot::new(2).expect("nonzero slot should be valid");
+    assert_eq!(slot.raw(), 2);
+
+    let routes = [LibdrmNativeOutputRoute {
+        slot,
+        output: OutputId::from_raw(7),
+    }];
+    let callback = LibdrmNativePageFlipCallback::new(slot, 81);
+
+    assert_eq!(
+        callback.decode(&routes),
+        LibdrmNativePageFlipDecodeReport {
+            status: LibdrmNativePageFlipDecodeStatus::Decoded,
+            callback: Some(LivePageFlipCallback {
+                output: OutputId::from_raw(7),
+                frame_serial: 81,
+            }),
+        }
+    );
+
+    let unknown_slot = LibdrmNativeOutputSlot::new(3).expect("nonzero slot should be valid");
+    assert_eq!(
+        LibdrmNativePageFlipCallback::new(unknown_slot, 82).decode(&routes),
+        LibdrmNativePageFlipDecodeReport {
+            status: LibdrmNativePageFlipDecodeStatus::UnknownOutputSlot,
+            callback: None,
+        }
+    );
+    assert_eq!(
+        LibdrmNativePageFlipCallback::new(slot, 0).decode(&routes),
+        LibdrmNativePageFlipDecodeReport {
+            status: LibdrmNativePageFlipDecodeStatus::InvalidFrameSerial,
+            callback: None,
+        }
+    );
 }
 
 #[test]
