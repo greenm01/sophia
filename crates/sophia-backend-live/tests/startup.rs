@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 
 use sophia_backend_live::{
     DeviceId, HeadlessOutput, LibinputDeviceDescriptor, LibinputDeviceKind, LiveBackendConfig,
+    LiveBackendDependencyDecision, LiveBackendDependencyKind, LiveBackendDependencyUse,
     LiveCompositorBackendDiscoveryStatus, OutputId, QueuedInputPoller, RendererSelection, SeatId,
-    Size, discover_live_backend,
+    Size, discover_live_backend, live_backend_dependency_decision,
 };
 
 #[test]
@@ -66,6 +67,55 @@ fn live_backend_startup_fails_closed_without_connected_outputs() {
     );
 
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn dependency_policy_allows_libdrm_and_libinput_at_live_backend_seams() {
+    assert!(
+        live_backend_dependency_decision(
+            LiveBackendDependencyKind::LibDrm,
+            LiveBackendDependencyUse::Discovery,
+        )
+        .is_allowed()
+    );
+    assert!(
+        live_backend_dependency_decision(
+            LiveBackendDependencyKind::LibInput,
+            LiveBackendDependencyUse::RuntimePolling,
+        )
+        .is_allowed()
+    );
+}
+
+#[test]
+fn dependency_policy_defers_gpu_and_shared_memory_imports() {
+    assert_eq!(
+        live_backend_dependency_decision(
+            LiveBackendDependencyKind::Gbm,
+            LiveBackendDependencyUse::RendererImport,
+        ),
+        LiveBackendDependencyDecision::Deferred {
+            required_boundary: "live renderer import boundary",
+        }
+    );
+    assert_eq!(
+        live_backend_dependency_decision(
+            LiveBackendDependencyKind::DmaBuf,
+            LiveBackendDependencyUse::Discovery,
+        ),
+        LiveBackendDependencyDecision::Deferred {
+            required_boundary: "live renderer import boundary",
+        }
+    );
+    assert_eq!(
+        live_backend_dependency_decision(
+            LiveBackendDependencyKind::MitShm,
+            LiveBackendDependencyUse::SharedMemoryImport,
+        ),
+        LiveBackendDependencyDecision::Deferred {
+            required_boundary: "bounded shared-memory import boundary",
+        }
+    );
 }
 
 fn drm_sysfs_fixture(name: &str) -> PathBuf {

@@ -19,6 +19,55 @@ use sophia_engine::{
 };
 pub use sophia_protocol::{DeviceId, OutputId, SeatId, Size};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveBackendDependencyKind {
+    LibDrm,
+    LibInput,
+    Gbm,
+    Egl,
+    DmaBuf,
+    MitShm,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveBackendDependencyUse {
+    Discovery,
+    RuntimePolling,
+    RendererImport,
+    SharedMemoryImport,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveBackendDependencyDecision {
+    Allowed,
+    Deferred { required_boundary: &'static str },
+}
+
+impl LiveBackendDependencyDecision {
+    pub fn is_allowed(self) -> bool {
+        matches!(self, Self::Allowed)
+    }
+}
+
+pub fn live_backend_dependency_decision(
+    kind: LiveBackendDependencyKind,
+    use_case: LiveBackendDependencyUse,
+) -> LiveBackendDependencyDecision {
+    use LiveBackendDependencyDecision::{Allowed, Deferred};
+    use LiveBackendDependencyKind::{DmaBuf, Egl, Gbm, LibDrm, LibInput, MitShm};
+    use LiveBackendDependencyUse::{Discovery, RendererImport, RuntimePolling, SharedMemoryImport};
+
+    match (kind, use_case) {
+        (LibDrm | LibInput, Discovery | RuntimePolling) => Allowed,
+        (MitShm, _) | (_, SharedMemoryImport) => Deferred {
+            required_boundary: "bounded shared-memory import boundary",
+        },
+        (Gbm | Egl | DmaBuf, _) | (_, RendererImport) => Deferred {
+            required_boundary: "live renderer import boundary",
+        },
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LiveBackendConfig {
     pub drm_sysfs_root: PathBuf,

@@ -745,7 +745,10 @@ dependencies. Today it only wraps the dependency-neutral discovery traits and
 can seed a headless assembly from sysfs fixtures and static input descriptors.
 Future libdrm, libinput, GBM/EGL, or renderer import code should land in that
 crate first. `sophia-engine` should continue to expose stable data contracts
-and deterministic tests, not direct kernel IO ownership.
+and deterministic tests, not direct kernel IO ownership. The admission rule is
+tracked in `docs/live-backend-dependency-policy.md`: libdrm and libinput may
+enter through live discovery and polling seams, while GPU imports and MIT-SHM
+mapping stay deferred until separate renderer import boundaries exist.
 
 Physical input now has a request-generation seam. After Sophia Engine produces
 an `InputRoute`, `routed_input_request_from_physical_event` combines the

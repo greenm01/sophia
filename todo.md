@@ -9,15 +9,15 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Decide when to introduce real libdrm/libinput dependencies and keep them
-  outside `sophia-engine` if possible.
-- [ ] Keep GPU imports and real MIT-SHM mapping deferred until a live renderer
-  import boundary exists.
+- [ ] Define the renderer import boundary separately from backend discovery.
+- [ ] Sketch the first reduced renderer import records without adding GBM, EGL,
+  DMA-BUF, or real MIT-SHM mapping yet.
 
 **Next**
-- [ ] Add a live backend dependency policy doc before adding crates that touch
-  `/dev/dri`, `/dev/input`, GBM, EGL, or DMA-BUF.
-- [ ] Define the renderer import boundary separately from backend discovery.
+- [ ] Add deterministic tests for renderer import admission and fail-closed
+  unsupported import paths.
+- [ ] Decide whether the renderer import boundary belongs in `sophia-engine`,
+  `sophia-backend-live`, or a dedicated `sophia-renderer-live` crate.
 
 ---
 
@@ -90,6 +90,11 @@ evidence belong in `docs/research-log.md`.
   IO behind traits that preserve deterministic headless tests.
 - [x] Add one smoke that proves backend discovery can fail closed without
   affecting protocol authority or WM IPC contracts.
+- [x] Add a live backend dependency policy before adding crates that touch
+  `/dev/dri`, `/dev/input`, GBM, EGL, DMA-BUF, or real MIT-SHM mapping.
+- [x] Decide that libdrm and libinput may enter through
+  `sophia-backend-live`, while GPU imports and real MIT-SHM mapping remain
+  deferred until renderer import boundaries exist.
 
 ---
 
