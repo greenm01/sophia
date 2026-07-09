@@ -1872,6 +1872,91 @@ impl LibinputEventSource {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LibinputPollReport {
+    pub polled: usize,
+    pub accepted: usize,
+    pub rejected: Vec<LibinputEventIngest>,
+}
+
+pub trait NonBlockingInputPoller {
+    fn poll_ready(&mut self) -> io::Result<Vec<InputEventPacket>>;
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LibinputPhysicalInputAdapter<P> {
+    poller: P,
+    source: LibinputEventSource,
+}
+
+impl<P> LibinputPhysicalInputAdapter<P> {
+    pub fn new(poller: P, source: LibinputEventSource) -> Self {
+        Self { poller, source }
+    }
+
+    pub fn source(&self) -> &LibinputEventSource {
+        &self.source
+    }
+
+    pub fn source_mut(&mut self) -> &mut LibinputEventSource {
+        &mut self.source
+    }
+
+    pub fn into_source(self) -> LibinputEventSource {
+        self.source
+    }
+}
+
+impl<P> LibinputPhysicalInputAdapter<P>
+where
+    P: NonBlockingInputPoller,
+{
+    pub fn poll_once(&mut self) -> io::Result<LibinputPollReport> {
+        let events = self.poller.poll_ready()?;
+        let polled = events.len();
+        let mut accepted = 0;
+        let mut rejected = Vec::new();
+
+        for event in events {
+            match self.source.push_event(event) {
+                LibinputEventIngest::Accepted => accepted += 1,
+                rejected_outcome => rejected.push(rejected_outcome),
+            }
+        }
+
+        Ok(LibinputPollReport {
+            polled,
+            accepted,
+            rejected,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct QueuedInputPoller {
+    queued: Vec<InputEventPacket>,
+}
+
+impl QueuedInputPoller {
+    pub fn new(queued: Vec<InputEventPacket>) -> Self {
+        Self { queued }
+    }
+
+    pub fn push(&mut self, event: InputEventPacket) {
+        self.queued.push(event);
+    }
+
+    pub fn queued_len(&self) -> usize {
+        self.queued.len()
+    }
+}
+
+impl NonBlockingInputPoller for QueuedInputPoller {
+    fn poll_ready(&mut self) -> io::Result<Vec<InputEventPacket>> {
+        Ok(self.queued.drain(..).collect())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HeadlessOutput {
     pub id: OutputId,

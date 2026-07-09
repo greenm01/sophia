@@ -4,11 +4,12 @@ use sophia_engine::{
     FrameClock, FramePlanRequest, FrameScheduleDecision, HeadlessEngine, HeadlessRuntimeAdapter,
     HeadlessSessionDriver, HeadlessSessionDriverTick, ImportCapableRenderer, ImportedBufferHandle,
     LastCommittedLayout, LayoutEpochState, LibinputDeviceDescriptor, LibinputDeviceKind,
-    LibinputEventIngest, LibinputEventSource, LiveBrokerRuntimeAdapter, LiveChromeRuntimeAdapter,
-    LivePortalRuntimeAdapter, LiveRendererRuntimeAdapter, LiveRuntimeDriverAdapter,
-    LiveRuntimeDriverIntake, LiveWmRuntimeAdapter, LiveXRuntimeAdapter, MetadataChromeRejectReason,
-    MetadataChromeUpdate, NotificationChromePresenter, NotificationChromeRejectReason,
-    NotificationChromeUpdate, RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction,
+    LibinputEventIngest, LibinputEventSource, LibinputPhysicalInputAdapter,
+    LiveBrokerRuntimeAdapter, LiveChromeRuntimeAdapter, LivePortalRuntimeAdapter,
+    LiveRendererRuntimeAdapter, LiveRuntimeDriverAdapter, LiveRuntimeDriverIntake,
+    LiveWmRuntimeAdapter, LiveXRuntimeAdapter, MetadataChromeRejectReason, MetadataChromeUpdate,
+    NotificationChromePresenter, NotificationChromeRejectReason, NotificationChromeUpdate,
+    QueuedInputPoller, RoutedInputCoalescer, RoutedInputFlushReason, RoutedInputQueueAction,
     RoutedInputRequestError, SanitizedChromeMetadata, SessionCommand, SessionEvent,
     SessionLayerSource, SessionTickRequest, SlowClientVisualDecision, SurfaceTimeoutPolicy,
     SurfaceTransactionCommitReadiness, SurfaceVisualStateTable, WmIpcError, WmRestartReason,
@@ -223,6 +224,63 @@ fn libinput_event_source_rejects_unknown_or_wrong_seat_events() {
         LibinputEventIngest::UnknownDevice
     );
     assert_eq!(source.pending_len(), 0);
+}
+
+#[test]
+fn libinput_physical_input_adapter_polls_ready_events_without_blocking() {
+    let mut source = LibinputEventSource::new();
+    source.register_device(LibinputDeviceDescriptor {
+        seat: SeatId::from_raw(1),
+        device: DeviceId::from_raw(2),
+        kind: LibinputDeviceKind::Pointer,
+    });
+    let poller = QueuedInputPoller::new(vec![
+        motion_event(1, 10.0, 20.0),
+        motion_event(2, 11.0, 21.0),
+    ]);
+    let mut adapter = LibinputPhysicalInputAdapter::new(poller, source);
+
+    let report = adapter.poll_once().unwrap();
+
+    assert_eq!(report.polled, 2);
+    assert_eq!(report.accepted, 2);
+    assert!(report.rejected.is_empty());
+    assert_eq!(adapter.source().pending_len(), 2);
+    let events = adapter.source_mut().drain_events();
+    assert_eq!(events[0].serial, 1);
+    assert_eq!(events[1].serial, 2);
+
+    let empty_report = adapter.poll_once().unwrap();
+    assert_eq!(empty_report.polled, 0);
+    assert_eq!(empty_report.accepted, 0);
+    assert!(empty_report.rejected.is_empty());
+}
+
+#[test]
+fn libinput_physical_input_adapter_reports_rejected_events() {
+    let mut source = LibinputEventSource::new();
+    source.register_device(LibinputDeviceDescriptor {
+        seat: SeatId::from_raw(9),
+        device: DeviceId::from_raw(2),
+        kind: LibinputDeviceKind::Pointer,
+    });
+    let mut unknown_device_event = motion_event(2, 0.0, 0.0);
+    unknown_device_event.device = DeviceId::from_raw(99);
+    let poller = QueuedInputPoller::new(vec![motion_event(1, 0.0, 0.0), unknown_device_event]);
+    let mut adapter = LibinputPhysicalInputAdapter::new(poller, source);
+
+    let report = adapter.poll_once().unwrap();
+
+    assert_eq!(report.polled, 2);
+    assert_eq!(report.accepted, 0);
+    assert_eq!(
+        report.rejected,
+        vec![
+            LibinputEventIngest::SeatMismatch,
+            LibinputEventIngest::UnknownDevice,
+        ]
+    );
+    assert_eq!(adapter.source().pending_len(), 0);
 }
 
 #[test]

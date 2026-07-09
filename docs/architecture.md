@@ -658,12 +658,15 @@ seed engine output state from that data. Sysfs cannot fully replace a libdrm
 ioctl backend: when CRTC IDs are not available, `crtc_id = 0` means the output
 is discovered but not yet scanout-bound.
 
-The libinput backend starts the same way. `LibinputDeviceDescriptor` records the
-seat, device, and broad device kind that future libinput discovery will
-produce. `LibinputEventSource` accepts `InputEventPacket` values only from
-registered device/seat pairs and drains them in order for the routing pipeline.
-It is not a real file-descriptor poller yet; it is the typed intake seam that
-physical input will feed.
+The libinput backend starts with the same adapter discipline.
+`LibinputDeviceDescriptor` records the seat, device, and broad device kind that
+future libinput discovery will produce. `LibinputEventSource` accepts
+`InputEventPacket` values only from registered device/seat pairs and drains them
+in order for the routing pipeline. `NonBlockingInputPoller` and
+`LibinputPhysicalInputAdapter` define the runtime seam: a real libinput backend
+will dispatch ready file-descriptor events without blocking the engine loop,
+while the deterministic `QueuedInputPoller` keeps tests independent of kernel
+devices.
 
 Physical input now has a request-generation seam. After Sophia Engine produces
 an `InputRoute`, `routed_input_request_from_physical_event` combines the

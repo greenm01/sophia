@@ -484,6 +484,11 @@ The event source accepts packets only when the device is registered and the
 packet seat matches the device seat. This keeps physical-input intake explicit
 before the compositor starts doing scene hit-tests and routed-input generation.
 
+Physical input polling is represented by `NonBlockingInputPoller` and
+`LibinputPhysicalInputAdapter`. Production backends should implement the trait
+with non-blocking libinput dispatch over ready file descriptors. Tests should
+use deterministic queued pollers rather than opening `/dev/input` devices.
+
 ### InputRoute
 
 An input route is the compositor's answer to "what visual surface did this event
