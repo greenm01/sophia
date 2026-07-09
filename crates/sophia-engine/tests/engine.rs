@@ -20,6 +20,7 @@ use sophia_engine::{
     runtime_observation_from_metadata_chrome_updates,
     runtime_observation_from_notification_chrome_updates, runtime_observation_from_portal_commands,
     runtime_observation_from_render_frame_report, runtime_observation_from_session_tick_report,
+    runtime_observation_from_slow_client_visual_decisions,
     runtime_observation_from_wm_transaction_update, schedule_frame_from_damage,
     surface_transaction_readiness_for_epoch, update_wm_supervisor_from_runtime_action,
 };
@@ -1940,6 +1941,46 @@ fn authority_transaction_commit_maps_to_reduced_runtime_observation() {
         SessionRuntimeObservation::AuthorityTransactionObserved {
             outcome: TransactionOutcome::Committed,
             applied_surface_count: 2,
+        }
+    );
+}
+
+#[test]
+fn slow_client_visual_decisions_map_to_count_only_runtime_observation() {
+    let surface_a = SurfaceId::new(1, 1);
+    let surface_b = SurfaceId::new(2, 1);
+    let decisions = [
+        SlowClientVisualDecision::PreserveCommitted {
+            surface: surface_a,
+            committed: None,
+        },
+        SlowClientVisualDecision::DegradeToPending {
+            surface: surface_b,
+            degraded: CommittedSurfaceState {
+                surface: surface_b,
+                committed_generation: 3,
+                geometry: Rect {
+                    x: 0,
+                    y: 0,
+                    width: 100,
+                    height: 100,
+                },
+                buffer: BufferSource::CpuBuffer { handle: 99 },
+                damage: Region::empty(),
+            },
+        },
+        SlowClientVisualDecision::NotTimedOut {
+            surface: SurfaceId::new(3, 1),
+            readiness: SurfaceTransactionCommitReadiness::Ready,
+        },
+    ];
+
+    assert_eq!(
+        runtime_observation_from_slow_client_visual_decisions(&decisions),
+        SessionRuntimeObservation::SlowClientVisualDecisionsObserved {
+            timeout_count: 2,
+            preserved_count: 1,
+            degraded_count: 1,
         }
     );
 }

@@ -129,6 +129,9 @@ pub struct SessionRuntimeState {
     pub authority_transactions_rejected: u64,
     pub authority_transactions_timed_out: u64,
     pub authority_surfaces_applied: u64,
+    pub slow_client_timeouts: u64,
+    pub slow_client_preserved: u64,
+    pub slow_client_degraded: u64,
     pub last_frame_serial: Option<u64>,
     pub portal_broker_health: Option<RuntimeBrokerHealth>,
     pub metadata_broker_health: Option<RuntimeBrokerHealth>,
@@ -170,6 +173,11 @@ pub enum SessionRuntimeEvent {
     AuthorityTransactionObserved {
         outcome: TransactionOutcome,
         applied_surface_count: u32,
+    },
+    SlowClientVisualDecisionsObserved {
+        timeout_count: u32,
+        preserved_count: u32,
+        degraded_count: u32,
     },
     TickCompleted,
 }
@@ -217,6 +225,11 @@ pub enum SessionRuntimeObservation {
     AuthorityTransactionObserved {
         outcome: TransactionOutcome,
         applied_surface_count: u32,
+    },
+    SlowClientVisualDecisionsObserved {
+        timeout_count: u32,
+        preserved_count: u32,
+        degraded_count: u32,
     },
     TickCompleted,
 }
@@ -340,6 +353,15 @@ pub fn session_runtime_event_from_observation(
         } => Ok(SessionRuntimeEvent::AuthorityTransactionObserved {
             outcome,
             applied_surface_count,
+        }),
+        SessionRuntimeObservation::SlowClientVisualDecisionsObserved {
+            timeout_count,
+            preserved_count,
+            degraded_count,
+        } => Ok(SessionRuntimeEvent::SlowClientVisualDecisionsObserved {
+            timeout_count,
+            preserved_count,
+            degraded_count,
         }),
         SessionRuntimeObservation::TickCompleted => Ok(SessionRuntimeEvent::TickCompleted),
     }
@@ -496,6 +518,22 @@ pub fn update_session_runtime(
                         state.authority_transactions_rejected.saturating_add(1);
                 }
             }
+            SessionRuntimeCommand::None
+        }
+        SessionRuntimeEvent::SlowClientVisualDecisionsObserved {
+            timeout_count,
+            preserved_count,
+            degraded_count,
+        } => {
+            state.slow_client_timeouts = state
+                .slow_client_timeouts
+                .saturating_add(u64::from(timeout_count));
+            state.slow_client_preserved = state
+                .slow_client_preserved
+                .saturating_add(u64::from(preserved_count));
+            state.slow_client_degraded = state
+                .slow_client_degraded
+                .saturating_add(u64::from(degraded_count));
             SessionRuntimeCommand::None
         }
         SessionRuntimeEvent::TickCompleted => {

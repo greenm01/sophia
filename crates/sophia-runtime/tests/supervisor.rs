@@ -222,6 +222,32 @@ fn authority_transaction_observation_roundtrips_through_batch_loop() {
 }
 
 #[test]
+fn slow_client_visual_observation_records_only_aggregate_counts() {
+    let mut runtime = SessionRuntimeLoop::default();
+
+    let report = runtime
+        .step_observations([
+            SessionRuntimeObservation::SlowClientVisualDecisionsObserved {
+                timeout_count: 3,
+                preserved_count: 2,
+                degraded_count: 1,
+            },
+            SessionRuntimeObservation::SlowClientVisualDecisionsObserved {
+                timeout_count: 1,
+                preserved_count: 1,
+                degraded_count: 0,
+            },
+        ])
+        .expect("slow-client observations should be accepted");
+
+    assert_eq!(report.events_processed, 2);
+    assert!(report.commands.is_empty());
+    assert_eq!(runtime.state().slow_client_timeouts, 4);
+    assert_eq!(runtime.state().slow_client_preserved, 3);
+    assert_eq!(runtime.state().slow_client_degraded, 1);
+}
+
+#[test]
 fn session_runtime_loop_processes_event_batches_without_side_effects() {
     let mut runtime = SessionRuntimeLoop::default();
 

@@ -88,7 +88,7 @@ Make macOS-style transaction integrity a first-class Sophia invariant.
   visual transaction.
 - [x] Define fail-closed slow-client behavior: keep the last committed visual
   state unless timeout policy explicitly degrades.
-- [ ] Define timeout/degrade reporting so chronic offenders can be measured
+- [x] Define timeout/degrade reporting so chronic offenders can be measured
   without leaking protocol metadata to the WM.
 - [ ] Update frame scheduling docs so layout epochs become a prototype-specific
   compatibility mechanism, while authority-native commits use explicit

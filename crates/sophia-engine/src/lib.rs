@@ -396,6 +396,26 @@ pub fn runtime_observation_from_authority_transaction_commit(
     }
 }
 
+pub fn runtime_observation_from_slow_client_visual_decisions(
+    decisions: &[SlowClientVisualDecision],
+) -> SessionRuntimeObservation {
+    let preserved_count = decisions
+        .iter()
+        .filter(|decision| matches!(decision, SlowClientVisualDecision::PreserveCommitted { .. }))
+        .count();
+    let degraded_count = decisions
+        .iter()
+        .filter(|decision| matches!(decision, SlowClientVisualDecision::DegradeToPending { .. }))
+        .count();
+    let timeout_count = preserved_count.saturating_add(degraded_count);
+
+    SessionRuntimeObservation::SlowClientVisualDecisionsObserved {
+        timeout_count: u32::try_from(timeout_count).unwrap_or(u32::MAX),
+        preserved_count: u32::try_from(preserved_count).unwrap_or(u32::MAX),
+        degraded_count: u32::try_from(degraded_count).unwrap_or(u32::MAX),
+    }
+}
+
 pub fn runtime_observation_from_session_tick_report(
     report: &SessionTickReport,
 ) -> SessionRuntimeObservation {
