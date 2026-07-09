@@ -6,7 +6,7 @@
 //! models reduced import admission.
 
 pub use sophia_engine::BufferImportPath;
-pub use sophia_protocol::BufferSource;
+pub use sophia_protocol::{BufferSource, Size};
 
 #[cfg(feature = "egl-probe")]
 mod egl_probe;
@@ -58,6 +58,31 @@ pub enum LiveRendererPresentationStatus {
     Ready,
     Unavailable,
     Degraded,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveGbmEglFrameTargetRecord {
+    pub status: LiveGbmEglFrameTargetStatus,
+    pub size: Size,
+}
+
+impl LiveGbmEglFrameTargetRecord {
+    pub const fn new(size: Size) -> Self {
+        Self {
+            status: if size.width > 0 && size.height > 0 {
+                LiveGbmEglFrameTargetStatus::Ready
+            } else {
+                LiveGbmEglFrameTargetStatus::InvalidSize
+            },
+            size,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveGbmEglFrameTargetStatus {
+    Ready,
+    InvalidSize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

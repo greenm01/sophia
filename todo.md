@@ -9,12 +9,12 @@ evidence belong in `docs/research-log.md`.
 ## Active Focus - Real Backend Boundaries
 
 **Now**
-- [ ] Decide the next production-shaped GBM/EGL step after offscreen
-  presentation smoke evidence.
+- [ ] Decide whether the frame-target record should be threaded into
+  backend-live startup reports or stay renderer-local for one more step.
 
 **Next**
-- [ ] Define the first reduced GBM/EGL frame target record for future renderer
-  integration.
+- [ ] Add backend-live projection for reduced GBM/EGL frame target readiness if
+  the renderer-local record proves stable.
 
 ---
 
@@ -278,6 +278,10 @@ evidence belong in `docs/research-log.md`.
   compatibility smoke.
 - [x] Define the broader host/device matrix required before retiring
   `DEFAULT_DISPLAY`.
+- [x] Decide the next production-shaped GBM/EGL step after offscreen
+  presentation smoke evidence.
+- [x] Define the first reduced GBM/EGL frame target record for future renderer
+  integration.
 
 ---
 

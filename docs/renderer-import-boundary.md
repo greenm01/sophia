@@ -365,6 +365,13 @@ reduced EGL draw-smoke status, and the reduced presentation status. It does not
 store the render-node path, fd, GBM/EGL objects, driver errors, pixels, or KMS
 identity.
 
+The next production-shaped step after offscreen presentation evidence is a
+reduced GBM/EGL frame-target record. `LiveGbmEglFrameTargetRecord` records only
+the intended target size and whether that size is valid. It is deliberately not
+a GBM surface, EGL surface, framebuffer, DMA-BUF, or scanout object. Future
+renderer integration can use it to agree on target dimensions before native
+allocation code exists.
+
 The next reduced boundary is `LivePageFlipEvent`. It can be derived from
 scanout readiness or from the engine's `PageFlipCommitOutcome`, but it drops the
 output ID, transaction ID, surface IDs, commit payload, and all native KMS
