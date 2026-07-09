@@ -48,6 +48,18 @@ The same data/logic split applies in Rust:
 Avoid placing behavior on data records unless it is a pure helper such as
 validation, conversion, or formatting.
 
+### Engine Crate Modules
+
+`crates/sophia-engine/src/lib.rs` is the public facade for the engine crate. It
+should declare domain modules and re-export the stable public API; it should not
+grow into an implementation file again.
+
+Engine implementation belongs in domain modules such as runtime driver, input,
+frame scheduling, output discovery, rendering, visual state, chrome, session,
+WM IPC, and the headless engine orchestrator. Keep shared helpers in exactly one
+owning module and expose them as `pub(crate)` only when another engine module
+needs them.
+
 ## Test Placement
 
 Rust tests live outside production source files.
