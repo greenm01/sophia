@@ -6,15 +6,15 @@ use sophia_backend_live::{
     CompositorBackendTickInput, DeviceId, FakePageFlipCallbackSource, HeadlessOutput,
     LibinputDeviceDescriptor, LibinputDeviceKind, LiveBackendConfig, LiveBackendDependencyDecision,
     LiveBackendDependencyKind, LiveBackendDependencyUse, LiveCompositorBackendDiscoveryStatus,
-    LivePageFlipCallback, LivePageFlipCallbackDecision, LivePageFlipCallbackIntake,
-    LivePageFlipCallbackQueue, LivePageFlipCallbackQueueReport, LivePageFlipCallbackReport,
-    LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus,
-    LiveRendererImportBoundary, LiveRendererImportHealth, LiveRendererImportPathStatus,
-    LiveRendererImportStartupStatus, LiveRendererPreference, LiveRendererPresentationReport,
-    LiveRendererPresentationStatus, LiveRendererRuntimeObservation,
-    LiveRendererSelectionObservation, LiveScanoutReadinessReport, LiveScanoutReadinessStatus,
-    OutputId, PageFlipCommitOutcome, QueuedInputPoller, RendererSelection, SeatId, Size,
-    discover_live_backend, live_backend_dependency_decision,
+    LiveLibdrmPollerDiagnostics, LiveLibdrmPollerDiagnosticsStatus, LivePageFlipCallback,
+    LivePageFlipCallbackDecision, LivePageFlipCallbackIntake, LivePageFlipCallbackQueue,
+    LivePageFlipCallbackQueueReport, LivePageFlipCallbackReport, LivePageFlipCallbackSourceReport,
+    LivePageFlipEvent, LivePageFlipEventStatus, LiveRendererImportBoundary,
+    LiveRendererImportHealth, LiveRendererImportPathStatus, LiveRendererImportStartupStatus,
+    LiveRendererPreference, LiveRendererPresentationReport, LiveRendererPresentationStatus,
+    LiveRendererRuntimeObservation, LiveRendererSelectionObservation, LiveScanoutReadinessReport,
+    LiveScanoutReadinessStatus, OutputId, PageFlipCommitOutcome, QueuedInputPoller,
+    RendererSelection, SeatId, Size, discover_live_backend, live_backend_dependency_decision,
 };
 use sophia_protocol::{TransactionCommit, TransactionId, TransactionOutcome};
 
@@ -259,6 +259,20 @@ fn live_runtime_assembly_reports_reduced_renderer_health_on_tick() {
         LivePageFlipEvent {
             status: LivePageFlipEventStatus::Ready,
             frame_serial: None,
+        }
+    );
+    assert_eq!(
+        assembly.libdrm_poller_diagnostics(),
+        LiveLibdrmPollerDiagnostics::not_configured()
+    );
+    assert_eq!(
+        tick.libdrm_poller,
+        LiveLibdrmPollerDiagnostics {
+            status: LiveLibdrmPollerDiagnosticsStatus::NotConfigured,
+            route_count: 0,
+            pending_callbacks: 0,
+            decoded_callbacks: 0,
+            rejected_callbacks: 0,
         }
     );
 

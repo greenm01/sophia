@@ -11,7 +11,7 @@ evidence belong in `docs/research-log.md`.
 **Now**
 - [ ] Keep `DEFAULT_DISPLAY` clear-color smoke as fallback until GBM-backed
   drawing is validated against real render nodes.
-- [ ] Add startup wiring for reduced native libdrm poller diagnostics.
+- [ ] Add native libdrm poller construction from discovered output routes.
 
 **Next**
 - [ ] Keep wgpu deferred until GBM/EGL startup, drawing, and presentation seams
@@ -265,6 +265,7 @@ evidence belong in `docs/research-log.md`.
   changes.
 - [x] Add reduced native libdrm poller route-count diagnostics without native
   identities.
+- [x] Add startup wiring for reduced native libdrm poller diagnostics.
 
 ---
 

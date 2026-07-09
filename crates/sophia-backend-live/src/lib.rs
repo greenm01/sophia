@@ -347,6 +347,43 @@ impl LivePageFlipCallbackQueueReport {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveLibdrmPollerDiagnostics {
+    pub status: LiveLibdrmPollerDiagnosticsStatus,
+    pub route_count: usize,
+    pub pending_callbacks: usize,
+    pub decoded_callbacks: usize,
+    pub rejected_callbacks: usize,
+}
+
+impl LiveLibdrmPollerDiagnostics {
+    pub const fn not_configured() -> Self {
+        Self {
+            status: LiveLibdrmPollerDiagnosticsStatus::NotConfigured,
+            route_count: 0,
+            pending_callbacks: 0,
+            decoded_callbacks: 0,
+            rejected_callbacks: 0,
+        }
+    }
+}
+
+impl Default for LiveLibdrmPollerDiagnostics {
+    fn default() -> Self {
+        Self::not_configured()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveLibdrmPollerDiagnosticsStatus {
+    NotConfigured,
+    Idle,
+    WouldBlock,
+    CallbackDecoded,
+    CallbackRejected,
+    ReadFailed,
+}
+
 pub struct LivePageFlipCallbackQueue {
     receiver: Receiver<LivePageFlipCallback>,
     max_drain_per_tick: usize,
@@ -773,6 +810,19 @@ pub struct LibdrmNativePollerDiagnostics {
 }
 
 #[cfg(feature = "libdrm-events")]
+impl From<LibdrmNativePollerDiagnostics> for LiveLibdrmPollerDiagnostics {
+    fn from(diagnostics: LibdrmNativePollerDiagnostics) -> Self {
+        Self {
+            status: diagnostics.last_read_loop.status.into(),
+            route_count: diagnostics.route_count,
+            pending_callbacks: diagnostics.pending_callbacks,
+            decoded_callbacks: diagnostics.last_read_loop.decoded_callbacks,
+            rejected_callbacks: diagnostics.last_read_loop.rejected_callbacks,
+        }
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LibdrmNativeReadLoopReport {
     pub status: LibdrmNativeReadLoopStatus,
@@ -852,6 +902,19 @@ pub enum LibdrmNativeReadLoopStatus {
     CallbackDecoded,
     CallbackRejected,
     ReadFailed,
+}
+
+#[cfg(feature = "libdrm-events")]
+impl From<LibdrmNativeReadLoopStatus> for LiveLibdrmPollerDiagnosticsStatus {
+    fn from(status: LibdrmNativeReadLoopStatus) -> Self {
+        match status {
+            LibdrmNativeReadLoopStatus::Idle => Self::Idle,
+            LibdrmNativeReadLoopStatus::WouldBlock => Self::WouldBlock,
+            LibdrmNativeReadLoopStatus::CallbackDecoded => Self::CallbackDecoded,
+            LibdrmNativeReadLoopStatus::CallbackRejected => Self::CallbackRejected,
+            LibdrmNativeReadLoopStatus::ReadFailed => Self::ReadFailed,
+        }
+    }
 }
 
 #[cfg(feature = "libdrm-events")]
@@ -1363,6 +1426,7 @@ impl LiveBackendStartupReport {
                 page_flip_event,
                 page_flip_callback_intake,
                 page_flip_callback_queue: None,
+                libdrm_poller_diagnostics: LiveLibdrmPollerDiagnostics::not_configured(),
             })
     }
 }
@@ -1535,6 +1599,7 @@ pub struct LiveBackendRuntimeAssembly {
     page_flip_event: LivePageFlipEvent,
     page_flip_callback_intake: LivePageFlipCallbackIntake,
     page_flip_callback_queue: Option<LivePageFlipCallbackQueue>,
+    libdrm_poller_diagnostics: LiveLibdrmPollerDiagnostics,
 }
 
 impl LiveBackendRuntimeAssembly {
@@ -1553,6 +1618,38 @@ impl LiveBackendRuntimeAssembly {
     pub fn with_page_flip_callback_queue(mut self, queue: LivePageFlipCallbackQueue) -> Self {
         self.page_flip_callback_queue = Some(queue);
         self
+    }
+
+    pub fn with_libdrm_poller_diagnostics(
+        mut self,
+        diagnostics: LiveLibdrmPollerDiagnostics,
+    ) -> Self {
+        self.libdrm_poller_diagnostics = diagnostics;
+        self
+    }
+
+    #[cfg(feature = "libdrm-events")]
+    pub fn with_native_libdrm_poller_diagnostics(
+        self,
+        diagnostics: LibdrmNativePollerDiagnostics,
+    ) -> Self {
+        self.with_libdrm_poller_diagnostics(diagnostics.into())
+    }
+
+    pub fn observe_libdrm_poller_diagnostics(&mut self, diagnostics: LiveLibdrmPollerDiagnostics) {
+        self.libdrm_poller_diagnostics = diagnostics;
+    }
+
+    #[cfg(feature = "libdrm-events")]
+    pub fn observe_native_libdrm_poller_diagnostics(
+        &mut self,
+        diagnostics: LibdrmNativePollerDiagnostics,
+    ) {
+        self.observe_libdrm_poller_diagnostics(diagnostics.into());
+    }
+
+    pub fn libdrm_poller_diagnostics(&self) -> LiveLibdrmPollerDiagnostics {
+        self.libdrm_poller_diagnostics
     }
 
     pub fn scanout_readiness_observation(&self) -> LiveScanoutReadinessReport {
@@ -1605,6 +1702,7 @@ impl LiveBackendRuntimeAssembly {
             scanout: self.scanout_readiness,
             page_flip: self.page_flip_event,
             page_flip_callbacks,
+            libdrm_poller: self.libdrm_poller_diagnostics,
         })
     }
 }
@@ -1616,6 +1714,7 @@ pub struct LiveBackendRuntimeTickReport {
     pub scanout: LiveScanoutReadinessReport,
     pub page_flip: LivePageFlipEvent,
     pub page_flip_callbacks: LivePageFlipCallbackQueueReport,
+    pub libdrm_poller: LiveLibdrmPollerDiagnostics,
 }
 
 pub fn discover_live_backend(config: &LiveBackendConfig) -> LiveBackendStartupReport {

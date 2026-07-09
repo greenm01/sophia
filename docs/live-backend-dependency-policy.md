@@ -241,6 +241,9 @@ Native poller diagnostics stay reduced to aggregate counts and the reduced
 read-loop report. They may report route count and pending callback count, but
 must not expose route slots, connector IDs, CRTC IDs, file descriptors, or other
 native KMS identity.
+Live runtime assemblies may carry those diagnostics through startup and tick
+reports as reduced status plus counts. Engine state still receives no native
+poller handles, routes, or output identity.
 
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout

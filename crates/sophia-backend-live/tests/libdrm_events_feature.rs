@@ -11,7 +11,8 @@ use sophia_backend_live::{
     LibdrmNativePageFlipDecodeStatus, LibdrmNativePageFlipSource, LibdrmNativePageFlipSourceReport,
     LibdrmNativePageFlipSourceStatus, LibdrmNativePollerDiagnostics, LibdrmNativeReadLoopReport,
     LibdrmNativeReadLoopStatus, LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus,
-    LibdrmPageFlipEventPoller, LiveBackendConfig, LivePageFlipCallback, LivePageFlipCallbackQueue,
+    LibdrmPageFlipEventPoller, LiveBackendConfig, LiveLibdrmPollerDiagnostics,
+    LiveLibdrmPollerDiagnosticsStatus, LivePageFlipCallback, LivePageFlipCallbackQueue,
     LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus,
     NativeLibdrmPageFlipEventPoller, OutputId, QueuedInputPoller, decode_native_page_flip_batch,
     discover_live_backend, libdrm_dependency_admission_report, libdrm_fd_authority_report,
@@ -416,6 +417,70 @@ fn native_libdrm_poller_diagnostics_report_only_reduced_counts() {
             frame_serial: 82,
         }
     );
+}
+
+#[test]
+fn live_runtime_assembly_reports_reduced_native_libdrm_poller_diagnostics() {
+    let root = ready_drm_sysfs_fixture("native-libdrm-runtime-diagnostics");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let authority =
+        LibdrmBackendFdAuthority::new(21).expect("nonzero generation should mint authority token");
+    let slot = LibdrmNativeOutputSlot::new(2).expect("nonzero slot should be valid");
+    let source = LibdrmNativePageFlipSource::from_authority(authority);
+    let mut poller =
+        NativeLibdrmPageFlipEventPoller::new(source).with_routes([LibdrmNativeOutputRoute {
+            slot,
+            output: OutputId::from_raw(1),
+        }]);
+    let (sender, receiver) = mpsc::sync_channel(2);
+
+    poller.inject_callbacks([
+        LibdrmNativePageFlipCallback::new(slot, 81),
+        LibdrmNativePageFlipCallback::new(slot, 0),
+    ]);
+    let poll_report = poller.poll_page_flip_events(&sender, 4);
+    assert_eq!(poll_report.status, LibdrmPageFlipEventPollStatus::Emitted);
+
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed live assembly")
+        .with_native_libdrm_poller_diagnostics(poller.diagnostics())
+        .with_page_flip_callback_queue(LivePageFlipCallbackQueue::new(receiver, 4));
+
+    assert_eq!(
+        assembly.libdrm_poller_diagnostics(),
+        LiveLibdrmPollerDiagnostics {
+            status: LiveLibdrmPollerDiagnosticsStatus::CallbackDecoded,
+            route_count: 1,
+            pending_callbacks: 0,
+            decoded_callbacks: 1,
+            rejected_callbacks: 1,
+        }
+    );
+
+    let tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should drain callback and report diagnostics");
+
+    assert_eq!(
+        tick.libdrm_poller,
+        LiveLibdrmPollerDiagnostics {
+            status: LiveLibdrmPollerDiagnosticsStatus::CallbackDecoded,
+            route_count: 1,
+            pending_callbacks: 0,
+            decoded_callbacks: 1,
+            rejected_callbacks: 1,
+        }
+    );
+    assert_eq!(
+        tick.page_flip,
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(81),
+        }
+    );
+
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
