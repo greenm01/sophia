@@ -139,6 +139,42 @@ pub enum LiveRendererPreference {
     GpuRequired,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveScanoutReadinessReport {
+    pub status: LiveScanoutReadinessStatus,
+}
+
+impl LiveScanoutReadinessReport {
+    fn from_backend_and_presentation(
+        backend: &LiveBackendStartupReport,
+        presentation: LiveRendererPresentationReport,
+    ) -> Self {
+        if backend.selected_output().is_none() {
+            return Self {
+                status: LiveScanoutReadinessStatus::OutputUnavailable,
+            };
+        }
+
+        Self {
+            status: match presentation.status {
+                LiveRendererPresentationStatus::Ready => LiveScanoutReadinessStatus::Ready,
+                LiveRendererPresentationStatus::Unavailable => {
+                    LiveScanoutReadinessStatus::PresentationUnavailable
+                }
+                LiveRendererPresentationStatus::Degraded => LiveScanoutReadinessStatus::Degraded,
+            },
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveScanoutReadinessStatus {
+    Ready,
+    OutputUnavailable,
+    PresentationUnavailable,
+    Degraded,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct LiveBackendStartupReport {
     pub discovery: LiveCompositorBackendDiscoveryReport,
@@ -189,6 +225,13 @@ impl LiveBackendStartupReport {
 
     pub fn renderer_import_status(&self) -> LiveRendererImportStartupStatus {
         self.renderer_import.startup_status()
+    }
+
+    pub fn scanout_readiness_report(
+        &self,
+        presentation: LiveRendererPresentationReport,
+    ) -> LiveScanoutReadinessReport {
+        LiveScanoutReadinessReport::from_backend_and_presentation(self, presentation)
     }
 
     #[cfg(feature = "egl-probe")]

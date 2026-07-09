@@ -6,9 +6,11 @@ use sophia_backend_live::{
     LibinputDeviceKind, LiveBackendConfig, LiveBackendDependencyDecision,
     LiveBackendDependencyKind, LiveBackendDependencyUse, LiveCompositorBackendDiscoveryStatus,
     LiveRendererImportBoundary, LiveRendererImportHealth, LiveRendererImportPathStatus,
-    LiveRendererImportStartupStatus, LiveRendererPreference, LiveRendererRuntimeObservation,
-    LiveRendererSelectionObservation, OutputId, QueuedInputPoller, RendererSelection, SeatId, Size,
-    discover_live_backend, live_backend_dependency_decision,
+    LiveRendererImportStartupStatus, LiveRendererPreference, LiveRendererPresentationReport,
+    LiveRendererPresentationStatus, LiveRendererRuntimeObservation,
+    LiveRendererSelectionObservation, LiveScanoutReadinessReport, LiveScanoutReadinessStatus,
+    OutputId, QueuedInputPoller, RendererSelection, SeatId, Size, discover_live_backend,
+    live_backend_dependency_decision,
 };
 
 #[test]
@@ -292,6 +294,74 @@ fn dependency_policy_defers_gpu_and_shared_memory_imports() {
             required_boundary: "bounded shared-memory import boundary",
         }
     );
+}
+
+#[test]
+fn scanout_readiness_reports_ready_without_exposing_kms_identity() {
+    let root = ready_drm_sysfs_fixture("scanout-ready");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+
+    assert_eq!(
+        report.scanout_readiness_report(LiveRendererPresentationReport {
+            status: LiveRendererPresentationStatus::Ready,
+        }),
+        LiveScanoutReadinessReport {
+            status: LiveScanoutReadinessStatus::Ready,
+        }
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn scanout_readiness_reports_missing_output_before_renderer_status() {
+    let root = drm_sysfs_fixture("scanout-no-output");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+
+    assert_eq!(
+        report.scanout_readiness_report(LiveRendererPresentationReport {
+            status: LiveRendererPresentationStatus::Ready,
+        }),
+        LiveScanoutReadinessReport {
+            status: LiveScanoutReadinessStatus::OutputUnavailable,
+        }
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn scanout_readiness_collapses_unavailable_presentation_without_native_details() {
+    let root = ready_drm_sysfs_fixture("scanout-presentation-unavailable");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+
+    assert_eq!(
+        report.scanout_readiness_report(LiveRendererPresentationReport {
+            status: LiveRendererPresentationStatus::Unavailable,
+        }),
+        LiveScanoutReadinessReport {
+            status: LiveScanoutReadinessStatus::PresentationUnavailable,
+        }
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn scanout_readiness_collapses_degraded_presentation_without_native_details() {
+    let root = ready_drm_sysfs_fixture("scanout-degraded");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+
+    assert_eq!(
+        report.scanout_readiness_report(LiveRendererPresentationReport {
+            status: LiveRendererPresentationStatus::Degraded,
+        }),
+        LiveScanoutReadinessReport {
+            status: LiveScanoutReadinessStatus::Degraded,
+        }
+    );
+
+    fs::remove_dir_all(root).unwrap();
 }
 
 fn drm_sysfs_fixture(name: &str) -> PathBuf {

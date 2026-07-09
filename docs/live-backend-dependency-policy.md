@@ -93,6 +93,14 @@ DMA-BUF fds, EGLImages, fences, pixels, native errors, or GL object names. Real
 scanout is deferred until that reduced shape is validated against real render
 nodes.
 
+The first scanout-adjacent backend report is still reduced data. Backend-live
+may combine output discovery and renderer presentation into
+`LiveScanoutReadinessReport`, but the report says only whether scanout is ready,
+the output is unavailable, presentation is unavailable, or the path is degraded.
+It must not expose connector IDs, CRTC IDs, plane IDs, framebuffer IDs, device
+paths, fds, driver errors, or native KMS object identity. Real page flips remain
+deferred until this reduced status shape is stable.
+
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
 authority. On Linux, wgpu will usually target Vulkan, but Sophia must first prove

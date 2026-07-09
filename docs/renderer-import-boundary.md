@@ -324,6 +324,12 @@ macOS-style invariant intact: the Engine can learn that a presentation boundary
 happened, but it cannot accidentally present partially assembled native state
 through a leaky renderer API.
 
+The backend may project presentation into a scanout-adjacent readiness report,
+but that report stays outside renderer-private state. `LiveScanoutReadinessReport`
+is reduced to ready, output unavailable, presentation unavailable, or degraded.
+It is not a KMS page-flip result and must not contain connector IDs, CRTC IDs,
+plane IDs, framebuffer IDs, fds, paths, driver errors, or framebuffer handles.
+
 ## EGL Candidate Dependency
 
 The admitted native EGL dependency is `khronos-egl` 6.0.0. It binds the Khronos

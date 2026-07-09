@@ -11,14 +11,13 @@ evidence belong in `docs/research-log.md`.
 **Now**
 - [ ] Keep `DEFAULT_DISPLAY` clear-color smoke as fallback until GBM-backed
   drawing is validated against real render nodes.
-- [ ] Define the first scanout-adjacent status without exposing KMS object
-  identity.
+- [ ] Decide when `SOPHIA_RUN_REAL_GBM_SMOKE=1` results are strong enough to
+  retire `DEFAULT_DISPLAY` as a fallback smoke.
 
 **Next**
 - [ ] Keep wgpu deferred until GBM/EGL startup, drawing, and presentation seams
   are proven.
-- [ ] Decide when `SOPHIA_RUN_REAL_GBM_SMOKE=1` results are strong enough to
-  retire `DEFAULT_DISPLAY` as a fallback smoke.
+- [ ] Add the first reduced page-flip event shape without KMS object identity.
 
 ---
 
@@ -232,6 +231,8 @@ evidence belong in `docs/research-log.md`.
   presentation status.
 - [x] Add opt-in real render-node validation for GBM-backed EGL drawing and
   offscreen presentation.
+- [x] Define the first scanout-adjacent status without exposing KMS object
+  identity.
 
 ---
 
