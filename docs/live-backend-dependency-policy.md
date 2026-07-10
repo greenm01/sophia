@@ -576,13 +576,14 @@ connector identity, seat names, or native error strings. Default validation must
 remain independent of DRM device nodes and `/dev/input` devices.
 `LiveAtomicScanoutPreflightReport` is the non-modesetting readiness layer for
 the atomic scanout milestone. It may report only the validation target, reduced
-readiness status, capped primary-card-node count, and capped read/write-openable
-primary-card-node count, and capped atomic-capability-admitted primary-card-node
-count. It may open candidate primary card nodes and enable `UniversalPlanes` and
-`Atomic` client capabilities only to prove reduced readiness before the opt-in
-smoke. It must not request DRM master, modeset hardware, perform atomic commits,
-or expose paths, permissions, native errors, fds, KMS handles, connector
-identity, framebuffer identity, or GEM handles.
+readiness status, capped primary-card-node count, capped read/write-openable
+primary-card-node count, capped atomic-capability-admitted primary-card-node
+count, and capped KMS scanout-target primary-card-node count. It may open
+candidate primary card nodes, enable `UniversalPlanes` and `Atomic` client
+capabilities, and read KMS resources only to prove reduced readiness before the
+opt-in smoke. It must not request DRM master, modeset hardware, perform atomic
+commits, or expose paths, permissions, native errors, fds, KMS handles,
+connector identity, framebuffer identity, or GEM handles.
 `LiveHardwareValidationSmokeReport` is the next reduced layer. Until
 device-opening hardware smoke is admitted, a requested real-hardware smoke
 reports `BackendUnavailable` rather than opening devices. Future hardware

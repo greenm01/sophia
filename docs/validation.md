@@ -89,14 +89,15 @@ atomic scanout smoke. Run `tools/atomic_scanout_preflight.sh` first when the
 host state is unknown. That preflight does not request DRM master, does not
 modeset hardware, and emits only a reduced
 `sophia_atomic_scanout_preflight` line: schema version, validation target,
-readiness status, capped primary card count, and capped read/write-openable
-primary card count, and capped atomic-capability-admitted primary card count.
-It does not expose device paths, file descriptors, native errors, permissions,
-or KMS object identity.
+readiness status, capped primary card count, capped read/write-openable primary
+card count, capped atomic-capability-admitted primary card count, and capped KMS
+scanout-target primary card count. It does not expose device paths, file
+descriptors, native errors, permissions, or KMS object identity.
 Use `tools/verify_atomic_scanout_preflight.sh` on the captured log when the
 next step is the real smoke; the verifier requires
-`CandidatePrimaryCardsAtomicCapable` and at least one primary card node that
-admits the `UniversalPlanes` and `Atomic` DRM client capabilities.
+`CandidatePrimaryCardsScanoutReady` and at least one primary card node that
+admits the `UniversalPlanes` and `Atomic` DRM client capabilities and exposes a
+reduced KMS connector/CRTC/primary-plane target.
 
 Set `SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1` only from a session that may take
 DRM master on a primary `/dev/dri/card*` node. The child test opens the card
