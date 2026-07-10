@@ -2297,7 +2297,7 @@ fn live_runtime_assembly_retains_submit_failure_cleanup_for_retry() {
     );
     assert_eq!(
         submitted.reduced_log_line(),
-        "sophia_runtime_rendered_scanout_submit schema=2 status=PrimaryPlaneSubmitFailed scanout_target=Ready output_size=1280x720 target=Ready target_size=1280x720 export=Exported scanout_buffer=Ready properties=Discovered resources=Created request=Built submit=AtomicSubmitFailed request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false commit_submit=Rejected runtime_scanout_state=Rejected in_flight=false in_flight_ticks=0"
+        "sophia_runtime_rendered_scanout_submit schema=3 status=PrimaryPlaneSubmitFailed scanout_target=Ready output_size=1280x720 target=Ready target_size=1280x720 export=Exported scanout_buffer=Ready properties=Discovered resources=Created request=Built submit=AtomicSubmitFailed request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false commit_submit=Rejected runtime_scanout_state=Rejected in_flight=false in_flight_ticks=0 cleanup_pending=true"
     );
     assert_eq!(
         submitted.scanout_buffer,
@@ -2672,7 +2672,7 @@ fn live_runtime_tick_submits_rendered_scanout_when_runtime_requests_scanout() {
     );
     assert_eq!(
         submit.reduced_log_line(),
-        "sophia_runtime_rendered_scanout_submit schema=2 status=SubmittedWaitingForPageFlip scanout_target=Ready output_size=1280x720 target=Ready target_size=1280x720 export=Exported scanout_buffer=Ready properties=Discovered resources=Created request=Built submit=SubmittedWaitingForPageFlip request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false commit_submit=Submitted runtime_scanout_state=Submitted in_flight=true in_flight_ticks=0"
+        "sophia_runtime_rendered_scanout_submit schema=3 status=SubmittedWaitingForPageFlip scanout_target=Ready output_size=1280x720 target=Ready target_size=1280x720 export=Exported scanout_buffer=Ready properties=Discovered resources=Created request=Built submit=SubmittedWaitingForPageFlip request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false commit_submit=Submitted runtime_scanout_state=Submitted in_flight=true in_flight_ticks=0 cleanup_pending=false"
     );
     assert_eq!(tick.engine.runtime.runtime_state.scanout_submissions, 1);
     assert_eq!(

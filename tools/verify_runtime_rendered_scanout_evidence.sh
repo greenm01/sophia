@@ -92,7 +92,7 @@ verify_line() {
 }
 
 declare -A expected_submit=(
-    ["schema"]="2"
+    ["schema"]="3"
     ["status"]="SubmittedWaitingForPageFlip"
     ["scanout_target"]="Ready"
     ["output_size"]="1280x720"
@@ -113,6 +113,7 @@ declare -A expected_submit=(
     ["runtime_scanout_state"]="Submitted"
     ["in_flight"]="true"
     ["in_flight_ticks"]="0"
+    ["cleanup_pending"]="false"
 )
 
 declare -A expected_retire=(

@@ -3,7 +3,7 @@ const RETIRE_PREFIX: &str = "sophia_runtime_rendered_scanout_retire";
 const CLEANUP_PREFIX: &str = "sophia_runtime_rendered_scanout_cleanup";
 
 const CLEAN_SUBMIT_FIELDS: &[(&str, &str)] = &[
-    ("schema", "2"),
+    ("schema", "3"),
     ("status", "SubmittedWaitingForPageFlip"),
     ("scanout_target", "Ready"),
     ("output_size", "1280x720"),
@@ -24,6 +24,7 @@ const CLEAN_SUBMIT_FIELDS: &[(&str, &str)] = &[
     ("runtime_scanout_state", "Submitted"),
     ("in_flight", "true"),
     ("in_flight_ticks", "0"),
+    ("cleanup_pending", "false"),
 ];
 
 const CLEAN_RETIRE_FIELDS: &[(&str, &str)] = &[

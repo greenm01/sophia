@@ -91,6 +91,8 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Advanced runtime rendered-scanout submit evidence to schema 3 with a
+  reduced cleanup-pending field for submit-time native cleanup debt.
 - [x] Made native primary-plane scanout submit fail closed when a supplied KMS
   selection payload disagrees with its reduced selection status.
 - [x] Made native primary-plane modeset request building reject zero mode-blob
@@ -128,8 +130,6 @@ smoke still needs a DRM-master-capable machine.
   changes, while retaining it for identical-size observations.
 - [x] Added reduced output-size reporting to runtime ticks so scanout reports
   expose the output geometry paired with the GBM frame target.
-- [x] Extended runtime rendered-scanout submit evidence to schema 2 with
-  reduced output-size and GBM frame-target-size fields.
 - [x] Made the opt-in atomic hardware smoke retain the renderer-owned GBM
   front-buffer owner with the primary-plane submission until page-flip
   retirement, matching the production runtime lifetime rule.

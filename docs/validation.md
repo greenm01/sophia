@@ -162,11 +162,12 @@ separately.
 Runtime rendered-primary-plane submits can also be captured as reduced
 `sophia_runtime_rendered_scanout_submit` lines. Those lines are not a substitute
 for the two-phase hardware smoke evidence, but they are useful when inspecting a
-running production loop: schema 2 includes the reduced submit status, scanout
+running production loop: schema 3 includes the reduced submit status, scanout
 target, reduced output size, frame target, reduced frame-target size, GBM
 export, scanout-buffer validation, native submit stages,
 atomic commit flags, commit submit result, runtime scanout state, and in-flight
-age without exposing DRM object IDs or file descriptors.
+age, plus whether native cleanup debt is pending, without exposing DRM object
+IDs or file descriptors.
 Runtime retirement and cleanup retries can be captured as
 `sophia_runtime_rendered_scanout_retire` and
 `sophia_runtime_rendered_scanout_cleanup` lines. They record reduced retirement

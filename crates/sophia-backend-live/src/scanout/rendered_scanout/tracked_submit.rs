@@ -53,6 +53,7 @@ where
             runtime_scanout_state: Some(RuntimeScanoutState::Deferred),
             in_flight: true,
             in_flight_ticks: *rendered_primary_plane_scanout_in_flight_ticks,
+            cleanup_pending: rendered_primary_plane_scanout_cleanup.is_some(),
         };
     }
 
@@ -80,6 +81,7 @@ where
             runtime_scanout_state: Some(RuntimeScanoutState::Deferred),
             in_flight: false,
             in_flight_ticks: *rendered_primary_plane_scanout_in_flight_ticks,
+            cleanup_pending: true,
         };
     }
 
@@ -98,6 +100,7 @@ where
                 .map_scanout_buffer(|owner| Box::new(owner) as Box<dyn Any>),
         );
     }
+    let cleanup_pending = result.cleanup.is_some();
     if let Some(cleanup) = result.cleanup.take() {
         *rendered_primary_plane_scanout_cleanup =
             Some(cleanup.map_scanout_buffer(|owner| Box::new(owner) as Box<dyn Any>));
@@ -129,6 +132,7 @@ where
         runtime_scanout_state,
         in_flight: rendered_primary_plane_scanout_submission.is_some(),
         in_flight_ticks: *rendered_primary_plane_scanout_in_flight_ticks,
+        cleanup_pending,
     }
 }
 

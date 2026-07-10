@@ -21,6 +21,7 @@ pub struct LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
     pub runtime_scanout_state: Option<RuntimeScanoutState>,
     pub in_flight: bool,
     pub in_flight_ticks: u64,
+    pub cleanup_pending: bool,
 }
 
 impl LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
@@ -45,7 +46,7 @@ impl LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
                 });
 
         format!(
-            "sophia_runtime_rendered_scanout_submit schema=2 status={:?} scanout_target={:?} output_size={} target={} target_size={} export={} scanout_buffer={} properties={} resources={} request={} submit={} request_scope={} commit_page_flip_event={} commit_nonblocking={} commit_allow_modeset={} commit_test_only={} commit_submit={} runtime_scanout_state={} in_flight={} in_flight_ticks={}",
+            "sophia_runtime_rendered_scanout_submit schema=3 status={:?} scanout_target={:?} output_size={} target={} target_size={} export={} scanout_buffer={} properties={} resources={} request={} submit={} request_scope={} commit_page_flip_event={} commit_nonblocking={} commit_allow_modeset={} commit_test_only={} commit_submit={} runtime_scanout_state={} in_flight={} in_flight_ticks={} cleanup_pending={}",
             self.status,
             self.scanout_target,
             reduced_size(self.output_size),
@@ -66,6 +67,7 @@ impl LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
             reduced_status(self.runtime_scanout_state),
             self.in_flight,
             self.in_flight_ticks,
+            self.cleanup_pending,
         )
     }
 }
