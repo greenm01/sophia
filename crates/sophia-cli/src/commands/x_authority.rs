@@ -677,6 +677,7 @@ fn runtime_state_from_observed_transactions(
         chrome_command_count: 0,
         layers: layer_templates_from_surface_transactions(transactions),
         committed_surfaces: committed,
+        scanout_submit_state: None,
     });
     let report = driver.run_with_adapter(output.id, 1, &mut adapter)?;
     Ok(report.runtime_state)

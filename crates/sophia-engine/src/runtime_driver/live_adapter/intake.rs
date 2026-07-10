@@ -3,7 +3,7 @@ use crate::{HeadlessEngine, WmTransactionUpdate};
 
 use super::{
     LiveChromeRuntimeAdapter, LivePortalRuntimeAdapter, LiveRendererRuntimeAdapter,
-    LiveWmRuntimeAdapter, LiveXRuntimeAdapter,
+    LiveScanoutRuntimeAdapter, LiveWmRuntimeAdapter, LiveXRuntimeAdapter,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -39,6 +39,7 @@ pub struct LiveRuntimeDriverIntake {
     pub chrome_command_count: u32,
     pub layers: Vec<LayerSnapshot>,
     pub committed_surfaces: Vec<CommittedSurfaceState>,
+    pub scanout_submit_state: Option<RuntimeScanoutState>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -48,6 +49,7 @@ pub struct LiveRuntimeDriverAdapter {
     pub portal: LivePortalRuntimeAdapter,
     pub chrome: LiveChromeRuntimeAdapter,
     pub renderer: LiveRendererRuntimeAdapter,
+    pub scanout: LiveScanoutRuntimeAdapter,
 }
 
 impl LiveRuntimeDriverAdapter {
@@ -77,6 +79,11 @@ impl LiveRuntimeDriverAdapter {
             renderer: LiveRendererRuntimeAdapter::from_committed_surface_states(
                 intake.committed_surfaces,
                 intake.layers,
+            ),
+            scanout: LiveScanoutRuntimeAdapter::from_submit_state(
+                intake
+                    .scanout_submit_state
+                    .unwrap_or(RuntimeScanoutState::Submitted),
             ),
         }
         .with_authority_commits(intake.authority_commits)

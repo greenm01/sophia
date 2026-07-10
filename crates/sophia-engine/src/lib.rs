@@ -26,10 +26,10 @@ mod prelude {
         decode_wm_response_frame, encode_wm_request_frame,
     };
     pub(crate) use sophia_runtime::{
-        RestartPolicy, SessionRuntimeCommand, SessionRuntimeLoop, SessionRuntimeObservation,
-        SessionRuntimeObservationError, SessionRuntimeState, SophiaErrorExt, SophiaErrorKind,
-        SupervisedProcessKind, SupervisorCommand, SupervisorEvent, SupervisorState,
-        update_supervisor,
+        RestartPolicy, RuntimeScanoutState, SessionRuntimeCommand, SessionRuntimeLoop,
+        SessionRuntimeObservation, SessionRuntimeObservationError, SessionRuntimeState,
+        SophiaErrorExt, SophiaErrorKind, SupervisedProcessKind, SupervisorCommand, SupervisorEvent,
+        SupervisorState, update_supervisor,
     };
     pub(crate) use tracing::{debug, instrument, trace, warn};
 }
@@ -63,3 +63,5 @@ pub use runtime_driver::*;
 pub use session::*;
 pub use visual_state::*;
 pub use wm::*;
+
+pub use sophia_runtime::RuntimeScanoutState;

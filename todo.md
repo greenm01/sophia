@@ -67,6 +67,8 @@ active milestone to `docs/roadmap-history.md`.
 
 ## Done Recently
 
+- [x] Added reduced live scanout submit intake so backend-live rendered
+  primary-plane submit results can drive runtime `SubmitScanout`.
 - [x] Added shared runtime scanout lifecycle state so rendered frames progress
   through `SubmitScanout` before portal/chrome phases.
 - [x] Added a reduced `LiveAtomicScanoutCommitReport` that maps Engine

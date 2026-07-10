@@ -33,8 +33,9 @@ use sophia_backend_live::{
     LiveRenderedPrimaryPlaneScanoutSubmitStatus, LiveRenderedScanoutBufferExport,
     LiveRenderedScanoutBufferExporter, NativeLibdrmAtomicScanoutCommitter,
     NativeLibdrmPageFlipEventPoller, NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller,
-    Size, build_native_primary_plane_atomic_request, create_native_primary_plane_resources,
-    decode_native_page_flip_batch, destroy_native_primary_plane_resources, discover_live_backend,
+    RuntimeScanoutState, Size, build_native_primary_plane_atomic_request,
+    create_native_primary_plane_resources, decode_native_page_flip_batch,
+    destroy_native_primary_plane_resources, discover_live_backend,
     discover_native_primary_plane_property_handles, libdrm_dependency_admission_report,
     libdrm_fd_authority_report, native_libdrm_event_adapter_report,
     native_libdrm_event_adapter_report_for_authority, real_atomic_scanout_validation_gate,
@@ -1020,6 +1021,10 @@ fn live_runtime_assembly_submits_rendered_primary_plane_scanout_through_reduced_
         LiveRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
     );
     assert_eq!(
+        submitted.runtime_scanout_state(),
+        RuntimeScanoutState::Submitted
+    );
+    assert_eq!(
         submitted.export,
         Some(LiveRendererScanoutBufferExportStatus::Exported)
     );
@@ -1044,6 +1049,10 @@ fn live_runtime_assembly_submits_rendered_primary_plane_scanout_through_reduced_
     assert_eq!(
         retired.status,
         LibdrmNativePrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip
+    );
+    assert_eq!(
+        retired.runtime_scanout_state(),
+        Some(RuntimeScanoutState::Retired)
     );
     assert_eq!(
         retired.destroy,
@@ -1086,6 +1095,7 @@ fn live_runtime_assembly_keeps_rendered_scanout_owner_until_page_flip_is_accepte
         waiting.status,
         LibdrmNativePrimaryPlaneScanoutRetireStatus::WaitingForAcceptedPageFlip
     );
+    assert_eq!(waiting.runtime_scanout_state(), None);
     assert!(waiting.destroy.is_none());
     let owner = waiting
         .submission
@@ -1111,6 +1121,10 @@ fn live_runtime_assembly_fails_rendered_scanout_submit_before_kms_on_export_fail
     assert_eq!(
         submitted.status,
         LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutExportFailed
+    );
+    assert_eq!(
+        submitted.runtime_scanout_state(),
+        RuntimeScanoutState::Rejected
     );
     assert_eq!(
         submitted.export,

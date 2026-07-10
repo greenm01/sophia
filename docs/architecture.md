@@ -568,6 +568,10 @@ The runtime driver's default scanout adapter answers `SubmitScanout` with a
 reduced submitted observation for deterministic tests. A live adapter should
 replace that placeholder with backend-owned rendered primary-plane submit and
 later page-flip retirement/rejection observations.
+`LiveRuntimeDriverIntake` now carries an optional reduced scanout submit state
+for that handoff. Backend-live maps rendered primary-plane submit status into
+`Submitted` or `Rejected`, then the live runtime adapter converts that fact into
+`ScanoutStateChanged` when the executor reaches `SubmitScanout`.
 
 `HeadlessSessionDriver` is the first reusable command executor around this
 loop. It owns a `SessionRuntimeLoop` and last-committed layout cache, starts a

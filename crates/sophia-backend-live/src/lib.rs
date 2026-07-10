@@ -25,6 +25,7 @@ pub use sophia_engine::{
     LibinputEventSource, LibinputPhysicalInputAdapter, LibinputPollReport,
     LiveCompositorBackendDiscoveryReport, LiveCompositorBackendDiscoveryStatus,
     NonBlockingInputPoller, PageFlipCommitOutcome, QueuedInputPoller, RendererSelection,
+    RuntimeScanoutState,
 };
 use sophia_engine::{
     StaticInputDiscoveryBackend, SysfsDrmKmsOutputBackend, discover_live_compositor_backend,
@@ -2152,12 +2153,35 @@ pub struct LiveRenderedPrimaryPlaneScanoutSubmitResult<Owner> {
 }
 
 #[cfg(feature = "libdrm-events")]
+impl<Owner> LiveRenderedPrimaryPlaneScanoutSubmitResult<Owner> {
+    pub fn runtime_scanout_state(&self) -> RuntimeScanoutState {
+        runtime_scanout_state_from_rendered_primary_plane_submit_status(self.status)
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LiveRenderedPrimaryPlaneScanoutSubmitStatus {
     SubmittedWaitingForPageFlip,
     FrameTargetUnavailable,
     ScanoutExportFailed,
     PrimaryPlaneSubmitFailed,
+}
+
+#[cfg(feature = "libdrm-events")]
+pub fn runtime_scanout_state_from_rendered_primary_plane_submit_status(
+    status: LiveRenderedPrimaryPlaneScanoutSubmitStatus,
+) -> RuntimeScanoutState {
+    match status {
+        LiveRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip => {
+            RuntimeScanoutState::Submitted
+        }
+        LiveRenderedPrimaryPlaneScanoutSubmitStatus::FrameTargetUnavailable
+        | LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutExportFailed
+        | LiveRenderedPrimaryPlaneScanoutSubmitStatus::PrimaryPlaneSubmitFailed => {
+            RuntimeScanoutState::Rejected
+        }
+    }
 }
 
 #[cfg(feature = "libdrm-events")]
@@ -2180,6 +2204,28 @@ pub struct LiveRenderedPrimaryPlaneScanoutRetireResult<Owner> {
     pub status: LibdrmNativePrimaryPlaneScanoutRetireStatus,
     pub destroy: Option<LibdrmNativePrimaryPlaneResourceDestroyStatus>,
     pub submission: Option<LiveRenderedPrimaryPlaneScanoutSubmission<Owner>>,
+}
+
+#[cfg(feature = "libdrm-events")]
+impl<Owner> LiveRenderedPrimaryPlaneScanoutRetireResult<Owner> {
+    pub fn runtime_scanout_state(&self) -> Option<RuntimeScanoutState> {
+        runtime_scanout_state_from_rendered_primary_plane_retire_status(self.status)
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+pub fn runtime_scanout_state_from_rendered_primary_plane_retire_status(
+    status: LibdrmNativePrimaryPlaneScanoutRetireStatus,
+) -> Option<RuntimeScanoutState> {
+    match status {
+        LibdrmNativePrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip => {
+            Some(RuntimeScanoutState::Retired)
+        }
+        LibdrmNativePrimaryPlaneScanoutRetireStatus::WaitingForAcceptedPageFlip => None,
+        LibdrmNativePrimaryPlaneScanoutRetireStatus::ResourceRetireFailed => {
+            Some(RuntimeScanoutState::Rejected)
+        }
+    }
 }
 
 #[cfg(feature = "libdrm-events")]

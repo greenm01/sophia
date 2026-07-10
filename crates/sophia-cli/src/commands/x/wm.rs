@@ -144,6 +144,7 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
             chrome_command_count: 0,
             layers,
             committed_surfaces: Vec::new(),
+            scanout_submit_state: None,
         });
         let report = driver.run_with_adapter(output.id, 7, &mut adapter)?;
         let session_tick = report

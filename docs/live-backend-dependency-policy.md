@@ -199,6 +199,12 @@ command. The default deterministic adapter reports submitted state only; a live
 backend adapter must translate rendered primary-plane submit, accepted
 page-flip retirement, and rejection into reduced scanout observations before
 the runtime advances beyond scanout submission.
+Backend-live now exposes that first translation for rendered primary-plane
+submit results: submitted-waiting-for-page-flip becomes reduced submitted
+state, while frame-target, export, or primary-plane submit failure becomes
+reduced rejected state. Accepted page-flip retirement maps to reduced retired
+state; stale page-flip evidence produces no runtime state change because the
+submission remains in flight.
 `retire_native_primary_plane_scanout_after_page_flip` consumes that owner only
 when a reduced callback report is accepted and presented. Rejected or stale
 callbacks return the owner to the caller, preserving buffer and framebuffer

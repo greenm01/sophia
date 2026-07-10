@@ -257,6 +257,7 @@ where
                 chrome_command_count: input.chrome_command_count,
                 layers: input.layer_templates,
                 committed_surfaces: self.committed_surfaces.clone(),
+                scanout_submit_state: None,
             },
         );
 

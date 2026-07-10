@@ -8,6 +8,7 @@ mod chrome;
 mod intake;
 mod portal;
 mod renderer;
+mod scanout;
 mod wm;
 mod x;
 
@@ -16,6 +17,7 @@ pub use chrome::*;
 pub use intake::*;
 pub use portal::*;
 pub use renderer::*;
+pub use scanout::*;
 pub use wm::*;
 pub use x::*;
 
@@ -41,6 +43,13 @@ impl RuntimeDriverAdapter for LiveRuntimeDriverAdapter {
     ) -> Result<SessionTickReport, EngineError> {
         self.renderer
             .render_frame(engine, output, frame_serial, last_committed)
+    }
+
+    fn submit_scanout(
+        &mut self,
+        frame_serial: u64,
+    ) -> Result<SessionRuntimeObservation, EngineError> {
+        Ok(self.scanout.submit_observation(frame_serial))
     }
 
     fn drain_portal_commands(&mut self) -> Result<SessionRuntimeObservation, EngineError> {

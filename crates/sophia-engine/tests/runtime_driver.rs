@@ -341,6 +341,7 @@ fn live_runtime_driver_adapter_executes_through_shared_command_executor() {
         chrome_command_count: 1,
         layers: vec![test_layer(1, 0, 0, Region::empty())],
         committed_surfaces: Vec::new(),
+        scanout_submit_state: None,
     });
 
     let report = driver
@@ -383,6 +384,7 @@ fn live_runtime_driver_adapter_builds_from_nonblocking_intake_values() {
         chrome_command_count: 4,
         layers: vec![test_layer(1, 0, 0, Region::empty())],
         committed_surfaces: Vec::new(),
+        scanout_submit_state: Some(RuntimeScanoutState::Submitted),
     });
 
     assert_eq!(adapter.x, LiveXRuntimeAdapter::from_polled_event_count(2));
@@ -399,6 +401,43 @@ fn live_runtime_driver_adapter_builds_from_nonblocking_intake_values() {
         SessionRuntimeObservation::ChromeCommandsReady { count: 4 }
     );
     assert_eq!(adapter.renderer.layers.len(), 1);
+    assert_eq!(
+        adapter.scanout.submit_observation(77),
+        SessionRuntimeObservation::ScanoutStateChanged {
+            state: RuntimeScanoutState::Submitted,
+            frame_serial: Some(77),
+        }
+    );
+}
+
+#[test]
+fn live_runtime_driver_adapter_reports_rejected_scanout_submit() {
+    let engine = HeadlessEngine::default();
+    let output = engine.output();
+    let mut driver = HeadlessSessionDriver::new(engine);
+    let mut adapter = LiveRuntimeDriverAdapter::from_intake(LiveRuntimeDriverIntake {
+        x_event_count: 0,
+        authority_commits: Vec::new(),
+        authority_batches: Vec::new(),
+        wm_update: None,
+        portal_commands: Vec::new(),
+        chrome_command_count: 0,
+        layers: vec![test_layer(1, 0, 0, Region::empty())],
+        committed_surfaces: Vec::new(),
+        scanout_submit_state: Some(RuntimeScanoutState::Rejected),
+    });
+
+    let report = driver
+        .run_with_adapter(output.id, 96, &mut adapter)
+        .expect("rejected scanout submit should stay reduced");
+
+    assert_eq!(report.runtime_state.scanout_submissions, 0);
+    assert_eq!(report.runtime_state.scanout_rejections, 1);
+    assert_eq!(report.runtime_state.in_flight_scanouts, 0);
+    assert_eq!(
+        report.runtime_state.last_scanout_state,
+        Some(RuntimeScanoutState::Rejected)
+    );
 }
 
 #[test]
@@ -419,6 +458,7 @@ fn live_runtime_driver_adapter_records_authority_transaction_commits() {
         chrome_command_count: 0,
         layers: vec![test_layer(7, 0, 0, Region::empty())],
         committed_surfaces: Vec::new(),
+        scanout_submit_state: None,
     });
 
     let report = driver
@@ -472,6 +512,7 @@ fn live_runtime_driver_adapter_commits_authority_batches_before_rendering() {
             chrome_command_count: 0,
             layers: vec![test_layer(9, 0, 0, Region::empty())],
             committed_surfaces: Vec::new(),
+            scanout_submit_state: None,
         },
     );
 
