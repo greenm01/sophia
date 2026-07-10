@@ -244,6 +244,7 @@ where
             &mut self.rendered_primary_plane_scanout_submission,
             &mut self.rendered_primary_plane_runtime_scanout_state,
             &mut self.rendered_primary_plane_scanout_in_flight_ticks,
+            self.page_flip_callback_intake.last_frame_serial(),
             Some(&mut self.pending_runtime_scanout_states),
             device,
             exporter,
@@ -445,6 +446,7 @@ where
             &mut self.rendered_primary_plane_runtime_scanout_state;
         let rendered_primary_plane_scanout_in_flight_ticks =
             &mut self.rendered_primary_plane_scanout_in_flight_ticks;
+        let submitted_after_page_flip_serial = self.page_flip_callback_intake.last_frame_serial();
         let mut rendered_primary_plane_scanout_submit = None;
 
         let engine = self.assembly.run_tick_with_live_runtime_adapter(
@@ -457,6 +459,7 @@ where
                     rendered_primary_plane_scanout_submission,
                     rendered_primary_plane_runtime_scanout_state,
                     rendered_primary_plane_scanout_in_flight_ticks,
+                    submitted_after_page_flip_serial,
                     device,
                     exporter,
                     submit_report: &mut rendered_primary_plane_scanout_submit,

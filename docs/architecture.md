@@ -598,6 +598,10 @@ observable without exposing native object identity or forcing an unsafe early
 retire. A reduced backpressure report classifies the owner as idle, waiting for
 page-flip evidence, or stalled past a caller-provided threshold. Threshold `0`
 keeps the report observational only and never marks the owner stalled.
+Tracked rendered submissions also remember the last reduced page-flip sequence
+observed before submit. Retirement requires accepted page-flip evidence newer
+than that baseline, so replayed or pre-submit callbacks cannot retire the
+current GBM/KMS owner.
 Those terminal reduced states are queued inside backend-live and drained into
 the next runtime tick as scanout lifecycle observations. The shared reducer
 records the retirement or rejection without treating it as a fresh render

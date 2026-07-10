@@ -867,6 +867,11 @@ That age now feeds a reduced backpressure classifier: idle, waiting for
 page-flip evidence, or stalled past a caller-provided threshold. It is a
 diagnostic/policy hook only; resource retirement still requires accepted
 page-flip evidence.
+Tracked rendered submissions now also bind themselves to the last reduced
+page-flip sequence observed before submission. A replayed accepted callback at
+that baseline is treated as waiting, while a newer callback can retire the
+owner. This closes the lower-level replay seam without exposing native sequence
+identity outside backend-live.
 The page-flip callback queue now carries the latest accepted reduced callback
 report. `run_tick_with_rendered_primary_plane_scanout_with` consumes that report
 before draining lifecycle states, so one live tick can retire the old rendered

@@ -104,6 +104,8 @@ active milestone to `docs/roadmap-history.md`.
   missing page flips are observable without exposing GBM/KMS identity.
 - [x] Added reduced rendered-scanout backpressure classification so callers can
   distinguish idle, waiting, and stalled page-flip states without retiring early.
+- [x] Bound tracked rendered scanout submissions to the last observed page-flip
+  sequence so replayed accepted callbacks cannot retire a newer owner.
 - [x] Added reduced live scanout submit intake so backend-live rendered
   primary-plane submit results can drive runtime `SubmitScanout`.
 - [x] Added shared runtime scanout lifecycle state so rendered frames progress

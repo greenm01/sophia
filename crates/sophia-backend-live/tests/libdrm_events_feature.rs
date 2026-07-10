@@ -1269,6 +1269,74 @@ fn live_runtime_assembly_tracks_rendered_scanout_until_accepted_page_flip() {
 }
 
 #[test]
+fn live_runtime_assembly_rejects_page_flip_replay_at_submission_baseline() {
+    let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-baseline-replay");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready backend should seed live assembly");
+    let device = full_primary_plane_scanout_device();
+    let mut exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+
+    let baseline = assembly.observe_page_flip_callback(LivePageFlipCallback {
+        output: OutputId::from_raw(1),
+        frame_serial: 55,
+    });
+    assert_eq!(baseline.decision, LivePageFlipCallbackDecision::Accepted);
+
+    let submitted =
+        assembly.submit_and_track_rendered_primary_plane_scanout_with(&device, &mut exporter);
+    assert_eq!(
+        submitted.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+    );
+
+    let replay = LivePageFlipCallbackReport {
+        decision: LivePageFlipCallbackDecision::Accepted,
+        event: LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(55),
+        },
+    };
+    let waiting =
+        assembly.retire_tracked_rendered_primary_plane_scanout_after_page_flip(&device, &replay);
+
+    assert_eq!(
+        waiting.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::WaitingForAcceptedPageFlip
+    );
+    assert_eq!(waiting.runtime_scanout_state, None);
+    assert_eq!(waiting.in_flight, true);
+    assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), true);
+
+    let newer = LivePageFlipCallbackReport {
+        decision: LivePageFlipCallbackDecision::Accepted,
+        event: LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(56),
+        },
+    };
+    let retired =
+        assembly.retire_tracked_rendered_primary_plane_scanout_after_page_flip(&device, &newer);
+
+    assert_eq!(
+        retired.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip
+    );
+    assert_eq!(
+        retired.runtime_scanout_state,
+        Some(RuntimeScanoutState::Retired)
+    );
+    assert_eq!(retired.in_flight, false);
+    assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), false);
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn live_runtime_assembly_does_not_track_failed_rendered_scanout_submit() {
     let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-tracked-fail");
     let report = discover_live_backend(&LiveBackendConfig::new(&root));

@@ -244,6 +244,7 @@ pub fn runtime_scanout_state_from_rendered_primary_plane_submit_status(
 pub struct LiveRenderedPrimaryPlaneScanoutSubmission<Owner> {
     pub(crate) scanout_buffer: Owner,
     pub(crate) primary_plane: LibdrmNativePrimaryPlaneScanoutSubmission,
+    pub(crate) submitted_after_page_flip_serial: Option<u64>,
 }
 
 #[cfg(feature = "libdrm-events")]
@@ -259,7 +260,16 @@ impl<Owner> LiveRenderedPrimaryPlaneScanoutSubmission<Owner> {
         LiveRenderedPrimaryPlaneScanoutSubmission {
             scanout_buffer: map(self.scanout_buffer),
             primary_plane: self.primary_plane,
+            submitted_after_page_flip_serial: self.submitted_after_page_flip_serial,
         }
+    }
+
+    pub(crate) fn with_submitted_after_page_flip_serial(
+        mut self,
+        submitted_after_page_flip_serial: Option<u64>,
+    ) -> Self {
+        self.submitted_after_page_flip_serial = submitted_after_page_flip_serial;
+        self
     }
 }
 
@@ -493,6 +503,7 @@ where
         submission: Some(LiveRenderedPrimaryPlaneScanoutSubmission {
             scanout_buffer: owner,
             primary_plane,
+            submitted_after_page_flip_serial: None,
         }),
     }
 }
@@ -505,6 +516,7 @@ pub(crate) fn track_rendered_primary_plane_scanout_submit_from_target_with<D, E>
     >,
     rendered_primary_plane_runtime_scanout_state: &mut Option<RuntimeScanoutState>,
     rendered_primary_plane_scanout_in_flight_ticks: &mut u64,
+    submitted_after_page_flip_serial: Option<u64>,
     pending_runtime_scanout_states: Option<&mut VecDeque<RuntimeScanoutState>>,
     device: &D,
     exporter: &mut E,
@@ -534,8 +546,11 @@ where
     let runtime_scanout_state = Some(result.runtime_scanout_state());
 
     if let Some(submission) = result.submission.take() {
-        *rendered_primary_plane_scanout_submission =
-            Some(submission.map_scanout_buffer(|owner| Box::new(owner) as Box<dyn Any>));
+        *rendered_primary_plane_scanout_submission = Some(
+            submission
+                .with_submitted_after_page_flip_serial(submitted_after_page_flip_serial)
+                .map_scanout_buffer(|owner| Box::new(owner) as Box<dyn Any>),
+        );
     }
     *rendered_primary_plane_scanout_in_flight_ticks = 0;
     *rendered_primary_plane_runtime_scanout_state = runtime_scanout_state;
@@ -564,6 +579,7 @@ pub(crate) struct LiveRenderedPrimaryPlaneRuntimeAdapter<'a, D, E> {
         &'a mut Option<BoxedRenderedPrimaryPlaneScanoutSubmission>,
     pub(crate) rendered_primary_plane_runtime_scanout_state: &'a mut Option<RuntimeScanoutState>,
     pub(crate) rendered_primary_plane_scanout_in_flight_ticks: &'a mut u64,
+    pub(crate) submitted_after_page_flip_serial: Option<u64>,
     pub(crate) device: &'a D,
     pub(crate) exporter: &'a mut E,
     pub(crate) submit_report: &'a mut Option<LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport>,
@@ -622,6 +638,7 @@ where
             self.rendered_primary_plane_scanout_submission,
             self.rendered_primary_plane_runtime_scanout_state,
             self.rendered_primary_plane_scanout_in_flight_ticks,
+            self.submitted_after_page_flip_serial,
             None,
             self.device,
             self.exporter,
@@ -657,6 +674,21 @@ pub fn retire_rendered_primary_plane_scanout_after_page_flip<D, Owner>(
 where
     D: LibdrmNativePrimaryPlaneResourceDevice,
 {
+    let waiting_for_newer_page_flip = callback.decision == LivePageFlipCallbackDecision::Accepted
+        && submission
+            .submitted_after_page_flip_serial
+            .is_some_and(|baseline| match callback.event.frame_serial {
+                Some(serial) => serial <= baseline,
+                None => true,
+            });
+    if waiting_for_newer_page_flip {
+        return LiveRenderedPrimaryPlaneScanoutRetireResult {
+            status: LibdrmNativePrimaryPlaneScanoutRetireStatus::WaitingForAcceptedPageFlip,
+            destroy: None,
+            submission: Some(submission),
+        };
+    }
+
     let owner = submission.scanout_buffer;
     let retired = retire_native_primary_plane_scanout_after_page_flip(
         device,
@@ -669,6 +701,7 @@ where
             .map(|primary_plane| LiveRenderedPrimaryPlaneScanoutSubmission {
                 scanout_buffer: owner,
                 primary_plane,
+                submitted_after_page_flip_serial: submission.submitted_after_page_flip_serial,
             });
 
     LiveRenderedPrimaryPlaneScanoutRetireResult {
