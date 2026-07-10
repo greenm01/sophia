@@ -46,3 +46,30 @@ impl drm::buffer::Buffer for LibdrmRendererScanoutBuffer {
         self.handle
     }
 }
+
+#[cfg(feature = "libdrm-events")]
+impl drm::buffer::PlanarBuffer for LibdrmRendererScanoutBuffer {
+    fn size(&self) -> (u32, u32) {
+        drm::buffer::Buffer::size(self)
+    }
+
+    fn format(&self) -> drm::buffer::DrmFourcc {
+        drm::buffer::Buffer::format(self)
+    }
+
+    fn modifier(&self) -> Option<drm::buffer::DrmModifier> {
+        None
+    }
+
+    fn pitches(&self) -> [u32; 4] {
+        [self.pitch, 0, 0, 0]
+    }
+
+    fn handles(&self) -> [Option<drm::buffer::Handle>; 4] {
+        [Some(self.handle), None, None, None]
+    }
+
+    fn offsets(&self) -> [u32; 4] {
+        [0, 0, 0, 0]
+    }
+}

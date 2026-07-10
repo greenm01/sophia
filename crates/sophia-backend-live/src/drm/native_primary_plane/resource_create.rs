@@ -28,7 +28,7 @@ pub fn create_native_primary_plane_resources<D, B>(
 ) -> LibdrmNativePrimaryPlaneResourceCreateResult
 where
     D: LibdrmNativePrimaryPlaneResourceDevice,
-    B: drm::buffer::Buffer + ?Sized,
+    B: drm::buffer::Buffer + drm::buffer::PlanarBuffer + ?Sized,
 {
     if !is_valid_native_primary_plane_scanout_size(selection.size) {
         return LibdrmNativePrimaryPlaneResourceCreateResult {
@@ -70,7 +70,7 @@ where
             cleanup: None,
         };
     }
-    let Ok(framebuffer) = device.add_scanout_framebuffer(buffer, 24, 32) else {
+    let Ok(framebuffer) = device.add_scanout_framebuffer(buffer) else {
         let cleanup = device.destroy_mode_blob(mode_blob).is_err().then(|| {
             LibdrmNativePrimaryPlaneResourceCleanup::from_mode_blob(mode_blob, selection.size)
         });
@@ -100,7 +100,7 @@ pub fn create_native_primary_plane_page_flip_resources<D, B>(
 ) -> LibdrmNativePrimaryPlaneResourceCreateResult
 where
     D: LibdrmNativePrimaryPlaneResourceDevice,
-    B: drm::buffer::Buffer + ?Sized,
+    B: drm::buffer::Buffer + drm::buffer::PlanarBuffer + ?Sized,
 {
     if !is_valid_native_primary_plane_scanout_size(selection.size) {
         return LibdrmNativePrimaryPlaneResourceCreateResult {
@@ -118,7 +118,7 @@ where
         };
     }
 
-    let Ok(framebuffer) = device.add_scanout_framebuffer(buffer, 24, 32) else {
+    let Ok(framebuffer) = device.add_scanout_framebuffer(buffer) else {
         return LibdrmNativePrimaryPlaneResourceCreateResult {
             status: LibdrmNativePrimaryPlaneResourceCreateStatus::FramebufferCreateFailed,
             resources: None,

@@ -724,11 +724,9 @@ impl LibdrmNativePrimaryPlaneResourceDevice for FakeNativePrimaryPlaneResourceDe
     fn add_scanout_framebuffer<B>(
         &self,
         _buffer: &B,
-        _depth: u32,
-        _bpp: u32,
     ) -> io::Result<drm::control::framebuffer::Handle>
     where
-        B: drm::buffer::Buffer + ?Sized,
+        B: drm::buffer::PlanarBuffer + ?Sized,
     {
         clone_io_result(&self.framebuffer)
     }
@@ -829,13 +827,11 @@ impl LibdrmNativePrimaryPlaneResourceDevice for FakeNativePrimaryPlaneScanoutDev
     fn add_scanout_framebuffer<B>(
         &self,
         buffer: &B,
-        depth: u32,
-        bpp: u32,
     ) -> io::Result<drm::control::framebuffer::Handle>
     where
-        B: drm::buffer::Buffer + ?Sized,
+        B: drm::buffer::PlanarBuffer + ?Sized,
     {
-        self.resources.add_scanout_framebuffer(buffer, depth, bpp)
+        self.resources.add_scanout_framebuffer(buffer)
     }
 
     fn destroy_scanout_framebuffer(
@@ -1053,6 +1049,32 @@ impl drm::buffer::Buffer for FakeDrmBuffer {
 
     fn handle(&self) -> drm::buffer::Handle {
         self.handle
+    }
+}
+
+impl drm::buffer::PlanarBuffer for FakeDrmBuffer {
+    fn size(&self) -> (u32, u32) {
+        drm::buffer::Buffer::size(self)
+    }
+
+    fn format(&self) -> drm::buffer::DrmFourcc {
+        drm::buffer::Buffer::format(self)
+    }
+
+    fn modifier(&self) -> Option<drm::buffer::DrmModifier> {
+        None
+    }
+
+    fn pitches(&self) -> [u32; 4] {
+        [self.pitch, 0, 0, 0]
+    }
+
+    fn handles(&self) -> [Option<drm::buffer::Handle>; 4] {
+        [Some(self.handle), None, None, None]
+    }
+
+    fn offsets(&self) -> [u32; 4] {
+        [0, 0, 0, 0]
     }
 }
 
@@ -4257,6 +4279,23 @@ fn native_libdrm_renderer_scanout_buffer_rejects_invalid_renderer_descriptors() 
         drm::buffer::Buffer::format(&argb_buffer),
         drm::buffer::DrmFourcc::Argb8888
     );
+    assert_eq!(
+        drm::buffer::PlanarBuffer::format(&argb_buffer),
+        drm::buffer::DrmFourcc::Argb8888
+    );
+    assert_eq!(
+        drm::buffer::PlanarBuffer::pitches(&argb_buffer),
+        [1280 * 4, 0, 0, 0]
+    );
+    assert_eq!(
+        drm::buffer::PlanarBuffer::offsets(&argb_buffer),
+        [0, 0, 0, 0]
+    );
+    assert_eq!(
+        drm::buffer::PlanarBuffer::handles(&argb_buffer)[0],
+        Some(drm::control::from_u32(19).expect("test GEM handle should be nonzero"))
+    );
+    assert_eq!(drm::buffer::PlanarBuffer::modifier(&argb_buffer), None);
 
     let mut invalid_exporter =
         FakeRendererScanoutBufferExporter::new(LiveRendererScanoutBufferExportStatus::Exported)

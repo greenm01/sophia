@@ -10,11 +10,9 @@ pub trait LibdrmNativePrimaryPlaneResourceDevice {
     fn add_scanout_framebuffer<B>(
         &self,
         buffer: &B,
-        depth: u32,
-        bpp: u32,
     ) -> io::Result<drm::control::framebuffer::Handle>
     where
-        B: drm::buffer::Buffer + ?Sized;
+        B: drm::buffer::PlanarBuffer + ?Sized;
 
     fn destroy_scanout_framebuffer(
         &self,
@@ -51,13 +49,11 @@ where
     fn add_scanout_framebuffer<B>(
         &self,
         buffer: &B,
-        depth: u32,
-        bpp: u32,
     ) -> io::Result<drm::control::framebuffer::Handle>
     where
-        B: drm::buffer::Buffer + ?Sized,
+        B: drm::buffer::PlanarBuffer + ?Sized,
     {
-        self.add_framebuffer(buffer, depth, bpp)
+        self.add_planar_framebuffer(buffer, drm::control::FbCmd2Flags::empty())
     }
 
     fn destroy_scanout_framebuffer(
