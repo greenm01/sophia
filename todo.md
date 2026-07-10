@@ -94,6 +94,9 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Made native primary-plane resource creation reject multi-plane buffers
+  for Sophia's current packed XRGB8888/ARGB8888 scanout path before creating
+  mode blobs or attempting framebuffer registration.
 - [x] Advanced atomic scanout evidence to schema 9 and runtime rendered-scanout
   submit evidence to schema 5 with reduced scanout-buffer format, modifier, and
   plane-count details, so framebuffer-registration failures can be diagnosed

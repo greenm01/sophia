@@ -1061,6 +1061,9 @@ struct FakeDrmBuffer {
     pitch: u32,
     format: drm::buffer::DrmFourcc,
     handle: drm::buffer::Handle,
+    plane_handles: [Option<drm::buffer::Handle>; 4],
+    plane_pitches: [u32; 4],
+    plane_offsets: [u32; 4],
 }
 
 impl FakeDrmBuffer {
@@ -1070,16 +1073,32 @@ impl FakeDrmBuffer {
             pitch: size.width as u32 * 4,
             format: drm::buffer::DrmFourcc::Xrgb8888,
             handle: drm::control::from_u32(17).expect("test buffer handle should be nonzero"),
+            plane_handles: [
+                Some(drm::control::from_u32(17).expect("test buffer handle should be nonzero")),
+                None,
+                None,
+                None,
+            ],
+            plane_pitches: [size.width as u32 * 4, 0, 0, 0],
+            plane_offsets: [0, 0, 0, 0],
         }
     }
 
     fn with_pitch(mut self, pitch: u32) -> Self {
         self.pitch = pitch;
+        self.plane_pitches[0] = pitch;
         self
     }
 
     fn with_format(mut self, format: drm::buffer::DrmFourcc) -> Self {
         self.format = format;
+        self
+    }
+
+    fn with_two_planes(mut self) -> Self {
+        self.plane_handles[1] =
+            Some(drm::control::from_u32(18).expect("test buffer handle should be nonzero"));
+        self.plane_pitches[1] = self.pitch;
         self
     }
 }
@@ -1116,15 +1135,15 @@ impl drm::buffer::PlanarBuffer for FakeDrmBuffer {
     }
 
     fn pitches(&self) -> [u32; 4] {
-        [self.pitch, 0, 0, 0]
+        self.plane_pitches
     }
 
     fn handles(&self) -> [Option<drm::buffer::Handle>; 4] {
-        [Some(self.handle), None, None, None]
+        self.plane_handles
     }
 
     fn offsets(&self) -> [u32; 4] {
-        [0, 0, 0, 0]
+        self.plane_offsets
     }
 }
 
@@ -4229,6 +4248,27 @@ fn native_libdrm_primary_plane_resources_validate_size_and_lifetime() {
     );
     assert!(invalid_format.resources.is_none());
     assert!(invalid_format.cleanup.is_none());
+
+    let multi_plane_packed_format = create_native_primary_plane_page_flip_resources(
+        &FakeNativePrimaryPlaneResourceDevice {
+            mode_blob: Ok(15),
+            framebuffer: Ok(framebuffer_handle()),
+            destroy_framebuffer: Ok(()),
+            destroy_mode_blob: Ok(()),
+        },
+        selected,
+        &FakeDrmBuffer::xrgb8888(selected.size()).with_two_planes(),
+    );
+    assert_eq!(
+        multi_plane_packed_format.status,
+        LibdrmNativePrimaryPlaneResourceCreateStatus::InvalidBuffer
+    );
+    assert_eq!(
+        multi_plane_packed_format.framebuffer,
+        Some(LibdrmNativePrimaryPlaneFramebufferCreateDetail::NotAttempted)
+    );
+    assert!(multi_plane_packed_format.resources.is_none());
+    assert!(multi_plane_packed_format.cleanup.is_none());
 
     let zero_mode_blob = create_native_primary_plane_resources(
         &FakeNativePrimaryPlaneResourceDevice {

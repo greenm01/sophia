@@ -1080,6 +1080,13 @@ to distinguish unsupported format, modifier, and plane-count cases without
 leaking GEM handles, fds, pitch/offset arrays, exact modifier values, or native
 driver errors.
 
+The primary-plane resource path now admits only one active plane for the packed
+XRGB8888/ARGB8888 scanout formats Sophia supports today. Multi-plane scanout
+descriptors fail closed as `InvalidBuffer` before mode-blob creation,
+framebuffer registration, or cleanup bookkeeping. Supporting multi-plane
+formats later should be tied to reduced `IN_FORMATS` plane capability parsing,
+not accidental AddFB probing.
+
 The opt-in hardware smoke cannot complete in this environment. Its preflight
 stops before modesetting with reduced status `DeviceDirectoryUnavailable` and
 zero primary card counts. The remaining proof must run on a DRM-master-capable

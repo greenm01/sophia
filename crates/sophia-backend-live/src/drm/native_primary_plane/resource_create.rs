@@ -260,15 +260,16 @@ fn invalid_native_primary_plane_scanout_buffer_status<B>(
     buffer: &B,
 ) -> Option<LibdrmNativePrimaryPlaneResourceCreateStatus>
 where
-    B: drm::buffer::Buffer + ?Sized,
+    B: drm::buffer::Buffer + drm::buffer::PlanarBuffer + ?Sized,
 {
-    let (buffer_width, buffer_height) = buffer.size();
+    let (buffer_width, buffer_height) = drm::buffer::Buffer::size(buffer);
     if buffer_width != selection.size.width as u32 || buffer_height != selection.size.height as u32
     {
         return Some(LibdrmNativePrimaryPlaneResourceCreateStatus::BufferSizeMismatch);
     }
 
-    if !is_supported_native_scanout_format(buffer.format())
+    if !is_supported_native_scanout_format(drm::buffer::Buffer::format(buffer))
+        || active_native_scanout_buffer_planes(buffer) != 1
         || buffer.pitch() < buffer_width * LIVE_RENDERER_SCANOUT_BYTES_PER_XRGB8888_PIXEL
     {
         return Some(LibdrmNativePrimaryPlaneResourceCreateStatus::InvalidBuffer);
@@ -279,6 +280,18 @@ where
 
 #[cfg(feature = "libdrm-events")]
 const LIVE_RENDERER_SCANOUT_BYTES_PER_XRGB8888_PIXEL: u32 = 4;
+
+#[cfg(feature = "libdrm-events")]
+fn active_native_scanout_buffer_planes<B>(buffer: &B) -> usize
+where
+    B: drm::buffer::PlanarBuffer + ?Sized,
+{
+    buffer
+        .handles()
+        .iter()
+        .filter(|handle| handle.is_some())
+        .count()
+}
 
 #[cfg(feature = "libdrm-events")]
 const fn is_supported_native_scanout_format(format: drm::buffer::DrmFourcc) -> bool {
