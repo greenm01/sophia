@@ -51,12 +51,13 @@ verify_phase() {
 
     declare -A observed=()
     declare -A expected=(
-        ["schema"]="4"
+        ["schema"]="5"
         ["phase"]="$phase"
         ["status"]="Passed"
         ["scanout_target"]="Ready"
         ["rendered_context"]="Ready"
         ["gbm_export"]="Exported"
+        ["scanout_buffer"]="Ready"
         ["properties"]="Discovered"
         ["resources"]="Created"
         ["request"]="Built"

@@ -3505,6 +3505,7 @@ fn native_atomic_scanout_smoke_evidence_passes_only_after_submit_page_flip_and_r
             scanout_target: Some(LiveKmsScanoutTargetStatus::Ready),
             rendered_context: Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
             gbm_export: Some(LiveRendererScanoutBufferExportStatus::Exported),
+            scanout_buffer: Some(sophia_renderer_live::LiveRendererScanoutBufferStatus::Ready),
             properties: Some(LibdrmNativePrimaryPlanePropertyDiscoveryStatus::Discovered),
             resources: Some(LibdrmNativePrimaryPlaneResourceCreateStatus::Created),
             request: Some(LibdrmNativeAtomicRequestBuildStatus::Built),
@@ -3525,7 +3526,7 @@ fn native_atomic_scanout_smoke_evidence_passes_only_after_submit_page_flip_and_r
     );
     assert_eq!(
         evidence.reduced_log_line(),
-        "sophia_atomic_scanout_evidence schema=4 phase=InitialModeset status=Passed scanout_target=Ready rendered_context=Ready gbm_export=Exported properties=Discovered resources=Created request=Built submit=SubmittedWaitingForPageFlip request_scope=Modeset commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=true commit_test_only=false page_flip_poll=Emitted page_flip=Presented retire=RetiredAfterPageFlip retire_destroy=Destroyed retire_cleanup_pending=false"
+        "sophia_atomic_scanout_evidence schema=5 phase=InitialModeset status=Passed scanout_target=Ready rendered_context=Ready gbm_export=Exported scanout_buffer=Ready properties=Discovered resources=Created request=Built submit=SubmittedWaitingForPageFlip request_scope=Modeset commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=true commit_test_only=false page_flip_poll=Emitted page_flip=Presented retire=RetiredAfterPageFlip retire_destroy=Destroyed retire_cleanup_pending=false"
     );
 }
 
@@ -3598,7 +3599,7 @@ fn native_atomic_scanout_steady_state_evidence_requires_page_flip_request_scope(
     );
     assert_eq!(
         evidence.reduced_log_line(),
-        "sophia_atomic_scanout_evidence schema=4 phase=SteadyPageFlip status=Passed scanout_target=Ready rendered_context=Ready gbm_export=Exported properties=Discovered resources=Created request=Built submit=SubmittedWaitingForPageFlip request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false page_flip_poll=Emitted page_flip=Presented retire=RetiredAfterPageFlip retire_destroy=Destroyed retire_cleanup_pending=false"
+        "sophia_atomic_scanout_evidence schema=5 phase=SteadyPageFlip status=Passed scanout_target=Ready rendered_context=Ready gbm_export=Exported scanout_buffer=Ready properties=Discovered resources=Created request=Built submit=SubmittedWaitingForPageFlip request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false page_flip_poll=Emitted page_flip=Presented retire=RetiredAfterPageFlip retire_destroy=Destroyed retire_cleanup_pending=false"
     );
 }
 
@@ -3820,6 +3821,36 @@ fn native_atomic_scanout_smoke_evidence_fails_before_submit_for_not_ready_target
 #[test]
 fn native_atomic_scanout_smoke_evidence_reports_precise_submit_stage_failures() {
     let device = full_primary_plane_scanout_device();
+
+    let forged_ready = sophia_renderer_live::LiveRendererScanoutBufferDescriptor {
+        status: sophia_renderer_live::LiveRendererScanoutBufferStatus::Ready,
+        size: Size {
+            width: -1,
+            height: 720,
+        },
+        pitch: 1280 * 4,
+        format: LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+        gem_handle: 17,
+    };
+    let scanout_buffer_failed =
+        submit_native_primary_plane_scanout_from_renderer_descriptor(&device, forged_ready);
+    let scanout_buffer_evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+        LiveKmsScanoutTargetStatus::Ready,
+        Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
+        LiveRendererScanoutBufferExportStatus::Exported,
+        Some(&scanout_buffer_failed),
+        None,
+        None,
+        None,
+    );
+    assert_eq!(
+        scanout_buffer_evidence.status,
+        LibdrmNativeAtomicScanoutSmokeStatus::ScanoutBufferUnavailable
+    );
+    assert_eq!(
+        scanout_buffer_evidence.scanout_buffer,
+        Some(sophia_renderer_live::LiveRendererScanoutBufferStatus::Invalid)
+    );
 
     let mut property_failed = submit_native_primary_plane_scanout_from_renderer_descriptor(
         &device,

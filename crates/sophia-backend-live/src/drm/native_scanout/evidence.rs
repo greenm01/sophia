@@ -14,6 +14,7 @@ pub struct LibdrmNativeAtomicScanoutSmokeEvidence {
     pub scanout_target: Option<LiveKmsScanoutTargetStatus>,
     pub rendered_context: Option<LibdrmNativeRenderedScanoutContextStatus>,
     pub gbm_export: Option<LiveRendererScanoutBufferExportStatus>,
+    pub scanout_buffer: Option<LiveRendererScanoutBufferStatus>,
     pub properties: Option<LibdrmNativePrimaryPlanePropertyDiscoveryStatus>,
     pub resources: Option<LibdrmNativePrimaryPlaneResourceCreateStatus>,
     pub request: Option<LibdrmNativeAtomicRequestBuildStatus>,
@@ -55,12 +56,13 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
                 });
 
         format!(
-            "sophia_atomic_scanout_evidence schema=4 phase={:?} status={:?} scanout_target={} rendered_context={} gbm_export={} properties={} resources={} request={} submit={} request_scope={} commit_page_flip_event={} commit_nonblocking={} commit_allow_modeset={} commit_test_only={} page_flip_poll={} page_flip={} retire={} retire_destroy={} retire_cleanup_pending={}",
+            "sophia_atomic_scanout_evidence schema=5 phase={:?} status={:?} scanout_target={} rendered_context={} gbm_export={} scanout_buffer={} properties={} resources={} request={} submit={} request_scope={} commit_page_flip_event={} commit_nonblocking={} commit_allow_modeset={} commit_test_only={} page_flip_poll={} page_flip={} retire={} retire_destroy={} retire_cleanup_pending={}",
             self.phase,
             self.status,
             status(self.scanout_target),
             status(self.rendered_context),
             status(self.gbm_export),
+            status(self.scanout_buffer),
             status(self.properties),
             status(self.resources),
             status(self.request),
@@ -85,6 +87,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             scanout_target: None,
             rendered_context: None,
             gbm_export: None,
+            scanout_buffer: None,
             properties: None,
             resources: None,
             request: None,
@@ -106,6 +109,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             scanout_target: None,
             rendered_context: None,
             gbm_export: None,
+            scanout_buffer: None,
             properties: None,
             resources: None,
             request: None,
@@ -173,6 +177,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
         retire: Option<&LibdrmNativePrimaryPlaneScanoutRetireResult>,
     ) -> Self {
         let submit_status = submit.map(|report| report.status);
+        let scanout_buffer = submit.map(|report| report.scanout_buffer);
         let properties = submit.and_then(|report| report.properties);
         let resources = submit.and_then(|report| report.resources);
         let request = submit.and_then(|report| report.request);
@@ -198,6 +203,8 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             LibdrmNativeAtomicScanoutSmokeStatus::RenderedContextUnavailable
         } else if gbm_export != LiveRendererScanoutBufferExportStatus::Exported {
             LibdrmNativeAtomicScanoutSmokeStatus::GbmExportFailed
+        } else if scanout_buffer != Some(LiveRendererScanoutBufferStatus::Ready) {
+            LibdrmNativeAtomicScanoutSmokeStatus::ScanoutBufferUnavailable
         } else if properties != Some(LibdrmNativePrimaryPlanePropertyDiscoveryStatus::Discovered) {
             LibdrmNativeAtomicScanoutSmokeStatus::PropertyDiscoveryFailed
         } else if resources != Some(LibdrmNativePrimaryPlaneResourceCreateStatus::Created) {
@@ -233,6 +240,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             scanout_target: Some(scanout_target),
             rendered_context,
             gbm_export: Some(gbm_export),
+            scanout_buffer,
             properties,
             resources,
             request,
@@ -288,6 +296,7 @@ pub enum LibdrmNativeAtomicScanoutSmokeStatus {
     KmsTargetUnavailable,
     RenderedContextUnavailable,
     GbmExportFailed,
+    ScanoutBufferUnavailable,
     PropertyDiscoveryFailed,
     ResourceCreationFailed,
     RequestBuildFailed,
