@@ -83,6 +83,9 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Hardened native primary-plane resource creation so generic DRM buffers
+  with unsupported format or undersized pitch fail before mode-blob or
+  framebuffer allocation.
 - [x] Reused native primary-plane scanout size validation during resource
   creation so oversized selected modes fail before mode-blob or framebuffer
   allocation.

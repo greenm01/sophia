@@ -14,6 +14,7 @@ pub enum LibdrmNativePrimaryPlaneResourceCreateStatus {
     Created,
     InvalidSelectionSize,
     BufferSizeMismatch,
+    InvalidBuffer,
     MissingMode,
     ModeBlobCreateFailed,
     FramebufferCreateFailed,
@@ -37,11 +38,9 @@ where
         };
     }
 
-    let (buffer_width, buffer_height) = buffer.size();
-    if buffer_width != selection.size.width as u32 || buffer_height != selection.size.height as u32
-    {
+    if let Some(status) = invalid_native_primary_plane_scanout_buffer_status(selection, buffer) {
         return LibdrmNativePrimaryPlaneResourceCreateResult {
-            status: LibdrmNativePrimaryPlaneResourceCreateStatus::BufferSizeMismatch,
+            status,
             resources: None,
             cleanup: None,
         };
@@ -104,11 +103,9 @@ where
         };
     }
 
-    let (buffer_width, buffer_height) = buffer.size();
-    if buffer_width != selection.size.width as u32 || buffer_height != selection.size.height as u32
-    {
+    if let Some(status) = invalid_native_primary_plane_scanout_buffer_status(selection, buffer) {
         return LibdrmNativePrimaryPlaneResourceCreateResult {
-            status: LibdrmNativePrimaryPlaneResourceCreateStatus::BufferSizeMismatch,
+            status,
             resources: None,
             cleanup: None,
         };
@@ -132,3 +129,29 @@ where
         cleanup: None,
     }
 }
+
+#[cfg(feature = "libdrm-events")]
+fn invalid_native_primary_plane_scanout_buffer_status<B>(
+    selection: LibdrmNativePrimaryPlaneSelection,
+    buffer: &B,
+) -> Option<LibdrmNativePrimaryPlaneResourceCreateStatus>
+where
+    B: drm::buffer::Buffer + ?Sized,
+{
+    let (buffer_width, buffer_height) = buffer.size();
+    if buffer_width != selection.size.width as u32 || buffer_height != selection.size.height as u32
+    {
+        return Some(LibdrmNativePrimaryPlaneResourceCreateStatus::BufferSizeMismatch);
+    }
+
+    if buffer.format() != drm::buffer::DrmFourcc::Xrgb8888
+        || buffer.pitch() < buffer_width * LIVE_RENDERER_SCANOUT_BYTES_PER_XRGB8888_PIXEL
+    {
+        return Some(LibdrmNativePrimaryPlaneResourceCreateStatus::InvalidBuffer);
+    }
+
+    None
+}
+
+#[cfg(feature = "libdrm-events")]
+const LIVE_RENDERER_SCANOUT_BYTES_PER_XRGB8888_PIXEL: u32 = 4;

@@ -849,6 +849,7 @@ fn scanout_buffer(size: Size) -> LibdrmRendererScanoutBuffer {
 struct FakeDrmBuffer {
     size: (u32, u32),
     pitch: u32,
+    format: drm::buffer::DrmFourcc,
     handle: drm::buffer::Handle,
 }
 
@@ -857,8 +858,19 @@ impl FakeDrmBuffer {
         Self {
             size: (size.width as u32, size.height as u32),
             pitch: size.width as u32 * 4,
+            format: drm::buffer::DrmFourcc::Xrgb8888,
             handle: drm::control::from_u32(17).expect("test buffer handle should be nonzero"),
         }
+    }
+
+    fn with_pitch(mut self, pitch: u32) -> Self {
+        self.pitch = pitch;
+        self
+    }
+
+    fn with_format(mut self, format: drm::buffer::DrmFourcc) -> Self {
+        self.format = format;
+        self
     }
 }
 
@@ -868,7 +880,7 @@ impl drm::buffer::Buffer for FakeDrmBuffer {
     }
 
     fn format(&self) -> drm::buffer::DrmFourcc {
-        drm::buffer::DrmFourcc::Xrgb8888
+        self.format
     }
 
     fn pitch(&self) -> u32 {
@@ -4297,6 +4309,40 @@ fn native_libdrm_primary_plane_resources_validate_size_and_lifetime() {
         LibdrmNativePrimaryPlaneResourceCreateStatus::BufferSizeMismatch
     );
     assert!(mismatched.resources.is_none());
+
+    let invalid_pitch = create_native_primary_plane_resources(
+        &FakeNativePrimaryPlaneResourceDevice {
+            mode_blob: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+            framebuffer: Ok(framebuffer_handle()),
+            destroy_framebuffer: Ok(()),
+            destroy_mode_blob: Ok(()),
+        },
+        selected,
+        &FakeDrmBuffer::xrgb8888(selected.size()).with_pitch(1280 * 4 - 1),
+    );
+    assert_eq!(
+        invalid_pitch.status,
+        LibdrmNativePrimaryPlaneResourceCreateStatus::InvalidBuffer
+    );
+    assert!(invalid_pitch.resources.is_none());
+    assert!(invalid_pitch.cleanup.is_none());
+
+    let invalid_format = create_native_primary_plane_page_flip_resources(
+        &FakeNativePrimaryPlaneResourceDevice {
+            mode_blob: Ok(15),
+            framebuffer: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+            destroy_framebuffer: Ok(()),
+            destroy_mode_blob: Ok(()),
+        },
+        selected,
+        &FakeDrmBuffer::xrgb8888(selected.size()).with_format(drm::buffer::DrmFourcc::Argb8888),
+    );
+    assert_eq!(
+        invalid_format.status,
+        LibdrmNativePrimaryPlaneResourceCreateStatus::InvalidBuffer
+    );
+    assert!(invalid_format.resources.is_none());
+    assert!(invalid_format.cleanup.is_none());
 
     let created = create_native_primary_plane_resources(
         &full_primary_plane_resource_device(),
