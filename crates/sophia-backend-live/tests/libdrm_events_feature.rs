@@ -360,7 +360,7 @@ fn real_atomic_scanout_page_flip_wait_policy_matches_hardware_smoke_budget() {
 
     assert_eq!(policy.max_read, 4);
     assert_eq!(policy.max_emit, 1);
-    assert_eq!(policy.timeout, std::time::Duration::from_secs(2));
+    assert_eq!(policy.timeout, std::time::Duration::from_secs(8));
     assert_eq!(policy.sleep, std::time::Duration::from_millis(5));
 }
 

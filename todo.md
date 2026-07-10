@@ -76,25 +76,16 @@ Current hardware smoke state from the DRM-master host:
   the KMS submit device with `prime_fd_to_buffer`, use the imported handles for
   AddFB2/AddFB, and close imported GEM handles on failure or through resource
   retire/cleanup.
-- [ ] Resume at post-import page-flip progression. PRIME import now carries the
-  initial modeset through imported-handle AddFB2 and page-flip retirement once:
+- [x] Resume at post-import page-flip progression. The smoke now retains the
+  initial active scanout until the steady page flip presents, then retires both
+  resource bundles. Default wait budgets are long enough for this TTY3 host.
 
   ```text
   sophia_atomic_scanout_evidence schema=10 phase=InitialModeset status=Passed scanout_target=Ready rendered_context=Ready gbm_export=Exported gbm_export_detail=Exported scanout_buffer=Ready buffer_format=Xrgb8888 buffer_modifier=Implicit buffer_planes=Single properties=Discovered format_table=Present resources=Created framebuffer=CreatedWithAddFb2 request=Built submit=SubmittedWaitingForPageFlip request_scope=Modeset commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=true commit_test_only=false page_flip_wait=Retired page_flip_poll=Emitted page_flip=Presented retire=RetiredAfterPageFlip retire_destroy=Destroyed retire_cleanup_pending=false
+  sophia_atomic_scanout_evidence schema=10 phase=SteadyPageFlip status=Passed scanout_target=Ready rendered_context=Ready gbm_export=Exported gbm_export_detail=Exported scanout_buffer=Ready buffer_format=Xrgb8888 buffer_modifier=Implicit buffer_planes=Single properties=Discovered format_table=Present resources=Created framebuffer=CreatedWithAddFb2 request=Built submit=SubmittedWaitingForPageFlip request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false page_flip_wait=Retired page_flip_poll=Emitted page_flip=Presented retire=RetiredAfterPageFlip retire_destroy=Destroyed retire_cleanup_pending=false
   ```
-
-  The same run then reached a created framebuffer for the steady page-flip phase
-  and failed at non-modeset atomic submit. Subsequent retries submitted the
-  imported initial modeset but did not receive the first page-flip callback
-  before timeout:
-
-  ```text
-  sophia_atomic_scanout_evidence schema=10 phase=SteadyPageFlip status=AtomicSubmitFailed scanout_target=Ready rendered_context=Ready gbm_export=Exported gbm_export_detail=Exported scanout_buffer=Ready buffer_format=Xrgb8888 buffer_modifier=Implicit buffer_planes=Single properties=Discovered format_table=Present resources=Created framebuffer=CreatedWithAddFb2 request=Built submit=AtomicSubmitFailed request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false page_flip_wait=CallbackMissing page_flip_poll=none page_flip=none retire=none retire_destroy=none retire_cleanup_pending=false
-  ```
-- [ ] Keep `tools/check_atomic_scanout_local.sh` as the non-hardware gate before
-  each retry, then rerun `tools/atomic_scanout_smoke.sh` from the DRM-master
-  TTY and compare `buffer_modifier`, `buffer_planes`, `resources`, and
-  `framebuffer`.
+- [x] Keep `tools/check_atomic_scanout_local.sh` as the non-hardware gate before
+  the retry, then rerun `tools/atomic_scanout_smoke.sh` from the DRM-master TTY.
 
 ---
 

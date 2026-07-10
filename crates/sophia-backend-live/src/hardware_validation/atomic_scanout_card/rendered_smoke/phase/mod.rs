@@ -8,6 +8,40 @@ use crate::prelude::*;
 use evidence::reduced_smoke_evidence_for_phase;
 use policy::submit_policy_for_smoke_phase;
 use reduced_context::reduced_rendered_context_status_from_native;
+use sophia_renderer_live::NativeGbmOwnedScanoutBuffer;
+
+#[derive(Debug)]
+pub(super) struct RealAtomicScanoutSubmittedSmokePhase {
+    pub(super) phase: LibdrmNativeAtomicScanoutSmokePhase,
+    pub(super) scanout_target: LiveKmsScanoutTargetStatus,
+    pub(super) rendered_context: Option<LibdrmNativeRenderedScanoutContextStatus>,
+    pub(super) export_status: LiveRendererScanoutBufferExportStatus,
+    pub(super) export_detail: LiveRendererScanoutBufferExportDetail,
+    pub(super) submit: LibdrmNativePrimaryPlaneScanoutSubmitResult,
+    pub(super) submission:
+        Option<LiveRenderedPrimaryPlaneScanoutSubmission<NativeGbmOwnedScanoutBuffer>>,
+}
+
+impl RealAtomicScanoutSubmittedSmokePhase {
+    pub(super) fn evidence(
+        &self,
+        poll: Option<&LibdrmPageFlipEventPollReport>,
+        callback: Option<&LivePageFlipCallbackReport>,
+        retire: Option<&LibdrmNativePrimaryPlaneScanoutRetireResult>,
+    ) -> LibdrmNativeAtomicScanoutSmokeEvidence {
+        reduced_smoke_evidence_for_phase(
+            self.phase,
+            self.scanout_target,
+            self.rendered_context,
+            self.export_status,
+            self.export_detail,
+            Some(&self.submit),
+            poll,
+            callback,
+            retire,
+        )
+    }
+}
 
 impl RealAtomicScanoutPageFlipSession {
     pub fn run_native_gbm_rendered_primary_plane_smoke_phase<R>(
@@ -17,6 +51,34 @@ impl RealAtomicScanoutPageFlipSession {
         intake: &mut LivePageFlipCallbackIntake,
         wait_policy: RealAtomicScanoutPageFlipWaitPolicy,
     ) -> LibdrmNativeAtomicScanoutSmokeEvidence
+    where
+        R: RenderDeviceDiscoveryBackend,
+    {
+        let mut submitted =
+            match self.submit_native_gbm_rendered_primary_plane_smoke_phase(phase, exporter) {
+                Ok(submitted) => submitted,
+                Err(evidence) => return evidence,
+            };
+
+        let Some(submission) = submitted.submission.take() else {
+            let mut evidence = submitted.evidence(None, None, None);
+            evidence.status = LibdrmNativeAtomicScanoutSmokeStatus::RetainedResourceMissing;
+            return evidence;
+        };
+        let page_flip =
+            self.wait_for_rendered_submitted_page_flip_retirement(intake, submission, wait_policy);
+        submitted.evidence(
+            Some(&page_flip.poll),
+            page_flip.callback_report.as_ref(),
+            page_flip.retired.as_ref(),
+        )
+    }
+
+    pub(super) fn submit_native_gbm_rendered_primary_plane_smoke_phase<R>(
+        &mut self,
+        phase: LibdrmNativeAtomicScanoutSmokePhase,
+        exporter: &mut NativeGbmRenderedScanoutBufferDiscoveryExporter<R>,
+    ) -> Result<RealAtomicScanoutSubmittedSmokePhase, LibdrmNativeAtomicScanoutSmokeEvidence>
     where
         R: RenderDeviceDiscoveryBackend,
     {
@@ -31,7 +93,7 @@ impl RealAtomicScanoutPageFlipSession {
             },
         );
         if scanout_target != LiveKmsScanoutTargetStatus::Ready {
-            return reduced_smoke_evidence_for_phase(
+            return Err(reduced_smoke_evidence_for_phase(
                 phase,
                 scanout_target,
                 None,
@@ -41,14 +103,14 @@ impl RealAtomicScanoutPageFlipSession {
                 None,
                 None,
                 None,
-            );
+            ));
         }
 
         let export = exporter.export_rendered_scanout_buffer(target).normalized();
         let rendered_context =
             reduced_rendered_context_status_from_native(exporter.context_status());
         if export.status != LiveRendererScanoutBufferExportStatus::Exported {
-            return reduced_smoke_evidence_for_phase(
+            return Err(reduced_smoke_evidence_for_phase(
                 phase,
                 scanout_target,
                 rendered_context,
@@ -58,7 +120,7 @@ impl RealAtomicScanoutPageFlipSession {
                 None,
                 None,
                 None,
-            );
+            ));
         }
 
         let (Some(descriptor), Some(owned_buffer)) = (export.descriptor, export.owner) else {
@@ -74,7 +136,7 @@ impl RealAtomicScanoutPageFlipSession {
                 None,
             );
             evidence.status = LibdrmNativeAtomicScanoutSmokeStatus::RetainedResourceMissing;
-            return evidence;
+            return Err(evidence);
         };
 
         let prime_fds = owned_buffer.export_scanout_dma_buf_fds().ok();
@@ -102,7 +164,7 @@ impl RealAtomicScanoutPageFlipSession {
         };
         if submit.status != LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
         {
-            return reduced_smoke_evidence_for_phase(
+            return Err(reduced_smoke_evidence_for_phase(
                 phase,
                 scanout_target,
                 rendered_context,
@@ -112,7 +174,7 @@ impl RealAtomicScanoutPageFlipSession {
                 None,
                 None,
                 None,
-            );
+            ));
         }
         let Some(submission) = submit.submission.take() else {
             let mut evidence = reduced_smoke_evidence_for_phase(
@@ -127,29 +189,21 @@ impl RealAtomicScanoutPageFlipSession {
                 None,
             );
             evidence.status = LibdrmNativeAtomicScanoutSmokeStatus::RetainedResourceMissing;
-            return evidence;
+            return Err(evidence);
         };
 
-        let rendered_submission = LiveRenderedPrimaryPlaneScanoutSubmission {
-            scanout_buffer: owned_buffer,
-            primary_plane: submission,
-            submitted_after_page_flip_serial: None,
-        };
-        let page_flip = self.wait_for_rendered_submitted_page_flip_retirement(
-            intake,
-            rendered_submission,
-            wait_policy,
-        );
-        reduced_smoke_evidence_for_phase(
+        Ok(RealAtomicScanoutSubmittedSmokePhase {
             phase,
             scanout_target,
             rendered_context,
-            export.status,
-            export.detail,
-            Some(&submit),
-            Some(&page_flip.poll),
-            page_flip.callback_report.as_ref(),
-            page_flip.retired.as_ref(),
-        )
+            export_status: export.status,
+            export_detail: export.detail,
+            submit,
+            submission: Some(LiveRenderedPrimaryPlaneScanoutSubmission {
+                scanout_buffer: owned_buffer,
+                primary_plane: submission,
+                submitted_after_page_flip_serial: None,
+            }),
+        })
     }
 }

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-pub const ATOMIC_SCANOUT_SMOKE_CHILD_TIMEOUT_MS: u64 = 10_000;
+pub const ATOMIC_SCANOUT_SMOKE_CHILD_TIMEOUT_MS: u64 = 30_000;
 
 pub fn atomic_scanout_smoke_child_args(args: &[String]) -> Vec<String> {
     [

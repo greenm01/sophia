@@ -1156,11 +1156,17 @@ modeset but did not receive the first page-flip callback before timeout. The
 next investigation is therefore post-import page-flip progression, not
 framebuffer registration.
 
-The opt-in hardware smoke cannot complete in this environment. Its preflight
-stops before modesetting with reduced status `DeviceDirectoryUnavailable` and
-zero primary card counts. The remaining proof must run on a DRM-master-capable
-machine and produce two passing reduced evidence lines: `InitialModeset` and
-`SteadyPageFlip`.
+The post-import page-flip blocker was resource lifetime in the destructive
+smoke harness. The smoke retired the just-presented initial framebuffer before
+submitting the steady page flip. The runner now waits for the initial modeset
+callback without destroying its scanout resources, submits the steady non-modeset
+page flip while the initial framebuffer remains active, then retires the initial
+resources after the steady callback. The default page-flip wait is 8 seconds and
+the parent watchdog is 30 seconds. TTY3 now produces two passing reduced
+evidence lines: `InitialModeset` with `request_scope=Modeset
+commit_allow_modeset=true` and `SteadyPageFlip` with `request_scope=PageFlip
+commit_allow_modeset=false`, both using `framebuffer=CreatedWithAddFb2` and
+`retire_cleanup_pending=false`.
 
 ## Open Questions
 

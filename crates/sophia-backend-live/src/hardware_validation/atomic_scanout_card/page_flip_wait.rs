@@ -17,7 +17,7 @@ impl RealAtomicScanoutPageFlipWaitPolicy {
         Self {
             max_read: 4,
             max_emit: 1,
-            timeout: Duration::from_secs(2),
+            timeout: Duration::from_secs(8),
             sleep: Duration::from_millis(5),
         }
     }
@@ -36,7 +36,59 @@ pub struct RealAtomicScanoutPageFlipWaitReport {
     pub retired: Option<LibdrmNativePrimaryPlaneScanoutRetireResult>,
 }
 
+#[derive(Debug)]
+pub struct RealAtomicScanoutPageFlipPresentationReport<Owner> {
+    pub poll: LibdrmPageFlipEventPollReport,
+    pub callback_report: Option<LivePageFlipCallbackReport>,
+    pub submission: Option<LiveRenderedPrimaryPlaneScanoutSubmission<Owner>>,
+}
+
 impl RealAtomicScanoutPageFlipSession {
+    pub fn wait_for_rendered_submitted_page_flip_presentation<Owner>(
+        &mut self,
+        intake: &mut LivePageFlipCallbackIntake,
+        submission: LiveRenderedPrimaryPlaneScanoutSubmission<Owner>,
+        policy: RealAtomicScanoutPageFlipWaitPolicy,
+    ) -> RealAtomicScanoutPageFlipPresentationReport<Owner> {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let deadline = Instant::now() + policy.timeout;
+        let mut submission = Some(submission);
+
+        loop {
+            let report = self.poller.read_and_poll_page_flip_events(
+                &mut self.reader,
+                &sender,
+                policy.max_read,
+                policy.max_emit,
+            );
+            let last_poll = report.poll;
+
+            if let Ok(callback) = receiver.try_recv() {
+                let callback_report = intake.observe(callback);
+                return RealAtomicScanoutPageFlipPresentationReport {
+                    poll: last_poll,
+                    callback_report: Some(callback_report),
+                    submission,
+                };
+            }
+
+            if matches!(
+                last_poll.status,
+                LibdrmPageFlipEventPollStatus::Disconnected
+                    | LibdrmPageFlipEventPollStatus::Backpressure
+            ) || Instant::now() >= deadline
+            {
+                return RealAtomicScanoutPageFlipPresentationReport {
+                    poll: last_poll,
+                    callback_report: None,
+                    submission: submission.take(),
+                };
+            }
+
+            std::thread::sleep(policy.sleep);
+        }
+    }
+
     pub fn wait_for_rendered_submitted_page_flip_retirement<Owner>(
         &mut self,
         intake: &mut LivePageFlipCallbackIntake,

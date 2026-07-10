@@ -136,7 +136,7 @@ helper forwards optional CLI targeting arguments: `--slot`, `--output`,
 `--authority`, `--page-flip-timeout-ms`, and `--child-timeout-ms`. The page-flip
 timeout bounds native callback waiting inside the smoke child; the child timeout
 bounds the parent watchdog around the destructive child process and defaults to
-10 seconds.
+30 seconds. The native page-flip wait defaults to 8 seconds.
 Backend-live first uses the production `select_real_atomic_scanout_card` seam to
 choose an opaque card owner that opens read/write, admits UniversalPlanes and
 Atomic client capabilities, exposes a reduced KMS primary-plane scanout target,
@@ -267,7 +267,7 @@ runs only the opt-in atomic scanout CLI smoke:
 ```sh
 tools/atomic_scanout_smoke.sh
 SOPHIA_ATOMIC_SCANOUT_EVIDENCE=/tmp/sophia-atomic-smoke.log tools/atomic_scanout_smoke.sh
-tools/atomic_scanout_smoke.sh --slot=1 --output=1 --authority=1 --page-flip-timeout-ms=2000 --child-timeout-ms=10000
+tools/atomic_scanout_smoke.sh --slot=1 --output=1 --authority=1 --page-flip-timeout-ms=8000 --child-timeout-ms=30000
 ```
 
 The helper runs the verified preflight before the smoke and
@@ -281,7 +281,7 @@ captures the runtime rendered-scanout submit-to-retire evidence, and verifies
 all three reduced logs:
 
 ```sh
-tools/atomic_scanout_hardware_proof.sh --slot=1 --output=1 --authority=1 --page-flip-timeout-ms=2000 --child-timeout-ms=10000
+tools/atomic_scanout_hardware_proof.sh --slot=1 --output=1 --authority=1 --page-flip-timeout-ms=8000 --child-timeout-ms=30000
 ```
 
 To verify captured logs without rerunning hardware:

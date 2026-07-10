@@ -37,11 +37,11 @@ pub(crate) fn print(verbose: bool) {
     println!("commands: atomic-scanout-preflight");
     #[cfg(feature = "atomic-scanout-smoke-live")]
     println!(
-        "commands: atomic-scanout-smoke [--slot=1] [--output=1] [--authority=1] [--page-flip-timeout-ms=2000] [--child-timeout-ms=10000]"
+        "commands: atomic-scanout-smoke [--slot=1] [--output=1] [--authority=1] [--page-flip-timeout-ms=8000] [--child-timeout-ms=30000]"
     );
     #[cfg(feature = "atomic-scanout-smoke-live")]
     println!(
-        "commands: atomic-scanout-runtime-evidence [--slot=1] [--output=1] [--authority=1] [--page-flip-timeout-ms=2000]"
+        "commands: atomic-scanout-runtime-evidence [--slot=1] [--output=1] [--authority=1] [--page-flip-timeout-ms=8000]"
     );
 
     if verbose {
