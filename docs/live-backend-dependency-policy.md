@@ -322,7 +322,10 @@ commits the same snapshot using page-flip policy, not modeset policy.
 Rendered scanout submit reports carry the reduced request scope from the native
 primary-plane submit, so runtime diagnostics prove the steady-state path used a
 plane-only page-flip request shape without exposing KMS identity. That
-steady-state path also uses framebuffer-only resources, so a missing or
+steady-state path also records reduced output size and frame-target size in the
+schema-versioned runtime submit line, so evidence can prove geometry alignment
+without exposing connector, mode, or buffer identity. It uses framebuffer-only
+resources, so a missing or
 failing mode-blob creator cannot break ordinary page flips after the initial
 modeset.
 `LibdrmNativeAtomicScanoutSmokeEvidence` is the reduced record for that smoke.
