@@ -2276,6 +2276,117 @@ fn live_runtime_tick_native_gbm_rendered_scanout_fails_closed_when_render_device
 
 #[cfg(feature = "gbm-probe")]
 #[test]
+fn live_runtime_tick_native_gbm_rendered_scanout_reads_native_page_flips_before_persistent_export()
+{
+    let root = ready_drm_sysfs_fixture("runtime-native-gbm-rendered-scanout-native-page-flip");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let (sender, receiver) = mpsc::sync_channel(2);
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready backend should seed live assembly")
+        .with_page_flip_callback_queue(LivePageFlipCallbackQueue::new(receiver, 2));
+    let device = full_primary_plane_scanout_device();
+    let mut initial_exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+    let submitted = assembly
+        .submit_and_track_rendered_primary_plane_scanout_with(&device, &mut initial_exporter);
+    assert_eq!(
+        submitted.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+    );
+
+    let slot = LibdrmNativeOutputSlot::new(1).expect("slot one should be valid");
+    let source = LibdrmNativePageFlipSource::from_authority(
+        LibdrmBackendFdAuthority::new(34).expect("nonzero authority should mint"),
+    );
+    let mut poller =
+        NativeLibdrmPageFlipEventPoller::new(source).with_routes([LibdrmNativeOutputRoute {
+            slot,
+            output: OutputId::from_raw(1),
+        }]);
+    let mut reader =
+        FakeLibdrmNativePageFlipReader::new([LibdrmNativePageFlipCallback::new(slot, 100)]);
+    let mut exporter = NativeGbmRenderedScanoutBufferDiscoveryExporter::new(MissingRenderDevice);
+
+    let report = assembly
+        .run_tick_with_native_gbm_rendered_primary_plane_scanout_exporter_and_native_page_flip_events_with(
+            CompositorBackendTickInput::default(),
+            &device,
+            &mut exporter,
+            &mut reader,
+            &mut poller,
+            &sender,
+            4,
+            4,
+        )
+        .expect("native page-flip intake should run before persistent GBM export");
+
+    assert_eq!(
+        report.native_page_flip.read_loop,
+        LibdrmNativeReadLoopReport::callback_decoded(1)
+            .expect("one callback should produce read evidence")
+    );
+    assert_eq!(
+        report.native_page_flip.poll.status,
+        LibdrmPageFlipEventPollStatus::Emitted
+    );
+    assert_eq!(
+        report
+            .tick
+            .rendered_primary_plane_scanout_retire
+            .expect("native page flip should retire in-flight scanout")
+            .status,
+        LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip
+    );
+    assert_eq!(
+        report
+            .tick
+            .rendered_primary_plane_scanout_submit
+            .expect("persistent native GBM export should be attempted")
+            .status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutExportFailed
+    );
+    assert_eq!(
+        report.tick.libdrm_poller,
+        LiveLibdrmPollerDiagnostics {
+            status: LiveLibdrmPollerDiagnosticsStatus::CallbackDecoded,
+            route_count: 1,
+            pending_callbacks: 0,
+            decoded_callbacks: 1,
+            rejected_callbacks: 0,
+        }
+    );
+    assert_eq!(
+        report.tick.engine.runtime.runtime_state.scanout_retirements,
+        1
+    );
+    assert_eq!(
+        report.tick.engine.runtime.runtime_state.scanout_rejections,
+        1
+    );
+    assert_eq!(
+        report.tick.engine.runtime.runtime_state.last_scanout_state,
+        Some(RuntimeScanoutState::Rejected)
+    );
+    assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), false);
+    assert_eq!(exporter.export_attempts(), 1);
+    assert_eq!(exporter.context_open_attempts(), 1);
+    assert_eq!(
+        exporter.context_status(),
+        Some(NativeGbmRenderedScanoutContextStatus::Unavailable)
+    );
+    assert_eq!(
+        exporter.last_export_status(),
+        Some(LiveRendererScanoutBufferExportStatus::Unavailable)
+    );
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(feature = "gbm-probe")]
+#[test]
 fn native_gbm_rendered_scanout_exporter_rejects_invalid_target_before_device_open() {
     let mut exporter = NativeGbmRenderedScanoutBufferDiscoveryExporter::new(MissingRenderDevice);
     let target = LiveGbmEglFrameTargetRecord::new(Size {

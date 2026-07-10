@@ -232,6 +232,12 @@ degraded. Invalid targets fail before any render-device open attempt.
 Render-device or context failure is reduced to scanout export failure and
 runtime rejection; raw fds, paths, GBM handles, EGL displays, and native error
 text remain private.
+The preferred production tick pairs this persistent exporter with native
+page-flip event intake. Backend-live reads and reduces native callbacks before
+running the `SubmitScanout` phase, then retires any accepted in-flight GBM/KMS
+owner before attempting the next rendered GBM export. That ordering keeps
+resource lifetime explicit without exposing native object identity to Engine
+state.
 The tracked rendered primary-plane path keeps the combined rendered buffer owner
 and KMS submission owner inside backend-live until page-flip evidence is strong
 enough to retire it. This is the resource-lifetime half of atomic rendering:

@@ -71,6 +71,9 @@ active milestone to `docs/roadmap-history.md`.
 
 ## Done Recently
 
+- [x] Combined native page-flip intake with the persistent native GBM rendered
+  scanout exporter so runtime ticks retire accepted GBM/KMS owners before the
+  next reusable export attempt.
 - [x] Moved backend-live startup discovery and renderer-selection helpers out
   of `src/lib.rs`, leaving the root module as wiring and public exports.
 - [x] Extracted rendered primary-plane scanout types, helpers, and the

@@ -945,6 +945,12 @@ into the bounded callback queue, updates reduced poller diagnostics, retires
 the in-flight owner from accepted evidence, and submits the next rendered frame
 in the same runtime tick. A fake-reader test proves the ordering without
 opening DRM devices.
+That path now has a persistent native GBM/EGL exporter variant as well. The
+runtime can drain native page flips, retire the previous GBM/KMS owner, and
+then attempt the next rendered primary-plane export through the reusable
+backend-live exporter. The deterministic coverage uses an unavailable render
+device to prove the ordering and fail-closed reduced states without touching
+real hardware.
 
 ## Open Questions
 
