@@ -60,8 +60,8 @@ Support now exists for that hardware proof:
 
 - [x] Build the first real KMS atomic property-set shape from backend-private
   connector, CRTC, plane, framebuffer, and mode state.
-- [ ] Continue splitting backend-live by domain. The root module is now wiring;
-  the next large candidate is runtime assembly.
+- [ ] Continue splitting backend-live by domain where modules still mix
+  unrelated authority, renderer, runtime, or scanout ownership.
 
 ---
 
