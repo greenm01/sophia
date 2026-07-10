@@ -27,7 +27,9 @@ impl RuntimeDriverAdapter for LiveRuntimeDriverAdapter {
     }
 
     fn poll_x_observations(&mut self) -> Result<Vec<SessionRuntimeObservation>, EngineError> {
-        Ok(self.x.poll_observations())
+        let mut observations = self.x.poll_observations();
+        observations.extend(self.scanout.lifecycle_observations());
+        Ok(observations)
     }
 
     fn request_wm_layout(&mut self) -> Result<SessionRuntimeObservation, EngineError> {

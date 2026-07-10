@@ -210,6 +210,10 @@ and KMS submission owner inside backend-live until page-flip evidence is strong
 enough to retire it. This is the resource-lifetime half of atomic rendering:
 the runtime can observe submitted/retired/rejected state, but it never sees or
 owns GBM buffers, DRM framebuffers, property handles, or KMS submission objects.
+Backend-live queues reduced terminal scanout states and drains them through the
+next runtime tick. The queue carries only `RuntimeScanoutState` values; native
+resource ownership stays in backend-live, and stale page-flip evidence does not
+emit a runtime lifecycle state.
 `retire_native_primary_plane_scanout_after_page_flip` consumes that owner only
 when a reduced callback report is accepted and presented. Rejected or stale
 callbacks return the owner to the caller, preserving buffer and framebuffer

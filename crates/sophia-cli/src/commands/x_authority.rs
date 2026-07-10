@@ -647,6 +647,8 @@ fn runtime_state_from_observed_batches(
         portal_commands: Vec::new(),
         chrome_command_count: 0,
         layer_templates: layer_templates_from_surface_transactions(&transactions),
+        scanout_submit_state: None,
+        scanout_lifecycle_states: Vec::new(),
     })?;
     Ok(report.runtime.runtime_state)
 }
@@ -678,6 +680,7 @@ fn runtime_state_from_observed_transactions(
         layers: layer_templates_from_surface_transactions(transactions),
         committed_surfaces: committed,
         scanout_submit_state: None,
+        scanout_lifecycle_states: Vec::new(),
     });
     let report = driver.run_with_adapter(output.id, 1, &mut adapter)?;
     Ok(report.runtime_state)

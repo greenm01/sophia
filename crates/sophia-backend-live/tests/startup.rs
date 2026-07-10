@@ -463,6 +463,8 @@ fn live_runtime_assembly_runs_fake_compositor_loop_without_native_scanout() {
             portal_commands: Vec::new(),
             chrome_command_count: 1,
             layer_templates: vec![layer],
+            scanout_submit_state: None,
+            scanout_lifecycle_states: Vec::new(),
         })
         .expect("fake compositor runtime tick should complete");
 

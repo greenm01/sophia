@@ -47,6 +47,7 @@ pub fn update_session_runtime(
             state: scanout_state,
             frame_serial,
         } => {
+            let answering_submit = state.phase == SessionRuntimePhase::SubmittingScanout;
             state.last_scanout_state = Some(scanout_state);
             state.last_scanout_frame_serial = frame_serial;
             match scanout_state {
@@ -63,8 +64,12 @@ pub fn update_session_runtime(
                     state.in_flight_scanouts = state.in_flight_scanouts.saturating_sub(1);
                 }
             }
-            state.phase = SessionRuntimePhase::DrainingPortals;
-            SessionRuntimeCommand::DrainPortalCommands
+            if answering_submit {
+                state.phase = SessionRuntimePhase::DrainingPortals;
+                SessionRuntimeCommand::DrainPortalCommands
+            } else {
+                SessionRuntimeCommand::None
+            }
         }
         SessionRuntimeEvent::PortalCommandsReady { count } => {
             state.portal_commands_drained = state

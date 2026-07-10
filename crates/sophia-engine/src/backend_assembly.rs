@@ -45,6 +45,8 @@ pub struct CompositorBackendTickInput {
     pub portal_commands: Vec<PortalCommand>,
     pub chrome_command_count: u32,
     pub layer_templates: Vec<LayerSnapshot>,
+    pub scanout_submit_state: Option<RuntimeScanoutState>,
+    pub scanout_lifecycle_states: Vec<RuntimeScanoutState>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -257,7 +259,8 @@ where
                 chrome_command_count: input.chrome_command_count,
                 layers: input.layer_templates,
                 committed_surfaces: self.committed_surfaces.clone(),
-                scanout_submit_state: None,
+                scanout_submit_state: input.scanout_submit_state,
+                scanout_lifecycle_states: input.scanout_lifecycle_states,
             },
         );
 

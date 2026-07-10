@@ -1148,6 +1148,22 @@ fn live_runtime_assembly_tracks_rendered_scanout_until_accepted_page_flip() {
         assembly.rendered_primary_plane_runtime_scanout_state(),
         Some(RuntimeScanoutState::Retired)
     );
+    assert_eq!(assembly.pending_runtime_scanout_state_count(), 1);
+
+    let tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should observe retired scanout state");
+
+    assert_eq!(
+        tick.runtime_scanout_states,
+        vec![RuntimeScanoutState::Retired]
+    );
+    assert_eq!(tick.engine.runtime.runtime_state.scanout_retirements, 1);
+    assert_eq!(
+        tick.engine.runtime.runtime_state.last_scanout_state,
+        Some(RuntimeScanoutState::Submitted)
+    );
+    assert_eq!(assembly.pending_runtime_scanout_state_count(), 0);
 
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -1179,6 +1195,18 @@ fn live_runtime_assembly_does_not_track_failed_rendered_scanout_submit() {
         assembly.rendered_primary_plane_runtime_scanout_state(),
         Some(RuntimeScanoutState::Rejected)
     );
+    assert_eq!(assembly.pending_runtime_scanout_state_count(), 1);
+
+    let tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should observe rejected scanout submit state");
+
+    assert_eq!(
+        tick.runtime_scanout_states,
+        vec![RuntimeScanoutState::Rejected]
+    );
+    assert_eq!(tick.engine.runtime.runtime_state.scanout_rejections, 1);
+    assert_eq!(assembly.pending_runtime_scanout_state_count(), 0);
 
     let accepted = LivePageFlipCallbackReport {
         decision: LivePageFlipCallbackDecision::Accepted,

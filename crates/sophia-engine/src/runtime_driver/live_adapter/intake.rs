@@ -40,6 +40,7 @@ pub struct LiveRuntimeDriverIntake {
     pub layers: Vec<LayerSnapshot>,
     pub committed_surfaces: Vec<CommittedSurfaceState>,
     pub scanout_submit_state: Option<RuntimeScanoutState>,
+    pub scanout_lifecycle_states: Vec<RuntimeScanoutState>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -80,10 +81,11 @@ impl LiveRuntimeDriverAdapter {
                 intake.committed_surfaces,
                 intake.layers,
             ),
-            scanout: LiveScanoutRuntimeAdapter::from_submit_state(
+            scanout: LiveScanoutRuntimeAdapter::from_states(
                 intake
                     .scanout_submit_state
                     .unwrap_or(RuntimeScanoutState::Submitted),
+                intake.scanout_lifecycle_states,
             ),
         }
         .with_authority_commits(intake.authority_commits)

@@ -4186,6 +4186,8 @@ impl LiveBackendStartupReport {
                 rendered_primary_plane_scanout_submission: None,
                 #[cfg(feature = "libdrm-events")]
                 rendered_primary_plane_runtime_scanout_state: None,
+                #[cfg(feature = "libdrm-events")]
+                pending_runtime_scanout_states: VecDeque::new(),
             })
     }
 }
@@ -4413,6 +4415,8 @@ pub struct LiveBackendRuntimeAssembly<P = QueuedInputPoller> {
     rendered_primary_plane_scanout_submission: Option<BoxedRenderedPrimaryPlaneScanoutSubmission>,
     #[cfg(feature = "libdrm-events")]
     rendered_primary_plane_runtime_scanout_state: Option<RuntimeScanoutState>,
+    #[cfg(feature = "libdrm-events")]
+    pending_runtime_scanout_states: VecDeque<RuntimeScanoutState>,
 }
 
 impl<P> LiveBackendRuntimeAssembly<P>
@@ -4476,6 +4480,11 @@ where
     #[cfg(feature = "libdrm-events")]
     pub fn rendered_primary_plane_runtime_scanout_state(&self) -> Option<RuntimeScanoutState> {
         self.rendered_primary_plane_runtime_scanout_state
+    }
+
+    #[cfg(feature = "libdrm-events")]
+    pub fn pending_runtime_scanout_state_count(&self) -> usize {
+        self.pending_runtime_scanout_states.len()
     }
 
     pub fn scanout_readiness_observation(&self) -> LiveScanoutReadinessReport {
@@ -4686,6 +4695,10 @@ where
                 Some(submission.map_scanout_buffer(|owner| Box::new(owner) as Box<dyn Any>));
         }
         self.rendered_primary_plane_runtime_scanout_state = runtime_scanout_state;
+        if runtime_scanout_state == Some(RuntimeScanoutState::Rejected) {
+            self.pending_runtime_scanout_states
+                .push_back(RuntimeScanoutState::Rejected);
+        }
 
         LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
             status: result.status.into(),
@@ -4722,6 +4735,8 @@ where
         }
         if let Some(runtime_scanout_state) = runtime_scanout_state {
             self.rendered_primary_plane_runtime_scanout_state = Some(runtime_scanout_state);
+            self.pending_runtime_scanout_states
+                .push_back(runtime_scanout_state);
         }
 
         LiveTrackedRenderedPrimaryPlaneScanoutRetireReport {
@@ -4793,8 +4808,17 @@ where
 
     pub fn run_tick(
         &mut self,
-        input: CompositorBackendTickInput,
+        mut input: CompositorBackendTickInput,
     ) -> Result<LiveBackendRuntimeTickReport, CompositorBackendAssemblyError> {
+        #[cfg(feature = "libdrm-events")]
+        let runtime_scanout_states: Vec<RuntimeScanoutState> =
+            self.pending_runtime_scanout_states.drain(..).collect();
+        #[cfg(not(feature = "libdrm-events"))]
+        let runtime_scanout_states: Vec<RuntimeScanoutState> = Vec::new();
+        input
+            .scanout_lifecycle_states
+            .extend(runtime_scanout_states.iter().copied());
+
         let page_flip_callbacks = self
             .page_flip_callback_queue
             .as_ref()
@@ -4817,6 +4841,7 @@ where
             gbm_egl_frame_target_allocation: self.gbm_egl_frame_target_allocation,
             page_flip: self.page_flip_event,
             page_flip_callbacks,
+            runtime_scanout_states,
             libdrm_poller: self.libdrm_poller_diagnostics,
         })
     }
@@ -4848,6 +4873,7 @@ pub struct LiveBackendRuntimeTickReport {
     pub gbm_egl_frame_target_allocation: Option<LiveGbmEglFrameTargetAllocationReport>,
     pub page_flip: LivePageFlipEvent,
     pub page_flip_callbacks: LivePageFlipCallbackQueueReport,
+    pub runtime_scanout_states: Vec<RuntimeScanoutState>,
     pub libdrm_poller: LiveLibdrmPollerDiagnostics,
 }
 

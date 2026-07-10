@@ -120,7 +120,8 @@ fn session_runtime_reducer_tracks_scanout_retirement_and_rejection() {
     assert_eq!(state.scanout_retirements, 1);
     assert_eq!(state.in_flight_scanouts, 0);
     assert_eq!(state.last_scanout_state, Some(RuntimeScanoutState::Retired));
-    assert_eq!(command, SessionRuntimeCommand::DrainPortalCommands);
+    assert_eq!(state.phase, SessionRuntimePhase::Idle);
+    assert_eq!(command, SessionRuntimeCommand::None);
 
     let (state, _command) = update_session_runtime(
         state,
@@ -142,6 +143,27 @@ fn session_runtime_reducer_tracks_scanout_retirement_and_rejection() {
         state.last_scanout_state,
         Some(RuntimeScanoutState::Rejected)
     );
+    assert_eq!(state.phase, SessionRuntimePhase::Idle);
+    assert_eq!(command, SessionRuntimeCommand::None);
+}
+
+#[test]
+fn session_runtime_reducer_scanout_submit_response_continues_the_render_pipeline() {
+    let state = SessionRuntimeState {
+        phase: SessionRuntimePhase::SubmittingScanout,
+        ..SessionRuntimeState::default()
+    };
+
+    let (state, command) = update_session_runtime(
+        state,
+        SessionRuntimeEvent::ScanoutStateChanged {
+            state: RuntimeScanoutState::Rejected,
+            frame_serial: Some(21),
+        },
+    );
+
+    assert_eq!(state.scanout_rejections, 1);
+    assert_eq!(state.phase, SessionRuntimePhase::DrainingPortals);
     assert_eq!(command, SessionRuntimeCommand::DrainPortalCommands);
 }
 

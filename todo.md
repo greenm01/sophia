@@ -67,6 +67,8 @@ active milestone to `docs/roadmap-history.md`.
 
 ## Done Recently
 
+- [x] Threaded backend-live terminal scanout states into the shared runtime tick
+  without exposing GBM or KMS ownership.
 - [x] Added backend-live tracked rendered scanout ownership so stale page-flip
   evidence keeps GBM/KMS resources in flight until accepted retirement.
 - [x] Added reduced live scanout submit intake so backend-live rendered

@@ -145,6 +145,7 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
             layers,
             committed_surfaces: Vec::new(),
             scanout_submit_state: None,
+            scanout_lifecycle_states: Vec::new(),
         });
         let report = driver.run_with_adapter(output.id, 7, &mut adapter)?;
         let session_tick = report

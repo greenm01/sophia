@@ -76,6 +76,8 @@ fn headless_backend_assembly_drains_input_commits_authority_and_renders_cpu_fram
             portal_commands: Vec::new(),
             chrome_command_count: 0,
             layer_templates: vec![template],
+            scanout_submit_state: None,
+            scanout_lifecycle_states: Vec::new(),
         })
         .expect("deterministic backend tick should complete");
 

@@ -342,6 +342,7 @@ fn live_runtime_driver_adapter_executes_through_shared_command_executor() {
         layers: vec![test_layer(1, 0, 0, Region::empty())],
         committed_surfaces: Vec::new(),
         scanout_submit_state: None,
+        scanout_lifecycle_states: Vec::new(),
     });
 
     let report = driver
@@ -385,6 +386,7 @@ fn live_runtime_driver_adapter_builds_from_nonblocking_intake_values() {
         layers: vec![test_layer(1, 0, 0, Region::empty())],
         committed_surfaces: Vec::new(),
         scanout_submit_state: Some(RuntimeScanoutState::Submitted),
+        scanout_lifecycle_states: Vec::new(),
     });
 
     assert_eq!(adapter.x, LiveXRuntimeAdapter::from_polled_event_count(2));
@@ -425,6 +427,7 @@ fn live_runtime_driver_adapter_reports_rejected_scanout_submit() {
         layers: vec![test_layer(1, 0, 0, Region::empty())],
         committed_surfaces: Vec::new(),
         scanout_submit_state: Some(RuntimeScanoutState::Rejected),
+        scanout_lifecycle_states: Vec::new(),
     });
 
     let report = driver
@@ -437,6 +440,38 @@ fn live_runtime_driver_adapter_reports_rejected_scanout_submit() {
     assert_eq!(
         report.runtime_state.last_scanout_state,
         Some(RuntimeScanoutState::Rejected)
+    );
+}
+
+#[test]
+fn live_runtime_driver_adapter_records_async_scanout_retirement_before_submit() {
+    let engine = HeadlessEngine::default();
+    let output = engine.output();
+    let mut driver = HeadlessSessionDriver::new(engine);
+    let mut adapter = LiveRuntimeDriverAdapter::from_intake(LiveRuntimeDriverIntake {
+        x_event_count: 0,
+        authority_commits: Vec::new(),
+        authority_batches: Vec::new(),
+        wm_update: None,
+        portal_commands: Vec::new(),
+        chrome_command_count: 0,
+        layers: vec![test_layer(1, 0, 0, Region::empty())],
+        committed_surfaces: Vec::new(),
+        scanout_submit_state: Some(RuntimeScanoutState::Submitted),
+        scanout_lifecycle_states: vec![RuntimeScanoutState::Retired],
+    });
+
+    let report = driver
+        .run_with_adapter(output.id, 97, &mut adapter)
+        .expect("async scanout retirement should not disrupt frame scheduling");
+
+    assert_eq!(report.runtime_state.scanout_retirements, 1);
+    assert_eq!(report.runtime_state.scanout_submissions, 1);
+    assert_eq!(report.runtime_state.in_flight_scanouts, 1);
+    assert_eq!(report.runtime_state.phase, SessionRuntimePhase::Idle);
+    assert_eq!(
+        report.runtime_state.last_scanout_state,
+        Some(RuntimeScanoutState::Submitted)
     );
 }
 
@@ -459,6 +494,7 @@ fn live_runtime_driver_adapter_records_authority_transaction_commits() {
         layers: vec![test_layer(7, 0, 0, Region::empty())],
         committed_surfaces: Vec::new(),
         scanout_submit_state: None,
+        scanout_lifecycle_states: Vec::new(),
     });
 
     let report = driver
@@ -513,6 +549,7 @@ fn live_runtime_driver_adapter_commits_authority_batches_before_rendering() {
             layers: vec![test_layer(9, 0, 0, Region::empty())],
             committed_surfaces: Vec::new(),
             scanout_submit_state: None,
+            scanout_lifecycle_states: Vec::new(),
         },
     );
 

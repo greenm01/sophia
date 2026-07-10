@@ -577,6 +577,11 @@ rendered-buffer owner and KMS submission owner internally. Stale page-flip
 evidence keeps that owner in flight. Accepted presented page-flip evidence
 retires the owner and maps to reduced `Retired` state; resource retirement
 failure maps to reduced `Rejected` state.
+Those terminal reduced states are queued inside backend-live and drained into
+the next runtime tick as scanout lifecycle observations. The shared reducer
+records the retirement or rejection without treating it as a fresh render
+pipeline transition; only the active `SubmitScanout` response advances into
+portal and chrome phases.
 
 `HeadlessSessionDriver` is the first reusable command executor around this
 loop. It owns a `SessionRuntimeLoop` and last-committed layout cache, starts a
