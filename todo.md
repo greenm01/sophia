@@ -78,6 +78,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Made native primary-plane scanout policy expose its required reduced
+  request scope and fail closed if a built atomic request does not match it.
 - [x] Added a local non-hardware atomic scanout gate that runs formatting,
   GBM/EGL scanout feature tests, backend-live scanout intake tests, and reduced
   verifier fixture checks.

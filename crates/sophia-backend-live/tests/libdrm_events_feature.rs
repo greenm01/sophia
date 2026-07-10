@@ -1175,6 +1175,15 @@ fn native_libdrm_primary_plane_scanout_submit_chains_renderer_descriptor_to_atom
 #[test]
 fn native_libdrm_primary_plane_scanout_submit_page_flip_policy_disallows_modeset() {
     let device = full_primary_plane_scanout_device();
+    assert_eq!(
+        LibdrmNativePrimaryPlaneScanoutSubmitPolicy::page_flip().expected_request_scope(),
+        LibdrmNativeAtomicCommitRequestScope::PageFlip
+    );
+    assert_eq!(
+        LibdrmNativePrimaryPlaneScanoutSubmitPolicy::modeset().expected_request_scope(),
+        LibdrmNativeAtomicCommitRequestScope::Modeset
+    );
+
     let selection = select_native_primary_plane_target(&device);
     let result =
         submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_policy(

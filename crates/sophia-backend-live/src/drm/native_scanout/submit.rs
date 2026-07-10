@@ -59,6 +59,14 @@ impl LibdrmNativePrimaryPlaneScanoutSubmitPolicy {
             allow_modeset: true,
         }
     }
+
+    pub const fn expected_request_scope(self) -> LibdrmNativeAtomicCommitRequestScope {
+        if self.allow_modeset {
+            LibdrmNativeAtomicCommitRequestScope::Modeset
+        } else {
+            LibdrmNativeAtomicCommitRequestScope::PageFlip
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -225,6 +233,22 @@ where
         request
     };
     let request_scope = request.reduced_scope();
+    if request_scope != policy.expected_request_scope() {
+        let destroy = destroy_native_primary_plane_resources(device, resource_bundle);
+        return LibdrmNativePrimaryPlaneScanoutSubmitResult {
+            status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::AtomicRequestBuildFailed,
+            selection: selection.status,
+            scanout_buffer: descriptor.status,
+            properties: Some(properties.status),
+            resources: Some(resources.status),
+            request: Some(LibdrmNativeAtomicRequestBuildStatus::Built),
+            request_scope: Some(request_scope),
+            commit_flags: Some(request.reduced_flags()),
+            submit: None,
+            submission: None,
+            cleanup: destroy.cleanup,
+        };
+    }
     let commit_flags = request.reduced_flags();
     let (flags, request) = request.into_native();
     let submit = match device.submit_atomic_commit(flags, request) {
