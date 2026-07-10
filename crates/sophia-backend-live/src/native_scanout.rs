@@ -152,6 +152,7 @@ pub enum LibdrmNativeRenderedScanoutContextStatus {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LibdrmNativeAtomicScanoutSmokeEvidence {
     pub status: LibdrmNativeAtomicScanoutSmokeStatus,
+    pub scanout_target: Option<LiveKmsScanoutTargetStatus>,
     pub rendered_context: Option<LibdrmNativeRenderedScanoutContextStatus>,
     pub gbm_export: Option<LiveRendererScanoutBufferExportStatus>,
     pub submit: Option<LibdrmNativePrimaryPlaneScanoutSubmitStatus>,
@@ -167,6 +168,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
     pub const fn no_primary_card() -> Self {
         Self {
             status: LibdrmNativeAtomicScanoutSmokeStatus::NoPrimaryCard,
+            scanout_target: None,
             rendered_context: None,
             gbm_export: None,
             submit: None,
@@ -181,6 +183,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
     pub const fn kms_selection_failed() -> Self {
         Self {
             status: LibdrmNativeAtomicScanoutSmokeStatus::KmsSelectionFailed,
+            scanout_target: None,
             rendered_context: None,
             gbm_export: None,
             submit: None,
@@ -193,6 +196,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
     }
 
     pub fn from_pipeline_reports(
+        scanout_target: LiveKmsScanoutTargetStatus,
         rendered_context: Option<LibdrmNativeRenderedScanoutContextStatus>,
         gbm_export: LiveRendererScanoutBufferExportStatus,
         submit: Option<&LibdrmNativePrimaryPlaneScanoutSubmitResult>,
@@ -209,7 +213,9 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
         let retire_destroy = retire.and_then(|report| report.destroy);
         let retire_cleanup_pending = retire.is_some_and(|report| report.cleanup.is_some());
 
-        let status = if matches!(
+        let status = if scanout_target != LiveKmsScanoutTargetStatus::Ready {
+            LibdrmNativeAtomicScanoutSmokeStatus::KmsTargetUnavailable
+        } else if matches!(
             rendered_context,
             Some(
                 LibdrmNativeRenderedScanoutContextStatus::Unavailable
@@ -238,6 +244,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
 
         Self {
             status,
+            scanout_target: Some(scanout_target),
             rendered_context,
             gbm_export: Some(gbm_export),
             submit: submit_status,
@@ -256,6 +263,7 @@ pub enum LibdrmNativeAtomicScanoutSmokeStatus {
     Passed,
     NoPrimaryCard,
     KmsSelectionFailed,
+    KmsTargetUnavailable,
     RenderedContextUnavailable,
     GbmExportFailed,
     SubmitFailed,

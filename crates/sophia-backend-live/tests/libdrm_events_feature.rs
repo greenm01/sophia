@@ -27,10 +27,10 @@ use sophia_backend_live::{
     LibdrmNativeReadLoopReport, LibdrmNativeReadLoopStatus,
     LibdrmNativeRenderedScanoutContextStatus, LibdrmPageFlipEventPollReport,
     LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller, LibdrmRendererScanoutBuffer,
-    LiveBackendConfig, LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
-    LiveHardwareValidationSmokeReport, LiveHardwareValidationSmokeStatus,
-    LiveHardwareValidationTarget, LiveKmsScanoutTargetStatus, LiveLibdrmPollerDiagnostics,
-    LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
+    LiveBackendConfig, LiveGbmEglFrameTargetStatus, LiveHardwareValidationGateReport,
+    LiveHardwareValidationGateStatus, LiveHardwareValidationSmokeReport,
+    LiveHardwareValidationSmokeStatus, LiveHardwareValidationTarget, LiveKmsScanoutTargetStatus,
+    LiveLibdrmPollerDiagnostics, LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
     LiveLibdrmPollerStartupStatus, LivePageFlipCallback, LivePageFlipCallbackDecision,
     LivePageFlipCallbackQueue, LivePageFlipCallbackReport, LivePageFlipCallbackSourceReport,
     LivePageFlipEvent, LivePageFlipEventStatus, LiveRenderedPrimaryPlaneScanoutBackpressureReport,
@@ -2242,6 +2242,7 @@ fn native_atomic_scanout_smoke_evidence_passes_only_after_submit_page_flip_and_r
         retire_native_primary_plane_scanout_after_page_flip(&device, submission, &callback);
 
     let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+        LiveKmsScanoutTargetStatus::Ready,
         Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
         LiveRendererScanoutBufferExportStatus::Exported,
         Some(&submit),
@@ -2254,6 +2255,7 @@ fn native_atomic_scanout_smoke_evidence_passes_only_after_submit_page_flip_and_r
         evidence,
         LibdrmNativeAtomicScanoutSmokeEvidence {
             status: LibdrmNativeAtomicScanoutSmokeStatus::Passed,
+            scanout_target: Some(LiveKmsScanoutTargetStatus::Ready),
             rendered_context: Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
             gbm_export: Some(LiveRendererScanoutBufferExportStatus::Exported),
             submit: Some(LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip),
@@ -2290,6 +2292,7 @@ fn native_atomic_scanout_smoke_evidence_fails_closed_before_page_flip() {
         });
 
     let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+        LiveKmsScanoutTargetStatus::Ready,
         Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
         LiveRendererScanoutBufferExportStatus::Exported,
         Some(&submit),
@@ -2316,6 +2319,29 @@ fn native_atomic_scanout_smoke_evidence_fails_closed_before_page_flip() {
         submission.retire(&device).status,
         LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed
     );
+}
+
+#[test]
+fn native_atomic_scanout_smoke_evidence_fails_before_submit_for_not_ready_target() {
+    let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+        LiveKmsScanoutTargetStatus::FrameTargetSizeMismatch,
+        Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
+        LiveRendererScanoutBufferExportStatus::Exported,
+        None,
+        None,
+        None,
+        None,
+    );
+
+    assert_eq!(
+        evidence.status,
+        LibdrmNativeAtomicScanoutSmokeStatus::KmsTargetUnavailable
+    );
+    assert_eq!(
+        evidence.scanout_target,
+        Some(LiveKmsScanoutTargetStatus::FrameTargetSizeMismatch)
+    );
+    assert!(evidence.submit.is_none());
 }
 
 #[test]
@@ -2357,6 +2383,7 @@ fn native_atomic_scanout_smoke_evidence_reports_resource_retire_failure() {
         retire_native_primary_plane_scanout_after_page_flip(&device, submission, &callback);
 
     let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+        LiveKmsScanoutTargetStatus::Ready,
         Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
         LiveRendererScanoutBufferExportStatus::Exported,
         Some(&submit),
@@ -2392,6 +2419,7 @@ fn native_atomic_scanout_smoke_evidence_records_reduced_early_failures() {
     );
     assert_eq!(
         LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+            LiveKmsScanoutTargetStatus::Ready,
             Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
             LiveRendererScanoutBufferExportStatus::Unavailable,
             None,
@@ -2404,6 +2432,7 @@ fn native_atomic_scanout_smoke_evidence_records_reduced_early_failures() {
     );
     assert_eq!(
         LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+            LiveKmsScanoutTargetStatus::Ready,
             Some(LibdrmNativeRenderedScanoutContextStatus::Unavailable),
             LiveRendererScanoutBufferExportStatus::Unavailable,
             None,
@@ -3709,6 +3738,30 @@ mod atomic_scanout_hardware_smoke {
         let slot = LibdrmNativeOutputSlot::new(1).expect("slot one should be valid");
         let output = OutputId::from_raw(1);
         let target = LiveGbmEglFrameTargetRecord::new(selected.size());
+        let scanout_target = if target.status != LiveGbmEglFrameTargetStatus::Ready {
+            LiveKmsScanoutTargetStatus::InvalidFrameTarget
+        } else if target.size != selected.size() {
+            LiveKmsScanoutTargetStatus::FrameTargetSizeMismatch
+        } else {
+            LiveKmsScanoutTargetStatus::Ready
+        };
+        if scanout_target != LiveKmsScanoutTargetStatus::Ready {
+            let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+                scanout_target,
+                None,
+                LiveRendererScanoutBufferExportStatus::Unavailable,
+                None,
+                None,
+                None,
+                None,
+            );
+            println!("{evidence:?}");
+            assert_eq!(
+                evidence.status,
+                LibdrmNativeAtomicScanoutSmokeStatus::Passed
+            );
+            return;
+        }
 
         let context_report =
             NativeGbmRenderedScanoutContext::from_backend_device_result(card.try_clone_file());
@@ -3736,6 +3789,7 @@ mod atomic_scanout_hardware_smoke {
                 }
             };
             let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+                scanout_target,
                 Some(rendered_context),
                 export_status,
                 None,
@@ -3754,6 +3808,7 @@ mod atomic_scanout_hardware_smoke {
         let export = context.export_rendered_owned_scanout_buffer(target);
         if export.status != LiveRendererScanoutBufferExportStatus::Exported {
             let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+                scanout_target,
                 Some(rendered_context),
                 export.status,
                 None,
@@ -3778,6 +3833,7 @@ mod atomic_scanout_hardware_smoke {
         if submit.status != LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
         {
             let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+                scanout_target,
                 Some(rendered_context),
                 export.status,
                 Some(&submit),
@@ -3826,6 +3882,7 @@ mod atomic_scanout_hardware_smoke {
         }
 
         let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+            scanout_target,
             Some(rendered_context),
             export.status,
             Some(&submit),

@@ -288,12 +288,14 @@ read, reduced callback validation, and resource retirement. Default validation
 never opens or modesets real hardware.
 `LibdrmNativeAtomicScanoutSmokeEvidence` is the reduced record for that smoke.
 It reports only where the chain stopped: no primary card, KMS selection failure,
-persistent rendered-context failure, GBM export failure, submit failure, missing
-page-flip evidence, retirement failure, or passed. When retirement fails, the
-record also carries the reduced resource-destroy status so diagnostics can tell
-an accepted page flip from a framebuffer/blob cleanup failure. Native handles
-and object IDs remain private. A reduced cleanup-pending bit says whether a
-retry owner still exists after the smoke path attempts retirement.
+persistent rendered-context failure, KMS scanout target failure, GBM export
+failure, submit failure, missing page-flip evidence, retirement failure, or
+passed. The record carries only the reduced KMS scanout target status, never KMS
+object identity. When retirement fails, the record also carries the reduced
+resource-destroy status so diagnostics can tell an accepted page flip from a
+framebuffer/blob cleanup failure. Native handles and object IDs remain private.
+A reduced cleanup-pending bit says whether a retry owner still exists after the
+smoke path attempts retirement.
 
 Backend-live runtime ticks carry the current reduced scanout readiness report,
 KMS scanout target report, and page-flip event beside renderer health. This
