@@ -415,6 +415,7 @@ fn render_initialized_gbm_scanout_front_buffer<T: std::os::fd::AsFd>(
             height,
             config,
             candidate.format,
+            candidate.usage,
         ) {
             Ok(buffer) => return Ok(buffer),
             Err(detail) => last_detail = preferred_scanout_failure_detail(last_detail, detail),
@@ -432,16 +433,12 @@ fn render_initialized_gbm_scanout_front_buffer_with_config<T: std::os::fd::AsFd>
     height: u32,
     config: khronos_egl::Config,
     surface_format: gbm::Format,
+    surface_usage: gbm::BufferObjectFlags,
 ) -> Result<NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExportDetail> {
     use gbm::AsRaw as _;
 
     let gbm_surface = gbm_device
-        .create_surface::<()>(
-            width,
-            height,
-            surface_format,
-            gbm::BufferObjectFlags::SCANOUT | gbm::BufferObjectFlags::RENDERING,
-        )
+        .create_surface::<()>(width, height, surface_format, surface_usage)
         .map_err(|_error| NativeGbmScanoutBufferExportDetail::GbmSurfaceUnavailable)?;
     let native_window = gbm_surface.as_raw() as khronos_egl::NativeWindowType;
     let surface = unsafe { egl.create_window_surface(display, config, native_window, None) }
@@ -486,6 +483,7 @@ fn render_initialized_gbm_scanout_front_buffer_with_config<T: std::os::fd::AsFd>
 #[derive(Clone, Copy)]
 struct RenderedScanoutCandidate {
     format: gbm::Format,
+    usage: gbm::BufferObjectFlags,
     config_attributes: [khronos_egl::Int; 13],
 }
 
@@ -508,17 +506,33 @@ fn choose_scanout_config_for_format(
     })
 }
 
-fn rendered_scanout_candidates() -> [RenderedScanoutCandidate; 2] {
+fn rendered_scanout_candidates() -> [RenderedScanoutCandidate; 4] {
     [
         RenderedScanoutCandidate {
             format: gbm::Format::Xrgb8888,
+            usage: rendered_scanout_usage().union(gbm::BufferObjectFlags::LINEAR),
+            config_attributes: xrgb_window_config_attributes(),
+        },
+        RenderedScanoutCandidate {
+            format: gbm::Format::Xrgb8888,
+            usage: rendered_scanout_usage(),
             config_attributes: xrgb_window_config_attributes(),
         },
         RenderedScanoutCandidate {
             format: gbm::Format::Argb8888,
+            usage: rendered_scanout_usage().union(gbm::BufferObjectFlags::LINEAR),
+            config_attributes: window_config_attributes(),
+        },
+        RenderedScanoutCandidate {
+            format: gbm::Format::Argb8888,
+            usage: rendered_scanout_usage(),
             config_attributes: window_config_attributes(),
         },
     ]
+}
+
+fn rendered_scanout_usage() -> gbm::BufferObjectFlags {
+    gbm::BufferObjectFlags::SCANOUT | gbm::BufferObjectFlags::RENDERING
 }
 
 fn preferred_scanout_failure_detail(

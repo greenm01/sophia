@@ -94,6 +94,9 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Made rendered GBM/EGL scanout prefer linear GBM surfaces before the
+  driver's default layout after hardware evidence reached
+  `buffer_format=Xrgb8888`, `buffer_modifier=Implicit`, and still failed AddFB.
 - [x] Tightened native GBM/EGL rendered scanout export after hardware evidence
   reported `buffer_format=Argb8888` and `buffer_modifier=Invalid`: scanout
   config selection now requires matching `EGL_NATIVE_VISUAL_ID`, and invalid GBM

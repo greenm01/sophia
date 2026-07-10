@@ -1097,6 +1097,13 @@ real explicit modifier. The native EGL scanout exporter now selects only configs
 whose `EGL_NATIVE_VISUAL_ID` matches the requested GBM format and normalizes an
 invalid GBM modifier to the implicit/no-modifier path.
 
+A later smoke improved to `buffer_format=Xrgb8888`, `buffer_modifier=Implicit`,
+and `buffer_planes=Single`, but still failed framebuffer registration. The
+rendered scanout exporter now prefers linear GBM surfaces before the default
+driver layout. This keeps the rendered path first while giving legacy AddFB2
+and AddFB a buffer layout they are more likely to register without explicit
+modifier metadata.
+
 The primary-plane resource path now admits only one active plane for the packed
 XRGB8888/ARGB8888 scanout formats Sophia supports today. Multi-plane scanout
 descriptors fail closed as `InvalidBuffer` before mode-blob creation,
