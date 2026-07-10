@@ -20,6 +20,13 @@ active milestone to `docs/roadmap-history.md`.
 - [ ] Verify rendered GBM front-buffer export, primary-plane atomic submit,
   native page-flip callback, and resource retirement appear in reduced evidence.
 
+Support now exists for that hardware proof:
+
+- `tools/atomic_scanout_smoke.sh` records the opt-in smoke log and verifies
+  passing evidence automatically.
+- `tools/verify_atomic_scanout_evidence.sh` can verify a captured log offline
+  against the reduced atomic scanout evidence contract.
+
 ---
 
 ## Next 3 Milestones

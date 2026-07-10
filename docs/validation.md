@@ -143,6 +143,17 @@ tools/atomic_scanout_smoke.sh
 SOPHIA_ATOMIC_SCANOUT_EVIDENCE=/tmp/sophia-atomic-smoke.log tools/atomic_scanout_smoke.sh
 ```
 
+The helper runs `tools/verify_atomic_scanout_evidence.sh` after a successful
+smoke. To verify a captured log without rerunning the hardware smoke:
+
+```sh
+tools/verify_atomic_scanout_evidence.sh /tmp/sophia-atomic-smoke.log
+```
+
+The verifier accepts only reduced evidence that proves a rendered GBM
+front-buffer export, primary-plane atomic submit, nonblocking page-flip commit
+flags, native page-flip delivery, and explicit resource retirement.
+
 ## Retiring `DEFAULT_DISPLAY`
 
 The `DEFAULT_DISPLAY` EGL smoke is temporary, but it is not removable merely

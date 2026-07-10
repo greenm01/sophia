@@ -11,6 +11,7 @@ echo "Sophia atomic scanout hardware smoke"
 echo "This test may take DRM master on a primary /dev/dri/card* node."
 echo "Evidence: $EVIDENCE_FILE"
 
+set +e
 (
     cd "$ROOT_DIR"
     SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 \
@@ -19,5 +20,13 @@ echo "Evidence: $EVIDENCE_FILE"
         "$TEST_FILTER" \
         -- --nocapture
 ) 2>&1 | tee "$EVIDENCE_FILE"
+test_status="${PIPESTATUS[0]}"
+set -e
 
-exit "${PIPESTATUS[0]}"
+if [[ "$test_status" -eq 0 ]]; then
+    "$ROOT_DIR/tools/verify_atomic_scanout_evidence.sh" "$EVIDENCE_FILE"
+else
+    echo "Atomic scanout smoke failed; evidence left at $EVIDENCE_FILE" >&2
+fi
+
+exit "$test_status"
