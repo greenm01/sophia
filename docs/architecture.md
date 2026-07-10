@@ -700,6 +700,14 @@ Submitted scanout retirement follows the same rule: an accepted, presented
 page-flip callback retires the framebuffer resources; stale, wrong-output, or
 rejected callbacks return the owner to the caller so in-flight resources stay
 alive.
+`LiveBackendRuntimeAssembly::submit_rendered_primary_plane_scanout_with` is the
+runtime-facing version of that chain. It starts from the current reduced
+`LiveGbmEglFrameTargetRecord`, asks a rendered scanout exporter for a ready
+front-buffer descriptor plus its opaque owner, submits the descriptor through
+the primary-plane path, and returns a combined owner. The rendered buffer owner
+and the KMS submission owner then travel together until accepted page-flip
+evidence allows `retire_rendered_primary_plane_scanout_after_page_flip` to drop
+both safely.
 The opt-in hardware smoke records that chain through
 `LibdrmNativeAtomicScanoutSmokeEvidence`: GBM export, primary-plane submit,
 native page-flip polling, callback intake, and retirement collapse to reduced

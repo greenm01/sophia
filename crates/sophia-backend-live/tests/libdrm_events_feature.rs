@@ -30,16 +30,18 @@ use sophia_backend_live::{
     LiveLibdrmPollerStartupReport, LiveLibdrmPollerStartupStatus, LivePageFlipCallback,
     LivePageFlipCallbackDecision, LivePageFlipCallbackQueue, LivePageFlipCallbackReport,
     LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus,
-    NativeLibdrmAtomicScanoutCommitter, NativeLibdrmPageFlipEventPoller,
-    NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller, Size,
-    build_native_primary_plane_atomic_request, create_native_primary_plane_resources,
+    LiveRenderedPrimaryPlaneScanoutSubmitStatus, LiveRenderedScanoutBufferExport,
+    LiveRenderedScanoutBufferExporter, NativeLibdrmAtomicScanoutCommitter,
+    NativeLibdrmPageFlipEventPoller, NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller,
+    Size, build_native_primary_plane_atomic_request, create_native_primary_plane_resources,
     decode_native_page_flip_batch, destroy_native_primary_plane_resources, discover_live_backend,
     discover_native_primary_plane_property_handles, libdrm_dependency_admission_report,
     libdrm_fd_authority_report, native_libdrm_event_adapter_report,
     native_libdrm_event_adapter_report_for_authority, real_atomic_scanout_validation_gate,
     real_atomic_scanout_validation_smoke_report, real_libdrm_events_validation_gate,
     real_libdrm_events_validation_smoke_report, reduce_native_page_flip_event,
-    retire_native_primary_plane_scanout_after_page_flip, select_native_primary_plane_target,
+    retire_native_primary_plane_scanout_after_page_flip,
+    retire_rendered_primary_plane_scanout_after_page_flip, select_native_primary_plane_target,
     submit_native_primary_plane_scanout_from_renderer_descriptor,
 };
 use sophia_renderer_live::{
@@ -621,6 +623,50 @@ fn scanout_buffer(size: Size) -> LibdrmRendererScanoutBuffer {
         .expect("ready renderer descriptor should become a backend-private DRM buffer")
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct FakeRenderedScanoutOwner {
+    raw: u32,
+}
+
+struct FakeRenderedScanoutExporter {
+    status: LiveRendererScanoutBufferExportStatus,
+    descriptor: Option<sophia_renderer_live::LiveRendererScanoutBufferDescriptor>,
+    owner: Option<FakeRenderedScanoutOwner>,
+}
+
+impl FakeRenderedScanoutExporter {
+    fn exported(size: Size) -> Self {
+        Self {
+            status: LiveRendererScanoutBufferExportStatus::Exported,
+            descriptor: Some(scanout_descriptor(size)),
+            owner: Some(FakeRenderedScanoutOwner { raw: 7 }),
+        }
+    }
+
+    fn unavailable() -> Self {
+        Self {
+            status: LiveRendererScanoutBufferExportStatus::Unavailable,
+            descriptor: None,
+            owner: None,
+        }
+    }
+}
+
+impl LiveRenderedScanoutBufferExporter for FakeRenderedScanoutExporter {
+    type Owner = FakeRenderedScanoutOwner;
+
+    fn export_rendered_scanout_buffer(
+        &mut self,
+        _target: LiveGbmEglFrameTargetRecord,
+    ) -> LiveRenderedScanoutBufferExport<Self::Owner> {
+        LiveRenderedScanoutBufferExport {
+            status: self.status,
+            descriptor: self.descriptor,
+            owner: self.owner.take(),
+        }
+    }
+}
+
 #[test]
 fn native_libdrm_atomic_commit_request_reports_reduced_flags() {
     let default_request =
@@ -952,6 +998,128 @@ fn native_libdrm_primary_plane_scanout_keeps_submission_until_page_flip_is_accep
         submission.retire(&device).status,
         LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed
     );
+}
+
+#[test]
+fn live_runtime_assembly_submits_rendered_primary_plane_scanout_through_reduced_seam() {
+    let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-submit");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready backend should seed live assembly");
+    let device = full_primary_plane_scanout_device();
+    let mut exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+
+    let mut submitted = assembly.submit_rendered_primary_plane_scanout_with(&device, &mut exporter);
+
+    assert_eq!(
+        submitted.status,
+        LiveRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+    );
+    assert_eq!(
+        submitted.export,
+        Some(LiveRendererScanoutBufferExportStatus::Exported)
+    );
+    assert_eq!(
+        submitted.submit,
+        Some(LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip)
+    );
+    let submission = submitted
+        .submission
+        .take()
+        .expect("rendered scanout submit should retain both owners");
+    let callback = LivePageFlipCallbackReport {
+        decision: LivePageFlipCallbackDecision::Accepted,
+        event: LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(55),
+        },
+    };
+    let retired =
+        retire_rendered_primary_plane_scanout_after_page_flip(&device, submission, &callback);
+
+    assert_eq!(
+        retired.status,
+        LibdrmNativePrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip
+    );
+    assert_eq!(
+        retired.destroy,
+        Some(LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed)
+    );
+    assert!(retired.submission.is_none());
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_runtime_assembly_keeps_rendered_scanout_owner_until_page_flip_is_accepted() {
+    let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-wait");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready backend should seed live assembly");
+    let device = full_primary_plane_scanout_device();
+    let mut exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+    let mut submitted = assembly.submit_rendered_primary_plane_scanout_with(&device, &mut exporter);
+    let submission = submitted
+        .submission
+        .take()
+        .expect("rendered scanout submit should retain both owners");
+    let rejected = LivePageFlipCallbackReport {
+        decision: LivePageFlipCallbackDecision::RejectedStaleFrameSerial,
+        event: LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Rejected,
+            frame_serial: Some(54),
+        },
+    };
+
+    let waiting =
+        retire_rendered_primary_plane_scanout_after_page_flip(&device, submission, &rejected);
+
+    assert_eq!(
+        waiting.status,
+        LibdrmNativePrimaryPlaneScanoutRetireStatus::WaitingForAcceptedPageFlip
+    );
+    assert!(waiting.destroy.is_none());
+    let owner = waiting
+        .submission
+        .expect("waiting retirement must keep rendered scanout owner")
+        .into_scanout_buffer();
+    assert_eq!(owner, FakeRenderedScanoutOwner { raw: 7 });
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_runtime_assembly_fails_rendered_scanout_submit_before_kms_on_export_failure() {
+    let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-export-fail");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready backend should seed live assembly");
+    let device = full_primary_plane_scanout_device();
+    let mut exporter = FakeRenderedScanoutExporter::unavailable();
+
+    let submitted = assembly.submit_rendered_primary_plane_scanout_with(&device, &mut exporter);
+
+    assert_eq!(
+        submitted.status,
+        LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutExportFailed
+    );
+    assert_eq!(
+        submitted.export,
+        Some(LiveRendererScanoutBufferExportStatus::Unavailable)
+    );
+    assert!(submitted.submit.is_none());
+    assert!(submitted.submission.is_none());
+
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

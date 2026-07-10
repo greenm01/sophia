@@ -102,6 +102,9 @@ active milestone to `docs/roadmap-history.md`.
 - [x] Added a rendered GBM scanout export path that clears an EGL-backed GBM
   surface, swaps, locks the XRGB8888 front buffer, and feeds the same reduced
   scanout descriptor into the atomic submit chain.
+- [x] Added a runtime-facing rendered primary-plane scanout submit seam that
+  retains the rendered buffer owner with the KMS submission owner until
+  accepted page-flip retirement.
 - [x] Added feature-gated DRM atomic property discovery for the primary-plane
   request builder.
 - [x] Defined opt-in environment gates for real libdrm and libinput validation.

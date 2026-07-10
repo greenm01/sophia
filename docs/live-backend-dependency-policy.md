@@ -188,15 +188,21 @@ and submits it with modeset permission. A successful return is only
 `SubmittedWaitingForPageFlip`; the opaque submission owner must remain alive
 until backend-live accepts native page-flip evidence and explicitly retires the
 resources.
+Runtime code should use the rendered-owner wrapper instead of calling the
+descriptor submit seam directly. `LiveRenderedScanoutBufferExporter` abstracts a
+rendered front-buffer owner for deterministic tests and native GBM/EGL, while
+`LiveRenderedPrimaryPlaneScanoutSubmission` retains that owner together with the
+KMS submission owner. If page-flip evidence is stale or rejected, retirement
+returns the combined owner to the caller.
 `retire_native_primary_plane_scanout_after_page_flip` consumes that owner only
 when a reduced callback report is accepted and presented. Rejected or stale
 callbacks return the owner to the caller, preserving buffer and framebuffer
 lifetime until a real presentation event arrives.
 The opt-in atomic hardware smoke ties these seams together in a child process:
-primary card open, DRM atomic client capability setup, GBM scanout allocation
-from the duplicated fd namespace, primary-plane submit, native page-flip read,
-reduced callback validation, and resource retirement. Default validation never
-opens or modesets real hardware.
+primary card open, DRM atomic client capability setup, rendered GBM front-buffer
+export from the duplicated fd namespace, primary-plane submit, native page-flip
+read, reduced callback validation, and resource retirement. Default validation
+never opens or modesets real hardware.
 `LibdrmNativeAtomicScanoutSmokeEvidence` is the reduced record for that smoke.
 It reports only where the chain stopped: no primary card, KMS selection failure,
 GBM export failure, submit failure, missing page-flip evidence, retirement

@@ -62,6 +62,8 @@ use sophia_renderer_live::{
     NativeGbmBackedEglDrawSmoke, NativeGbmBackedEglFrameTargetAllocator,
     NativeGbmBackedEglPlatformProbe, NativeGbmBackedEglPresentationSmoke,
 };
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+use sophia_renderer_live::{NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExporter};
 
 pub const LIVE_PAGE_FLIP_CALLBACK_CHANNEL_CAPACITY: usize = 128;
 pub const SOPHIA_RUN_REAL_LIBDRM_EVENTS_SMOKE: &str = "SOPHIA_RUN_REAL_LIBDRM_EVENTS_SMOKE";
@@ -2072,6 +2074,142 @@ pub enum LibdrmNativePrimaryPlaneScanoutRetireStatus {
     RetiredAfterPageFlip,
     WaitingForAcceptedPageFlip,
     ResourceRetireFailed,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Debug)]
+pub struct LiveRenderedScanoutBufferExport<Owner> {
+    pub status: LiveRendererScanoutBufferExportStatus,
+    pub descriptor: Option<LiveRendererScanoutBufferDescriptor>,
+    pub owner: Option<Owner>,
+}
+
+#[cfg(feature = "libdrm-events")]
+pub trait LiveRenderedScanoutBufferExporter {
+    type Owner;
+
+    fn export_rendered_scanout_buffer(
+        &mut self,
+        target: LiveGbmEglFrameTargetRecord,
+    ) -> LiveRenderedScanoutBufferExport<Self::Owner>;
+}
+
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+pub struct NativeGbmRenderedScanoutBufferExporter<T> {
+    device: Option<io::Result<T>>,
+}
+
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+impl<T> NativeGbmRenderedScanoutBufferExporter<T> {
+    pub fn new(device: io::Result<T>) -> Self {
+        Self {
+            device: Some(device),
+        }
+    }
+}
+
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+impl<T> LiveRenderedScanoutBufferExporter for NativeGbmRenderedScanoutBufferExporter<T>
+where
+    T: AsFd,
+{
+    type Owner = NativeGbmOwnedScanoutBuffer;
+
+    fn export_rendered_scanout_buffer(
+        &mut self,
+        target: LiveGbmEglFrameTargetRecord,
+    ) -> LiveRenderedScanoutBufferExport<Self::Owner> {
+        let Some(device) = self.device.take() else {
+            return LiveRenderedScanoutBufferExport {
+                status: LiveRendererScanoutBufferExportStatus::Unavailable,
+                descriptor: None,
+                owner: None,
+            };
+        };
+
+        let report =
+            NativeGbmScanoutBufferExporter::export_rendered_owned_scanout_buffer_from_backend_device_result(
+                device, target,
+            );
+        let descriptor = report.buffer.as_ref().map(|buffer| buffer.descriptor());
+
+        LiveRenderedScanoutBufferExport {
+            status: report.status,
+            descriptor,
+            owner: report.buffer,
+        }
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Debug)]
+pub struct LiveRenderedPrimaryPlaneScanoutSubmitResult<Owner> {
+    pub status: LiveRenderedPrimaryPlaneScanoutSubmitStatus,
+    pub target: Option<LiveGbmEglFrameTargetStatus>,
+    pub export: Option<LiveRendererScanoutBufferExportStatus>,
+    pub submit: Option<LibdrmNativePrimaryPlaneScanoutSubmitStatus>,
+    pub submission: Option<LiveRenderedPrimaryPlaneScanoutSubmission<Owner>>,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveRenderedPrimaryPlaneScanoutSubmitStatus {
+    SubmittedWaitingForPageFlip,
+    FrameTargetUnavailable,
+    ScanoutExportFailed,
+    PrimaryPlaneSubmitFailed,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Debug)]
+pub struct LiveRenderedPrimaryPlaneScanoutSubmission<Owner> {
+    scanout_buffer: Owner,
+    primary_plane: LibdrmNativePrimaryPlaneScanoutSubmission,
+}
+
+#[cfg(feature = "libdrm-events")]
+impl<Owner> LiveRenderedPrimaryPlaneScanoutSubmission<Owner> {
+    pub fn into_scanout_buffer(self) -> Owner {
+        self.scanout_buffer
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Debug)]
+pub struct LiveRenderedPrimaryPlaneScanoutRetireResult<Owner> {
+    pub status: LibdrmNativePrimaryPlaneScanoutRetireStatus,
+    pub destroy: Option<LibdrmNativePrimaryPlaneResourceDestroyStatus>,
+    pub submission: Option<LiveRenderedPrimaryPlaneScanoutSubmission<Owner>>,
+}
+
+#[cfg(feature = "libdrm-events")]
+pub fn retire_rendered_primary_plane_scanout_after_page_flip<D, Owner>(
+    device: &D,
+    submission: LiveRenderedPrimaryPlaneScanoutSubmission<Owner>,
+    callback: &LivePageFlipCallbackReport,
+) -> LiveRenderedPrimaryPlaneScanoutRetireResult<Owner>
+where
+    D: LibdrmNativePrimaryPlaneResourceDevice,
+{
+    let owner = submission.scanout_buffer;
+    let retired = retire_native_primary_plane_scanout_after_page_flip(
+        device,
+        submission.primary_plane,
+        callback,
+    );
+    let submission =
+        retired
+            .submission
+            .map(|primary_plane| LiveRenderedPrimaryPlaneScanoutSubmission {
+                scanout_buffer: owner,
+                primary_plane,
+            });
+
+    LiveRenderedPrimaryPlaneScanoutRetireResult {
+        status: retired.status,
+        destroy: retired.destroy,
+        submission,
+    }
 }
 
 #[cfg(feature = "libdrm-events")]
@@ -4275,6 +4413,85 @@ where
             );
         self.gbm_egl_frame_target_allocation = Some(report);
         Some(report)
+    }
+
+    #[cfg(feature = "libdrm-events")]
+    pub fn submit_rendered_primary_plane_scanout_with<D, E>(
+        &mut self,
+        device: &D,
+        exporter: &mut E,
+    ) -> LiveRenderedPrimaryPlaneScanoutSubmitResult<E::Owner>
+    where
+        D: LibdrmNativeKmsSelectionDevice
+            + LibdrmNativePropertyLookupDevice
+            + LibdrmNativePrimaryPlaneResourceDevice
+            + LibdrmNativeAtomicCommitDevice,
+        E: LiveRenderedScanoutBufferExporter,
+    {
+        let Some(target) = self.gbm_egl_frame_target else {
+            return LiveRenderedPrimaryPlaneScanoutSubmitResult {
+                status: LiveRenderedPrimaryPlaneScanoutSubmitStatus::FrameTargetUnavailable,
+                target: None,
+                export: None,
+                submit: None,
+                submission: None,
+            };
+        };
+
+        let export = exporter.export_rendered_scanout_buffer(target);
+        if export.status != LiveRendererScanoutBufferExportStatus::Exported {
+            return LiveRenderedPrimaryPlaneScanoutSubmitResult {
+                status: LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutExportFailed,
+                target: Some(target.status),
+                export: Some(export.status),
+                submit: None,
+                submission: None,
+            };
+        }
+
+        let (Some(descriptor), Some(owner)) = (export.descriptor, export.owner) else {
+            return LiveRenderedPrimaryPlaneScanoutSubmitResult {
+                status: LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutExportFailed,
+                target: Some(target.status),
+                export: Some(export.status),
+                submit: None,
+                submission: None,
+            };
+        };
+
+        let mut submit =
+            submit_native_primary_plane_scanout_from_renderer_descriptor(device, descriptor);
+        if submit.status != LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+        {
+            return LiveRenderedPrimaryPlaneScanoutSubmitResult {
+                status: LiveRenderedPrimaryPlaneScanoutSubmitStatus::PrimaryPlaneSubmitFailed,
+                target: Some(target.status),
+                export: Some(export.status),
+                submit: Some(submit.status),
+                submission: None,
+            };
+        }
+
+        let Some(primary_plane) = submit.submission.take() else {
+            return LiveRenderedPrimaryPlaneScanoutSubmitResult {
+                status: LiveRenderedPrimaryPlaneScanoutSubmitStatus::PrimaryPlaneSubmitFailed,
+                target: Some(target.status),
+                export: Some(export.status),
+                submit: Some(submit.status),
+                submission: None,
+            };
+        };
+
+        LiveRenderedPrimaryPlaneScanoutSubmitResult {
+            status: LiveRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip,
+            target: Some(target.status),
+            export: Some(export.status),
+            submit: Some(submit.status),
+            submission: Some(LiveRenderedPrimaryPlaneScanoutSubmission {
+                scanout_buffer: owner,
+                primary_plane,
+            }),
+        }
     }
 
     pub fn page_flip_observation(&self) -> LivePageFlipEvent {
