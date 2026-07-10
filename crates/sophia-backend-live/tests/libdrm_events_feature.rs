@@ -70,7 +70,8 @@ use sophia_backend_live::{
 #[cfg(feature = "gbm-probe")]
 use sophia_backend_live::{
     LiveGbmEglFrameTargetStatus, NativeGbmRenderedScanoutBufferDiscoveryExporter,
-    NativeGbmRenderedScanoutContextStatus, RenderDeviceDiscoveryBackend,
+    NativeGbmRenderedScanoutContextStatus, RealAtomicScanoutSmokeConfig,
+    RenderDeviceDiscoveryBackend,
 };
 #[cfg(feature = "libinput-events")]
 use sophia_protocol::{InputEventKind, Point};
@@ -264,6 +265,21 @@ fn real_atomic_scanout_page_flip_wait_policy_matches_hardware_smoke_budget() {
     assert_eq!(policy.max_emit, 1);
     assert_eq!(policy.timeout, std::time::Duration::from_secs(2));
     assert_eq!(policy.sleep, std::time::Duration::from_millis(5));
+}
+
+#[cfg(feature = "gbm-probe")]
+#[test]
+fn real_atomic_scanout_smoke_config_rejects_zero_identity_fields() {
+    let policy = RealAtomicScanoutPageFlipWaitPolicy::hardware_smoke();
+    let config = RealAtomicScanoutSmokeConfig::from_raw(1, 7, 9, policy)
+        .expect("nonzero slot and authority should mint smoke config");
+
+    assert_eq!(config.slot.raw(), 1);
+    assert_eq!(config.output.raw(), 7);
+    assert_eq!(config.authority.generation(), 9);
+    assert_eq!(config.wait_policy, policy);
+    assert!(RealAtomicScanoutSmokeConfig::from_raw(0, 7, 9, policy).is_none());
+    assert!(RealAtomicScanoutSmokeConfig::from_raw(1, 7, 0, policy).is_none());
 }
 
 #[test]

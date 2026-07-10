@@ -14,6 +14,9 @@ pub(crate) use readiness::*;
 #[cfg(feature = "gbm-probe")]
 pub use render_device::*;
 #[cfg(feature = "gbm-probe")]
-pub use rendered_smoke::run_real_atomic_scanout_smoke_phases;
+pub use rendered_smoke::{
+    RealAtomicScanoutSmokeConfig, run_real_atomic_scanout_smoke_phases,
+    run_real_atomic_scanout_smoke_phases_with,
+};
 pub use selection::*;
 pub use session::*;

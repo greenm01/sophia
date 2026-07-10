@@ -366,6 +366,9 @@ smoke still needs a DRM-master-capable machine.
 - [x] Added a feature-gated `sophia atomic-scanout-smoke` CLI parent/child
   command and moved the destructive hardware smoke helper off the cargo-test
   runner.
+- [x] Added a reduced atomic scanout smoke config seam so slot, output,
+  authority generation, and page-flip wait policy are explicit instead of
+  hard-coded inside the proof runner.
 - [x] Added reduced `Deferred` scanout state so rendered primary-plane
   backpressure does not masquerade as rejection or corrupt in-flight accounting.
 - [x] Threaded accepted reduced page-flip evidence into the rendered scanout
