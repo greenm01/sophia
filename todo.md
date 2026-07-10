@@ -83,6 +83,8 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Replaced the page-flip commit gate's staged-batch panic with an explicit
+  idle fallback so the atomic visual authority fails closed.
 - [x] Removed panic-prone rendered-scanout owner retention from the page-flip
   retirement path; resource ownership now moves through explicit reduced
   branches.

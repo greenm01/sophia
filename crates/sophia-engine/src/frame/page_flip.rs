@@ -103,10 +103,9 @@ impl PageFlipCommitGate {
             };
         }
 
-        let batch = self
-            .staged
-            .take()
-            .expect("staged page-flip batch should exist after readiness check");
+        let Some(batch) = self.staged.take() else {
+            return PageFlipCommitOutcome::Idle;
+        };
         let commit =
             engine.commit_surface_transactions(batch.transaction, &batch.transactions, committed);
 
