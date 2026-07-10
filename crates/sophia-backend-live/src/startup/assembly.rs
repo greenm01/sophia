@@ -77,42 +77,13 @@ impl LiveBackendStartupReport {
             renderer_status,
             selection_observation(renderer_selection),
         );
-        let scanout_readiness = self.scanout_readiness_report(LiveRendererPresentationReport {
-            status: LiveRendererPresentationStatus::Ready,
-        });
-        let kms_scanout_target = self.kms_scanout_target_report(LiveRendererPresentationReport {
-            status: LiveRendererPresentationStatus::Ready,
-        });
-        let page_flip_event =
-            LivePageFlipEvent::from_kms_scanout_target_status(kms_scanout_target.status);
-        let page_flip_callback_intake = LivePageFlipCallbackIntake::new(selected_output.id);
-        let gbm_egl_frame_target = LiveGbmEglFrameTargetRecord::new(selected_output.size);
         self.into_headless_assembly(poller, renderer_selection)
-            .map(|assembly| LiveBackendRuntimeAssembly {
-                assembly,
-                renderer_observation,
-                output_size: Some(selected_output.size),
-                scanout_readiness,
-                kms_scanout_target,
-                gbm_egl_frame_target: Some(gbm_egl_frame_target),
-                gbm_egl_frame_target_lifecycle: Some(
-                    LiveGbmEglFrameTargetLifecycleReport::created(gbm_egl_frame_target),
-                ),
-                gbm_egl_frame_target_allocation: None,
-                page_flip_event,
-                page_flip_callback_intake,
-                page_flip_callback_queue: None,
-                libdrm_poller_diagnostics: LiveLibdrmPollerDiagnostics::not_configured(),
-                #[cfg(feature = "libdrm-events")]
-                rendered_primary_plane_scanout_submission: None,
-                #[cfg(feature = "libdrm-events")]
-                rendered_primary_plane_scanout_cleanup: None,
-                #[cfg(feature = "libdrm-events")]
-                rendered_primary_plane_runtime_scanout_state: None,
-                #[cfg(feature = "libdrm-events")]
-                rendered_primary_plane_scanout_in_flight_ticks: 0,
-                #[cfg(feature = "libdrm-events")]
-                pending_runtime_scanout_states: VecDeque::new(),
+            .map(|assembly| {
+                LiveBackendRuntimeAssembly::from_ready_headless_scanout(
+                    assembly,
+                    selected_output,
+                    renderer_observation,
+                )
             })
     }
 }

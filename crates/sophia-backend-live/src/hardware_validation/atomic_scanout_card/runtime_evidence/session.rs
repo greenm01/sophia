@@ -17,36 +17,13 @@ impl RealAtomicScanoutPageFlipSession {
             size: self.selection().size(),
             scale: 1,
         };
-        let frame_target = LiveGbmEglFrameTargetRecord::new(output.size);
         let (sender, receiver) = std::sync::mpsc::sync_channel(4);
-        let mut runtime = LiveBackendRuntimeAssembly {
-            assembly: HeadlessCompositorBackendAssembly::new(output),
-            renderer_observation: real_atomic_runtime_rendered_scanout_renderer_observation(),
-            output_size: Some(output.size),
-            scanout_readiness: LiveScanoutReadinessReport {
-                status: LiveScanoutReadinessStatus::Ready,
-            },
-            kms_scanout_target: LiveKmsScanoutTargetReport {
-                status: LiveKmsScanoutTargetStatus::Ready,
-                size: Some(output.size),
-            },
-            gbm_egl_frame_target: Some(frame_target),
-            gbm_egl_frame_target_lifecycle: Some(LiveGbmEglFrameTargetLifecycleReport::created(
-                frame_target,
-            )),
-            gbm_egl_frame_target_allocation: None,
-            page_flip_event: LivePageFlipEvent::from_kms_scanout_target_status(
-                LiveKmsScanoutTargetStatus::Ready,
-            ),
-            page_flip_callback_intake: LivePageFlipCallbackIntake::new(output.id),
-            page_flip_callback_queue: Some(LivePageFlipCallbackQueue::new(receiver, 4)),
-            libdrm_poller_diagnostics: LiveLibdrmPollerDiagnostics::not_configured(),
-            rendered_primary_plane_scanout_submission: None,
-            rendered_primary_plane_scanout_cleanup: None,
-            rendered_primary_plane_runtime_scanout_state: None,
-            rendered_primary_plane_scanout_in_flight_ticks: 0,
-            pending_runtime_scanout_states: VecDeque::new(),
-        };
+        let mut runtime = LiveBackendRuntimeAssembly::from_ready_headless_scanout(
+            HeadlessCompositorBackendAssembly::new(output),
+            output,
+            real_atomic_runtime_rendered_scanout_renderer_observation(),
+        )
+        .with_page_flip_callback_queue(LivePageFlipCallbackQueue::new(receiver, 4));
 
         let first = match runtime
             .run_tick_with_native_gbm_rendered_primary_plane_scanout_exporter_and_native_page_flip_events_with(
