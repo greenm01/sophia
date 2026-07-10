@@ -51,7 +51,7 @@ verify_phase() {
 
     declare -A observed=()
     declare -A expected=(
-        ["schema"]="9"
+        ["schema"]="10"
         ["phase"]="$phase"
         ["status"]="Passed"
         ["scanout_target"]="Ready"
@@ -63,6 +63,7 @@ verify_phase() {
         ["buffer_modifier"]="SupportedBufferModifier"
         ["buffer_planes"]="SupportedBufferPlanes"
         ["properties"]="Discovered"
+        ["format_table"]="KnownFormatTableState"
         ["resources"]="Created"
         ["framebuffer"]="CreatedFramebuffer"
         ["request"]="Built"
@@ -128,6 +129,13 @@ verify_phase() {
         if [[ "$key" == "buffer_planes" ]]; then
             case "$actual" in
                 Single|Multiple)
+                    continue
+                    ;;
+            esac
+        fi
+        if [[ "$key" == "format_table" ]]; then
+            case "$actual" in
+                Present|Missing)
                     continue
                     ;;
             esac

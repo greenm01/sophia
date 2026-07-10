@@ -96,6 +96,8 @@ where
         result.properties = Some(properties.status);
         return result;
     };
+    let format_table =
+        Some(LibdrmNativePrimaryPlaneFormatTableStatus::from_property_handles(property_handles));
 
     let resources = if policy.allow_modeset {
         create_native_primary_plane_resources(device, selected, &buffer)
@@ -110,6 +112,7 @@ where
             descriptor,
         );
         result.properties = Some(properties.status);
+        result.format_table = format_table;
         result.resources = Some(resources.status);
         result.framebuffer = resources.framebuffer;
         result.cleanup = resources.cleanup;
@@ -131,6 +134,7 @@ where
             descriptor,
         );
         result.properties = Some(properties.status);
+        result.format_table = format_table;
         result.resources = Some(resources.status);
         result.framebuffer = resources.framebuffer;
         result.request = Some(request.status);
@@ -153,6 +157,7 @@ where
             descriptor,
         );
         result.properties = Some(properties.status);
+        result.format_table = format_table;
         result.resources = Some(resources.status);
         result.framebuffer = resources.framebuffer;
         result.request = Some(LibdrmNativeAtomicRequestBuildStatus::Built);
@@ -180,6 +185,7 @@ where
             descriptor,
         );
         result.properties = Some(properties.status);
+        result.format_table = format_table;
         result.resources = Some(resources.status);
         result.framebuffer = resources.framebuffer;
         result.request = Some(LibdrmNativeAtomicRequestBuildStatus::Built);
@@ -197,6 +203,7 @@ where
         descriptor,
     );
     result.properties = Some(properties.status);
+    result.format_table = format_table;
     result.resources = Some(resources.status);
     result.framebuffer = resources.framebuffer;
     result.request = Some(LibdrmNativeAtomicRequestBuildStatus::Built);

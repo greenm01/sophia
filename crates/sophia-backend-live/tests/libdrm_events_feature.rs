@@ -21,23 +21,23 @@ use sophia_backend_live::{
     LibdrmNativePageFlipDecodeStatus, LibdrmNativePageFlipReadResult, LibdrmNativePageFlipReader,
     LibdrmNativePageFlipSource, LibdrmNativePageFlipSourceReport, LibdrmNativePageFlipSourceStatus,
     LibdrmNativePlaneSnapshot, LibdrmNativePollerDiagnostics,
-    LibdrmNativePrimaryPlaneFramebufferCreateDetail, LibdrmNativePrimaryPlaneObjects,
-    LibdrmNativePrimaryPlanePropertyDiscoveryStatus, LibdrmNativePrimaryPlanePropertyHandles,
-    LibdrmNativePrimaryPlaneResourceCreateStatus, LibdrmNativePrimaryPlaneResourceDestroyStatus,
-    LibdrmNativePrimaryPlaneResourceDevice, LibdrmNativePrimaryPlaneScanoutRetireResult,
-    LibdrmNativePrimaryPlaneScanoutRetireStatus, LibdrmNativePrimaryPlaneScanoutSubmitPolicy,
-    LibdrmNativePrimaryPlaneScanoutSubmitStatus, LibdrmNativePrimaryPlaneSelectionResult,
-    LibdrmNativePrimaryPlaneSelectionStatus, LibdrmNativePropertyHandleSet,
-    LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport, LibdrmNativeReadLoopReport,
-    LibdrmNativeReadLoopStatus, LibdrmNativeRenderedScanoutContextStatus,
-    LibdrmNativeScanoutBufferFormatDetail, LibdrmNativeScanoutBufferModifierDetail,
-    LibdrmNativeScanoutBufferPlaneDetail, LibdrmPageFlipEventPollReport,
-    LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller, LibdrmRendererScanoutBuffer,
-    LiveAtomicScanoutPreflightReport, LiveAtomicScanoutPreflightStatus, LiveBackendConfig,
-    LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
-    LiveHardwareValidationSmokeReport, LiveHardwareValidationSmokeStatus,
-    LiveHardwareValidationTarget, LiveKmsScanoutTargetStatus, LiveLibdrmPollerDiagnostics,
-    LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
+    LibdrmNativePrimaryPlaneFormatTableStatus, LibdrmNativePrimaryPlaneFramebufferCreateDetail,
+    LibdrmNativePrimaryPlaneObjects, LibdrmNativePrimaryPlanePropertyDiscoveryStatus,
+    LibdrmNativePrimaryPlanePropertyHandles, LibdrmNativePrimaryPlaneResourceCreateStatus,
+    LibdrmNativePrimaryPlaneResourceDestroyStatus, LibdrmNativePrimaryPlaneResourceDevice,
+    LibdrmNativePrimaryPlaneScanoutRetireResult, LibdrmNativePrimaryPlaneScanoutRetireStatus,
+    LibdrmNativePrimaryPlaneScanoutSubmitPolicy, LibdrmNativePrimaryPlaneScanoutSubmitStatus,
+    LibdrmNativePrimaryPlaneSelectionResult, LibdrmNativePrimaryPlaneSelectionStatus,
+    LibdrmNativePropertyHandleSet, LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport,
+    LibdrmNativeReadLoopReport, LibdrmNativeReadLoopStatus,
+    LibdrmNativeRenderedScanoutContextStatus, LibdrmNativeScanoutBufferFormatDetail,
+    LibdrmNativeScanoutBufferModifierDetail, LibdrmNativeScanoutBufferPlaneDetail,
+    LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller,
+    LibdrmRendererScanoutBuffer, LiveAtomicScanoutPreflightReport,
+    LiveAtomicScanoutPreflightStatus, LiveBackendConfig, LiveHardwareValidationGateReport,
+    LiveHardwareValidationGateStatus, LiveHardwareValidationSmokeReport,
+    LiveHardwareValidationSmokeStatus, LiveHardwareValidationTarget, LiveKmsScanoutTargetStatus,
+    LiveLibdrmPollerDiagnostics, LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
     LiveLibdrmPollerStartupStatus, LivePageFlipCallback, LivePageFlipCallbackDecision,
     LivePageFlipCallbackQueue, LivePageFlipCallbackReport, LivePageFlipCallbackSourceReport,
     LivePageFlipEvent, LivePageFlipEventStatus, LiveRenderedPrimaryPlaneScanoutBackpressureReport,
@@ -987,6 +987,7 @@ fn full_property_lookup_device() -> FakeNativePropertyLookupDevice {
             ("CRTC_Y", property_handle(111)),
             ("CRTC_W", property_handle(112)),
             ("CRTC_H", property_handle(113)),
+            ("IN_FORMATS", property_handle(114)),
         ])),
     }
 }
@@ -1286,6 +1287,7 @@ fn native_libdrm_primary_plane_property_discovery_feeds_request_builder() {
     let properties = discovery
         .properties
         .expect("complete lookup should produce private property handles");
+    assert_eq!(properties.plane_in_formats(), Some(property_handle(114)));
     let build = build_native_primary_plane_atomic_request(
         primary_plane_objects(Size {
             width: 1280,
@@ -1296,6 +1298,44 @@ fn native_libdrm_primary_plane_property_discovery_feeds_request_builder() {
 
     assert_eq!(build.status, LibdrmNativeAtomicRequestBuildStatus::Built);
     assert!(build.request.is_some());
+}
+
+#[test]
+fn native_libdrm_primary_plane_property_discovery_keeps_in_formats_optional() {
+    let without_in_formats = FakeNativePropertyLookupDevice {
+        plane: Ok(LibdrmNativePropertyHandleSet::new([
+            ("FB_ID", property_handle(104)),
+            ("CRTC_ID", property_handle(105)),
+            ("SRC_X", property_handle(106)),
+            ("SRC_Y", property_handle(107)),
+            ("SRC_W", property_handle(108)),
+            ("SRC_H", property_handle(109)),
+            ("CRTC_X", property_handle(110)),
+            ("CRTC_Y", property_handle(111)),
+            ("CRTC_W", property_handle(112)),
+            ("CRTC_H", property_handle(113)),
+        ])),
+        ..full_property_lookup_device()
+    };
+
+    let discovery = discover_native_primary_plane_property_handles(
+        &without_in_formats,
+        connector_handle(),
+        crtc_handle(),
+        plane_handle(),
+    );
+
+    assert_eq!(
+        discovery.status,
+        LibdrmNativePrimaryPlanePropertyDiscoveryStatus::Discovered
+    );
+    assert_eq!(
+        discovery
+            .properties
+            .expect("complete request properties should still be discovered")
+            .plane_in_formats(),
+        None
+    );
 }
 
 #[test]
@@ -2389,7 +2429,7 @@ fn live_runtime_assembly_retains_submit_failure_cleanup_for_retry() {
     );
     assert_eq!(
         submitted.reduced_log_line(),
-        "sophia_runtime_rendered_scanout_submit schema=5 status=PrimaryPlaneSubmitFailed scanout_target=Ready output_size=1280x720 target=Ready target_size=1280x720 export=Exported scanout_buffer=Ready buffer_format=Xrgb8888 buffer_modifier=Implicit buffer_planes=Single properties=Discovered resources=Created framebuffer=CreatedWithAddFb2 request=Built submit=AtomicSubmitFailed request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false commit_submit=Rejected runtime_scanout_state=Rejected in_flight=false in_flight_ticks=0 cleanup_pending=true"
+        "sophia_runtime_rendered_scanout_submit schema=6 status=PrimaryPlaneSubmitFailed scanout_target=Ready output_size=1280x720 target=Ready target_size=1280x720 export=Exported scanout_buffer=Ready buffer_format=Xrgb8888 buffer_modifier=Implicit buffer_planes=Single properties=Discovered format_table=Present resources=Created framebuffer=CreatedWithAddFb2 request=Built submit=AtomicSubmitFailed request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false commit_submit=Rejected runtime_scanout_state=Rejected in_flight=false in_flight_ticks=0 cleanup_pending=true"
     );
     assert_eq!(
         submitted.scanout_buffer,
@@ -2764,7 +2804,7 @@ fn live_runtime_tick_submits_rendered_scanout_when_runtime_requests_scanout() {
     );
     assert_eq!(
         submit.reduced_log_line(),
-        "sophia_runtime_rendered_scanout_submit schema=5 status=SubmittedWaitingForPageFlip scanout_target=Ready output_size=1280x720 target=Ready target_size=1280x720 export=Exported scanout_buffer=Ready buffer_format=Xrgb8888 buffer_modifier=Implicit buffer_planes=Single properties=Discovered resources=Created framebuffer=CreatedWithAddFb2 request=Built submit=SubmittedWaitingForPageFlip request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false commit_submit=Submitted runtime_scanout_state=Submitted in_flight=true in_flight_ticks=0 cleanup_pending=false"
+        "sophia_runtime_rendered_scanout_submit schema=6 status=SubmittedWaitingForPageFlip scanout_target=Ready output_size=1280x720 target=Ready target_size=1280x720 export=Exported scanout_buffer=Ready buffer_format=Xrgb8888 buffer_modifier=Implicit buffer_planes=Single properties=Discovered format_table=Present resources=Created framebuffer=CreatedWithAddFb2 request=Built submit=SubmittedWaitingForPageFlip request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false commit_submit=Submitted runtime_scanout_state=Submitted in_flight=true in_flight_ticks=0 cleanup_pending=false"
     );
     assert_eq!(tick.engine.runtime.runtime_state.scanout_submissions, 1);
     assert_eq!(

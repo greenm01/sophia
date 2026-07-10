@@ -818,14 +818,15 @@ atomic commit submit. This lets the production loop explain why a scanout was
 rejected without exposing DRM object IDs, GBM handles, or authority-bearing file
 descriptors. The report also has a schema-versioned reduced log line,
 `sophia_runtime_rendered_scanout_submit`, for capturing runtime submit evidence
-without depending on Rust debug formatting. Submit schema 5 includes the reduced
+without depending on Rust debug formatting. Submit schema 6 includes the reduced
 output size observed by the runtime, the reduced GBM frame-target size, and
 reduced scanout-buffer format, modifier, and plane-count shape, so captured
 evidence can prove the rendered buffer was sized for the output snapshot that
 reached native submit and show the broad buffer layout handed to KMS. It also
-records reduced framebuffer-creation detail, showing which AddFB path
-registered the framebuffer, and includes a reduced cleanup-pending bit so submit
-failures that retain native cleanup debt are visible immediately.
+records whether the selected primary plane exposed an `IN_FORMATS` table,
+reduced framebuffer-creation detail showing which AddFB path registered the
+framebuffer, and a reduced cleanup-pending bit so submit failures that retain
+native cleanup debt are visible immediately.
 Runtime retirement and cleanup reports expose matching reduced lines:
 `sophia_runtime_rendered_scanout_retire` records accepted, waiting, and
 retire-failed page-flip outcomes; `sophia_runtime_rendered_scanout_cleanup`

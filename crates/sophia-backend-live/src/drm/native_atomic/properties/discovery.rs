@@ -91,20 +91,23 @@ where
 
     LibdrmNativePrimaryPlanePropertyDiscoveryResult {
         status: LibdrmNativePrimaryPlanePropertyDiscoveryStatus::Discovered,
-        properties: Some(LibdrmNativePrimaryPlanePropertyHandles::new(
-            connector_crtc_id,
-            crtc_mode_id,
-            crtc_active,
-            plane_fb_id,
-            plane_crtc_id,
-            plane_src_x,
-            plane_src_y,
-            plane_src_w,
-            plane_src_h,
-            plane_crtc_x,
-            plane_crtc_y,
-            plane_crtc_w,
-            plane_crtc_h,
-        )),
+        properties: Some(
+            LibdrmNativePrimaryPlanePropertyHandles::new(
+                connector_crtc_id,
+                crtc_mode_id,
+                crtc_active,
+                plane_fb_id,
+                plane_crtc_id,
+                plane_src_x,
+                plane_src_y,
+                plane_src_w,
+                plane_src_h,
+                plane_crtc_x,
+                plane_crtc_y,
+                plane_crtc_w,
+                plane_crtc_h,
+            )
+            .with_plane_in_formats(plane_properties.get("IN_FORMATS")),
+        ),
     }
 }

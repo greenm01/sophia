@@ -94,6 +94,9 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Carried optional primary-plane `IN_FORMATS` discovery into reduced atomic
+  schema 10 and runtime submit schema 6 as `format_table=Present|Missing`,
+  setting up real format/modifier admission without leaking property blob IDs.
 - [x] Made native primary-plane resource creation reject multi-plane buffers
   for Sophia's current packed XRGB8888/ARGB8888 scanout path before creating
   mode blobs or attempting framebuffer registration.

@@ -106,6 +106,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
         let buffer_modifier = submit.and_then(|report| report.buffer_modifier);
         let buffer_planes = submit.and_then(|report| report.buffer_planes);
         let properties = submit.and_then(|report| report.properties);
+        let format_table = submit.and_then(|report| report.format_table);
         let resources = submit.and_then(|report| report.resources);
         let framebuffer = submit.and_then(|report| report.framebuffer);
         let request = submit.and_then(|report| report.request);
@@ -175,6 +176,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             buffer_modifier,
             buffer_planes,
             properties,
+            format_table,
             resources,
             framebuffer,
             request,

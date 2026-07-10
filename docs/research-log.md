@@ -951,14 +951,16 @@ native stage that caused it. Those reports now expose a stable
 `sophia_runtime_rendered_scanout_submit` reduced log line, giving runtime
 diagnostics the same copyable, identity-free shape as the hardware validation
 evidence.
-That submit line has advanced to schema 5. It now records reduced output size,
+That submit line has advanced to schema 6. It now records reduced output size,
 reduced GBM frame-target size, reduced scanout-buffer format, modifier, and
-plane-count shape, reduced framebuffer-creation detail, and reduced
-cleanup-pending state. Runtime evidence can prove that the submitted buffer was
-sized for the output snapshot, identify the reduced buffer layout handed to
-KMS, identify the AddFB path used for framebuffer registration, and immediately
-expose submit-time cleanup debt without exposing connector, mode, framebuffer,
-GBM identity, GEM handles, fds, exact modifier values, or native errors.
+plane-count shape, reduced primary-plane format-table presence, reduced
+framebuffer-creation detail, and reduced cleanup-pending state. Runtime evidence
+can prove that the submitted buffer was sized for the output snapshot, identify
+the reduced buffer layout handed to KMS, show whether `IN_FORMATS` was available
+for later modifier admission, identify the AddFB path used for framebuffer
+registration, and immediately expose submit-time cleanup debt without exposing
+connector, mode, framebuffer, GBM identity, GEM handles, fds, exact modifier
+values, property blob IDs, or native errors.
 Retire, cleanup, and failure evidence keep their existing reduced shapes.
 Rendered scanout retirement and cleanup retry reports now expose the same kind
 of reduced runtime lines: `sophia_runtime_rendered_scanout_retire` and
@@ -1070,8 +1072,8 @@ AddFB2 for explicit linear GBM buffers, then falls back to implicit AddFB2 and
 legacy AddFB. The proof verifiers accept any reduced created-framebuffer path,
 while still rejecting reduced framebuffer-registration failures.
 
-Reduced atomic scanout evidence is now schema 9, and runtime rendered-scanout
-submit evidence is now schema 5. Both lines include reduced scanout-buffer
+Reduced atomic scanout evidence is now schema 10, and runtime rendered-scanout
+submit evidence is now schema 6. Both lines include reduced scanout-buffer
 layout fields: `buffer_format`, `buffer_modifier`, and `buffer_planes`. The
 allowed values intentionally collapse the native descriptor to broad facts such
 as `Xrgb8888`, `Argb8888`, `Implicit`, `Linear`, `NonLinear`, `Single`, and
@@ -1079,6 +1081,12 @@ as `Xrgb8888`, `Argb8888`, `Implicit`, `Linear`, `NonLinear`, `Single`, and
 to distinguish unsupported format, modifier, and plane-count cases without
 leaking GEM handles, fds, pitch/offset arrays, exact modifier values, or native
 driver errors.
+
+The selected primary-plane property discovery path now carries the optional
+`IN_FORMATS` property handle privately and reduces it to `format_table=Present`
+or `Missing` in atomic and runtime submit evidence. This does not parse the
+kernel blob yet, but it proves whether the authority has the metadata source
+needed for proper format/modifier admission before relying on AddFB failures.
 
 The primary-plane resource path now admits only one active plane for the packed
 XRGB8888/ARGB8888 scanout formats Sophia supports today. Multi-plane scanout

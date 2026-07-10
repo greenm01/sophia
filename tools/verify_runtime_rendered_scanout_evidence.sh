@@ -111,6 +111,13 @@ verify_line() {
                     ;;
             esac
         fi
+        if [[ "$key" == "format_table" ]]; then
+            case "$actual" in
+                Present|Missing)
+                    continue
+                    ;;
+            esac
+        fi
         if [[ "$actual" != "${expected_ref[$key]}" ]]; then
             echo "runtime rendered scanout evidence expected $key=${expected_ref[$key]}, got ${actual:-missing}" >&2
             echo "$evidence" >&2
@@ -120,7 +127,7 @@ verify_line() {
 }
 
 declare -A expected_submit=(
-    ["schema"]="5"
+    ["schema"]="6"
     ["status"]="SubmittedWaitingForPageFlip"
     ["scanout_target"]="Ready"
     ["output_size"]="1280x720"
@@ -132,6 +139,7 @@ declare -A expected_submit=(
     ["buffer_modifier"]="SupportedBufferModifier"
     ["buffer_planes"]="SupportedBufferPlanes"
     ["properties"]="Discovered"
+    ["format_table"]="KnownFormatTableState"
     ["resources"]="Created"
     ["framebuffer"]="CreatedFramebuffer"
     ["request"]="Built"

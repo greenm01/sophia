@@ -3,7 +3,7 @@ const RETIRE_PREFIX: &str = "sophia_runtime_rendered_scanout_retire";
 const CLEANUP_PREFIX: &str = "sophia_runtime_rendered_scanout_cleanup";
 
 const CLEAN_SUBMIT_FIELDS: &[(&str, &str)] = &[
-    ("schema", "5"),
+    ("schema", "6"),
     ("status", "SubmittedWaitingForPageFlip"),
     ("scanout_target", "Ready"),
     ("output_size", "1280x720"),
@@ -15,6 +15,7 @@ const CLEAN_SUBMIT_FIELDS: &[(&str, &str)] = &[
     ("buffer_modifier", "SupportedBufferModifier"),
     ("buffer_planes", "SupportedBufferPlanes"),
     ("properties", "Discovered"),
+    ("format_table", "KnownFormatTableState"),
     ("resources", "Created"),
     ("framebuffer", "CreatedFramebuffer"),
     ("request", "Built"),
@@ -114,6 +115,9 @@ fn evidence_field_matches(key: &str, value: &str, required_value: &str) -> bool 
     }
     if key == "buffer_planes" && required_value == "SupportedBufferPlanes" {
         return matches!(value, "Single" | "Multiple");
+    }
+    if key == "format_table" && required_value == "KnownFormatTableState" {
+        return matches!(value, "Present" | "Missing");
     }
 
     value == required_value

@@ -15,6 +15,7 @@ pub struct LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
     pub buffer_modifier: Option<LibdrmNativeScanoutBufferModifierDetail>,
     pub buffer_planes: Option<LibdrmNativeScanoutBufferPlaneDetail>,
     pub properties: Option<LibdrmNativePrimaryPlanePropertyDiscoveryStatus>,
+    pub format_table: Option<LibdrmNativePrimaryPlaneFormatTableStatus>,
     pub resources: Option<LibdrmNativePrimaryPlaneResourceCreateStatus>,
     pub framebuffer: Option<LibdrmNativePrimaryPlaneFramebufferCreateDetail>,
     pub request: Option<LibdrmNativeAtomicRequestBuildStatus>,
@@ -50,7 +51,7 @@ impl LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
                 });
 
         format!(
-            "sophia_runtime_rendered_scanout_submit schema=5 status={:?} scanout_target={:?} output_size={} target={} target_size={} export={} scanout_buffer={} buffer_format={} buffer_modifier={} buffer_planes={} properties={} resources={} framebuffer={} request={} submit={} request_scope={} commit_page_flip_event={} commit_nonblocking={} commit_allow_modeset={} commit_test_only={} commit_submit={} runtime_scanout_state={} in_flight={} in_flight_ticks={} cleanup_pending={}",
+            "sophia_runtime_rendered_scanout_submit schema=6 status={:?} scanout_target={:?} output_size={} target={} target_size={} export={} scanout_buffer={} buffer_format={} buffer_modifier={} buffer_planes={} properties={} format_table={} resources={} framebuffer={} request={} submit={} request_scope={} commit_page_flip_event={} commit_nonblocking={} commit_allow_modeset={} commit_test_only={} commit_submit={} runtime_scanout_state={} in_flight={} in_flight_ticks={} cleanup_pending={}",
             self.status,
             self.scanout_target,
             reduced_size(self.output_size),
@@ -62,6 +63,7 @@ impl LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
             reduced_status(self.buffer_modifier),
             reduced_status(self.buffer_planes),
             reduced_status(self.properties),
+            reduced_status(self.format_table),
             reduced_status(self.resources),
             reduced_status(self.framebuffer),
             reduced_status(self.request),

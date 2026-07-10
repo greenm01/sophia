@@ -13,6 +13,7 @@ pub struct LibdrmNativePrimaryPlanePropertyHandles {
     pub(crate) plane_crtc_y: drm::control::property::Handle,
     pub(crate) plane_crtc_w: drm::control::property::Handle,
     pub(crate) plane_crtc_h: drm::control::property::Handle,
+    pub(crate) plane_in_formats: Option<drm::control::property::Handle>,
 }
 
 impl LibdrmNativePrimaryPlanePropertyHandles {
@@ -46,7 +47,20 @@ impl LibdrmNativePrimaryPlanePropertyHandles {
             plane_crtc_y,
             plane_crtc_w,
             plane_crtc_h,
+            plane_in_formats: None,
         }
+    }
+
+    pub const fn with_plane_in_formats(
+        mut self,
+        plane_in_formats: Option<drm::control::property::Handle>,
+    ) -> Self {
+        self.plane_in_formats = plane_in_formats;
+        self
+    }
+
+    pub const fn plane_in_formats(&self) -> Option<drm::control::property::Handle> {
+        self.plane_in_formats
     }
 }
 

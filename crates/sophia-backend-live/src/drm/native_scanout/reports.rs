@@ -9,6 +9,7 @@ pub struct LibdrmNativePrimaryPlaneScanoutSubmitResult {
     pub buffer_modifier: Option<LibdrmNativeScanoutBufferModifierDetail>,
     pub buffer_planes: Option<LibdrmNativeScanoutBufferPlaneDetail>,
     pub properties: Option<LibdrmNativePrimaryPlanePropertyDiscoveryStatus>,
+    pub format_table: Option<LibdrmNativePrimaryPlaneFormatTableStatus>,
     pub resources: Option<LibdrmNativePrimaryPlaneResourceCreateStatus>,
     pub framebuffer: Option<LibdrmNativePrimaryPlaneFramebufferCreateDetail>,
     pub request: Option<LibdrmNativeAtomicRequestBuildStatus>,
@@ -33,6 +34,7 @@ impl LibdrmNativePrimaryPlaneScanoutSubmitResult {
             buffer_modifier: None,
             buffer_planes: None,
             properties: None,
+            format_table: None,
             resources: None,
             framebuffer: None,
             request: None,
@@ -120,6 +122,24 @@ impl LibdrmNativeScanoutBufferPlaneDetail {
             Self::Multiple
         } else {
             Self::Invalid
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibdrmNativePrimaryPlaneFormatTableStatus {
+    Present,
+    Missing,
+}
+
+impl LibdrmNativePrimaryPlaneFormatTableStatus {
+    pub(crate) const fn from_property_handles(
+        properties: LibdrmNativePrimaryPlanePropertyHandles,
+    ) -> Self {
+        if properties.plane_in_formats().is_some() {
+            Self::Present
+        } else {
+            Self::Missing
         }
     }
 }

@@ -99,7 +99,7 @@ fn rejects_runtime_rendered_scanout_failure_line() {
 #[test]
 fn rejects_setup_failure_atomic_scanout_evidence() {
     let evidence = vec![
-        "sophia_atomic_scanout_evidence schema=9 phase=InitialModeset status=NoPrimaryCard scanout_target=none rendered_context=none gbm_export=none gbm_export_detail=none scanout_buffer=none buffer_format=none buffer_modifier=none buffer_planes=none properties=none resources=none framebuffer=none request=none submit=none request_scope=none commit_page_flip_event=none commit_nonblocking=none commit_allow_modeset=none commit_test_only=none page_flip_wait=none page_flip_poll=none page_flip=none retire=none retire_destroy=none retire_cleanup_pending=false".to_owned(),
+        "sophia_atomic_scanout_evidence schema=10 phase=InitialModeset status=NoPrimaryCard scanout_target=none rendered_context=none gbm_export=none gbm_export_detail=none scanout_buffer=none buffer_format=none buffer_modifier=none buffer_planes=none properties=none resources=none framebuffer=none request=none submit=none request_scope=none commit_page_flip_event=none commit_nonblocking=none commit_allow_modeset=none commit_test_only=none page_flip_wait=none page_flip_poll=none page_flip=none retire=none retire_destroy=none retire_cleanup_pending=false".to_owned(),
     ];
 
     assert!(!runtime_rendered_scanout_evidence_is_clean(&evidence));
