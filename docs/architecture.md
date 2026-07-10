@@ -979,6 +979,11 @@ physical `InputEventPacket` with the accepted route and emits an
 unrouted outcomes, missing target windows, and missing local coordinates. A
 coalescer flush can be converted into a bounded batch of routed-input requests
 without involving WM policy.
+Runtime ticks now report this separation explicitly. `PhysicalInputIntakeReport`
+mirrors the reduced libinput poll result, records the number of queued physical
+events, and reports `PhysicalIntakeOnly` as the routing stage. A backend tick
+may ingest and queue physical input, but scene hit-testing and routed-input
+request generation remain separate routing-layer calls.
 
 Scene hit-testing now handles transformed layer geometry. Sophia Engine walks
 renderable layers from highest stack rank to lowest, inverts each layer's

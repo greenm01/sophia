@@ -508,6 +508,10 @@ use deterministic queued pollers rather than opening `/dev/input` devices.
 Runtime backend assemblies accept any `NonBlockingInputPoller`; the default type
 remains `QueuedInputPoller`, while live backend feature tests can substitute the
 native-shaped libinput poller at the same boundary.
+`PhysicalInputIntakeReport` is the runtime-facing proof for that boundary. It
+may report poll counts, rejected intake outcomes, queued physical event count,
+and `PhysicalIntakeOnly`; it must not report routed X requests, target windows,
+local coordinates, or scene hit-test decisions.
 
 ### InputRoute
 

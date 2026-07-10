@@ -87,6 +87,12 @@ fn headless_backend_assembly_drains_input_commits_authority_and_renders_cpu_fram
     assert_eq!(report.input_poll.polled, 1);
     assert_eq!(report.input_poll.accepted, 1);
     assert!(report.input_poll.rejected.is_empty());
+    assert_eq!(report.physical_input.poll, report.input_poll);
+    assert_eq!(report.physical_input.pending_events, 1);
+    assert_eq!(
+        report.physical_input.routing_stage,
+        PhysicalInputRoutingStage::PhysicalIntakeOnly
+    );
     assert_eq!(assembly.input().source().pending_len(), 1);
     assert_eq!(assembly.committed_surfaces().len(), 1);
     assert_eq!(assembly.committed_surfaces()[0].geometry.x, 25);
@@ -117,6 +123,57 @@ fn headless_backend_assembly_drains_input_commits_authority_and_renders_cpu_fram
     assert_eq!(render.imports[0].requested, BufferImportPath::CpuReadback);
     assert_eq!(render.imports[0].used, BufferImportPath::CpuReadback);
     assert!(!render.imports[0].used_fallback);
+}
+
+#[test]
+fn headless_backend_tick_keeps_physical_input_separate_from_routed_input() {
+    let output = HeadlessOutput::deterministic();
+    let mut source = LibinputEventSource::new();
+    source.register_device(LibinputDeviceDescriptor {
+        seat: SeatId::from_raw(1),
+        device: DeviceId::from_raw(2),
+        kind: LibinputDeviceKind::Pointer,
+    });
+    let event = motion_event(1, 10.0, 20.0);
+    let input = LibinputPhysicalInputAdapter::new(QueuedInputPoller::new(vec![event]), source);
+    let mut assembly = HeadlessCompositorBackendAssembly::from_parts(
+        output,
+        DrmKmsOutputRegistry::new(),
+        DeterministicFrameClock::default(),
+        input,
+        RendererSelection::CpuFallback,
+    );
+
+    let report = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("deterministic backend tick should complete");
+
+    assert_eq!(
+        report.physical_input,
+        PhysicalInputIntakeReport {
+            poll: LibinputPollReport {
+                polled: 1,
+                accepted: 1,
+                rejected: Vec::new(),
+            },
+            pending_events: 1,
+            routing_stage: PhysicalInputRoutingStage::PhysicalIntakeOnly,
+        }
+    );
+    assert_eq!(assembly.input().source().pending_len(), 1);
+
+    let event = assembly
+        .input_mut()
+        .source_mut()
+        .drain_events()
+        .pop()
+        .expect("physical event should remain queued for routing layer");
+    let route = hit_test_scene_for_input(&event, &[]);
+    assert_eq!(route.outcome, InputRouteOutcome::NoTarget);
+    assert_eq!(
+        routed_input_request_from_physical_event(&event, &route),
+        Err(RoutedInputRequestError::RouteNotAccepted)
+    );
 }
 
 #[test]

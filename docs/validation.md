@@ -4,6 +4,10 @@ Sophia's default validation path must not require native renderer libraries,
 kernel devices, a display server, or network access. The default suite protects
 the data model, protocol authorities, runtime reducers, renderer admission
 records, and deterministic backend seams.
+Default physical input validation uses `QueuedInputPoller`. Native libinput
+coverage is feature-gated and opt-in; ordinary workspace validation must prove
+physical input intake with deterministic queued packets and must not open
+`/dev/input` devices.
 
 Run before committing ordinary changes:
 

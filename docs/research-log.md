@@ -630,6 +630,12 @@ can combine an accepted `InputRoute` with the original `InputEventPacket` to
 produce an `XLibreRoutedInputRequest`, and coalescer flushes can become request
 batches. The adapter rejects mismatched serials, closed route outcomes, missing
 target XIDs, and missing local coordinates before anything reaches XLibre.
+Backend ticks now expose `PhysicalInputIntakeReport` to keep that boundary
+auditable. The report carries the reduced poll result, the number of queued
+physical events, and `PhysicalIntakeOnly` as the routing stage. A deterministic
+queued-poller test proves the runtime tick leaves the accepted event in the
+physical input source; hit-testing and routed-input request generation happen
+only when the routing layer is called separately.
 
 Notification portal commands now have a compositor chrome presentation seam.
 `NotificationChromePresenter` stages bounded notification requests, presents

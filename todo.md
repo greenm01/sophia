@@ -18,8 +18,8 @@ active milestone to `docs/roadmap-history.md`.
   rendered scanout submit can share one runtime tick.
 - [x] Add a runtime-owned readiness gate so concrete libinput dispatch runs only
   after the session loop observes input fd readiness.
-- [ ] Keep physical input and routed-input transformation separate.
-- [ ] Preserve deterministic queued poller tests as the default validation path.
+- [x] Keep physical input and routed-input transformation separate.
+- [x] Preserve deterministic queued poller tests as the default validation path.
 
 ---
 
@@ -74,6 +74,11 @@ active milestone to `docs/roadmap-history.md`.
 
 ## Done Recently
 
+- [x] Added reduced physical-input intake evidence to Engine backend ticks so
+  runtime reports prove physical packets are queued without doing scene
+  hit-testing or routed-input request generation.
+- [x] Extended the default queued-poller backend-live smoke to assert
+  `PhysicalIntakeOnly`, keeping native libinput behind optional feature tests.
 - [x] Added a reduced session-loop owner that observes input readiness, drains
   native page-flip events, and drives rendered primary-plane scanout through one
   bounded runtime tick without passing fds into Sophia Engine.

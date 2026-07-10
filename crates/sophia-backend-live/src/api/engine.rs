@@ -5,6 +5,7 @@ pub use sophia_engine::{
     LibinputDeviceKind, LibinputEventIngest, LibinputEventSource, LibinputPhysicalInputAdapter,
     LibinputPollReport, LiveCompositorBackendDiscoveryReport, LiveCompositorBackendDiscoveryStatus,
     LiveRuntimeDriverAdapter, LiveRuntimeDriverIntake, NonBlockingInputPoller,
-    PageFlipCommitOutcome, QueuedInputPoller, RendererSelection, RuntimeDriverAdapter,
-    RuntimeScanoutState, SessionRuntimeObservation, SessionTickReport,
+    PageFlipCommitOutcome, PhysicalInputIntakeReport, PhysicalInputRoutingStage, QueuedInputPoller,
+    RendererSelection, RuntimeDriverAdapter, RuntimeScanoutState, SessionRuntimeObservation,
+    SessionTickReport,
 };

@@ -19,8 +19,8 @@ use sophia_backend_live::{
     LiveRendererImportPathStatus, LiveRendererImportStartupStatus, LiveRendererPreference,
     LiveRendererPresentationReport, LiveRendererPresentationStatus, LiveRendererRuntimeObservation,
     LiveRendererSelectionObservation, LiveScanoutReadinessReport, LiveScanoutReadinessStatus,
-    OutputId, PageFlipCommitOutcome, QueuedInputPoller, RendererSelection, SeatId, Size,
-    discover_live_backend, live_backend_dependency_decision,
+    OutputId, PageFlipCommitOutcome, PhysicalInputRoutingStage, QueuedInputPoller,
+    RendererSelection, SeatId, Size, discover_live_backend, live_backend_dependency_decision,
 };
 use sophia_engine::AuthorityTransactionIntake;
 use sophia_protocol::{
@@ -471,6 +471,12 @@ fn live_runtime_assembly_runs_fake_compositor_loop_without_native_scanout() {
     assert_eq!(tick.engine.input_poll.polled, 1);
     assert_eq!(tick.engine.input_poll.accepted, 1);
     assert!(tick.engine.input_poll.rejected.is_empty());
+    assert_eq!(tick.engine.physical_input.poll, tick.engine.input_poll);
+    assert_eq!(tick.engine.physical_input.pending_events, 1);
+    assert_eq!(
+        tick.engine.physical_input.routing_stage,
+        PhysicalInputRoutingStage::PhysicalIntakeOnly
+    );
     assert_eq!(tick.engine.runtime.runtime_state.x_events_polled, 1);
     assert_eq!(
         tick.engine

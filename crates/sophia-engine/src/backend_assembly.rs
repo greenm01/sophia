@@ -53,9 +53,32 @@ pub struct CompositorBackendTickInput {
 pub struct CompositorBackendTickReport {
     pub tick: FrameClockTick,
     pub input_poll: LibinputPollReport,
+    pub physical_input: PhysicalInputIntakeReport,
     pub authority_inbox: AuthorityTransactionInboxReport,
     pub runtime: HeadlessSessionDriverReport,
     pub render: Option<RenderFrameReport>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhysicalInputIntakeReport {
+    pub poll: LibinputPollReport,
+    pub pending_events: usize,
+    pub routing_stage: PhysicalInputRoutingStage,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PhysicalInputRoutingStage {
+    PhysicalIntakeOnly,
+}
+
+impl PhysicalInputIntakeReport {
+    pub fn from_poll(poll: LibinputPollReport, pending_events: usize) -> Self {
+        Self {
+            poll,
+            pending_events,
+            routing_stage: PhysicalInputRoutingStage::PhysicalIntakeOnly,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -257,6 +280,10 @@ where
             .input
             .poll_once()
             .map_err(CompositorBackendAssemblyError::InputPoll)?;
+        let physical_input = PhysicalInputIntakeReport::from_poll(
+            input_poll.clone(),
+            self.input.source().pending_len(),
+        );
         let tick = self.clock.next_frame(self.engine.output().id);
         let mut authority_batches = input.authority_batches;
         let authority_inbox = self
@@ -310,6 +337,7 @@ where
         Ok(CompositorBackendTickReport {
             tick,
             input_poll,
+            physical_input,
             authority_inbox,
             runtime,
             render,
