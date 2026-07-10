@@ -1393,6 +1393,35 @@ fn native_libdrm_primary_plane_scanout_submit_fails_closed_for_bad_descriptor() 
     assert!(result.request.is_none());
     assert!(result.submit.is_none());
     assert!(result.submission.is_none());
+
+    let forged_undersized_pitch = sophia_renderer_live::LiveRendererScanoutBufferDescriptor {
+        status: sophia_renderer_live::LiveRendererScanoutBufferStatus::Ready,
+        size: Size {
+            width: 1280,
+            height: 720,
+        },
+        pitch: 1280 * 4 - 1,
+        format: LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+        gem_handle: 17,
+    };
+    let undersized_pitch = submit_native_primary_plane_scanout_from_renderer_descriptor(
+        &device,
+        forged_undersized_pitch,
+    );
+
+    assert_eq!(
+        undersized_pitch.status,
+        LibdrmNativePrimaryPlaneScanoutSubmitStatus::ScanoutBufferUnavailable
+    );
+    assert_eq!(
+        undersized_pitch.scanout_buffer,
+        sophia_renderer_live::LiveRendererScanoutBufferStatus::Invalid
+    );
+    assert!(undersized_pitch.properties.is_none());
+    assert!(undersized_pitch.resources.is_none());
+    assert!(undersized_pitch.request.is_none());
+    assert!(undersized_pitch.submit.is_none());
+    assert!(undersized_pitch.submission.is_none());
 }
 
 #[test]
@@ -4284,6 +4313,18 @@ fn native_libdrm_renderer_scanout_buffer_rejects_invalid_renderer_descriptors() 
         gem_handle: 17,
     };
     assert!(LibdrmRendererScanoutBuffer::from_descriptor(forged_ready).is_none());
+
+    let forged_undersized_pitch = sophia_renderer_live::LiveRendererScanoutBufferDescriptor {
+        status: sophia_renderer_live::LiveRendererScanoutBufferStatus::Ready,
+        size: Size {
+            width: 1280,
+            height: 720,
+        },
+        pitch: 1280 * 4 - 1,
+        format: LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+        gem_handle: 17,
+    };
+    assert!(LibdrmRendererScanoutBuffer::from_descriptor(forged_undersized_pitch).is_none());
 
     let submit = submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor(
         &full_primary_plane_scanout_device(),

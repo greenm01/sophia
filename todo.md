@@ -83,6 +83,8 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Extended backend-live scanout tests so forged undersized-pitch descriptors
+  fail before DRM framebuffer resource creation or atomic submit.
 - [x] Hardened renderer-live scanout descriptors so XRGB8888 buffers must report
   a row pitch large enough for the target width before backend-live can import
   them for primary-plane scanout.
