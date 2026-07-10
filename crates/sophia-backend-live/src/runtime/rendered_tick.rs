@@ -33,6 +33,7 @@ where
         let runtime_scanout_states = self.drain_pending_runtime_scanout_states_into(&mut input);
 
         let target = self.gbm_egl_frame_target;
+        let output_size = self.output_size;
         let scanout_target = self.kms_scanout_target.status;
         let rendered_primary_plane_scanout_submission =
             &mut self.rendered_primary_plane_scanout_submission;
@@ -52,6 +53,7 @@ where
                 LiveRenderedPrimaryPlaneRuntimeAdapter {
                     inner,
                     scanout_target,
+                    output_size,
                     target,
                     rendered_primary_plane_scanout_submission,
                     rendered_primary_plane_scanout_cleanup,

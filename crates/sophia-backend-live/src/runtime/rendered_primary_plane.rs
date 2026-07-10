@@ -72,6 +72,7 @@ where
     {
         track_rendered_primary_plane_scanout_submit_from_target_with(
             self.kms_scanout_target.status,
+            self.output_size,
             self.gbm_egl_frame_target,
             &mut self.rendered_primary_plane_scanout_submission,
             &mut self.rendered_primary_plane_scanout_cleanup,

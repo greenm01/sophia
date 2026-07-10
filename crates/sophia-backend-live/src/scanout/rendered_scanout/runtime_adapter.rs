@@ -7,6 +7,7 @@ use crate::prelude::*;
 pub(crate) struct LiveRenderedPrimaryPlaneRuntimeAdapter<'a, D, E> {
     pub(crate) inner: LiveRuntimeDriverAdapter,
     pub(crate) scanout_target: LiveKmsScanoutTargetStatus,
+    pub(crate) output_size: Option<Size>,
     pub(crate) target: Option<LiveGbmEglFrameTargetRecord>,
     pub(crate) rendered_primary_plane_scanout_submission:
         &'a mut Option<BoxedRenderedPrimaryPlaneScanoutSubmission>,
@@ -70,6 +71,7 @@ where
     ) -> Result<SessionRuntimeObservation, sophia_engine::EngineError> {
         let report = track_rendered_primary_plane_scanout_submit_from_target_with(
             self.scanout_target,
+            self.output_size,
             self.target,
             self.rendered_primary_plane_scanout_submission,
             self.rendered_primary_plane_scanout_cleanup,

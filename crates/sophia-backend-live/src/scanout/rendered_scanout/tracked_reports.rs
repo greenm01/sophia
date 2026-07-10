@@ -9,11 +9,19 @@ fn reduced_status<T: std::fmt::Debug>(status: Option<T>) -> String {
 }
 
 #[cfg(feature = "libdrm-events")]
+fn reduced_size(size: Option<Size>) -> String {
+    size.map(|size| format!("{}x{}", size.width, size.height))
+        .unwrap_or_else(|| "none".to_owned())
+}
+
+#[cfg(feature = "libdrm-events")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
     pub status: LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus,
     pub scanout_target: LiveKmsScanoutTargetStatus,
+    pub output_size: Option<Size>,
     pub target: Option<LiveGbmEglFrameTargetStatus>,
+    pub target_size: Option<Size>,
     pub export: Option<LiveRendererScanoutBufferExportStatus>,
     pub scanout_buffer: Option<LiveRendererScanoutBufferStatus>,
     pub properties: Option<LibdrmNativePrimaryPlanePropertyDiscoveryStatus>,
@@ -51,10 +59,12 @@ impl LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
                 });
 
         format!(
-            "sophia_runtime_rendered_scanout_submit schema=1 status={:?} scanout_target={:?} target={} export={} scanout_buffer={} properties={} resources={} request={} submit={} request_scope={} commit_page_flip_event={} commit_nonblocking={} commit_allow_modeset={} commit_test_only={} commit_submit={} runtime_scanout_state={} in_flight={} in_flight_ticks={}",
+            "sophia_runtime_rendered_scanout_submit schema=2 status={:?} scanout_target={:?} output_size={} target={} target_size={} export={} scanout_buffer={} properties={} resources={} request={} submit={} request_scope={} commit_page_flip_event={} commit_nonblocking={} commit_allow_modeset={} commit_test_only={} commit_submit={} runtime_scanout_state={} in_flight={} in_flight_ticks={}",
             self.status,
             self.scanout_target,
+            reduced_size(self.output_size),
             reduced_status(self.target),
+            reduced_size(self.target_size),
             reduced_status(self.export),
             reduced_status(self.scanout_buffer),
             reduced_status(self.properties),

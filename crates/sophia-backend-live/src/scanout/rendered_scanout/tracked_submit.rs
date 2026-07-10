@@ -8,6 +8,7 @@ use std::{any::Any, collections::VecDeque};
 #[cfg(feature = "libdrm-events")]
 pub(crate) fn track_rendered_primary_plane_scanout_submit_from_target_with<D, E>(
     scanout_target: LiveKmsScanoutTargetStatus,
+    output_size: Option<Size>,
     target: Option<LiveGbmEglFrameTargetRecord>,
     rendered_primary_plane_scanout_submission: &mut Option<
         BoxedRenderedPrimaryPlaneScanoutSubmission,
@@ -37,7 +38,9 @@ where
         return LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
             status: LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::AlreadyInFlight,
             scanout_target,
+            output_size,
             target: target.map(|target| target.status),
+            target_size: target.map(|target| target.size),
             export: None,
             scanout_buffer: None,
             properties: None,
@@ -62,7 +65,9 @@ where
         return LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
             status: LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::CleanupPending,
             scanout_target,
+            output_size,
             target: target.map(|target| target.status),
+            target_size: target.map(|target| target.size),
             export: None,
             scanout_buffer: None,
             properties: None,
@@ -109,7 +114,9 @@ where
     LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
         status: result.status.into(),
         scanout_target: result.scanout_target,
+        output_size,
         target: result.target,
+        target_size: target.map(|target| target.size),
         export: result.export,
         scanout_buffer: result.scanout_buffer,
         properties: result.properties,
