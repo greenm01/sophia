@@ -11,7 +11,8 @@ use sophia_backend_live::{
     LibinputNativeEventReadReport, LibinputNativeEventReadStatus, LibinputPhysicalInputAdapter,
     LiveBackendConfig, LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
     LiveHardwareValidationSmokeReport, LiveHardwareValidationSmokeStatus,
-    LiveHardwareValidationTarget, NativeLibinputDeviceMap, NativeLibinputEventPoller,
+    LiveHardwareValidationTarget, LiveInputReadinessGateReport, LiveInputReadinessGateStatus,
+    LiveInputReadinessGatedPoller, NativeLibinputDeviceMap, NativeLibinputEventPoller,
     NativeLibinputEventReader, NonBlockingInputPoller, SeatId, discover_live_backend,
     native_libinput_event_adapter_report, real_libinput_events_validation_gate,
     real_libinput_events_validation_smoke_report,
@@ -150,6 +151,74 @@ fn native_libinput_event_poller_reports_reduced_read_failure() {
 }
 
 #[test]
+fn input_readiness_gate_skips_polling_until_ready_token_is_observed() {
+    let poller = NativeLibinputEventPoller::new(
+        FakeLiveLibinputEventReader::new([
+            motion_event(1, 10.0, 20.0),
+            motion_event(2, 11.0, 21.0),
+        ]),
+        1,
+    );
+    let mut gated = LiveInputReadinessGatedPoller::new(poller);
+
+    let idle = gated
+        .poll_ready()
+        .expect("idle gate should not call inner poller");
+
+    assert!(idle.is_empty());
+    assert_eq!(
+        gated.last_gate_report(),
+        LiveInputReadinessGateReport {
+            status: LiveInputReadinessGateStatus::Idle,
+        }
+    );
+    assert_eq!(gated.inner().reader().queued_len(), 2);
+
+    gated.observe_ready();
+    let ready = gated
+        .poll_ready()
+        .expect("ready gate should call inner poller once");
+
+    assert_eq!(ready, vec![motion_event(1, 10.0, 20.0)]);
+    assert_eq!(
+        gated.last_gate_report(),
+        LiveInputReadinessGateReport::polled()
+    );
+    assert_eq!(gated.inner().reader().queued_len(), 1);
+    assert!(!gated.ready());
+
+    let second_idle = gated
+        .poll_ready()
+        .expect("consumed readiness should not poll twice");
+
+    assert!(second_idle.is_empty());
+    assert_eq!(
+        gated.last_gate_report(),
+        LiveInputReadinessGateReport::idle()
+    );
+    assert_eq!(gated.inner().reader().queued_len(), 1);
+}
+
+#[test]
+fn input_readiness_gate_reports_reduced_read_failure() {
+    let poller = NativeLibinputEventPoller::new(
+        FakeLiveLibinputEventReader::new([motion_event(1, 10.0, 20.0)]),
+        4,
+    );
+    let mut gated = LiveInputReadinessGatedPoller::new(poller);
+    gated.inner_mut().reader_mut().fail_next_read();
+    gated.observe_ready();
+
+    assert!(gated.poll_ready().is_err());
+    assert_eq!(
+        gated.last_gate_report(),
+        LiveInputReadinessGateReport::read_failed()
+    );
+    assert!(!gated.ready());
+    assert_eq!(gated.inner().reader().queued_len(), 1);
+}
+
+#[test]
 fn native_libinput_event_reader_idles_without_exposing_native_identity() {
     let reader = NativeLibinputEventReader::new(
         input::Libinput::new_from_path(RejectingLibinputInterface),
@@ -227,6 +296,65 @@ fn live_runtime_assembly_runs_tick_with_native_shaped_input_poller() {
     assert_eq!(report.engine.input_poll.accepted, 1);
     assert!(report.engine.input_poll.rejected.is_empty());
     assert_eq!(assembly.assembly().input().source().pending_len(), 1);
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_runtime_assembly_uses_input_readiness_gate_without_blocking_ticks() {
+    let root = ready_drm_sysfs_fixture("native-input-readiness-gate-runtime");
+    let config = LiveBackendConfig::new(&root).with_input_device(LibinputDeviceDescriptor {
+        seat: SeatId::from_raw(1),
+        device: DeviceId::from_raw(2),
+        kind: LibinputDeviceKind::Pointer,
+    });
+    let poller = LiveInputReadinessGatedPoller::new(NativeLibinputEventPoller::new(
+        FakeLiveLibinputEventReader::new([motion_event(1, 10.0, 20.0)]),
+        4,
+    ));
+    let mut assembly = discover_live_backend(&config)
+        .into_live_runtime_assembly(poller)
+        .expect("ready startup should accept gated native-shaped input poller");
+
+    let idle_tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should continue when input is not ready");
+
+    assert_eq!(idle_tick.engine.input_poll.polled, 0);
+    assert_eq!(idle_tick.engine.input_poll.accepted, 0);
+    assert_eq!(assembly.assembly().input().source().pending_len(), 0);
+    assert_eq!(
+        assembly.assembly().input().poller().last_gate_report(),
+        LiveInputReadinessGateReport::idle()
+    );
+    assert_eq!(
+        assembly
+            .assembly()
+            .input()
+            .poller()
+            .inner()
+            .reader()
+            .queued_len(),
+        1
+    );
+
+    assembly
+        .assembly_mut()
+        .input_mut()
+        .poller_mut()
+        .observe_ready();
+    let ready_tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should poll input after readiness is observed");
+
+    assert_eq!(ready_tick.engine.input_poll.polled, 1);
+    assert_eq!(ready_tick.engine.input_poll.accepted, 1);
+    assert!(ready_tick.engine.input_poll.rejected.is_empty());
+    assert_eq!(assembly.assembly().input().source().pending_len(), 1);
+    assert_eq!(
+        assembly.assembly().input().poller().last_gate_report(),
+        LiveInputReadinessGateReport::polled()
+    );
 
     fs::remove_dir_all(root).unwrap();
 }

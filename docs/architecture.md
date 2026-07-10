@@ -925,6 +925,12 @@ The next production input-loop seam is fd readiness gating. The concrete reader
 must not become the session selector. Backend-live should observe readiness in
 the outer loop, call libinput dispatch only when ready, and continue scanout
 ticks when input is idle.
+Backend-live now has the first form of that seam as a one-shot readiness-gated
+poller. A tick without a readiness token returns an empty reduced input batch
+and still advances the runtime. A tick after readiness is observed consumes the
+token and calls the wrapped concrete poller exactly once. The future session
+loop must own the actual `poll`/`epoll` wait and feed these readiness tokens;
+Sophia Engine still sees only `LibinputPollReport` and accepted input packets.
 
 The first live compositor backend boundary is dependency-neutral. An
 `OutputDiscoveryBackend` produces a `DrmKmsOutputRegistry`; an

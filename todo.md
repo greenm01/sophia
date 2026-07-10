@@ -16,7 +16,7 @@ active milestone to `docs/roadmap-history.md`.
 
 - [x] Prove libinput-shaped input polling, native page-flip retirement, and
   rendered scanout submit can share one runtime tick.
-- [ ] Add a runtime-owned readiness gate so concrete libinput dispatch runs only
+- [x] Add a runtime-owned readiness gate so concrete libinput dispatch runs only
   after the session loop observes input fd readiness.
 - [ ] Keep physical input and routed-input transformation separate.
 - [ ] Preserve deterministic queued poller tests as the default validation path.
@@ -74,6 +74,9 @@ active milestone to `docs/roadmap-history.md`.
 
 ## Done Recently
 
+- [x] Added a one-shot live input readiness gate so runtime ticks continue when
+  input is idle and concrete libinput dispatch only runs after the outer loop
+  observes readiness.
 - [x] Proved libinput-shaped input polling can run in the same live runtime tick
   as native page-flip retirement and rendered primary-plane scanout submit.
 - [x] Added a concrete safe-wrapper libinput reader behind `libinput-events`

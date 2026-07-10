@@ -966,6 +966,12 @@ libdrm page-flip intake retires the previous rendered GBM/KMS owner and the
 runtime submits the next rendered primary-plane frame. This is still a
 deterministic fake-reader test, but it proves the sequencing contract needed by
 the production loop before backend-live owns real fd readiness.
+Input readiness now has a one-shot backend-live gate. `LiveInputReadinessGatedPoller`
+wraps the concrete or fake input poller and returns an empty reduced batch until
+the outer loop observes readiness. Polling consumes the token, so repeated
+dispatch requires repeated readiness observations. The runtime coverage proves a
+tick continues while the gate is idle, leaves queued input untouched, then polls
+and ingests that input after readiness is marked.
 
 ## Open Questions
 
