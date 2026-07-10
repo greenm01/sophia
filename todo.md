@@ -83,6 +83,8 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Split rendered primary-plane scanout target reduction and tracked runtime
+  submit bookkeeping out of the one-shot submit translator.
 - [x] Normalized reduced native scanout submit reports so forged ready
   renderer descriptors are reported as invalid before native DRM allocation.
 - [x] Centralized renderer scanout descriptor validation so fake exports,

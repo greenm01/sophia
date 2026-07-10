@@ -6,7 +6,9 @@ mod runtime_adapter;
 mod submission;
 mod submit;
 mod submit_report;
+mod target_status;
 mod tracked_reports;
+mod tracked_submit;
 
 pub use backpressure::*;
 pub use exporter::*;
@@ -16,4 +18,6 @@ pub(crate) use runtime_adapter::*;
 pub use submission::*;
 pub(crate) use submit::*;
 pub use submit_report::*;
+pub(crate) use target_status::*;
 pub use tracked_reports::*;
+pub(crate) use tracked_submit::*;
