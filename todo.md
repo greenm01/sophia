@@ -78,6 +78,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Added tick-level rendered primary-plane scanout backpressure reporting
+  so the production runtime can observe waiting versus stalled page-flip state.
 - [x] Made deferred rendered-scanout submits update the backend's latest reduced
   scanout diagnostic state without queueing a terminal lifecycle event.
 - [x] Added negative preflight verifier fixtures for impossible reduced count

@@ -256,6 +256,9 @@ pub enum LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus {
 }
 
 #[cfg(feature = "libdrm-events")]
+pub const LIVE_RENDERED_PRIMARY_PLANE_SCANOUT_STALL_THRESHOLD_TICKS: u64 = 2;
+
+#[cfg(feature = "libdrm-events")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LiveRenderedPrimaryPlaneScanoutBackpressureReport {
     pub status: LiveRenderedPrimaryPlaneScanoutBackpressureStatus,

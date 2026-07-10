@@ -4,7 +4,8 @@ use std::{io, sync::mpsc};
 
 use sophia_backend_live::{
     CompositorBackendTickInput, FakeLibdrmNativePageFlipReader, FakeLibdrmPageFlipEventPoller,
-    LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS, LibdrmBackendFdAuthority,
+    LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS,
+    LIVE_RENDERED_PRIMARY_PLANE_SCANOUT_STALL_THRESHOLD_TICKS, LibdrmBackendFdAuthority,
     LibdrmBackendFdAuthorityReport, LibdrmBackendFdAuthorityStatus,
     LibdrmDependencyAdmissionReport, LibdrmDependencyAdmissionStatus,
     LibdrmNativeAtomicCommitDevice, LibdrmNativeAtomicCommitFlagsReport,
@@ -1645,6 +1646,15 @@ fn live_runtime_assembly_tracks_rendered_scanout_until_accepted_page_flip() {
         2
     );
     assert_eq!(
+        stalled_tick.rendered_primary_plane_scanout_backpressure,
+        LiveRenderedPrimaryPlaneScanoutBackpressureReport {
+            status: LiveRenderedPrimaryPlaneScanoutBackpressureStatus::StalledWaitingForPageFlip,
+            in_flight: true,
+            in_flight_ticks: 2,
+            threshold_ticks: LIVE_RENDERED_PRIMARY_PLANE_SCANOUT_STALL_THRESHOLD_TICKS,
+        }
+    );
+    assert_eq!(
         assembly.rendered_primary_plane_scanout_backpressure_report(2),
         LiveRenderedPrimaryPlaneScanoutBackpressureReport {
             status: LiveRenderedPrimaryPlaneScanoutBackpressureStatus::StalledWaitingForPageFlip,
@@ -2236,6 +2246,15 @@ fn live_runtime_tick_submits_rendered_scanout_when_runtime_requests_scanout() {
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight_ticks(), 0);
     assert_eq!(assembly.pending_runtime_scanout_state_count(), 0);
     assert_eq!(tick.rendered_primary_plane_scanout_in_flight_ticks, 0);
+    assert_eq!(
+        tick.rendered_primary_plane_scanout_backpressure,
+        LiveRenderedPrimaryPlaneScanoutBackpressureReport {
+            status: LiveRenderedPrimaryPlaneScanoutBackpressureStatus::WaitingForPageFlip,
+            in_flight: true,
+            in_flight_ticks: 0,
+            threshold_ticks: LIVE_RENDERED_PRIMARY_PLANE_SCANOUT_STALL_THRESHOLD_TICKS,
+        }
+    );
 
     let deferred_tick = assembly
         .run_tick_with_rendered_primary_plane_scanout_with(
@@ -2297,6 +2316,15 @@ fn live_runtime_tick_submits_rendered_scanout_when_runtime_requests_scanout() {
     );
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), true);
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight_ticks(), 1);
+    assert_eq!(
+        deferred_tick.rendered_primary_plane_scanout_backpressure,
+        LiveRenderedPrimaryPlaneScanoutBackpressureReport {
+            status: LiveRenderedPrimaryPlaneScanoutBackpressureStatus::WaitingForPageFlip,
+            in_flight: true,
+            in_flight_ticks: 1,
+            threshold_ticks: LIVE_RENDERED_PRIMARY_PLANE_SCANOUT_STALL_THRESHOLD_TICKS,
+        }
+    );
 
     sender
         .try_send(LivePageFlipCallback {
@@ -2377,6 +2405,15 @@ fn live_runtime_tick_submits_rendered_scanout_when_runtime_requests_scanout() {
     assert_eq!(
         retire_and_submit_tick.rendered_primary_plane_scanout_in_flight_ticks,
         0
+    );
+    assert_eq!(
+        retire_and_submit_tick.rendered_primary_plane_scanout_backpressure,
+        LiveRenderedPrimaryPlaneScanoutBackpressureReport {
+            status: LiveRenderedPrimaryPlaneScanoutBackpressureStatus::WaitingForPageFlip,
+            in_flight: true,
+            in_flight_ticks: 0,
+            threshold_ticks: LIVE_RENDERED_PRIMARY_PLANE_SCANOUT_STALL_THRESHOLD_TICKS,
+        }
     );
 
     std::fs::remove_dir_all(root).unwrap();

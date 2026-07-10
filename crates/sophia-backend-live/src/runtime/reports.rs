@@ -20,6 +20,9 @@ pub struct LiveBackendRuntimeTickReport {
     #[cfg(feature = "libdrm-events")]
     pub rendered_primary_plane_scanout_in_flight_ticks: u64,
     #[cfg(feature = "libdrm-events")]
+    pub rendered_primary_plane_scanout_backpressure:
+        LiveRenderedPrimaryPlaneScanoutBackpressureReport,
+    #[cfg(feature = "libdrm-events")]
     pub rendered_primary_plane_scanout_submit:
         Option<LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport>,
     #[cfg(feature = "libdrm-events")]

@@ -43,6 +43,11 @@ where
             rendered_primary_plane_scanout_in_flight_ticks: self
                 .rendered_primary_plane_scanout_in_flight_ticks,
             #[cfg(feature = "libdrm-events")]
+            rendered_primary_plane_scanout_backpressure: self
+                .rendered_primary_plane_scanout_backpressure_report(
+                    LIVE_RENDERED_PRIMARY_PLANE_SCANOUT_STALL_THRESHOLD_TICKS,
+                ),
+            #[cfg(feature = "libdrm-events")]
             rendered_primary_plane_scanout_submit: None,
             #[cfg(feature = "libdrm-events")]
             rendered_primary_plane_scanout_retire: None,
@@ -132,6 +137,10 @@ where
             rendered_primary_plane_scanout_cleanup_retry,
             rendered_primary_plane_scanout_in_flight_ticks: self
                 .rendered_primary_plane_scanout_in_flight_ticks,
+            rendered_primary_plane_scanout_backpressure: self
+                .rendered_primary_plane_scanout_backpressure_report(
+                    LIVE_RENDERED_PRIMARY_PLANE_SCANOUT_STALL_THRESHOLD_TICKS,
+                ),
             rendered_primary_plane_scanout_submit,
             rendered_primary_plane_scanout_retire,
             libdrm_poller: self.libdrm_poller_diagnostics,
