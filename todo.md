@@ -83,6 +83,9 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Made atomic scanout preflight inspect each primary DRM node through one
+  ordered readiness probe, so reduced counts come from a consistent live fd
+  observation instead of separate repeated opens.
 - [x] Split atomic scanout preflight report, count normalization, device-node
   filtering, and live host probing into separate hardware-validation modules.
 - [x] Carried reduced scanout-buffer import status through rendered primary-plane

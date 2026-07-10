@@ -37,16 +37,17 @@ pub fn real_atomic_scanout_preflight_report_from_dev_dri(
             continue;
         }
         let path = entry.path();
-        if can_open_primary_card_node_read_write(&path) {
+        let readiness = inspect_atomic_preflight_card(&path);
+        if readiness.openable {
             openable_primary_card_nodes = openable_primary_card_nodes.saturating_add(1);
         }
-        if can_admit_atomic_scanout_client_capabilities(&path) {
+        if readiness.atomic_capable {
             atomic_capable_primary_card_nodes = atomic_capable_primary_card_nodes.saturating_add(1);
         }
-        if can_select_primary_plane_scanout_target(&path) {
+        if readiness.scanout_target {
             scanout_target_primary_card_nodes = scanout_target_primary_card_nodes.saturating_add(1);
         }
-        if can_discover_primary_plane_atomic_properties(&path) {
+        if readiness.atomic_properties {
             atomic_property_primary_card_nodes =
                 atomic_property_primary_card_nodes.saturating_add(1);
         }
@@ -62,77 +63,76 @@ pub fn real_atomic_scanout_preflight_report_from_dev_dri(
     )
 }
 
-fn can_open_primary_card_node_read_write(path: &std::path::Path) -> bool {
-    std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(path)
-        .is_ok()
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct AtomicPreflightCardReadiness {
+    openable: bool,
+    atomic_capable: bool,
+    scanout_target: bool,
+    atomic_properties: bool,
 }
 
 #[cfg(feature = "libdrm-events")]
-fn can_admit_atomic_scanout_client_capabilities(path: &std::path::Path) -> bool {
-    open_atomic_preflight_card_with_client_capabilities(path).is_some()
-}
-
-#[cfg(not(feature = "libdrm-events"))]
-fn can_admit_atomic_scanout_client_capabilities(_path: &std::path::Path) -> bool {
-    false
-}
-
-#[cfg(feature = "libdrm-events")]
-fn can_select_primary_plane_scanout_target(path: &std::path::Path) -> bool {
-    let Some(card) = open_atomic_preflight_card_with_client_capabilities(path) else {
-        return false;
+fn inspect_atomic_preflight_card(path: &std::path::Path) -> AtomicPreflightCardReadiness {
+    let Some(card) = open_atomic_preflight_card(path) else {
+        return AtomicPreflightCardReadiness::default();
     };
 
-    crate::select_native_primary_plane_target(&card).status
-        == crate::LibdrmNativePrimaryPlaneSelectionStatus::Selected
-}
-
-#[cfg(not(feature = "libdrm-events"))]
-fn can_select_primary_plane_scanout_target(_path: &std::path::Path) -> bool {
-    false
-}
-
-#[cfg(feature = "libdrm-events")]
-fn can_discover_primary_plane_atomic_properties(path: &std::path::Path) -> bool {
-    let Some(card) = open_atomic_preflight_card_with_client_capabilities(path) else {
-        return false;
+    let mut readiness = AtomicPreflightCardReadiness {
+        openable: true,
+        ..AtomicPreflightCardReadiness::default()
     };
+
+    if !admit_atomic_scanout_client_capabilities(&card) {
+        return readiness;
+    }
+    readiness.atomic_capable = true;
+
     let selection = crate::select_native_primary_plane_target(&card);
-    let Some(selection) = selection.selection else {
-        return false;
-    };
+    if selection.status != crate::LibdrmNativePrimaryPlaneSelectionStatus::Selected {
+        return readiness;
+    }
+    readiness.scanout_target = true;
 
-    crate::discover_native_primary_plane_property_handles(
+    let Some(selection) = selection.selection else {
+        return readiness;
+    };
+    let properties = crate::discover_native_primary_plane_property_handles(
         &card,
         selection.connector,
         selection.crtc,
         selection.plane,
-    )
-    .status
-        == crate::LibdrmNativePrimaryPlanePropertyDiscoveryStatus::Discovered
+    );
+    readiness.atomic_properties =
+        properties.status == crate::LibdrmNativePrimaryPlanePropertyDiscoveryStatus::Discovered;
+    readiness
 }
 
 #[cfg(not(feature = "libdrm-events"))]
-fn can_discover_primary_plane_atomic_properties(_path: &std::path::Path) -> bool {
-    false
+fn inspect_atomic_preflight_card(path: &std::path::Path) -> AtomicPreflightCardReadiness {
+    AtomicPreflightCardReadiness {
+        openable: std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .is_ok(),
+        ..AtomicPreflightCardReadiness::default()
+    }
 }
 
 #[cfg(feature = "libdrm-events")]
-fn open_atomic_preflight_card_with_client_capabilities(
-    path: &std::path::Path,
-) -> Option<AtomicPreflightCard> {
+fn open_atomic_preflight_card(path: &std::path::Path) -> Option<AtomicPreflightCard> {
     let file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .open(path)
         .ok()?;
-    let card = AtomicPreflightCard(file);
-    drm::Device::set_client_capability(&card, drm::ClientCapability::UniversalPlanes, true).ok()?;
-    drm::Device::set_client_capability(&card, drm::ClientCapability::Atomic, true).ok()?;
-    Some(card)
+    Some(AtomicPreflightCard(file))
+}
+
+#[cfg(feature = "libdrm-events")]
+fn admit_atomic_scanout_client_capabilities(card: &AtomicPreflightCard) -> bool {
+    drm::Device::set_client_capability(card, drm::ClientCapability::UniversalPlanes, true).is_ok()
+        && drm::Device::set_client_capability(card, drm::ClientCapability::Atomic, true).is_ok()
 }
 
 #[cfg(feature = "libdrm-events")]
