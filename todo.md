@@ -99,6 +99,9 @@ smoke still needs a DRM-master-capable machine.
   cleanup retry outcomes.
 - [x] Added `tools/verify_runtime_rendered_scanout_evidence.sh` and fixtures for
   a strict clean runtime submit-to-retire evidence proof.
+- [x] Added `sophia atomic-scanout-runtime-evidence` plus
+  `tools/runtime_rendered_scanout_evidence.sh` to capture and verify a real
+  one-frame runtime rendered-primary-plane scanout proof.
 - [x] Added session-loop coverage proving pending decoded native page-flip
   callbacks drain under the bounded emit budget without requiring another
   reduced page-flip readiness token.

@@ -5,6 +5,8 @@ mod readiness;
 mod render_device;
 #[cfg(feature = "gbm-probe")]
 mod rendered_smoke;
+#[cfg(feature = "gbm-probe")]
+mod runtime_evidence;
 mod selection;
 mod session;
 
@@ -18,5 +20,7 @@ pub use rendered_smoke::{
     RealAtomicScanoutSmokeConfig, run_real_atomic_scanout_smoke_phases,
     run_real_atomic_scanout_smoke_phases_with,
 };
+#[cfg(feature = "gbm-probe")]
+pub use runtime_evidence::run_real_atomic_runtime_rendered_scanout_evidence_with;
 pub use selection::*;
 pub use session::*;

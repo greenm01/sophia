@@ -1,0 +1,154 @@
+use super::{
+    RealAtomicScanoutPageFlipSession, RealAtomicScanoutPageFlipWaitPolicy,
+    RealAtomicScanoutSmokeConfig,
+};
+use crate::prelude::*;
+
+#[cfg(feature = "gbm-probe")]
+pub fn run_real_atomic_runtime_rendered_scanout_evidence_with(
+    config: RealAtomicScanoutSmokeConfig,
+) -> Vec<String> {
+    let mut session_result = select_real_atomic_scanout_card().into_page_flip_session(
+        config.slot,
+        config.output,
+        config.authority,
+    );
+    let Some(mut session) = session_result.session.take() else {
+        return vec![
+            session_result
+                .failure_evidence()
+                .unwrap_or_else(LibdrmNativeAtomicScanoutSmokeEvidence::kms_selection_failed)
+                .reduced_log_line(),
+        ];
+    };
+    let discovery = match session.render_device_discovery() {
+        Ok(discovery) => discovery,
+        Err(_) => {
+            return vec![
+                LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+                    LiveKmsScanoutTargetStatus::Ready,
+                    Some(LibdrmNativeRenderedScanoutContextStatus::Unavailable),
+                    LiveRendererScanoutBufferExportStatus::Unavailable,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .reduced_log_line(),
+            ];
+        }
+    };
+    let mut exporter = NativeGbmRenderedScanoutBufferDiscoveryExporter::new(discovery);
+    session.run_runtime_rendered_scanout_evidence_lines(
+        config.output,
+        &mut exporter,
+        config.wait_policy,
+    )
+}
+
+#[cfg(feature = "gbm-probe")]
+impl RealAtomicScanoutPageFlipSession {
+    pub fn run_runtime_rendered_scanout_evidence_lines<R>(
+        &mut self,
+        output_id: OutputId,
+        exporter: &mut NativeGbmRenderedScanoutBufferDiscoveryExporter<R>,
+        wait_policy: RealAtomicScanoutPageFlipWaitPolicy,
+    ) -> Vec<String>
+    where
+        R: RenderDeviceDiscoveryBackend,
+    {
+        let output = HeadlessOutput {
+            id: output_id,
+            size: self.selection().size(),
+            scale: 1,
+        };
+        let frame_target = LiveGbmEglFrameTargetRecord::new(output.size);
+        let (sender, receiver) = std::sync::mpsc::sync_channel(4);
+        let mut runtime = LiveBackendRuntimeAssembly {
+            assembly: HeadlessCompositorBackendAssembly::new(output),
+            renderer_observation: LiveRendererRuntimeObservation::from_startup_status(
+                LiveRendererImportBoundary::cpu_only().startup_status(),
+                LiveRendererSelectionObservation::CpuFallback,
+            ),
+            output_size: Some(output.size),
+            scanout_readiness: LiveScanoutReadinessReport {
+                status: LiveScanoutReadinessStatus::Ready,
+            },
+            kms_scanout_target: LiveKmsScanoutTargetReport {
+                status: LiveKmsScanoutTargetStatus::Ready,
+                size: Some(output.size),
+            },
+            gbm_egl_frame_target: Some(frame_target),
+            gbm_egl_frame_target_lifecycle: Some(LiveGbmEglFrameTargetLifecycleReport::created(
+                frame_target,
+            )),
+            gbm_egl_frame_target_allocation: None,
+            page_flip_event: LivePageFlipEvent::from_kms_scanout_target_status(
+                LiveKmsScanoutTargetStatus::Ready,
+            ),
+            page_flip_callback_intake: LivePageFlipCallbackIntake::new(output.id),
+            page_flip_callback_queue: Some(LivePageFlipCallbackQueue::new(receiver, 4)),
+            libdrm_poller_diagnostics: LiveLibdrmPollerDiagnostics::not_configured(),
+            rendered_primary_plane_scanout_submission: None,
+            rendered_primary_plane_scanout_cleanup: None,
+            rendered_primary_plane_runtime_scanout_state: None,
+            rendered_primary_plane_scanout_in_flight_ticks: 0,
+            pending_runtime_scanout_states: VecDeque::new(),
+        };
+
+        let first = match runtime
+            .run_tick_with_native_gbm_rendered_primary_plane_scanout_exporter_and_native_page_flip_events_with(
+                CompositorBackendTickInput::default(),
+                &self.card,
+                exporter,
+                &mut self.reader,
+                &mut self.poller,
+                &sender,
+                wait_policy.max_read,
+                wait_policy.max_emit,
+            ) {
+            Ok(report) => report.tick,
+            Err(_) => return Vec::new(),
+        };
+
+        let Some(submit) = first.rendered_primary_plane_scanout_submit else {
+            return Vec::new();
+        };
+        let mut lines = vec![submit.reduced_log_line()];
+        if submit.status
+            != LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+        {
+            return lines;
+        }
+
+        let deadline = std::time::Instant::now() + wait_policy.timeout;
+        while std::time::Instant::now() < deadline {
+            let tick = match runtime
+                .run_tick_with_native_gbm_rendered_primary_plane_scanout_exporter_and_native_page_flip_events_with(
+                    CompositorBackendTickInput::default(),
+                    &self.card,
+                    exporter,
+                    &mut self.reader,
+                    &mut self.poller,
+                    &sender,
+                    wait_policy.max_read,
+                    wait_policy.max_emit,
+                ) {
+                Ok(report) => report.tick,
+                Err(_) => return lines,
+            };
+
+            if let Some(retire) = tick.rendered_primary_plane_scanout_retire {
+                lines.push(retire.reduced_log_line());
+                if let Some(cleanup) = tick.rendered_primary_plane_scanout_cleanup_retry {
+                    lines.push(cleanup.reduced_log_line());
+                }
+                return lines;
+            }
+
+            std::thread::sleep(wait_policy.sleep);
+        }
+
+        lines
+    }
+}

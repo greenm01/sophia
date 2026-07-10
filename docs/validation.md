@@ -178,6 +178,12 @@ line and exactly one clean retired line, rejects cleanup retry lines, and
 rejects unknown, duplicate, or malformed fields. This verifier proves a
 single-frame runtime submit-to-retire observation; the destructive two-phase
 hardware proof still comes from `tools/verify_atomic_scanout_evidence.sh`.
+To capture that runtime proof on real hardware, run
+`tools/runtime_rendered_scanout_evidence.sh` from a session where DRM master and
+modeset disruption are acceptable. The helper runs atomic preflight, executes
+the feature-gated `sophia atomic-scanout-runtime-evidence` command with
+`SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1`, captures the reduced runtime evidence
+log, and verifies it with `tools/verify_runtime_rendered_scanout_evidence.sh`.
 The stable evidence shape for the GBM/EGL renderer smoke is
 `LiveRealGbmSmokeEvidence`: status, draw status, presentation status, and
 frame-target allocation status only.
@@ -244,6 +250,8 @@ captured log without rerunning the hardware smoke:
 ```sh
 tools/verify_atomic_scanout_evidence.sh /tmp/sophia-atomic-smoke.log
 tools/verify_atomic_scanout_preflight.sh /tmp/sophia-atomic-scanout-preflight.log
+tools/runtime_rendered_scanout_evidence.sh --slot=1 --output=1 --authority=1 --page-flip-timeout-ms=2000
+tools/verify_runtime_rendered_scanout_evidence.sh /tmp/sophia-runtime-rendered-scanout.log
 ```
 
 The verifier accepts only reduced evidence that proves a rendered GBM

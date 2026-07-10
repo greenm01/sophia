@@ -36,6 +36,41 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
     }
 
     #[cfg(feature = "atomic-scanout-smoke-live")]
+    if args
+        .iter()
+        .any(|arg| arg == "atomic-scanout-runtime-evidence")
+    {
+        if std::env::var_os("SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE").is_none() {
+            return Err("set SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 to run destructive atomic scanout runtime evidence".into());
+        }
+
+        let config = atomic_scanout_smoke_cli_config(args)?;
+        let lines =
+            sophia_backend_live::run_real_atomic_runtime_rendered_scanout_evidence_with(config);
+        for line in &lines {
+            println!("{line}");
+        }
+        if !lines.iter().any(|line| {
+            line.starts_with("sophia_runtime_rendered_scanout_submit ")
+                && line.contains(" status=SubmittedWaitingForPageFlip ")
+                && line.contains(" runtime_scanout_state=Submitted ")
+        }) || !lines.iter().any(|line| {
+            line.starts_with("sophia_runtime_rendered_scanout_retire ")
+                && line.contains(" status=RetiredAfterPageFlip ")
+                && line.contains(" cleanup_pending=false")
+        }) || lines
+            .iter()
+            .any(|line| line.starts_with("sophia_runtime_rendered_scanout_cleanup "))
+        {
+            return Err(
+                "atomic scanout runtime evidence did not capture a clean submit-to-retire frame"
+                    .into(),
+            );
+        }
+        return Ok(true);
+    }
+
+    #[cfg(feature = "atomic-scanout-smoke-live")]
     if args.iter().any(|arg| arg == "atomic-scanout-smoke-child") {
         if std::env::var_os("SOPHIA_REAL_ATOMIC_SCANOUT_CHILD").is_none() {
             return Ok(true);
