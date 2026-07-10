@@ -1,1 +1,1 @@
-sophia_atomic_scanout_preflight schema=2 target=AtomicScanout status=DeviceDirectoryUnavailable primary_card_nodes=0 openable_primary_card_nodes=0
+sophia_atomic_scanout_preflight schema=3 target=AtomicScanout status=DeviceDirectoryUnavailable primary_card_nodes=0 openable_primary_card_nodes=0 atomic_capable_primary_card_nodes=0

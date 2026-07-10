@@ -203,50 +203,89 @@ fn real_atomic_scanout_validation_gate_is_explicit_and_reduced() {
 #[test]
 fn atomic_scanout_preflight_reduces_host_readiness_without_identity() {
     assert_eq!(
-        LiveAtomicScanoutPreflightReport::from_primary_card_counts(false, 2, 2),
+        LiveAtomicScanoutPreflightReport::from_primary_card_counts(false, 2, 2, 2),
         LiveAtomicScanoutPreflightReport {
             target: LiveHardwareValidationTarget::AtomicScanout,
             status: LiveAtomicScanoutPreflightStatus::DeviceDirectoryUnavailable,
             primary_card_nodes: 0,
             openable_primary_card_nodes: 0,
+            atomic_capable_primary_card_nodes: 0,
         }
     );
     assert_eq!(
-        LiveAtomicScanoutPreflightReport::from_primary_card_counts(true, 0, 0),
+        LiveAtomicScanoutPreflightReport::from_primary_card_counts(true, 0, 0, 0),
         LiveAtomicScanoutPreflightReport {
             target: LiveHardwareValidationTarget::AtomicScanout,
             status: LiveAtomicScanoutPreflightStatus::NoPrimaryCardNodes,
             primary_card_nodes: 0,
             openable_primary_card_nodes: 0,
+            atomic_capable_primary_card_nodes: 0,
         }
     );
     assert_eq!(
-        LiveAtomicScanoutPreflightReport::from_primary_card_counts(true, 2, 0),
+        LiveAtomicScanoutPreflightReport::from_primary_card_counts(true, 2, 0, 0),
         LiveAtomicScanoutPreflightReport {
             target: LiveHardwareValidationTarget::AtomicScanout,
             status: LiveAtomicScanoutPreflightStatus::PrimaryCardOpenUnavailable,
             primary_card_nodes: 2,
             openable_primary_card_nodes: 0,
+            atomic_capable_primary_card_nodes: 0,
         }
     );
     assert_eq!(
-        LiveAtomicScanoutPreflightReport::from_primary_card_counts(true, 2, 1),
+        LiveAtomicScanoutPreflightReport::from_primary_card_counts(true, 2, 1, 0),
         LiveAtomicScanoutPreflightReport {
             target: LiveHardwareValidationTarget::AtomicScanout,
-            status: LiveAtomicScanoutPreflightStatus::CandidatePrimaryCardsOpenable,
+            status: LiveAtomicScanoutPreflightStatus::AtomicClientCapabilityUnavailable,
             primary_card_nodes: 2,
             openable_primary_card_nodes: 1,
+            atomic_capable_primary_card_nodes: 0,
         }
     );
     assert_eq!(
-        LiveAtomicScanoutPreflightReport::from_primary_card_counts(true, usize::MAX, usize::MAX)
-            .primary_card_nodes,
+        LiveAtomicScanoutPreflightReport::from_primary_card_counts(true, 2, 2, 1),
+        LiveAtomicScanoutPreflightReport {
+            target: LiveHardwareValidationTarget::AtomicScanout,
+            status: LiveAtomicScanoutPreflightStatus::CandidatePrimaryCardsAtomicCapable,
+            primary_card_nodes: 2,
+            openable_primary_card_nodes: 2,
+            atomic_capable_primary_card_nodes: 1,
+        }
+    );
+    assert_eq!(
+        LiveAtomicScanoutPreflightReport::from_primary_card_counts(
+            true,
+            usize::MAX,
+            usize::MAX,
+            usize::MAX
+        )
+        .primary_card_nodes,
         LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS
     );
     assert_eq!(
-        LiveAtomicScanoutPreflightReport::from_primary_card_counts(true, usize::MAX, usize::MAX)
-            .openable_primary_card_nodes,
+        LiveAtomicScanoutPreflightReport::from_primary_card_counts(
+            true,
+            usize::MAX,
+            usize::MAX,
+            usize::MAX
+        )
+        .openable_primary_card_nodes,
         LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS
+    );
+    assert_eq!(
+        LiveAtomicScanoutPreflightReport::from_primary_card_counts(
+            true,
+            usize::MAX,
+            usize::MAX,
+            usize::MAX
+        )
+        .atomic_capable_primary_card_nodes,
+        LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS
+    );
+    assert_eq!(
+        LiveAtomicScanoutPreflightReport::from_primary_card_counts(true, 2, 1, 2)
+            .atomic_capable_primary_card_nodes,
+        1
     );
 
     let real = real_atomic_scanout_preflight_report();
@@ -255,8 +294,12 @@ fn atomic_scanout_preflight_reduces_host_readiness_without_identity() {
     assert!(real.primary_card_nodes <= LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS);
     assert!(real.openable_primary_card_nodes <= LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS);
     assert!(
+        real.atomic_capable_primary_card_nodes <= LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS
+    );
+    assert!(real.atomic_capable_primary_card_nodes <= real.openable_primary_card_nodes);
+    assert!(
         real.reduced_log_line()
-            .starts_with("sophia_atomic_scanout_preflight schema=2 target=AtomicScanout status=")
+            .starts_with("sophia_atomic_scanout_preflight schema=3 target=AtomicScanout status=")
     );
 }
 

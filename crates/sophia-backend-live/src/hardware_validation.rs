@@ -83,6 +83,7 @@ pub struct LiveAtomicScanoutPreflightReport {
     pub status: LiveAtomicScanoutPreflightStatus,
     pub primary_card_nodes: u8,
     pub openable_primary_card_nodes: u8,
+    pub atomic_capable_primary_card_nodes: u8,
 }
 
 impl LiveAtomicScanoutPreflightReport {
@@ -90,6 +91,7 @@ impl LiveAtomicScanoutPreflightReport {
         device_directory_available: bool,
         primary_card_nodes: usize,
         openable_primary_card_nodes: usize,
+        atomic_capable_primary_card_nodes: usize,
     ) -> Self {
         let primary_card_nodes = if device_directory_available {
             capped_primary_card_count(primary_card_nodes)
@@ -101,14 +103,25 @@ impl LiveAtomicScanoutPreflightReport {
         } else {
             0
         };
+        let atomic_capable_primary_card_nodes = if device_directory_available {
+            capped_primary_card_count(atomic_capable_primary_card_nodes)
+        } else {
+            0
+        };
+        let atomic_capable_primary_card_nodes = capped_atomic_capable_primary_card_count(
+            atomic_capable_primary_card_nodes,
+            openable_primary_card_nodes,
+        );
         let status = if !device_directory_available {
             LiveAtomicScanoutPreflightStatus::DeviceDirectoryUnavailable
         } else if primary_card_nodes == 0 {
             LiveAtomicScanoutPreflightStatus::NoPrimaryCardNodes
         } else if openable_primary_card_nodes == 0 {
             LiveAtomicScanoutPreflightStatus::PrimaryCardOpenUnavailable
+        } else if atomic_capable_primary_card_nodes == 0 {
+            LiveAtomicScanoutPreflightStatus::AtomicClientCapabilityUnavailable
         } else {
-            LiveAtomicScanoutPreflightStatus::CandidatePrimaryCardsOpenable
+            LiveAtomicScanoutPreflightStatus::CandidatePrimaryCardsAtomicCapable
         };
 
         Self {
@@ -116,13 +129,18 @@ impl LiveAtomicScanoutPreflightReport {
             status,
             primary_card_nodes,
             openable_primary_card_nodes,
+            atomic_capable_primary_card_nodes,
         }
     }
 
     pub fn reduced_log_line(self) -> String {
         format!(
-            "sophia_atomic_scanout_preflight schema=2 target={:?} status={:?} primary_card_nodes={} openable_primary_card_nodes={}",
-            self.target, self.status, self.primary_card_nodes, self.openable_primary_card_nodes
+            "sophia_atomic_scanout_preflight schema=3 target={:?} status={:?} primary_card_nodes={} openable_primary_card_nodes={} atomic_capable_primary_card_nodes={}",
+            self.target,
+            self.status,
+            self.primary_card_nodes,
+            self.openable_primary_card_nodes,
+            self.atomic_capable_primary_card_nodes
         )
     }
 }
@@ -132,7 +150,8 @@ pub enum LiveAtomicScanoutPreflightStatus {
     DeviceDirectoryUnavailable,
     NoPrimaryCardNodes,
     PrimaryCardOpenUnavailable,
-    CandidatePrimaryCardsOpenable,
+    AtomicClientCapabilityUnavailable,
+    CandidatePrimaryCardsAtomicCapable,
 }
 
 pub const fn capped_primary_card_count(primary_card_nodes: usize) -> u8 {
@@ -140,6 +159,17 @@ pub const fn capped_primary_card_count(primary_card_nodes: usize) -> u8 {
         LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS
     } else {
         primary_card_nodes as u8
+    }
+}
+
+pub const fn capped_atomic_capable_primary_card_count(
+    atomic_capable_primary_card_nodes: u8,
+    openable_primary_card_nodes: u8,
+) -> u8 {
+    if atomic_capable_primary_card_nodes > openable_primary_card_nodes {
+        openable_primary_card_nodes
+    } else {
+        atomic_capable_primary_card_nodes
     }
 }
 
@@ -187,11 +217,12 @@ pub fn real_atomic_scanout_preflight_report_from_dev_dri(
     dev_dri: &std::path::Path,
 ) -> LiveAtomicScanoutPreflightReport {
     let Ok(entries) = std::fs::read_dir(dev_dri) else {
-        return LiveAtomicScanoutPreflightReport::from_primary_card_counts(false, 0, 0);
+        return LiveAtomicScanoutPreflightReport::from_primary_card_counts(false, 0, 0, 0);
     };
 
     let mut primary_card_nodes = 0usize;
     let mut openable_primary_card_nodes = 0usize;
+    let mut atomic_capable_primary_card_nodes = 0usize;
 
     for entry in entries
         .filter_map(Result::ok)
@@ -201,11 +232,17 @@ pub fn real_atomic_scanout_preflight_report_from_dev_dri(
         if primary_card_nodes > LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS as usize
             && openable_primary_card_nodes
                 > LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS as usize
+            && atomic_capable_primary_card_nodes
+                > LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS as usize
         {
             continue;
         }
-        if can_open_primary_card_node_read_write(&entry.path()) {
+        let path = entry.path();
+        if can_open_primary_card_node_read_write(&path) {
             openable_primary_card_nodes = openable_primary_card_nodes.saturating_add(1);
+        }
+        if can_admit_atomic_scanout_client_capabilities(&path) {
+            atomic_capable_primary_card_nodes = atomic_capable_primary_card_nodes.saturating_add(1);
         }
     }
 
@@ -213,6 +250,7 @@ pub fn real_atomic_scanout_preflight_report_from_dev_dri(
         true,
         primary_card_nodes,
         openable_primary_card_nodes,
+        atomic_capable_primary_card_nodes,
     )
 }
 
@@ -236,6 +274,37 @@ fn can_open_primary_card_node_read_write(path: &std::path::Path) -> bool {
         .write(true)
         .open(path)
         .is_ok()
+}
+
+#[cfg(feature = "libdrm-events")]
+fn can_admit_atomic_scanout_client_capabilities(path: &std::path::Path) -> bool {
+    #[derive(Debug)]
+    struct AtomicPreflightCard(std::fs::File);
+
+    impl std::os::fd::AsFd for AtomicPreflightCard {
+        fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
+            self.0.as_fd()
+        }
+    }
+
+    impl drm::Device for AtomicPreflightCard {}
+
+    let Ok(file) = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+    else {
+        return false;
+    };
+    let card = AtomicPreflightCard(file);
+
+    drm::Device::set_client_capability(&card, drm::ClientCapability::UniversalPlanes, true).is_ok()
+        && drm::Device::set_client_capability(&card, drm::ClientCapability::Atomic, true).is_ok()
+}
+
+#[cfg(not(feature = "libdrm-events"))]
+fn can_admit_atomic_scanout_client_capabilities(_path: &std::path::Path) -> bool {
+    false
 }
 
 fn is_primary_card_node_name(name: &str) -> bool {
