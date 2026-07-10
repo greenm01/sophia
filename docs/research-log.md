@@ -1000,6 +1000,18 @@ destroy status from accepted page-flip retirement. The runtime can distinguish
 clean retirement from retryable framebuffer/blob cleanup debt without exposing
 framebuffer IDs, mode-blob handles, GBM objects, or driver errors.
 
+## 2026-07-10: Atomic Scanout Hardware Evidence
+
+The local non-hardware atomic scanout gate passes, including GBM/EGL scanout
+feature tests, backend-live scanout intake tests, and strict reduced verifier
+fixtures.
+
+The opt-in hardware smoke cannot complete in this environment. Its preflight
+stops before modesetting with reduced status `DeviceDirectoryUnavailable` and
+zero primary card counts. The remaining proof must run on a DRM-master-capable
+machine and produce two passing reduced evidence lines: `InitialModeset` and
+`SteadyPageFlip`.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

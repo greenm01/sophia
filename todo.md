@@ -38,6 +38,11 @@ Support now exists for that hardware proof:
 - `tools/verify_atomic_scanout_evidence.sh` can verify a captured log offline
   against the reduced atomic scanout evidence contract.
 
+Current local host note: `tools/atomic_scanout_smoke.sh` stops at verified
+preflight with `DeviceDirectoryUnavailable` and zero primary card counts. The
+local non-hardware gate passes, but the modesetting smoke still needs a
+DRM-master-capable machine.
+
 ---
 
 ## Next 3 Milestones
