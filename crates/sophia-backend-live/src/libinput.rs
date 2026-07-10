@@ -1,4 +1,4 @@
-use super::*;
+use crate::prelude::*;
 
 #[cfg(feature = "libinput-events")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

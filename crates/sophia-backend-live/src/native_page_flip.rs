@@ -1,4 +1,4 @@
-use super::*;
+use crate::prelude::*;
 use std::sync::mpsc::{SyncSender, TrySendError};
 
 #[cfg(feature = "libdrm-events")]

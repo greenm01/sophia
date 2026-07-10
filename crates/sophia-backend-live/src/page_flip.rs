@@ -1,4 +1,4 @@
-use super::*;
+use crate::prelude::*;
 use std::collections::VecDeque;
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, TrySendError};
 

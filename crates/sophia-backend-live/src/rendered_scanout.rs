@@ -1,4 +1,4 @@
-use super::*;
+use crate::prelude::*;
 
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
 use std::io;

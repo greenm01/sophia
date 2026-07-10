@@ -1,4 +1,4 @@
-use super::*;
+use crate::prelude::*;
 
 #[cfg(feature = "libdrm-events")]
 pub trait LibdrmNativeAtomicCommitDevice {

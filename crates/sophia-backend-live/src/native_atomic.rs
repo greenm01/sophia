@@ -1,4 +1,4 @@
-use super::*;
+use crate::prelude::*;
 
 #[derive(Debug)]
 pub struct LibdrmNativeAtomicCommitRequest {

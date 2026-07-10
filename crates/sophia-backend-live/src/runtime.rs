@@ -1,4 +1,4 @@
-use super::*;
+use crate::prelude::*;
 
 pub struct LiveBackendRuntimeAssembly<P = QueuedInputPoller> {
     pub(crate) assembly: HeadlessCompositorBackendAssembly<P>,

@@ -1,4 +1,4 @@
-use super::*;
+use crate::prelude::*;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LiveScanoutReadinessReport {
