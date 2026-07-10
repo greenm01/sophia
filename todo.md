@@ -97,6 +97,8 @@ smoke still needs a DRM-master-capable machine.
   IDs before constructing an atomic request.
 - [x] Made native primary-plane resource creation reject zero mode-blob IDs
   before framebuffer allocation or cleanup bookkeeping.
+- [x] Centralized pre-native-submit rendered scanout result construction so
+  early failures initialize reduced evidence fields consistently.
 - [x] Split backend-live startup probe reports into render-device discovery,
   GPU startup, EGL startup, and GBM smoke-evidence modules.
 - [x] Split runtime rendered-scanout tracked reports into submit, retire,

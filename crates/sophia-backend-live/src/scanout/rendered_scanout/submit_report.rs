@@ -22,6 +22,30 @@ pub struct LiveRenderedPrimaryPlaneScanoutSubmitResult<Owner> {
 
 #[cfg(feature = "libdrm-events")]
 impl<Owner> LiveRenderedPrimaryPlaneScanoutSubmitResult<Owner> {
+    pub(crate) const fn stopped_before_native_submit(
+        status: LiveRenderedPrimaryPlaneScanoutSubmitStatus,
+        scanout_target: LiveKmsScanoutTargetStatus,
+        target: Option<LiveGbmEglFrameTargetStatus>,
+        export: Option<LiveRendererScanoutBufferExportStatus>,
+    ) -> Self {
+        Self {
+            status,
+            scanout_target,
+            target,
+            export,
+            scanout_buffer: None,
+            properties: None,
+            resources: None,
+            request: None,
+            submit: None,
+            request_scope: None,
+            commit_flags: None,
+            commit_submit: None,
+            submission: None,
+            cleanup: None,
+        }
+    }
+
     pub fn runtime_scanout_state(&self) -> RuntimeScanoutState {
         runtime_scanout_state_from_rendered_primary_plane_submit_status(self.status)
     }

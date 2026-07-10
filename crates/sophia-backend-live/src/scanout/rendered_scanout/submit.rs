@@ -18,102 +18,52 @@ where
     E: LiveRenderedScanoutBufferExporter,
 {
     if scanout_target != LiveKmsScanoutTargetStatus::Ready {
-        return LiveRenderedPrimaryPlaneScanoutSubmitResult {
-            status: LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutTargetNotReady,
+        return LiveRenderedPrimaryPlaneScanoutSubmitResult::stopped_before_native_submit(
+            LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutTargetNotReady,
             scanout_target,
-            target: target.map(|target| target.status),
-            export: None,
-            scanout_buffer: None,
-            properties: None,
-            resources: None,
-            request: None,
-            submit: None,
-            request_scope: None,
-            commit_flags: None,
-            commit_submit: None,
-            submission: None,
-            cleanup: None,
-        };
+            target.map(|target| target.status),
+            None,
+        );
     }
 
     let Some(target) = target else {
-        return LiveRenderedPrimaryPlaneScanoutSubmitResult {
-            status: LiveRenderedPrimaryPlaneScanoutSubmitStatus::FrameTargetUnavailable,
+        return LiveRenderedPrimaryPlaneScanoutSubmitResult::stopped_before_native_submit(
+            LiveRenderedPrimaryPlaneScanoutSubmitStatus::FrameTargetUnavailable,
             scanout_target,
-            target: None,
-            export: None,
-            scanout_buffer: None,
-            properties: None,
-            resources: None,
-            request: None,
-            submit: None,
-            request_scope: None,
-            commit_flags: None,
-            commit_submit: None,
-            submission: None,
-            cleanup: None,
-        };
+            None,
+            None,
+        );
     };
 
     let selection = select_native_primary_plane_target(device);
     let scanout_target =
         reduced_scanout_target_status_from_native_selection(scanout_target, target, &selection);
     if scanout_target != LiveKmsScanoutTargetStatus::Ready {
-        return LiveRenderedPrimaryPlaneScanoutSubmitResult {
-            status: LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutTargetNotReady,
+        return LiveRenderedPrimaryPlaneScanoutSubmitResult::stopped_before_native_submit(
+            LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutTargetNotReady,
             scanout_target,
-            target: Some(target.status),
-            export: None,
-            scanout_buffer: None,
-            properties: None,
-            resources: None,
-            request: None,
-            submit: None,
-            request_scope: None,
-            commit_flags: None,
-            commit_submit: None,
-            submission: None,
-            cleanup: None,
-        };
+            Some(target.status),
+            None,
+        );
     }
 
     let export = exporter.export_rendered_scanout_buffer(target).normalized();
     if export.status != LiveRendererScanoutBufferExportStatus::Exported {
-        return LiveRenderedPrimaryPlaneScanoutSubmitResult {
-            status: LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutExportFailed,
+        return LiveRenderedPrimaryPlaneScanoutSubmitResult::stopped_before_native_submit(
+            LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutExportFailed,
             scanout_target,
-            target: Some(target.status),
-            export: Some(export.status),
-            scanout_buffer: None,
-            properties: None,
-            resources: None,
-            request: None,
-            submit: None,
-            request_scope: None,
-            commit_flags: None,
-            commit_submit: None,
-            submission: None,
-            cleanup: None,
-        };
+            Some(target.status),
+            Some(export.status),
+        );
     }
 
     let (Some(descriptor), Some(owner)) = (export.descriptor, export.owner) else {
-        return LiveRenderedPrimaryPlaneScanoutSubmitResult {
-            status: LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutExportFailed,
+        return LiveRenderedPrimaryPlaneScanoutSubmitResult::stopped_before_native_submit(
+            LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutExportFailed,
             scanout_target,
-            target: Some(target.status),
-            export: Some(export.status),
-            scanout_buffer: None,
-            properties: None,
-            resources: None,
-            request: None,
-            submit: None,
-            request_scope: None,
-            commit_flags: None,
-            commit_submit: None,
-            submission: None,
-            cleanup: None,
-        };
+            Some(target.status),
+            Some(export.status),
+        );
     };
 
     let mut submit =
