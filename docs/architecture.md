@@ -588,6 +588,10 @@ first valid export, then reuses it across runtime ticks. If context startup or
 render-device discovery fails, the runtime sees only reduced scanout rejection;
 no file descriptor, path, GBM handle, EGL display, or native error crosses into
 Engine state.
+The reusable exporter also records the last reduced frame-target lifecycle:
+created, retained, resized, invalidated, or retired. This gives the backend
+resize/target-continuity evidence for production scanout while keeping native
+GBM/EGL resources and identities private.
 For rendered primary-plane scanout, backend-live can also retain the combined
 rendered-buffer owner and KMS submission owner internally. Stale page-flip
 evidence keeps that owner in flight. Accepted presented page-flip evidence

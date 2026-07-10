@@ -88,6 +88,8 @@ where
     context_status: Option<NativeGbmRenderedScanoutContextStatus>,
     context_open_attempts: usize,
     export_attempts: usize,
+    last_target: Option<LiveGbmEglFrameTargetRecord>,
+    last_target_lifecycle: Option<LiveGbmEglFrameTargetLifecycleReport>,
     last_export_status: Option<LiveRendererScanoutBufferExportStatus>,
 }
 
@@ -103,6 +105,8 @@ where
             context_status: None,
             context_open_attempts: 0,
             export_attempts: 0,
+            last_target: None,
+            last_target_lifecycle: None,
             last_export_status: None,
         }
     }
@@ -117,6 +121,14 @@ where
 
     pub const fn last_export_status(&self) -> Option<LiveRendererScanoutBufferExportStatus> {
         self.last_export_status
+    }
+
+    pub const fn last_target(&self) -> Option<LiveGbmEglFrameTargetRecord> {
+        self.last_target
+    }
+
+    pub const fn last_target_lifecycle(&self) -> Option<LiveGbmEglFrameTargetLifecycleReport> {
+        self.last_target_lifecycle
     }
 
     pub const fn context_status(&self) -> Option<NativeGbmRenderedScanoutContextStatus> {
@@ -148,6 +160,11 @@ where
         target: LiveGbmEglFrameTargetRecord,
     ) -> LiveRenderedScanoutBufferExport<Self::Owner> {
         self.export_attempts = self.export_attempts.saturating_add(1);
+        let target_lifecycle =
+            LiveGbmEglFrameTargetLifecycleReport::from_size_update(self.last_target, target);
+        self.last_target = Some(target);
+        self.last_target_lifecycle = Some(target_lifecycle);
+
         if target.status != LiveGbmEglFrameTargetStatus::Ready {
             self.last_export_status = Some(LiveRendererScanoutBufferExportStatus::InvalidTarget);
             return LiveRenderedScanoutBufferExport {

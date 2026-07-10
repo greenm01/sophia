@@ -55,6 +55,7 @@ use sophia_backend_live::{
 };
 use sophia_renderer_live::{
     FakeRendererScanoutBufferExporter, LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+    LiveGbmEglFrameTargetLifecycleReport, LiveGbmEglFrameTargetLifecycleStatus,
     LiveGbmEglFrameTargetRecord, LiveRendererScanoutBufferExportStatus,
     LiveRendererScanoutBufferExporter, NativeGbmRenderedScanoutContext,
 };
@@ -1948,11 +1949,12 @@ fn live_runtime_tick_native_gbm_rendered_scanout_fails_closed_when_render_device
 #[test]
 fn native_gbm_rendered_scanout_exporter_rejects_invalid_target_before_device_open() {
     let mut exporter = NativeGbmRenderedScanoutBufferDiscoveryExporter::new(MissingRenderDevice);
-
-    let export = exporter.export_rendered_scanout_buffer(LiveGbmEglFrameTargetRecord::new(Size {
+    let target = LiveGbmEglFrameTargetRecord::new(Size {
         width: 0,
         height: 720,
-    }));
+    });
+
+    let export = exporter.export_rendered_scanout_buffer(target);
 
     assert_eq!(
         export.status,
@@ -1966,6 +1968,70 @@ fn native_gbm_rendered_scanout_exporter_rejects_invalid_target_before_device_ope
         exporter.last_export_status(),
         Some(LiveRendererScanoutBufferExportStatus::InvalidTarget)
     );
+    assert_eq!(exporter.last_target(), Some(target));
+    assert_eq!(
+        exporter.last_target_lifecycle(),
+        Some(LiveGbmEglFrameTargetLifecycleReport {
+            status: LiveGbmEglFrameTargetLifecycleStatus::Invalidated,
+            target,
+        })
+    );
+}
+
+#[cfg(feature = "gbm-probe")]
+#[test]
+fn native_gbm_rendered_scanout_exporter_tracks_reduced_target_reuse_and_resize() {
+    let mut exporter = NativeGbmRenderedScanoutBufferDiscoveryExporter::new(MissingRenderDevice);
+    let first = LiveGbmEglFrameTargetRecord::new(Size {
+        width: 1280,
+        height: 720,
+    });
+    let resized = LiveGbmEglFrameTargetRecord::new(Size {
+        width: 1920,
+        height: 1080,
+    });
+
+    let first_export = exporter.export_rendered_scanout_buffer(first);
+    assert_eq!(
+        first_export.status,
+        LiveRendererScanoutBufferExportStatus::Unavailable
+    );
+    assert_eq!(
+        exporter.last_target_lifecycle(),
+        Some(LiveGbmEglFrameTargetLifecycleReport {
+            status: LiveGbmEglFrameTargetLifecycleStatus::Created,
+            target: first,
+        })
+    );
+
+    let retained_export = exporter.export_rendered_scanout_buffer(first);
+    assert_eq!(
+        retained_export.status,
+        LiveRendererScanoutBufferExportStatus::Unavailable
+    );
+    assert_eq!(
+        exporter.last_target_lifecycle(),
+        Some(LiveGbmEglFrameTargetLifecycleReport {
+            status: LiveGbmEglFrameTargetLifecycleStatus::Retained,
+            target: first,
+        })
+    );
+
+    let resized_export = exporter.export_rendered_scanout_buffer(resized);
+    assert_eq!(
+        resized_export.status,
+        LiveRendererScanoutBufferExportStatus::Unavailable
+    );
+    assert_eq!(
+        exporter.last_target_lifecycle(),
+        Some(LiveGbmEglFrameTargetLifecycleReport {
+            status: LiveGbmEglFrameTargetLifecycleStatus::Resized,
+            target: resized,
+        })
+    );
+    assert_eq!(exporter.last_target(), Some(resized));
+    assert_eq!(exporter.export_attempts(), 3);
+    assert_eq!(exporter.context_open_attempts(), 3);
 }
 
 #[test]

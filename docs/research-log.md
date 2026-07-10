@@ -886,6 +886,10 @@ Cleanup debt now backpressures rendered primary-plane submission. If the retry
 still leaves cleanup pending, the runtime reports a reduced deferred scanout
 instead of submitting another buffer and risking loss of the retained cleanup
 owner.
+The reusable native GBM rendered-scanout exporter now records reduced
+frame-target lifecycle state across exports. This makes retained, resized, and
+invalidated targets observable while preserving the rule that native GBM/EGL
+identity stays behind backend-live.
 The page-flip callback queue now carries the latest accepted reduced callback
 report. `run_tick_with_rendered_primary_plane_scanout_with` consumes that report
 before draining lifecycle states, so one live tick can retire the old rendered

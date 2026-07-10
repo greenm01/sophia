@@ -245,6 +245,10 @@ Backpressure classification is reduced as well: backend-live may report idle,
 waiting, or stalled waiting for page-flip evidence against a caller-provided
 tick threshold, but that classification must not release resources or publish a
 false retirement.
+Reusable native GBM rendered-scanout exporters may report only reduced
+frame-target lifecycle state across exports. Created, retained, resized, and
+invalidated target reports are acceptable; GBM handles, EGL displays, file
+descriptors, paths, and native error strings are not.
 Each tracked rendered scanout owner must carry the last reduced page-flip
 sequence observed before submission. Backend-live may retire that owner only
 when accepted page-flip evidence is newer than the baseline; accepted-looking

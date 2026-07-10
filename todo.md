@@ -116,6 +116,9 @@ active milestone to `docs/roadmap-history.md`.
   before the next rendered scanout submit.
 - [x] Backpressured rendered primary-plane submit while cleanup remains pending
   so native cleanup debt stays bounded to one retained owner.
+- [x] Added reduced frame-target lifecycle tracking to the reusable native GBM
+  rendered-scanout exporter so resize/reuse behavior is observable without
+  native identity.
 - [x] Added reduced live scanout submit intake so backend-live rendered
   primary-plane submit results can drive runtime `SubmitScanout`.
 - [x] Added shared runtime scanout lifecycle state so rendered frames progress
