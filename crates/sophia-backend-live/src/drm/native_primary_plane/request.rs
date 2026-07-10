@@ -16,6 +16,13 @@ pub enum LibdrmNativeAtomicRequestBuildStatus {
 }
 
 #[cfg(feature = "libdrm-events")]
+const LIBDRM_NATIVE_PRIMARY_PLANE_SOURCE_FIXED_POINT_SHIFT: u32 = 16;
+
+#[cfg(feature = "libdrm-events")]
+const LIBDRM_NATIVE_PRIMARY_PLANE_MAX_SOURCE_DIMENSION: i32 =
+    (u32::MAX >> LIBDRM_NATIVE_PRIMARY_PLANE_SOURCE_FIXED_POINT_SHIFT) as i32;
+
+#[cfg(feature = "libdrm-events")]
 pub fn build_native_primary_plane_atomic_request(
     objects: LibdrmNativePrimaryPlaneObjects,
     properties: LibdrmNativePrimaryPlanePropertyHandles,
@@ -45,7 +52,7 @@ fn build_native_primary_plane_atomic_request_with_scope(
     properties: LibdrmNativePrimaryPlanePropertyHandles,
     scope: LibdrmNativeAtomicCommitRequestScope,
 ) -> LibdrmNativeAtomicRequestBuildResult {
-    if objects.size.width <= 0 || objects.size.height <= 0 {
+    if !is_valid_primary_plane_request_size(objects.size) {
         return LibdrmNativeAtomicRequestBuildResult {
             status: LibdrmNativeAtomicRequestBuildStatus::InvalidSize,
             request: None,
@@ -94,6 +101,14 @@ fn build_native_primary_plane_atomic_request_with_scope(
 }
 
 #[cfg(feature = "libdrm-events")]
+const fn is_valid_primary_plane_request_size(size: Size) -> bool {
+    size.width > 0
+        && size.height > 0
+        && size.width <= LIBDRM_NATIVE_PRIMARY_PLANE_MAX_SOURCE_DIMENSION
+        && size.height <= LIBDRM_NATIVE_PRIMARY_PLANE_MAX_SOURCE_DIMENSION
+}
+
+#[cfg(feature = "libdrm-events")]
 fn add_primary_plane_properties(
     request: &mut drm::control::atomic::AtomicModeReq,
     objects: LibdrmNativePrimaryPlaneObjects,
@@ -124,12 +139,16 @@ fn add_primary_plane_properties(
     request.add_property(
         objects.plane,
         properties.plane_src_w,
-        drm::control::property::Value::UnsignedRange(width << 16),
+        drm::control::property::Value::UnsignedRange(
+            width << LIBDRM_NATIVE_PRIMARY_PLANE_SOURCE_FIXED_POINT_SHIFT,
+        ),
     );
     request.add_property(
         objects.plane,
         properties.plane_src_h,
-        drm::control::property::Value::UnsignedRange(height << 16),
+        drm::control::property::Value::UnsignedRange(
+            height << LIBDRM_NATIVE_PRIMARY_PLANE_SOURCE_FIXED_POINT_SHIFT,
+        ),
     );
     request.add_property(
         objects.plane,

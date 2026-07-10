@@ -83,6 +83,8 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Hardened native primary-plane atomic request building so oversized source
+  dimensions fail before KMS 16.16 plane properties are emitted.
 - [x] Extended backend-live scanout tests so forged undersized-pitch descriptors
   fail before DRM framebuffer resource creation or atomic submit.
 - [x] Hardened renderer-live scanout descriptors so XRGB8888 buffers must report

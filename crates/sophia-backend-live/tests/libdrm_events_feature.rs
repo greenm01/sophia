@@ -4635,6 +4635,32 @@ fn native_libdrm_primary_plane_builder_rejects_invalid_size() {
         LibdrmNativeAtomicRequestBuildStatus::InvalidSize
     );
     assert!(negative_height.request.is_none());
+
+    let oversized_width = build_native_primary_plane_atomic_request(
+        primary_plane_objects(Size {
+            width: 65_536,
+            height: 720,
+        }),
+        primary_plane_properties(),
+    );
+    assert_eq!(
+        oversized_width.status,
+        LibdrmNativeAtomicRequestBuildStatus::InvalidSize
+    );
+    assert!(oversized_width.request.is_none());
+
+    let oversized_height = build_native_primary_plane_page_flip_atomic_request(
+        primary_plane_objects(Size {
+            width: 1280,
+            height: 65_536,
+        }),
+        primary_plane_properties(),
+    );
+    assert_eq!(
+        oversized_height.status,
+        LibdrmNativeAtomicRequestBuildStatus::InvalidSize
+    );
+    assert!(oversized_height.request.is_none());
 }
 
 #[test]
