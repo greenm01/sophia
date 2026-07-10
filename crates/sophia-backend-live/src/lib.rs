@@ -765,6 +765,7 @@ impl LiveAtomicScanoutCommitter for FakeAtomicScanoutCommitter {
 }
 
 #[cfg(feature = "libdrm-events")]
+#[derive(Debug)]
 pub struct LibdrmNativeAtomicCommitRequest {
     request: drm::control::atomic::AtomicModeReq,
     page_flip_event: bool,
@@ -858,6 +859,193 @@ pub enum LibdrmNativeAtomicCommitSubmitStatus {
     Submitted,
     WouldBlock,
     Rejected,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LibdrmNativePrimaryPlanePropertyHandles {
+    connector_crtc_id: drm::control::property::Handle,
+    crtc_mode_id: drm::control::property::Handle,
+    crtc_active: drm::control::property::Handle,
+    plane_fb_id: drm::control::property::Handle,
+    plane_crtc_id: drm::control::property::Handle,
+    plane_src_x: drm::control::property::Handle,
+    plane_src_y: drm::control::property::Handle,
+    plane_src_w: drm::control::property::Handle,
+    plane_src_h: drm::control::property::Handle,
+    plane_crtc_x: drm::control::property::Handle,
+    plane_crtc_y: drm::control::property::Handle,
+    plane_crtc_w: drm::control::property::Handle,
+    plane_crtc_h: drm::control::property::Handle,
+}
+
+#[cfg(feature = "libdrm-events")]
+impl LibdrmNativePrimaryPlanePropertyHandles {
+    #[allow(clippy::too_many_arguments)]
+    pub const fn new(
+        connector_crtc_id: drm::control::property::Handle,
+        crtc_mode_id: drm::control::property::Handle,
+        crtc_active: drm::control::property::Handle,
+        plane_fb_id: drm::control::property::Handle,
+        plane_crtc_id: drm::control::property::Handle,
+        plane_src_x: drm::control::property::Handle,
+        plane_src_y: drm::control::property::Handle,
+        plane_src_w: drm::control::property::Handle,
+        plane_src_h: drm::control::property::Handle,
+        plane_crtc_x: drm::control::property::Handle,
+        plane_crtc_y: drm::control::property::Handle,
+        plane_crtc_w: drm::control::property::Handle,
+        plane_crtc_h: drm::control::property::Handle,
+    ) -> Self {
+        Self {
+            connector_crtc_id,
+            crtc_mode_id,
+            crtc_active,
+            plane_fb_id,
+            plane_crtc_id,
+            plane_src_x,
+            plane_src_y,
+            plane_src_w,
+            plane_src_h,
+            plane_crtc_x,
+            plane_crtc_y,
+            plane_crtc_w,
+            plane_crtc_h,
+        }
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LibdrmNativePrimaryPlaneObjects {
+    connector: drm::control::connector::Handle,
+    crtc: drm::control::crtc::Handle,
+    plane: drm::control::plane::Handle,
+    framebuffer: drm::control::framebuffer::Handle,
+    mode_blob: u64,
+    size: Size,
+}
+
+#[cfg(feature = "libdrm-events")]
+impl LibdrmNativePrimaryPlaneObjects {
+    pub const fn new(
+        connector: drm::control::connector::Handle,
+        crtc: drm::control::crtc::Handle,
+        plane: drm::control::plane::Handle,
+        framebuffer: drm::control::framebuffer::Handle,
+        mode_blob: u64,
+        size: Size,
+    ) -> Self {
+        Self {
+            connector,
+            crtc,
+            plane,
+            framebuffer,
+            mode_blob,
+            size,
+        }
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Debug)]
+pub struct LibdrmNativeAtomicRequestBuildResult {
+    pub status: LibdrmNativeAtomicRequestBuildStatus,
+    pub request: Option<LibdrmNativeAtomicCommitRequest>,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibdrmNativeAtomicRequestBuildStatus {
+    Built,
+    InvalidSize,
+}
+
+#[cfg(feature = "libdrm-events")]
+pub fn build_native_primary_plane_atomic_request(
+    objects: LibdrmNativePrimaryPlaneObjects,
+    properties: LibdrmNativePrimaryPlanePropertyHandles,
+) -> LibdrmNativeAtomicRequestBuildResult {
+    if objects.size.width <= 0 || objects.size.height <= 0 {
+        return LibdrmNativeAtomicRequestBuildResult {
+            status: LibdrmNativeAtomicRequestBuildStatus::InvalidSize,
+            request: None,
+        };
+    }
+
+    let width = objects.size.width as u64;
+    let height = objects.size.height as u64;
+    let mut request = drm::control::atomic::AtomicModeReq::new();
+    request.add_property(
+        objects.connector,
+        properties.connector_crtc_id,
+        drm::control::property::Value::CRTC(Some(objects.crtc)),
+    );
+    request.add_property(
+        objects.crtc,
+        properties.crtc_mode_id,
+        drm::control::property::Value::Blob(objects.mode_blob),
+    );
+    request.add_property(
+        objects.crtc,
+        properties.crtc_active,
+        drm::control::property::Value::Boolean(true),
+    );
+    request.add_property(
+        objects.plane,
+        properties.plane_fb_id,
+        drm::control::property::Value::Framebuffer(Some(objects.framebuffer)),
+    );
+    request.add_property(
+        objects.plane,
+        properties.plane_crtc_id,
+        drm::control::property::Value::CRTC(Some(objects.crtc)),
+    );
+    request.add_property(
+        objects.plane,
+        properties.plane_src_x,
+        drm::control::property::Value::UnsignedRange(0),
+    );
+    request.add_property(
+        objects.plane,
+        properties.plane_src_y,
+        drm::control::property::Value::UnsignedRange(0),
+    );
+    request.add_property(
+        objects.plane,
+        properties.plane_src_w,
+        drm::control::property::Value::UnsignedRange(width << 16),
+    );
+    request.add_property(
+        objects.plane,
+        properties.plane_src_h,
+        drm::control::property::Value::UnsignedRange(height << 16),
+    );
+    request.add_property(
+        objects.plane,
+        properties.plane_crtc_x,
+        drm::control::property::Value::SignedRange(0),
+    );
+    request.add_property(
+        objects.plane,
+        properties.plane_crtc_y,
+        drm::control::property::Value::SignedRange(0),
+    );
+    request.add_property(
+        objects.plane,
+        properties.plane_crtc_w,
+        drm::control::property::Value::UnsignedRange(width),
+    );
+    request.add_property(
+        objects.plane,
+        properties.plane_crtc_h,
+        drm::control::property::Value::UnsignedRange(height),
+    );
+
+    LibdrmNativeAtomicRequestBuildResult {
+        status: LibdrmNativeAtomicRequestBuildStatus::Built,
+        request: Some(LibdrmNativeAtomicCommitRequest::new(request)),
+    }
 }
 
 #[cfg(feature = "libdrm-events")]

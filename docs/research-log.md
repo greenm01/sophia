@@ -821,6 +821,10 @@ The first concrete libdrm reader is now feature-gated behind `libdrm-events`.
 submit boundary. The submit report says only submitted, would-block, or
 rejected; it deliberately does not publish committed visual state without the
 accepted page-flip callback path.
+The native atomic request builder can now assemble the standard full-output
+primary-plane property set from backend-private KMS handles. The public evidence
+is reduced to built or invalid-size status; KMS object and property identity
+remain private.
 
 ## Open Questions
 

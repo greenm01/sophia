@@ -666,6 +666,9 @@ serials into the existing reduced callback pipeline.
 may submit a backend-owned `AtomicModeReq` to DRM/KMS, but a successful ioctl
 only means the kernel accepted the request. Sophia still waits for the reduced
 page-flip callback before making the visual commit observable.
+The first native request builder covers the simple full-output primary-plane
+case. It packages connector, CRTC, plane, framebuffer, mode blob, and rectangle
+properties behind backend-live types and exports only reduced build status.
 
 The XLibre prototype scheduler may still consume X Damage. In that path,
 `schedule_frame_from_damage` combines a frame-clock tick, an optional X-derived

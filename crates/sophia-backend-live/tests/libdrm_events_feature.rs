@@ -8,21 +8,24 @@ use sophia_backend_live::{
     LibdrmDependencyAdmissionReport, LibdrmDependencyAdmissionStatus,
     LibdrmNativeAtomicCommitDevice, LibdrmNativeAtomicCommitFlagsReport,
     LibdrmNativeAtomicCommitRequest, LibdrmNativeAtomicCommitSubmitReport,
-    LibdrmNativeAtomicCommitSubmitStatus, LibdrmNativeCrtcRoute, LibdrmNativeEventAdapterReport,
-    LibdrmNativeEventAdapterStatus, LibdrmNativeOutputRoute, LibdrmNativeOutputSlot,
-    LibdrmNativePageFlipCallback, LibdrmNativePageFlipDecodeReport,
-    LibdrmNativePageFlipDecodeStatus, LibdrmNativePageFlipReadResult, LibdrmNativePageFlipReader,
-    LibdrmNativePageFlipSource, LibdrmNativePageFlipSourceReport, LibdrmNativePageFlipSourceStatus,
-    LibdrmNativePollerDiagnostics, LibdrmNativeReadAndPollReport, LibdrmNativeReadLoopReport,
-    LibdrmNativeReadLoopStatus, LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus,
-    LibdrmPageFlipEventPoller, LiveBackendConfig, LiveHardwareValidationGateReport,
-    LiveHardwareValidationGateStatus, LiveHardwareValidationSmokeReport,
-    LiveHardwareValidationSmokeStatus, LiveHardwareValidationTarget, LiveLibdrmPollerDiagnostics,
-    LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
-    LiveLibdrmPollerStartupStatus, LivePageFlipCallback, LivePageFlipCallbackQueue,
-    LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus,
-    NativeLibdrmAtomicScanoutCommitter, NativeLibdrmPageFlipEventPoller,
-    NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller, decode_native_page_flip_batch,
+    LibdrmNativeAtomicCommitSubmitStatus, LibdrmNativeAtomicRequestBuildStatus,
+    LibdrmNativeCrtcRoute, LibdrmNativeEventAdapterReport, LibdrmNativeEventAdapterStatus,
+    LibdrmNativeOutputRoute, LibdrmNativeOutputSlot, LibdrmNativePageFlipCallback,
+    LibdrmNativePageFlipDecodeReport, LibdrmNativePageFlipDecodeStatus,
+    LibdrmNativePageFlipReadResult, LibdrmNativePageFlipReader, LibdrmNativePageFlipSource,
+    LibdrmNativePageFlipSourceReport, LibdrmNativePageFlipSourceStatus,
+    LibdrmNativePollerDiagnostics, LibdrmNativePrimaryPlaneObjects,
+    LibdrmNativePrimaryPlanePropertyHandles, LibdrmNativeReadAndPollReport,
+    LibdrmNativeReadLoopReport, LibdrmNativeReadLoopStatus, LibdrmPageFlipEventPollReport,
+    LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller, LiveBackendConfig,
+    LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
+    LiveHardwareValidationSmokeReport, LiveHardwareValidationSmokeStatus,
+    LiveHardwareValidationTarget, LiveLibdrmPollerDiagnostics, LiveLibdrmPollerDiagnosticsStatus,
+    LiveLibdrmPollerStartupReport, LiveLibdrmPollerStartupStatus, LivePageFlipCallback,
+    LivePageFlipCallbackQueue, LivePageFlipCallbackSourceReport, LivePageFlipEvent,
+    LivePageFlipEventStatus, NativeLibdrmAtomicScanoutCommitter, NativeLibdrmPageFlipEventPoller,
+    NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller, Size,
+    build_native_primary_plane_atomic_request, decode_native_page_flip_batch,
     discover_live_backend, libdrm_dependency_admission_report, libdrm_fd_authority_report,
     native_libdrm_event_adapter_report, native_libdrm_event_adapter_report_for_authority,
     real_libdrm_events_validation_gate, real_libdrm_events_validation_smoke_report,
@@ -180,6 +183,39 @@ impl LibdrmNativeAtomicCommitDevice for FakeNativeAtomicCommitDevice {
     }
 }
 
+fn property_handle(raw: u32) -> drm::control::property::Handle {
+    drm::control::from_u32(raw).expect("test property handle should be nonzero")
+}
+
+fn primary_plane_properties() -> LibdrmNativePrimaryPlanePropertyHandles {
+    LibdrmNativePrimaryPlanePropertyHandles::new(
+        property_handle(101),
+        property_handle(102),
+        property_handle(103),
+        property_handle(104),
+        property_handle(105),
+        property_handle(106),
+        property_handle(107),
+        property_handle(108),
+        property_handle(109),
+        property_handle(110),
+        property_handle(111),
+        property_handle(112),
+        property_handle(113),
+    )
+}
+
+fn primary_plane_objects(size: Size) -> LibdrmNativePrimaryPlaneObjects {
+    LibdrmNativePrimaryPlaneObjects::new(
+        drm::control::from_u32(11).expect("test connector handle should be nonzero"),
+        drm::control::from_u32(12).expect("test crtc handle should be nonzero"),
+        drm::control::from_u32(13).expect("test plane handle should be nonzero"),
+        drm::control::from_u32(14).expect("test framebuffer handle should be nonzero"),
+        15,
+        size,
+    )
+}
+
 #[test]
 fn native_libdrm_atomic_commit_request_reports_reduced_flags() {
     let default_request =
@@ -209,6 +245,67 @@ fn native_libdrm_atomic_commit_request_reports_reduced_flags() {
             test_only: true,
         }
     );
+}
+
+#[test]
+fn native_libdrm_primary_plane_builder_creates_submit_ready_request() {
+    let build = build_native_primary_plane_atomic_request(
+        primary_plane_objects(Size {
+            width: 1280,
+            height: 720,
+        }),
+        primary_plane_properties(),
+    );
+
+    assert_eq!(build.status, LibdrmNativeAtomicRequestBuildStatus::Built);
+    let request = build.request.expect("valid objects should build request");
+    assert_eq!(
+        request.reduced_flags(),
+        LibdrmNativeAtomicCommitFlagsReport {
+            page_flip_event: true,
+            nonblocking: true,
+            allow_modeset: false,
+            test_only: false,
+        }
+    );
+
+    let mut committer =
+        NativeLibdrmAtomicScanoutCommitter::new(FakeNativeAtomicCommitDevice { result: Ok(()) });
+    assert_eq!(
+        committer.submit_native_atomic_commit(request),
+        LibdrmNativeAtomicCommitSubmitReport {
+            status: LibdrmNativeAtomicCommitSubmitStatus::Submitted,
+        }
+    );
+}
+
+#[test]
+fn native_libdrm_primary_plane_builder_rejects_invalid_size() {
+    let zero_width = build_native_primary_plane_atomic_request(
+        primary_plane_objects(Size {
+            width: 0,
+            height: 720,
+        }),
+        primary_plane_properties(),
+    );
+    assert_eq!(
+        zero_width.status,
+        LibdrmNativeAtomicRequestBuildStatus::InvalidSize
+    );
+    assert!(zero_width.request.is_none());
+
+    let negative_height = build_native_primary_plane_atomic_request(
+        primary_plane_objects(Size {
+            width: 1280,
+            height: -1,
+        }),
+        primary_plane_properties(),
+    );
+    assert_eq!(
+        negative_height.status,
+        LibdrmNativeAtomicRequestBuildStatus::InvalidSize
+    );
+    assert!(negative_height.request.is_none());
 }
 
 #[test]

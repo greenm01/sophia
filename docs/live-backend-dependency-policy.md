@@ -146,6 +146,12 @@ only after the matching reduced page-flip evidence is accepted.
 `LibdrmNativeAtomicCommitRequest` owns the native atomic request privately and
 exposes only reduced flag facts for tests and diagnostics; framebuffer, CRTC,
 plane, connector, property, and fd identity stay inside backend-live.
+`build_native_primary_plane_atomic_request` is the first backend-private KMS
+property-set builder. It wires a connector, CRTC, primary plane, framebuffer,
+mode blob, and full-output rectangle into a `drm::control::atomic::AtomicModeReq`
+while exposing only built/invalid-size status. This is still not a full scanout
+pipeline: object discovery, property-name lookup, framebuffer lifetime, and
+hardware smoke remain separate work.
 
 Backend-live runtime ticks carry the current reduced scanout readiness report,
 KMS scanout target report, and page-flip event beside renderer health. This
