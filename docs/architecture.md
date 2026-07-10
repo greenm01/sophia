@@ -646,6 +646,10 @@ are ready. If the tick belongs to another output, or any transaction is still
 pending/timed out, the gate preserves the last committed surface state and keeps
 the batch staged. This gives the DRM/KMS backend a concrete page-flip seam
 without making tests depend on real scanout hardware.
+Backend-live observes that seam through `LiveAtomicScanoutCommitReport`, a
+reduced commit report that records only idle/waiting/committed/rejected state
+and the derived page-flip event. It deliberately drops transaction IDs, surface
+IDs, and native scanout identity before the runtime tick observes the result.
 
 The XLibre prototype scheduler may still consume X Damage. In that path,
 `schedule_frame_from_damage` combines a frame-clock tick, an optional X-derived

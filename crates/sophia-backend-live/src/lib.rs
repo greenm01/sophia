@@ -636,6 +636,40 @@ pub enum LivePageFlipEventStatus {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveAtomicScanoutCommitReport {
+    pub status: LiveAtomicScanoutCommitStatus,
+    pub page_flip: LivePageFlipEvent,
+}
+
+impl LiveAtomicScanoutCommitReport {
+    pub fn from_page_flip_outcome(outcome: &PageFlipCommitOutcome) -> Self {
+        Self {
+            status: match outcome {
+                PageFlipCommitOutcome::Idle => LiveAtomicScanoutCommitStatus::Idle,
+                PageFlipCommitOutcome::WaitingForOutput { .. } => {
+                    LiveAtomicScanoutCommitStatus::WaitingForOutput
+                }
+                PageFlipCommitOutcome::WaitingForTransactionReadiness { .. } => {
+                    LiveAtomicScanoutCommitStatus::WaitingForTransactionReadiness
+                }
+                PageFlipCommitOutcome::Committed { .. } => LiveAtomicScanoutCommitStatus::Committed,
+                PageFlipCommitOutcome::Rejected { .. } => LiveAtomicScanoutCommitStatus::Rejected,
+            },
+            page_flip: LivePageFlipEvent::from_commit_outcome(outcome),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveAtomicScanoutCommitStatus {
+    Idle,
+    WaitingForOutput,
+    WaitingForTransactionReadiness,
+    Committed,
+    Rejected,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LivePageFlipCallback {
     pub output: OutputId,
     pub frame_serial: u64,
@@ -2458,6 +2492,15 @@ where
 
     pub fn observe_page_flip_outcome(&mut self, outcome: &PageFlipCommitOutcome) {
         self.page_flip_event = LivePageFlipEvent::from_commit_outcome(outcome);
+    }
+
+    pub fn observe_atomic_scanout_commit(
+        &mut self,
+        outcome: &PageFlipCommitOutcome,
+    ) -> LiveAtomicScanoutCommitReport {
+        let report = LiveAtomicScanoutCommitReport::from_page_flip_outcome(outcome);
+        self.page_flip_event = report.page_flip;
+        report
     }
 
     pub fn observe_page_flip_callback(

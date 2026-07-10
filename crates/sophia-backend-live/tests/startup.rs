@@ -5,18 +5,18 @@ use std::sync::mpsc;
 use sophia_backend_live::{
     BufferSource, CompositorBackendTickInput, DeviceId, FakeGbmEglFrameTargetAllocator,
     FakePageFlipCallbackSource, HeadlessOutput, LibinputDeviceDescriptor, LibinputDeviceKind,
-    LiveBackendConfig, LiveBackendDependencyDecision, LiveBackendDependencyKind,
-    LiveBackendDependencyUse, LiveCompositorBackendDiscoveryStatus,
-    LiveGbmEglFrameTargetAllocationReport, LiveGbmEglFrameTargetAllocationStatus,
-    LiveGbmEglFrameTargetLifecycleReport, LiveGbmEglFrameTargetLifecycleStatus,
-    LiveGbmEglFrameTargetRecord, LiveGbmEglFrameTargetStatus, LiveKmsScanoutTargetReport,
-    LiveKmsScanoutTargetStatus, LiveLibdrmPollerDiagnostics, LiveLibdrmPollerDiagnosticsStatus,
-    LivePageFlipCallback, LivePageFlipCallbackDecision, LivePageFlipCallbackIntake,
-    LivePageFlipCallbackQueue, LivePageFlipCallbackQueueReport, LivePageFlipCallbackReport,
-    LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus,
-    LiveRendererImportBoundary, LiveRendererImportHealth, LiveRendererImportPathStatus,
-    LiveRendererImportStartupStatus, LiveRendererPreference, LiveRendererPresentationReport,
-    LiveRendererPresentationStatus, LiveRendererRuntimeObservation,
+    LiveAtomicScanoutCommitReport, LiveAtomicScanoutCommitStatus, LiveBackendConfig,
+    LiveBackendDependencyDecision, LiveBackendDependencyKind, LiveBackendDependencyUse,
+    LiveCompositorBackendDiscoveryStatus, LiveGbmEglFrameTargetAllocationReport,
+    LiveGbmEglFrameTargetAllocationStatus, LiveGbmEglFrameTargetLifecycleReport,
+    LiveGbmEglFrameTargetLifecycleStatus, LiveGbmEglFrameTargetRecord, LiveGbmEglFrameTargetStatus,
+    LiveKmsScanoutTargetReport, LiveKmsScanoutTargetStatus, LiveLibdrmPollerDiagnostics,
+    LiveLibdrmPollerDiagnosticsStatus, LivePageFlipCallback, LivePageFlipCallbackDecision,
+    LivePageFlipCallbackIntake, LivePageFlipCallbackQueue, LivePageFlipCallbackQueueReport,
+    LivePageFlipCallbackReport, LivePageFlipCallbackSourceReport, LivePageFlipEvent,
+    LivePageFlipEventStatus, LiveRendererImportBoundary, LiveRendererImportHealth,
+    LiveRendererImportPathStatus, LiveRendererImportStartupStatus, LiveRendererPreference,
+    LiveRendererPresentationReport, LiveRendererPresentationStatus, LiveRendererRuntimeObservation,
     LiveRendererSelectionObservation, LiveScanoutReadinessReport, LiveScanoutReadinessStatus,
     OutputId, PageFlipCommitOutcome, QueuedInputPoller, RendererSelection, SeatId, Size,
     discover_live_backend, live_backend_dependency_decision,
@@ -383,7 +383,7 @@ fn live_runtime_assembly_threads_scanout_and_page_flip_observations() {
         }
     );
 
-    assembly.observe_page_flip_outcome(&PageFlipCommitOutcome::Committed {
+    let atomic_commit = assembly.observe_atomic_scanout_commit(&PageFlipCommitOutcome::Committed {
         frame_serial: 121,
         commit: TransactionCommit {
             transaction: TransactionId::from_raw(71),
@@ -391,6 +391,16 @@ fn live_runtime_assembly_threads_scanout_and_page_flip_observations() {
             applied_surfaces: vec![sophia_protocol::SurfaceId::new(101, 1)],
         },
     });
+    assert_eq!(
+        atomic_commit,
+        LiveAtomicScanoutCommitReport {
+            status: LiveAtomicScanoutCommitStatus::Committed,
+            page_flip: LivePageFlipEvent {
+                status: LivePageFlipEventStatus::Presented,
+                frame_serial: Some(121),
+            },
+        }
+    );
     let tick = assembly
         .run_tick(CompositorBackendTickInput::default())
         .expect("runtime tick should succeed");
@@ -1479,6 +1489,59 @@ fn page_flip_event_preserves_only_frame_serial_for_terminal_outcomes() {
         LivePageFlipEvent {
             status: LivePageFlipEventStatus::Rejected,
             frame_serial: Some(92),
+        }
+    );
+}
+
+#[test]
+fn atomic_scanout_commit_report_reduces_page_flip_outcomes() {
+    assert_eq!(
+        LiveAtomicScanoutCommitReport::from_page_flip_outcome(&PageFlipCommitOutcome::Committed {
+            frame_serial: 91,
+            commit: TransactionCommit {
+                transaction: TransactionId::from_raw(57),
+                outcome: TransactionOutcome::Committed,
+                applied_surfaces: vec![sophia_protocol::SurfaceId::new(88, 1)],
+            },
+        }),
+        LiveAtomicScanoutCommitReport {
+            status: LiveAtomicScanoutCommitStatus::Committed,
+            page_flip: LivePageFlipEvent {
+                status: LivePageFlipEventStatus::Presented,
+                frame_serial: Some(91),
+            },
+        }
+    );
+    assert_eq!(
+        LiveAtomicScanoutCommitReport::from_page_flip_outcome(&PageFlipCommitOutcome::Rejected {
+            frame_serial: 92,
+            commit: TransactionCommit {
+                transaction: TransactionId::from_raw(58),
+                outcome: TransactionOutcome::RejectedInvalidSurface,
+                applied_surfaces: vec![sophia_protocol::SurfaceId::new(89, 1)],
+            },
+        }),
+        LiveAtomicScanoutCommitReport {
+            status: LiveAtomicScanoutCommitStatus::Rejected,
+            page_flip: LivePageFlipEvent {
+                status: LivePageFlipEventStatus::Rejected,
+                frame_serial: Some(92),
+            },
+        }
+    );
+    assert_eq!(
+        LiveAtomicScanoutCommitReport::from_page_flip_outcome(
+            &PageFlipCommitOutcome::WaitingForTransactionReadiness {
+                transaction: TransactionId::from_raw(59),
+                pending_surfaces: vec![sophia_protocol::SurfaceId::new(90, 1)],
+            },
+        ),
+        LiveAtomicScanoutCommitReport {
+            status: LiveAtomicScanoutCommitStatus::WaitingForTransactionReadiness,
+            page_flip: LivePageFlipEvent {
+                status: LivePageFlipEventStatus::WaitingForTransactionReadiness,
+                frame_serial: None,
+            },
         }
     );
 }

@@ -120,6 +120,13 @@ IDs, framebuffer IDs, file descriptors, native driver errors, or KMS object
 handles. The future libdrm/KMS adapter must translate native page-flip callbacks
 into this shape before runtime code observes them.
 
+`LiveAtomicScanoutCommitReport` is the first reduced report for the atomic
+commit seam itself. It accepts the Engine's `PageFlipCommitOutcome`, drops
+transaction and surface identity, and reports only whether the commit is idle,
+waiting, committed, or rejected plus the derived `LivePageFlipEvent`. A real
+KMS backend should call this after page-flip completion or rejection instead of
+writing page-flip state directly.
+
 Backend-live runtime ticks carry the current reduced scanout readiness report,
 KMS scanout target report, and page-flip event beside renderer health. This
 keeps the runtime-facing diagnostics useful without introducing KMS dependencies

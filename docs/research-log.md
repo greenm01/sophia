@@ -801,6 +801,12 @@ The paired smoke report fails closed: without a concrete native reader, an
 opted-in real libdrm or libinput smoke returns `BackendUnavailable` instead of
 opening devices.
 
+The atomic scanout seam now has a backend-live report shape.
+`LiveAtomicScanoutCommitReport` reduces the Engine's `PageFlipCommitOutcome` to
+idle/waiting/committed/rejected state plus `LivePageFlipEvent`, without
+transaction IDs, surface IDs, or KMS object identity. This is the report a real
+KMS page-flip backend should update after the native commit boundary.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new

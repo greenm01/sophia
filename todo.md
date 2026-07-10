@@ -61,6 +61,8 @@ active milestone to `docs/roadmap-history.md`.
 
 ## Done Recently
 
+- [x] Added a reduced `LiveAtomicScanoutCommitReport` that maps Engine
+  `PageFlipCommitOutcome` into runtime-safe scanout commit state.
 - [x] Defined opt-in environment gates for real libdrm and libinput validation.
 - [x] Kept default workspace validation independent of device nodes and seats.
 - [x] Added reduced real-hardware smoke reports that fail closed before concrete
