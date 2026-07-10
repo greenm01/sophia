@@ -1122,6 +1122,7 @@ pub struct LibdrmNativeConnectorSnapshot {
     current_encoder: Option<drm::control::encoder::Handle>,
     encoders: Vec<drm::control::encoder::Handle>,
     mode_size: Option<Size>,
+    native_mode: Option<drm::control::Mode>,
 }
 
 #[cfg(feature = "libdrm-events")]
@@ -1137,6 +1138,29 @@ impl LibdrmNativeConnectorSnapshot {
             current_encoder,
             encoders: encoders.into_iter().collect(),
             mode_size,
+            native_mode: None,
+        }
+    }
+
+    pub fn new_with_native_mode(
+        connected: bool,
+        current_encoder: Option<drm::control::encoder::Handle>,
+        encoders: impl IntoIterator<Item = drm::control::encoder::Handle>,
+        mode: Option<drm::control::Mode>,
+    ) -> Self {
+        let mode_size = mode.map(|mode| {
+            let (width, height) = mode.size();
+            Size {
+                width: i32::from(width),
+                height: i32::from(height),
+            }
+        });
+        Self {
+            connected,
+            current_encoder,
+            encoders: encoders.into_iter().collect(),
+            mode_size,
+            native_mode: mode,
         }
     }
 
@@ -1253,7 +1277,7 @@ where
         connector: drm::control::connector::Handle,
     ) -> io::Result<LibdrmNativeConnectorSnapshot> {
         let info = self.get_connector(connector, false)?;
-        let mode_size = info
+        let selected_mode = info
             .modes()
             .iter()
             .find(|mode| {
@@ -1261,18 +1285,12 @@ where
                     .contains(drm::control::ModeTypeFlags::PREFERRED)
             })
             .or_else(|| info.modes().first())
-            .map(|mode| {
-                let (width, height) = mode.size();
-                Size {
-                    width: i32::from(width),
-                    height: i32::from(height),
-                }
-            });
-        Ok(LibdrmNativeConnectorSnapshot::new(
+            .copied();
+        Ok(LibdrmNativeConnectorSnapshot::new_with_native_mode(
             info.state() == drm::control::connector::State::Connected,
             info.current_encoder(),
             info.encoders().iter().copied(),
-            mode_size,
+            selected_mode,
         ))
     }
 
@@ -1359,6 +1377,7 @@ pub struct LibdrmNativePrimaryPlaneSelection {
     crtc: drm::control::crtc::Handle,
     plane: drm::control::plane::Handle,
     size: Size,
+    mode: Option<drm::control::Mode>,
 }
 
 #[cfg(feature = "libdrm-events")]
@@ -1453,6 +1472,7 @@ where
                         crtc,
                         plane,
                         size,
+                        mode: connector_snapshot.native_mode,
                     }),
                 };
             }
@@ -1499,6 +1519,214 @@ where
         }
     }
     Ok(None)
+}
+
+#[cfg(feature = "libdrm-events")]
+pub trait LibdrmNativePrimaryPlaneResourceDevice {
+    fn create_mode_blob_for_selection(
+        &self,
+        selection: LibdrmNativePrimaryPlaneSelection,
+    ) -> io::Result<u64>;
+
+    fn add_scanout_framebuffer<B>(
+        &self,
+        buffer: &B,
+        depth: u32,
+        bpp: u32,
+    ) -> io::Result<drm::control::framebuffer::Handle>
+    where
+        B: drm::buffer::Buffer + ?Sized;
+
+    fn destroy_scanout_framebuffer(
+        &self,
+        framebuffer: drm::control::framebuffer::Handle,
+    ) -> io::Result<()>;
+
+    fn destroy_mode_blob(&self, mode_blob: u64) -> io::Result<()>;
+}
+
+#[cfg(feature = "libdrm-events")]
+impl<D> LibdrmNativePrimaryPlaneResourceDevice for D
+where
+    D: drm::control::Device,
+{
+    fn create_mode_blob_for_selection(
+        &self,
+        selection: LibdrmNativePrimaryPlaneSelection,
+    ) -> io::Result<u64> {
+        let Some(mode) = selection.mode else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "selected KMS target does not carry a native mode",
+            ));
+        };
+        match self.create_property_blob(&mode)? {
+            drm::control::property::Value::Blob(blob) => Ok(blob),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "DRM mode blob creation returned a non-blob value",
+            )),
+        }
+    }
+
+    fn add_scanout_framebuffer<B>(
+        &self,
+        buffer: &B,
+        depth: u32,
+        bpp: u32,
+    ) -> io::Result<drm::control::framebuffer::Handle>
+    where
+        B: drm::buffer::Buffer + ?Sized,
+    {
+        self.add_framebuffer(buffer, depth, bpp)
+    }
+
+    fn destroy_scanout_framebuffer(
+        &self,
+        framebuffer: drm::control::framebuffer::Handle,
+    ) -> io::Result<()> {
+        self.destroy_framebuffer(framebuffer)
+    }
+
+    fn destroy_mode_blob(&self, mode_blob: u64) -> io::Result<()> {
+        self.destroy_property_blob(mode_blob)
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LibdrmNativePrimaryPlaneResourceBundle {
+    framebuffer: drm::control::framebuffer::Handle,
+    mode_blob: u64,
+    size: Size,
+}
+
+#[cfg(feature = "libdrm-events")]
+impl LibdrmNativePrimaryPlaneResourceBundle {
+    pub const fn into_objects(
+        self,
+        selection: LibdrmNativePrimaryPlaneSelection,
+    ) -> LibdrmNativePrimaryPlaneObjects {
+        selection.into_objects(self.framebuffer, self.mode_blob)
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Debug)]
+pub struct LibdrmNativePrimaryPlaneResourceCreateResult {
+    pub status: LibdrmNativePrimaryPlaneResourceCreateStatus,
+    pub resources: Option<LibdrmNativePrimaryPlaneResourceBundle>,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibdrmNativePrimaryPlaneResourceCreateStatus {
+    Created,
+    InvalidSelectionSize,
+    BufferSizeMismatch,
+    MissingMode,
+    ModeBlobCreateFailed,
+    FramebufferCreateFailed,
+}
+
+#[cfg(feature = "libdrm-events")]
+pub fn create_native_primary_plane_resources<D, B>(
+    device: &D,
+    selection: LibdrmNativePrimaryPlaneSelection,
+    buffer: &B,
+) -> LibdrmNativePrimaryPlaneResourceCreateResult
+where
+    D: LibdrmNativePrimaryPlaneResourceDevice,
+    B: drm::buffer::Buffer + ?Sized,
+{
+    if selection.size.width <= 0 || selection.size.height <= 0 {
+        return LibdrmNativePrimaryPlaneResourceCreateResult {
+            status: LibdrmNativePrimaryPlaneResourceCreateStatus::InvalidSelectionSize,
+            resources: None,
+        };
+    }
+
+    let (buffer_width, buffer_height) = buffer.size();
+    if buffer_width != selection.size.width as u32 || buffer_height != selection.size.height as u32
+    {
+        return LibdrmNativePrimaryPlaneResourceCreateResult {
+            status: LibdrmNativePrimaryPlaneResourceCreateStatus::BufferSizeMismatch,
+            resources: None,
+        };
+    }
+
+    let mode_blob = match device.create_mode_blob_for_selection(selection) {
+        Ok(mode_blob) => mode_blob,
+        Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+            return LibdrmNativePrimaryPlaneResourceCreateResult {
+                status: LibdrmNativePrimaryPlaneResourceCreateStatus::MissingMode,
+                resources: None,
+            };
+        }
+        Err(_) => {
+            return LibdrmNativePrimaryPlaneResourceCreateResult {
+                status: LibdrmNativePrimaryPlaneResourceCreateStatus::ModeBlobCreateFailed,
+                resources: None,
+            };
+        }
+    };
+    let Ok(framebuffer) = device.add_scanout_framebuffer(buffer, 24, 32) else {
+        let _ = device.destroy_mode_blob(mode_blob);
+        return LibdrmNativePrimaryPlaneResourceCreateResult {
+            status: LibdrmNativePrimaryPlaneResourceCreateStatus::FramebufferCreateFailed,
+            resources: None,
+        };
+    };
+
+    LibdrmNativePrimaryPlaneResourceCreateResult {
+        status: LibdrmNativePrimaryPlaneResourceCreateStatus::Created,
+        resources: Some(LibdrmNativePrimaryPlaneResourceBundle {
+            framebuffer,
+            mode_blob,
+            size: selection.size,
+        }),
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LibdrmNativePrimaryPlaneResourceDestroyReport {
+    pub status: LibdrmNativePrimaryPlaneResourceDestroyStatus,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibdrmNativePrimaryPlaneResourceDestroyStatus {
+    Destroyed,
+    FramebufferDestroyFailed,
+    ModeBlobDestroyFailed,
+}
+
+#[cfg(feature = "libdrm-events")]
+pub fn destroy_native_primary_plane_resources<D>(
+    device: &D,
+    resources: LibdrmNativePrimaryPlaneResourceBundle,
+) -> LibdrmNativePrimaryPlaneResourceDestroyReport
+where
+    D: LibdrmNativePrimaryPlaneResourceDevice,
+{
+    if device
+        .destroy_scanout_framebuffer(resources.framebuffer)
+        .is_err()
+    {
+        return LibdrmNativePrimaryPlaneResourceDestroyReport {
+            status: LibdrmNativePrimaryPlaneResourceDestroyStatus::FramebufferDestroyFailed,
+        };
+    }
+    if device.destroy_mode_blob(resources.mode_blob).is_err() {
+        return LibdrmNativePrimaryPlaneResourceDestroyReport {
+            status: LibdrmNativePrimaryPlaneResourceDestroyStatus::ModeBlobDestroyFailed,
+        };
+    }
+
+    LibdrmNativePrimaryPlaneResourceDestroyReport {
+        status: LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed,
+    }
 }
 
 #[cfg(feature = "libdrm-events")]

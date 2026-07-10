@@ -54,8 +54,8 @@ active milestone to `docs/roadmap-history.md`.
   scanout timing are stable.
 - [x] Build the first real KMS atomic property-set shape from backend-private
   connector, CRTC, plane, framebuffer, and mode state.
-- [ ] Add live framebuffer and mode-blob allocation/lifetime management that can
-  feed the private atomic request builder.
+- [ ] Wire renderer-produced GBM/EGL scanout buffers into the native
+  framebuffer resource seam.
 - [ ] Add opt-in hardware smoke for selected KMS target -> property discovery ->
   framebuffer-backed atomic request -> submitted commit -> page-flip evidence.
 - [ ] Keep the XLibre prototype docs and bridge smokes as compatibility lessons
@@ -81,6 +81,8 @@ active milestone to `docs/roadmap-history.md`.
   full-output scanout case.
 - [x] Added feature-gated KMS connector/CRTC/primary-plane target selection for
   the native atomic request path.
+- [x] Added feature-gated primary-plane mode-blob/framebuffer resource lifecycle
+  for the native atomic request path.
 - [x] Added feature-gated DRM atomic property discovery for the primary-plane
   request builder.
 - [x] Defined opt-in environment gates for real libdrm and libinput validation.

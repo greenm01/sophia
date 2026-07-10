@@ -829,6 +829,11 @@ The native KMS target selector can now reduce connector, encoder, CRTC, mode
 size, and primary-plane discovery into selected or missing resource-group
 status. The selected native handles can feed the primary-plane request builder
 once a framebuffer and mode blob are supplied.
+The native resource lifecycle seam can now create the mode blob, register a
+scanout framebuffer from a DRM buffer, validate target/buffer size, and destroy
+the framebuffer/blob pair after use. The request-builder test path now runs
+target selection, resource creation, property discovery, and atomic request
+construction together.
 The matching property discovery seam can resolve the required connector, CRTC,
 and plane property handles through a real DRM device or a deterministic fake.
 Discovery failures are reduced to read failure or missing resource-property

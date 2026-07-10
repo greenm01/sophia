@@ -17,23 +17,25 @@ use sophia_backend_live::{
     LibdrmNativePageFlipSourceReport, LibdrmNativePageFlipSourceStatus, LibdrmNativePlaneSnapshot,
     LibdrmNativePollerDiagnostics, LibdrmNativePrimaryPlaneObjects,
     LibdrmNativePrimaryPlanePropertyDiscoveryStatus, LibdrmNativePrimaryPlanePropertyHandles,
-    LibdrmNativePrimaryPlaneSelectionStatus, LibdrmNativePropertyHandleSet,
-    LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport, LibdrmNativeReadLoopReport,
-    LibdrmNativeReadLoopStatus, LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus,
-    LibdrmPageFlipEventPoller, LiveBackendConfig, LiveHardwareValidationGateReport,
-    LiveHardwareValidationGateStatus, LiveHardwareValidationSmokeReport,
-    LiveHardwareValidationSmokeStatus, LiveHardwareValidationTarget, LiveLibdrmPollerDiagnostics,
-    LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
-    LiveLibdrmPollerStartupStatus, LivePageFlipCallback, LivePageFlipCallbackQueue,
-    LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus,
-    NativeLibdrmAtomicScanoutCommitter, NativeLibdrmPageFlipEventPoller,
+    LibdrmNativePrimaryPlaneResourceCreateStatus, LibdrmNativePrimaryPlaneResourceDestroyStatus,
+    LibdrmNativePrimaryPlaneResourceDevice, LibdrmNativePrimaryPlaneSelectionStatus,
+    LibdrmNativePropertyHandleSet, LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport,
+    LibdrmNativeReadLoopReport, LibdrmNativeReadLoopStatus, LibdrmPageFlipEventPollReport,
+    LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller, LiveBackendConfig,
+    LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
+    LiveHardwareValidationSmokeReport, LiveHardwareValidationSmokeStatus,
+    LiveHardwareValidationTarget, LiveLibdrmPollerDiagnostics, LiveLibdrmPollerDiagnosticsStatus,
+    LiveLibdrmPollerStartupReport, LiveLibdrmPollerStartupStatus, LivePageFlipCallback,
+    LivePageFlipCallbackQueue, LivePageFlipCallbackSourceReport, LivePageFlipEvent,
+    LivePageFlipEventStatus, NativeLibdrmAtomicScanoutCommitter, NativeLibdrmPageFlipEventPoller,
     NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller, Size,
-    build_native_primary_plane_atomic_request, decode_native_page_flip_batch,
-    discover_live_backend, discover_native_primary_plane_property_handles,
-    libdrm_dependency_admission_report, libdrm_fd_authority_report,
-    native_libdrm_event_adapter_report, native_libdrm_event_adapter_report_for_authority,
-    real_libdrm_events_validation_gate, real_libdrm_events_validation_smoke_report,
-    reduce_native_page_flip_event, select_native_primary_plane_target,
+    build_native_primary_plane_atomic_request, create_native_primary_plane_resources,
+    decode_native_page_flip_batch, destroy_native_primary_plane_resources, discover_live_backend,
+    discover_native_primary_plane_property_handles, libdrm_dependency_admission_report,
+    libdrm_fd_authority_report, native_libdrm_event_adapter_report,
+    native_libdrm_event_adapter_report_for_authority, real_libdrm_events_validation_gate,
+    real_libdrm_events_validation_smoke_report, reduce_native_page_flip_event,
+    select_native_primary_plane_target,
 };
 
 #[test]
@@ -270,6 +272,71 @@ impl LibdrmNativeKmsSelectionDevice for FakeNativeKmsSelectionDevice {
     }
 }
 
+#[derive(Debug)]
+struct FakeNativePrimaryPlaneResourceDevice {
+    mode_blob: io::Result<u64>,
+    framebuffer: io::Result<drm::control::framebuffer::Handle>,
+    destroy_framebuffer: io::Result<()>,
+    destroy_mode_blob: io::Result<()>,
+}
+
+impl LibdrmNativePrimaryPlaneResourceDevice for FakeNativePrimaryPlaneResourceDevice {
+    fn create_mode_blob_for_selection(
+        &self,
+        _selection: sophia_backend_live::LibdrmNativePrimaryPlaneSelection,
+    ) -> io::Result<u64> {
+        clone_io_result(&self.mode_blob)
+    }
+
+    fn add_scanout_framebuffer<B>(
+        &self,
+        _buffer: &B,
+        _depth: u32,
+        _bpp: u32,
+    ) -> io::Result<drm::control::framebuffer::Handle>
+    where
+        B: drm::buffer::Buffer + ?Sized,
+    {
+        clone_io_result(&self.framebuffer)
+    }
+
+    fn destroy_scanout_framebuffer(
+        &self,
+        _framebuffer: drm::control::framebuffer::Handle,
+    ) -> io::Result<()> {
+        clone_io_result(&self.destroy_framebuffer)
+    }
+
+    fn destroy_mode_blob(&self, _mode_blob: u64) -> io::Result<()> {
+        clone_io_result(&self.destroy_mode_blob)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct FakeScanoutBuffer {
+    size: (u32, u32),
+    pitch: u32,
+    handle: drm::buffer::Handle,
+}
+
+impl drm::buffer::Buffer for FakeScanoutBuffer {
+    fn size(&self) -> (u32, u32) {
+        self.size
+    }
+
+    fn format(&self) -> drm::buffer::DrmFourcc {
+        drm::buffer::DrmFourcc::Xrgb8888
+    }
+
+    fn pitch(&self) -> u32 {
+        self.pitch
+    }
+
+    fn handle(&self) -> drm::buffer::Handle {
+        self.handle
+    }
+}
+
 fn clone_io_result<T: Clone>(result: &io::Result<T>) -> io::Result<T> {
     result
         .as_ref()
@@ -297,6 +364,14 @@ fn plane_handle() -> drm::control::plane::Handle {
     drm::control::from_u32(13).expect("test plane handle should be nonzero")
 }
 
+fn framebuffer_handle() -> drm::control::framebuffer::Handle {
+    drm::control::from_u32(14).expect("test framebuffer handle should be nonzero")
+}
+
+fn buffer_handle() -> drm::buffer::Handle {
+    drm::control::from_u32(17).expect("test buffer handle should be nonzero")
+}
+
 fn primary_plane_properties() -> LibdrmNativePrimaryPlanePropertyHandles {
     LibdrmNativePrimaryPlanePropertyHandles::new(
         property_handle(101),
@@ -320,7 +395,7 @@ fn primary_plane_objects(size: Size) -> LibdrmNativePrimaryPlaneObjects {
         connector_handle(),
         crtc_handle(),
         plane_handle(),
-        drm::control::from_u32(14).expect("test framebuffer handle should be nonzero"),
+        framebuffer_handle(),
         15,
         size,
     )
@@ -371,6 +446,23 @@ fn full_kms_selection_device() -> FakeNativeKmsSelectionDevice {
         )),
         plane_snapshot: Ok(LibdrmNativePlaneSnapshot::new([crtc_handle()])),
         plane_type: Ok(Some(drm::control::PlaneType::Primary)),
+    }
+}
+
+fn full_primary_plane_resource_device() -> FakeNativePrimaryPlaneResourceDevice {
+    FakeNativePrimaryPlaneResourceDevice {
+        mode_blob: Ok(15),
+        framebuffer: Ok(framebuffer_handle()),
+        destroy_framebuffer: Ok(()),
+        destroy_mode_blob: Ok(()),
+    }
+}
+
+fn scanout_buffer(size: Size) -> FakeScanoutBuffer {
+    FakeScanoutBuffer {
+        size: (size.width as u32, size.height as u32),
+        pitch: size.width as u32 * 4,
+        handle: buffer_handle(),
     }
 }
 
@@ -528,10 +620,19 @@ fn native_libdrm_primary_plane_selection_feeds_request_builder() {
             height: 720,
         }
     );
-    let objects = selected.into_objects(
-        drm::control::from_u32(14).expect("test framebuffer handle should be nonzero"),
-        15,
+    let resource_create = create_native_primary_plane_resources(
+        &full_primary_plane_resource_device(),
+        selected,
+        &scanout_buffer(selected.size()),
     );
+    assert_eq!(
+        resource_create.status,
+        LibdrmNativePrimaryPlaneResourceCreateStatus::Created
+    );
+    let objects = resource_create
+        .resources
+        .expect("complete resource device should produce framebuffer and mode blob")
+        .into_objects(selected);
     let properties = discover_native_primary_plane_property_handles(
         &full_property_lookup_device(),
         connector_handle(),
@@ -544,6 +645,98 @@ fn native_libdrm_primary_plane_selection_feeds_request_builder() {
 
     assert_eq!(build.status, LibdrmNativeAtomicRequestBuildStatus::Built);
     assert!(build.request.is_some());
+}
+
+#[test]
+fn native_libdrm_primary_plane_resources_validate_size_and_lifetime() {
+    let selected = select_native_primary_plane_target(&full_kms_selection_device())
+        .selection
+        .expect("complete KMS path should select a target");
+    let mismatched = create_native_primary_plane_resources(
+        &full_primary_plane_resource_device(),
+        selected,
+        &scanout_buffer(Size {
+            width: 1920,
+            height: 1080,
+        }),
+    );
+    assert_eq!(
+        mismatched.status,
+        LibdrmNativePrimaryPlaneResourceCreateStatus::BufferSizeMismatch
+    );
+    assert!(mismatched.resources.is_none());
+
+    let created = create_native_primary_plane_resources(
+        &full_primary_plane_resource_device(),
+        selected,
+        &scanout_buffer(selected.size()),
+    );
+    assert_eq!(
+        created.status,
+        LibdrmNativePrimaryPlaneResourceCreateStatus::Created
+    );
+    let destroyed = destroy_native_primary_plane_resources(
+        &full_primary_plane_resource_device(),
+        created
+            .resources
+            .expect("created resources should be destroyable"),
+    );
+    assert_eq!(
+        destroyed.status,
+        LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed
+    );
+}
+
+#[test]
+fn native_libdrm_primary_plane_resource_creation_fails_closed() {
+    let selected = select_native_primary_plane_target(&full_kms_selection_device())
+        .selection
+        .expect("complete KMS path should select a target");
+
+    let mode_failed = FakeNativePrimaryPlaneResourceDevice {
+        mode_blob: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+        ..full_primary_plane_resource_device()
+    };
+    let created = create_native_primary_plane_resources(
+        &mode_failed,
+        selected,
+        &scanout_buffer(selected.size()),
+    );
+    assert_eq!(
+        created.status,
+        LibdrmNativePrimaryPlaneResourceCreateStatus::ModeBlobCreateFailed
+    );
+    assert!(created.resources.is_none());
+
+    let mode_missing = FakeNativePrimaryPlaneResourceDevice {
+        mode_blob: Err(io::Error::from(io::ErrorKind::InvalidInput)),
+        ..full_primary_plane_resource_device()
+    };
+    let created = create_native_primary_plane_resources(
+        &mode_missing,
+        selected,
+        &scanout_buffer(selected.size()),
+    );
+    assert_eq!(
+        created.status,
+        LibdrmNativePrimaryPlaneResourceCreateStatus::MissingMode
+    );
+    assert!(created.resources.is_none());
+
+    let framebuffer_failed = FakeNativePrimaryPlaneResourceDevice {
+        framebuffer: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+        ..full_primary_plane_resource_device()
+    };
+    let created = create_native_primary_plane_resources(
+        &framebuffer_failed,
+        selected,
+        &scanout_buffer(selected.size()),
+    );
+    assert_eq!(
+        created.status,
+        LibdrmNativePrimaryPlaneResourceCreateStatus::FramebufferCreateFailed
+    );
+    assert!(created.resources.is_none());
 }
 
 #[test]

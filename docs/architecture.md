@@ -672,6 +672,9 @@ properties behind backend-live types and exports only reduced build status.
 The matching KMS selector can choose a connected connector, usable encoder/CRTC,
 display mode size, and compatible primary plane from real DRM resources while
 keeping those native handles backend-private.
+The resource lifecycle seam can then create a mode blob, register a scanout
+framebuffer from a renderer-owned buffer, and retire both resources without
+exposing their native IDs outside backend-live.
 Property discovery for that path now uses the native DRM property APIs and
 collapses lookup problems to reduced missing-property groups. The property
 handles themselves stay backend-private.
