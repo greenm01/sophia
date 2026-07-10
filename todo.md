@@ -129,6 +129,8 @@ active milestone to `docs/roadmap-history.md`.
   so opt-in hardware proof cannot pass without target-readiness evidence.
 - [x] Added preselected KMS target primary-plane submit so rendered target
   sizing and atomic submit can share one coherent selection snapshot.
+- [x] Rechecked the native KMS target snapshot before runtime rendered scanout
+  export so stale readiness cannot render into the wrong target.
 - [x] Added reduced live scanout submit intake so backend-live rendered
   primary-plane submit results can drive runtime `SubmitScanout`.
 - [x] Added shared runtime scanout lifecycle state so rendered frames progress

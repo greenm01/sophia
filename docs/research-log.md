@@ -926,6 +926,11 @@ Primary-plane submit now also has a preselected-target entry point. The opt-in
 atomic smoke uses one KMS selection snapshot for frame-target sizing, readiness
 evidence, and atomic submit instead of selecting again after rendering. A
 deterministic fake test proves the helper honors the supplied snapshot.
+The runtime rendered-primary-plane submit path now mirrors that discipline. It
+rechecks the native KMS target snapshot before asking the renderer for a scanout
+buffer, verifies the selected size against the reduced frame target, and then
+submits the same snapshot. A fake drift test proves a disappeared native target
+returns reduced scanout-target-not-ready with zero export attempts.
 
 ## Open Questions
 

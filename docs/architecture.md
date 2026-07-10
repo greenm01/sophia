@@ -789,6 +789,12 @@ Native primary-plane submit can also consume a preselected KMS target snapshot.
 That path is required when the Engine has already sized a rendered frame target
 from a specific connector/CRTC/plane selection; readiness, buffer production,
 and atomic submit must refer to the same reduced target snapshot.
+The runtime rendered-primary-plane path performs the same check before export:
+after the reduced KMS target is ready and a frame target exists, backend-live
+selects the native KMS target once, verifies that the selected size still
+matches the frame target, and only then asks the renderer for a scanout buffer.
+If the native target changed or disappeared, the runtime reports a reduced
+not-ready scanout target and leaves the renderer untouched.
 The shared session runtime now has a matching reduced lifecycle: after
 `RenderFrame`, it emits `SubmitScanout` and records submitted, retired, or
 rejected scanout state without seeing framebuffer IDs, KMS handles, or GBM

@@ -537,6 +537,20 @@ where
         };
     };
 
+    let selection = select_native_primary_plane_target(device);
+    let scanout_target =
+        reduced_scanout_target_status_from_native_selection(scanout_target, target, &selection);
+    if scanout_target != LiveKmsScanoutTargetStatus::Ready {
+        return LiveRenderedPrimaryPlaneScanoutSubmitResult {
+            status: LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutTargetNotReady,
+            scanout_target,
+            target: Some(target.status),
+            export: None,
+            submit: None,
+            submission: None,
+        };
+    }
+
     let export = exporter.export_rendered_scanout_buffer(target);
     if export.status != LiveRendererScanoutBufferExportStatus::Exported {
         return LiveRenderedPrimaryPlaneScanoutSubmitResult {
@@ -560,8 +574,9 @@ where
         };
     };
 
-    let mut submit =
-        submit_native_primary_plane_scanout_from_renderer_descriptor(device, descriptor);
+    let mut submit = submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor(
+        device, selection, descriptor,
+    );
     if submit.status != LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip {
         return LiveRenderedPrimaryPlaneScanoutSubmitResult {
             status: LiveRenderedPrimaryPlaneScanoutSubmitStatus::PrimaryPlaneSubmitFailed,
@@ -596,6 +611,31 @@ where
             submitted_after_page_flip_serial: None,
         }),
     }
+}
+
+#[cfg(feature = "libdrm-events")]
+fn reduced_scanout_target_status_from_native_selection(
+    current_status: LiveKmsScanoutTargetStatus,
+    target: LiveGbmEglFrameTargetRecord,
+    selection: &LibdrmNativePrimaryPlaneSelectionResult,
+) -> LiveKmsScanoutTargetStatus {
+    if current_status != LiveKmsScanoutTargetStatus::Ready {
+        return current_status;
+    }
+
+    if target.status != LiveGbmEglFrameTargetStatus::Ready {
+        return LiveKmsScanoutTargetStatus::InvalidFrameTarget;
+    }
+
+    let Some(selected) = selection.selection else {
+        return LiveKmsScanoutTargetStatus::OutputUnavailable;
+    };
+
+    if selected.size() != target.size {
+        return LiveKmsScanoutTargetStatus::FrameTargetSizeMismatch;
+    }
+
+    LiveKmsScanoutTargetStatus::Ready
 }
 
 #[cfg(feature = "libdrm-events")]

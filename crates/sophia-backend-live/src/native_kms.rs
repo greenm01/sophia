@@ -237,7 +237,7 @@ where
 }
 
 #[cfg(feature = "libdrm-events")]
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LibdrmNativePrimaryPlaneSelectionResult {
     pub status: LibdrmNativePrimaryPlaneSelectionStatus,
     pub selection: Option<LibdrmNativePrimaryPlaneSelection>,

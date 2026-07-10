@@ -290,6 +290,11 @@ When a KMS target has already been selected to size a rendered frame target,
 primary-plane submit must consume that same reduced target snapshot rather than
 selecting again. Reselecting after rendering can race connector, mode, or plane
 state and break the atomic relation between target geometry and pixels.
+Runtime rendered-primary-plane submit must also recheck the native KMS snapshot
+before renderer export. A stale reduced readiness report is not enough to open
+or render into a scanout target. If the native snapshot is missing or no longer
+matches the reduced frame target, the submit report reduces to
+scanout-target-not-ready and export remains unattempted.
 `LibdrmNativeAtomicScanoutSmokeEvidence` is the reduced record for that smoke.
 It reports only where the chain stopped: no primary card, KMS selection failure,
 persistent rendered-context failure, KMS scanout target failure, GBM export

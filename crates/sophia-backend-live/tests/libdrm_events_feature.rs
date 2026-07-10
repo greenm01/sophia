@@ -1888,8 +1888,8 @@ fn live_runtime_tick_rejects_rendered_scanout_when_kms_target_is_not_ready() {
     });
 
     assembly.observe_gbm_egl_frame_target_size(Size {
-        width: 1280,
-        height: 720,
+        width: 640,
+        height: 480,
     });
     assert_eq!(
         assembly.kms_scanout_target_observation().status,
@@ -1937,13 +1937,13 @@ fn live_runtime_direct_rendered_scanout_submit_rejects_not_ready_kms_target() {
         .expect("ready backend should seed live assembly");
     let device = full_primary_plane_scanout_device();
     let mut exporter = FakeRenderedScanoutExporter::exported(Size {
-        width: 1280,
-        height: 720,
+        width: 640,
+        height: 480,
     });
 
     assembly.observe_gbm_egl_frame_target_size(Size {
-        width: 1280,
-        height: 720,
+        width: 640,
+        height: 480,
     });
 
     let submitted = assembly.submit_rendered_primary_plane_scanout_with(&device, &mut exporter);
@@ -1964,6 +1964,56 @@ fn live_runtime_direct_rendered_scanout_submit_rejects_not_ready_kms_target() {
         submitted.runtime_scanout_state(),
         RuntimeScanoutState::Rejected
     );
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_runtime_direct_rendered_scanout_submit_rechecks_native_kms_snapshot_before_export() {
+    let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-native-kms-drift");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready backend should seed live assembly");
+    let device = FakeNativePrimaryPlaneScanoutDevice {
+        selection: FakeNativeKmsSelectionDevice {
+            connector_snapshot: Ok(LibdrmNativeConnectorSnapshot::new(
+                false,
+                Some(encoder_handle()),
+                [encoder_handle()],
+                Some(Size {
+                    width: 1280,
+                    height: 720,
+                }),
+            )),
+            ..full_kms_selection_device()
+        },
+        ..full_primary_plane_scanout_device()
+    };
+    let mut exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+
+    assert_eq!(
+        assembly.kms_scanout_target_observation().status,
+        LiveKmsScanoutTargetStatus::Ready
+    );
+
+    let submitted = assembly.submit_rendered_primary_plane_scanout_with(&device, &mut exporter);
+
+    assert_eq!(
+        submitted.status,
+        LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutTargetNotReady
+    );
+    assert_eq!(
+        submitted.scanout_target,
+        LiveKmsScanoutTargetStatus::OutputUnavailable
+    );
+    assert_eq!(submitted.export, None);
+    assert_eq!(submitted.submit, None);
+    assert_eq!(exporter.export_attempts(), 0);
+    assert!(submitted.submission.is_none());
 
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -3624,7 +3674,7 @@ fn ready_drm_sysfs_fixture(name: &str) -> std::path::PathBuf {
     let connector = root.join("card0-HDMI-A-1");
     std::fs::create_dir_all(&connector).unwrap();
     write_fixture_file(&connector, "status", "connected\n");
-    write_fixture_file(&connector, "modes", "1920x1080\n");
+    write_fixture_file(&connector, "modes", "1280x720\n");
     write_fixture_file(&connector, "connector_id", "42\n");
     write_fixture_file(&connector, "crtc_id", "99\n");
     root
