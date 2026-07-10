@@ -944,7 +944,9 @@ as false. This prevents the steady scanout loop from accidentally becoming a
 modeset loop.
 `LibdrmNativeAtomicScanoutSmokeEvidence` now includes reduced request scope and
 commit flags, so captured opt-in hardware evidence can prove the commit policy
-and request shape used by the submit that generated the page-flip evidence.
+and request shape used by the submit that generated the page-flip evidence. The
+schema now separates initial modeset evidence from steady-state page-flip
+evidence so a passing capture proves the post-modeset scanout path as well.
 The live runtime now has a native page-flip intake tick for rendered
 primary-plane scanout. It reads/polls the feature-gated libdrm page-flip reader
 into the bounded callback queue, updates reduced poller diagnostics, retires

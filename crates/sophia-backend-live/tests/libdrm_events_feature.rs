@@ -11,13 +11,14 @@ use sophia_backend_live::{
     LibdrmNativeAtomicCommitRequest, LibdrmNativeAtomicCommitRequestScope,
     LibdrmNativeAtomicCommitSubmitReport, LibdrmNativeAtomicCommitSubmitStatus,
     LibdrmNativeAtomicRequestBuildStatus, LibdrmNativeAtomicScanoutSmokeEvidence,
-    LibdrmNativeAtomicScanoutSmokeStatus, LibdrmNativeConnectorSnapshot, LibdrmNativeCrtcRoute,
-    LibdrmNativeEncoderSnapshot, LibdrmNativeEventAdapterReport, LibdrmNativeEventAdapterStatus,
-    LibdrmNativeKmsSelectionDevice, LibdrmNativeOutputRoute, LibdrmNativeOutputSlot,
-    LibdrmNativePageFlipCallback, LibdrmNativePageFlipDecodeReport,
-    LibdrmNativePageFlipDecodeStatus, LibdrmNativePageFlipReadResult, LibdrmNativePageFlipReader,
-    LibdrmNativePageFlipSource, LibdrmNativePageFlipSourceReport, LibdrmNativePageFlipSourceStatus,
-    LibdrmNativePlaneSnapshot, LibdrmNativePollerDiagnostics, LibdrmNativePrimaryPlaneObjects,
+    LibdrmNativeAtomicScanoutSmokePhase, LibdrmNativeAtomicScanoutSmokeStatus,
+    LibdrmNativeConnectorSnapshot, LibdrmNativeCrtcRoute, LibdrmNativeEncoderSnapshot,
+    LibdrmNativeEventAdapterReport, LibdrmNativeEventAdapterStatus, LibdrmNativeKmsSelectionDevice,
+    LibdrmNativeOutputRoute, LibdrmNativeOutputSlot, LibdrmNativePageFlipCallback,
+    LibdrmNativePageFlipDecodeReport, LibdrmNativePageFlipDecodeStatus,
+    LibdrmNativePageFlipReadResult, LibdrmNativePageFlipReader, LibdrmNativePageFlipSource,
+    LibdrmNativePageFlipSourceReport, LibdrmNativePageFlipSourceStatus, LibdrmNativePlaneSnapshot,
+    LibdrmNativePollerDiagnostics, LibdrmNativePrimaryPlaneObjects,
     LibdrmNativePrimaryPlanePropertyDiscoveryStatus, LibdrmNativePrimaryPlanePropertyHandles,
     LibdrmNativePrimaryPlaneResourceCreateStatus, LibdrmNativePrimaryPlaneResourceDestroyStatus,
     LibdrmNativePrimaryPlaneResourceDevice, LibdrmNativePrimaryPlaneScanoutRetireResult,
@@ -3082,6 +3083,7 @@ fn native_atomic_scanout_smoke_evidence_passes_only_after_submit_page_flip_and_r
     assert_eq!(
         evidence,
         LibdrmNativeAtomicScanoutSmokeEvidence {
+            phase: LibdrmNativeAtomicScanoutSmokePhase::InitialModeset,
             status: LibdrmNativeAtomicScanoutSmokeStatus::Passed,
             scanout_target: Some(LiveKmsScanoutTargetStatus::Ready),
             rendered_context: Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
@@ -3103,7 +3105,80 @@ fn native_atomic_scanout_smoke_evidence_passes_only_after_submit_page_flip_and_r
     );
     assert_eq!(
         evidence.reduced_log_line(),
-        "sophia_atomic_scanout_evidence schema=2 status=Passed scanout_target=Ready rendered_context=Ready gbm_export=Exported submit=SubmittedWaitingForPageFlip request_scope=Modeset commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=true commit_test_only=false page_flip_poll=Emitted page_flip=Presented retire=RetiredAfterPageFlip retire_destroy=Destroyed retire_cleanup_pending=false"
+        "sophia_atomic_scanout_evidence schema=3 phase=InitialModeset status=Passed scanout_target=Ready rendered_context=Ready gbm_export=Exported submit=SubmittedWaitingForPageFlip request_scope=Modeset commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=true commit_test_only=false page_flip_poll=Emitted page_flip=Presented retire=RetiredAfterPageFlip retire_destroy=Destroyed retire_cleanup_pending=false"
+    );
+}
+
+#[test]
+fn native_atomic_scanout_steady_state_evidence_requires_page_flip_request_scope() {
+    let device = full_primary_plane_scanout_device();
+    let selection = select_native_primary_plane_target(&device);
+    let mut submit =
+        submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_policy(
+            &device,
+            selection,
+            scanout_descriptor(Size {
+                width: 1280,
+                height: 720,
+            }),
+            LibdrmNativePrimaryPlaneScanoutSubmitPolicy::page_flip(),
+        );
+    let submission = submit
+        .submission
+        .take()
+        .expect("submitted page flip should retain resource ownership");
+    let poll =
+        LibdrmPageFlipEventPollReport::from_source_report(LivePageFlipCallbackSourceReport {
+            emitted: 1,
+            queued_remaining: 0,
+            backpressure: false,
+            disconnected: false,
+            max_reached: false,
+        });
+    let callback = LivePageFlipCallbackReport {
+        decision: LivePageFlipCallbackDecision::Accepted,
+        event: LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(43),
+        },
+    };
+    let retired =
+        retire_native_primary_plane_scanout_after_page_flip(&device, submission, &callback);
+
+    let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
+        LiveKmsScanoutTargetStatus::Ready,
+        Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
+        LiveRendererScanoutBufferExportStatus::Exported,
+        Some(&submit),
+        Some(&poll),
+        Some(&callback),
+        Some(&retired),
+    );
+
+    assert_eq!(
+        evidence.phase,
+        LibdrmNativeAtomicScanoutSmokePhase::SteadyPageFlip
+    );
+    assert_eq!(
+        evidence.status,
+        LibdrmNativeAtomicScanoutSmokeStatus::Passed
+    );
+    assert_eq!(
+        evidence.request_scope,
+        Some(LibdrmNativeAtomicCommitRequestScope::PageFlip)
+    );
+    assert_eq!(
+        evidence.commit_flags,
+        Some(LibdrmNativeAtomicCommitFlagsReport {
+            page_flip_event: true,
+            nonblocking: true,
+            allow_modeset: false,
+            test_only: false,
+        })
+    );
+    assert_eq!(
+        evidence.reduced_log_line(),
+        "sophia_atomic_scanout_evidence schema=3 phase=SteadyPageFlip status=Passed scanout_target=Ready rendered_context=Ready gbm_export=Exported submit=SubmittedWaitingForPageFlip request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false page_flip_poll=Emitted page_flip=Presented retire=RetiredAfterPageFlip retire_destroy=Destroyed retire_cleanup_pending=false"
     );
 }
 
@@ -4786,7 +4861,7 @@ mod atomic_scanout_hardware_smoke {
             .env("SOPHIA_REAL_ATOMIC_SCANOUT_CHILD", "1")
             .spawn()
             .expect("real atomic scanout smoke child should start");
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(10);
 
         loop {
             if let Some(status) = child
@@ -5009,6 +5084,95 @@ mod atomic_scanout_hardware_smoke {
             LibdrmNativeAtomicScanoutSmokeStatus::Passed
         );
         drop(owned_buffer);
+
+        let steady_export = context.export_rendered_owned_scanout_buffer(target);
+        if steady_export.status != LiveRendererScanoutBufferExportStatus::Exported {
+            let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
+                scanout_target,
+                Some(rendered_context),
+                steady_export.status,
+                None,
+                None,
+                None,
+                None,
+            );
+            println!("{}", evidence.reduced_log_line());
+            assert_eq!(
+                evidence.status,
+                LibdrmNativeAtomicScanoutSmokeStatus::Passed
+            );
+        }
+        let steady_owned_buffer = steady_export
+            .buffer
+            .expect("real steady-state GBM scanout export should retain owned buffer");
+
+        let mut steady_submit =
+            submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_policy(
+                &card,
+                LibdrmNativePrimaryPlaneSelectionResult {
+                    status: selection.status,
+                    selection: Some(selected),
+                },
+                steady_owned_buffer.descriptor(),
+                LibdrmNativePrimaryPlaneScanoutSubmitPolicy::page_flip(),
+            );
+        if steady_submit.status
+            != LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+        {
+            let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
+                scanout_target,
+                Some(rendered_context),
+                steady_export.status,
+                Some(&steady_submit),
+                None,
+                None,
+                None,
+            );
+            println!("{}", evidence.reduced_log_line());
+            assert_eq!(
+                evidence.status,
+                LibdrmNativeAtomicScanoutSmokeStatus::Passed
+            );
+        }
+        let steady_submission = steady_submit
+            .submission
+            .take()
+            .expect("steady-state submitted scanout should retain resources");
+
+        let (steady_sender, steady_receiver) = mpsc::sync_channel(1);
+        let steady_poll = poller.read_and_poll_page_flip_events(&mut reader, &steady_sender, 1, 1);
+        let steady_callback = steady_receiver.try_recv().ok();
+        let mut steady_submission = Some(steady_submission);
+        let mut steady_callback_report = None;
+        let mut steady_retired = None;
+        if let Some(callback) = steady_callback {
+            let report = intake.observe(callback);
+            steady_retired = Some(retire_native_primary_plane_scanout_after_page_flip(
+                &card,
+                steady_submission
+                    .take()
+                    .expect("steady callback path should still own submitted resources"),
+                &report,
+            ));
+            steady_callback_report = Some(report);
+        }
+
+        let steady_evidence =
+            LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
+                scanout_target,
+                Some(rendered_context),
+                steady_export.status,
+                Some(&steady_submit),
+                Some(&steady_poll.poll),
+                steady_callback_report.as_ref(),
+                steady_retired.as_ref(),
+            );
+        println!("{}", steady_evidence.reduced_log_line());
+        assert_eq!(
+            steady_evidence.status,
+            LibdrmNativeAtomicScanoutSmokeStatus::Passed
+        );
+        drop(steady_owned_buffer);
     }
 
     fn first_openable_primary_card_node() -> Option<PathBuf> {

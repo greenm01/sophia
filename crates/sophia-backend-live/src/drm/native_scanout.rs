@@ -174,6 +174,7 @@ pub enum LibdrmNativeRenderedScanoutContextStatus {
 #[cfg(feature = "libdrm-events")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LibdrmNativeAtomicScanoutSmokeEvidence {
+    pub phase: LibdrmNativeAtomicScanoutSmokePhase,
     pub status: LibdrmNativeAtomicScanoutSmokeStatus,
     pub scanout_target: Option<LiveKmsScanoutTargetStatus>,
     pub rendered_context: Option<LibdrmNativeRenderedScanoutContextStatus>,
@@ -217,7 +218,8 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
                 });
 
         format!(
-            "sophia_atomic_scanout_evidence schema=2 status={:?} scanout_target={} rendered_context={} gbm_export={} submit={} request_scope={} commit_page_flip_event={} commit_nonblocking={} commit_allow_modeset={} commit_test_only={} page_flip_poll={} page_flip={} retire={} retire_destroy={} retire_cleanup_pending={}",
+            "sophia_atomic_scanout_evidence schema=3 phase={:?} status={:?} scanout_target={} rendered_context={} gbm_export={} submit={} request_scope={} commit_page_flip_event={} commit_nonblocking={} commit_allow_modeset={} commit_test_only={} page_flip_poll={} page_flip={} retire={} retire_destroy={} retire_cleanup_pending={}",
+            self.phase,
             self.status,
             status(self.scanout_target),
             status(self.rendered_context),
@@ -238,6 +240,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
 
     pub const fn no_primary_card() -> Self {
         Self {
+            phase: LibdrmNativeAtomicScanoutSmokePhase::InitialModeset,
             status: LibdrmNativeAtomicScanoutSmokeStatus::NoPrimaryCard,
             scanout_target: None,
             rendered_context: None,
@@ -255,6 +258,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
 
     pub const fn kms_selection_failed() -> Self {
         Self {
+            phase: LibdrmNativeAtomicScanoutSmokePhase::InitialModeset,
             status: LibdrmNativeAtomicScanoutSmokeStatus::KmsSelectionFailed,
             scanout_target: None,
             rendered_context: None,
@@ -271,6 +275,49 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
     }
 
     pub fn from_pipeline_reports(
+        scanout_target: LiveKmsScanoutTargetStatus,
+        rendered_context: Option<LibdrmNativeRenderedScanoutContextStatus>,
+        gbm_export: LiveRendererScanoutBufferExportStatus,
+        submit: Option<&LibdrmNativePrimaryPlaneScanoutSubmitResult>,
+        poll: Option<&LibdrmPageFlipEventPollReport>,
+        callback: Option<&LivePageFlipCallbackReport>,
+        retire: Option<&LibdrmNativePrimaryPlaneScanoutRetireResult>,
+    ) -> Self {
+        Self::from_pipeline_reports_for_phase(
+            LibdrmNativeAtomicScanoutSmokePhase::InitialModeset,
+            scanout_target,
+            rendered_context,
+            gbm_export,
+            submit,
+            poll,
+            callback,
+            retire,
+        )
+    }
+
+    pub fn from_page_flip_pipeline_reports(
+        scanout_target: LiveKmsScanoutTargetStatus,
+        rendered_context: Option<LibdrmNativeRenderedScanoutContextStatus>,
+        gbm_export: LiveRendererScanoutBufferExportStatus,
+        submit: Option<&LibdrmNativePrimaryPlaneScanoutSubmitResult>,
+        poll: Option<&LibdrmPageFlipEventPollReport>,
+        callback: Option<&LivePageFlipCallbackReport>,
+        retire: Option<&LibdrmNativePrimaryPlaneScanoutRetireResult>,
+    ) -> Self {
+        Self::from_pipeline_reports_for_phase(
+            LibdrmNativeAtomicScanoutSmokePhase::SteadyPageFlip,
+            scanout_target,
+            rendered_context,
+            gbm_export,
+            submit,
+            poll,
+            callback,
+            retire,
+        )
+    }
+
+    fn from_pipeline_reports_for_phase(
+        phase: LibdrmNativeAtomicScanoutSmokePhase,
         scanout_target: LiveKmsScanoutTargetStatus,
         rendered_context: Option<LibdrmNativeRenderedScanoutContextStatus>,
         gbm_export: LiveRendererScanoutBufferExportStatus,
@@ -304,7 +351,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             LibdrmNativeAtomicScanoutSmokeStatus::GbmExportFailed
         } else if submit_status
             != Some(LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip)
-            || request_scope != Some(LibdrmNativeAtomicCommitRequestScope::Modeset)
+            || request_scope != Some(phase.required_request_scope())
         {
             LibdrmNativeAtomicScanoutSmokeStatus::SubmitFailed
         } else if !accepted_page_flip
@@ -323,6 +370,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
         };
 
         Self {
+            phase,
             status,
             scanout_target: Some(scanout_target),
             rendered_context,
@@ -335,6 +383,23 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             retire: retire_status,
             retire_destroy,
             retire_cleanup_pending,
+        }
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibdrmNativeAtomicScanoutSmokePhase {
+    InitialModeset,
+    SteadyPageFlip,
+}
+
+#[cfg(feature = "libdrm-events")]
+impl LibdrmNativeAtomicScanoutSmokePhase {
+    pub const fn required_request_scope(self) -> LibdrmNativeAtomicCommitRequestScope {
+        match self {
+            Self::InitialModeset => LibdrmNativeAtomicCommitRequestScope::Modeset,
+            Self::SteadyPageFlip => LibdrmNativeAtomicCommitRequestScope::PageFlip,
         }
     }
 }

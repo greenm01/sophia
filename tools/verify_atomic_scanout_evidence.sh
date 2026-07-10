@@ -9,79 +9,100 @@ if [[ ! -s "$EVIDENCE_FILE" ]]; then
     exit 1
 fi
 
-evidence="$(grep -F "$EVIDENCE_PREFIX" "$EVIDENCE_FILE" | tail -n 1 || true)"
+mapfile -t evidence_lines < <(grep -F "$EVIDENCE_PREFIX" "$EVIDENCE_FILE" || true)
 
-if [[ -z "$evidence" ]]; then
+if [[ "${#evidence_lines[@]}" -eq 0 ]]; then
     echo "atomic scanout evidence line not found in: $EVIDENCE_FILE" >&2
     exit 1
 fi
-
-read -r -a parts <<< "$evidence"
-prefix="${parts[0]:-}"
-fields=("${parts[@]:1}")
-
-if [[ "$prefix" != "$EVIDENCE_PREFIX" ]]; then
-    echo "atomic scanout evidence has wrong prefix: $prefix" >&2
-    echo "$evidence" >&2
+if [[ "${#evidence_lines[@]}" -ne 2 ]]; then
+    echo "atomic scanout evidence expected exactly 2 phase lines, got ${#evidence_lines[@]}" >&2
+    printf '%s\n' "${evidence_lines[@]}" >&2
     exit 1
 fi
 
-declare -A observed=()
-declare -A expected=(
-    ["schema"]="2"
-    ["status"]="Passed"
-    ["scanout_target"]="Ready"
-    ["rendered_context"]="Ready"
-    ["gbm_export"]="Exported"
-    ["submit"]="SubmittedWaitingForPageFlip"
-    ["request_scope"]="Modeset"
-    ["commit_page_flip_event"]="true"
-    ["commit_nonblocking"]="true"
-    ["commit_allow_modeset"]="true"
-    ["commit_test_only"]="false"
-    ["page_flip_poll"]="Emitted"
-    ["page_flip"]="Presented"
-    ["retire"]="RetiredAfterPageFlip"
-    ["retire_destroy"]="Destroyed"
-    ["retire_cleanup_pending"]="false"
-)
+verify_phase() {
+    local phase="$1"
+    local request_scope="$2"
+    local commit_allow_modeset="$3"
+    local evidence=""
 
-for field in "${fields[@]}"; do
-    if [[ "$field" != *=* ]]; then
-        echo "atomic scanout evidence has malformed field: $field" >&2
+    for line in "${evidence_lines[@]}"; do
+        if [[ "$line" == *" phase=$phase "* ]]; then
+            evidence="$line"
+        fi
+    done
+
+    if [[ -z "$evidence" ]]; then
+        echo "atomic scanout evidence missing phase=$phase" >&2
+        printf '%s\n' "${evidence_lines[@]}" >&2
+        exit 1
+    fi
+
+    read -r -a parts <<< "$evidence"
+    local prefix="${parts[0]:-}"
+    local fields=("${parts[@]:1}")
+
+    if [[ "$prefix" != "$EVIDENCE_PREFIX" ]]; then
+        echo "atomic scanout evidence has wrong prefix: $prefix" >&2
         echo "$evidence" >&2
         exit 1
     fi
 
-    key="${field%%=*}"
-    value="${field#*=}"
-    if [[ -n "${observed[$key]+set}" ]]; then
-        echo "atomic scanout evidence has duplicate field: $key" >&2
-        echo "$evidence" >&2
-        exit 1
-    fi
-    if [[ -z "${expected[$key]+set}" ]]; then
-        echo "atomic scanout evidence has unknown field: $key" >&2
-        echo "$evidence" >&2
-        exit 1
-    fi
-    observed["$key"]="$value"
-done
+    declare -A observed=()
+    declare -A expected=(
+        ["schema"]="3"
+        ["phase"]="$phase"
+        ["status"]="Passed"
+        ["scanout_target"]="Ready"
+        ["rendered_context"]="Ready"
+        ["gbm_export"]="Exported"
+        ["submit"]="SubmittedWaitingForPageFlip"
+        ["request_scope"]="$request_scope"
+        ["commit_page_flip_event"]="true"
+        ["commit_nonblocking"]="true"
+        ["commit_allow_modeset"]="$commit_allow_modeset"
+        ["commit_test_only"]="false"
+        ["page_flip_poll"]="Emitted"
+        ["page_flip"]="Presented"
+        ["retire"]="RetiredAfterPageFlip"
+        ["retire_destroy"]="Destroyed"
+        ["retire_cleanup_pending"]="false"
+    )
 
-require_field() {
-    local key="$1"
-    local expected="$2"
-    local actual="${observed[$key]:-}"
+    for field in "${fields[@]}"; do
+        if [[ "$field" != *=* ]]; then
+            echo "atomic scanout evidence has malformed field: $field" >&2
+            echo "$evidence" >&2
+            exit 1
+        fi
 
-    if [[ "$actual" != "$expected" ]]; then
-        echo "atomic scanout evidence expected $key=$expected, got ${actual:-missing}" >&2
-        echo "$evidence" >&2
-        exit 1
-    fi
+        local key="${field%%=*}"
+        local value="${field#*=}"
+        if [[ -n "${observed[$key]+set}" ]]; then
+            echo "atomic scanout evidence has duplicate field: $key" >&2
+            echo "$evidence" >&2
+            exit 1
+        fi
+        if [[ -z "${expected[$key]+set}" ]]; then
+            echo "atomic scanout evidence has unknown field: $key" >&2
+            echo "$evidence" >&2
+            exit 1
+        fi
+        observed["$key"]="$value"
+    done
+
+    for key in "${!expected[@]}"; do
+        local actual="${observed[$key]:-}"
+        if [[ "$actual" != "${expected[$key]}" ]]; then
+            echo "atomic scanout evidence expected $key=${expected[$key]}, got ${actual:-missing}" >&2
+            echo "$evidence" >&2
+            exit 1
+        fi
+    done
 }
 
-for key in "${!expected[@]}"; do
-    require_field "$key" "${expected[$key]}"
-done
+verify_phase "InitialModeset" "Modeset" "true"
+verify_phase "SteadyPageFlip" "PageFlip" "false"
 
 echo "atomic scanout evidence passed: $EVIDENCE_FILE"

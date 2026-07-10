@@ -20,7 +20,8 @@ active milestone to `docs/roadmap-history.md`.
 - [ ] Capture `LibdrmNativeAtomicScanoutSmokeEvidence` with
   `tools/atomic_scanout_smoke.sh`.
 - [ ] Verify rendered GBM front-buffer export, primary-plane atomic submit,
-  native page-flip callback, and resource retirement appear in reduced evidence.
+  native page-flip callback, resource retirement, and steady-state page-flip
+  submit appear in reduced evidence.
 
 Support now exists for that hardware proof:
 
@@ -74,6 +75,9 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Extended atomic scanout evidence to schema 3 so a passing hardware capture
+  must prove both initial modeset presentation and steady-state page-flip
+  presentation.
 - [x] Gated the modesetting atomic scanout smoke helper behind verified
   non-modesetting preflight so unsupported hosts fail before requesting DRM
   master.
@@ -85,9 +89,8 @@ Support now exists for that hardware proof:
 - [x] Carried reduced request scope through rendered primary-plane runtime
   submit reports so steady-state scanout diagnostics prove page-flip request
   shape, not only commit flags.
-- [x] Bumped atomic scanout evidence to schema 2 with reduced request scope, so
-  the explicit hardware smoke proves whether it submitted a modeset or page-flip
-  request shape.
+- [x] Added reduced request scope to atomic scanout evidence, so hardware smoke
+  captures prove whether they submitted a modeset or page-flip request shape.
 - [x] Split primary-plane atomic request building so runtime page-flip policy
   emits plane-only requests while explicit modeset smokes keep connector,
   CRTC, mode, and active properties.
