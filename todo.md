@@ -83,6 +83,9 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Aligned the opt-in atomic hardware smoke with preflight readiness by
+  choosing an atomic-scanout-ready primary card instead of the first merely
+  openable card.
 - [x] Added verifier coverage proving reduced `SmokeChildTimeout` evidence is
   rejected as an incomplete atomic hardware proof.
 - [x] Made the opt-in atomic hardware-smoke parent emit reduced

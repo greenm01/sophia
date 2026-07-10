@@ -6056,7 +6056,7 @@ mod atomic_scanout_hardware_smoke {
             return;
         }
 
-        let Some(card_path) = first_openable_primary_card_node() else {
+        let Some(card_path) = first_atomic_scanout_ready_primary_card_node() else {
             let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::no_primary_card();
             fail_atomic_scanout_smoke(evidence);
         };
@@ -6413,7 +6413,7 @@ mod atomic_scanout_hardware_smoke {
         }
     }
 
-    fn first_openable_primary_card_node() -> Option<PathBuf> {
+    fn first_atomic_scanout_ready_primary_card_node() -> Option<PathBuf> {
         let entries = std::fs::read_dir("/dev/dri").ok()?;
         let mut candidates = Vec::new();
 
@@ -6428,6 +6428,24 @@ mod atomic_scanout_hardware_smoke {
         candidates.sort();
         candidates
             .into_iter()
-            .find(|path| RealDrmCard::open(path).is_ok())
+            .find(|path| primary_card_node_is_atomic_scanout_ready(path))
+    }
+
+    fn primary_card_node_is_atomic_scanout_ready(path: &Path) -> bool {
+        let Ok(card) = RealDrmCard::open(path) else {
+            return false;
+        };
+
+        if drm::Device::set_client_capability(&card, drm::ClientCapability::UniversalPlanes, true)
+            .is_err()
+            || drm::Device::set_client_capability(&card, drm::ClientCapability::Atomic, true)
+                .is_err()
+        {
+            return false;
+        }
+
+        let selection = select_native_primary_plane_target(&card);
+        selection.status == LibdrmNativePrimaryPlaneSelectionStatus::Selected
+            && selection.selection.is_some()
     }
 }
