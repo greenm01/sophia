@@ -206,9 +206,10 @@ tools/check_atomic_scanout_verifiers.sh
 ```
 
 That script proves the preflight verifier accepts only an atomic-ready reduced
-host record and that the scanout evidence verifier rejects missing steady-state
-page-flip evidence, the wrong steady-state request scope, and native identity
-fields.
+host record, rejects impossible count relationships, and rejects native host
+identity fields. It also proves the scanout evidence verifier rejects missing
+steady-state page-flip evidence, the wrong steady-state request scope, and
+native identity fields.
 
 ## Retiring `DEFAULT_DISPLAY`
 

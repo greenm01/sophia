@@ -78,6 +78,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Added negative preflight verifier fixtures for impossible reduced count
+  relationships and native host identity leakage.
 - [x] Made opt-in atomic hardware smoke early failures print reduced evidence
   and fail with the actual reduced status instead of asserting `Passed`.
 - [x] Made reduced atomic scanout smoke evidence require phase-correct commit

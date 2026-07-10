@@ -23,6 +23,8 @@ expect_fail() {
 
 expect_pass tools/verify_atomic_scanout_preflight.sh atomic_scanout_preflight_pass.log
 expect_fail tools/verify_atomic_scanout_preflight.sh atomic_scanout_preflight_unavailable.log
+expect_fail tools/verify_atomic_scanout_preflight.sh atomic_scanout_preflight_impossible_counts.log
+expect_fail tools/verify_atomic_scanout_preflight.sh atomic_scanout_preflight_unknown_native_field.log
 
 expect_pass tools/verify_atomic_scanout_evidence.sh atomic_scanout_evidence_pass.log
 expect_fail tools/verify_atomic_scanout_evidence.sh atomic_scanout_evidence_missing_steady_phase.log
