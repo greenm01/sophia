@@ -785,6 +785,10 @@ the primary-plane path, and returns a combined owner. The rendered buffer owner
 and the KMS submission owner then travel together until accepted page-flip
 evidence allows `retire_rendered_primary_plane_scanout_after_page_flip` to drop
 both safely.
+Native primary-plane submit can also consume a preselected KMS target snapshot.
+That path is required when the Engine has already sized a rendered frame target
+from a specific connector/CRTC/plane selection; readiness, buffer production,
+and atomic submit must refer to the same reduced target snapshot.
 The shared session runtime now has a matching reduced lifecycle: after
 `RenderFrame`, it emits `SubmitScanout` and records submitted, retired, or
 rejected scanout state without seeing framebuffer IDs, KMS handles, or GBM

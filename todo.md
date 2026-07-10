@@ -127,6 +127,8 @@ active milestone to `docs/roadmap-history.md`.
   submit reports so the submit path cannot omit readiness evidence.
 - [x] Added reduced KMS scanout target status to atomic scanout smoke evidence
   so opt-in hardware proof cannot pass without target-readiness evidence.
+- [x] Added preselected KMS target primary-plane submit so rendered target
+  sizing and atomic submit can share one coherent selection snapshot.
 - [x] Added reduced live scanout submit intake so backend-live rendered
   primary-plane submit results can drive runtime `SubmitScanout`.
 - [x] Added shared runtime scanout lifecycle state so rendered frames progress

@@ -283,6 +283,22 @@ where
         + LibdrmNativeAtomicCommitDevice,
 {
     let selection = select_native_primary_plane_target(device);
+    submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor(
+        device, selection, descriptor,
+    )
+}
+
+#[cfg(feature = "libdrm-events")]
+pub fn submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor<D>(
+    device: &D,
+    selection: LibdrmNativePrimaryPlaneSelectionResult,
+    descriptor: LiveRendererScanoutBufferDescriptor,
+) -> LibdrmNativePrimaryPlaneScanoutSubmitResult
+where
+    D: LibdrmNativePropertyLookupDevice
+        + LibdrmNativePrimaryPlaneResourceDevice
+        + LibdrmNativeAtomicCommitDevice,
+{
     let Some(selected) = selection.selection else {
         return LibdrmNativePrimaryPlaneScanoutSubmitResult {
             status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::KmsTargetUnavailable,

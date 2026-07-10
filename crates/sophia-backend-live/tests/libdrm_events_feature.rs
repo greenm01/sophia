@@ -22,15 +22,16 @@ use sophia_backend_live::{
     LibdrmNativePrimaryPlanePropertyDiscoveryStatus, LibdrmNativePrimaryPlanePropertyHandles,
     LibdrmNativePrimaryPlaneResourceCreateStatus, LibdrmNativePrimaryPlaneResourceDestroyStatus,
     LibdrmNativePrimaryPlaneResourceDevice, LibdrmNativePrimaryPlaneScanoutRetireStatus,
-    LibdrmNativePrimaryPlaneScanoutSubmitStatus, LibdrmNativePrimaryPlaneSelectionStatus,
-    LibdrmNativePropertyHandleSet, LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport,
-    LibdrmNativeReadLoopReport, LibdrmNativeReadLoopStatus,
-    LibdrmNativeRenderedScanoutContextStatus, LibdrmPageFlipEventPollReport,
-    LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller, LibdrmRendererScanoutBuffer,
-    LiveBackendConfig, LiveGbmEglFrameTargetStatus, LiveHardwareValidationGateReport,
-    LiveHardwareValidationGateStatus, LiveHardwareValidationSmokeReport,
-    LiveHardwareValidationSmokeStatus, LiveHardwareValidationTarget, LiveKmsScanoutTargetStatus,
-    LiveLibdrmPollerDiagnostics, LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
+    LibdrmNativePrimaryPlaneScanoutSubmitStatus, LibdrmNativePrimaryPlaneSelectionResult,
+    LibdrmNativePrimaryPlaneSelectionStatus, LibdrmNativePropertyHandleSet,
+    LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport, LibdrmNativeReadLoopReport,
+    LibdrmNativeReadLoopStatus, LibdrmNativeRenderedScanoutContextStatus,
+    LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller,
+    LibdrmRendererScanoutBuffer, LiveBackendConfig, LiveGbmEglFrameTargetStatus,
+    LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
+    LiveHardwareValidationSmokeReport, LiveHardwareValidationSmokeStatus,
+    LiveHardwareValidationTarget, LiveKmsScanoutTargetStatus, LiveLibdrmPollerDiagnostics,
+    LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
     LiveLibdrmPollerStartupStatus, LivePageFlipCallback, LivePageFlipCallbackDecision,
     LivePageFlipCallbackQueue, LivePageFlipCallbackReport, LivePageFlipCallbackSourceReport,
     LivePageFlipEvent, LivePageFlipEventStatus, LiveRenderedPrimaryPlaneScanoutBackpressureReport,
@@ -52,6 +53,7 @@ use sophia_backend_live::{
     retire_native_primary_plane_scanout_after_page_flip,
     retire_rendered_primary_plane_scanout_after_page_flip, select_native_primary_plane_target,
     submit_native_primary_plane_scanout_from_renderer_descriptor,
+    submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor,
 };
 use sophia_renderer_live::{
     FakeRendererScanoutBufferExporter, LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
@@ -925,6 +927,33 @@ fn native_libdrm_primary_plane_scanout_submit_chains_renderer_descriptor_to_atom
         retired.status,
         LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed
     );
+}
+
+#[test]
+fn native_libdrm_primary_plane_scanout_submit_uses_supplied_selection_snapshot() {
+    let device = full_primary_plane_scanout_device();
+    let result = submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor(
+        &device,
+        LibdrmNativePrimaryPlaneSelectionResult {
+            status: LibdrmNativePrimaryPlaneSelectionStatus::NoConnectedConnector,
+            selection: None,
+        },
+        scanout_descriptor(Size {
+            width: 1280,
+            height: 720,
+        }),
+    );
+
+    assert_eq!(
+        result.status,
+        LibdrmNativePrimaryPlaneScanoutSubmitStatus::KmsTargetUnavailable
+    );
+    assert_eq!(
+        result.selection,
+        LibdrmNativePrimaryPlaneSelectionStatus::NoConnectedConnector
+    );
+    assert!(result.submit.is_none());
+    assert!(result.submission.is_none());
 }
 
 #[test]
@@ -3826,8 +3855,12 @@ mod atomic_scanout_hardware_smoke {
             .buffer
             .expect("real GBM scanout export should retain owned buffer");
 
-        let mut submit = submit_native_primary_plane_scanout_from_renderer_descriptor(
+        let mut submit = submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor(
             &card,
+            LibdrmNativePrimaryPlaneSelectionResult {
+                status: selection.status,
+                selection: Some(selected),
+            },
             owned_buffer.descriptor(),
         );
         if submit.status != LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip

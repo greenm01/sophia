@@ -922,6 +922,10 @@ destroy status when cleanup fails. Non-ready scanout targets fail the evidence
 before the smoke can treat export or submit as sufficient. This path compiled
 and the default test run skipped it because the opt-in environment variable was
 unset; real hardware evidence remains to be recorded.
+Primary-plane submit now also has a preselected-target entry point. The opt-in
+atomic smoke uses one KMS selection snapshot for frame-target sizing, readiness
+evidence, and atomic submit instead of selecting again after rendering. A
+deterministic fake test proves the helper honors the supplied snapshot.
 
 ## Open Questions
 
