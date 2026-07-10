@@ -306,6 +306,7 @@ pub struct LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
     pub submit: Option<LibdrmNativePrimaryPlaneScanoutSubmitStatus>,
     pub runtime_scanout_state: Option<RuntimeScanoutState>,
     pub in_flight: bool,
+    pub in_flight_ticks: u64,
 }
 
 #[cfg(feature = "libdrm-events")]
@@ -346,6 +347,7 @@ pub struct LiveTrackedRenderedPrimaryPlaneScanoutRetireReport {
     pub status: LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus,
     pub runtime_scanout_state: Option<RuntimeScanoutState>,
     pub in_flight: bool,
+    pub in_flight_ticks: u64,
 }
 
 #[cfg(feature = "libdrm-events")]
@@ -461,6 +463,7 @@ pub(crate) fn track_rendered_primary_plane_scanout_submit_from_target_with<D, E>
         BoxedRenderedPrimaryPlaneScanoutSubmission,
     >,
     rendered_primary_plane_runtime_scanout_state: &mut Option<RuntimeScanoutState>,
+    rendered_primary_plane_scanout_in_flight_ticks: &mut u64,
     pending_runtime_scanout_states: Option<&mut VecDeque<RuntimeScanoutState>>,
     device: &D,
     exporter: &mut E,
@@ -481,6 +484,7 @@ where
             submit: None,
             runtime_scanout_state: Some(RuntimeScanoutState::Deferred),
             in_flight: true,
+            in_flight_ticks: *rendered_primary_plane_scanout_in_flight_ticks,
         };
     }
 
@@ -492,6 +496,7 @@ where
         *rendered_primary_plane_scanout_submission =
             Some(submission.map_scanout_buffer(|owner| Box::new(owner) as Box<dyn Any>));
     }
+    *rendered_primary_plane_scanout_in_flight_ticks = 0;
     *rendered_primary_plane_runtime_scanout_state = runtime_scanout_state;
     if runtime_scanout_state == Some(RuntimeScanoutState::Rejected) {
         if let Some(pending_runtime_scanout_states) = pending_runtime_scanout_states {
@@ -506,6 +511,7 @@ where
         submit: result.submit,
         runtime_scanout_state,
         in_flight: rendered_primary_plane_scanout_submission.is_some(),
+        in_flight_ticks: *rendered_primary_plane_scanout_in_flight_ticks,
     }
 }
 
@@ -516,6 +522,7 @@ pub(crate) struct LiveRenderedPrimaryPlaneRuntimeAdapter<'a, D, E> {
     pub(crate) rendered_primary_plane_scanout_submission:
         &'a mut Option<BoxedRenderedPrimaryPlaneScanoutSubmission>,
     pub(crate) rendered_primary_plane_runtime_scanout_state: &'a mut Option<RuntimeScanoutState>,
+    pub(crate) rendered_primary_plane_scanout_in_flight_ticks: &'a mut u64,
     pub(crate) device: &'a D,
     pub(crate) exporter: &'a mut E,
     pub(crate) submit_report: &'a mut Option<LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport>,
@@ -573,6 +580,7 @@ where
             self.target,
             self.rendered_primary_plane_scanout_submission,
             self.rendered_primary_plane_runtime_scanout_state,
+            self.rendered_primary_plane_scanout_in_flight_ticks,
             None,
             self.device,
             self.exporter,

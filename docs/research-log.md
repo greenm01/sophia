@@ -859,8 +859,10 @@ that would otherwise turn a pending kernel scanout into a use-after-retire bug.
 Rendered primary-plane backpressure now has its own reduced runtime state:
 `Deferred`. When the executor asks for another `SubmitScanout` while an earlier
 KMS submission is still awaiting page-flip evidence, backend-live reports
-`Deferred` instead of `Rejected`. The runtime continues through portal/chrome
-phases without altering in-flight scanout counts.
+`Deferred` instead of `Rejected`. Backend-live now also reports the reduced
+runtime tick age of the in-flight owner so repeated deferrals can be diagnosed
+without releasing GBM/KMS resources early. The runtime continues through portal
+and chrome phases without altering in-flight scanout counts.
 The page-flip callback queue now carries the latest accepted reduced callback
 report. `run_tick_with_rendered_primary_plane_scanout_with` consumes that report
 before draining lifecycle states, so one live tick can retire the old rendered

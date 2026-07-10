@@ -1108,7 +1108,9 @@ fn live_runtime_assembly_tracks_rendered_scanout_until_accepted_page_flip() {
         Some(RuntimeScanoutState::Submitted)
     );
     assert_eq!(submitted.in_flight, true);
+    assert_eq!(submitted.in_flight_ticks, 0);
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), true);
+    assert_eq!(assembly.rendered_primary_plane_scanout_in_flight_ticks(), 0);
     assert_eq!(
         assembly.rendered_primary_plane_runtime_scanout_state(),
         Some(RuntimeScanoutState::Submitted)
@@ -1126,7 +1128,14 @@ fn live_runtime_assembly_tracks_rendered_scanout_until_accepted_page_flip() {
         Some(RuntimeScanoutState::Deferred)
     );
     assert_eq!(blocked.in_flight, true);
+    assert_eq!(blocked.in_flight_ticks, 0);
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), true);
+
+    let aged_tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should age in-flight scanout ownership");
+    assert_eq!(aged_tick.rendered_primary_plane_scanout_in_flight_ticks, 1);
+    assert_eq!(assembly.rendered_primary_plane_scanout_in_flight_ticks(), 1);
 
     let stale = LivePageFlipCallbackReport {
         decision: LivePageFlipCallbackDecision::RejectedStaleFrameSerial,
@@ -1144,6 +1153,7 @@ fn live_runtime_assembly_tracks_rendered_scanout_until_accepted_page_flip() {
     );
     assert_eq!(waiting.runtime_scanout_state, None);
     assert_eq!(waiting.in_flight, true);
+    assert_eq!(waiting.in_flight_ticks, 1);
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), true);
 
     let accepted = LivePageFlipCallbackReport {
@@ -1165,7 +1175,9 @@ fn live_runtime_assembly_tracks_rendered_scanout_until_accepted_page_flip() {
         Some(RuntimeScanoutState::Retired)
     );
     assert_eq!(retired.in_flight, false);
+    assert_eq!(retired.in_flight_ticks, 0);
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), false);
+    assert_eq!(assembly.rendered_primary_plane_scanout_in_flight_ticks(), 0);
     assert_eq!(
         assembly.rendered_primary_plane_runtime_scanout_state(),
         Some(RuntimeScanoutState::Retired)
@@ -1180,6 +1192,7 @@ fn live_runtime_assembly_tracks_rendered_scanout_until_accepted_page_flip() {
         tick.runtime_scanout_states,
         vec![RuntimeScanoutState::Retired]
     );
+    assert_eq!(tick.rendered_primary_plane_scanout_in_flight_ticks, 0);
     assert_eq!(tick.engine.runtime.runtime_state.scanout_retirements, 1);
     assert_eq!(
         tick.engine.runtime.runtime_state.last_scanout_state,
@@ -1212,6 +1225,7 @@ fn live_runtime_assembly_does_not_track_failed_rendered_scanout_submit() {
         Some(RuntimeScanoutState::Rejected)
     );
     assert_eq!(submitted.in_flight, false);
+    assert_eq!(submitted.in_flight_ticks, 0);
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), false);
     assert_eq!(
         assembly.rendered_primary_plane_runtime_scanout_state(),
@@ -1246,6 +1260,7 @@ fn live_runtime_assembly_does_not_track_failed_rendered_scanout_submit() {
     );
     assert_eq!(retired.runtime_scanout_state, None);
     assert_eq!(retired.in_flight, false);
+    assert_eq!(retired.in_flight_ticks, 0);
 
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -1289,7 +1304,9 @@ fn live_runtime_tick_submits_rendered_scanout_when_runtime_requests_scanout() {
         Some(tick.engine.tick.frame_serial)
     );
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), true);
+    assert_eq!(assembly.rendered_primary_plane_scanout_in_flight_ticks(), 0);
     assert_eq!(assembly.pending_runtime_scanout_state_count(), 0);
+    assert_eq!(tick.rendered_primary_plane_scanout_in_flight_ticks, 0);
 
     let deferred_tick = assembly
         .run_tick_with_rendered_primary_plane_scanout_with(
@@ -1305,6 +1322,17 @@ fn live_runtime_tick_submits_rendered_scanout_when_runtime_requests_scanout() {
             .expect("active scanout submit should be reported")
             .status,
         LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::AlreadyInFlight
+    );
+    assert_eq!(
+        deferred_tick.rendered_primary_plane_scanout_in_flight_ticks,
+        1
+    );
+    assert_eq!(
+        deferred_tick
+            .rendered_primary_plane_scanout_submit
+            .expect("active scanout submit should be reported")
+            .in_flight_ticks,
+        1
     );
     assert_eq!(
         deferred_tick
@@ -1339,6 +1367,7 @@ fn live_runtime_tick_submits_rendered_scanout_when_runtime_requests_scanout() {
         Some(RuntimeScanoutState::Deferred)
     );
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), true);
+    assert_eq!(assembly.rendered_primary_plane_scanout_in_flight_ticks(), 1);
 
     sender
         .try_send(LivePageFlipCallback {
@@ -1364,6 +1393,13 @@ fn live_runtime_tick_submits_rendered_scanout_when_runtime_requests_scanout() {
             .expect("accepted page flip should retire in-flight scanout")
             .status,
         LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip
+    );
+    assert_eq!(
+        retire_and_submit_tick
+            .rendered_primary_plane_scanout_retire
+            .expect("accepted page flip should retire in-flight scanout")
+            .in_flight_ticks,
+        0
     );
     assert_eq!(
         retire_and_submit_tick.runtime_scanout_states,
@@ -1401,6 +1437,11 @@ fn live_runtime_tick_submits_rendered_scanout_when_runtime_requests_scanout() {
         1
     );
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), true);
+    assert_eq!(assembly.rendered_primary_plane_scanout_in_flight_ticks(), 0);
+    assert_eq!(
+        retire_and_submit_tick.rendered_primary_plane_scanout_in_flight_ticks,
+        0
+    );
 
     std::fs::remove_dir_all(root).unwrap();
 }

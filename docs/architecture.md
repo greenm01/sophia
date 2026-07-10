@@ -592,7 +592,10 @@ For rendered primary-plane scanout, backend-live can also retain the combined
 rendered-buffer owner and KMS submission owner internally. Stale page-flip
 evidence keeps that owner in flight. Accepted presented page-flip evidence
 retires the owner and maps to reduced `Retired` state; resource retirement
-failure maps to reduced `Rejected` state.
+failure maps to reduced `Rejected` state. While an owner stays in flight,
+backend-live also records a reduced in-flight tick age so a stalled page flip is
+observable without exposing native object identity or forcing an unsafe early
+retire.
 Those terminal reduced states are queued inside backend-live and drained into
 the next runtime tick as scanout lifecycle observations. The shared reducer
 records the retirement or rejection without treating it as a fresh render

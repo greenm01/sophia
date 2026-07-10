@@ -19,6 +19,8 @@ pub struct LiveBackendRuntimeAssembly<P = QueuedInputPoller> {
     #[cfg(feature = "libdrm-events")]
     pub(crate) rendered_primary_plane_runtime_scanout_state: Option<RuntimeScanoutState>,
     #[cfg(feature = "libdrm-events")]
+    pub(crate) rendered_primary_plane_scanout_in_flight_ticks: u64,
+    #[cfg(feature = "libdrm-events")]
     pub(crate) pending_runtime_scanout_states: VecDeque<RuntimeScanoutState>,
 }
 
@@ -78,6 +80,11 @@ where
     #[cfg(feature = "libdrm-events")]
     pub fn rendered_primary_plane_scanout_in_flight(&self) -> bool {
         self.rendered_primary_plane_scanout_submission.is_some()
+    }
+
+    #[cfg(feature = "libdrm-events")]
+    pub const fn rendered_primary_plane_scanout_in_flight_ticks(&self) -> u64 {
+        self.rendered_primary_plane_scanout_in_flight_ticks
     }
 
     #[cfg(feature = "libdrm-events")]
@@ -224,6 +231,7 @@ where
             self.gbm_egl_frame_target,
             &mut self.rendered_primary_plane_scanout_submission,
             &mut self.rendered_primary_plane_runtime_scanout_state,
+            &mut self.rendered_primary_plane_scanout_in_flight_ticks,
             Some(&mut self.pending_runtime_scanout_states),
             device,
             exporter,
@@ -244,6 +252,7 @@ where
                 status: LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::NoSubmission,
                 runtime_scanout_state: None,
                 in_flight: false,
+                in_flight_ticks: 0,
             };
         };
 
@@ -252,6 +261,8 @@ where
         let runtime_scanout_state = retired.runtime_scanout_state();
         if let Some(submission) = retired.submission {
             self.rendered_primary_plane_scanout_submission = Some(submission);
+        } else {
+            self.rendered_primary_plane_scanout_in_flight_ticks = 0;
         }
         if let Some(runtime_scanout_state) = runtime_scanout_state {
             self.rendered_primary_plane_runtime_scanout_state = Some(runtime_scanout_state);
@@ -263,6 +274,7 @@ where
             status: retired.status.into(),
             runtime_scanout_state,
             in_flight: self.rendered_primary_plane_scanout_in_flight(),
+            in_flight_ticks: self.rendered_primary_plane_scanout_in_flight_ticks,
         }
     }
 
@@ -342,6 +354,8 @@ where
             .unwrap_or_default();
 
         #[cfg(feature = "libdrm-events")]
+        self.advance_rendered_primary_plane_scanout_age_if_in_flight();
+        #[cfg(feature = "libdrm-events")]
         let runtime_scanout_states: Vec<RuntimeScanoutState> =
             self.pending_runtime_scanout_states.drain(..).collect();
         #[cfg(not(feature = "libdrm-events"))]
@@ -363,6 +377,9 @@ where
             page_flip: self.page_flip_event,
             page_flip_callbacks,
             runtime_scanout_states,
+            #[cfg(feature = "libdrm-events")]
+            rendered_primary_plane_scanout_in_flight_ticks: self
+                .rendered_primary_plane_scanout_in_flight_ticks,
             #[cfg(feature = "libdrm-events")]
             rendered_primary_plane_scanout_submit: None,
             #[cfg(feature = "libdrm-events")]
@@ -402,6 +419,7 @@ where
                     device, &callback,
                 )
             });
+        self.advance_rendered_primary_plane_scanout_age_if_in_flight();
         let runtime_scanout_states: Vec<RuntimeScanoutState> =
             self.pending_runtime_scanout_states.drain(..).collect();
         input
@@ -413,6 +431,8 @@ where
             &mut self.rendered_primary_plane_scanout_submission;
         let rendered_primary_plane_runtime_scanout_state =
             &mut self.rendered_primary_plane_runtime_scanout_state;
+        let rendered_primary_plane_scanout_in_flight_ticks =
+            &mut self.rendered_primary_plane_scanout_in_flight_ticks;
         let mut rendered_primary_plane_scanout_submit = None;
 
         let engine = self.assembly.run_tick_with_live_runtime_adapter(
@@ -424,6 +444,7 @@ where
                     target,
                     rendered_primary_plane_scanout_submission,
                     rendered_primary_plane_runtime_scanout_state,
+                    rendered_primary_plane_scanout_in_flight_ticks,
                     device,
                     exporter,
                     submit_report: &mut rendered_primary_plane_scanout_submit,
@@ -443,6 +464,8 @@ where
             page_flip: self.page_flip_event,
             page_flip_callbacks,
             runtime_scanout_states,
+            rendered_primary_plane_scanout_in_flight_ticks: self
+                .rendered_primary_plane_scanout_in_flight_ticks,
             rendered_primary_plane_scanout_submit,
             rendered_primary_plane_scanout_retire,
             libdrm_poller: self.libdrm_poller_diagnostics,
@@ -502,6 +525,15 @@ where
         self.page_flip_event =
             LivePageFlipEvent::from_kms_scanout_target_status(self.kms_scanout_target.status);
     }
+
+    #[cfg(feature = "libdrm-events")]
+    fn advance_rendered_primary_plane_scanout_age_if_in_flight(&mut self) {
+        if self.rendered_primary_plane_scanout_submission.is_some() {
+            self.rendered_primary_plane_scanout_in_flight_ticks = self
+                .rendered_primary_plane_scanout_in_flight_ticks
+                .saturating_add(1);
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -516,6 +548,8 @@ pub struct LiveBackendRuntimeTickReport {
     pub page_flip: LivePageFlipEvent,
     pub page_flip_callbacks: LivePageFlipCallbackQueueReport,
     pub runtime_scanout_states: Vec<RuntimeScanoutState>,
+    #[cfg(feature = "libdrm-events")]
+    pub rendered_primary_plane_scanout_in_flight_ticks: u64,
     #[cfg(feature = "libdrm-events")]
     pub rendered_primary_plane_scanout_submit:
         Option<LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport>,

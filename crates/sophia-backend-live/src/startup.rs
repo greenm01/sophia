@@ -507,6 +507,8 @@ impl LiveBackendStartupReport {
                 #[cfg(feature = "libdrm-events")]
                 rendered_primary_plane_runtime_scanout_state: None,
                 #[cfg(feature = "libdrm-events")]
+                rendered_primary_plane_scanout_in_flight_ticks: 0,
+                #[cfg(feature = "libdrm-events")]
                 pending_runtime_scanout_states: VecDeque::new(),
             })
     }

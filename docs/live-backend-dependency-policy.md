@@ -238,7 +238,9 @@ owns GBM buffers, DRM framebuffers, property handles, or KMS submission objects.
 Backend-live queues reduced terminal scanout states and drains them through the
 next runtime tick. The queue carries only `RuntimeScanoutState` values; native
 resource ownership stays in backend-live, and stale page-flip evidence does not
-emit a runtime lifecycle state.
+emit a runtime lifecycle state. Runtime reports may expose only reduced
+in-flight tick age for a retained scanout owner, which is enough to diagnose a
+missing page flip without leaking framebuffer, GBM, or KMS identity.
 `retire_native_primary_plane_scanout_after_page_flip` consumes that owner only
 when a reduced callback report is accepted and presented. Rejected or stale
 callbacks return the owner to the caller, preserving buffer and framebuffer
