@@ -229,7 +229,7 @@ fn native_owned_scanout_buffer_from_bo(
     let pitch = buffer.stride();
     let format = buffer.format() as u32;
     let gem_handle = unsafe { buffer.handle().u32_ };
-    if pitch == 0 || gem_handle == 0 || format != gbm::Format::Xrgb8888 as u32 {
+    if pitch == 0 || gem_handle == 0 || !is_supported_scanout_format(format) {
         return Err(NativeGbmScanoutBufferExportDetail::InvalidBufferDescriptor);
     }
 
@@ -290,11 +290,12 @@ fn render_initialized_gbm_scanout_front_buffer<T: std::os::fd::AsFd>(
         .choose_first_config(display, &xrgb_window_config_attributes())
         .map_err(|_error| NativeGbmScanoutBufferExportDetail::EglConfigUnavailable)?
         .ok_or(NativeGbmScanoutBufferExportDetail::EglConfigUnavailable)?;
+    let surface_format = gbm_format_for_config(egl, display, config)?;
     let gbm_surface = gbm_device
         .create_surface::<()>(
             width,
             height,
-            gbm::Format::Xrgb8888,
+            surface_format,
             gbm::BufferObjectFlags::SCANOUT | gbm::BufferObjectFlags::RENDERING,
         )
         .map_err(|_error| NativeGbmScanoutBufferExportDetail::GbmSurfaceUnavailable)?;
@@ -336,6 +337,26 @@ fn render_initialized_gbm_scanout_front_buffer<T: std::os::fd::AsFd>(
     let _ = egl.destroy_surface(display, surface);
 
     result
+}
+
+fn is_supported_scanout_format(format: u32) -> bool {
+    format == gbm::Format::Xrgb8888 as u32 || format == gbm::Format::Argb8888 as u32
+}
+
+fn gbm_format_for_config(
+    egl: &khronos_egl::DynamicInstance<khronos_egl::EGL1_5>,
+    display: khronos_egl::Display,
+    config: khronos_egl::Config,
+) -> Result<gbm::Format, NativeGbmScanoutBufferExportDetail> {
+    let native_visual = egl
+        .get_config_attrib(display, config, khronos_egl::NATIVE_VISUAL_ID)
+        .map_err(|_error| NativeGbmScanoutBufferExportDetail::EglConfigUnavailable)?;
+
+    match native_visual as u32 {
+        format if format == gbm::Format::Xrgb8888 as u32 => Ok(gbm::Format::Xrgb8888),
+        format if format == gbm::Format::Argb8888 as u32 => Ok(gbm::Format::Argb8888),
+        _ => Err(NativeGbmScanoutBufferExportDetail::EglConfigUnavailable),
+    }
 }
 
 fn exported_scanout_buffer_report(

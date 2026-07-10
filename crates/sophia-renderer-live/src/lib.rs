@@ -45,4 +45,5 @@ pub use gbm_probe::{
 #[cfg(feature = "gbm-probe")]
 pub use native_scanout::*;
 
+pub const LIVE_RENDERER_SCANOUT_FORMAT_ARGB8888: u32 = 875_713_089;
 pub const LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888: u32 = 875_713_112;

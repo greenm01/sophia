@@ -28,9 +28,9 @@ pub(crate) use sophia_renderer_live::{
 };
 #[cfg(feature = "libdrm-events")]
 pub(crate) use sophia_renderer_live::{
-    LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888, LiveRendererScanoutBufferDescriptor,
-    LiveRendererScanoutBufferExportDetail, LiveRendererScanoutBufferExportStatus,
-    LiveRendererScanoutBufferStatus,
+    LIVE_RENDERER_SCANOUT_FORMAT_ARGB8888, LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+    LiveRendererScanoutBufferDescriptor, LiveRendererScanoutBufferExportDetail,
+    LiveRendererScanoutBufferExportStatus, LiveRendererScanoutBufferStatus,
 };
 #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
 pub(crate) use sophia_renderer_live::{

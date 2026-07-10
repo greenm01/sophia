@@ -5,7 +5,8 @@ use std::{io, sync::mpsc};
 use sophia_backend_live::{
     CompositorBackendTickInput, FakeLibdrmNativePageFlipReader, FakeLibdrmPageFlipEventPoller,
     LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS,
-    LIVE_RENDERED_PRIMARY_PLANE_SCANOUT_STALL_THRESHOLD_TICKS, LibdrmBackendFdAuthority,
+    LIVE_RENDERED_PRIMARY_PLANE_SCANOUT_STALL_THRESHOLD_TICKS,
+    LIVE_RENDERER_SCANOUT_FORMAT_ARGB8888, LibdrmBackendFdAuthority,
     LibdrmBackendFdAuthorityReport, LibdrmBackendFdAuthorityStatus,
     LibdrmDependencyAdmissionReport, LibdrmDependencyAdmissionStatus,
     LibdrmNativeAtomicCommitDevice, LibdrmNativeAtomicCommitFlagsReport,
@@ -4124,6 +4125,23 @@ fn native_libdrm_primary_plane_resources_validate_size_and_lifetime() {
     assert!(invalid_pitch.resources.is_none());
     assert!(invalid_pitch.cleanup.is_none());
 
+    let argb_format = create_native_primary_plane_page_flip_resources(
+        &FakeNativePrimaryPlaneResourceDevice {
+            mode_blob: Ok(15),
+            framebuffer: Ok(framebuffer_handle()),
+            destroy_framebuffer: Ok(()),
+            destroy_mode_blob: Ok(()),
+        },
+        selected,
+        &FakeDrmBuffer::xrgb8888(selected.size()).with_format(drm::buffer::DrmFourcc::Argb8888),
+    );
+    assert_eq!(
+        argb_format.status,
+        LibdrmNativePrimaryPlaneResourceCreateStatus::Created
+    );
+    assert!(argb_format.resources.is_some());
+    assert!(argb_format.cleanup.is_none());
+
     let invalid_format = create_native_primary_plane_page_flip_resources(
         &FakeNativePrimaryPlaneResourceDevice {
             mode_blob: Ok(15),
@@ -4132,7 +4150,7 @@ fn native_libdrm_primary_plane_resources_validate_size_and_lifetime() {
             destroy_mode_blob: Ok(()),
         },
         selected,
-        &FakeDrmBuffer::xrgb8888(selected.size()).with_format(drm::buffer::DrmFourcc::Argb8888),
+        &FakeDrmBuffer::xrgb8888(selected.size()).with_format(drm::buffer::DrmFourcc::Rgb565),
     );
     assert_eq!(
         invalid_format.status,
@@ -4227,6 +4245,19 @@ fn native_libdrm_renderer_scanout_buffer_rejects_invalid_renderer_descriptors() 
         width: 1280,
         height: 720,
     });
+    let mut argb_exporter =
+        FakeRendererScanoutBufferExporter::new(LiveRendererScanoutBufferExportStatus::Exported)
+            .with_descriptor(1280 * 4, LIVE_RENDERER_SCANOUT_FORMAT_ARGB8888, 19);
+    let argb_buffer = argb_exporter
+        .export_scanout_buffer(target)
+        .descriptor
+        .and_then(LibdrmRendererScanoutBuffer::from_descriptor)
+        .expect("ARGB8888 renderer scanout descriptors should be accepted");
+    assert_eq!(
+        drm::buffer::Buffer::format(&argb_buffer),
+        drm::buffer::DrmFourcc::Argb8888
+    );
+
     let mut invalid_exporter =
         FakeRendererScanoutBufferExporter::new(LiveRendererScanoutBufferExportStatus::Exported)
             .with_descriptor(0, LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888, 17);

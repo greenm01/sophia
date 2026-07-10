@@ -1,5 +1,8 @@
 use crate::Size;
-use crate::{LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888, LiveGbmEglFrameTargetRecord};
+use crate::{
+    LIVE_RENDERER_SCANOUT_FORMAT_ARGB8888, LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+    LiveGbmEglFrameTargetRecord,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LiveRendererScanoutBufferDescriptor {
@@ -42,10 +45,15 @@ const fn is_valid_scanout_buffer_shape(
         && size.width <= (u32::MAX / LIVE_RENDERER_SCANOUT_BYTES_PER_XRGB8888_PIXEL) as i32
         && pitch >= minimum_xrgb8888_pitch(size.width)
         && gem_handle > 0
-        && format == LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888
+        && is_supported_scanout_format(format)
 }
 
 const LIVE_RENDERER_SCANOUT_BYTES_PER_XRGB8888_PIXEL: u32 = 4;
+
+pub const fn is_supported_scanout_format(format: u32) -> bool {
+    format == LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888
+        || format == LIVE_RENDERER_SCANOUT_FORMAT_ARGB8888
+}
 
 const fn minimum_xrgb8888_pitch(width: i32) -> u32 {
     width as u32 * LIVE_RENDERER_SCANOUT_BYTES_PER_XRGB8888_PIXEL

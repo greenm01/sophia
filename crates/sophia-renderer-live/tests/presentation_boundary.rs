@@ -1,12 +1,13 @@
 use sophia_renderer_live::{
-    FakeGbmEglFrameTargetAllocator, FakePresentationSmoke, LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
-    LiveGbmEglFrameTargetAllocationReport, LiveGbmEglFrameTargetAllocationRequest,
-    LiveGbmEglFrameTargetAllocationStatus, LiveGbmEglFrameTargetAllocator,
-    LiveGbmEglFrameTargetLifecycleReport, LiveGbmEglFrameTargetLifecycleStatus,
-    LiveGbmEglFrameTargetRecord, LiveGbmEglFrameTargetStatus, LiveRendererPresentationReport,
-    LiveRendererPresentationStatus, LiveRendererScanoutBufferDescriptor,
-    LiveRendererScanoutBufferExportReport, LiveRendererScanoutBufferExportStatus,
-    LiveRendererScanoutBufferExporter, LiveRendererScanoutBufferStatus, Size,
+    FakeGbmEglFrameTargetAllocator, FakePresentationSmoke, LIVE_RENDERER_SCANOUT_FORMAT_ARGB8888,
+    LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888, LiveGbmEglFrameTargetAllocationReport,
+    LiveGbmEglFrameTargetAllocationRequest, LiveGbmEglFrameTargetAllocationStatus,
+    LiveGbmEglFrameTargetAllocator, LiveGbmEglFrameTargetLifecycleReport,
+    LiveGbmEglFrameTargetLifecycleStatus, LiveGbmEglFrameTargetRecord, LiveGbmEglFrameTargetStatus,
+    LiveRendererPresentationReport, LiveRendererPresentationStatus,
+    LiveRendererScanoutBufferDescriptor, LiveRendererScanoutBufferExportReport,
+    LiveRendererScanoutBufferExportStatus, LiveRendererScanoutBufferExporter,
+    LiveRendererScanoutBufferStatus, Size,
 };
 
 #[test]
@@ -186,6 +187,18 @@ fn renderer_scanout_buffer_descriptor_validates_scanout_shape() {
     );
     assert_eq!(ready.status, LiveRendererScanoutBufferStatus::Ready);
     assert!(ready.is_valid_scanout_buffer());
+
+    let ready_argb = LiveRendererScanoutBufferDescriptor::new(
+        Size {
+            width: 1920,
+            height: 1080,
+        },
+        1920 * 4,
+        LIVE_RENDERER_SCANOUT_FORMAT_ARGB8888,
+        45,
+    );
+    assert_eq!(ready_argb.status, LiveRendererScanoutBufferStatus::Ready);
+    assert!(ready_argb.is_valid_scanout_buffer());
 
     for descriptor in [
         LiveRendererScanoutBufferDescriptor::new(

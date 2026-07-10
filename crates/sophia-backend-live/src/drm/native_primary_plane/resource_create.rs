@@ -151,7 +151,7 @@ where
         return Some(LibdrmNativePrimaryPlaneResourceCreateStatus::BufferSizeMismatch);
     }
 
-    if buffer.format() != drm::buffer::DrmFourcc::Xrgb8888
+    if !is_supported_native_scanout_format(buffer.format())
         || buffer.pitch() < buffer_width * LIVE_RENDERER_SCANOUT_BYTES_PER_XRGB8888_PIXEL
     {
         return Some(LibdrmNativePrimaryPlaneResourceCreateStatus::InvalidBuffer);
@@ -162,3 +162,11 @@ where
 
 #[cfg(feature = "libdrm-events")]
 const LIVE_RENDERER_SCANOUT_BYTES_PER_XRGB8888_PIXEL: u32 = 4;
+
+#[cfg(feature = "libdrm-events")]
+const fn is_supported_native_scanout_format(format: drm::buffer::DrmFourcc) -> bool {
+    matches!(
+        format,
+        drm::buffer::DrmFourcc::Xrgb8888 | drm::buffer::DrmFourcc::Argb8888
+    )
+}

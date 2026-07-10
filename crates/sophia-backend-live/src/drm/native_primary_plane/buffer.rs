@@ -32,7 +32,10 @@ impl drm::buffer::Buffer for LibdrmRendererScanoutBuffer {
     }
 
     fn format(&self) -> drm::buffer::DrmFourcc {
-        drm::buffer::DrmFourcc::Xrgb8888
+        match self.format {
+            LIVE_RENDERER_SCANOUT_FORMAT_ARGB8888 => drm::buffer::DrmFourcc::Argb8888,
+            _ => drm::buffer::DrmFourcc::Xrgb8888,
+        }
     }
 
     fn pitch(&self) -> u32 {
