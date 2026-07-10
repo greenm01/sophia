@@ -89,7 +89,8 @@ variable, the test returns early and never opens or modesets hardware.
 The stable evidence shape for that run is
 `LibdrmNativeAtomicScanoutSmokeEvidence`: overall status, rendered context
 status, GBM export status, primary-plane submit status, page-flip poll status,
-page-flip event status, and retirement status only.
+page-flip event status, retirement status, and retire-time resource destroy
+status only.
 The stable evidence shape for the GBM/EGL renderer smoke is
 `LiveRealGbmSmokeEvidence`: status, draw status, presentation status, and
 frame-target allocation status only.

@@ -136,6 +136,8 @@ active milestone to `docs/roadmap-history.md`.
 - [x] Added reduced `LibdrmNativeAtomicScanoutSmokeEvidence` so the opt-in
   hardware smoke reports where the GBM/submit/page-flip/retire chain stopped
   without exposing native handles or KMS object IDs.
+- [x] Added reduced retire-destroy status to atomic scanout smoke evidence so
+  accepted page flips and framebuffer/blob cleanup failures remain distinct.
 - [x] Added a rendered GBM scanout export path that clears an EGL-backed GBM
   surface, swaps, locks the XRGB8888 front buffer, and feeds the same reduced
   scanout descriptor into the atomic submit chain.

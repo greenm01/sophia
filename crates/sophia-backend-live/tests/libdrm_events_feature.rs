@@ -1661,6 +1661,7 @@ fn native_atomic_scanout_smoke_evidence_passes_only_after_submit_page_flip_and_r
             page_flip_poll: Some(LibdrmPageFlipEventPollStatus::Emitted),
             page_flip: Some(LivePageFlipEventStatus::Presented),
             retire: Some(LibdrmNativePrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip),
+            retire_destroy: Some(LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed),
         }
     );
 }
@@ -1709,9 +1710,71 @@ fn native_atomic_scanout_smoke_evidence_fails_closed_before_page_flip() {
         evidence.page_flip_poll,
         Some(LibdrmPageFlipEventPollStatus::Idle)
     );
+    assert_eq!(evidence.retire_destroy, None);
     assert_eq!(
         submission.retire(&device).status,
         LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed
+    );
+}
+
+#[test]
+fn native_atomic_scanout_smoke_evidence_reports_resource_retire_failure() {
+    let device = FakeNativePrimaryPlaneScanoutDevice {
+        resources: FakeNativePrimaryPlaneResourceDevice {
+            destroy_framebuffer: Err(io::Error::other("test framebuffer destroy failed")),
+            ..full_primary_plane_resource_device()
+        },
+        ..full_primary_plane_scanout_device()
+    };
+    let mut submit = submit_native_primary_plane_scanout_from_renderer_descriptor(
+        &device,
+        scanout_descriptor(Size {
+            width: 1280,
+            height: 720,
+        }),
+    );
+    let submission = submit
+        .submission
+        .take()
+        .expect("submitted scanout should retain resource ownership");
+    let poll =
+        LibdrmPageFlipEventPollReport::from_source_report(LivePageFlipCallbackSourceReport {
+            emitted: 1,
+            queued_remaining: 0,
+            backpressure: false,
+            disconnected: false,
+            max_reached: false,
+        });
+    let callback = LivePageFlipCallbackReport {
+        decision: LivePageFlipCallbackDecision::Accepted,
+        event: LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(42),
+        },
+    };
+    let retired =
+        retire_native_primary_plane_scanout_after_page_flip(&device, submission, &callback);
+
+    let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+        Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
+        LiveRendererScanoutBufferExportStatus::Exported,
+        Some(&submit),
+        Some(&poll),
+        Some(&callback),
+        Some(&retired),
+    );
+
+    assert_eq!(
+        evidence.status,
+        LibdrmNativeAtomicScanoutSmokeStatus::RetireFailed
+    );
+    assert_eq!(
+        evidence.retire,
+        Some(LibdrmNativePrimaryPlaneScanoutRetireStatus::ResourceRetireFailed)
+    );
+    assert_eq!(
+        evidence.retire_destroy,
+        Some(LibdrmNativePrimaryPlaneResourceDestroyStatus::FramebufferDestroyFailed)
     );
 }
 

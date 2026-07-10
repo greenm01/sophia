@@ -880,7 +880,8 @@ process, enables the atomic KMS capabilities, allocates the GBM scanout buffer
 from a persistent GBM/EGL rendered-scanout context in the same handle namespace,
 submits primary-plane scanout, waits for a native page-flip callback, validates
 the reduced callback, and retires the submitted resources. The reduced evidence
-now records context startup separately from GBM export. This path compiled and
+now records context startup separately from GBM export, and reports reduced
+retire-time resource destroy status when cleanup fails. This path compiled and
 the default test run skipped it because the opt-in environment variable was
 unset; real hardware evidence remains to be recorded.
 
