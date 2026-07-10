@@ -159,6 +159,13 @@ property discovery, resource creation, request build, atomic submit,
 request-shape mismatch, page-flip reader setup, page-flip delivery,
 page-flip wait state, waiting-retire state, and resource retirement are reported
 separately.
+Runtime rendered-primary-plane submits can also be captured as reduced
+`sophia_runtime_rendered_scanout_submit` lines. Those lines are not a substitute
+for the two-phase hardware smoke evidence, but they are useful when inspecting a
+running production loop: they include the reduced submit status, scanout target,
+frame target, GBM export, scanout-buffer validation, native submit stages,
+atomic commit flags, commit submit result, runtime scanout state, and in-flight
+age without exposing DRM object IDs or file descriptors.
 The stable evidence shape for the GBM/EGL renderer smoke is
 `LiveRealGbmSmokeEvidence`: status, draw status, presentation status, and
 frame-target allocation status only.

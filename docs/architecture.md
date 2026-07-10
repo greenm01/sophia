@@ -816,7 +816,9 @@ Runtime rendered-primary-plane submit reports preserve the reduced native submit
 stages as well: property discovery, resource creation, atomic request build, and
 atomic commit submit. This lets the production loop explain why a scanout was
 rejected without exposing DRM object IDs, GBM handles, or authority-bearing file
-descriptors.
+descriptors. The report also has a schema-versioned reduced log line,
+`sophia_runtime_rendered_scanout_submit`, for capturing runtime submit evidence
+without depending on Rust debug formatting.
 Native primary-plane submit can also consume a preselected KMS target snapshot.
 That path is required when the Engine has already sized a rendered frame target
 from a specific connector/CRTC/plane selection; readiness, buffer production,

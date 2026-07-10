@@ -947,7 +947,10 @@ submit-stage diagnostics used by the smoke evidence: property discovery,
 resource creation, atomic request build, and atomic commit submit. Deterministic
 runtime tests cover both a submitted scanout and an atomic-submit rejection, so
 the live loop can distinguish a policy-level rejection from the underlying
-native stage that caused it.
+native stage that caused it. Those reports now expose a stable
+`sophia_runtime_rendered_scanout_submit` reduced log line, giving runtime
+diagnostics the same copyable, identity-free shape as the hardware validation
+evidence.
 Primary-plane submit now also has a preselected-target entry point. The opt-in
 atomic smoke uses one KMS selection snapshot for frame-target sizing, readiness
 evidence, and atomic submit instead of selecting again after rendering. A

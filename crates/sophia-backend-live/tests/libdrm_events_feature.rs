@@ -2174,6 +2174,10 @@ fn live_runtime_assembly_retains_submit_failure_cleanup_for_retry() {
         Some(LibdrmNativeAtomicCommitSubmitStatus::Rejected)
     );
     assert_eq!(
+        submitted.reduced_log_line(),
+        "sophia_runtime_rendered_scanout_submit schema=1 status=PrimaryPlaneSubmitFailed scanout_target=Ready target=Ready export=Exported scanout_buffer=Ready properties=Discovered resources=Created request=Built submit=AtomicSubmitFailed request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false commit_submit=Rejected runtime_scanout_state=Rejected in_flight=false in_flight_ticks=0"
+    );
+    assert_eq!(
         submitted.scanout_buffer,
         Some(sophia_renderer_live::LiveRendererScanoutBufferStatus::Ready)
     );
@@ -2503,15 +2507,13 @@ fn live_runtime_tick_submits_rendered_scanout_when_runtime_requests_scanout() {
         )
         .expect("runtime scanout command should use rendered primary-plane submit");
 
-    assert_eq!(
-        tick.rendered_primary_plane_scanout_submit
-            .expect("active scanout submit should be reported")
-            .status,
-        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
-    );
     let submit = tick
         .rendered_primary_plane_scanout_submit
         .expect("active scanout submit should be reported");
+    assert_eq!(
+        submit.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+    );
     assert_eq!(
         submit.properties,
         Some(LibdrmNativePrimaryPlanePropertyDiscoveryStatus::Discovered)
@@ -2527,6 +2529,10 @@ fn live_runtime_tick_submits_rendered_scanout_when_runtime_requests_scanout() {
     assert_eq!(
         submit.commit_submit,
         Some(LibdrmNativeAtomicCommitSubmitStatus::Submitted)
+    );
+    assert_eq!(
+        submit.reduced_log_line(),
+        "sophia_runtime_rendered_scanout_submit schema=1 status=SubmittedWaitingForPageFlip scanout_target=Ready target=Ready export=Exported scanout_buffer=Ready properties=Discovered resources=Created request=Built submit=SubmittedWaitingForPageFlip request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false commit_submit=Submitted runtime_scanout_state=Submitted in_flight=true in_flight_ticks=0"
     );
     assert_eq!(tick.engine.runtime.runtime_state.scanout_submissions, 1);
     assert_eq!(
