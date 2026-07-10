@@ -108,6 +108,8 @@ smoke still needs a DRM-master-capable machine.
   after an output resize until the GBM frame target matches the new size.
 - [x] Cleared stale GBM frame-target allocation evidence when output size
   changes, while retaining it for identical-size observations.
+- [x] Added reduced output-size reporting to runtime ticks so scanout reports
+  expose the output geometry paired with the GBM frame target.
 - [x] Made the opt-in atomic hardware smoke retain the renderer-owned GBM
   front-buffer owner with the primary-plane submission until page-flip
   retirement, matching the production runtime lifetime rule.
