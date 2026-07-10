@@ -3,7 +3,6 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PREFLIGHT_FILE="${SOPHIA_ATOMIC_SCANOUT_PREFLIGHT:-/tmp/sophia-atomic-scanout-preflight.log}"
-TEST_FILTER="atomic_scanout_preflight_reduces_host_readiness_without_identity"
 
 mkdir -p "$(dirname "$PREFLIGHT_FILE")"
 
@@ -14,10 +13,9 @@ echo "Preflight: $PREFLIGHT_FILE"
 set +e
 (
     cd "$ROOT_DIR"
-    cargo test --offline -p sophia-backend-live \
-        --features "libdrm-events" \
-        "$TEST_FILTER" \
-        -- --nocapture
+    cargo run --quiet --offline -p sophia-cli \
+        --features "atomic-scanout-live" \
+        -- atomic-scanout-preflight
 ) 2>&1 | tee "$PREFLIGHT_FILE"
 test_status="${PIPESTATUS[0]}"
 set -e

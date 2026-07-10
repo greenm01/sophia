@@ -1,3 +1,5 @@
+#[cfg(feature = "atomic-scanout-live")]
+mod backend;
 mod help;
 mod portal;
 mod routed_input;
@@ -58,6 +60,10 @@ mod prelude {
 }
 
 pub(crate) fn run(args: &[String], verbose: bool) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "atomic-scanout-live")]
+    if backend::try_run(args)? {
+        return Ok(());
+    }
     if x::try_run(args)? {
         return Ok(());
     }
