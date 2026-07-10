@@ -337,6 +337,13 @@ impl NativeLibdrmPageFlipEventPoller {
             };
         }
 
+        if self.pending_callbacks.is_empty() {
+            return LibdrmNativeReadAndPollReport {
+                read_loop,
+                poll: read_loop.into_poll_report(),
+            };
+        }
+
         LibdrmNativeReadAndPollReport {
             read_loop,
             poll: self.poll_page_flip_events(sender, max_emit),

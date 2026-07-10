@@ -445,6 +445,11 @@ real fd polling exists. Native idle and would-block states collapse to an idle
 poll report, decoded callbacks become an emitted poll report with only a count,
 and read failure becomes a disconnected poll report. The mapping carries no
 native errno, fd, CRTC, connector, or raw event identity.
+Poller diagnostics must still preserve the reduced read-loop status. A native
+fd read that returns would-block may yield an idle poll report because no
+callback entered runtime, but diagnostics must report `WouldBlock` so the
+session loop can distinguish an empty callback queue from a real nonblocking
+fd read.
 The report may count rejected native callbacks separately from decoded
 callbacks. Rejection counts stay inside backend-live diagnostics and do not emit
 runtime callbacks.

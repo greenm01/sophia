@@ -3774,6 +3774,40 @@ fn native_libdrm_poller_reads_and_polls_bounded_callbacks() {
 }
 
 #[test]
+fn native_libdrm_poller_preserves_would_block_diagnostics_after_empty_read() {
+    let authority =
+        LibdrmBackendFdAuthority::new(26).expect("nonzero generation should mint authority token");
+    let slot = LibdrmNativeOutputSlot::new(2).expect("nonzero slot should be valid");
+    let source = LibdrmNativePageFlipSource::from_authority(authority);
+    let mut poller =
+        NativeLibdrmPageFlipEventPoller::new(source).with_routes([LibdrmNativeOutputRoute {
+            slot,
+            output: OutputId::from_raw(7),
+        }]);
+    let mut reader = FakeLibdrmNativePageFlipReader::new([]);
+    let (sender, receiver) = mpsc::sync_channel(1);
+
+    let report = poller.read_and_poll_page_flip_events(&mut reader, &sender, 4, 4);
+
+    assert_eq!(report.read_loop, LibdrmNativeReadLoopReport::would_block());
+    assert_eq!(report.poll.status, LibdrmPageFlipEventPollStatus::Idle);
+    assert_eq!(poller.pending_callback_count(), 0);
+    assert_eq!(
+        poller.last_read_loop_report(),
+        LibdrmNativeReadLoopReport::would_block()
+    );
+    assert_eq!(
+        poller.diagnostics(),
+        LibdrmNativePollerDiagnostics {
+            route_count: 1,
+            pending_callbacks: 0,
+            last_read_loop: LibdrmNativeReadLoopReport::would_block(),
+        }
+    );
+    assert!(receiver.try_recv().is_err());
+}
+
+#[test]
 fn native_libdrm_poller_reports_read_failure_without_dropping_pending_callbacks() {
     let authority =
         LibdrmBackendFdAuthority::new(25).expect("nonzero generation should mint authority token");

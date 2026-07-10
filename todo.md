@@ -68,6 +68,9 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Preserved reduced native page-flip `WouldBlock` diagnostics through empty
+  read-and-poll cycles so production scanout can distinguish an idle queue from
+  a nonblocking fd read.
 - [x] Added reduced physical-input intake evidence to Engine backend ticks so
   runtime reports prove physical packets are queued without doing scene
   hit-testing or routed-input request generation.
