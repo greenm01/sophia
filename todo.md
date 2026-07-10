@@ -99,6 +99,8 @@ smoke still needs a DRM-master-capable machine.
   native lookup, and primary-plane discovery modules.
 - [x] Split the opt-in rendered atomic-smoke phase into orchestration,
   reduced-evidence, submit-policy, and native-context reduction modules.
+- [x] Split native page-flip poller code into trait, fake poller, and native
+  poller state-machine modules.
 - [x] Corrected the runtime rendered-scanout proof harness so it reports native
   DMA-BUF renderer capability instead of CPU fallback when driving the GBM
   primary-plane path.

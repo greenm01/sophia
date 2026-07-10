@@ -1,50 +1,7 @@
-#[cfg(feature = "libdrm-events")]
-use super::*;
-#[cfg(feature = "libdrm-events")]
+use super::LibdrmPageFlipEventPoller;
 use crate::prelude::*;
-#[cfg(feature = "libdrm-events")]
 use std::{collections::VecDeque, sync::mpsc::SyncSender};
 
-#[cfg(feature = "libdrm-events")]
-pub trait LibdrmPageFlipEventPoller {
-    fn poll_page_flip_events(
-        &mut self,
-        sender: &SyncSender<LivePageFlipCallback>,
-        max_emit: usize,
-    ) -> LibdrmPageFlipEventPollReport;
-}
-
-#[cfg(feature = "libdrm-events")]
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct FakeLibdrmPageFlipEventPoller {
-    source: FakePageFlipCallbackSource,
-}
-
-#[cfg(feature = "libdrm-events")]
-impl FakeLibdrmPageFlipEventPoller {
-    pub fn new(callbacks: impl IntoIterator<Item = LivePageFlipCallback>) -> Self {
-        Self {
-            source: FakePageFlipCallbackSource::new(callbacks),
-        }
-    }
-
-    pub fn queued_len(&self) -> usize {
-        self.source.queued_len()
-    }
-}
-
-#[cfg(feature = "libdrm-events")]
-impl LibdrmPageFlipEventPoller for FakeLibdrmPageFlipEventPoller {
-    fn poll_page_flip_events(
-        &mut self,
-        sender: &SyncSender<LivePageFlipCallback>,
-        max_emit: usize,
-    ) -> LibdrmPageFlipEventPollReport {
-        LibdrmPageFlipEventPollReport::from_source_report(self.source.emit_ready(sender, max_emit))
-    }
-}
-
-#[cfg(feature = "libdrm-events")]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeLibdrmPageFlipEventPoller {
     source: LibdrmNativePageFlipSource,
@@ -53,7 +10,6 @@ pub struct NativeLibdrmPageFlipEventPoller {
     last_read_loop: LibdrmNativeReadLoopReport,
 }
 
-#[cfg(feature = "libdrm-events")]
 impl NativeLibdrmPageFlipEventPoller {
     pub fn new(source: LibdrmNativePageFlipSource) -> Self {
         Self {
@@ -164,7 +120,6 @@ impl NativeLibdrmPageFlipEventPoller {
     }
 }
 
-#[cfg(feature = "libdrm-events")]
 impl LibdrmPageFlipEventPoller for NativeLibdrmPageFlipEventPoller {
     fn poll_page_flip_events(
         &mut self,
