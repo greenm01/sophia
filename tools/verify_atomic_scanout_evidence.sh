@@ -2,7 +2,7 @@
 set -euo pipefail
 
 EVIDENCE_FILE="${1:-${SOPHIA_ATOMIC_SCANOUT_EVIDENCE:-/tmp/sophia-atomic-scanout-evidence.log}}"
-EVIDENCE_PREFIX="LibdrmNativeAtomicScanoutSmokeEvidence"
+EVIDENCE_PREFIX="sophia_atomic_scanout_evidence"
 
 if [[ ! -s "$EVIDENCE_FILE" ]]; then
     echo "atomic scanout evidence is missing or empty: $EVIDENCE_FILE" >&2
@@ -26,20 +26,19 @@ require_pattern() {
     fi
 }
 
-require_pattern "status: Passed"
-require_pattern "scanout_target: Some(Ready)"
-require_pattern "rendered_context: Some(Ready)"
-require_pattern "gbm_export: Some(Exported)"
-require_pattern "submit: Some(SubmittedWaitingForPageFlip)"
-require_pattern "commit_flags: Some("
-require_pattern "page_flip_event: true"
-require_pattern "nonblocking: true"
-require_pattern "allow_modeset: true"
-require_pattern "test_only: false"
-require_pattern "page_flip_poll: Some(Emitted)"
-require_pattern "page_flip: Some(Presented)"
-require_pattern "retire: Some(RetiredAfterPageFlip)"
-require_pattern "retire_destroy: Some(Destroyed)"
-require_pattern "retire_cleanup_pending: false"
+require_pattern "status=Passed"
+require_pattern "scanout_target=Ready"
+require_pattern "rendered_context=Ready"
+require_pattern "gbm_export=Exported"
+require_pattern "submit=SubmittedWaitingForPageFlip"
+require_pattern "commit_page_flip_event=true"
+require_pattern "commit_nonblocking=true"
+require_pattern "commit_allow_modeset=true"
+require_pattern "commit_test_only=false"
+require_pattern "page_flip_poll=Emitted"
+require_pattern "page_flip=Presented"
+require_pattern "retire=RetiredAfterPageFlip"
+require_pattern "retire_destroy=Destroyed"
+require_pattern "retire_cleanup_pending=false"
 
 echo "atomic scanout evidence passed: $EVIDENCE_FILE"

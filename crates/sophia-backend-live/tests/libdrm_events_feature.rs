@@ -3024,6 +3024,10 @@ fn native_atomic_scanout_smoke_evidence_passes_only_after_submit_page_flip_and_r
             retire_cleanup_pending: false,
         }
     );
+    assert_eq!(
+        evidence.reduced_log_line(),
+        "sophia_atomic_scanout_evidence status=Passed scanout_target=Ready rendered_context=Ready gbm_export=Exported submit=SubmittedWaitingForPageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=true commit_test_only=false page_flip_poll=Emitted page_flip=Presented retire=RetiredAfterPageFlip retire_destroy=Destroyed retire_cleanup_pending=false"
+    );
 }
 
 #[test]
@@ -4477,7 +4481,7 @@ mod atomic_scanout_hardware_smoke {
 
         let Some(card_path) = first_openable_primary_card_node() else {
             let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::no_primary_card();
-            println!("{evidence:?}");
+            println!("{}", evidence.reduced_log_line());
             assert_eq!(
                 evidence.status,
                 LibdrmNativeAtomicScanoutSmokeStatus::Passed
@@ -4494,7 +4498,7 @@ mod atomic_scanout_hardware_smoke {
         let selection = select_native_primary_plane_target(&card);
         if selection.status != LibdrmNativePrimaryPlaneSelectionStatus::Selected {
             let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::kms_selection_failed();
-            println!("{evidence:?}");
+            println!("{}", evidence.reduced_log_line());
             assert_eq!(
                 evidence.status,
                 LibdrmNativeAtomicScanoutSmokeStatus::Passed
@@ -4523,7 +4527,7 @@ mod atomic_scanout_hardware_smoke {
                 None,
                 None,
             );
-            println!("{evidence:?}");
+            println!("{}", evidence.reduced_log_line());
             assert_eq!(
                 evidence.status,
                 LibdrmNativeAtomicScanoutSmokeStatus::Passed
@@ -4565,7 +4569,7 @@ mod atomic_scanout_hardware_smoke {
                 None,
                 None,
             );
-            println!("{evidence:?}");
+            println!("{}", evidence.reduced_log_line());
             assert_eq!(
                 evidence.status,
                 LibdrmNativeAtomicScanoutSmokeStatus::Passed
@@ -4584,7 +4588,7 @@ mod atomic_scanout_hardware_smoke {
                 None,
                 None,
             );
-            println!("{evidence:?}");
+            println!("{}", evidence.reduced_log_line());
             assert_eq!(
                 evidence.status,
                 LibdrmNativeAtomicScanoutSmokeStatus::Passed
@@ -4613,7 +4617,7 @@ mod atomic_scanout_hardware_smoke {
                 None,
                 None,
             );
-            println!("{evidence:?}");
+            println!("{}", evidence.reduced_log_line());
             assert_eq!(
                 evidence.status,
                 LibdrmNativeAtomicScanoutSmokeStatus::Passed
@@ -4662,7 +4666,7 @@ mod atomic_scanout_hardware_smoke {
             callback_report.as_ref(),
             retired.as_ref(),
         );
-        println!("{evidence:?}");
+        println!("{}", evidence.reduced_log_line());
         assert_eq!(
             evidence.status,
             LibdrmNativeAtomicScanoutSmokeStatus::Passed
