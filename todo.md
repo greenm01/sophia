@@ -100,6 +100,8 @@ smoke still needs a DRM-master-capable machine.
   primary-plane scanout tick, and native GBM scanout wrapper modules.
 - [x] Centralized runtime scanout lifecycle-state draining so plain and rendered
   scanout ticks hand pending states to the Engine through one path.
+- [x] Shared ready runtime scanout assembly construction between startup and
+  runtime rendered-scanout hardware evidence paths.
 - [x] Made the opt-in atomic hardware smoke retain the renderer-owned GBM
   front-buffer owner with the primary-plane submission until page-flip
   retirement, matching the production runtime lifetime rule.
