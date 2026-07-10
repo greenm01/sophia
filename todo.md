@@ -78,6 +78,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Split backend-live session-loop readiness, page-flip budget/reporting,
+  loop owner, and runtime adapter code into domain modules.
 - [x] Split renderer-native GBM platform into config, smoke/probe, and retained
   scanout-owner modules with explicit front-buffer lifetime notes.
 - [x] Split renderer-native EGL into status, default-display, shared GL, and
