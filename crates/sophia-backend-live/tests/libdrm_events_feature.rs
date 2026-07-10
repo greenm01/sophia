@@ -1493,6 +1493,141 @@ fn live_runtime_assembly_retains_failed_rendered_scanout_cleanup_for_retry() {
 }
 
 #[test]
+fn live_runtime_tick_retries_pending_rendered_scanout_cleanup_before_submit() {
+    let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-cleanup-auto-retry");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready backend should seed live assembly");
+    let failing_device = FakeNativePrimaryPlaneScanoutDevice {
+        resources: FakeNativePrimaryPlaneResourceDevice {
+            destroy_framebuffer: Err(io::Error::other("test framebuffer destroy failed")),
+            ..full_primary_plane_resource_device()
+        },
+        ..full_primary_plane_scanout_device()
+    };
+    let retry_device = full_primary_plane_scanout_device();
+    let mut exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+
+    let submitted = assembly
+        .submit_and_track_rendered_primary_plane_scanout_with(&failing_device, &mut exporter);
+    assert_eq!(
+        submitted.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+    );
+    let accepted = LivePageFlipCallbackReport {
+        decision: LivePageFlipCallbackDecision::Accepted,
+        event: LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(55),
+        },
+    };
+    let retired = assembly
+        .retire_tracked_rendered_primary_plane_scanout_after_page_flip(&failing_device, &accepted);
+    assert_eq!(
+        retired.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::ResourceRetireFailed
+    );
+    assert!(assembly.rendered_primary_plane_scanout_cleanup_pending());
+
+    let mut next_exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+    let tick = assembly
+        .run_tick_with_rendered_primary_plane_scanout_with(
+            CompositorBackendTickInput::default(),
+            &retry_device,
+            &mut next_exporter,
+        )
+        .expect("device-backed tick should retry pending cleanup and submit next scanout");
+
+    assert_eq!(
+        tick.rendered_primary_plane_scanout_cleanup_retry
+            .expect("pending cleanup should be retried")
+            .status,
+        LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus::CleanedUp
+    );
+    assert_eq!(tick.rendered_primary_plane_scanout_cleanup_pending, false);
+    assert!(!assembly.rendered_primary_plane_scanout_cleanup_pending());
+    assert_eq!(
+        tick.rendered_primary_plane_scanout_submit
+            .expect("runtime should still submit the next scanout")
+            .status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+    );
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_runtime_tick_reports_failed_rendered_scanout_cleanup_retry() {
+    let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-cleanup-auto-retry-fail");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready backend should seed live assembly");
+    let failing_device = FakeNativePrimaryPlaneScanoutDevice {
+        resources: FakeNativePrimaryPlaneResourceDevice {
+            destroy_framebuffer: Err(io::Error::other("test framebuffer destroy failed")),
+            ..full_primary_plane_resource_device()
+        },
+        ..full_primary_plane_scanout_device()
+    };
+    let mut exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+
+    let submitted = assembly
+        .submit_and_track_rendered_primary_plane_scanout_with(&failing_device, &mut exporter);
+    assert_eq!(
+        submitted.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+    );
+    let accepted = LivePageFlipCallbackReport {
+        decision: LivePageFlipCallbackDecision::Accepted,
+        event: LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(55),
+        },
+    };
+    let retired = assembly
+        .retire_tracked_rendered_primary_plane_scanout_after_page_flip(&failing_device, &accepted);
+    assert_eq!(
+        retired.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::ResourceRetireFailed
+    );
+    assert!(assembly.rendered_primary_plane_scanout_cleanup_pending());
+
+    let mut next_exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+    let tick = assembly
+        .run_tick_with_rendered_primary_plane_scanout_with(
+            CompositorBackendTickInput::default(),
+            &failing_device,
+            &mut next_exporter,
+        )
+        .expect("device-backed tick should report failed cleanup retry");
+
+    assert_eq!(
+        tick.rendered_primary_plane_scanout_cleanup_retry
+            .expect("pending cleanup should be retried")
+            .status,
+        LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus::CleanupFailed
+    );
+    assert_eq!(tick.rendered_primary_plane_scanout_cleanup_pending, true);
+    assert!(assembly.rendered_primary_plane_scanout_cleanup_pending());
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn live_runtime_tick_submits_rendered_scanout_when_runtime_requests_scanout() {
     let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-submit-command");
     let report = discover_live_backend(&LiveBackendConfig::new(&root));

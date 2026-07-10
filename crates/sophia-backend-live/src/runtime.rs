@@ -440,6 +440,8 @@ where
             rendered_primary_plane_scanout_cleanup_pending: self
                 .rendered_primary_plane_scanout_cleanup_pending(),
             #[cfg(feature = "libdrm-events")]
+            rendered_primary_plane_scanout_cleanup_retry: None,
+            #[cfg(feature = "libdrm-events")]
             rendered_primary_plane_scanout_in_flight_ticks: self
                 .rendered_primary_plane_scanout_in_flight_ticks,
             #[cfg(feature = "libdrm-events")]
@@ -465,6 +467,9 @@ where
         E: LiveRenderedScanoutBufferExporter,
         E::Owner: 'static,
     {
+        let rendered_primary_plane_scanout_cleanup_retry = self
+            .rendered_primary_plane_scanout_cleanup_pending()
+            .then(|| self.retry_tracked_rendered_primary_plane_scanout_cleanup(device));
         let page_flip_callbacks = self
             .page_flip_callback_queue
             .as_ref()
@@ -530,6 +535,7 @@ where
             runtime_scanout_states,
             rendered_primary_plane_scanout_cleanup_pending: self
                 .rendered_primary_plane_scanout_cleanup_pending(),
+            rendered_primary_plane_scanout_cleanup_retry,
             rendered_primary_plane_scanout_in_flight_ticks: self
                 .rendered_primary_plane_scanout_in_flight_ticks,
             rendered_primary_plane_scanout_submit,
@@ -616,6 +622,9 @@ pub struct LiveBackendRuntimeTickReport {
     pub runtime_scanout_states: Vec<RuntimeScanoutState>,
     #[cfg(feature = "libdrm-events")]
     pub rendered_primary_plane_scanout_cleanup_pending: bool,
+    #[cfg(feature = "libdrm-events")]
+    pub rendered_primary_plane_scanout_cleanup_retry:
+        Option<LiveTrackedRenderedPrimaryPlaneScanoutCleanupReport>,
     #[cfg(feature = "libdrm-events")]
     pub rendered_primary_plane_scanout_in_flight_ticks: u64,
     #[cfg(feature = "libdrm-events")]

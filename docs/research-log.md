@@ -878,6 +878,10 @@ keeps an opaque cleanup owner with the rendered buffer owner. A later retry can
 finish cleanup without leaking native IDs into runtime state. Runtime ticks and
 atomic smoke evidence now expose only a reduced cleanup-pending bit for this
 case.
+The device-backed rendered scanout tick now retries one pending cleanup before
+new scanout submission and records the reduced retry result. This gives the live
+backend a forward-progress path for cleanup debt without adding native identity
+to the Engine-facing report.
 The page-flip callback queue now carries the latest accepted reduced callback
 report. `run_tick_with_rendered_primary_plane_scanout_with` consumes that report
 before draining lifecycle states, so one live tick can retire the old rendered

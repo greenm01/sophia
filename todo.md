@@ -110,6 +110,8 @@ active milestone to `docs/roadmap-history.md`.
   failure without exposing framebuffer/blob identity.
 - [x] Threaded reduced cleanup-pending diagnostics through runtime ticks and
   atomic scanout smoke evidence.
+- [x] Added device-backed runtime tick cleanup retry with reduced retry status
+  before the next rendered scanout submit.
 - [x] Added reduced live scanout submit intake so backend-live rendered
   primary-plane submit results can drive runtime `SubmitScanout`.
 - [x] Added shared runtime scanout lifecycle state so rendered frames progress

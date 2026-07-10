@@ -255,6 +255,10 @@ remaining native cleanup work with the rendered buffer owner and exposes only
 reduced cleanup-pending and cleanup-retry reports. Runtime tick reports and
 opt-in atomic smoke evidence may carry the reduced cleanup-pending bit, but no
 framebuffer, blob, or GBM identity.
+When `run_tick_with_rendered_primary_plane_scanout_with` has a native device, it
+may retry one pending cleanup before submitting the next rendered scanout. The
+tick report may expose only the reduced cleanup retry status and whether cleanup
+is still pending.
 `retire_native_primary_plane_scanout_after_page_flip` consumes that owner only
 when a reduced callback report is accepted and presented. Rejected or stale
 callbacks return the owner to the caller, preserving buffer and framebuffer

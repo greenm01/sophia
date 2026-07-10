@@ -607,6 +607,9 @@ ends the in-flight scanout state but retains an opaque cleanup owner with the
 rendered buffer owner. The runtime may retry that cleanup later; it must not
 drop native handles or pretend cleanup succeeded. Runtime tick reports and
 atomic scanout smoke evidence expose only the reduced cleanup-pending bit.
+Device-backed rendered scanout ticks opportunistically retry pending cleanup
+once before processing new rendered scanout submission, and report the reduced
+cleanup-retry result on the tick.
 Those terminal reduced states are queued inside backend-live and drained into
 the next runtime tick as scanout lifecycle observations. The shared reducer
 records the retirement or rejection without treating it as a fresh render
