@@ -24,6 +24,12 @@ set -e
 
 if [[ "$test_status" -ne 0 ]]; then
     echo "Atomic scanout preflight failed; output left at $PREFLIGHT_FILE" >&2
+    exit "$test_status"
 fi
 
-exit "$test_status"
+if ! "$ROOT_DIR/tools/verify_atomic_scanout_preflight.sh" "$PREFLIGHT_FILE"; then
+    echo "Atomic scanout preflight did not find a smoke-ready host; output left at $PREFLIGHT_FILE" >&2
+    exit 1
+fi
+
+exit 0

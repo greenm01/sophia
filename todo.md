@@ -83,6 +83,8 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Made the standalone atomic scanout preflight helper verify its reduced log
+  and exit nonzero unless the host is ready for the DRM-master smoke.
 - [x] Tightened atomic scanout preflight verification so hardware-smoke readiness
   logs must contain exactly one reduced preflight record.
 - [x] Added negative atomic scanout preflight fixtures proving duplicate and

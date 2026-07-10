@@ -93,9 +93,10 @@ readiness status, capped primary card count, capped read/write-openable primary
 card count, capped atomic-capability-admitted primary card count, capped KMS
 scanout-target primary card count, and capped atomic-property-ready primary card
 count. It does not expose device paths, file descriptors, native errors,
-permissions, or KMS object identity.
-Use `tools/verify_atomic_scanout_preflight.sh` on the captured log when the
-next step is the real smoke; the verifier requires
+permissions, or KMS object identity. The helper verifies the captured log before
+exiting and fails unless the host is smoke-ready. Use
+`tools/verify_atomic_scanout_preflight.sh` directly when you need to check an
+existing capture; the verifier requires
 `CandidatePrimaryCardsAtomicReady` and at least one primary card node that
 admits the `UniversalPlanes` and `Atomic` DRM client capabilities, exposes a
 reduced KMS connector/CRTC/primary-plane target, and has the atomic property
@@ -182,7 +183,7 @@ tools/atomic_scanout_smoke.sh
 SOPHIA_ATOMIC_SCANOUT_EVIDENCE=/tmp/sophia-atomic-smoke.log tools/atomic_scanout_smoke.sh
 ```
 
-The helper runs `tools/verify_atomic_scanout_preflight.sh` before the smoke and
+The helper runs the verified preflight before the smoke and
 `tools/verify_atomic_scanout_evidence.sh` after a successful smoke. Set
 `SOPHIA_ATOMIC_SCANOUT_SKIP_PREFLIGHT=1` only when preflight is known to be
 wrong for the host and a modesetting smoke is still intentional. To verify a

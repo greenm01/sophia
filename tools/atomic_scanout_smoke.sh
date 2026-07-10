@@ -18,7 +18,6 @@ echo "Evidence: $EVIDENCE_FILE"
 
 if [[ "$SKIP_PREFLIGHT" != "1" ]]; then
     "$ROOT_DIR/tools/atomic_scanout_preflight.sh"
-    "$ROOT_DIR/tools/verify_atomic_scanout_preflight.sh" "$PREFLIGHT_FILE"
 else
     echo "Skipping atomic scanout preflight because SOPHIA_ATOMIC_SCANOUT_SKIP_PREFLIGHT=1"
 fi
