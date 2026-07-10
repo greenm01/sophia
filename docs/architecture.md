@@ -595,7 +595,10 @@ GBM/EGL resources and identities private.
 KMS scanout readiness now also checks that the reduced GBM/EGL frame target
 size matches the selected output size. A valid-looking but mismatched target is
 reported as reduced frame-target-size-mismatch and blocks page-flip readiness
-before any native primary-plane submit is attempted.
+before any native primary-plane submit is attempted. The rendered primary-plane
+submit path consumes that same reduced readiness status, so active
+`SubmitScanout` commands reject before renderer export or native KMS work when
+the scanout target is not ready.
 For rendered primary-plane scanout, backend-live can also retain the combined
 rendered-buffer owner and KMS submission owner internally. Stale page-flip
 evidence keeps that owner in flight. Accepted presented page-flip evidence

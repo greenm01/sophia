@@ -29,11 +29,11 @@ use sophia_backend_live::{
     LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller, LibdrmRendererScanoutBuffer,
     LiveBackendConfig, LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
     LiveHardwareValidationSmokeReport, LiveHardwareValidationSmokeStatus,
-    LiveHardwareValidationTarget, LiveLibdrmPollerDiagnostics, LiveLibdrmPollerDiagnosticsStatus,
-    LiveLibdrmPollerStartupReport, LiveLibdrmPollerStartupStatus, LivePageFlipCallback,
-    LivePageFlipCallbackDecision, LivePageFlipCallbackQueue, LivePageFlipCallbackReport,
-    LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus,
-    LiveRenderedPrimaryPlaneScanoutBackpressureReport,
+    LiveHardwareValidationTarget, LiveKmsScanoutTargetStatus, LiveLibdrmPollerDiagnostics,
+    LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
+    LiveLibdrmPollerStartupStatus, LivePageFlipCallback, LivePageFlipCallbackDecision,
+    LivePageFlipCallbackQueue, LivePageFlipCallbackReport, LivePageFlipCallbackSourceReport,
+    LivePageFlipEvent, LivePageFlipEventStatus, LiveRenderedPrimaryPlaneScanoutBackpressureReport,
     LiveRenderedPrimaryPlaneScanoutBackpressureStatus, LiveRenderedPrimaryPlaneScanoutSubmitStatus,
     LiveRenderedScanoutBufferExport, LiveRenderedScanoutBufferExporter,
     LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus,
@@ -642,6 +642,7 @@ struct FakeRenderedScanoutExporter {
     status: LiveRendererScanoutBufferExportStatus,
     descriptor: Option<sophia_renderer_live::LiveRendererScanoutBufferDescriptor>,
     owner: Option<FakeRenderedScanoutOwner>,
+    export_attempts: usize,
 }
 
 #[cfg(feature = "gbm-probe")]
@@ -665,6 +666,7 @@ impl FakeRenderedScanoutExporter {
             status: LiveRendererScanoutBufferExportStatus::Exported,
             descriptor: Some(scanout_descriptor(size)),
             owner: Some(FakeRenderedScanoutOwner { raw: 7 }),
+            export_attempts: 0,
         }
     }
 
@@ -673,7 +675,12 @@ impl FakeRenderedScanoutExporter {
             status: LiveRendererScanoutBufferExportStatus::Unavailable,
             descriptor: None,
             owner: None,
+            export_attempts: 0,
         }
+    }
+
+    fn export_attempts(&self) -> usize {
+        self.export_attempts
     }
 }
 
@@ -684,6 +691,7 @@ impl LiveRenderedScanoutBufferExporter for FakeRenderedScanoutExporter {
         &mut self,
         _target: LiveGbmEglFrameTargetRecord,
     ) -> LiveRenderedScanoutBufferExport<Self::Owner> {
+        self.export_attempts = self.export_attempts.saturating_add(1);
         LiveRenderedScanoutBufferExport {
             status: self.status,
             descriptor: self.descriptor,
@@ -1833,6 +1841,60 @@ fn live_runtime_tick_submits_rendered_scanout_when_runtime_requests_scanout() {
         retire_and_submit_tick.rendered_primary_plane_scanout_in_flight_ticks,
         0
     );
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_runtime_tick_rejects_rendered_scanout_when_kms_target_is_not_ready() {
+    let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-kms-not-ready");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready backend should seed live assembly");
+    let device = full_primary_plane_scanout_device();
+    let mut exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+
+    assembly.observe_gbm_egl_frame_target_size(Size {
+        width: 1280,
+        height: 720,
+    });
+    assert_eq!(
+        assembly.kms_scanout_target_observation().status,
+        LiveKmsScanoutTargetStatus::FrameTargetSizeMismatch
+    );
+
+    let tick = assembly
+        .run_tick_with_rendered_primary_plane_scanout_with(
+            CompositorBackendTickInput::default(),
+            &device,
+            &mut exporter,
+        )
+        .expect("runtime scanout command should fail closed before export");
+    let submit = tick
+        .rendered_primary_plane_scanout_submit
+        .expect("active scanout submit should be reported");
+
+    assert_eq!(
+        submit.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutTargetNotReady
+    );
+    assert_eq!(
+        submit.scanout_target,
+        Some(LiveKmsScanoutTargetStatus::FrameTargetSizeMismatch)
+    );
+    assert_eq!(submit.export, None);
+    assert_eq!(submit.submit, None);
+    assert_eq!(submit.in_flight, false);
+    assert_eq!(exporter.export_attempts(), 0);
+    assert_eq!(
+        tick.engine.runtime.runtime_state.last_scanout_state,
+        Some(RuntimeScanoutState::Rejected)
+    );
+    assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), false);
 
     std::fs::remove_dir_all(root).unwrap();
 }

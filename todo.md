@@ -121,6 +121,8 @@ active milestone to `docs/roadmap-history.md`.
   native identity.
 - [x] Made KMS scanout readiness fail closed when the reduced frame target size
   does not match the selected output size.
+- [x] Threaded reduced KMS scanout readiness into rendered primary-plane submit
+  so not-ready targets reject before renderer export or native KMS work.
 - [x] Added reduced live scanout submit intake so backend-live rendered
   primary-plane submit results can drive runtime `SubmitScanout`.
 - [x] Added shared runtime scanout lifecycle state so rendered frames progress

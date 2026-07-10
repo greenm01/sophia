@@ -218,6 +218,7 @@ where
 #[derive(Debug)]
 pub struct LiveRenderedPrimaryPlaneScanoutSubmitResult<Owner> {
     pub status: LiveRenderedPrimaryPlaneScanoutSubmitStatus,
+    pub scanout_target: Option<LiveKmsScanoutTargetStatus>,
     pub target: Option<LiveGbmEglFrameTargetStatus>,
     pub export: Option<LiveRendererScanoutBufferExportStatus>,
     pub submit: Option<LibdrmNativePrimaryPlaneScanoutSubmitStatus>,
@@ -235,6 +236,7 @@ impl<Owner> LiveRenderedPrimaryPlaneScanoutSubmitResult<Owner> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LiveRenderedPrimaryPlaneScanoutSubmitStatus {
     SubmittedWaitingForPageFlip,
+    ScanoutTargetNotReady,
     FrameTargetUnavailable,
     ScanoutExportFailed,
     PrimaryPlaneSubmitFailed,
@@ -248,7 +250,8 @@ pub fn runtime_scanout_state_from_rendered_primary_plane_submit_status(
         LiveRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip => {
             RuntimeScanoutState::Submitted
         }
-        LiveRenderedPrimaryPlaneScanoutSubmitStatus::FrameTargetUnavailable
+        LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutTargetNotReady
+        | LiveRenderedPrimaryPlaneScanoutSubmitStatus::FrameTargetUnavailable
         | LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutExportFailed
         | LiveRenderedPrimaryPlaneScanoutSubmitStatus::PrimaryPlaneSubmitFailed => {
             RuntimeScanoutState::Rejected
@@ -357,6 +360,7 @@ pub fn runtime_scanout_state_from_rendered_primary_plane_retire_status(
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
     pub status: LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus,
+    pub scanout_target: Option<LiveKmsScanoutTargetStatus>,
     pub target: Option<LiveGbmEglFrameTargetStatus>,
     pub export: Option<LiveRendererScanoutBufferExportStatus>,
     pub submit: Option<LibdrmNativePrimaryPlaneScanoutSubmitStatus>,
@@ -369,6 +373,7 @@ pub struct LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus {
     SubmittedWaitingForPageFlip,
+    ScanoutTargetNotReady,
     FrameTargetUnavailable,
     ScanoutExportFailed,
     PrimaryPlaneSubmitFailed,
@@ -384,6 +389,9 @@ impl From<LiveRenderedPrimaryPlaneScanoutSubmitStatus>
         match status {
             LiveRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip => {
                 Self::SubmittedWaitingForPageFlip
+            }
+            LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutTargetNotReady => {
+                Self::ScanoutTargetNotReady
             }
             LiveRenderedPrimaryPlaneScanoutSubmitStatus::FrameTargetUnavailable => {
                 Self::FrameTargetUnavailable
@@ -494,7 +502,8 @@ impl From<LibdrmNativePrimaryPlaneScanoutRetireStatus>
 }
 
 #[cfg(feature = "libdrm-events")]
-pub(crate) fn submit_rendered_primary_plane_scanout_from_target_with<D, E>(
+pub(crate) fn submit_rendered_primary_plane_scanout_from_scanout_target_with<D, E>(
+    scanout_target: Option<LiveKmsScanoutTargetStatus>,
     target: Option<LiveGbmEglFrameTargetRecord>,
     device: &D,
     exporter: &mut E,
@@ -506,9 +515,23 @@ where
         + LibdrmNativeAtomicCommitDevice,
     E: LiveRenderedScanoutBufferExporter,
 {
+    if let Some(scanout_target) = scanout_target {
+        if scanout_target != LiveKmsScanoutTargetStatus::Ready {
+            return LiveRenderedPrimaryPlaneScanoutSubmitResult {
+                status: LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutTargetNotReady,
+                scanout_target: Some(scanout_target),
+                target: target.map(|target| target.status),
+                export: None,
+                submit: None,
+                submission: None,
+            };
+        }
+    }
+
     let Some(target) = target else {
         return LiveRenderedPrimaryPlaneScanoutSubmitResult {
             status: LiveRenderedPrimaryPlaneScanoutSubmitStatus::FrameTargetUnavailable,
+            scanout_target,
             target: None,
             export: None,
             submit: None,
@@ -520,6 +543,7 @@ where
     if export.status != LiveRendererScanoutBufferExportStatus::Exported {
         return LiveRenderedPrimaryPlaneScanoutSubmitResult {
             status: LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutExportFailed,
+            scanout_target,
             target: Some(target.status),
             export: Some(export.status),
             submit: None,
@@ -530,6 +554,7 @@ where
     let (Some(descriptor), Some(owner)) = (export.descriptor, export.owner) else {
         return LiveRenderedPrimaryPlaneScanoutSubmitResult {
             status: LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutExportFailed,
+            scanout_target,
             target: Some(target.status),
             export: Some(export.status),
             submit: None,
@@ -542,6 +567,7 @@ where
     if submit.status != LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip {
         return LiveRenderedPrimaryPlaneScanoutSubmitResult {
             status: LiveRenderedPrimaryPlaneScanoutSubmitStatus::PrimaryPlaneSubmitFailed,
+            scanout_target,
             target: Some(target.status),
             export: Some(export.status),
             submit: Some(submit.status),
@@ -552,6 +578,7 @@ where
     let Some(primary_plane) = submit.submission.take() else {
         return LiveRenderedPrimaryPlaneScanoutSubmitResult {
             status: LiveRenderedPrimaryPlaneScanoutSubmitStatus::PrimaryPlaneSubmitFailed,
+            scanout_target,
             target: Some(target.status),
             export: Some(export.status),
             submit: Some(submit.status),
@@ -561,6 +588,7 @@ where
 
     LiveRenderedPrimaryPlaneScanoutSubmitResult {
         status: LiveRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip,
+        scanout_target,
         target: Some(target.status),
         export: Some(export.status),
         submit: Some(submit.status),
@@ -574,6 +602,7 @@ where
 
 #[cfg(feature = "libdrm-events")]
 pub(crate) fn track_rendered_primary_plane_scanout_submit_from_target_with<D, E>(
+    scanout_target: Option<LiveKmsScanoutTargetStatus>,
     target: Option<LiveGbmEglFrameTargetRecord>,
     rendered_primary_plane_scanout_submission: &mut Option<
         BoxedRenderedPrimaryPlaneScanoutSubmission,
@@ -597,6 +626,7 @@ where
     if rendered_primary_plane_scanout_submission.is_some() {
         return LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
             status: LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::AlreadyInFlight,
+            scanout_target,
             target: target.map(|target| target.status),
             export: None,
             submit: None,
@@ -609,6 +639,7 @@ where
     if cleanup_pending {
         return LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
             status: LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::CleanupPending,
+            scanout_target,
             target: target.map(|target| target.status),
             export: None,
             submit: None,
@@ -618,8 +649,12 @@ where
         };
     }
 
-    let mut result =
-        submit_rendered_primary_plane_scanout_from_target_with(target, device, exporter);
+    let mut result = submit_rendered_primary_plane_scanout_from_scanout_target_with(
+        scanout_target,
+        target,
+        device,
+        exporter,
+    );
     let runtime_scanout_state = Some(result.runtime_scanout_state());
 
     if let Some(submission) = result.submission.take() {
@@ -639,6 +674,7 @@ where
 
     LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
         status: result.status.into(),
+        scanout_target: result.scanout_target,
         target: result.target,
         export: result.export,
         submit: result.submit,
@@ -651,6 +687,7 @@ where
 #[cfg(feature = "libdrm-events")]
 pub(crate) struct LiveRenderedPrimaryPlaneRuntimeAdapter<'a, D, E> {
     pub(crate) inner: LiveRuntimeDriverAdapter,
+    pub(crate) scanout_target: Option<LiveKmsScanoutTargetStatus>,
     pub(crate) target: Option<LiveGbmEglFrameTargetRecord>,
     pub(crate) rendered_primary_plane_scanout_submission:
         &'a mut Option<BoxedRenderedPrimaryPlaneScanoutSubmission>,
@@ -712,6 +749,7 @@ where
         frame_serial: u64,
     ) -> Result<SessionRuntimeObservation, sophia_engine::EngineError> {
         let report = track_rendered_primary_plane_scanout_submit_from_target_with(
+            self.scanout_target,
             self.target,
             self.rendered_primary_plane_scanout_submission,
             self.rendered_primary_plane_runtime_scanout_state,
