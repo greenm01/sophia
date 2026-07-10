@@ -83,6 +83,8 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Split native libdrm page-flip read, poll, decode, diagnostics, and fake
+  poller runtime tests into their own `libdrm_events_feature` module.
 - [x] Split atomic scanout evidence contract tests into their own
   `libdrm_events_feature` test-domain module.
 - [x] Split the opt-in real atomic scanout hardware smoke out of the large
