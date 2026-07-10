@@ -5,6 +5,10 @@
 //! DRM/KMS discovery and static input descriptors. Future libdrm/libinput code
 //! can replace these adapters without changing Sophia Engine, WM IPC, or
 //! protocol authority packets.
+//!
+//! Keep this file as the crate boundary. Backend code belongs in domain modules:
+//! input capture, DRM/KMS discovery, scanout, runtime assembly, session loop,
+//! startup probing, and hardware validation.
 
 mod api;
 mod dependency;
