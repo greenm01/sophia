@@ -2,7 +2,8 @@ use std::time::{Duration, Instant};
 
 use super::*;
 use sophia_backend_live::{
-    LivePageFlipCallbackIntake, RealAtomicScanoutCard, select_real_atomic_scanout_card,
+    LivePageFlipCallbackIntake, RealAtomicScanoutPageFlipWaitPolicy,
+    select_real_atomic_scanout_card,
 };
 use sophia_renderer_live::{
     LiveRendererScanoutBufferExportStatus, NativeGbmRenderedScanoutContextStatus,
@@ -183,10 +184,11 @@ fn native_atomic_scanout_real_primary_card_child() {
     };
 
     let mut intake = LivePageFlipCallbackIntake::new(output);
-    let page_flip = {
-        let (card, reader, poller) = session.page_flip_parts_mut();
-        wait_for_page_flip_retirement(card, reader, poller, &mut intake, submission)
-    };
+    let page_flip = session.wait_for_submitted_page_flip_retirement(
+        &mut intake,
+        submission,
+        RealAtomicScanoutPageFlipWaitPolicy::hardware_smoke(),
+    );
 
     let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
         scanout_target,
@@ -279,10 +281,11 @@ fn native_atomic_scanout_real_primary_card_child() {
         fail_atomic_scanout_smoke(evidence);
     };
 
-    let steady_page_flip = {
-        let (card, reader, poller) = session.page_flip_parts_mut();
-        wait_for_page_flip_retirement(card, reader, poller, &mut intake, steady_submission)
-    };
+    let steady_page_flip = session.wait_for_submitted_page_flip_retirement(
+        &mut intake,
+        steady_submission,
+        RealAtomicScanoutPageFlipWaitPolicy::hardware_smoke(),
+    );
 
     let steady_evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
         scanout_target,
@@ -327,63 +330,4 @@ fn rendered_context_status_from_native(
             LibdrmNativeRenderedScanoutContextStatus::Degraded
         }
     })
-}
-
-struct RealAtomicPageFlipWaitReport {
-    poll: LibdrmPageFlipEventPollReport,
-    callback_report: Option<LivePageFlipCallbackReport>,
-    retired: Option<LibdrmNativePrimaryPlaneScanoutRetireResult>,
-}
-
-fn wait_for_page_flip_retirement(
-    card: &RealAtomicScanoutCard,
-    reader: &mut NativeLibdrmPageFlipEventReader<RealAtomicScanoutCard>,
-    poller: &mut NativeLibdrmPageFlipEventPoller,
-    intake: &mut LivePageFlipCallbackIntake,
-    submission: LibdrmNativePrimaryPlaneScanoutSubmission,
-) -> RealAtomicPageFlipWaitReport {
-    let (sender, receiver) = mpsc::sync_channel(1);
-    let deadline = Instant::now() + Duration::from_secs(2);
-    let mut submission = Some(submission);
-
-    loop {
-        let report = poller.read_and_poll_page_flip_events(reader, &sender, 4, 1);
-        let last_poll = report.poll;
-
-        if let Ok(callback) = receiver.try_recv() {
-            let callback_report = intake.observe(callback);
-            let retired = retire_native_primary_plane_scanout_after_page_flip(
-                card,
-                submission
-                    .take()
-                    .expect("callback path should still own submitted resources"),
-                &callback_report,
-            );
-            return RealAtomicPageFlipWaitReport {
-                poll: last_poll,
-                callback_report: Some(callback_report),
-                retired: Some(retired),
-            };
-        }
-
-        if matches!(
-            last_poll.status,
-            LibdrmPageFlipEventPollStatus::Disconnected
-                | LibdrmPageFlipEventPollStatus::Backpressure
-        ) || Instant::now() >= deadline
-        {
-            return RealAtomicPageFlipWaitReport {
-                poll: last_poll,
-                callback_report: None,
-                retired: submission.map(|submission| LibdrmNativePrimaryPlaneScanoutRetireResult {
-                    status: LibdrmNativePrimaryPlaneScanoutRetireStatus::WaitingForAcceptedPageFlip,
-                    destroy: None,
-                    submission: Some(submission),
-                    cleanup: None,
-                }),
-            };
-        }
-
-        std::thread::sleep(Duration::from_millis(5));
-    }
 }

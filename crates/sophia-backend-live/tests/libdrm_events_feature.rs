@@ -44,8 +44,8 @@ use sophia_backend_live::{
     LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus, NativeLibdrmAtomicScanoutCommitter,
     NativeLibdrmPageFlipEventPoller, NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller,
     RealAtomicScanoutCardSelectionStatus, RealAtomicScanoutPageFlipSessionStatus,
-    RuntimeScanoutState, Size, build_native_primary_plane_atomic_request,
-    build_native_primary_plane_page_flip_atomic_request,
+    RealAtomicScanoutPageFlipWaitPolicy, RuntimeScanoutState, Size,
+    build_native_primary_plane_atomic_request, build_native_primary_plane_page_flip_atomic_request,
     create_native_primary_plane_page_flip_resources, create_native_primary_plane_resources,
     decode_native_page_flip_batch, destroy_native_primary_plane_resources, discover_live_backend,
     discover_native_primary_plane_property_handles, libdrm_dependency_admission_report,
@@ -69,9 +69,8 @@ use sophia_backend_live::{
 };
 #[cfg(feature = "gbm-probe")]
 use sophia_backend_live::{
-    LibdrmNativePrimaryPlaneScanoutSubmission, LiveGbmEglFrameTargetStatus,
-    NativeGbmRenderedScanoutBufferDiscoveryExporter, NativeGbmRenderedScanoutContextStatus,
-    RenderDeviceDiscoveryBackend,
+    LiveGbmEglFrameTargetStatus, NativeGbmRenderedScanoutBufferDiscoveryExporter,
+    NativeGbmRenderedScanoutContextStatus, RenderDeviceDiscoveryBackend,
 };
 #[cfg(feature = "libinput-events")]
 use sophia_protocol::{InputEventKind, Point};
@@ -255,6 +254,16 @@ fn real_atomic_scanout_card_selection_fails_closed_without_device_identity() {
     assert!(empty.card.is_none());
     assert!(empty.selection.is_none());
     std::fs::remove_dir_all(empty_root).unwrap();
+}
+
+#[test]
+fn real_atomic_scanout_page_flip_wait_policy_matches_hardware_smoke_budget() {
+    let policy = RealAtomicScanoutPageFlipWaitPolicy::hardware_smoke();
+
+    assert_eq!(policy.max_read, 4);
+    assert_eq!(policy.max_emit, 1);
+    assert_eq!(policy.timeout, std::time::Duration::from_secs(2));
+    assert_eq!(policy.sleep, std::time::Duration::from_millis(5));
 }
 
 #[test]

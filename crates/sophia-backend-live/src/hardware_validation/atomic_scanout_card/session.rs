@@ -7,10 +7,10 @@ use crate::prelude::*;
 
 #[derive(Debug)]
 pub struct RealAtomicScanoutPageFlipSession {
-    card: RealAtomicScanoutCard,
+    pub(super) card: RealAtomicScanoutCard,
     selection: LibdrmNativePrimaryPlaneSelection,
-    reader: NativeLibdrmPageFlipEventReader<RealAtomicScanoutCard>,
-    poller: NativeLibdrmPageFlipEventPoller,
+    pub(super) reader: NativeLibdrmPageFlipEventReader<RealAtomicScanoutCard>,
+    pub(super) poller: NativeLibdrmPageFlipEventPoller,
 }
 
 impl RealAtomicScanoutPageFlipSession {
@@ -20,16 +20,6 @@ impl RealAtomicScanoutPageFlipSession {
 
     pub const fn selection(&self) -> LibdrmNativePrimaryPlaneSelection {
         self.selection
-    }
-
-    pub fn page_flip_parts_mut(
-        &mut self,
-    ) -> (
-        &RealAtomicScanoutCard,
-        &mut NativeLibdrmPageFlipEventReader<RealAtomicScanoutCard>,
-        &mut NativeLibdrmPageFlipEventPoller,
-    ) {
-        (&self.card, &mut self.reader, &mut self.poller)
     }
 
     #[cfg(feature = "gbm-probe")]
