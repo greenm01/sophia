@@ -20,6 +20,7 @@ where
     context_status: Option<NativeGbmRenderedScanoutContextStatus>,
     context_open_attempts: usize,
     export_attempts: usize,
+    preferred_modifiers: Vec<u64>,
     last_target: Option<LiveGbmEglFrameTargetRecord>,
     last_target_lifecycle: Option<LiveGbmEglFrameTargetLifecycleReport>,
     last_export_status: Option<LiveRendererScanoutBufferExportStatus>,
@@ -37,10 +38,16 @@ where
             context_status: None,
             context_open_attempts: 0,
             export_attempts: 0,
+            preferred_modifiers: Vec::new(),
             last_target: None,
             last_target_lifecycle: None,
             last_export_status: None,
         }
+    }
+
+    pub fn with_preferred_modifiers(mut self, preferred_modifiers: impl Into<Vec<u64>>) -> Self {
+        self.preferred_modifiers = reduced_preferred_scanout_modifiers(preferred_modifiers.into());
+        self
     }
 
     pub const fn context_open_attempts(&self) -> usize {
@@ -137,7 +144,8 @@ where
             );
         };
 
-        let report = context.export_rendered_owned_scanout_buffer(target);
+        let report = context
+            .export_rendered_owned_scanout_buffer_with_modifiers(target, &self.preferred_modifiers);
         let descriptor = report.buffer.as_ref().map(|buffer| buffer.descriptor());
         self.last_export_status = Some(report.status);
         LiveRenderedScanoutBufferExport::new(
@@ -148,3 +156,21 @@ where
         )
     }
 }
+
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+fn reduced_preferred_scanout_modifiers(mut modifiers: Vec<u64>) -> Vec<u64> {
+    let mut reduced = Vec::new();
+    for modifier in modifiers.drain(..) {
+        if modifier == u64::MAX || reduced.contains(&modifier) {
+            continue;
+        }
+        reduced.push(modifier);
+        if reduced.len() >= MAX_PREFERRED_SCANOUT_MODIFIERS {
+            break;
+        }
+    }
+    reduced
+}
+
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+const MAX_PREFERRED_SCANOUT_MODIFIERS: usize = 16;

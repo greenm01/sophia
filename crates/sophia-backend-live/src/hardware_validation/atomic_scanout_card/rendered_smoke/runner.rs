@@ -43,7 +43,8 @@ pub fn run_real_atomic_scanout_smoke_phases_with(
             ];
         }
     };
-    let mut exporter = NativeGbmRenderedScanoutBufferDiscoveryExporter::new(discovery);
+    let mut exporter = NativeGbmRenderedScanoutBufferDiscoveryExporter::new(discovery)
+        .with_preferred_modifiers(session.preferred_xrgb8888_scanout_modifiers());
     let mut intake = LivePageFlipCallbackIntake::new(config.output);
     let initial = session.run_native_gbm_rendered_primary_plane_smoke_phase(
         LibdrmNativeAtomicScanoutSmokePhase::InitialModeset,

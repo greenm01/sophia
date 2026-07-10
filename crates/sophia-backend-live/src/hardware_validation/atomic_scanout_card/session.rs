@@ -27,6 +27,50 @@ impl RealAtomicScanoutPageFlipSession {
         RealAtomicScanoutRenderDeviceDiscovery::from_card(&self.card)
     }
 
+    #[cfg(all(feature = "gbm-probe", feature = "libdrm-events"))]
+    pub fn preferred_xrgb8888_scanout_modifiers(&self) -> Vec<u64> {
+        let discovery = discover_native_primary_plane_property_handles(
+            &self.card,
+            self.selection.connector,
+            self.selection.crtc,
+            self.selection.plane,
+        );
+        let Some(properties) = discovery.properties else {
+            return Vec::new();
+        };
+        let Some(in_formats) = properties.plane_in_formats() else {
+            return Vec::new();
+        };
+
+        let Ok(plane_properties) =
+            drm::control::Device::get_properties(&self.card, self.selection.plane)
+        else {
+            return Vec::new();
+        };
+        let Some(blob_id) = plane_properties
+            .iter()
+            .find_map(|(property, value)| (*property == in_formats).then_some(*value))
+        else {
+            return Vec::new();
+        };
+        if blob_id == 0 {
+            return Vec::new();
+        }
+
+        let Ok(blob) = drm::control::Device::get_property_blob(&self.card, blob_id) else {
+            return Vec::new();
+        };
+        let parsed = LibdrmNativePlaneFormatModifierTable::parse_for_format(
+            &blob,
+            drm::buffer::DrmFourcc::Xrgb8888,
+        );
+        let Some(table) = parsed.table else {
+            return Vec::new();
+        };
+
+        table.modifiers().iter().copied().map(u64::from).collect()
+    }
+
     #[cfg(all(feature = "gbm-probe", feature = "libinput-events"))]
     pub fn run_tick_with_native_gbm_rendered_primary_plane_scanout<P, E>(
         &mut self,

@@ -140,6 +140,15 @@ where
         width: u32,
         height: u32,
     ) -> NativeGbmOwnedScanoutBufferExportReport {
+        self.export_rendered_owned_scanout_buffer_with_modifiers(width, height, &[])
+    }
+
+    pub fn export_rendered_owned_scanout_buffer_with_modifiers(
+        &self,
+        width: u32,
+        height: u32,
+        preferred_modifiers: &[u64],
+    ) -> NativeGbmOwnedScanoutBufferExportReport {
         if width == 0 || height == 0 {
             return NativeGbmOwnedScanoutBufferExportReport {
                 status: NativeGbmScanoutBufferExportStatus::InvalidTarget,
@@ -154,6 +163,7 @@ where
             &self.gbm_device,
             width,
             height,
+            preferred_modifiers,
         ) {
             Ok(buffer) => exported_scanout_buffer_report(buffer),
             Err(detail) => failed_scanout_buffer_report(detail),
@@ -226,6 +236,22 @@ pub fn export_rendered_gbm_scanout_buffer_from_backend_device_result<T: std::os:
     width: u32,
     height: u32,
 ) -> NativeGbmOwnedScanoutBufferExportReport {
+    export_rendered_gbm_scanout_buffer_with_modifiers_from_backend_device_result(
+        device,
+        width,
+        height,
+        &[],
+    )
+}
+
+pub fn export_rendered_gbm_scanout_buffer_with_modifiers_from_backend_device_result<
+    T: std::os::fd::AsFd,
+>(
+    device: std::io::Result<T>,
+    width: u32,
+    height: u32,
+    preferred_modifiers: &[u64],
+) -> NativeGbmOwnedScanoutBufferExportReport {
     if width == 0 || height == 0 {
         return NativeGbmOwnedScanoutBufferExportReport {
             status: NativeGbmScanoutBufferExportStatus::InvalidTarget,
@@ -242,7 +268,7 @@ pub fn export_rendered_gbm_scanout_buffer_from_backend_device_result<T: std::os:
         };
     };
 
-    match render_gbm_scanout_front_buffer(device, width, height) {
+    match render_gbm_scanout_front_buffer(device, width, height, preferred_modifiers) {
         Ok(buffer) => exported_scanout_buffer_report(buffer),
         Err(detail) => failed_scanout_buffer_report(detail),
     }
@@ -360,6 +386,7 @@ fn render_gbm_scanout_front_buffer<T: std::os::fd::AsFd>(
     device: T,
     width: u32,
     height: u32,
+    preferred_modifiers: &[u64],
 ) -> Result<NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExportDetail> {
     use gbm::AsRaw as _;
 
@@ -380,8 +407,14 @@ fn render_gbm_scanout_front_buffer<T: std::os::fd::AsFd>(
 
     egl.initialize(display)
         .map_err(|_error| NativeGbmScanoutBufferExportDetail::EglInitializeFailed)?;
-    let result =
-        render_initialized_gbm_scanout_front_buffer(&egl, display, &gbm_device, width, height);
+    let result = render_initialized_gbm_scanout_front_buffer(
+        &egl,
+        display,
+        &gbm_device,
+        width,
+        height,
+        preferred_modifiers,
+    );
     let _ = egl.terminate(display);
     result
 }
@@ -392,12 +425,14 @@ fn render_initialized_gbm_scanout_front_buffer<T: std::os::fd::AsFd>(
     gbm_device: &gbm::Device<T>,
     width: u32,
     height: u32,
+    preferred_modifiers: &[u64],
 ) -> Result<NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExportDetail> {
     egl.bind_api(khronos_egl::OPENGL_API)
         .map_err(|_error| NativeGbmScanoutBufferExportDetail::EglBindApiFailed)?;
 
+    let preferred_modifiers = reduced_gbm_scanout_modifiers(preferred_modifiers);
     let mut last_detail = NativeGbmScanoutBufferExportDetail::EglConfigUnavailable;
-    for candidate in rendered_scanout_candidates() {
+    for candidate in rendered_scanout_candidates(&preferred_modifiers) {
         let Some(config) = choose_scanout_config_for_format(
             egl,
             display,
@@ -415,7 +450,7 @@ fn render_initialized_gbm_scanout_front_buffer<T: std::os::fd::AsFd>(
             height,
             config,
             candidate.format,
-            candidate.modifiers,
+            &candidate.modifiers,
             candidate.usage,
         ) {
             Ok(buffer) => return Ok(buffer),
@@ -434,7 +469,7 @@ fn render_initialized_gbm_scanout_front_buffer_with_config<T: std::os::fd::AsFd>
     height: u32,
     config: khronos_egl::Config,
     surface_format: gbm::Format,
-    surface_modifiers: &'static [gbm::Modifier],
+    surface_modifiers: &[gbm::Modifier],
     surface_usage: gbm::BufferObjectFlags,
 ) -> Result<NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExportDetail> {
     use gbm::AsRaw as _;
@@ -487,10 +522,10 @@ fn render_initialized_gbm_scanout_front_buffer_with_config<T: std::os::fd::AsFd>
     result
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct RenderedScanoutCandidate {
     format: gbm::Format,
-    modifiers: &'static [gbm::Modifier],
+    modifiers: Vec<gbm::Modifier>,
     usage: gbm::BufferObjectFlags,
     config_attributes: [khronos_egl::Int; 13],
 }
@@ -500,7 +535,7 @@ fn create_rendered_scanout_surface<T: std::os::fd::AsFd>(
     width: u32,
     height: u32,
     format: gbm::Format,
-    modifiers: &'static [gbm::Modifier],
+    modifiers: &[gbm::Modifier],
     usage: gbm::BufferObjectFlags,
 ) -> Result<gbm::Surface<()>, NativeGbmScanoutBufferExportDetail> {
     if modifiers.is_empty() {
@@ -539,42 +574,70 @@ fn choose_scanout_config_for_format(
     })
 }
 
-fn rendered_scanout_candidates() -> [RenderedScanoutCandidate; 5] {
-    [
+fn rendered_scanout_candidates(
+    preferred_modifiers: &[gbm::Modifier],
+) -> Vec<RenderedScanoutCandidate> {
+    let mut candidates = Vec::with_capacity(6);
+    if !preferred_modifiers.is_empty() {
+        candidates.push(RenderedScanoutCandidate {
+            format: gbm::Format::Xrgb8888,
+            modifiers: preferred_modifiers.to_vec(),
+            usage: rendered_scanout_usage(),
+            config_attributes: xrgb_window_config_attributes(),
+        });
+    }
+    candidates.extend([
         RenderedScanoutCandidate {
             format: gbm::Format::Xrgb8888,
-            modifiers: &LINEAR_SCANOUT_MODIFIERS,
+            modifiers: Vec::from(LINEAR_SCANOUT_MODIFIERS),
             usage: rendered_scanout_usage().union(gbm::BufferObjectFlags::LINEAR),
             config_attributes: xrgb_window_config_attributes(),
         },
         RenderedScanoutCandidate {
             format: gbm::Format::Xrgb8888,
-            modifiers: &[],
+            modifiers: Vec::new(),
             usage: rendered_scanout_usage().union(gbm::BufferObjectFlags::LINEAR),
             config_attributes: xrgb_window_config_attributes(),
         },
         RenderedScanoutCandidate {
             format: gbm::Format::Xrgb8888,
-            modifiers: &[],
+            modifiers: Vec::new(),
             usage: rendered_scanout_usage(),
             config_attributes: xrgb_window_config_attributes(),
         },
         RenderedScanoutCandidate {
             format: gbm::Format::Argb8888,
-            modifiers: &LINEAR_SCANOUT_MODIFIERS,
+            modifiers: Vec::from(LINEAR_SCANOUT_MODIFIERS),
             usage: rendered_scanout_usage().union(gbm::BufferObjectFlags::LINEAR),
             config_attributes: window_config_attributes(),
         },
         RenderedScanoutCandidate {
             format: gbm::Format::Argb8888,
-            modifiers: &[],
+            modifiers: Vec::new(),
             usage: rendered_scanout_usage(),
             config_attributes: window_config_attributes(),
         },
-    ]
+    ]);
+    candidates
 }
 
 const LINEAR_SCANOUT_MODIFIERS: [gbm::Modifier; 1] = [gbm::Modifier::Linear];
+
+fn reduced_gbm_scanout_modifiers(modifiers: &[u64]) -> Vec<gbm::Modifier> {
+    let mut reduced = Vec::new();
+    for modifier in modifiers.iter().copied().map(gbm::Modifier::from) {
+        if matches!(modifier, gbm::Modifier::Invalid) || reduced.contains(&modifier) {
+            continue;
+        }
+        reduced.push(modifier);
+        if reduced.len() >= MAX_PREFERRED_SCANOUT_MODIFIERS {
+            break;
+        }
+    }
+    reduced
+}
+
+const MAX_PREFERRED_SCANOUT_MODIFIERS: usize = 16;
 
 fn rendered_scanout_usage() -> gbm::BufferObjectFlags {
     gbm::BufferObjectFlags::SCANOUT | gbm::BufferObjectFlags::RENDERING
