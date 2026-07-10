@@ -2130,3 +2130,190 @@ fn multi_output_drm_sysfs_fixture(name: &str) -> std::path::PathBuf {
 fn write_fixture_file(root: &std::path::Path, name: &str, contents: &str) {
     std::fs::write(root.join(name), contents).unwrap();
 }
+
+#[cfg(feature = "gbm-probe")]
+mod atomic_scanout_hardware_smoke {
+    use std::os::fd::{AsFd, BorrowedFd};
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, Instant};
+
+    use super::*;
+    use sophia_backend_live::LivePageFlipCallbackIntake;
+    use sophia_renderer_live::{
+        LiveRendererScanoutBufferExportStatus, NativeGbmScanoutBufferExporter,
+    };
+
+    #[derive(Debug)]
+    struct RealDrmCard(std::fs::File);
+
+    impl RealDrmCard {
+        fn open(path: &Path) -> io::Result<Self> {
+            Ok(Self(
+                std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(path)?,
+            ))
+        }
+
+        fn try_clone(&self) -> io::Result<Self> {
+            Ok(Self(self.0.try_clone()?))
+        }
+
+        fn try_clone_file(&self) -> io::Result<std::fs::File> {
+            self.0.try_clone()
+        }
+    }
+
+    impl AsFd for RealDrmCard {
+        fn as_fd(&self) -> BorrowedFd<'_> {
+            self.0.as_fd()
+        }
+    }
+
+    impl drm::Device for RealDrmCard {}
+    impl drm::control::Device for RealDrmCard {}
+
+    #[test]
+    fn native_atomic_scanout_smokes_real_primary_card_when_enabled() {
+        if std::env::var_os("SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE").is_none() {
+            return;
+        }
+
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("atomic_scanout_hardware_smoke::native_atomic_scanout_real_primary_card_child")
+            .arg("--nocapture")
+            .env("SOPHIA_REAL_ATOMIC_SCANOUT_CHILD", "1")
+            .spawn()
+            .expect("real atomic scanout smoke child should start");
+        let deadline = Instant::now() + Duration::from_secs(5);
+
+        loop {
+            if let Some(status) = child
+                .try_wait()
+                .expect("real atomic scanout smoke child should be waitable")
+            {
+                assert!(
+                    status.success(),
+                    "real atomic scanout smoke child failed with status {status}"
+                );
+                return;
+            }
+
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("real atomic scanout smoke child timed out waiting for page-flip evidence");
+            }
+
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn native_atomic_scanout_real_primary_card_child() {
+        if std::env::var_os("SOPHIA_REAL_ATOMIC_SCANOUT_CHILD").is_none() {
+            return;
+        }
+
+        let Some(card_path) = first_openable_primary_card_node() else {
+            return;
+        };
+        let card = RealDrmCard::open(&card_path).expect("primary DRM card should open read/write");
+
+        drm::Device::set_client_capability(&card, drm::ClientCapability::UniversalPlanes, true)
+            .expect("primary DRM card should accept UniversalPlanes client capability");
+        drm::Device::set_client_capability(&card, drm::ClientCapability::Atomic, true)
+            .expect("primary DRM card should accept Atomic client capability");
+
+        let selection = select_native_primary_plane_target(&card);
+        assert_eq!(
+            selection.status,
+            LibdrmNativePrimaryPlaneSelectionStatus::Selected
+        );
+        let selected = selection
+            .selection
+            .expect("real KMS target selection should produce primary-plane target");
+        let slot = LibdrmNativeOutputSlot::new(1).expect("slot one should be valid");
+        let output = OutputId::from_raw(1);
+        let target = LiveGbmEglFrameTargetRecord::new(selected.size());
+
+        let export =
+            NativeGbmScanoutBufferExporter::export_owned_scanout_buffer_from_backend_device_result(
+                card.try_clone_file(),
+                target,
+            );
+        assert_eq!(
+            export.status,
+            LiveRendererScanoutBufferExportStatus::Exported
+        );
+        let owned_buffer = export
+            .buffer
+            .expect("real GBM scanout export should retain owned buffer");
+
+        let submit = submit_native_primary_plane_scanout_from_renderer_descriptor(
+            &card,
+            owned_buffer.descriptor(),
+        );
+        assert_eq!(
+            submit.status,
+            LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+        );
+        let submission = submit
+            .submission
+            .expect("submitted scanout should retain resources");
+
+        let mut reader = NativeLibdrmPageFlipEventReader::new(
+            card.try_clone()
+                .expect("page-flip reader should clone the DRM card fd"),
+        )
+        .with_crtc_routes([selected.crtc_route(slot)]);
+        let source = LibdrmNativePageFlipSource::from_authority(
+            LibdrmBackendFdAuthority::new(1).expect("nonzero authority generation should mint"),
+        );
+        let mut poller = NativeLibdrmPageFlipEventPoller::new(source)
+            .with_routes([LibdrmNativeOutputRoute { slot, output }]);
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let poll = poller.read_and_poll_page_flip_events(&mut reader, &sender, 1, 1);
+        assert_eq!(poll.poll.status, LibdrmPageFlipEventPollStatus::Emitted);
+        let callback = receiver
+            .try_recv()
+            .expect("page-flip callback should be emitted to the reduced queue");
+        let mut intake = LivePageFlipCallbackIntake::new(output);
+        let callback_report = intake.observe(callback);
+        let retired = retire_native_primary_plane_scanout_after_page_flip(
+            &card,
+            submission,
+            &callback_report,
+        );
+
+        assert_eq!(
+            retired.status,
+            LibdrmNativePrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip
+        );
+        assert_eq!(
+            retired.destroy,
+            Some(LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed)
+        );
+        drop(owned_buffer);
+    }
+
+    fn first_openable_primary_card_node() -> Option<PathBuf> {
+        let entries = std::fs::read_dir("/dev/dri").ok()?;
+        let mut candidates = Vec::new();
+
+        for entry in entries.flatten() {
+            let file_name = entry.file_name();
+            let file_name = file_name.to_string_lossy();
+            if file_name.starts_with("card") {
+                candidates.push(entry.path());
+            }
+        }
+
+        candidates.sort();
+        candidates
+            .into_iter()
+            .find(|path| RealDrmCard::open(path).is_ok())
+    }
+}

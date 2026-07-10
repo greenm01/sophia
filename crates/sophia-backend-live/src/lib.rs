@@ -1406,6 +1406,10 @@ impl LibdrmNativePrimaryPlaneSelection {
         self.size
     }
 
+    pub const fn crtc_route(self, slot: LibdrmNativeOutputSlot) -> LibdrmNativeCrtcRoute {
+        LibdrmNativeCrtcRoute::new(self.crtc, slot)
+    }
+
     pub const fn into_objects(
         self,
         framebuffer: drm::control::framebuffer::Handle,

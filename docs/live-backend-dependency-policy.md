@@ -188,6 +188,11 @@ resources.
 when a reduced callback report is accepted and presented. Rejected or stale
 callbacks return the owner to the caller, preserving buffer and framebuffer
 lifetime until a real presentation event arrives.
+The opt-in atomic hardware smoke ties these seams together in a child process:
+primary card open, DRM atomic client capability setup, GBM scanout allocation
+from the duplicated fd namespace, primary-plane submit, native page-flip read,
+reduced callback validation, and resource retirement. Default validation never
+opens or modesets real hardware.
 
 Backend-live runtime ticks carry the current reduced scanout readiness report,
 KMS scanout target report, and page-flip event beside renderer health. This

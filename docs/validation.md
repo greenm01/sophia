@@ -76,6 +76,15 @@ It still exposes no render-node path, fd, GBM object, EGL object, pixel, driver
 error, or KMS identity through Sophia's public reports. The real GBM/EGL smoke
 runs the native path in a child test process so a driver crash reports as an
 opt-in validation failure instead of terminating ordinary deterministic tests.
+
+The combined `libdrm-events,gbm-probe` backend suite also includes an opt-in
+atomic scanout smoke. Set `SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1` only from a
+session that may take DRM master on a primary `/dev/dri/card*` node. The child
+test opens the card read/write, enables UniversalPlanes and Atomic client
+capabilities, duplicates the same fd namespace for GBM allocation, submits a
+primary-plane atomic modeset, waits for reduced page-flip evidence, and retires
+the submitted framebuffer resources. Without that environment variable, the
+test returns early and never opens or modesets hardware.
 The stable evidence shape for that run is `LiveRealGbmSmokeEvidence`: status,
 draw status, presentation status, and frame-target allocation status only.
 

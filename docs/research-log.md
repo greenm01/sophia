@@ -856,6 +856,14 @@ Submitted scanout owners now retire only through a reduced accepted/presented
 page-flip callback report. Rejected or stale callback reports return the owner
 to the caller, which preserves resource lifetime across the exact failure cases
 that would otherwise turn a pending kernel scanout into a use-after-retire bug.
+The opt-in atomic scanout hardware smoke now exists behind
+`SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1`. It opens a primary DRM card in a child
+process, enables the atomic KMS capabilities, allocates the GBM scanout buffer
+from a duplicated fd in the same handle namespace, submits primary-plane
+scanout, waits for a native page-flip callback, validates the reduced callback,
+and retires the submitted resources. This path compiled and the default test
+run skipped it because the opt-in environment variable was unset; real hardware
+evidence remains to be recorded.
 
 ## Open Questions
 
