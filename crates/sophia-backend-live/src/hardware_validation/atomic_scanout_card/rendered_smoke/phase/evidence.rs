@@ -5,6 +5,7 @@ pub(super) fn reduced_smoke_evidence_for_phase(
     scanout_target: LiveKmsScanoutTargetStatus,
     rendered_context: Option<LibdrmNativeRenderedScanoutContextStatus>,
     gbm_export: LiveRendererScanoutBufferExportStatus,
+    gbm_export_detail: LiveRendererScanoutBufferExportDetail,
     submit: Option<&LibdrmNativePrimaryPlaneScanoutSubmitResult>,
     poll: Option<&LibdrmPageFlipEventPollReport>,
     callback: Option<&LivePageFlipCallbackReport>,
@@ -12,10 +13,11 @@ pub(super) fn reduced_smoke_evidence_for_phase(
 ) -> LibdrmNativeAtomicScanoutSmokeEvidence {
     match phase {
         LibdrmNativeAtomicScanoutSmokePhase::InitialModeset => {
-            LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+            LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports_with_gbm_export_detail(
                 scanout_target,
                 rendered_context,
                 gbm_export,
+                gbm_export_detail,
                 submit,
                 poll,
                 callback,
@@ -23,10 +25,11 @@ pub(super) fn reduced_smoke_evidence_for_phase(
             )
         }
         LibdrmNativeAtomicScanoutSmokePhase::SteadyPageFlip => {
-            LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
+            LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports_with_gbm_export_detail(
                 scanout_target,
                 rendered_context,
                 gbm_export,
+                gbm_export_detail,
                 submit,
                 poll,
                 callback,

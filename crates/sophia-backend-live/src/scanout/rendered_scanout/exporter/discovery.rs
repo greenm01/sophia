@@ -5,8 +5,9 @@ use crate::api::*;
 
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
 use sophia_renderer_live::{
-    LiveRendererScanoutBufferExportStatus, NativeGbmOwnedScanoutBuffer,
-    NativeGbmRenderedScanoutContext, NativeGbmRenderedScanoutContextStatus,
+    LiveRendererScanoutBufferExportDetail, LiveRendererScanoutBufferExportStatus,
+    NativeGbmOwnedScanoutBuffer, NativeGbmRenderedScanoutContext,
+    NativeGbmRenderedScanoutContextStatus,
 };
 
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
@@ -100,6 +101,7 @@ where
             self.last_export_status = Some(LiveRendererScanoutBufferExportStatus::InvalidTarget);
             return LiveRenderedScanoutBufferExport::new(
                 LiveRendererScanoutBufferExportStatus::InvalidTarget,
+                LiveRendererScanoutBufferExportDetail::InvalidTarget,
                 None,
                 None,
             );
@@ -127,12 +129,22 @@ where
                 }
             };
             self.last_export_status = Some(status);
-            return LiveRenderedScanoutBufferExport::new(status, None, None);
+            return LiveRenderedScanoutBufferExport::new(
+                status,
+                LiveRendererScanoutBufferExportDetail::from_status(status),
+                None,
+                None,
+            );
         };
 
         let report = context.export_rendered_owned_scanout_buffer(target);
         let descriptor = report.buffer.as_ref().map(|buffer| buffer.descriptor());
         self.last_export_status = Some(report.status);
-        LiveRenderedScanoutBufferExport::new(report.status, descriptor, report.buffer)
+        LiveRenderedScanoutBufferExport::new(
+            report.status,
+            report.detail,
+            descriptor,
+            report.buffer,
+        )
     }
 }

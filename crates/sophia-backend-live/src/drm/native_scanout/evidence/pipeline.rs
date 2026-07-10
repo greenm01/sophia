@@ -10,11 +10,34 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
         callback: Option<&LivePageFlipCallbackReport>,
         retire: Option<&LibdrmNativePrimaryPlaneScanoutRetireResult>,
     ) -> Self {
+        Self::from_pipeline_reports_with_gbm_export_detail(
+            scanout_target,
+            rendered_context,
+            gbm_export,
+            LiveRendererScanoutBufferExportDetail::from_status(gbm_export),
+            submit,
+            poll,
+            callback,
+            retire,
+        )
+    }
+
+    pub fn from_pipeline_reports_with_gbm_export_detail(
+        scanout_target: LiveKmsScanoutTargetStatus,
+        rendered_context: Option<LibdrmNativeRenderedScanoutContextStatus>,
+        gbm_export: LiveRendererScanoutBufferExportStatus,
+        gbm_export_detail: LiveRendererScanoutBufferExportDetail,
+        submit: Option<&LibdrmNativePrimaryPlaneScanoutSubmitResult>,
+        poll: Option<&LibdrmPageFlipEventPollReport>,
+        callback: Option<&LivePageFlipCallbackReport>,
+        retire: Option<&LibdrmNativePrimaryPlaneScanoutRetireResult>,
+    ) -> Self {
         Self::from_pipeline_reports_for_phase(
             LibdrmNativeAtomicScanoutSmokePhase::InitialModeset,
             scanout_target,
             rendered_context,
             gbm_export,
+            gbm_export_detail,
             submit,
             poll,
             callback,
@@ -31,11 +54,34 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
         callback: Option<&LivePageFlipCallbackReport>,
         retire: Option<&LibdrmNativePrimaryPlaneScanoutRetireResult>,
     ) -> Self {
+        Self::from_page_flip_pipeline_reports_with_gbm_export_detail(
+            scanout_target,
+            rendered_context,
+            gbm_export,
+            LiveRendererScanoutBufferExportDetail::from_status(gbm_export),
+            submit,
+            poll,
+            callback,
+            retire,
+        )
+    }
+
+    pub fn from_page_flip_pipeline_reports_with_gbm_export_detail(
+        scanout_target: LiveKmsScanoutTargetStatus,
+        rendered_context: Option<LibdrmNativeRenderedScanoutContextStatus>,
+        gbm_export: LiveRendererScanoutBufferExportStatus,
+        gbm_export_detail: LiveRendererScanoutBufferExportDetail,
+        submit: Option<&LibdrmNativePrimaryPlaneScanoutSubmitResult>,
+        poll: Option<&LibdrmPageFlipEventPollReport>,
+        callback: Option<&LivePageFlipCallbackReport>,
+        retire: Option<&LibdrmNativePrimaryPlaneScanoutRetireResult>,
+    ) -> Self {
         Self::from_pipeline_reports_for_phase(
             LibdrmNativeAtomicScanoutSmokePhase::SteadyPageFlip,
             scanout_target,
             rendered_context,
             gbm_export,
+            gbm_export_detail,
             submit,
             poll,
             callback,
@@ -48,6 +94,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
         scanout_target: LiveKmsScanoutTargetStatus,
         rendered_context: Option<LibdrmNativeRenderedScanoutContextStatus>,
         gbm_export: LiveRendererScanoutBufferExportStatus,
+        gbm_export_detail: LiveRendererScanoutBufferExportDetail,
         submit: Option<&LibdrmNativePrimaryPlaneScanoutSubmitResult>,
         poll: Option<&LibdrmPageFlipEventPollReport>,
         callback: Option<&LivePageFlipCallbackReport>,
@@ -118,6 +165,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             scanout_target: Some(scanout_target),
             rendered_context,
             gbm_export: Some(gbm_export),
+            gbm_export_detail: Some(gbm_export_detail),
             scanout_buffer,
             properties,
             resources,

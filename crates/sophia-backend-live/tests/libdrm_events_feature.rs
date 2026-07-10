@@ -39,7 +39,7 @@ use sophia_backend_live::{
     LivePageFlipEvent, LivePageFlipEventStatus, LiveRenderedPrimaryPlaneScanoutBackpressureReport,
     LiveRenderedPrimaryPlaneScanoutBackpressureStatus, LiveRenderedPrimaryPlaneScanoutSubmitStatus,
     LiveRenderedScanoutBufferExport, LiveRenderedScanoutBufferExporter,
-    LiveRuntimeRenderedScanoutEvidenceFailureReport,
+    LiveRendererScanoutBufferExportDetail, LiveRuntimeRenderedScanoutEvidenceFailureReport,
     LiveRuntimeRenderedScanoutEvidenceFailureStatus,
     LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus,
     LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus,
@@ -1116,6 +1116,7 @@ impl LiveRenderedScanoutBufferExporter for FakeRenderedScanoutExporter {
         self.export_attempts = self.export_attempts.saturating_add(1);
         LiveRenderedScanoutBufferExport {
             status: self.status,
+            detail: LiveRendererScanoutBufferExportDetail::from_status(self.status),
             descriptor: self.descriptor,
             owner: self.owner.take(),
         }

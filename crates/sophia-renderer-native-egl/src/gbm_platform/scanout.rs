@@ -2,7 +2,10 @@ use std::{ffi::c_void, ptr};
 
 use crate::gbm_platform::{EGL_PLATFORM_GBM_KHR, config::xrgb_window_config_attributes};
 use crate::gl::{context_attributes, smoke_current_gl_context_with_loader};
-use crate::{NativeGbmRenderedScanoutContextStatus, NativeGbmScanoutBufferExportStatus};
+use crate::{
+    NativeGbmRenderedScanoutContextStatus, NativeGbmScanoutBufferExportDetail,
+    NativeGbmScanoutBufferExportStatus,
+};
 
 #[derive(Debug)]
 pub struct NativeGbmOwnedScanoutBuffer {
@@ -42,6 +45,7 @@ impl NativeGbmOwnedScanoutBuffer {
 #[derive(Debug)]
 pub struct NativeGbmOwnedScanoutBufferExportReport {
     pub status: NativeGbmScanoutBufferExportStatus,
+    pub detail: NativeGbmScanoutBufferExportDetail,
     pub buffer: Option<NativeGbmOwnedScanoutBuffer>,
 }
 
@@ -111,6 +115,7 @@ where
         if width == 0 || height == 0 {
             return NativeGbmOwnedScanoutBufferExportReport {
                 status: NativeGbmScanoutBufferExportStatus::InvalidTarget,
+                detail: NativeGbmScanoutBufferExportDetail::InvalidTarget,
                 buffer: None,
             };
         }
@@ -122,14 +127,8 @@ where
             width,
             height,
         ) {
-            Ok(buffer) => NativeGbmOwnedScanoutBufferExportReport {
-                status: NativeGbmScanoutBufferExportStatus::Exported,
-                buffer: Some(buffer),
-            },
-            Err(status) => NativeGbmOwnedScanoutBufferExportReport {
-                status,
-                buffer: None,
-            },
+            Ok(buffer) => exported_scanout_buffer_report(buffer),
+            Err(detail) => failed_scanout_buffer_report(detail),
         }
     }
 }
@@ -156,6 +155,7 @@ pub fn export_gbm_scanout_buffer_from_backend_device_result<T: std::os::fd::AsFd
     if width == 0 || height == 0 {
         return NativeGbmOwnedScanoutBufferExportReport {
             status: NativeGbmScanoutBufferExportStatus::InvalidTarget,
+            detail: NativeGbmScanoutBufferExportDetail::InvalidTarget,
             buffer: None,
         };
     }
@@ -163,12 +163,14 @@ pub fn export_gbm_scanout_buffer_from_backend_device_result<T: std::os::fd::AsFd
     let Ok(device) = device else {
         return NativeGbmOwnedScanoutBufferExportReport {
             status: NativeGbmScanoutBufferExportStatus::Unavailable,
+            detail: NativeGbmScanoutBufferExportDetail::BackendDeviceUnavailable,
             buffer: None,
         };
     };
     let Ok(device) = gbm::Device::new(device) else {
         return NativeGbmOwnedScanoutBufferExportReport {
             status: NativeGbmScanoutBufferExportStatus::Unavailable,
+            detail: NativeGbmScanoutBufferExportDetail::GbmDeviceUnavailable,
             buffer: None,
         };
     };
@@ -180,19 +182,14 @@ pub fn export_gbm_scanout_buffer_from_backend_device_result<T: std::os::fd::AsFd
     ) else {
         return NativeGbmOwnedScanoutBufferExportReport {
             status: NativeGbmScanoutBufferExportStatus::Unavailable,
+            detail: NativeGbmScanoutBufferExportDetail::GbmSurfaceUnavailable,
             buffer: None,
         };
     };
 
     match native_owned_scanout_buffer_from_bo(width, height, buffer, None) {
-        Ok(buffer) => NativeGbmOwnedScanoutBufferExportReport {
-            status: NativeGbmScanoutBufferExportStatus::Exported,
-            buffer: Some(buffer),
-        },
-        Err(status) => NativeGbmOwnedScanoutBufferExportReport {
-            status,
-            buffer: None,
-        },
+        Ok(buffer) => exported_scanout_buffer_report(buffer),
+        Err(detail) => failed_scanout_buffer_report(detail),
     }
 }
 
@@ -204,6 +201,7 @@ pub fn export_rendered_gbm_scanout_buffer_from_backend_device_result<T: std::os:
     if width == 0 || height == 0 {
         return NativeGbmOwnedScanoutBufferExportReport {
             status: NativeGbmScanoutBufferExportStatus::InvalidTarget,
+            detail: NativeGbmScanoutBufferExportDetail::InvalidTarget,
             buffer: None,
         };
     }
@@ -211,19 +209,14 @@ pub fn export_rendered_gbm_scanout_buffer_from_backend_device_result<T: std::os:
     let Ok(device) = device else {
         return NativeGbmOwnedScanoutBufferExportReport {
             status: NativeGbmScanoutBufferExportStatus::Unavailable,
+            detail: NativeGbmScanoutBufferExportDetail::BackendDeviceUnavailable,
             buffer: None,
         };
     };
 
     match render_gbm_scanout_front_buffer(device, width, height) {
-        Ok(buffer) => NativeGbmOwnedScanoutBufferExportReport {
-            status: NativeGbmScanoutBufferExportStatus::Exported,
-            buffer: Some(buffer),
-        },
-        Err(status) => NativeGbmOwnedScanoutBufferExportReport {
-            status,
-            buffer: None,
-        },
+        Ok(buffer) => exported_scanout_buffer_report(buffer),
+        Err(detail) => failed_scanout_buffer_report(detail),
     }
 }
 
@@ -232,12 +225,12 @@ fn native_owned_scanout_buffer_from_bo(
     height: u32,
     buffer: gbm::BufferObject<()>,
     surface: Option<gbm::Surface<()>>,
-) -> Result<NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExportStatus> {
+) -> Result<NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExportDetail> {
     let pitch = buffer.stride();
     let format = buffer.format() as u32;
     let gem_handle = unsafe { buffer.handle().u32_ };
     if pitch == 0 || gem_handle == 0 || format != gbm::Format::Xrgb8888 as u32 {
-        return Err(NativeGbmScanoutBufferExportStatus::Degraded);
+        return Err(NativeGbmScanoutBufferExportDetail::InvalidBufferDescriptor);
     }
 
     Ok(NativeGbmOwnedScanoutBuffer {
@@ -255,13 +248,13 @@ fn render_gbm_scanout_front_buffer<T: std::os::fd::AsFd>(
     device: T,
     width: u32,
     height: u32,
-) -> Result<NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExportStatus> {
+) -> Result<NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExportDetail> {
     use gbm::AsRaw as _;
 
     let gbm_device = gbm::Device::new(device)
-        .map_err(|_error| NativeGbmScanoutBufferExportStatus::Unavailable)?;
+        .map_err(|_error| NativeGbmScanoutBufferExportDetail::GbmDeviceUnavailable)?;
     let egl = unsafe { khronos_egl::DynamicInstance::<khronos_egl::EGL1_5>::load_required() }
-        .map_err(|_error| NativeGbmScanoutBufferExportStatus::Unavailable)?;
+        .map_err(|_error| NativeGbmScanoutBufferExportDetail::EglUnavailable)?;
 
     let native_display = gbm_device.as_raw() as khronos_egl::NativeDisplayType;
     let display = unsafe {
@@ -271,10 +264,10 @@ fn render_gbm_scanout_front_buffer<T: std::os::fd::AsFd>(
             &[khronos_egl::ATTRIB_NONE],
         )
     }
-    .map_err(|_error| NativeGbmScanoutBufferExportStatus::Unavailable)?;
+    .map_err(|_error| NativeGbmScanoutBufferExportDetail::EglDisplayUnavailable)?;
 
     egl.initialize(display)
-        .map_err(|_error| NativeGbmScanoutBufferExportStatus::Degraded)?;
+        .map_err(|_error| NativeGbmScanoutBufferExportDetail::EglInitializeFailed)?;
     let result =
         render_initialized_gbm_scanout_front_buffer(&egl, display, &gbm_device, width, height);
     let _ = egl.terminate(display);
@@ -287,16 +280,16 @@ fn render_initialized_gbm_scanout_front_buffer<T: std::os::fd::AsFd>(
     gbm_device: &gbm::Device<T>,
     width: u32,
     height: u32,
-) -> Result<NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExportStatus> {
+) -> Result<NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExportDetail> {
     use gbm::AsRaw as _;
 
     egl.bind_api(khronos_egl::OPENGL_API)
-        .map_err(|_error| NativeGbmScanoutBufferExportStatus::Degraded)?;
+        .map_err(|_error| NativeGbmScanoutBufferExportDetail::EglBindApiFailed)?;
 
     let config = egl
         .choose_first_config(display, &xrgb_window_config_attributes())
-        .map_err(|_error| NativeGbmScanoutBufferExportStatus::Degraded)?
-        .ok_or(NativeGbmScanoutBufferExportStatus::Degraded)?;
+        .map_err(|_error| NativeGbmScanoutBufferExportDetail::EglConfigUnavailable)?
+        .ok_or(NativeGbmScanoutBufferExportDetail::EglConfigUnavailable)?;
     let gbm_surface = gbm_device
         .create_surface::<()>(
             width,
@@ -304,38 +297,38 @@ fn render_initialized_gbm_scanout_front_buffer<T: std::os::fd::AsFd>(
             gbm::Format::Xrgb8888,
             gbm::BufferObjectFlags::SCANOUT | gbm::BufferObjectFlags::RENDERING,
         )
-        .map_err(|_error| NativeGbmScanoutBufferExportStatus::Unavailable)?;
+        .map_err(|_error| NativeGbmScanoutBufferExportDetail::GbmSurfaceUnavailable)?;
     let native_window = gbm_surface.as_raw() as khronos_egl::NativeWindowType;
     let surface = unsafe { egl.create_window_surface(display, config, native_window, None) }
-        .map_err(|_error| NativeGbmScanoutBufferExportStatus::Degraded)?;
+        .map_err(|_error| NativeGbmScanoutBufferExportDetail::EglSurfaceUnavailable)?;
     let context = match egl.create_context(display, config, None, &context_attributes()) {
         Ok(context) => context,
         Err(_error) => {
             let _ = egl.destroy_surface(display, surface);
-            return Err(NativeGbmScanoutBufferExportStatus::Degraded);
+            return Err(NativeGbmScanoutBufferExportDetail::EglContextUnavailable);
         }
     };
 
     let result = egl
         .make_current(display, Some(surface), Some(surface), Some(context))
-        .map_err(|_error| NativeGbmScanoutBufferExportStatus::Degraded)
+        .map_err(|_error| NativeGbmScanoutBufferExportDetail::EglMakeCurrentFailed)
         .and_then(|()| {
             smoke_current_gl_context_with_loader(|name| {
                 egl.get_proc_address(name)
                     .map_or(ptr::null(), |proc| proc as *const c_void)
             })
-            .map_err(|_error| NativeGbmScanoutBufferExportStatus::Degraded)
+            .map_err(|_error| NativeGbmScanoutBufferExportDetail::GlSmokeFailed)
         })
         .and_then(|()| {
             egl.swap_buffers(display, surface)
-                .map_err(|_error| NativeGbmScanoutBufferExportStatus::Degraded)
+                .map_err(|_error| NativeGbmScanoutBufferExportDetail::EglSwapBuffersFailed)
         })
         .and_then(|()| {
             // `gbm` releases this lock when the returned BufferObject is
             // dropped. The owner retains the surface so the release callback
             // remains valid until KMS scanout has retired the buffer.
             let buffer = unsafe { gbm_surface.lock_front_buffer() }
-                .map_err(|_error| NativeGbmScanoutBufferExportStatus::Degraded)?;
+                .map_err(|_error| NativeGbmScanoutBufferExportDetail::FrontBufferLockFailed)?;
             native_owned_scanout_buffer_from_bo(width, height, buffer, Some(gbm_surface))
         });
     let _ = egl.make_current(display, None, None, None);
@@ -343,4 +336,24 @@ fn render_initialized_gbm_scanout_front_buffer<T: std::os::fd::AsFd>(
     let _ = egl.destroy_surface(display, surface);
 
     result
+}
+
+fn exported_scanout_buffer_report(
+    buffer: NativeGbmOwnedScanoutBuffer,
+) -> NativeGbmOwnedScanoutBufferExportReport {
+    NativeGbmOwnedScanoutBufferExportReport {
+        status: NativeGbmScanoutBufferExportStatus::Exported,
+        detail: NativeGbmScanoutBufferExportDetail::Exported,
+        buffer: Some(buffer),
+    }
+}
+
+fn failed_scanout_buffer_report(
+    detail: NativeGbmScanoutBufferExportDetail,
+) -> NativeGbmOwnedScanoutBufferExportReport {
+    NativeGbmOwnedScanoutBufferExportReport {
+        status: detail.status(),
+        detail,
+        buffer: None,
+    }
 }

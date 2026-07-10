@@ -52,6 +52,53 @@ pub enum NativeGbmScanoutBufferExportStatus {
 
 #[cfg(feature = "gbm-platform")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeGbmScanoutBufferExportDetail {
+    Exported,
+    InvalidTarget,
+    BackendDeviceUnavailable,
+    GbmDeviceUnavailable,
+    EglUnavailable,
+    EglDisplayUnavailable,
+    EglInitializeFailed,
+    EglBindApiFailed,
+    EglConfigUnavailable,
+    GbmSurfaceUnavailable,
+    EglSurfaceUnavailable,
+    EglContextUnavailable,
+    EglMakeCurrentFailed,
+    GlSmokeFailed,
+    EglSwapBuffersFailed,
+    FrontBufferLockFailed,
+    InvalidBufferDescriptor,
+}
+
+#[cfg(feature = "gbm-platform")]
+impl NativeGbmScanoutBufferExportDetail {
+    pub const fn status(self) -> NativeGbmScanoutBufferExportStatus {
+        match self {
+            Self::Exported => NativeGbmScanoutBufferExportStatus::Exported,
+            Self::InvalidTarget => NativeGbmScanoutBufferExportStatus::InvalidTarget,
+            Self::BackendDeviceUnavailable
+            | Self::GbmDeviceUnavailable
+            | Self::EglUnavailable
+            | Self::EglDisplayUnavailable
+            | Self::GbmSurfaceUnavailable => NativeGbmScanoutBufferExportStatus::Unavailable,
+            Self::EglInitializeFailed
+            | Self::EglBindApiFailed
+            | Self::EglConfigUnavailable
+            | Self::EglSurfaceUnavailable
+            | Self::EglContextUnavailable
+            | Self::EglMakeCurrentFailed
+            | Self::GlSmokeFailed
+            | Self::EglSwapBuffersFailed
+            | Self::FrontBufferLockFailed
+            | Self::InvalidBufferDescriptor => NativeGbmScanoutBufferExportStatus::Degraded,
+        }
+    }
+}
+
+#[cfg(feature = "gbm-platform")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeGbmRenderedScanoutContextStatus {
     Ready,
     Unavailable,

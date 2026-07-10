@@ -10,7 +10,7 @@ pub use sophia_renderer_live::{
     LiveRendererImportBoundary, LiveRendererImportDecision, LiveRendererImportHealth,
     LiveRendererImportPathStatus, LiveRendererImportRejection, LiveRendererImportStartupStatus,
     LiveRendererPresentationReport, LiveRendererPresentationStatus, LiveRendererRuntimeObservation,
-    LiveRendererSelectionObservation,
+    LiveRendererScanoutBufferExportDetail, LiveRendererSelectionObservation,
 };
 #[cfg(feature = "gbm-probe")]
 pub use sophia_renderer_live::{

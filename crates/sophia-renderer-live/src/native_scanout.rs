@@ -2,7 +2,7 @@ use std::os::fd::AsFd;
 
 use crate::{
     LiveGbmEglFrameTargetRecord, LiveRendererScanoutBufferDescriptor,
-    LiveRendererScanoutBufferExportStatus, Size,
+    LiveRendererScanoutBufferExportDetail, LiveRendererScanoutBufferExportStatus, Size,
 };
 
 #[derive(Debug)]
@@ -20,12 +20,14 @@ impl NativeGbmOwnedScanoutBuffer {
 #[derive(Debug)]
 pub struct NativeGbmOwnedScanoutBufferExportReport {
     pub status: LiveRendererScanoutBufferExportStatus,
+    pub detail: LiveRendererScanoutBufferExportDetail,
     pub buffer: Option<NativeGbmOwnedScanoutBuffer>,
 }
 
 impl NativeGbmOwnedScanoutBufferExportReport {
     pub fn new(
         status: LiveRendererScanoutBufferExportStatus,
+        detail: LiveRendererScanoutBufferExportDetail,
         buffer: Option<NativeGbmOwnedScanoutBuffer>,
     ) -> Self {
         match status {
@@ -35,10 +37,16 @@ impl NativeGbmOwnedScanoutBufferExportReport {
                 } else {
                     LiveRendererScanoutBufferExportStatus::Degraded
                 },
+                detail: if buffer.is_some() {
+                    detail
+                } else {
+                    LiveRendererScanoutBufferExportDetail::RetainedBufferMissing
+                },
                 buffer,
             },
             status => Self {
                 status,
+                detail,
                 buffer: None,
             },
         }
@@ -92,6 +100,7 @@ where
         if !target.is_valid_scanout_target() {
             return NativeGbmOwnedScanoutBufferExportReport::new(
                 LiveRendererScanoutBufferExportStatus::InvalidTarget,
+                LiveRendererScanoutBufferExportDetail::InvalidTarget,
                 None,
             );
         }
@@ -153,6 +162,7 @@ where
     if !target.is_valid_scanout_target() {
         return NativeGbmOwnedScanoutBufferExportReport::new(
             LiveRendererScanoutBufferExportStatus::InvalidTarget,
+            LiveRendererScanoutBufferExportDetail::InvalidTarget,
             None,
         );
     }
@@ -196,5 +206,67 @@ fn reduced_native_owned_scanout_buffer_export_report(
                 _buffer: buffer,
             })
     });
-    NativeGbmOwnedScanoutBufferExportReport::new(status, buffer)
+    NativeGbmOwnedScanoutBufferExportReport::new(
+        status,
+        reduced_native_owned_scanout_buffer_export_detail(report.detail),
+        buffer,
+    )
+}
+
+fn reduced_native_owned_scanout_buffer_export_detail(
+    detail: sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail,
+) -> LiveRendererScanoutBufferExportDetail {
+    match detail {
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::Exported => {
+            LiveRendererScanoutBufferExportDetail::Exported
+        }
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::InvalidTarget => {
+            LiveRendererScanoutBufferExportDetail::InvalidTarget
+        }
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::BackendDeviceUnavailable => {
+            LiveRendererScanoutBufferExportDetail::BackendDeviceUnavailable
+        }
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::GbmDeviceUnavailable => {
+            LiveRendererScanoutBufferExportDetail::GbmDeviceUnavailable
+        }
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::EglUnavailable => {
+            LiveRendererScanoutBufferExportDetail::EglUnavailable
+        }
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::EglDisplayUnavailable => {
+            LiveRendererScanoutBufferExportDetail::EglDisplayUnavailable
+        }
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::EglInitializeFailed => {
+            LiveRendererScanoutBufferExportDetail::EglInitializeFailed
+        }
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::EglBindApiFailed => {
+            LiveRendererScanoutBufferExportDetail::EglBindApiFailed
+        }
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::EglConfigUnavailable => {
+            LiveRendererScanoutBufferExportDetail::EglConfigUnavailable
+        }
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::GbmSurfaceUnavailable => {
+            LiveRendererScanoutBufferExportDetail::GbmSurfaceUnavailable
+        }
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::EglSurfaceUnavailable => {
+            LiveRendererScanoutBufferExportDetail::EglSurfaceUnavailable
+        }
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::EglContextUnavailable => {
+            LiveRendererScanoutBufferExportDetail::EglContextUnavailable
+        }
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::EglMakeCurrentFailed => {
+            LiveRendererScanoutBufferExportDetail::EglMakeCurrentFailed
+        }
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::GlSmokeFailed => {
+            LiveRendererScanoutBufferExportDetail::GlSmokeFailed
+        }
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::EglSwapBuffersFailed => {
+            LiveRendererScanoutBufferExportDetail::EglSwapBuffersFailed
+        }
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::FrontBufferLockFailed => {
+            LiveRendererScanoutBufferExportDetail::FrontBufferLockFailed
+        }
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::InvalidBufferDescriptor => {
+            LiveRendererScanoutBufferExportDetail::InvalidBufferDescriptor
+        }
+    }
 }

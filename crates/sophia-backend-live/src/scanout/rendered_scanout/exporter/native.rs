@@ -9,7 +9,9 @@ use std::io;
 use std::os::fd::AsFd;
 
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
-use sophia_renderer_live::LiveRendererScanoutBufferExportStatus;
+use sophia_renderer_live::{
+    LiveRendererScanoutBufferExportDetail, LiveRendererScanoutBufferExportStatus,
+};
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
 use sophia_renderer_live::{NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExporter};
 
@@ -41,6 +43,7 @@ where
         let Some(device) = self.device.take() else {
             return LiveRenderedScanoutBufferExport::new(
                 LiveRendererScanoutBufferExportStatus::Unavailable,
+                LiveRendererScanoutBufferExportDetail::BackendDeviceUnavailable,
                 None,
                 None,
             );
@@ -52,6 +55,11 @@ where
             );
         let descriptor = report.buffer.as_ref().map(|buffer| buffer.descriptor());
 
-        LiveRenderedScanoutBufferExport::new(report.status, descriptor, report.buffer)
+        LiveRenderedScanoutBufferExport::new(
+            report.status,
+            report.detail,
+            descriptor,
+            report.buffer,
+        )
     }
 }

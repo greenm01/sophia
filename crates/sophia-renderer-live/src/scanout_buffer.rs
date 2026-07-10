@@ -71,6 +71,39 @@ pub enum LiveRendererScanoutBufferExportStatus {
     Degraded,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveRendererScanoutBufferExportDetail {
+    Exported,
+    InvalidTarget,
+    BackendDeviceUnavailable,
+    GbmDeviceUnavailable,
+    EglUnavailable,
+    EglDisplayUnavailable,
+    EglInitializeFailed,
+    EglBindApiFailed,
+    EglConfigUnavailable,
+    GbmSurfaceUnavailable,
+    EglSurfaceUnavailable,
+    EglContextUnavailable,
+    EglMakeCurrentFailed,
+    GlSmokeFailed,
+    EglSwapBuffersFailed,
+    FrontBufferLockFailed,
+    InvalidBufferDescriptor,
+    RetainedBufferMissing,
+}
+
+impl LiveRendererScanoutBufferExportDetail {
+    pub const fn from_status(status: LiveRendererScanoutBufferExportStatus) -> Self {
+        match status {
+            LiveRendererScanoutBufferExportStatus::Exported => Self::Exported,
+            LiveRendererScanoutBufferExportStatus::InvalidTarget => Self::InvalidTarget,
+            LiveRendererScanoutBufferExportStatus::Unavailable => Self::BackendDeviceUnavailable,
+            LiveRendererScanoutBufferExportStatus::Degraded => Self::RetainedBufferMissing,
+        }
+    }
+}
+
 pub trait LiveRendererScanoutBufferExporter {
     fn export_scanout_buffer(
         &mut self,

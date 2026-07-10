@@ -5,10 +5,11 @@ use sophia_renderer_live::{
     GbmRenderDeviceToken, LiveGbmEglFrameTargetAllocationRequest,
     LiveGbmEglFrameTargetAllocationStatus, LiveGbmEglFrameTargetRecord,
     LiveGbmEglFrameTargetStatus, LiveRendererImportHealth, LiveRendererImportPathStatus,
-    LiveRendererImportStartupStatus, LiveRendererScanoutBufferExportStatus,
-    NativeGbmBackedEglFrameTargetAllocator, NativeGbmCapabilityProbe,
-    NativeGbmOwnedScanoutBufferExportReport, NativeGbmRenderedScanoutContext,
-    NativeGbmRenderedScanoutContextStatus, NativeGbmScanoutBufferExporter, Size,
+    LiveRendererImportStartupStatus, LiveRendererScanoutBufferExportDetail,
+    LiveRendererScanoutBufferExportStatus, NativeGbmBackedEglFrameTargetAllocator,
+    NativeGbmCapabilityProbe, NativeGbmOwnedScanoutBufferExportReport,
+    NativeGbmRenderedScanoutContext, NativeGbmRenderedScanoutContextStatus,
+    NativeGbmScanoutBufferExporter, Size,
 };
 
 #[test]
@@ -142,6 +143,7 @@ fn native_gbm_scanout_exporter_fails_closed_without_backend_device() {
 fn native_gbm_scanout_export_report_rejects_exported_without_retained_buffer() {
     let report = NativeGbmOwnedScanoutBufferExportReport::new(
         LiveRendererScanoutBufferExportStatus::Exported,
+        LiveRendererScanoutBufferExportDetail::Exported,
         None,
     );
 
@@ -156,7 +158,11 @@ fn native_gbm_scanout_export_report_rejects_exported_without_retained_buffer() {
         LiveRendererScanoutBufferExportStatus::Unavailable,
         LiveRendererScanoutBufferExportStatus::Degraded,
     ] {
-        let report = NativeGbmOwnedScanoutBufferExportReport::new(status, None);
+        let report = NativeGbmOwnedScanoutBufferExportReport::new(
+            status,
+            LiveRendererScanoutBufferExportDetail::from_status(status),
+            None,
+        );
         assert_eq!(report.status, status);
         assert!(report.buffer.is_none());
     }

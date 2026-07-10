@@ -163,16 +163,17 @@ never opens or modesets hardware.
 The stable evidence shape for that run is the
 `sophia_atomic_scanout_evidence` line pair: schema version, phase, overall
 status, rendered context status, GBM export status, primary-plane property
-discovery status, scanout-buffer import status, native resource creation status,
-atomic request build status, primary-plane submit status, reduced request scope,
-page-flip poll status, reduced commit flags, reduced page-flip wait outcome,
-page-flip event status, retirement status, retire-time resource destroy status,
-and retire-time cleanup-pending status only. A passing capture must contain both
-`InitialModeset` and `SteadyPageFlip`, and both phases must report
-`page_flip_wait=Retired`. Failed captures
+discovery status, scanout-buffer import status, reduced GBM export detail,
+native resource creation status, atomic request build status, primary-plane
+submit status, reduced request scope, page-flip poll status, reduced commit
+flags, reduced page-flip wait outcome, page-flip event status, retirement
+status, retire-time resource destroy status, and retire-time cleanup-pending
+status only. A passing capture must contain both `InitialModeset` and
+`SteadyPageFlip`, and both phases must report `page_flip_wait=Retired`. Failed
+captures
 reduce the stop point without native identity: smoke-child timeout, primary-card
 open, DRM client capability setup, KMS target selection, rendered-context
-creation, GBM export, retained-resource ownership, scanout-buffer import,
+creation, GBM export stage, retained-resource ownership, scanout-buffer import,
 property discovery, resource creation, request build, atomic submit,
 request-shape mismatch, page-flip reader setup, page-flip delivery,
 page-flip wait state, waiting-retire state, and resource retirement are reported
