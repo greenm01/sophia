@@ -29,7 +29,7 @@ where
     D: LibdrmNativePrimaryPlaneResourceDevice,
     B: drm::buffer::Buffer + ?Sized,
 {
-    if selection.size.width <= 0 || selection.size.height <= 0 {
+    if !is_valid_native_primary_plane_scanout_size(selection.size) {
         return LibdrmNativePrimaryPlaneResourceCreateResult {
             status: LibdrmNativePrimaryPlaneResourceCreateStatus::InvalidSelectionSize,
             resources: None,
@@ -96,7 +96,7 @@ where
     D: LibdrmNativePrimaryPlaneResourceDevice,
     B: drm::buffer::Buffer + ?Sized,
 {
-    if selection.size.width <= 0 || selection.size.height <= 0 {
+    if !is_valid_native_primary_plane_scanout_size(selection.size) {
         return LibdrmNativePrimaryPlaneResourceCreateResult {
             status: LibdrmNativePrimaryPlaneResourceCreateStatus::InvalidSelectionSize,
             resources: None,

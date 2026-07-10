@@ -52,7 +52,7 @@ fn build_native_primary_plane_atomic_request_with_scope(
     properties: LibdrmNativePrimaryPlanePropertyHandles,
     scope: LibdrmNativeAtomicCommitRequestScope,
 ) -> LibdrmNativeAtomicRequestBuildResult {
-    if !is_valid_primary_plane_request_size(objects.size) {
+    if !is_valid_native_primary_plane_scanout_size(objects.size) {
         return LibdrmNativeAtomicRequestBuildResult {
             status: LibdrmNativeAtomicRequestBuildStatus::InvalidSize,
             request: None,
@@ -101,7 +101,7 @@ fn build_native_primary_plane_atomic_request_with_scope(
 }
 
 #[cfg(feature = "libdrm-events")]
-const fn is_valid_primary_plane_request_size(size: Size) -> bool {
+pub(crate) const fn is_valid_native_primary_plane_scanout_size(size: Size) -> bool {
     size.width > 0
         && size.height > 0
         && size.width <= LIBDRM_NATIVE_PRIMARY_PLANE_MAX_SOURCE_DIMENSION

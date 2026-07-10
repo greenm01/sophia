@@ -83,6 +83,9 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Reused native primary-plane scanout size validation during resource
+  creation so oversized selected modes fail before mode-blob or framebuffer
+  allocation.
 - [x] Hardened native primary-plane atomic request building so oversized source
   dimensions fail before KMS 16.16 plane properties are emitted.
 - [x] Extended backend-live scanout tests so forged undersized-pitch descriptors

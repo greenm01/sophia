@@ -781,7 +781,7 @@ fn full_property_lookup_device() -> FakeNativePropertyLookupDevice {
     }
 }
 
-fn full_kms_selection_device() -> FakeNativeKmsSelectionDevice {
+fn kms_selection_device_with_mode_size(size: Size) -> FakeNativeKmsSelectionDevice {
     FakeNativeKmsSelectionDevice {
         connectors: Ok(vec![connector_handle()]),
         crtcs: Ok(vec![crtc_handle()]),
@@ -790,10 +790,7 @@ fn full_kms_selection_device() -> FakeNativeKmsSelectionDevice {
             true,
             Some(encoder_handle()),
             [encoder_handle()],
-            Some(Size {
-                width: 1280,
-                height: 720,
-            }),
+            Some(size),
         )),
         encoder_snapshot: Ok(LibdrmNativeEncoderSnapshot::new(
             Some(crtc_handle()),
@@ -802,6 +799,13 @@ fn full_kms_selection_device() -> FakeNativeKmsSelectionDevice {
         plane_snapshot: Ok(LibdrmNativePlaneSnapshot::new([crtc_handle()])),
         plane_type: Ok(Some(drm::control::PlaneType::Primary)),
     }
+}
+
+fn full_kms_selection_device() -> FakeNativeKmsSelectionDevice {
+    kms_selection_device_with_mode_size(Size {
+        width: 1280,
+        height: 720,
+    })
 }
 
 fn full_primary_plane_resource_device() -> FakeNativePrimaryPlaneResourceDevice {
@@ -840,6 +844,40 @@ fn scanout_descriptor(size: Size) -> sophia_renderer_live::LiveRendererScanoutBu
 fn scanout_buffer(size: Size) -> LibdrmRendererScanoutBuffer {
     LibdrmRendererScanoutBuffer::from_descriptor(scanout_descriptor(size))
         .expect("ready renderer descriptor should become a backend-private DRM buffer")
+}
+
+struct FakeDrmBuffer {
+    size: (u32, u32),
+    pitch: u32,
+    handle: drm::buffer::Handle,
+}
+
+impl FakeDrmBuffer {
+    fn xrgb8888(size: Size) -> Self {
+        Self {
+            size: (size.width as u32, size.height as u32),
+            pitch: size.width as u32 * 4,
+            handle: drm::control::from_u32(17).expect("test buffer handle should be nonzero"),
+        }
+    }
+}
+
+impl drm::buffer::Buffer for FakeDrmBuffer {
+    fn size(&self) -> (u32, u32) {
+        self.size
+    }
+
+    fn format(&self) -> drm::buffer::DrmFourcc {
+        drm::buffer::DrmFourcc::Xrgb8888
+    }
+
+    fn pitch(&self) -> u32 {
+        self.pitch
+    }
+
+    fn handle(&self) -> drm::buffer::Handle {
+        self.handle
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -4199,6 +4237,50 @@ fn native_atomic_scanout_smoke_evidence_records_reduced_early_failures() {
 
 #[test]
 fn native_libdrm_primary_plane_resources_validate_size_and_lifetime() {
+    let oversized_size = Size {
+        width: 65_536,
+        height: 720,
+    };
+    let oversized_selected =
+        select_native_primary_plane_target(&kms_selection_device_with_mode_size(oversized_size))
+            .selection
+            .expect("oversized fake KMS target should still select before resource validation");
+    let oversized_buffer = FakeDrmBuffer::xrgb8888(oversized_size);
+
+    let oversized_modeset = create_native_primary_plane_resources(
+        &FakeNativePrimaryPlaneResourceDevice {
+            mode_blob: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+            framebuffer: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+            destroy_framebuffer: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+            destroy_mode_blob: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+        },
+        oversized_selected,
+        &oversized_buffer,
+    );
+    assert_eq!(
+        oversized_modeset.status,
+        LibdrmNativePrimaryPlaneResourceCreateStatus::InvalidSelectionSize
+    );
+    assert!(oversized_modeset.resources.is_none());
+    assert!(oversized_modeset.cleanup.is_none());
+
+    let oversized_page_flip = create_native_primary_plane_page_flip_resources(
+        &FakeNativePrimaryPlaneResourceDevice {
+            mode_blob: Ok(15),
+            framebuffer: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+            destroy_framebuffer: Ok(()),
+            destroy_mode_blob: Ok(()),
+        },
+        oversized_selected,
+        &oversized_buffer,
+    );
+    assert_eq!(
+        oversized_page_flip.status,
+        LibdrmNativePrimaryPlaneResourceCreateStatus::InvalidSelectionSize
+    );
+    assert!(oversized_page_flip.resources.is_none());
+    assert!(oversized_page_flip.cleanup.is_none());
+
     let selected = select_native_primary_plane_target(&full_kms_selection_device())
         .selection
         .expect("complete KMS path should select a target");
