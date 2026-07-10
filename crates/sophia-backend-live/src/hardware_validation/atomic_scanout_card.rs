@@ -93,6 +93,32 @@ impl RealAtomicScanoutPageFlipSession {
     pub fn render_device_discovery(&self) -> io::Result<RealAtomicScanoutRenderDeviceDiscovery> {
         RealAtomicScanoutRenderDeviceDiscovery::from_card(&self.card)
     }
+
+    #[cfg(all(feature = "gbm-probe", feature = "libinput-events"))]
+    pub fn run_tick_with_native_gbm_rendered_primary_plane_scanout<P, E>(
+        &mut self,
+        runtime: &mut LiveBackendRuntimeAssembly<LiveInputReadinessGatedPoller<P>>,
+        input: CompositorBackendTickInput,
+        readiness: LiveBackendSessionLoopReadiness,
+        page_flip_budget: LiveBackendSessionLoopPageFlipBudget,
+        exporter: &mut NativeGbmRenderedScanoutBufferDiscoveryExporter<E>,
+        sender: &std::sync::mpsc::SyncSender<LivePageFlipCallback>,
+    ) -> Result<LiveBackendSessionLoopTickReport, CompositorBackendAssemblyError>
+    where
+        P: NonBlockingInputPoller,
+        E: RenderDeviceDiscoveryBackend,
+    {
+        runtime.run_session_loop_tick_with_native_gbm_rendered_primary_plane_scanout_exporter_and_native_page_flip_events_with(
+            input,
+            readiness,
+            page_flip_budget,
+            &self.card,
+            exporter,
+            &mut self.reader,
+            &mut self.poller,
+            sender,
+        )
+    }
 }
 
 #[cfg(feature = "gbm-probe")]

@@ -83,6 +83,9 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Added a production runtime-tick seam on the real atomic page-flip session
+  owner so selected DRM card, event reader, and routed poller ownership stays
+  bundled while driving native GBM rendered-primary-plane scanout.
 - [x] Switched the opt-in atomic hardware smoke from direct renderer-live
   context calls to the backend-live rendered scanout exporter seam.
 - [x] Added a render-device discovery owner for selected real atomic scanout
