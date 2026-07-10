@@ -63,6 +63,13 @@ where
             };
         }
     };
+    if mode_blob == 0 {
+        return LibdrmNativePrimaryPlaneResourceCreateResult {
+            status: LibdrmNativePrimaryPlaneResourceCreateStatus::ModeBlobCreateFailed,
+            resources: None,
+            cleanup: None,
+        };
+    }
     let Ok(framebuffer) = device.add_scanout_framebuffer(buffer, 24, 32) else {
         let cleanup = device.destroy_mode_blob(mode_blob).is_err().then(|| {
             LibdrmNativePrimaryPlaneResourceCleanup::from_mode_blob(mode_blob, selection.size)

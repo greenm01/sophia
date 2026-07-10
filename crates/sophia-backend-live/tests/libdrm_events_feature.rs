@@ -4140,6 +4140,23 @@ fn native_libdrm_primary_plane_resources_validate_size_and_lifetime() {
     assert!(invalid_format.resources.is_none());
     assert!(invalid_format.cleanup.is_none());
 
+    let zero_mode_blob = create_native_primary_plane_resources(
+        &FakeNativePrimaryPlaneResourceDevice {
+            mode_blob: Ok(0),
+            framebuffer: Ok(framebuffer_handle()),
+            destroy_framebuffer: Ok(()),
+            destroy_mode_blob: Ok(()),
+        },
+        selected,
+        &scanout_buffer(selected.size()),
+    );
+    assert_eq!(
+        zero_mode_blob.status,
+        LibdrmNativePrimaryPlaneResourceCreateStatus::ModeBlobCreateFailed
+    );
+    assert!(zero_mode_blob.resources.is_none());
+    assert!(zero_mode_blob.cleanup.is_none());
+
     let created = create_native_primary_plane_resources(
         &full_primary_plane_resource_device(),
         selected,

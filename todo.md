@@ -95,6 +95,8 @@ smoke still needs a DRM-master-capable machine.
   selection payload disagrees with its reduced selection status.
 - [x] Made native primary-plane modeset request building reject zero mode-blob
   IDs before constructing an atomic request.
+- [x] Made native primary-plane resource creation reject zero mode-blob IDs
+  before framebuffer allocation or cleanup bookkeeping.
 - [x] Split backend-live startup probe reports into render-device discovery,
   GPU startup, EGL startup, and GBM smoke-evidence modules.
 - [x] Split runtime rendered-scanout tracked reports into submit, retire,
