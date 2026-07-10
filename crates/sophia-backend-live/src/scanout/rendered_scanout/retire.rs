@@ -28,37 +28,44 @@ where
         };
     }
 
-    let mut owner = Some(submission.scanout_buffer);
-    let submitted_after_page_flip_serial = submission.submitted_after_page_flip_serial;
-    let retired = retire_native_primary_plane_scanout_after_page_flip(
-        device,
-        submission.primary_plane,
-        callback,
-    );
-    let submission =
-        retired
-            .submission
-            .map(|primary_plane| LiveRenderedPrimaryPlaneScanoutSubmission {
-                scanout_buffer: owner
-                    .take()
-                    .expect("waiting retirement should retain rendered owner"),
+    let LiveRenderedPrimaryPlaneScanoutSubmission {
+        scanout_buffer,
+        primary_plane,
+        submitted_after_page_flip_serial,
+    } = submission;
+    let retired =
+        retire_native_primary_plane_scanout_after_page_flip(device, primary_plane, callback);
+
+    if let Some(primary_plane) = retired.submission {
+        return LiveRenderedPrimaryPlaneScanoutRetireResult {
+            status: retired.status,
+            destroy: retired.destroy,
+            submission: Some(LiveRenderedPrimaryPlaneScanoutSubmission {
+                scanout_buffer,
                 primary_plane,
                 submitted_after_page_flip_serial,
-            });
-    let cleanup = retired
-        .cleanup
-        .map(|primary_plane| LiveRenderedPrimaryPlaneScanoutCleanup {
-            scanout_buffer: owner
-                .take()
-                .expect("cleanup failure should retain rendered owner"),
-            primary_plane,
-        });
+            }),
+            cleanup: None,
+        };
+    }
+
+    if let Some(primary_plane) = retired.cleanup {
+        return LiveRenderedPrimaryPlaneScanoutRetireResult {
+            status: retired.status,
+            destroy: retired.destroy,
+            submission: None,
+            cleanup: Some(LiveRenderedPrimaryPlaneScanoutCleanup {
+                scanout_buffer,
+                primary_plane,
+            }),
+        };
+    }
 
     LiveRenderedPrimaryPlaneScanoutRetireResult {
         status: retired.status,
         destroy: retired.destroy,
-        submission,
-        cleanup,
+        submission: None,
+        cleanup: None,
     }
 }
 

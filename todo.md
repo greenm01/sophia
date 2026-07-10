@@ -83,6 +83,9 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Removed panic-prone rendered-scanout owner retention from the page-flip
+  retirement path; resource ownership now moves through explicit reduced
+  branches.
 - [x] Added tick-level rendered primary-plane scanout backpressure reporting
   so the production runtime can observe waiting versus stalled page-flip state.
 - [x] Made deferred rendered-scanout submits update the backend's latest reduced
