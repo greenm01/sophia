@@ -29,6 +29,15 @@ impl LiveRendererScanoutBufferDescriptor {
             gem_handle,
         }
     }
+
+    pub const fn is_valid_scanout_buffer(self) -> bool {
+        matches!(self.status, LiveRendererScanoutBufferStatus::Ready)
+            && self.size.width > 0
+            && self.size.height > 0
+            && self.pitch > 0
+            && self.gem_handle > 0
+            && self.format == LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -104,7 +113,7 @@ impl LiveRendererScanoutBufferExporter for FakeRendererScanoutBufferExporter {
                     self.format,
                     self.gem_handle,
                 );
-                if descriptor.status == LiveRendererScanoutBufferStatus::Ready {
+                if descriptor.is_valid_scanout_buffer() {
                     LiveRendererScanoutBufferExportReport {
                         status: LiveRendererScanoutBufferExportStatus::Exported,
                         descriptor: Some(descriptor),

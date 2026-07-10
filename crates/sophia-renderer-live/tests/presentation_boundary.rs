@@ -185,6 +185,7 @@ fn renderer_scanout_buffer_descriptor_validates_scanout_shape() {
         44,
     );
     assert_eq!(ready.status, LiveRendererScanoutBufferStatus::Ready);
+    assert!(ready.is_valid_scanout_buffer());
 
     for descriptor in [
         LiveRendererScanoutBufferDescriptor::new(
@@ -225,7 +226,20 @@ fn renderer_scanout_buffer_descriptor_validates_scanout_shape() {
         ),
     ] {
         assert_eq!(descriptor.status, LiveRendererScanoutBufferStatus::Invalid);
+        assert!(!descriptor.is_valid_scanout_buffer());
     }
+
+    let forged_ready = LiveRendererScanoutBufferDescriptor {
+        status: LiveRendererScanoutBufferStatus::Ready,
+        size: Size {
+            width: -1,
+            height: 1080,
+        },
+        pitch: 1920 * 4,
+        format: LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+        gem_handle: 44,
+    };
+    assert!(!forged_ready.is_valid_scanout_buffer());
 }
 
 #[test]

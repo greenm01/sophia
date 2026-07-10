@@ -4153,6 +4153,18 @@ fn native_libdrm_renderer_scanout_buffer_rejects_invalid_renderer_descriptors() 
             .and_then(LibdrmRendererScanoutBuffer::from_descriptor)
             .is_none()
     );
+
+    let forged_ready = sophia_renderer_live::LiveRendererScanoutBufferDescriptor {
+        status: sophia_renderer_live::LiveRendererScanoutBufferStatus::Ready,
+        size: Size {
+            width: -1,
+            height: 720,
+        },
+        pitch: 1280 * 4,
+        format: LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+        gem_handle: 17,
+    };
+    assert!(LibdrmRendererScanoutBuffer::from_descriptor(forged_ready).is_none());
 }
 
 #[test]

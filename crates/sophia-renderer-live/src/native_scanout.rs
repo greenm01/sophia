@@ -2,7 +2,7 @@ use std::os::fd::AsFd;
 
 use crate::{
     LiveGbmEglFrameTargetRecord, LiveRendererScanoutBufferDescriptor,
-    LiveRendererScanoutBufferExportStatus, LiveRendererScanoutBufferStatus, Size,
+    LiveRendererScanoutBufferExportStatus, Size,
 };
 
 #[derive(Debug)]
@@ -167,12 +167,12 @@ fn reduced_native_owned_scanout_buffer_export_report(
             buffer.format(),
             buffer.gem_handle(),
         );
-        (descriptor.status == LiveRendererScanoutBufferStatus::Ready).then_some(
-            NativeGbmOwnedScanoutBuffer {
+        descriptor
+            .is_valid_scanout_buffer()
+            .then_some(NativeGbmOwnedScanoutBuffer {
                 descriptor,
                 _buffer: buffer,
-            },
-        )
+            })
     });
     NativeGbmOwnedScanoutBufferExportReport { status, buffer }
 }

@@ -12,12 +12,7 @@ pub struct LibdrmRendererScanoutBuffer {
 #[cfg(feature = "libdrm-events")]
 impl LibdrmRendererScanoutBuffer {
     pub fn from_descriptor(descriptor: LiveRendererScanoutBufferDescriptor) -> Option<Self> {
-        if descriptor.status != LiveRendererScanoutBufferStatus::Ready
-            || descriptor.format != LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888
-            || descriptor.size.width <= 0
-            || descriptor.size.height <= 0
-            || descriptor.pitch == 0
-        {
+        if !descriptor.is_valid_scanout_buffer() {
             return None;
         }
 
