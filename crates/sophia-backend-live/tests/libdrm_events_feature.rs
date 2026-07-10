@@ -5050,33 +5050,18 @@ mod atomic_scanout_hardware_smoke {
         );
         let mut poller = NativeLibdrmPageFlipEventPoller::new(source)
             .with_routes([LibdrmNativeOutputRoute { slot, output }]);
-        let (sender, receiver) = mpsc::sync_channel(1);
-        let poll = poller.read_and_poll_page_flip_events(&mut reader, &sender, 1, 1);
-        let callback = receiver.try_recv().ok();
         let mut intake = LivePageFlipCallbackIntake::new(output);
-        let mut submission = Some(submission);
-        let mut callback_report = None;
-        let mut retired = None;
-        if let Some(callback) = callback {
-            let report = intake.observe(callback);
-            retired = Some(retire_native_primary_plane_scanout_after_page_flip(
-                &card,
-                submission
-                    .take()
-                    .expect("callback path should still own submitted resources"),
-                &report,
-            ));
-            callback_report = Some(report);
-        }
+        let page_flip =
+            wait_for_page_flip_retirement(&card, &mut reader, &mut poller, &mut intake, submission);
 
         let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
             scanout_target,
             Some(rendered_context),
             export.status,
             Some(&submit),
-            Some(&poll.poll),
-            callback_report.as_ref(),
-            retired.as_ref(),
+            Some(&page_flip.poll),
+            page_flip.callback_report.as_ref(),
+            page_flip.retired.as_ref(),
         );
         println!("{}", evidence.reduced_log_line());
         assert_eq!(
@@ -5139,23 +5124,13 @@ mod atomic_scanout_hardware_smoke {
             .take()
             .expect("steady-state submitted scanout should retain resources");
 
-        let (steady_sender, steady_receiver) = mpsc::sync_channel(1);
-        let steady_poll = poller.read_and_poll_page_flip_events(&mut reader, &steady_sender, 1, 1);
-        let steady_callback = steady_receiver.try_recv().ok();
-        let mut steady_submission = Some(steady_submission);
-        let mut steady_callback_report = None;
-        let mut steady_retired = None;
-        if let Some(callback) = steady_callback {
-            let report = intake.observe(callback);
-            steady_retired = Some(retire_native_primary_plane_scanout_after_page_flip(
-                &card,
-                steady_submission
-                    .take()
-                    .expect("steady callback path should still own submitted resources"),
-                &report,
-            ));
-            steady_callback_report = Some(report);
-        }
+        let steady_page_flip = wait_for_page_flip_retirement(
+            &card,
+            &mut reader,
+            &mut poller,
+            &mut intake,
+            steady_submission,
+        );
 
         let steady_evidence =
             LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
@@ -5163,9 +5138,9 @@ mod atomic_scanout_hardware_smoke {
                 Some(rendered_context),
                 steady_export.status,
                 Some(&steady_submit),
-                Some(&steady_poll.poll),
-                steady_callback_report.as_ref(),
-                steady_retired.as_ref(),
+                Some(&steady_page_flip.poll),
+                steady_page_flip.callback_report.as_ref(),
+                steady_page_flip.retired.as_ref(),
             );
         println!("{}", steady_evidence.reduced_log_line());
         assert_eq!(
@@ -5173,6 +5148,61 @@ mod atomic_scanout_hardware_smoke {
             LibdrmNativeAtomicScanoutSmokeStatus::Passed
         );
         drop(steady_owned_buffer);
+    }
+
+    struct RealAtomicPageFlipWaitReport {
+        poll: LibdrmPageFlipEventPollReport,
+        callback_report: Option<LivePageFlipCallbackReport>,
+        retired: Option<LibdrmNativePrimaryPlaneScanoutRetireResult>,
+    }
+
+    fn wait_for_page_flip_retirement(
+        card: &RealDrmCard,
+        reader: &mut NativeLibdrmPageFlipEventReader<RealDrmCard>,
+        poller: &mut NativeLibdrmPageFlipEventPoller,
+        intake: &mut LivePageFlipCallbackIntake,
+        submission: LibdrmNativePrimaryPlaneScanoutSubmission,
+    ) -> RealAtomicPageFlipWaitReport {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut submission = Some(submission);
+        let mut last_poll = LibdrmNativeReadLoopReport::idle().into_poll_report();
+
+        loop {
+            let report = poller.read_and_poll_page_flip_events(reader, &sender, 4, 1);
+            last_poll = report.poll;
+
+            if let Ok(callback) = receiver.try_recv() {
+                let callback_report = intake.observe(callback);
+                let retired = retire_native_primary_plane_scanout_after_page_flip(
+                    card,
+                    submission
+                        .take()
+                        .expect("callback path should still own submitted resources"),
+                    &callback_report,
+                );
+                return RealAtomicPageFlipWaitReport {
+                    poll: last_poll,
+                    callback_report: Some(callback_report),
+                    retired: Some(retired),
+                };
+            }
+
+            if matches!(
+                last_poll.status,
+                LibdrmPageFlipEventPollStatus::Disconnected
+                    | LibdrmPageFlipEventPollStatus::Backpressure
+            ) || Instant::now() >= deadline
+            {
+                return RealAtomicPageFlipWaitReport {
+                    poll: last_poll,
+                    callback_report: None,
+                    retired: None,
+                };
+            }
+
+            std::thread::sleep(Duration::from_millis(5));
+        }
     }
 
     fn first_openable_primary_card_node() -> Option<PathBuf> {

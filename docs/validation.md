@@ -103,8 +103,10 @@ clears a GBM surface, locks the rendered front buffer, submits a primary-plane
 atomic modeset, waits for reduced page-flip evidence, and retires the submitted
 framebuffer resources. It then exports a second rendered front buffer and
 submits it through the steady-state page-flip policy, proving the post-modeset
-path without `ALLOW_MODESET`. Without that environment variable, the test
-returns early and never opens or modesets hardware.
+path without `ALLOW_MODESET`. Each submitted phase waits within a bounded
+deadline for native page-flip evidence before reducing the final smoke record.
+Without that environment variable, the test returns early and never opens or
+modesets hardware.
 The stable evidence shape for that run is the
 `sophia_atomic_scanout_evidence` line pair: schema version, phase, overall
 status, rendered context status, GBM export status, primary-plane submit

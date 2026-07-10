@@ -75,6 +75,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Made the opt-in atomic hardware smoke wait within a bounded deadline for
+  native page-flip evidence instead of sampling the nonblocking fd once.
 - [x] Extended atomic scanout evidence to schema 3 so a passing hardware capture
   must prove both initial modeset presentation and steady-state page-flip
   presentation.

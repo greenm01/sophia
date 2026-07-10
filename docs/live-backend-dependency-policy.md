@@ -294,8 +294,11 @@ lifetime until a real presentation event arrives.
 The opt-in atomic hardware smoke ties these seams together in a child process:
 primary card open, DRM atomic client capability setup, rendered GBM front-buffer
 export from the duplicated fd namespace, primary-plane submit, native page-flip
-read, reduced callback validation, and resource retirement. Default validation
-never opens or modesets real hardware.
+read, reduced callback validation, and resource retirement. The smoke waits
+within a bounded deadline for native page-flip evidence in both the initial
+modeset and steady-state page-flip phases; a one-shot nonblocking read is not
+enough to prove production scanout timing. Default validation never opens or
+modesets real hardware.
 When a KMS target has already been selected to size a rendered frame target,
 primary-plane submit must consume that same reduced target snapshot rather than
 selecting again. Reselecting after rendering can race connector, mode, or plane
