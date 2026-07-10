@@ -4,11 +4,15 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
     if args.iter().any(|arg| arg == "x-authority-xclock-smoke") {
         let report = run_x_authority_xclock_smoke()?;
         println!(
-            "x-authority-xclock-smoke display={} status={} stdout_bytes={} stderr_bytes={} transactions={} runtime_committed={} runtime_surfaces={} first_error={}",
+            "x-authority-xclock-smoke display={} outcome={} status={} stdout_bytes={} stderr_bytes={} requests={} opcode_count={} opcodes={} transactions={} runtime_committed={} runtime_surfaces={} first_error={}",
             report.display,
+            report.outcome,
             report.status,
             report.stdout_bytes,
             report.stderr_bytes,
+            report.requests,
+            report.opcode_count,
+            report.opcodes,
             report.transactions,
             report.runtime_committed,
             report.runtime_surfaces,
@@ -203,9 +207,13 @@ struct XAuthorityXlibPutImageSmokeReport {
 #[derive(Clone, Debug)]
 struct XAuthorityXclockSmokeReport {
     display: String,
+    outcome: String,
     status: i32,
     stdout_bytes: usize,
     stderr_bytes: usize,
+    requests: usize,
+    opcode_count: usize,
+    opcodes: String,
     transactions: usize,
     runtime_committed: u64,
     runtime_surfaces: u64,
@@ -583,29 +591,27 @@ fn run_x_authority_xclock_smoke() -> Result<XAuthorityXclockSmokeReport, Box<dyn
 {
     let (display, socket_path) = temp_xauthority_display(6600)?;
     let server_path = socket_path.clone();
-    let (sender, receiver) = sync_channel(32);
+    let (sender, receiver) = sync_channel(256);
     let server = std::thread::spawn(move || {
-        run_x11_core_socket_server_once_observed(
-            &server_path,
-            NamespaceId::from_raw(48),
-            |result| {
-                for output in &result.outputs {
-                    if let XClientOutput::Error(error) = output {
-                        let _ = sender.try_send(XclockObservation::Error(format!(
-                            "{:?}:major={}:resource={:#x}",
-                            error.code, error.major_code, error.resource_id
-                        )));
-                    }
+        run_x11_core_socket_server_once_traced(&server_path, NamespaceId::from_raw(48), |trace| {
+            let _ = sender.try_send(XclockObservation::Opcode(trace.major_opcode));
+            for output in &trace.result.outputs {
+                if let XClientOutput::Error(error) = output {
+                    let _ = sender.try_send(XclockObservation::Error(format!(
+                        "{:?}:major={}:resource={:#x}",
+                        error.code, error.major_code, error.resource_id
+                    )));
                 }
-                if let Some(response) = &result.response {
-                    if !response.transactions.is_empty() {
-                        let _ = sender.try_send(XclockObservation::Transactions(
-                            response.transactions.clone(),
-                        ));
-                    }
+            }
+            if let Some(response) = &trace.result.response {
+                if !response.transactions.is_empty() {
+                    let _ = sender.try_send(XclockObservation::Transactions(
+                        response.transactions.clone(),
+                    ));
                 }
-            },
-        )
+            }
+            Ok(())
+        })
     });
     wait_for_socket_path(&socket_path)?;
 
@@ -623,10 +629,16 @@ fn run_x_authority_xclock_smoke() -> Result<XAuthorityXclockSmokeReport, Box<dyn
     let deadline = std::time::Instant::now() + Duration::from_secs(4);
     let mut transactions = Vec::new();
     let mut first_error = None;
+    let mut opcodes = std::collections::BTreeSet::new();
+    let mut requests = 0usize;
 
     while std::time::Instant::now() < deadline {
         while let Ok(observation) = receiver.try_recv() {
             match observation {
+                XclockObservation::Opcode(opcode) => {
+                    requests = requests.saturating_add(1);
+                    opcodes.insert(opcode);
+                }
                 XclockObservation::Transactions(batch) => transactions.extend(batch),
                 XclockObservation::Error(error) => {
                     first_error.get_or_insert(error);
@@ -642,8 +654,10 @@ fn run_x_authority_xclock_smoke() -> Result<XAuthorityXclockSmokeReport, Box<dyn
         std::thread::sleep(Duration::from_millis(10));
     }
 
+    let mut proof_window_killed = false;
     if child.try_wait()?.is_none() {
         let _ = child.kill();
+        proof_window_killed = true;
     }
     let output = child.wait_with_output()?;
     let status = output.status.code().unwrap_or(-1);
@@ -656,6 +670,10 @@ fn run_x_authority_xclock_smoke() -> Result<XAuthorityXclockSmokeReport, Box<dyn
 
     while let Ok(observation) = receiver.try_recv() {
         match observation {
+            XclockObservation::Opcode(opcode) => {
+                requests = requests.saturating_add(1);
+                opcodes.insert(opcode);
+            }
             XclockObservation::Transactions(batch) => transactions.extend(batch),
             XclockObservation::Error(error) => {
                 first_error.get_or_insert(error);
@@ -685,11 +703,29 @@ fn run_x_authority_xclock_smoke() -> Result<XAuthorityXclockSmokeReport, Box<dyn
         .into());
     }
 
+    let outcome = if proof_window_killed {
+        "proof_window_killed"
+    } else if output.status.success() {
+        "client_exited_success"
+    } else {
+        "client_exited_failure"
+    };
+    let opcode_count = opcodes.len();
+    let opcodes = opcodes
+        .iter()
+        .map(u8::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+
     Ok(XAuthorityXclockSmokeReport {
         display,
+        outcome: outcome.to_owned(),
         status,
         stdout_bytes: output.stdout.len(),
         stderr_bytes: output.stderr.len(),
+        requests,
+        opcode_count,
+        opcodes,
         transactions: transactions.len(),
         runtime_committed: runtime_state.authority_transactions_committed,
         runtime_surfaces: runtime_state.authority_surfaces_applied,
@@ -699,6 +735,7 @@ fn run_x_authority_xclock_smoke() -> Result<XAuthorityXclockSmokeReport, Box<dyn
 
 #[derive(Clone, Debug)]
 enum XclockObservation {
+    Opcode(u8),
     Transactions(Vec<SurfaceTransaction>),
     Error(String),
 }

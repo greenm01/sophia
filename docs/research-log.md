@@ -11,7 +11,8 @@ transactions. The compatibility work stayed probe-driven: xclock added bounded
 font replies, pixmap/copy handling, subwindow mapping exposure, and core draw
 transactions for the line, segment, and polygon opcodes it actually used.
 
-The passing reduced evidence was `transactions=7`, `runtime_committed=7`,
+The passing reduced evidence was `outcome=proof_window_killed`,
+`requests=95`, `opcode_count=21`, `transactions=7`, `runtime_committed=7`,
 `runtime_surfaces=7`, and `first_error=none`; the harness kills xclock after
 the proof window because the client is intentionally long-running.
 

@@ -42,7 +42,7 @@ mod prelude {
         XSelectionChangeKind as XAuthoritySelectionChangeKind, read_x_authority_response,
         run_x_authority_socket_server_once, run_x11_core_socket_server_once,
         run_x11_core_socket_server_once_channel, run_x11_core_socket_server_once_observed,
-        write_x_authority_request,
+        run_x11_core_socket_server_once_traced, write_x_authority_request,
     };
     pub(crate) use sophia_x_bridge::{
         ClipboardSelectionFailureRequest, TestClientConfig, XMirrorState, XSelectionChangeKind,

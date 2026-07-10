@@ -16,6 +16,19 @@ cargo fmt --check
 cargo test --workspace --offline
 ```
 
+For Sophia X Authority compatibility changes, also run the focused wire suite
+and the real-client smoke that exercises the touched path:
+
+```sh
+cargo test --offline -q -p sophia-x-authority --test x11_wire
+cargo run --offline -q -p sophia-cli -- x-authority-xclock-smoke
+```
+
+`x-authority-xclock-smoke` is a regression smoke, not a full X server
+conformance test. Its reduced output must keep `first_error=none`, report the
+proof-window outcome explicitly, and include request/opcode counters so future
+client-driven regressions show which compatibility surface changed.
+
 The optional renderer-native features have extra local checks:
 
 ```sh

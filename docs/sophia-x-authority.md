@@ -391,6 +391,9 @@ draw transactions for line, segment, polygon, rectangle, image, and copy damage.
 
 The passing proof reached mapped exposure and seven Engine/Runtime committed
 authority transactions with no X protocol error before the harness killed the
-long-running xclock process. The authority still does not become a full X
-server: unsupported requests remain fail-closed, and only reduced transaction
-facts cross into runtime.
+long-running xclock process. Its reduced report now includes the explicit
+`outcome=proof_window_killed`, total request count, unique major-opcode count,
+and sorted major-opcode list, so future regressions show which compatibility
+surface changed without exposing XIDs or namespace IDs. The authority still does
+not become a full X server: unsupported requests remain fail-closed, and only
+reduced transaction facts cross into runtime.

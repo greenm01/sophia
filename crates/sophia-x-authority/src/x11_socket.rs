@@ -41,6 +41,14 @@ impl core::fmt::Display for X11SetupSocketError {
 impl std::error::Error for X11SetupSocketError {}
 
 #[cfg(unix)]
+#[derive(Clone, Copy, Debug)]
+pub struct X11CoreDispatchTrace<'a> {
+    pub sequence: u16,
+    pub major_opcode: u8,
+    pub result: &'a XDispatchResult,
+}
+
+#[cfg(unix)]
 pub fn run_x11_setup_socket_server_once(path: impl AsRef<Path>) -> Result<(), X11SetupSocketError> {
     let path = path.as_ref();
     match std::fs::remove_file(path) {
@@ -83,10 +91,20 @@ pub fn run_x11_core_socket_server_once_observed(
     namespace: NamespaceId,
     mut observer: impl FnMut(&XDispatchResult),
 ) -> Result<(), X11SetupSocketError> {
-    run_x11_core_socket_server_once_with_observer(path, namespace, move |result| {
+    run_x11_core_socket_server_once_traced(path, namespace, move |trace| {
+        let result = trace.result;
         observer(result);
         Ok(())
     })
+}
+
+#[cfg(unix)]
+pub fn run_x11_core_socket_server_once_traced(
+    path: impl AsRef<Path>,
+    namespace: NamespaceId,
+    observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
+) -> Result<(), X11SetupSocketError> {
+    run_x11_core_socket_server_once_with_trace_observer(path, namespace, observer)
 }
 
 #[cfg(unix)]
@@ -104,7 +122,18 @@ pub fn run_x11_core_socket_server_once_channel(
 fn run_x11_core_socket_server_once_with_observer(
     path: impl AsRef<Path>,
     namespace: NamespaceId,
-    observer: impl FnMut(&XDispatchResult) -> Result<(), X11SetupSocketError>,
+    mut observer: impl FnMut(&XDispatchResult) -> Result<(), X11SetupSocketError>,
+) -> Result<(), X11SetupSocketError> {
+    run_x11_core_socket_server_once_with_trace_observer(path, namespace, move |trace| {
+        observer(trace.result)
+    })
+}
+
+#[cfg(unix)]
+fn run_x11_core_socket_server_once_with_trace_observer(
+    path: impl AsRef<Path>,
+    namespace: NamespaceId,
+    observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
     let path = path.as_ref();
     match std::fs::remove_file(path) {
@@ -130,7 +159,7 @@ fn run_x11_core_socket_server_once_with_observer(
             path.display()
         ))
     })?;
-    serve_x11_core_socket_client_with_observer(&mut stream, namespace, observer)
+    serve_x11_core_socket_client_with_trace_observer(&mut stream, namespace, observer)
 }
 
 #[cfg(unix)]
@@ -179,6 +208,17 @@ fn serve_x11_core_socket_client_with_observer(
     namespace: NamespaceId,
     mut observer: impl FnMut(&XDispatchResult) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
+    serve_x11_core_socket_client_with_trace_observer(stream, namespace, move |trace| {
+        observer(trace.result)
+    })
+}
+
+#[cfg(unix)]
+fn serve_x11_core_socket_client_with_trace_observer(
+    stream: &mut UnixStream,
+    namespace: NamespaceId,
+    mut observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
+) -> Result<(), X11SetupSocketError> {
     let setup = serve_x11_setup_socket_client(stream)?;
     let mut runtime = XAuthorityRuntime::new();
     let mut atoms = XAtomTable::new();
@@ -210,7 +250,11 @@ fn serve_x11_core_socket_client_with_observer(
             ),
             Err(error) => dispatch_x11_parse_error(dispatch_context, error),
         };
-        observer(&output)?;
+        observer(X11CoreDispatchTrace {
+            sequence,
+            major_opcode,
+            result: &output,
+        })?;
         for record in output.encoded_outputs(setup.byte_order) {
             stream.write_all(&record).map_err(|error| {
                 X11SetupSocketError::new(format!("failed to write X11 output: {error}"))
