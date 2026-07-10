@@ -19,6 +19,7 @@ pub(crate) use crate::scanout::*;
 pub(crate) use crate::session_loop::*;
 pub(crate) use crate::startup::*;
 
+pub(crate) use sophia_protocol::TransactionOutcome;
 #[cfg(feature = "gbm-probe")]
 pub(crate) use sophia_renderer_live::GbmCapabilityProbeStatus;
 #[cfg(feature = "egl-probe")]

@@ -226,6 +226,11 @@ impl LiveAtomicScanoutCommitReport {
                     LiveAtomicScanoutCommitStatus::WaitingForTransactionReadiness
                 }
                 PageFlipCommitOutcome::Committed { .. } => LiveAtomicScanoutCommitStatus::Committed,
+                PageFlipCommitOutcome::Rejected { commit, .. }
+                    if commit.outcome == TransactionOutcome::TimedOut =>
+                {
+                    LiveAtomicScanoutCommitStatus::TimedOut
+                }
                 PageFlipCommitOutcome::Rejected { .. } => LiveAtomicScanoutCommitStatus::Rejected,
             },
             page_flip: LivePageFlipEvent::from_commit_outcome(outcome),
@@ -280,6 +285,7 @@ pub enum LiveAtomicScanoutCommitStatus {
     WaitingForOutput,
     WaitingForTransactionReadiness,
     Committed,
+    TimedOut,
     Rejected,
 }
 

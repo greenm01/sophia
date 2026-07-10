@@ -83,6 +83,9 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Added a reduced `TimedOut` atomic scanout commit status so slow-client
+  fail-closed commits are visible without being flattened into generic
+  rejection.
 - [x] Made the page-flip commit gate clear timed-out surface transactions
   without changing committed visuals, preventing a slow client from blocking
   future atomic commits indefinitely.

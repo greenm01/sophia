@@ -1693,6 +1693,23 @@ fn atomic_scanout_commit_report_reduces_page_flip_outcomes() {
         }
     );
     assert_eq!(
+        LiveAtomicScanoutCommitReport::from_page_flip_outcome(&PageFlipCommitOutcome::Rejected {
+            frame_serial: 93,
+            commit: TransactionCommit {
+                transaction: TransactionId::from_raw(60),
+                outcome: TransactionOutcome::TimedOut,
+                applied_surfaces: Vec::new(),
+            },
+        }),
+        LiveAtomicScanoutCommitReport {
+            status: LiveAtomicScanoutCommitStatus::TimedOut,
+            page_flip: LivePageFlipEvent {
+                status: LivePageFlipEventStatus::Rejected,
+                frame_serial: Some(93),
+            },
+        }
+    );
+    assert_eq!(
         LiveAtomicScanoutCommitReport::from_page_flip_outcome(
             &PageFlipCommitOutcome::WaitingForTransactionReadiness {
                 transaction: TransactionId::from_raw(59),
@@ -1776,6 +1793,17 @@ fn fake_atomic_scanout_committer_counts_only_committed_outcomes() {
         },
     });
     assert_eq!(rejected.status, LiveAtomicScanoutCommitStatus::Rejected);
+    assert_eq!(committer.committed_count(), 1);
+
+    let timed_out = committer.commit_atomic_scanout(&PageFlipCommitOutcome::Rejected {
+        frame_serial: 93,
+        commit: TransactionCommit {
+            transaction: TransactionId::from_raw(60),
+            outcome: TransactionOutcome::TimedOut,
+            applied_surfaces: Vec::new(),
+        },
+    });
+    assert_eq!(timed_out.status, LiveAtomicScanoutCommitStatus::TimedOut);
     assert_eq!(committer.committed_count(), 1);
 }
 
