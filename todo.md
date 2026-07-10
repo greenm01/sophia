@@ -83,6 +83,8 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Added a negative atomic scanout evidence fixture proving the shell verifier
+  rejects missing rendered-context readiness.
 - [x] Aligned Rust atomic scanout smoke evidence with the shell verifier so
   missing rendered-context readiness fails before GBM export can pass.
 - [x] Normalized renderer-live native GBM scanout export reports so an exported
