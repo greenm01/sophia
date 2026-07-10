@@ -4252,6 +4252,14 @@ fn native_atomic_scanout_smoke_evidence_records_reduced_early_failures() {
         LibdrmNativeAtomicScanoutSmokeStatus::NoPrimaryCard
     );
     assert_eq!(
+        LibdrmNativeAtomicScanoutSmokeEvidence::primary_card_open_failed().status,
+        LibdrmNativeAtomicScanoutSmokeStatus::PrimaryCardOpenFailed
+    );
+    assert_eq!(
+        LibdrmNativeAtomicScanoutSmokeEvidence::client_capability_failed().status,
+        LibdrmNativeAtomicScanoutSmokeStatus::ClientCapabilityFailed
+    );
+    assert_eq!(
         LibdrmNativeAtomicScanoutSmokeEvidence::kms_selection_failed().status,
         LibdrmNativeAtomicScanoutSmokeStatus::KmsSelectionFailed
     );
@@ -4293,6 +4301,42 @@ fn native_atomic_scanout_smoke_evidence_records_reduced_early_failures() {
         )
         .status,
         LibdrmNativeAtomicScanoutSmokeStatus::RenderedContextUnavailable
+    );
+
+    let mut retained_resource_missing =
+        LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+            LiveKmsScanoutTargetStatus::Ready,
+            Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
+            LiveRendererScanoutBufferExportStatus::Exported,
+            None,
+            None,
+            None,
+            None,
+        );
+    retained_resource_missing.status =
+        LibdrmNativeAtomicScanoutSmokeStatus::RetainedResourceMissing;
+    assert!(
+        retained_resource_missing
+            .reduced_log_line()
+            .contains("status=RetainedResourceMissing")
+    );
+
+    let mut page_flip_reader_unavailable =
+        LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+            LiveKmsScanoutTargetStatus::Ready,
+            Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
+            LiveRendererScanoutBufferExportStatus::Exported,
+            None,
+            None,
+            None,
+            None,
+        );
+    page_flip_reader_unavailable.status =
+        LibdrmNativeAtomicScanoutSmokeStatus::PageFlipReaderUnavailable;
+    assert!(
+        page_flip_reader_unavailable
+            .reduced_log_line()
+            .contains("status=PageFlipReaderUnavailable")
     );
 }
 
@@ -5952,21 +5996,32 @@ mod atomic_scanout_hardware_smoke {
             let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::no_primary_card();
             fail_atomic_scanout_smoke(evidence);
         };
-        let card = RealDrmCard::open(&card_path).expect("primary DRM card should open read/write");
+        let card = match RealDrmCard::open(&card_path) {
+            Ok(card) => card,
+            Err(_) => {
+                let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::primary_card_open_failed();
+                fail_atomic_scanout_smoke(evidence);
+            }
+        };
 
-        drm::Device::set_client_capability(&card, drm::ClientCapability::UniversalPlanes, true)
-            .expect("primary DRM card should accept UniversalPlanes client capability");
-        drm::Device::set_client_capability(&card, drm::ClientCapability::Atomic, true)
-            .expect("primary DRM card should accept Atomic client capability");
+        if drm::Device::set_client_capability(&card, drm::ClientCapability::UniversalPlanes, true)
+            .is_err()
+            || drm::Device::set_client_capability(&card, drm::ClientCapability::Atomic, true)
+                .is_err()
+        {
+            let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::client_capability_failed();
+            fail_atomic_scanout_smoke(evidence);
+        }
 
         let selection = select_native_primary_plane_target(&card);
         if selection.status != LibdrmNativePrimaryPlaneSelectionStatus::Selected {
             let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::kms_selection_failed();
             fail_atomic_scanout_smoke(evidence);
         }
-        let selected = selection
-            .selection
-            .expect("real KMS target selection should produce primary-plane target");
+        let Some(selected) = selection.selection else {
+            let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::kms_selection_failed();
+            fail_atomic_scanout_smoke(evidence);
+        };
         let slot = LibdrmNativeOutputSlot::new(1).expect("slot one should be valid");
         let output = OutputId::from_raw(1);
         let target = LiveGbmEglFrameTargetRecord::new(selected.size());
@@ -6040,9 +6095,19 @@ mod atomic_scanout_hardware_smoke {
             );
             fail_atomic_scanout_smoke(evidence);
         }
-        let owned_buffer = export
-            .buffer
-            .expect("real GBM scanout export should retain owned buffer");
+        let Some(owned_buffer) = export.buffer else {
+            let mut evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+                scanout_target,
+                Some(rendered_context),
+                export.status,
+                None,
+                None,
+                None,
+                None,
+            );
+            evidence.status = LibdrmNativeAtomicScanoutSmokeStatus::RetainedResourceMissing;
+            fail_atomic_scanout_smoke(evidence);
+        };
 
         let mut submit = submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor(
             &card,
@@ -6065,16 +6130,37 @@ mod atomic_scanout_hardware_smoke {
             );
             fail_atomic_scanout_smoke(evidence);
         }
-        let submission = submit
-            .submission
-            .take()
-            .expect("submitted scanout should retain resources");
+        let Some(submission) = submit.submission.take() else {
+            let mut evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+                scanout_target,
+                Some(rendered_context),
+                export.status,
+                Some(&submit),
+                None,
+                None,
+                None,
+            );
+            evidence.status = LibdrmNativeAtomicScanoutSmokeStatus::RetainedResourceMissing;
+            fail_atomic_scanout_smoke(evidence);
+        };
 
-        let mut reader = NativeLibdrmPageFlipEventReader::new(
-            card.try_clone()
-                .expect("page-flip reader should clone the DRM card fd"),
-        )
-        .with_crtc_routes([selected.crtc_route(slot)]);
+        let mut reader = match card.try_clone() {
+            Ok(card) => NativeLibdrmPageFlipEventReader::new(card)
+                .with_crtc_routes([selected.crtc_route(slot)]),
+            Err(_) => {
+                let mut evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+                    scanout_target,
+                    Some(rendered_context),
+                    export.status,
+                    Some(&submit),
+                    None,
+                    None,
+                    None,
+                );
+                evidence.status = LibdrmNativeAtomicScanoutSmokeStatus::PageFlipReaderUnavailable;
+                fail_atomic_scanout_smoke(evidence);
+            }
+        };
         let source = LibdrmNativePageFlipSource::from_authority(
             LibdrmBackendFdAuthority::new(1).expect("nonzero authority generation should mint"),
         );
@@ -6109,9 +6195,20 @@ mod atomic_scanout_hardware_smoke {
             );
             fail_atomic_scanout_smoke(evidence);
         }
-        let steady_owned_buffer = steady_export
-            .buffer
-            .expect("real steady-state GBM scanout export should retain owned buffer");
+        let Some(steady_owned_buffer) = steady_export.buffer else {
+            let mut evidence =
+                LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
+                    scanout_target,
+                    Some(rendered_context),
+                    steady_export.status,
+                    None,
+                    None,
+                    None,
+                    None,
+                );
+            evidence.status = LibdrmNativeAtomicScanoutSmokeStatus::RetainedResourceMissing;
+            fail_atomic_scanout_smoke(evidence);
+        };
 
         let mut steady_submit =
             submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_policy(
@@ -6137,10 +6234,20 @@ mod atomic_scanout_hardware_smoke {
             );
             fail_atomic_scanout_smoke(evidence);
         }
-        let steady_submission = steady_submit
-            .submission
-            .take()
-            .expect("steady-state submitted scanout should retain resources");
+        let Some(steady_submission) = steady_submit.submission.take() else {
+            let mut evidence =
+                LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
+                    scanout_target,
+                    Some(rendered_context),
+                    steady_export.status,
+                    Some(&steady_submit),
+                    None,
+                    None,
+                    None,
+                );
+            evidence.status = LibdrmNativeAtomicScanoutSmokeStatus::RetainedResourceMissing;
+            fail_atomic_scanout_smoke(evidence);
+        };
 
         let steady_page_flip = wait_for_page_flip_retirement(
             &card,

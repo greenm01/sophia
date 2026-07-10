@@ -83,6 +83,9 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Reduced additional atomic hardware-smoke setup failures, including primary
+  card open, DRM client capability setup, retained-resource ownership, and
+  page-flip reader setup, instead of losing evidence to raw panics.
 - [x] Made the standalone atomic scanout preflight helper verify its reduced log
   and exit nonzero unless the host is ready for the DRM-master smoke.
 - [x] Tightened atomic scanout preflight verification so hardware-smoke readiness

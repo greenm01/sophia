@@ -102,6 +102,50 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
         }
     }
 
+    pub const fn primary_card_open_failed() -> Self {
+        Self {
+            phase: LibdrmNativeAtomicScanoutSmokePhase::InitialModeset,
+            status: LibdrmNativeAtomicScanoutSmokeStatus::PrimaryCardOpenFailed,
+            scanout_target: None,
+            rendered_context: None,
+            gbm_export: None,
+            scanout_buffer: None,
+            properties: None,
+            resources: None,
+            request: None,
+            submit: None,
+            request_scope: None,
+            commit_flags: None,
+            page_flip_poll: None,
+            page_flip: None,
+            retire: None,
+            retire_destroy: None,
+            retire_cleanup_pending: false,
+        }
+    }
+
+    pub const fn client_capability_failed() -> Self {
+        Self {
+            phase: LibdrmNativeAtomicScanoutSmokePhase::InitialModeset,
+            status: LibdrmNativeAtomicScanoutSmokeStatus::ClientCapabilityFailed,
+            scanout_target: None,
+            rendered_context: None,
+            gbm_export: None,
+            scanout_buffer: None,
+            properties: None,
+            resources: None,
+            request: None,
+            request_scope: None,
+            submit: None,
+            commit_flags: None,
+            page_flip_poll: None,
+            page_flip: None,
+            retire: None,
+            retire_destroy: None,
+            retire_cleanup_pending: false,
+        }
+    }
+
     pub const fn kms_selection_failed() -> Self {
         Self {
             phase: LibdrmNativeAtomicScanoutSmokePhase::InitialModeset,
@@ -286,16 +330,20 @@ impl LibdrmNativeAtomicScanoutSmokePhase {
 pub enum LibdrmNativeAtomicScanoutSmokeStatus {
     Passed,
     NoPrimaryCard,
+    PrimaryCardOpenFailed,
+    ClientCapabilityFailed,
     KmsSelectionFailed,
     KmsTargetUnavailable,
     RenderedContextUnavailable,
     GbmExportFailed,
     ScanoutBufferUnavailable,
+    RetainedResourceMissing,
     PropertyDiscoveryFailed,
     ResourceCreationFailed,
     RequestBuildFailed,
     AtomicSubmitFailed,
     RequestShapeMismatch,
+    PageFlipReaderUnavailable,
     PageFlipMissing,
     RetireFailed,
 }

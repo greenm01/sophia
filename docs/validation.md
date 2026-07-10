@@ -124,9 +124,11 @@ atomic request build status, primary-plane submit status, reduced request scope,
 page-flip poll status, reduced commit flags, page-flip event status, retirement
 status, retire-time resource destroy status, and retire-time cleanup-pending status only. A passing
 capture must contain both `InitialModeset` and `SteadyPageFlip`. Failed captures
-reduce the stop point without native identity: property discovery, resource
-creation, request build, scanout-buffer import, atomic submit, and request-shape
-mismatches are reported separately.
+reduce the stop point without native identity: primary-card open, DRM client
+capability setup, KMS target selection, rendered-context creation, GBM export,
+retained-resource ownership, scanout-buffer import, property discovery, resource
+creation, request build, atomic submit, request-shape mismatch, page-flip reader
+setup, page-flip delivery, and resource retirement are reported separately.
 The stable evidence shape for the GBM/EGL renderer smoke is
 `LiveRealGbmSmokeEvidence`: status, draw status, presentation status, and
 frame-target allocation status only.
