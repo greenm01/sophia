@@ -106,6 +106,8 @@ smoke still needs a DRM-master-capable machine.
   production command source and into integration tests.
 - [x] Added runtime output-size observation so page-flip readiness fails closed
   after an output resize until the GBM frame target matches the new size.
+- [x] Cleared stale GBM frame-target allocation evidence when output size
+  changes, while retaining it for identical-size observations.
 - [x] Made the opt-in atomic hardware smoke retain the renderer-owned GBM
   front-buffer owner with the primary-plane submission until page-flip
   retirement, matching the production runtime lifetime rule.
