@@ -90,6 +90,27 @@ verify_line() {
                     ;;
             esac
         fi
+        if [[ "$key" == "buffer_format" ]]; then
+            case "$actual" in
+                Xrgb8888|Argb8888)
+                    continue
+                    ;;
+            esac
+        fi
+        if [[ "$key" == "buffer_modifier" ]]; then
+            case "$actual" in
+                Implicit|Linear|NonLinear)
+                    continue
+                    ;;
+            esac
+        fi
+        if [[ "$key" == "buffer_planes" ]]; then
+            case "$actual" in
+                Single|Multiple)
+                    continue
+                    ;;
+            esac
+        fi
         if [[ "$actual" != "${expected_ref[$key]}" ]]; then
             echo "runtime rendered scanout evidence expected $key=${expected_ref[$key]}, got ${actual:-missing}" >&2
             echo "$evidence" >&2
@@ -99,7 +120,7 @@ verify_line() {
 }
 
 declare -A expected_submit=(
-    ["schema"]="4"
+    ["schema"]="5"
     ["status"]="SubmittedWaitingForPageFlip"
     ["scanout_target"]="Ready"
     ["output_size"]="1280x720"
@@ -107,6 +128,9 @@ declare -A expected_submit=(
     ["target_size"]="1280x720"
     ["export"]="Exported"
     ["scanout_buffer"]="Ready"
+    ["buffer_format"]="SupportedBufferFormat"
+    ["buffer_modifier"]="SupportedBufferModifier"
+    ["buffer_planes"]="SupportedBufferPlanes"
     ["properties"]="Discovered"
     ["resources"]="Created"
     ["framebuffer"]="CreatedFramebuffer"

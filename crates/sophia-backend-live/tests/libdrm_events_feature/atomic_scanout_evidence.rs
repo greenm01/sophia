@@ -52,6 +52,9 @@ fn native_atomic_scanout_smoke_evidence_passes_only_after_submit_page_flip_and_r
             gbm_export: Some(LiveRendererScanoutBufferExportStatus::Exported),
             gbm_export_detail: Some(LiveRendererScanoutBufferExportDetail::Exported),
             scanout_buffer: Some(sophia_renderer_live::LiveRendererScanoutBufferStatus::Ready),
+            buffer_format: Some(LibdrmNativeScanoutBufferFormatDetail::Xrgb8888),
+            buffer_modifier: Some(LibdrmNativeScanoutBufferModifierDetail::Implicit),
+            buffer_planes: Some(LibdrmNativeScanoutBufferPlaneDetail::Single),
             properties: Some(LibdrmNativePrimaryPlanePropertyDiscoveryStatus::Discovered),
             resources: Some(LibdrmNativePrimaryPlaneResourceCreateStatus::Created),
             framebuffer: Some(LibdrmNativePrimaryPlaneFramebufferCreateDetail::CreatedWithAddFb2),
@@ -74,7 +77,7 @@ fn native_atomic_scanout_smoke_evidence_passes_only_after_submit_page_flip_and_r
     );
     assert_eq!(
         evidence.reduced_log_line(),
-        "sophia_atomic_scanout_evidence schema=8 phase=InitialModeset status=Passed scanout_target=Ready rendered_context=Ready gbm_export=Exported gbm_export_detail=Exported scanout_buffer=Ready properties=Discovered resources=Created framebuffer=CreatedWithAddFb2 request=Built submit=SubmittedWaitingForPageFlip request_scope=Modeset commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=true commit_test_only=false page_flip_wait=Retired page_flip_poll=Emitted page_flip=Presented retire=RetiredAfterPageFlip retire_destroy=Destroyed retire_cleanup_pending=false"
+        "sophia_atomic_scanout_evidence schema=9 phase=InitialModeset status=Passed scanout_target=Ready rendered_context=Ready gbm_export=Exported gbm_export_detail=Exported scanout_buffer=Ready buffer_format=Xrgb8888 buffer_modifier=Implicit buffer_planes=Single properties=Discovered resources=Created framebuffer=CreatedWithAddFb2 request=Built submit=SubmittedWaitingForPageFlip request_scope=Modeset commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=true commit_test_only=false page_flip_wait=Retired page_flip_poll=Emitted page_flip=Presented retire=RetiredAfterPageFlip retire_destroy=Destroyed retire_cleanup_pending=false"
     );
 }
 
@@ -147,7 +150,7 @@ fn native_atomic_scanout_steady_state_evidence_requires_page_flip_request_scope(
     );
     assert_eq!(
         evidence.reduced_log_line(),
-        "sophia_atomic_scanout_evidence schema=8 phase=SteadyPageFlip status=Passed scanout_target=Ready rendered_context=Ready gbm_export=Exported gbm_export_detail=Exported scanout_buffer=Ready properties=Discovered resources=Created framebuffer=CreatedWithAddFb2 request=Built submit=SubmittedWaitingForPageFlip request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false page_flip_wait=Retired page_flip_poll=Emitted page_flip=Presented retire=RetiredAfterPageFlip retire_destroy=Destroyed retire_cleanup_pending=false"
+        "sophia_atomic_scanout_evidence schema=9 phase=SteadyPageFlip status=Passed scanout_target=Ready rendered_context=Ready gbm_export=Exported gbm_export_detail=Exported scanout_buffer=Ready buffer_format=Xrgb8888 buffer_modifier=Implicit buffer_planes=Single properties=Discovered resources=Created framebuffer=CreatedWithAddFb2 request=Built submit=SubmittedWaitingForPageFlip request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false page_flip_wait=Retired page_flip_poll=Emitted page_flip=Presented retire=RetiredAfterPageFlip retire_destroy=Destroyed retire_cleanup_pending=false"
     );
 }
 

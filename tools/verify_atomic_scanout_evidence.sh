@@ -51,7 +51,7 @@ verify_phase() {
 
     declare -A observed=()
     declare -A expected=(
-        ["schema"]="8"
+        ["schema"]="9"
         ["phase"]="$phase"
         ["status"]="Passed"
         ["scanout_target"]="Ready"
@@ -59,6 +59,9 @@ verify_phase() {
         ["gbm_export"]="Exported"
         ["gbm_export_detail"]="Exported"
         ["scanout_buffer"]="Ready"
+        ["buffer_format"]="SupportedBufferFormat"
+        ["buffer_modifier"]="SupportedBufferModifier"
+        ["buffer_planes"]="SupportedBufferPlanes"
         ["properties"]="Discovered"
         ["resources"]="Created"
         ["framebuffer"]="CreatedFramebuffer"
@@ -104,6 +107,27 @@ verify_phase() {
         if [[ "$key" == "framebuffer" ]]; then
             case "$actual" in
                 CreatedWithAddFb2|CreatedWithAddFb2Modifiers|CreatedWithLegacyAddFb)
+                    continue
+                    ;;
+            esac
+        fi
+        if [[ "$key" == "buffer_format" ]]; then
+            case "$actual" in
+                Xrgb8888|Argb8888)
+                    continue
+                    ;;
+            esac
+        fi
+        if [[ "$key" == "buffer_modifier" ]]; then
+            case "$actual" in
+                Implicit|Linear|NonLinear)
+                    continue
+                    ;;
+            esac
+        fi
+        if [[ "$key" == "buffer_planes" ]]; then
+            case "$actual" in
+                Single|Multiple)
                     continue
                     ;;
             esac

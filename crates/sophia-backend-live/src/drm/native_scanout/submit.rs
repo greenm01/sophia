@@ -54,26 +54,29 @@ where
     };
 
     if selection.status != LibdrmNativePrimaryPlaneSelectionStatus::Selected {
-        return LibdrmNativePrimaryPlaneScanoutSubmitResult::new(
+        return LibdrmNativePrimaryPlaneScanoutSubmitResult::from_descriptor(
             LibdrmNativePrimaryPlaneScanoutSubmitStatus::KmsTargetUnavailable,
             selection.status,
             scanout_buffer,
+            descriptor,
         );
     }
 
     let Some(selected) = selection.selection else {
-        return LibdrmNativePrimaryPlaneScanoutSubmitResult::new(
+        return LibdrmNativePrimaryPlaneScanoutSubmitResult::from_descriptor(
             LibdrmNativePrimaryPlaneScanoutSubmitStatus::KmsTargetUnavailable,
             selection.status,
             scanout_buffer,
+            descriptor,
         );
     };
 
     let Some(buffer) = LibdrmRendererScanoutBuffer::from_descriptor(descriptor) else {
-        return LibdrmNativePrimaryPlaneScanoutSubmitResult::new(
+        return LibdrmNativePrimaryPlaneScanoutSubmitResult::from_descriptor(
             LibdrmNativePrimaryPlaneScanoutSubmitStatus::ScanoutBufferUnavailable,
             selection.status,
             scanout_buffer,
+            descriptor,
         );
     };
 
@@ -84,10 +87,11 @@ where
         selected.plane,
     );
     let Some(property_handles) = properties.properties else {
-        let mut result = LibdrmNativePrimaryPlaneScanoutSubmitResult::new(
+        let mut result = LibdrmNativePrimaryPlaneScanoutSubmitResult::from_descriptor(
             LibdrmNativePrimaryPlaneScanoutSubmitStatus::PropertyDiscoveryUnavailable,
             selection.status,
             scanout_buffer,
+            descriptor,
         );
         result.properties = Some(properties.status);
         return result;
@@ -99,10 +103,11 @@ where
         create_native_primary_plane_page_flip_resources(device, selected, &buffer)
     };
     let Some(resource_bundle) = resources.resources else {
-        let mut result = LibdrmNativePrimaryPlaneScanoutSubmitResult::new(
+        let mut result = LibdrmNativePrimaryPlaneScanoutSubmitResult::from_descriptor(
             LibdrmNativePrimaryPlaneScanoutSubmitStatus::ResourceCreationUnavailable,
             selection.status,
             scanout_buffer,
+            descriptor,
         );
         result.properties = Some(properties.status);
         result.resources = Some(resources.status);
@@ -119,10 +124,11 @@ where
     };
     let Some(request) = request.request else {
         let destroy = destroy_native_primary_plane_resources(device, resource_bundle);
-        let mut result = LibdrmNativePrimaryPlaneScanoutSubmitResult::new(
+        let mut result = LibdrmNativePrimaryPlaneScanoutSubmitResult::from_descriptor(
             LibdrmNativePrimaryPlaneScanoutSubmitStatus::AtomicRequestBuildFailed,
             selection.status,
             scanout_buffer,
+            descriptor,
         );
         result.properties = Some(properties.status);
         result.resources = Some(resources.status);
@@ -140,10 +146,11 @@ where
     let request_scope = request.reduced_scope();
     if request_scope != policy.expected_request_scope() {
         let destroy = destroy_native_primary_plane_resources(device, resource_bundle);
-        let mut result = LibdrmNativePrimaryPlaneScanoutSubmitResult::new(
+        let mut result = LibdrmNativePrimaryPlaneScanoutSubmitResult::from_descriptor(
             LibdrmNativePrimaryPlaneScanoutSubmitStatus::AtomicRequestBuildFailed,
             selection.status,
             scanout_buffer,
+            descriptor,
         );
         result.properties = Some(properties.status);
         result.resources = Some(resources.status);
@@ -166,10 +173,11 @@ where
 
     if submit != LibdrmNativeAtomicCommitSubmitStatus::Submitted {
         let destroy = destroy_native_primary_plane_resources(device, resource_bundle);
-        let mut result = LibdrmNativePrimaryPlaneScanoutSubmitResult::new(
+        let mut result = LibdrmNativePrimaryPlaneScanoutSubmitResult::from_descriptor(
             LibdrmNativePrimaryPlaneScanoutSubmitStatus::AtomicSubmitFailed,
             selection.status,
             scanout_buffer,
+            descriptor,
         );
         result.properties = Some(properties.status);
         result.resources = Some(resources.status);
@@ -182,10 +190,11 @@ where
         return result;
     }
 
-    let mut result = LibdrmNativePrimaryPlaneScanoutSubmitResult::new(
+    let mut result = LibdrmNativePrimaryPlaneScanoutSubmitResult::from_descriptor(
         LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip,
         selection.status,
         scanout_buffer,
+        descriptor,
     );
     result.properties = Some(properties.status);
     result.resources = Some(resources.status);

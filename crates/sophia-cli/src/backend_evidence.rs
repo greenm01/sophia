@@ -3,7 +3,7 @@ const RETIRE_PREFIX: &str = "sophia_runtime_rendered_scanout_retire";
 const CLEANUP_PREFIX: &str = "sophia_runtime_rendered_scanout_cleanup";
 
 const CLEAN_SUBMIT_FIELDS: &[(&str, &str)] = &[
-    ("schema", "4"),
+    ("schema", "5"),
     ("status", "SubmittedWaitingForPageFlip"),
     ("scanout_target", "Ready"),
     ("output_size", "1280x720"),
@@ -11,6 +11,9 @@ const CLEAN_SUBMIT_FIELDS: &[(&str, &str)] = &[
     ("target_size", "1280x720"),
     ("export", "Exported"),
     ("scanout_buffer", "Ready"),
+    ("buffer_format", "SupportedBufferFormat"),
+    ("buffer_modifier", "SupportedBufferModifier"),
+    ("buffer_planes", "SupportedBufferPlanes"),
     ("properties", "Discovered"),
     ("resources", "Created"),
     ("framebuffer", "CreatedFramebuffer"),
@@ -102,6 +105,15 @@ fn evidence_field_matches(key: &str, value: &str, required_value: &str) -> bool 
             value,
             "CreatedWithAddFb2" | "CreatedWithAddFb2Modifiers" | "CreatedWithLegacyAddFb"
         );
+    }
+    if key == "buffer_format" && required_value == "SupportedBufferFormat" {
+        return matches!(value, "Xrgb8888" | "Argb8888");
+    }
+    if key == "buffer_modifier" && required_value == "SupportedBufferModifier" {
+        return matches!(value, "Implicit" | "Linear" | "NonLinear");
+    }
+    if key == "buffer_planes" && required_value == "SupportedBufferPlanes" {
+        return matches!(value, "Single" | "Multiple");
     }
 
     value == required_value

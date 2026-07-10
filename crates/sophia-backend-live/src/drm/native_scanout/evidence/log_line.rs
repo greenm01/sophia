@@ -28,7 +28,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
                 });
 
         format!(
-            "sophia_atomic_scanout_evidence schema=8 phase={:?} status={:?} scanout_target={} rendered_context={} gbm_export={} gbm_export_detail={} scanout_buffer={} properties={} resources={} framebuffer={} request={} submit={} request_scope={} commit_page_flip_event={} commit_nonblocking={} commit_allow_modeset={} commit_test_only={} page_flip_wait={} page_flip_poll={} page_flip={} retire={} retire_destroy={} retire_cleanup_pending={}",
+            "sophia_atomic_scanout_evidence schema=9 phase={:?} status={:?} scanout_target={} rendered_context={} gbm_export={} gbm_export_detail={} scanout_buffer={} buffer_format={} buffer_modifier={} buffer_planes={} properties={} resources={} framebuffer={} request={} submit={} request_scope={} commit_page_flip_event={} commit_nonblocking={} commit_allow_modeset={} commit_test_only={} page_flip_wait={} page_flip_poll={} page_flip={} retire={} retire_destroy={} retire_cleanup_pending={}",
             self.phase,
             self.status,
             status(self.scanout_target),
@@ -36,6 +36,9 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             status(self.gbm_export),
             status(self.gbm_export_detail),
             status(self.scanout_buffer),
+            status(self.buffer_format),
+            status(self.buffer_modifier),
+            status(self.buffer_planes),
             status(self.properties),
             status(self.resources),
             status(self.framebuffer),

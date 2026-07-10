@@ -30,12 +30,14 @@ use sophia_backend_live::{
     LibdrmNativePrimaryPlaneSelectionStatus, LibdrmNativePropertyHandleSet,
     LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport, LibdrmNativeReadLoopReport,
     LibdrmNativeReadLoopStatus, LibdrmNativeRenderedScanoutContextStatus,
-    LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller,
-    LibdrmRendererScanoutBuffer, LiveAtomicScanoutPreflightReport,
-    LiveAtomicScanoutPreflightStatus, LiveBackendConfig, LiveHardwareValidationGateReport,
-    LiveHardwareValidationGateStatus, LiveHardwareValidationSmokeReport,
-    LiveHardwareValidationSmokeStatus, LiveHardwareValidationTarget, LiveKmsScanoutTargetStatus,
-    LiveLibdrmPollerDiagnostics, LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
+    LibdrmNativeScanoutBufferFormatDetail, LibdrmNativeScanoutBufferModifierDetail,
+    LibdrmNativeScanoutBufferPlaneDetail, LibdrmPageFlipEventPollReport,
+    LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller, LibdrmRendererScanoutBuffer,
+    LiveAtomicScanoutPreflightReport, LiveAtomicScanoutPreflightStatus, LiveBackendConfig,
+    LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
+    LiveHardwareValidationSmokeReport, LiveHardwareValidationSmokeStatus,
+    LiveHardwareValidationTarget, LiveKmsScanoutTargetStatus, LiveLibdrmPollerDiagnostics,
+    LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
     LiveLibdrmPollerStartupStatus, LivePageFlipCallback, LivePageFlipCallbackDecision,
     LivePageFlipCallbackQueue, LivePageFlipCallbackReport, LivePageFlipCallbackSourceReport,
     LivePageFlipEvent, LivePageFlipEventStatus, LiveRenderedPrimaryPlaneScanoutBackpressureReport,
@@ -2368,7 +2370,7 @@ fn live_runtime_assembly_retains_submit_failure_cleanup_for_retry() {
     );
     assert_eq!(
         submitted.reduced_log_line(),
-        "sophia_runtime_rendered_scanout_submit schema=4 status=PrimaryPlaneSubmitFailed scanout_target=Ready output_size=1280x720 target=Ready target_size=1280x720 export=Exported scanout_buffer=Ready properties=Discovered resources=Created framebuffer=CreatedWithAddFb2 request=Built submit=AtomicSubmitFailed request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false commit_submit=Rejected runtime_scanout_state=Rejected in_flight=false in_flight_ticks=0 cleanup_pending=true"
+        "sophia_runtime_rendered_scanout_submit schema=5 status=PrimaryPlaneSubmitFailed scanout_target=Ready output_size=1280x720 target=Ready target_size=1280x720 export=Exported scanout_buffer=Ready buffer_format=Xrgb8888 buffer_modifier=Implicit buffer_planes=Single properties=Discovered resources=Created framebuffer=CreatedWithAddFb2 request=Built submit=AtomicSubmitFailed request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false commit_submit=Rejected runtime_scanout_state=Rejected in_flight=false in_flight_ticks=0 cleanup_pending=true"
     );
     assert_eq!(
         submitted.scanout_buffer,
@@ -2743,7 +2745,7 @@ fn live_runtime_tick_submits_rendered_scanout_when_runtime_requests_scanout() {
     );
     assert_eq!(
         submit.reduced_log_line(),
-        "sophia_runtime_rendered_scanout_submit schema=4 status=SubmittedWaitingForPageFlip scanout_target=Ready output_size=1280x720 target=Ready target_size=1280x720 export=Exported scanout_buffer=Ready properties=Discovered resources=Created framebuffer=CreatedWithAddFb2 request=Built submit=SubmittedWaitingForPageFlip request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false commit_submit=Submitted runtime_scanout_state=Submitted in_flight=true in_flight_ticks=0 cleanup_pending=false"
+        "sophia_runtime_rendered_scanout_submit schema=5 status=SubmittedWaitingForPageFlip scanout_target=Ready output_size=1280x720 target=Ready target_size=1280x720 export=Exported scanout_buffer=Ready buffer_format=Xrgb8888 buffer_modifier=Implicit buffer_planes=Single properties=Discovered resources=Created framebuffer=CreatedWithAddFb2 request=Built submit=SubmittedWaitingForPageFlip request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false commit_submit=Submitted runtime_scanout_state=Submitted in_flight=true in_flight_ticks=0 cleanup_pending=false"
     );
     assert_eq!(tick.engine.runtime.runtime_state.scanout_submissions, 1);
     assert_eq!(

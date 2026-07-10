@@ -102,6 +102,9 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
     ) -> Self {
         let submit_status = submit.map(|report| report.status);
         let scanout_buffer = submit.map(|report| report.scanout_buffer);
+        let buffer_format = submit.and_then(|report| report.buffer_format);
+        let buffer_modifier = submit.and_then(|report| report.buffer_modifier);
+        let buffer_planes = submit.and_then(|report| report.buffer_planes);
         let properties = submit.and_then(|report| report.properties);
         let resources = submit.and_then(|report| report.resources);
         let framebuffer = submit.and_then(|report| report.framebuffer);
@@ -168,6 +171,9 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             gbm_export: Some(gbm_export),
             gbm_export_detail: Some(gbm_export_detail),
             scanout_buffer,
+            buffer_format,
+            buffer_modifier,
+            buffer_planes,
             properties,
             resources,
             framebuffer,
