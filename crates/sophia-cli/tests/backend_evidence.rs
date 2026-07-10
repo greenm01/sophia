@@ -24,6 +24,28 @@ fn accepts_clean_runtime_rendered_scanout_evidence_with_modifiers() {
 }
 
 #[test]
+fn accepts_clean_runtime_rendered_scanout_evidence_with_host_output_size() {
+    let evidence =
+        include_str!("../../../tools/fixtures/runtime_rendered_scanout_evidence_pass.log")
+            .replace("1280x720", "1920x1200");
+
+    assert!(runtime_rendered_scanout_evidence_is_clean(&lines(
+        &evidence
+    )));
+}
+
+#[test]
+fn rejects_runtime_rendered_scanout_size_mismatch() {
+    let evidence =
+        include_str!("../../../tools/fixtures/runtime_rendered_scanout_evidence_pass.log")
+            .replacen("target_size=1280x720", "target_size=1920x1200", 1);
+
+    assert!(!runtime_rendered_scanout_evidence_is_clean(&lines(
+        &evidence
+    )));
+}
+
+#[test]
 fn rejects_missing_retire_runtime_rendered_scanout_evidence() {
     let evidence = include_str!(
         "../../../tools/fixtures/runtime_rendered_scanout_evidence_missing_retire.log"

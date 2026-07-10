@@ -118,21 +118,33 @@ verify_line() {
                     ;;
             esac
         fi
+        if [[ "$key" == "output_size" || "$key" == "target_size" ]]; then
+            if [[ "$actual" =~ ^[1-9][0-9]*x[1-9][0-9]*$ ]]; then
+                continue
+            fi
+        fi
         if [[ "$actual" != "${expected_ref[$key]}" ]]; then
             echo "runtime rendered scanout evidence expected $key=${expected_ref[$key]}, got ${actual:-missing}" >&2
             echo "$evidence" >&2
             exit 1
         fi
     done
+
+    if [[ -n "${observed[output_size]+set}" && -n "${observed[target_size]+set}" \
+        && "${observed[output_size]}" != "${observed[target_size]}" ]]; then
+        echo "runtime rendered scanout evidence expected output_size to match target_size" >&2
+        echo "$evidence" >&2
+        exit 1
+    fi
 }
 
 declare -A expected_submit=(
     ["schema"]="6"
     ["status"]="SubmittedWaitingForPageFlip"
     ["scanout_target"]="Ready"
-    ["output_size"]="1280x720"
+    ["output_size"]="MatchingReducedSize"
     ["target"]="Ready"
-    ["target_size"]="1280x720"
+    ["target_size"]="MatchingReducedSize"
     ["export"]="Exported"
     ["scanout_buffer"]="Ready"
     ["buffer_format"]="SupportedBufferFormat"

@@ -12,7 +12,7 @@ active milestone to `docs/roadmap-history.md`.
 
 ## Active Milestone
 
-### Hardware Proof Closeout
+### External X Client Probe: xclock
 
 Current architecture read:
 
@@ -24,35 +24,7 @@ Current architecture read:
 - Sophia WM remains blind policy. XLibre remains prototype/reference material,
   not the destination architecture.
 
-Current proof baseline:
-
-- [x] The TTY3 atomic scanout smoke passed both `InitialModeset` and
-  `SteadyPageFlip` phases with schema 10 evidence, PRIME-imported rendered GBM
-  buffers, `framebuffer=CreatedWithAddFb2`, native page-flip callbacks, and
-  clean resource retirement.
-- [ ] Run the combined proof on TTY3:
-  `tools/atomic_scanout_hardware_proof.sh --slot=1 --output=1 --authority=1
-  --page-flip-timeout-ms=8000 --child-timeout-ms=30000`.
-- [ ] Verify the combined proof captures passing preflight, destructive
-  two-phase atomic scanout evidence, and runtime rendered-scanout
-  submit-to-retire evidence.
-- [ ] Record only the reduced proof summary here after it passes; keep detailed
-  rationale and evidence in `docs/research-log.md`.
-
----
-
-## Next 3 Milestones
-
-### 1. Hardware Proof Closeout
-
-- [ ] Close the combined TTY3 hardware proof with verifier-accepted reduced
-  logs.
-- [ ] Treat any proof failure as a backend-live or renderer-live lifetime,
-  readiness, or scanout issue before widening protocol work.
-- [ ] Keep the operator-facing proof in scripts and reduced logs; do not move
-  native paths, fds, object IDs, or driver strings into Engine or WM state.
-
-### 2. External X Client Probe: xclock
+Current probe target:
 
 - [ ] Add an `x-authority-xclock-smoke` probe that launches `/usr/bin/xclock`
   against the Sophia X Authority socket.
@@ -62,7 +34,21 @@ Current proof baseline:
   authority transaction without leaking XIDs, namespace IDs, titles, classes,
   PIDs, or raw property payloads across the WM boundary.
 
-### 3. Live Session Composition
+---
+
+## Next 3 Milestones
+
+### 1. External X Client Probe: xclock
+
+- [ ] Add an `x-authority-xclock-smoke` probe that launches `/usr/bin/xclock`
+  against the Sophia X Authority socket.
+- [ ] Let the first concrete missing opcode, reply, event, or extension from
+  `xclock` drive the next X Authority implementation step.
+- [ ] Pass only when the probe reaches at least one Engine/Runtime committed
+  authority transaction without leaking XIDs, namespace IDs, titles, classes,
+  PIDs, or raw property payloads across the WM boundary.
+
+### 2. Live Session Composition
 
 - [ ] Compose Sophia X Authority's bounded transaction queue, runtime intake,
   renderer-live frame targets, and backend-live rendered scanout into one
@@ -72,6 +58,15 @@ Current proof baseline:
   and cleanup.
 - [ ] Keep Wayland Authority and wgpu deferred until the X Authority plus live
   scanout path is stable.
+
+### 3. Authority Coverage From Real Probe Failures
+
+- [ ] Expand Sophia X Authority only where `xclock` and later real probes demand
+  it.
+- [ ] Prefer bounded drawing, upload, present, selection, event, and namespace
+  behavior over broad X11 completeness.
+- [ ] Keep XLibre bridge smokes as prototype references until Sophia X Authority
+  has equivalent live coverage.
 
 ---
 
@@ -86,6 +81,9 @@ Current proof baseline:
 
 ## Done Recently
 
+- [x] Closed the TTY3 combined hardware proof: preflight, destructive two-phase
+  atomic scanout, and runtime rendered-scanout submit-to-retire evidence all
+  pass their reduced verifiers.
 - [x] TTY3 atomic scanout smoke now passes both initial modeset and steady
   page-flip phases with retained rendered GBM/KMS ownership until page-flip
   retirement.

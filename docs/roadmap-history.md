@@ -80,6 +80,9 @@ validation evidence in `docs/research-log.md`.
   `SteadyPageFlip` pass with `framebuffer=CreatedWithAddFb2`,
   `page_flip=Presented`, `retire=RetiredAfterPageFlip`, and
   `retire_cleanup_pending=false`.
+- [x] Closed the combined TTY3 hardware proof with verifier-accepted preflight,
+  destructive two-phase atomic scanout evidence, and runtime rendered-scanout
+  submit-to-retire evidence.
 
 ---
 

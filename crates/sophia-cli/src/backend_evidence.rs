@@ -6,9 +6,9 @@ const CLEAN_SUBMIT_FIELDS: &[(&str, &str)] = &[
     ("schema", "6"),
     ("status", "SubmittedWaitingForPageFlip"),
     ("scanout_target", "Ready"),
-    ("output_size", "1280x720"),
+    ("output_size", "MatchingReducedSize"),
     ("target", "Ready"),
-    ("target_size", "1280x720"),
+    ("target_size", "MatchingReducedSize"),
     ("export", "Exported"),
     ("scanout_buffer", "Ready"),
     ("buffer_format", "SupportedBufferFormat"),
@@ -79,6 +79,8 @@ fn parse_exact_evidence_line(line: &str, prefix: &str, required: &[(&str, &str)]
     };
     let mut seen = 0u128;
     let mut seen_count = 0usize;
+    let mut output_size = None;
+    let mut target_size = None;
 
     for field in fields.split_ascii_whitespace() {
         let Some((key, value)) = field.split_once('=') else {
@@ -95,12 +97,32 @@ fn parse_exact_evidence_line(line: &str, prefix: &str, required: &[(&str, &str)]
         }
         seen |= bit;
         seen_count += 1;
+
+        if key == "output_size" {
+            output_size = Some(value);
+        }
+        if key == "target_size" {
+            target_size = Some(value);
+        }
     }
 
-    seen_count == required.len()
+    if seen_count != required.len() {
+        return false;
+    }
+    if required.iter().any(|(key, _)| *key == "output_size")
+        && required.iter().any(|(key, _)| *key == "target_size")
+        && output_size != target_size
+    {
+        return false;
+    }
+
+    true
 }
 
 fn evidence_field_matches(key: &str, value: &str, required_value: &str) -> bool {
+    if matches!(key, "output_size" | "target_size") && required_value == "MatchingReducedSize" {
+        return reduced_size_is_valid(value);
+    }
     if key == "framebuffer" && required_value == "CreatedFramebuffer" {
         return matches!(
             value,
@@ -121,4 +143,14 @@ fn evidence_field_matches(key: &str, value: &str, required_value: &str) -> bool 
     }
 
     value == required_value
+}
+
+fn reduced_size_is_valid(value: &str) -> bool {
+    let Some((width, height)) = value.split_once('x') else {
+        return false;
+    };
+    matches!(
+        (width.parse::<u32>(), height.parse::<u32>()),
+        (Ok(width), Ok(height)) if width > 0 && height > 0
+    )
 }

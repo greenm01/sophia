@@ -1168,6 +1168,24 @@ commit_allow_modeset=true` and `SteadyPageFlip` with `request_scope=PageFlip
 commit_allow_modeset=false`, both using `framebuffer=CreatedWithAddFb2` and
 `retire_cleanup_pending=false`.
 
+The combined TTY3 hardware proof now passes end to end. The proof command runs
+preflight, destructive two-phase atomic scanout, runtime rendered-scanout
+submit-to-retire capture, and all three offline verifiers. The preflight log
+reduces to one atomic-ready primary card with scanout target and atomic
+properties available. The destructive scanout evidence passes both phases with
+`buffer_format=Xrgb8888`, `buffer_modifier=Implicit`, `buffer_planes=Single`,
+`format_table=Present`, `framebuffer=CreatedWithAddFb2`,
+`page_flip=Presented`, `retire=RetiredAfterPageFlip`, and no cleanup debt. The
+runtime proof submits a rendered primary-plane page flip at the host output
+size, `1920x1200`, with matching target size, then retires cleanly with
+`destroy=Destroyed` and `cleanup_pending=false`.
+
+The runtime proof exposed one validation bug: the CLI-side clean-evidence
+predicate and shell verifier assumed the fixture mode `1280x720`. That was too
+narrow for real hardware. The proof invariant is now that `output_size` and
+`target_size` are valid reduced sizes and equal to each other, while all native
+identity remains hidden.
+
 ## Open Questions
 
 - Should Sophia's compositor/display engine be a fully separate process or a new
