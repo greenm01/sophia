@@ -856,6 +856,22 @@ Submitted scanout owners now retire only through a reduced accepted/presented
 page-flip callback report. Rejected or stale callback reports return the owner
 to the caller, which preserves resource lifetime across the exact failure cases
 that would otherwise turn a pending kernel scanout into a use-after-retire bug.
+Rendered primary-plane backpressure now has its own reduced runtime state:
+`Deferred`. When the executor asks for another `SubmitScanout` while an earlier
+KMS submission is still awaiting page-flip evidence, backend-live reports
+`Deferred` instead of `Rejected`. The runtime continues through portal/chrome
+phases without altering in-flight scanout counts.
+The page-flip callback queue now carries the latest accepted reduced callback
+report. `run_tick_with_rendered_primary_plane_scanout_with` consumes that report
+before draining lifecycle states, so one live tick can retire the old rendered
+primary-plane owner and submit the next rendered frame while keeping native
+object identity private.
+The live runtime assembly now also has a reusable native GBM rendered-scanout
+exporter path. The exporter owns backend render-device discovery across runtime
+ticks, records only reduced export attempt count/status, and still opens or
+uses native render-device authority only when the runtime reaches
+`SubmitScanout`. Unavailable render devices fail closed as reduced scanout
+export failure and runtime rejection.
 The opt-in atomic scanout hardware smoke now exists behind
 `SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1`. It opens a primary DRM card in a child
 process, enables the atomic KMS capabilities, allocates the GBM scanout buffer

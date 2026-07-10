@@ -43,6 +43,7 @@ pub struct SessionRuntimeState {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeScanoutState {
     Submitted,
+    Deferred,
     Retired,
     Rejected,
 }

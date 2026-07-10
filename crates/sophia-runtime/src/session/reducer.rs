@@ -55,6 +55,7 @@ pub fn update_session_runtime(
                     state.scanout_submissions = state.scanout_submissions.saturating_add(1);
                     state.in_flight_scanouts = state.in_flight_scanouts.saturating_add(1);
                 }
+                RuntimeScanoutState::Deferred => {}
                 RuntimeScanoutState::Retired => {
                     state.scanout_retirements = state.scanout_retirements.saturating_add(1);
                     state.in_flight_scanouts = state.in_flight_scanouts.saturating_sub(1);

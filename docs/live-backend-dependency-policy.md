@@ -143,6 +143,15 @@ real `drm::control::Device::atomic_commit` API when backed by a real DRM device,
 and reduces the result to submitted, would-block, or rejected. A submitted ioctl
 is not a committed Sophia frame. The runtime may publish committed visual state
 only after the matching reduced page-flip evidence is accepted.
+If the runtime reaches `SubmitScanout` while a previous rendered primary-plane
+submission is still in flight, backend-live reports reduced `Deferred` state.
+That state is not a rejection and must not decrement in-flight scanout
+accounting; it only records that scanout was intentionally backpressured until
+page-flip evidence arrives.
+The page-flip callback queue keeps only reduced accepted-callback evidence. The
+rendered scanout tick may use that evidence to retire the tracked rendered
+primary-plane owner before the runtime observes lifecycle state and requests the
+next submit.
 `LibdrmNativeAtomicCommitRequest` owns the native atomic request privately and
 exposes only reduced flag facts for tests and diagnostics; framebuffer, CRTC,
 plane, connector, property, and fd identity stay inside backend-live.
@@ -211,6 +220,12 @@ rendering, portals, and chrome to the shared live runtime adapter, but overrides
 only scanout submission. Native GBM/KMS work therefore happens only after a frame
 has rendered and the runtime has entered `SubmittingScanout`; Engine and runtime
 still observe only `RuntimeScanoutState`.
+Backend-live also exposes a reusable native GBM rendered-scanout exporter that
+owns `RenderDeviceDiscoveryBackend` inside the backend boundary. Runtime ticks
+may hold this exporter across frames while it reports only reduced export
+attempt count and status. Render-device failure is reduced to scanout export
+failure and runtime rejection; raw fds, paths, GBM handles, and native error text
+remain private.
 The tracked rendered primary-plane path keeps the combined rendered buffer owner
 and KMS submission owner inside backend-live until page-flip evidence is strong
 enough to retire it. This is the resource-lifetime half of atomic rendering:

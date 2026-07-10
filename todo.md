@@ -63,8 +63,8 @@ active milestone to `docs/roadmap-history.md`.
 - [ ] Revisit wgpu only after GBM/EGL startup, drawing, presentation,
   frame-target lifecycle, and scanout seams are validated.
 - [ ] Continue splitting `sophia-backend-live/src/lib.rs` by domain. Rendered
-  scanout and page-flip callback/poller plumbing are extracted; next candidates
-  are libdrm native scanout, GBM/EGL probing, and runtime assembly wiring.
+  scanout, page-flip/native DRM event plumbing, and native KMS scanout are
+  extracted; next candidates are GBM/EGL probing and runtime assembly wiring.
 
 ---
 
@@ -74,6 +74,18 @@ active milestone to `docs/roadmap-history.md`.
   command-time runtime adapter from backend-live `lib.rs` into a domain module.
 - [x] Extracted page-flip callback intake, queueing, fake source, reduced poll
   reports, and fake poller types from backend-live `lib.rs`.
+- [x] Extracted native libdrm page-flip source, reader, decode, and poller state
+  from backend-live `lib.rs`.
+- [x] Extracted native KMS/atomic primary-plane scanout selection, property
+  discovery, resource ownership, submit, and retirement from backend-live
+  `lib.rs`.
+- [x] Added reduced `Deferred` scanout state so rendered primary-plane
+  backpressure does not masquerade as rejection or corrupt in-flight accounting.
+- [x] Threaded accepted reduced page-flip evidence into the rendered scanout
+  runtime tick so tracked GBM/KMS owners retire before the next submit.
+- [x] Added a reusable native GBM rendered-scanout exporter for runtime ticks;
+  render-device discovery stays inside backend-live and failures reduce to
+  runtime scanout rejection.
 - [x] Added a backend-live runtime tick path that answers active `SubmitScanout`
   commands through rendered GBM/KMS primary-plane scanout.
 - [x] Threaded backend-live terminal scanout states into the shared runtime tick

@@ -1138,6 +1138,13 @@ fn live_runtime_assembly_drains_bounded_page_flip_callback_queue() {
             accepted: 1,
             rejected_unexpected_output: 0,
             rejected_stale_frame_serial: 0,
+            last_accepted: Some(LivePageFlipCallbackReport {
+                decision: LivePageFlipCallbackDecision::Accepted,
+                event: LivePageFlipEvent {
+                    status: LivePageFlipEventStatus::Presented,
+                    frame_serial: Some(22),
+                },
+            }),
             disconnected: false,
             max_reached: true,
         }
@@ -1161,6 +1168,13 @@ fn live_runtime_assembly_drains_bounded_page_flip_callback_queue() {
             accepted: 1,
             rejected_unexpected_output: 0,
             rejected_stale_frame_serial: 0,
+            last_accepted: Some(LivePageFlipCallbackReport {
+                decision: LivePageFlipCallbackDecision::Accepted,
+                event: LivePageFlipEvent {
+                    status: LivePageFlipEventStatus::Presented,
+                    frame_serial: Some(23),
+                },
+            }),
             disconnected: false,
             max_reached: true,
         }
@@ -1183,6 +1197,7 @@ fn live_runtime_assembly_drains_bounded_page_flip_callback_queue() {
             accepted: 0,
             rejected_unexpected_output: 0,
             rejected_stale_frame_serial: 0,
+            last_accepted: None,
             disconnected: true,
             max_reached: false,
         }

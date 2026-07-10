@@ -570,14 +570,21 @@ replace that placeholder with backend-owned rendered primary-plane submit and
 later page-flip retirement/rejection observations.
 `LiveRuntimeDriverIntake` now carries an optional reduced scanout submit state
 for that handoff. Backend-live maps rendered primary-plane submit status into
-`Submitted` or `Rejected`, then the live runtime adapter converts that fact into
-`ScanoutStateChanged` when the executor reaches `SubmitScanout`.
+`Submitted`, `Deferred`, or `Rejected`, then the live runtime adapter converts
+that fact into `ScanoutStateChanged` when the executor reaches `SubmitScanout`.
+`Deferred` is the backpressure case: a previous KMS submission is still waiting
+for accepted page-flip evidence, so the runtime advances the TEA loop without
+incrementing submissions, retirements, or rejections.
 Backend-live also has a command-time rendered scanout adapter for the live
 runtime tick. When the executor reaches `SubmitScanout`, that adapter exports
 the rendered GBM frame target, submits the primary-plane atomic request, retains
 the backend-owned scanout resources, and returns only the reduced runtime state.
 This keeps real scanout submission phase-aligned with the TEA loop instead of
 precomputing native KMS work before the runtime asks for it.
+The native GBM variant can use a reusable backend-live exporter object that owns
+render-device discovery and records only reduced export health. If the render
+device is unavailable, the runtime sees only reduced scanout rejection; no file
+descriptor, path, GBM handle, or native error crosses into Engine state.
 For rendered primary-plane scanout, backend-live can also retain the combined
 rendered-buffer owner and KMS submission owner internally. Stale page-flip
 evidence keeps that owner in flight. Accepted presented page-flip evidence
@@ -588,6 +595,11 @@ the next runtime tick as scanout lifecycle observations. The shared reducer
 records the retirement or rejection without treating it as a fresh render
 pipeline transition; only the active `SubmitScanout` response advances into
 portal and chrome phases.
+The rendered primary-plane runtime tick now consumes the latest accepted reduced
+page-flip callback before it drains lifecycle state into the Engine. That lets a
+single live tick retire the previous GBM/KMS owner, record reduced `Retired`
+state, and submit the next rendered frame without exposing native handles or
+temporarily counting the backpressured frame as rejected.
 
 `HeadlessSessionDriver` is the first reusable command executor around this
 loop. It owns a `SessionRuntimeLoop` and last-committed layout cache, starts a

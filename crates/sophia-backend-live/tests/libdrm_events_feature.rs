@@ -2,6 +2,8 @@
 
 use std::{io, sync::mpsc};
 
+#[cfg(feature = "gbm-probe")]
+use sophia_backend_live::RenderDeviceDiscoveryBackend;
 use sophia_backend_live::{
     CompositorBackendTickInput, FakeLibdrmNativePageFlipReader, FakeLibdrmPageFlipEventPoller,
     LibdrmBackendFdAuthority, LibdrmBackendFdAuthorityReport, LibdrmBackendFdAuthorityStatus,
@@ -32,7 +34,8 @@ use sophia_backend_live::{
     LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus,
     LiveRenderedPrimaryPlaneScanoutSubmitStatus, LiveRenderedScanoutBufferExport,
     LiveRenderedScanoutBufferExporter, LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus,
-    LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus, NativeLibdrmAtomicScanoutCommitter,
+    LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus,
+    NativeGbmRenderedScanoutBufferDiscoveryExporter, NativeLibdrmAtomicScanoutCommitter,
     NativeLibdrmPageFlipEventPoller, NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller,
     RuntimeScanoutState, Size, build_native_primary_plane_atomic_request,
     create_native_primary_plane_resources, decode_native_page_flip_batch,
@@ -636,6 +639,21 @@ struct FakeRenderedScanoutExporter {
     owner: Option<FakeRenderedScanoutOwner>,
 }
 
+#[cfg(feature = "gbm-probe")]
+struct MissingRenderDevice;
+
+#[cfg(feature = "gbm-probe")]
+impl RenderDeviceDiscoveryBackend for MissingRenderDevice {
+    type Device = std::fs::File;
+
+    fn open_render_device(&self) -> io::Result<Self::Device> {
+        Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "test render device unavailable",
+        ))
+    }
+}
+
 impl FakeRenderedScanoutExporter {
     fn exported(size: Size) -> Self {
         Self {
@@ -1102,7 +1120,10 @@ fn live_runtime_assembly_tracks_rendered_scanout_until_accepted_page_flip() {
         blocked.status,
         LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::AlreadyInFlight
     );
-    assert_eq!(blocked.runtime_scanout_state, None);
+    assert_eq!(
+        blocked.runtime_scanout_state,
+        Some(RuntimeScanoutState::Deferred)
+    );
     assert_eq!(blocked.in_flight, true);
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), true);
 
@@ -1232,9 +1253,11 @@ fn live_runtime_assembly_does_not_track_failed_rendered_scanout_submit() {
 fn live_runtime_tick_submits_rendered_scanout_when_runtime_requests_scanout() {
     let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-submit-command");
     let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let (sender, receiver) = mpsc::sync_channel(2);
     let mut assembly = report
         .into_live_runtime_assembly(QueuedInputPoller::default())
-        .expect("ready backend should seed live assembly");
+        .expect("ready backend should seed live assembly")
+        .with_page_flip_callback_queue(LivePageFlipCallbackQueue::new(receiver, 2));
     let device = full_primary_plane_scanout_device();
     let mut exporter = FakeRenderedScanoutExporter::exported(Size {
         width: 1280,
@@ -1267,11 +1290,122 @@ fn live_runtime_tick_submits_rendered_scanout_when_runtime_requests_scanout() {
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), true);
     assert_eq!(assembly.pending_runtime_scanout_state_count(), 0);
 
+    let deferred_tick = assembly
+        .run_tick_with_rendered_primary_plane_scanout_with(
+            CompositorBackendTickInput::default(),
+            &device,
+            &mut exporter,
+        )
+        .expect("runtime scanout command should defer while previous submit is in flight");
+
+    assert_eq!(
+        deferred_tick
+            .rendered_primary_plane_scanout_submit
+            .expect("active scanout submit should be reported")
+            .status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::AlreadyInFlight
+    );
+    assert_eq!(
+        deferred_tick
+            .engine
+            .runtime
+            .runtime_state
+            .scanout_submissions,
+        1
+    );
+    assert_eq!(
+        deferred_tick
+            .engine
+            .runtime
+            .runtime_state
+            .scanout_rejections,
+        0
+    );
+    assert_eq!(
+        deferred_tick
+            .engine
+            .runtime
+            .runtime_state
+            .in_flight_scanouts,
+        1
+    );
+    assert_eq!(
+        deferred_tick
+            .engine
+            .runtime
+            .runtime_state
+            .last_scanout_state,
+        Some(RuntimeScanoutState::Deferred)
+    );
+    assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), true);
+
+    sender
+        .try_send(LivePageFlipCallback {
+            output: OutputId::from_raw(1),
+            frame_serial: 99,
+        })
+        .expect("test channel should accept page-flip callback");
+    let mut next_exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+    let retire_and_submit_tick = assembly
+        .run_tick_with_rendered_primary_plane_scanout_with(
+            CompositorBackendTickInput::default(),
+            &device,
+            &mut next_exporter,
+        )
+        .expect("accepted page flip should retire previous submit and allow next submit");
+
+    assert_eq!(
+        retire_and_submit_tick
+            .rendered_primary_plane_scanout_retire
+            .expect("accepted page flip should retire in-flight scanout")
+            .status,
+        LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip
+    );
+    assert_eq!(
+        retire_and_submit_tick.runtime_scanout_states,
+        vec![RuntimeScanoutState::Retired]
+    );
+    assert_eq!(
+        retire_and_submit_tick
+            .rendered_primary_plane_scanout_submit
+            .expect("runtime should submit the next rendered scanout")
+            .status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+    );
+    assert_eq!(
+        retire_and_submit_tick
+            .engine
+            .runtime
+            .runtime_state
+            .scanout_retirements,
+        1
+    );
+    assert_eq!(
+        retire_and_submit_tick
+            .engine
+            .runtime
+            .runtime_state
+            .scanout_submissions,
+        2
+    );
+    assert_eq!(
+        retire_and_submit_tick
+            .engine
+            .runtime
+            .runtime_state
+            .in_flight_scanouts,
+        1
+    );
+    assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), true);
+
     std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
-fn live_runtime_tick_rejects_active_rendered_scanout_without_queuing_lifecycle_duplicate() {
+fn live_runtime_tick_defers_rendered_scanout_when_previous_submit_is_in_flight() {
     let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-submit-command-fail");
     let report = discover_live_backend(&LiveBackendConfig::new(&root));
     let mut assembly = report
@@ -1301,6 +1435,67 @@ fn live_runtime_tick_rejects_active_rendered_scanout_without_queuing_lifecycle_d
     );
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), false);
     assert_eq!(assembly.pending_runtime_scanout_state_count(), 0);
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(feature = "gbm-probe")]
+#[test]
+fn live_runtime_tick_native_gbm_rendered_scanout_fails_closed_when_render_device_is_unavailable() {
+    let root = ready_drm_sysfs_fixture("runtime-native-gbm-rendered-primary-plane-unavailable");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready backend should seed live assembly");
+    let device = full_primary_plane_scanout_device();
+    let mut exporter = NativeGbmRenderedScanoutBufferDiscoveryExporter::new(MissingRenderDevice);
+
+    let tick = assembly
+        .run_tick_with_native_gbm_rendered_primary_plane_scanout_exporter_with(
+            CompositorBackendTickInput::default(),
+            &device,
+            &mut exporter,
+        )
+        .expect("native GBM rendered scanout path should fail closed through runtime state");
+
+    assert_eq!(
+        tick.rendered_primary_plane_scanout_submit
+            .expect("active scanout submit should be reported")
+            .status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutExportFailed
+    );
+    assert_eq!(
+        tick.engine.runtime.runtime_state.last_scanout_state,
+        Some(RuntimeScanoutState::Rejected)
+    );
+    assert_eq!(tick.engine.runtime.runtime_state.scanout_rejections, 1);
+    assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), false);
+    assert_eq!(exporter.export_attempts(), 1);
+    assert_eq!(
+        exporter.last_export_status(),
+        Some(LiveRendererScanoutBufferExportStatus::Unavailable)
+    );
+
+    let second_tick = assembly
+        .run_tick_with_native_gbm_rendered_primary_plane_scanout_exporter_with(
+            CompositorBackendTickInput::default(),
+            &device,
+            &mut exporter,
+        )
+        .expect("reusable native GBM exporter should survive another runtime tick");
+
+    assert_eq!(
+        second_tick
+            .rendered_primary_plane_scanout_submit
+            .expect("active scanout submit should be reported")
+            .status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutExportFailed
+    );
+    assert_eq!(exporter.export_attempts(), 2);
+    assert_eq!(
+        exporter.last_export_status(),
+        Some(LiveRendererScanoutBufferExportStatus::Unavailable)
+    );
 
     std::fs::remove_dir_all(root).unwrap();
 }

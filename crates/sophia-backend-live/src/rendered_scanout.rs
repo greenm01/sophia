@@ -74,6 +74,61 @@ where
     }
 }
 
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+#[derive(Debug)]
+pub struct NativeGbmRenderedScanoutBufferDiscoveryExporter<R> {
+    discovery: R,
+    export_attempts: usize,
+    last_export_status: Option<LiveRendererScanoutBufferExportStatus>,
+}
+
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+impl<R> NativeGbmRenderedScanoutBufferDiscoveryExporter<R> {
+    pub const fn new(discovery: R) -> Self {
+        Self {
+            discovery,
+            export_attempts: 0,
+            last_export_status: None,
+        }
+    }
+
+    pub const fn export_attempts(&self) -> usize {
+        self.export_attempts
+    }
+
+    pub const fn last_export_status(&self) -> Option<LiveRendererScanoutBufferExportStatus> {
+        self.last_export_status
+    }
+
+    pub fn discovery(&self) -> &R {
+        &self.discovery
+    }
+
+    pub fn discovery_mut(&mut self) -> &mut R {
+        &mut self.discovery
+    }
+}
+
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+impl<R> LiveRenderedScanoutBufferExporter for NativeGbmRenderedScanoutBufferDiscoveryExporter<R>
+where
+    R: RenderDeviceDiscoveryBackend,
+{
+    type Owner = NativeGbmOwnedScanoutBuffer;
+
+    fn export_rendered_scanout_buffer(
+        &mut self,
+        target: LiveGbmEglFrameTargetRecord,
+    ) -> LiveRenderedScanoutBufferExport<Self::Owner> {
+        self.export_attempts = self.export_attempts.saturating_add(1);
+        let mut exporter =
+            NativeGbmRenderedScanoutBufferExporter::new(self.discovery.open_render_device());
+        let export = exporter.export_rendered_scanout_buffer(target);
+        self.last_export_status = Some(export.status);
+        export
+    }
+}
+
 #[cfg(feature = "libdrm-events")]
 #[derive(Debug)]
 pub struct LiveRenderedPrimaryPlaneScanoutSubmitResult<Owner> {
@@ -356,7 +411,7 @@ where
             target: target.map(|target| target.status),
             export: None,
             submit: None,
-            runtime_scanout_state: None,
+            runtime_scanout_state: Some(RuntimeScanoutState::Deferred),
             in_flight: true,
         };
     }

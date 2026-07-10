@@ -28,6 +28,10 @@ impl LiveScanoutRuntimeAdapter {
         Self::from_submit_state(RuntimeScanoutState::Submitted)
     }
 
+    pub fn deferred() -> Self {
+        Self::from_submit_state(RuntimeScanoutState::Deferred)
+    }
+
     pub fn rejected() -> Self {
         Self::from_submit_state(RuntimeScanoutState::Rejected)
     }
