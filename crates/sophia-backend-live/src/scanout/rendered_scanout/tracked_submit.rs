@@ -30,6 +30,10 @@ where
 {
     if rendered_primary_plane_scanout_submission.is_some() {
         *rendered_primary_plane_runtime_scanout_state = Some(RuntimeScanoutState::Deferred);
+        push_pending_runtime_scanout_state(
+            pending_runtime_scanout_states,
+            RuntimeScanoutState::Deferred,
+        );
         return LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
             status: LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::AlreadyInFlight,
             scanout_target,
@@ -47,6 +51,10 @@ where
 
     if rendered_primary_plane_scanout_cleanup.is_some() {
         *rendered_primary_plane_runtime_scanout_state = Some(RuntimeScanoutState::Deferred);
+        push_pending_runtime_scanout_state(
+            pending_runtime_scanout_states,
+            RuntimeScanoutState::Deferred,
+        );
         return LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
             status: LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::CleanupPending,
             scanout_target,
@@ -84,9 +92,10 @@ where
     *rendered_primary_plane_scanout_in_flight_ticks = 0;
     *rendered_primary_plane_runtime_scanout_state = runtime_scanout_state;
     if runtime_scanout_state == Some(RuntimeScanoutState::Rejected) {
-        if let Some(pending_runtime_scanout_states) = pending_runtime_scanout_states {
-            pending_runtime_scanout_states.push_back(RuntimeScanoutState::Rejected);
-        }
+        push_pending_runtime_scanout_state(
+            pending_runtime_scanout_states,
+            RuntimeScanoutState::Rejected,
+        );
     }
 
     LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
@@ -101,5 +110,14 @@ where
         runtime_scanout_state,
         in_flight: rendered_primary_plane_scanout_submission.is_some(),
         in_flight_ticks: *rendered_primary_plane_scanout_in_flight_ticks,
+    }
+}
+
+fn push_pending_runtime_scanout_state(
+    pending_runtime_scanout_states: Option<&mut VecDeque<RuntimeScanoutState>>,
+    state: RuntimeScanoutState,
+) {
+    if let Some(pending_runtime_scanout_states) = pending_runtime_scanout_states {
+        pending_runtime_scanout_states.push_back(state);
     }
 }

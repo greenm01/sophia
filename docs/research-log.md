@@ -1004,6 +1004,10 @@ Tracked rendered-primary-plane retire reports now preserve the reduced native
 destroy status from accepted page-flip retirement. The runtime can distinguish
 clean retirement from retryable framebuffer/blob cleanup debt without exposing
 framebuffer IDs, mode-blob handles, GBM objects, or driver errors.
+Direct rendered primary-plane handoff paths now queue reduced `Deferred`
+scanout lifecycle states as well. That keeps in-flight backpressure and
+cleanup-blocked submit attempts visible to the next engine tick instead of
+leaving them only in backend submit reports.
 
 ## 2026-07-10: Atomic Scanout Hardware Evidence
 

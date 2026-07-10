@@ -83,6 +83,9 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Queued reduced `Deferred` scanout lifecycle states for direct rendered
+  primary-plane handoff paths, so in-flight and cleanup-blocked scanout attempts
+  are delivered to the next engine tick instead of living only in submit reports.
 - [x] Extended atomic scanout evidence to schema 6 with a reduced
   `page_flip_wait` field, so real hardware captures distinguish clean
   retirement from missing callbacks, callback rejection, poll failure, and

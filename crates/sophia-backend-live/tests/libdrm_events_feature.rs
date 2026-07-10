@@ -1863,12 +1863,17 @@ fn live_runtime_assembly_tracks_rendered_scanout_until_accepted_page_flip() {
         assembly.rendered_primary_plane_runtime_scanout_state(),
         Some(RuntimeScanoutState::Deferred)
     );
-    assert_eq!(assembly.pending_runtime_scanout_state_count(), 0);
+    assert_eq!(assembly.pending_runtime_scanout_state_count(), 1);
 
     let aged_tick = assembly
         .run_tick(CompositorBackendTickInput::default())
         .expect("runtime tick should age in-flight scanout ownership");
+    assert_eq!(
+        aged_tick.runtime_scanout_states,
+        vec![RuntimeScanoutState::Deferred]
+    );
     assert_eq!(aged_tick.rendered_primary_plane_scanout_in_flight_ticks, 1);
+    assert_eq!(assembly.pending_runtime_scanout_state_count(), 0);
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight_ticks(), 1);
     assert_eq!(
         assembly.rendered_primary_plane_scanout_backpressure_report(2),
@@ -2181,7 +2186,16 @@ fn live_runtime_assembly_retains_submit_failure_cleanup_for_retry() {
         assembly.rendered_primary_plane_runtime_scanout_state(),
         Some(RuntimeScanoutState::Deferred)
     );
-    assert_eq!(assembly.pending_runtime_scanout_state_count(), 1);
+    assert_eq!(assembly.pending_runtime_scanout_state_count(), 2);
+
+    let tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should observe rejected then deferred scanout states");
+    assert_eq!(
+        tick.runtime_scanout_states,
+        vec![RuntimeScanoutState::Rejected, RuntimeScanoutState::Deferred]
+    );
+    assert_eq!(assembly.pending_runtime_scanout_state_count(), 0);
 
     let cleanup = assembly.retry_tracked_rendered_primary_plane_scanout_cleanup(&retry_device);
     assert_eq!(
