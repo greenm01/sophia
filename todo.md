@@ -68,6 +68,9 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Made native page-flip read-and-poll drain retained callbacks before
+  reading more fd events, bounding pending callback growth under queue
+  backpressure.
 - [x] Preserved reduced native page-flip `WouldBlock` diagnostics through empty
   read-and-poll cycles so production scanout can distinguish an idle queue from
   a nonblocking fd read.

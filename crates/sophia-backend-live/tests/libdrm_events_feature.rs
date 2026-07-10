@@ -3808,7 +3808,69 @@ fn native_libdrm_poller_preserves_would_block_diagnostics_after_empty_read() {
 }
 
 #[test]
-fn native_libdrm_poller_reports_read_failure_without_dropping_pending_callbacks() {
+fn native_libdrm_poller_drains_pending_callbacks_before_reading_more() {
+    let authority =
+        LibdrmBackendFdAuthority::new(27).expect("nonzero generation should mint authority token");
+    let slot = LibdrmNativeOutputSlot::new(2).expect("nonzero slot should be valid");
+    let source = LibdrmNativePageFlipSource::from_authority(authority);
+    let mut poller =
+        NativeLibdrmPageFlipEventPoller::new(source).with_routes([LibdrmNativeOutputRoute {
+            slot,
+            output: OutputId::from_raw(7),
+        }]);
+    let mut reader = FakeLibdrmNativePageFlipReader::new([
+        LibdrmNativePageFlipCallback::new(slot, 82),
+        LibdrmNativePageFlipCallback::new(slot, 83),
+    ]);
+    let (sender, receiver) = mpsc::sync_channel(1);
+
+    poller.inject_callbacks([LibdrmNativePageFlipCallback::new(slot, 81)]);
+
+    let first = poller.read_and_poll_page_flip_events(&mut reader, &sender, 4, 4);
+
+    assert_eq!(first.read_loop.decoded_callbacks, 1);
+    assert_eq!(first.poll.status, LibdrmPageFlipEventPollStatus::Emitted);
+    assert_eq!(first.poll.callbacks.emitted, 1);
+    assert_eq!(reader.queued_len(), 2);
+    assert_eq!(poller.pending_callback_count(), 0);
+    assert_eq!(
+        receiver
+            .try_recv()
+            .expect("retained callback should emit before native read"),
+        LivePageFlipCallback {
+            output: OutputId::from_raw(7),
+            frame_serial: 81,
+        }
+    );
+
+    let second = poller.read_and_poll_page_flip_events(&mut reader, &sender, 4, 4);
+
+    assert_eq!(
+        second.read_loop,
+        LibdrmNativeReadLoopReport::callback_decoded(2)
+            .expect("reader should then consume the queued native callbacks")
+    );
+    assert_eq!(
+        second.poll.status,
+        LibdrmPageFlipEventPollStatus::Backpressure
+    );
+    assert_eq!(second.poll.callbacks.emitted, 1);
+    assert_eq!(second.poll.callbacks.queued_remaining, 1);
+    assert_eq!(reader.queued_len(), 0);
+    assert_eq!(poller.pending_callback_count(), 1);
+    assert_eq!(
+        receiver
+            .try_recv()
+            .expect("first newly read callback should emit"),
+        LivePageFlipCallback {
+            output: OutputId::from_raw(7),
+            frame_serial: 82,
+        }
+    );
+}
+
+#[test]
+fn native_libdrm_poller_reports_read_failure_after_pending_backlog_drains() {
     let authority =
         LibdrmBackendFdAuthority::new(25).expect("nonzero generation should mint authority token");
     let slot = LibdrmNativeOutputSlot::new(2).expect("nonzero slot should be valid");
@@ -3824,14 +3886,35 @@ fn native_libdrm_poller_reports_read_failure_without_dropping_pending_callbacks(
     poller.inject_callbacks([LibdrmNativePageFlipCallback::new(slot, 80)]);
     let (sender, receiver) = mpsc::sync_channel(4);
 
-    let report = poller.read_and_poll_page_flip_events(&mut reader, &sender, 4, 4);
+    let drained = poller.read_and_poll_page_flip_events(&mut reader, &sender, 4, 4);
 
-    assert_eq!(report.read_loop, LibdrmNativeReadLoopReport::read_failed());
     assert_eq!(
-        report.poll.status,
+        drained.read_loop,
+        LibdrmNativeReadLoopReport::callback_decoded(1)
+            .expect("retained pending callback should drain first")
+    );
+    assert_eq!(drained.poll.status, LibdrmPageFlipEventPollStatus::Emitted);
+    assert_eq!(reader.queued_len(), 1);
+    assert_eq!(poller.pending_callback_count(), 0);
+    assert_eq!(
+        receiver
+            .try_recv()
+            .expect("retained callback should be queued before native read"),
+        LivePageFlipCallback {
+            output: OutputId::from_raw(7),
+            frame_serial: 80,
+        }
+    );
+
+    let failed = poller.read_and_poll_page_flip_events(&mut reader, &sender, 4, 4);
+
+    assert_eq!(failed.read_loop, LibdrmNativeReadLoopReport::read_failed());
+    assert_eq!(
+        failed.poll.status,
         LibdrmPageFlipEventPollStatus::Disconnected
     );
-    assert_eq!(poller.pending_callback_count(), 1);
+    assert_eq!(reader.queued_len(), 1);
+    assert_eq!(poller.pending_callback_count(), 0);
     assert!(receiver.try_recv().is_err());
 }
 

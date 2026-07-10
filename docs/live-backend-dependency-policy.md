@@ -479,6 +479,10 @@ that helper, or receive already-reduced callback facts from
 `NativeLibdrmPageFlipEventReader`. This preserves queue backpressure and
 retains undelivered callbacks while keeping the native fd read loop behind the
 feature-gated reader.
+When callbacks are already pending, `read_and_poll_page_flip_events` must try
+to hand off that retained backlog before reading more native fd events. This
+keeps sustained runtime-queue backpressure from growing an unbounded backend
+pending list and preserves page-flip ordering.
 Backend-live exposes a combined rendered-primary-plane tick helper that reads
 native page-flip events, polls them into the bounded callback queue, records
 reduced diagnostics, and then runs the scanout tick. This is the preferred live

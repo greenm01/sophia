@@ -329,6 +329,14 @@ impl NativeLibdrmPageFlipEventPoller {
     where
         R: LibdrmNativePageFlipReader,
     {
+        if !self.pending_callbacks.is_empty() {
+            let poll = self.poll_page_flip_events(sender, max_emit);
+            return LibdrmNativeReadAndPollReport {
+                read_loop: self.last_read_loop,
+                poll,
+            };
+        }
+
         let read_loop = self.read_page_flip_events(reader, max_read);
         if read_loop.status == LibdrmNativeReadLoopStatus::ReadFailed {
             return LibdrmNativeReadAndPollReport {
