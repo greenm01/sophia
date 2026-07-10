@@ -4165,6 +4165,20 @@ fn native_libdrm_renderer_scanout_buffer_rejects_invalid_renderer_descriptors() 
         gem_handle: 17,
     };
     assert!(LibdrmRendererScanoutBuffer::from_descriptor(forged_ready).is_none());
+
+    let submit = submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor(
+        &full_primary_plane_scanout_device(),
+        select_native_primary_plane_target(&full_kms_selection_device()),
+        forged_ready,
+    );
+    assert_eq!(
+        submit.status,
+        LibdrmNativePrimaryPlaneScanoutSubmitStatus::ScanoutBufferUnavailable
+    );
+    assert_eq!(
+        submit.scanout_buffer,
+        sophia_renderer_live::LiveRendererScanoutBufferStatus::Invalid
+    );
 }
 
 #[test]

@@ -47,11 +47,17 @@ where
         + LibdrmNativePrimaryPlaneResourceDevice
         + LibdrmNativeAtomicCommitDevice,
 {
+    let scanout_buffer = if descriptor.is_valid_scanout_buffer() {
+        LiveRendererScanoutBufferStatus::Ready
+    } else {
+        LiveRendererScanoutBufferStatus::Invalid
+    };
+
     let Some(selected) = selection.selection else {
         return LibdrmNativePrimaryPlaneScanoutSubmitResult {
             status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::KmsTargetUnavailable,
             selection: selection.status,
-            scanout_buffer: descriptor.status,
+            scanout_buffer,
             properties: None,
             resources: None,
             request: None,
@@ -67,7 +73,7 @@ where
         return LibdrmNativePrimaryPlaneScanoutSubmitResult {
             status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::ScanoutBufferUnavailable,
             selection: selection.status,
-            scanout_buffer: descriptor.status,
+            scanout_buffer,
             properties: None,
             resources: None,
             request: None,
@@ -89,7 +95,7 @@ where
         return LibdrmNativePrimaryPlaneScanoutSubmitResult {
             status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::PropertyDiscoveryUnavailable,
             selection: selection.status,
-            scanout_buffer: descriptor.status,
+            scanout_buffer,
             properties: Some(properties.status),
             resources: None,
             request: None,
@@ -110,7 +116,7 @@ where
         return LibdrmNativePrimaryPlaneScanoutSubmitResult {
             status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::ResourceCreationUnavailable,
             selection: selection.status,
-            scanout_buffer: descriptor.status,
+            scanout_buffer,
             properties: Some(properties.status),
             resources: Some(resources.status),
             request: None,
@@ -133,7 +139,7 @@ where
         return LibdrmNativePrimaryPlaneScanoutSubmitResult {
             status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::AtomicRequestBuildFailed,
             selection: selection.status,
-            scanout_buffer: descriptor.status,
+            scanout_buffer,
             properties: Some(properties.status),
             resources: Some(resources.status),
             request: Some(request.status),
@@ -156,7 +162,7 @@ where
         return LibdrmNativePrimaryPlaneScanoutSubmitResult {
             status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::AtomicRequestBuildFailed,
             selection: selection.status,
-            scanout_buffer: descriptor.status,
+            scanout_buffer,
             properties: Some(properties.status),
             resources: Some(resources.status),
             request: Some(LibdrmNativeAtomicRequestBuildStatus::Built),
@@ -182,7 +188,7 @@ where
         return LibdrmNativePrimaryPlaneScanoutSubmitResult {
             status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::AtomicSubmitFailed,
             selection: selection.status,
-            scanout_buffer: descriptor.status,
+            scanout_buffer,
             properties: Some(properties.status),
             resources: Some(resources.status),
             request: Some(LibdrmNativeAtomicRequestBuildStatus::Built),
@@ -197,7 +203,7 @@ where
     LibdrmNativePrimaryPlaneScanoutSubmitResult {
         status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip,
         selection: selection.status,
-        scanout_buffer: descriptor.status,
+        scanout_buffer,
         properties: Some(properties.status),
         resources: Some(resources.status),
         request: Some(LibdrmNativeAtomicRequestBuildStatus::Built),

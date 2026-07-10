@@ -83,6 +83,11 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Normalized reduced native scanout submit reports so forged ready
+  renderer descriptors are reported as invalid before native DRM allocation.
+- [x] Centralized renderer scanout descriptor validation so fake exports,
+  native GBM/EGL exports, and backend imports share the same fail-closed
+  readiness predicate.
 - [x] Hardened renderer-live GBM/EGL scanout target validation so malformed
   ready frame targets with non-positive dimensions reduce to `InvalidTarget`
   before reaching native GBM/EGL allocation or export.
