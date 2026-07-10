@@ -919,18 +919,23 @@ rendered-scanout context only when the runtime reaches `SubmitScanout`.
 Invalid targets fail before render-device opening; unavailable render devices or
 degraded context startup fail closed as reduced scanout export failure and
 runtime rejection.
-The opt-in atomic scanout hardware smoke now exists behind
-`SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1`. It opens a primary DRM card in a child
-process, enables the atomic KMS capabilities, allocates the GBM scanout buffer
-from a persistent GBM/EGL rendered-scanout context in the same handle namespace,
-submits primary-plane scanout, waits for a native page-flip callback, validates
-the reduced callback, and retires the submitted resources. The reduced evidence
-now records context startup separately from GBM export, includes the reduced KMS
-scanout target readiness status, and reports reduced retire-time resource
-destroy status when cleanup fails. Non-ready scanout targets fail the evidence
-before the smoke can treat export or submit as sufficient. This path compiled
-and the default test run skipped it because the opt-in environment variable was
-unset; real hardware evidence remains to be recorded.
+The opt-in atomic scanout hardware smoke now has an operator-facing CLI path:
+`tools/atomic_scanout_smoke.sh` verifies preflight, then runs the feature-gated
+`sophia atomic-scanout-smoke` command with
+`SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1`. The CLI parent spawns a child process
+for the destructive proof and emits reduced timeout evidence if the child hangs
+waiting for a page flip. Backend-live owns the actual proof phases: it opens a
+primary DRM card, enables the atomic KMS capabilities, allocates the GBM
+scanout buffer from a persistent GBM/EGL rendered-scanout context in the same
+handle namespace, submits primary-plane scanout, waits for a native page-flip
+callback, validates the reduced callback, and retires the submitted resources.
+The reduced evidence records context startup separately from GBM export,
+includes the reduced KMS scanout target readiness status, and reports reduced
+retire-time resource destroy status when cleanup fails. Non-ready scanout
+targets fail the evidence before the smoke can treat export or submit as
+sufficient. This path compiled, the local preflight failed closed with
+`DeviceDirectoryUnavailable`, and a skipped-preflight local run reduced to
+`NoPrimaryCard`; real hardware evidence remains to be recorded.
 Primary-plane submit now also has a preselected-target entry point. The opt-in
 atomic smoke uses one KMS selection snapshot for frame-target sizing, readiness
 evidence, and atomic submit instead of selecting again after rendering. A
