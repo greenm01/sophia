@@ -4361,7 +4361,26 @@ fn native_libdrm_renderer_scanout_buffer_rejects_invalid_renderer_descriptors() 
         );
     let linear_buffer = LibdrmRendererScanoutBuffer::from_descriptor(linear_descriptor)
         .expect("linear modified descriptors should stay valid");
-    assert_eq!(drm::buffer::PlanarBuffer::modifier(&linear_buffer), None);
+    assert_eq!(
+        drm::buffer::PlanarBuffer::modifier(&linear_buffer),
+        Some(drm::buffer::DrmModifier::Linear)
+    );
+    let selected = select_native_primary_plane_target(&full_kms_selection_device())
+        .selection
+        .expect("complete KMS path should select a target");
+    let linear_resources = create_native_primary_plane_page_flip_resources(
+        &full_primary_plane_resource_device(),
+        selected,
+        &linear_buffer,
+    );
+    assert_eq!(
+        linear_resources.framebuffer,
+        Some(LibdrmNativePrimaryPlaneFramebufferCreateDetail::CreatedWithAddFb2Modifiers)
+    );
+    assert_eq!(
+        linear_resources.status,
+        LibdrmNativePrimaryPlaneResourceCreateStatus::Created
+    );
 
     let tiled_descriptor =
         sophia_renderer_live::LiveRendererScanoutBufferDescriptor::new_with_planes(

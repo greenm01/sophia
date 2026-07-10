@@ -1061,6 +1061,13 @@ without leaking framebuffer IDs, GEM handles, or errno values. The reduced value
 records whether backend-live created the framebuffer with AddFB2, AddFB2 with
 modifiers, legacy AddFB fallback, or failed the attempted registration path.
 
+After a real smoke reduced to `framebuffer=AddFb2ThenLegacyAddFbFailed`, the
+backend-private scanout buffer adapter stopped normalizing explicit
+`DRM_FORMAT_MOD_LINEAR` away. Framebuffer registration now tries modifier-aware
+AddFB2 for explicit linear GBM buffers, then falls back to implicit AddFB2 and
+legacy AddFB. The proof verifiers accept any reduced created-framebuffer path,
+while still rejecting reduced framebuffer-registration failures.
+
 The opt-in hardware smoke cannot complete in this environment. Its preflight
 stops before modesetting with reduced status `DeviceDirectoryUnavailable` and
 zero primary card counts. The remaining proof must run on a DRM-master-capable

@@ -29,6 +29,7 @@ pub enum LibdrmNativePrimaryPlaneFramebufferCreateDetail {
     CreatedWithLegacyAddFb,
     AddFb2Failed,
     AddFb2ModifiersFailed,
+    AddFb2ModifiersThenAddFb2ThenLegacyAddFbFailed,
     AddFb2ThenLegacyAddFbFailed,
     NotAttempted,
 }
@@ -178,19 +179,41 @@ where
     D: LibdrmNativePrimaryPlaneResourceDevice,
     B: drm::buffer::Buffer + drm::buffer::PlanarBuffer + ?Sized,
 {
-    if has_non_linear_modifier(buffer) {
-        return match device.add_scanout_framebuffer_with_modifiers(buffer) {
+    if has_explicit_modifier(buffer) {
+        match device.add_scanout_framebuffer_with_modifiers(buffer) {
             Ok(framebuffer) => LibdrmNativePrimaryPlaneFramebufferCreateResult {
                 detail: LibdrmNativePrimaryPlaneFramebufferCreateDetail::CreatedWithAddFb2Modifiers,
                 framebuffer: Some(framebuffer),
             },
-            Err(_) => LibdrmNativePrimaryPlaneFramebufferCreateResult {
+            Err(_) if has_non_linear_modifier(buffer) => LibdrmNativePrimaryPlaneFramebufferCreateResult {
                 detail: LibdrmNativePrimaryPlaneFramebufferCreateDetail::AddFb2ModifiersFailed,
                 framebuffer: None,
             },
-        };
+            Err(_) => create_implicit_or_legacy_scanout_framebuffer(
+                device,
+                buffer,
+                LibdrmNativePrimaryPlaneFramebufferCreateDetail::AddFb2ModifiersThenAddFb2ThenLegacyAddFbFailed,
+            ),
+        }
+    } else {
+        create_implicit_or_legacy_scanout_framebuffer(
+            device,
+            buffer,
+            LibdrmNativePrimaryPlaneFramebufferCreateDetail::AddFb2ThenLegacyAddFbFailed,
+        )
     }
+}
 
+#[cfg(feature = "libdrm-events")]
+fn create_implicit_or_legacy_scanout_framebuffer<D, B>(
+    device: &D,
+    buffer: &B,
+    failed_detail: LibdrmNativePrimaryPlaneFramebufferCreateDetail,
+) -> LibdrmNativePrimaryPlaneFramebufferCreateResult
+where
+    D: LibdrmNativePrimaryPlaneResourceDevice,
+    B: drm::buffer::Buffer + drm::buffer::PlanarBuffer + ?Sized,
+{
     if let Ok(framebuffer) = device.add_scanout_framebuffer_without_modifiers(buffer) {
         return LibdrmNativePrimaryPlaneFramebufferCreateResult {
             detail: LibdrmNativePrimaryPlaneFramebufferCreateDetail::CreatedWithAddFb2,
@@ -204,10 +227,18 @@ where
             framebuffer: Some(framebuffer),
         },
         Err(_) => LibdrmNativePrimaryPlaneFramebufferCreateResult {
-            detail: LibdrmNativePrimaryPlaneFramebufferCreateDetail::AddFb2ThenLegacyAddFbFailed,
+            detail: failed_detail,
             framebuffer: None,
         },
     }
+}
+
+#[cfg(feature = "libdrm-events")]
+fn has_explicit_modifier<B>(buffer: &B) -> bool
+where
+    B: drm::buffer::PlanarBuffer + ?Sized,
+{
+    buffer.modifier().is_some()
 }
 
 #[cfg(feature = "libdrm-events")]

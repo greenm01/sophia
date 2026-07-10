@@ -61,7 +61,7 @@ verify_phase() {
         ["scanout_buffer"]="Ready"
         ["properties"]="Discovered"
         ["resources"]="Created"
-        ["framebuffer"]="CreatedWithAddFb2"
+        ["framebuffer"]="CreatedFramebuffer"
         ["request"]="Built"
         ["submit"]="SubmittedWaitingForPageFlip"
         ["request_scope"]="$request_scope"
@@ -101,6 +101,13 @@ verify_phase() {
 
     for key in "${!expected[@]}"; do
         local actual="${observed[$key]:-}"
+        if [[ "$key" == "framebuffer" ]]; then
+            case "$actual" in
+                CreatedWithAddFb2|CreatedWithAddFb2Modifiers|CreatedWithLegacyAddFb)
+                    continue
+                    ;;
+            esac
+        fi
         if [[ "$actual" != "${expected[$key]}" ]]; then
             echo "atomic scanout evidence expected $key=${expected[$key]}, got ${actual:-missing}" >&2
             echo "$evidence" >&2

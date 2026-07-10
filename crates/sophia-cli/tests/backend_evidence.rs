@@ -15,6 +15,15 @@ fn accepts_clean_runtime_rendered_scanout_evidence() {
 }
 
 #[test]
+fn accepts_clean_runtime_rendered_scanout_evidence_with_modifiers() {
+    let evidence = include_str!(
+        "../../../tools/fixtures/runtime_rendered_scanout_evidence_pass_modifiers.log"
+    );
+
+    assert!(runtime_rendered_scanout_evidence_is_clean(&lines(evidence)));
+}
+
+#[test]
 fn rejects_missing_retire_runtime_rendered_scanout_evidence() {
     let evidence = include_str!(
         "../../../tools/fixtures/runtime_rendered_scanout_evidence_missing_retire.log"

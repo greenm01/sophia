@@ -83,6 +83,13 @@ verify_line() {
 
     for key in "${!expected_ref[@]}"; do
         local actual="${observed[$key]:-}"
+        if [[ "$key" == "framebuffer" ]]; then
+            case "$actual" in
+                CreatedWithAddFb2|CreatedWithAddFb2Modifiers|CreatedWithLegacyAddFb)
+                    continue
+                    ;;
+            esac
+        fi
         if [[ "$actual" != "${expected_ref[$key]}" ]]; then
             echo "runtime rendered scanout evidence expected $key=${expected_ref[$key]}, got ${actual:-missing}" >&2
             echo "$evidence" >&2
@@ -102,7 +109,7 @@ declare -A expected_submit=(
     ["scanout_buffer"]="Ready"
     ["properties"]="Discovered"
     ["resources"]="Created"
-    ["framebuffer"]="CreatedWithAddFb2"
+    ["framebuffer"]="CreatedFramebuffer"
     ["request"]="Built"
     ["submit"]="SubmittedWaitingForPageFlip"
     ["request_scope"]="PageFlip"

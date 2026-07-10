@@ -13,7 +13,7 @@ const CLEAN_SUBMIT_FIELDS: &[(&str, &str)] = &[
     ("scanout_buffer", "Ready"),
     ("properties", "Discovered"),
     ("resources", "Created"),
-    ("framebuffer", "CreatedWithAddFb2"),
+    ("framebuffer", "CreatedFramebuffer"),
     ("request", "Built"),
     ("submit", "SubmittedWaitingForPageFlip"),
     ("request_scope", "PageFlip"),
@@ -81,7 +81,7 @@ fn parse_exact_evidence_line(line: &str, prefix: &str, required: &[(&str, &str)]
             return false;
         };
         let Some(index) = required.iter().position(|(required_key, required_value)| {
-            key == *required_key && value == *required_value
+            key == *required_key && evidence_field_matches(key, value, required_value)
         }) else {
             return false;
         };
@@ -94,4 +94,15 @@ fn parse_exact_evidence_line(line: &str, prefix: &str, required: &[(&str, &str)]
     }
 
     seen_count == required.len()
+}
+
+fn evidence_field_matches(key: &str, value: &str, required_value: &str) -> bool {
+    if key == "framebuffer" && required_value == "CreatedFramebuffer" {
+        return matches!(
+            value,
+            "CreatedWithAddFb2" | "CreatedWithAddFb2Modifiers" | "CreatedWithLegacyAddFb"
+        );
+    }
+
+    value == required_value
 }

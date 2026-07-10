@@ -308,7 +308,8 @@ page-flip commit flags, native page-flip delivery, and explicit resource
 retirement for both the initial modeset and steady-state page-flip phases. It
 also requires the current evidence schema and rejects duplicate or unknown
 fields, so a passing capture cannot smuggle native object identity into the
-reduced log.
+reduced log. A clean capture may report any reduced created-framebuffer path:
+no-modifier AddFB2, modifier-aware AddFB2, or legacy AddFB fallback.
 
 The verifier fixtures can be checked without hardware:
 

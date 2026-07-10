@@ -84,12 +84,8 @@ impl drm::buffer::PlanarBuffer for LibdrmRendererScanoutBuffer {
     }
 
     fn modifier(&self) -> Option<drm::buffer::DrmModifier> {
-        self.modifier.filter(|modifier| {
-            !matches!(
-                modifier,
-                drm::buffer::DrmModifier::Invalid | drm::buffer::DrmModifier::Linear
-            )
-        })
+        self.modifier
+            .filter(|modifier| !matches!(modifier, drm::buffer::DrmModifier::Invalid))
     }
 
     fn pitches(&self) -> [u32; 4] {

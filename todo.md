@@ -94,6 +94,9 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Preserved explicit linear GBM modifiers through the backend-private DRM
+  scanout-buffer adapter and made framebuffer registration try modifier-aware
+  AddFB2 before falling back to implicit AddFB2 and legacy AddFB.
 - [x] Extended atomic scanout evidence to schema 8 with reduced framebuffer
   creation detail, distinguishing AddFB2, AddFB2-with-modifiers, legacy AddFB
   fallback, and failed framebuffer registration without exposing native IDs.
