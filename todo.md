@@ -67,6 +67,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Split native page-flip plumbing into domain modules for reduced reports,
+  output routing/decode, reader implementations, and poller state.
 - [x] Split rendered primary-plane scanout into domain modules for reduced
   report types, submit tracking, command-time runtime adaptation, and
   page-flip retirement/cleanup.
