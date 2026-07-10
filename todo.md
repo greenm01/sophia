@@ -84,6 +84,8 @@ smoke still needs a DRM-master-capable machine.
 ## Done Recently
 
 - [x] Added verifier coverage proving forged passing atomic evidence from a
+  blocking commit or missing page-flip-event commit flag is rejected offline.
+- [x] Added verifier coverage proving forged passing atomic evidence from a
   test-only commit is rejected offline.
 - [x] Added verifier coverage proving forged passing atomic evidence with
   retire-time cleanup debt is rejected offline.
