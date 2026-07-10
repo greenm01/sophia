@@ -211,6 +211,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
         } else if submit_status
             != Some(LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip)
             || request_scope != Some(phase.required_request_scope())
+            || commit_flags != Some(phase.required_commit_flags())
         {
             LibdrmNativeAtomicScanoutSmokeStatus::SubmitFailed
         } else if !accepted_page_flip
@@ -260,6 +261,23 @@ impl LibdrmNativeAtomicScanoutSmokePhase {
         match self {
             Self::InitialModeset => LibdrmNativeAtomicCommitRequestScope::Modeset,
             Self::SteadyPageFlip => LibdrmNativeAtomicCommitRequestScope::PageFlip,
+        }
+    }
+
+    pub const fn required_commit_flags(self) -> LibdrmNativeAtomicCommitFlagsReport {
+        match self {
+            Self::InitialModeset => LibdrmNativeAtomicCommitFlagsReport {
+                page_flip_event: true,
+                nonblocking: true,
+                allow_modeset: true,
+                test_only: false,
+            },
+            Self::SteadyPageFlip => LibdrmNativeAtomicCommitFlagsReport {
+                page_flip_event: true,
+                nonblocking: true,
+                allow_modeset: false,
+                test_only: false,
+            },
         }
     }
 }

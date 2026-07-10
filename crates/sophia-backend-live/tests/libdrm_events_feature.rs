@@ -3639,6 +3639,77 @@ fn native_atomic_scanout_smoke_evidence_requires_modeset_request_scope() {
 }
 
 #[test]
+fn native_atomic_scanout_smoke_evidence_requires_phase_commit_flags() {
+    let device = full_primary_plane_scanout_device();
+    let selection = select_native_primary_plane_target(&device);
+    let mut submit =
+        submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_policy(
+            &device,
+            selection,
+            scanout_descriptor(Size {
+                width: 1280,
+                height: 720,
+            }),
+            LibdrmNativePrimaryPlaneScanoutSubmitPolicy::page_flip(),
+        );
+    submit.commit_flags = Some(LibdrmNativeAtomicCommitFlagsReport {
+        page_flip_event: true,
+        nonblocking: true,
+        allow_modeset: true,
+        test_only: false,
+    });
+    let submission = submit
+        .submission
+        .take()
+        .expect("submitted page flip should retain resource ownership");
+    let poll =
+        LibdrmPageFlipEventPollReport::from_source_report(LivePageFlipCallbackSourceReport {
+            emitted: 1,
+            queued_remaining: 0,
+            backpressure: false,
+            disconnected: false,
+            max_reached: false,
+        });
+    let callback = LivePageFlipCallbackReport {
+        decision: LivePageFlipCallbackDecision::Accepted,
+        event: LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(43),
+        },
+    };
+    let retired =
+        retire_native_primary_plane_scanout_after_page_flip(&device, submission, &callback);
+
+    let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
+        LiveKmsScanoutTargetStatus::Ready,
+        Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
+        LiveRendererScanoutBufferExportStatus::Exported,
+        Some(&submit),
+        Some(&poll),
+        Some(&callback),
+        Some(&retired),
+    );
+
+    assert_eq!(
+        evidence.status,
+        LibdrmNativeAtomicScanoutSmokeStatus::SubmitFailed
+    );
+    assert_eq!(
+        evidence.request_scope,
+        Some(LibdrmNativeAtomicCommitRequestScope::PageFlip)
+    );
+    assert_eq!(
+        evidence.commit_flags,
+        Some(LibdrmNativeAtomicCommitFlagsReport {
+            page_flip_event: true,
+            nonblocking: true,
+            allow_modeset: true,
+            test_only: false,
+        })
+    );
+}
+
+#[test]
 fn native_atomic_scanout_smoke_evidence_fails_before_submit_for_not_ready_target() {
     let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
         LiveKmsScanoutTargetStatus::FrameTargetSizeMismatch,

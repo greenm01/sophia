@@ -78,6 +78,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Made reduced atomic scanout smoke evidence require phase-correct commit
+  flags before reporting `Passed`, matching the shell verifier contract.
 - [x] Made native primary-plane scanout policy expose its required reduced
   request scope and fail closed if a built atomic request does not match it.
 - [x] Added a local non-hardware atomic scanout gate that runs formatting,
