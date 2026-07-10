@@ -307,6 +307,8 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             LibdrmNativeAtomicScanoutSmokeStatus::PageFlipMissing
         } else if retire_status
             != Some(LibdrmNativePrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip)
+            || retire_destroy != Some(LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed)
+            || retire_cleanup_pending
         {
             LibdrmNativeAtomicScanoutSmokeStatus::RetireFailed
         } else {

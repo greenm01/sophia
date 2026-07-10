@@ -19,17 +19,17 @@ use sophia_backend_live::{
     LibdrmNativePollerDiagnostics, LibdrmNativePrimaryPlaneObjects,
     LibdrmNativePrimaryPlanePropertyDiscoveryStatus, LibdrmNativePrimaryPlanePropertyHandles,
     LibdrmNativePrimaryPlaneResourceCreateStatus, LibdrmNativePrimaryPlaneResourceDestroyStatus,
-    LibdrmNativePrimaryPlaneResourceDevice, LibdrmNativePrimaryPlaneScanoutRetireStatus,
-    LibdrmNativePrimaryPlaneScanoutSubmitPolicy, LibdrmNativePrimaryPlaneScanoutSubmitStatus,
-    LibdrmNativePrimaryPlaneSelectionResult, LibdrmNativePrimaryPlaneSelectionStatus,
-    LibdrmNativePropertyHandleSet, LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport,
-    LibdrmNativeReadLoopReport, LibdrmNativeReadLoopStatus,
-    LibdrmNativeRenderedScanoutContextStatus, LibdrmPageFlipEventPollReport,
-    LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller, LibdrmRendererScanoutBuffer,
-    LiveBackendConfig, LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
-    LiveHardwareValidationSmokeReport, LiveHardwareValidationSmokeStatus,
-    LiveHardwareValidationTarget, LiveKmsScanoutTargetStatus, LiveLibdrmPollerDiagnostics,
-    LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
+    LibdrmNativePrimaryPlaneResourceDevice, LibdrmNativePrimaryPlaneScanoutRetireResult,
+    LibdrmNativePrimaryPlaneScanoutRetireStatus, LibdrmNativePrimaryPlaneScanoutSubmitPolicy,
+    LibdrmNativePrimaryPlaneScanoutSubmitStatus, LibdrmNativePrimaryPlaneSelectionResult,
+    LibdrmNativePrimaryPlaneSelectionStatus, LibdrmNativePropertyHandleSet,
+    LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport, LibdrmNativeReadLoopReport,
+    LibdrmNativeReadLoopStatus, LibdrmNativeRenderedScanoutContextStatus,
+    LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller,
+    LibdrmRendererScanoutBuffer, LiveBackendConfig, LiveHardwareValidationGateReport,
+    LiveHardwareValidationGateStatus, LiveHardwareValidationSmokeReport,
+    LiveHardwareValidationSmokeStatus, LiveHardwareValidationTarget, LiveKmsScanoutTargetStatus,
+    LiveLibdrmPollerDiagnostics, LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
     LiveLibdrmPollerStartupStatus, LivePageFlipCallback, LivePageFlipCallbackDecision,
     LivePageFlipCallbackQueue, LivePageFlipCallbackReport, LivePageFlipCallbackSourceReport,
     LivePageFlipEvent, LivePageFlipEventStatus, LiveRenderedPrimaryPlaneScanoutBackpressureReport,
@@ -3184,6 +3184,58 @@ fn native_atomic_scanout_smoke_evidence_reports_resource_retire_failure() {
         Some(LibdrmNativePrimaryPlaneResourceDestroyStatus::FramebufferDestroyFailed)
     );
     assert_eq!(evidence.retire_cleanup_pending, true);
+}
+
+#[test]
+fn native_atomic_scanout_smoke_evidence_requires_destroyed_retire_resources() {
+    let device = full_primary_plane_scanout_device();
+    let submit = submit_native_primary_plane_scanout_from_renderer_descriptor(
+        &device,
+        scanout_descriptor(Size {
+            width: 1280,
+            height: 720,
+        }),
+    );
+    let poll =
+        LibdrmPageFlipEventPollReport::from_source_report(LivePageFlipCallbackSourceReport {
+            emitted: 1,
+            queued_remaining: 0,
+            backpressure: false,
+            disconnected: false,
+            max_reached: false,
+        });
+    let callback = LivePageFlipCallbackReport {
+        decision: LivePageFlipCallbackDecision::Accepted,
+        event: LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(42),
+        },
+    };
+    let inconsistent_retire = LibdrmNativePrimaryPlaneScanoutRetireResult {
+        status: LibdrmNativePrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip,
+        destroy: Some(LibdrmNativePrimaryPlaneResourceDestroyStatus::FramebufferDestroyFailed),
+        submission: None,
+        cleanup: None,
+    };
+
+    let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+        LiveKmsScanoutTargetStatus::Ready,
+        Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
+        LiveRendererScanoutBufferExportStatus::Exported,
+        Some(&submit),
+        Some(&poll),
+        Some(&callback),
+        Some(&inconsistent_retire),
+    );
+
+    assert_eq!(
+        evidence.status,
+        LibdrmNativeAtomicScanoutSmokeStatus::RetireFailed
+    );
+    assert_eq!(
+        evidence.retire_destroy,
+        Some(LibdrmNativePrimaryPlaneResourceDestroyStatus::FramebufferDestroyFailed)
+    );
 }
 
 #[test]

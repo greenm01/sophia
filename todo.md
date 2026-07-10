@@ -67,6 +67,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Made reduced atomic scanout evidence require explicit destroyed-resource
+  status and no cleanup debt before reporting `Passed`.
 - [x] Versioned the reduced atomic scanout evidence schema and hardened the
   verifier to parse fields exactly, rejecting duplicate or unknown fields.
 - [x] Extracted backend-live runtime page-flip observation, atomic-commit
