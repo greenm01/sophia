@@ -54,35 +54,19 @@ where
     };
 
     let Some(selected) = selection.selection else {
-        return LibdrmNativePrimaryPlaneScanoutSubmitResult {
-            status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::KmsTargetUnavailable,
-            selection: selection.status,
+        return LibdrmNativePrimaryPlaneScanoutSubmitResult::new(
+            LibdrmNativePrimaryPlaneScanoutSubmitStatus::KmsTargetUnavailable,
+            selection.status,
             scanout_buffer,
-            properties: None,
-            resources: None,
-            request: None,
-            request_scope: None,
-            commit_flags: None,
-            submit: None,
-            submission: None,
-            cleanup: None,
-        };
+        );
     };
 
     let Some(buffer) = LibdrmRendererScanoutBuffer::from_descriptor(descriptor) else {
-        return LibdrmNativePrimaryPlaneScanoutSubmitResult {
-            status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::ScanoutBufferUnavailable,
-            selection: selection.status,
+        return LibdrmNativePrimaryPlaneScanoutSubmitResult::new(
+            LibdrmNativePrimaryPlaneScanoutSubmitStatus::ScanoutBufferUnavailable,
+            selection.status,
             scanout_buffer,
-            properties: None,
-            resources: None,
-            request: None,
-            request_scope: None,
-            commit_flags: None,
-            submit: None,
-            submission: None,
-            cleanup: None,
-        };
+        );
     };
 
     let properties = discover_native_primary_plane_property_handles(
@@ -92,19 +76,13 @@ where
         selected.plane,
     );
     let Some(property_handles) = properties.properties else {
-        return LibdrmNativePrimaryPlaneScanoutSubmitResult {
-            status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::PropertyDiscoveryUnavailable,
-            selection: selection.status,
+        let mut result = LibdrmNativePrimaryPlaneScanoutSubmitResult::new(
+            LibdrmNativePrimaryPlaneScanoutSubmitStatus::PropertyDiscoveryUnavailable,
+            selection.status,
             scanout_buffer,
-            properties: Some(properties.status),
-            resources: None,
-            request: None,
-            request_scope: None,
-            commit_flags: None,
-            submit: None,
-            submission: None,
-            cleanup: None,
-        };
+        );
+        result.properties = Some(properties.status);
+        return result;
     };
 
     let resources = if policy.allow_modeset {
@@ -113,19 +91,15 @@ where
         create_native_primary_plane_page_flip_resources(device, selected, &buffer)
     };
     let Some(resource_bundle) = resources.resources else {
-        return LibdrmNativePrimaryPlaneScanoutSubmitResult {
-            status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::ResourceCreationUnavailable,
-            selection: selection.status,
+        let mut result = LibdrmNativePrimaryPlaneScanoutSubmitResult::new(
+            LibdrmNativePrimaryPlaneScanoutSubmitStatus::ResourceCreationUnavailable,
+            selection.status,
             scanout_buffer,
-            properties: Some(properties.status),
-            resources: Some(resources.status),
-            request: None,
-            request_scope: None,
-            commit_flags: None,
-            submit: None,
-            submission: None,
-            cleanup: resources.cleanup,
-        };
+        );
+        result.properties = Some(properties.status);
+        result.resources = Some(resources.status);
+        result.cleanup = resources.cleanup;
+        return result;
     };
 
     let objects = resource_bundle.into_objects(selected);
@@ -136,19 +110,16 @@ where
     };
     let Some(request) = request.request else {
         let destroy = destroy_native_primary_plane_resources(device, resource_bundle);
-        return LibdrmNativePrimaryPlaneScanoutSubmitResult {
-            status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::AtomicRequestBuildFailed,
-            selection: selection.status,
+        let mut result = LibdrmNativePrimaryPlaneScanoutSubmitResult::new(
+            LibdrmNativePrimaryPlaneScanoutSubmitStatus::AtomicRequestBuildFailed,
+            selection.status,
             scanout_buffer,
-            properties: Some(properties.status),
-            resources: Some(resources.status),
-            request: Some(request.status),
-            request_scope: None,
-            commit_flags: None,
-            submit: None,
-            submission: None,
-            cleanup: destroy.cleanup,
-        };
+        );
+        result.properties = Some(properties.status);
+        result.resources = Some(resources.status);
+        result.request = Some(request.status);
+        result.cleanup = destroy.cleanup;
+        return result;
     };
 
     let request = if policy.allow_modeset {
@@ -159,19 +130,18 @@ where
     let request_scope = request.reduced_scope();
     if request_scope != policy.expected_request_scope() {
         let destroy = destroy_native_primary_plane_resources(device, resource_bundle);
-        return LibdrmNativePrimaryPlaneScanoutSubmitResult {
-            status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::AtomicRequestBuildFailed,
-            selection: selection.status,
+        let mut result = LibdrmNativePrimaryPlaneScanoutSubmitResult::new(
+            LibdrmNativePrimaryPlaneScanoutSubmitStatus::AtomicRequestBuildFailed,
+            selection.status,
             scanout_buffer,
-            properties: Some(properties.status),
-            resources: Some(resources.status),
-            request: Some(LibdrmNativeAtomicRequestBuildStatus::Built),
-            request_scope: Some(request_scope),
-            commit_flags: Some(request.reduced_flags()),
-            submit: None,
-            submission: None,
-            cleanup: destroy.cleanup,
-        };
+        );
+        result.properties = Some(properties.status);
+        result.resources = Some(resources.status);
+        result.request = Some(LibdrmNativeAtomicRequestBuildStatus::Built);
+        result.request_scope = Some(request_scope);
+        result.commit_flags = Some(request.reduced_flags());
+        result.cleanup = destroy.cleanup;
+        return result;
     }
     let commit_flags = request.reduced_flags();
     let (flags, request) = request.into_native();
@@ -185,34 +155,34 @@ where
 
     if submit != LibdrmNativeAtomicCommitSubmitStatus::Submitted {
         let destroy = destroy_native_primary_plane_resources(device, resource_bundle);
-        return LibdrmNativePrimaryPlaneScanoutSubmitResult {
-            status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::AtomicSubmitFailed,
-            selection: selection.status,
+        let mut result = LibdrmNativePrimaryPlaneScanoutSubmitResult::new(
+            LibdrmNativePrimaryPlaneScanoutSubmitStatus::AtomicSubmitFailed,
+            selection.status,
             scanout_buffer,
-            properties: Some(properties.status),
-            resources: Some(resources.status),
-            request: Some(LibdrmNativeAtomicRequestBuildStatus::Built),
-            request_scope: Some(request_scope),
-            commit_flags: Some(commit_flags),
-            submit: Some(submit),
-            submission: None,
-            cleanup: destroy.cleanup,
-        };
+        );
+        result.properties = Some(properties.status);
+        result.resources = Some(resources.status);
+        result.request = Some(LibdrmNativeAtomicRequestBuildStatus::Built);
+        result.request_scope = Some(request_scope);
+        result.commit_flags = Some(commit_flags);
+        result.submit = Some(submit);
+        result.cleanup = destroy.cleanup;
+        return result;
     }
 
-    LibdrmNativePrimaryPlaneScanoutSubmitResult {
-        status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip,
-        selection: selection.status,
+    let mut result = LibdrmNativePrimaryPlaneScanoutSubmitResult::new(
+        LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip,
+        selection.status,
         scanout_buffer,
-        properties: Some(properties.status),
-        resources: Some(resources.status),
-        request: Some(LibdrmNativeAtomicRequestBuildStatus::Built),
-        request_scope: Some(request_scope),
-        commit_flags: Some(commit_flags),
-        submit: Some(submit),
-        submission: Some(LibdrmNativePrimaryPlaneScanoutSubmission {
-            resources: resource_bundle,
-        }),
-        cleanup: None,
-    }
+    );
+    result.properties = Some(properties.status);
+    result.resources = Some(resources.status);
+    result.request = Some(LibdrmNativeAtomicRequestBuildStatus::Built);
+    result.request_scope = Some(request_scope);
+    result.commit_flags = Some(commit_flags);
+    result.submit = Some(submit);
+    result.submission = Some(LibdrmNativePrimaryPlaneScanoutSubmission {
+        resources: resource_bundle,
+    });
+    result
 }

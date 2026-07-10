@@ -15,6 +15,28 @@ pub struct LibdrmNativePrimaryPlaneScanoutSubmitResult {
     pub cleanup: Option<LibdrmNativePrimaryPlaneResourceCleanup>,
 }
 
+impl LibdrmNativePrimaryPlaneScanoutSubmitResult {
+    pub(crate) const fn new(
+        status: LibdrmNativePrimaryPlaneScanoutSubmitStatus,
+        selection: LibdrmNativePrimaryPlaneSelectionStatus,
+        scanout_buffer: LiveRendererScanoutBufferStatus,
+    ) -> Self {
+        Self {
+            status,
+            selection,
+            scanout_buffer,
+            properties: None,
+            resources: None,
+            request: None,
+            request_scope: None,
+            commit_flags: None,
+            submit: None,
+            submission: None,
+            cleanup: None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LibdrmNativePrimaryPlaneScanoutSubmitStatus {
     SubmittedWaitingForPageFlip,

@@ -83,6 +83,8 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Centralized native primary-plane scanout submit result construction so
+  reduced evidence fields default consistently across failure branches.
 - [x] Extended atomic scanout evidence to schema 5 so passing hardware captures
   must prove the reduced scanout-buffer import status is ready before submit.
 - [x] Split page-flip callback intake, callback queue draining, poller
