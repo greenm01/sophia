@@ -7,6 +7,7 @@ cd "$ROOT_DIR"
 
 cargo fmt --check
 cargo check --offline -p sophia-cli --features atomic-scanout-smoke-live --quiet
+cargo test --offline -p sophia-cli --features atomic-scanout-smoke-live --test backend_evidence --quiet
 cargo test --offline -p sophia-renderer-native-egl --features gbm-platform --quiet
 cargo test --offline -p sophia-renderer-live --features "gbm-probe egl-probe" --quiet
 cargo test --offline -p sophia-backend-live --features "libdrm-events libinput-events gbm-probe egl-probe" --quiet
