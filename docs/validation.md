@@ -100,7 +100,9 @@ existing capture; the verifier requires
 `CandidatePrimaryCardsAtomicReady` and at least one primary card node that
 admits the `UniversalPlanes` and `Atomic` DRM client capabilities, exposes a
 reduced KMS connector/CRTC/primary-plane target, and has the atomic property
-handles needed for the primary-plane request.
+handles needed for the primary-plane request. Under `libdrm-events`, preflight
+and `select_real_atomic_scanout_card` use the same reduced readiness probe, so
+the non-modesetting gate and the destructive selector do not drift.
 
 Set `SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1` only from a session that may take
 DRM master on a primary `/dev/dri/card*` node. Backend-live first uses the

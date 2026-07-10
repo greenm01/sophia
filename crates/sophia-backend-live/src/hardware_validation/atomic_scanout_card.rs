@@ -62,6 +62,72 @@ impl RealAtomicScanoutCardSelection {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct RealAtomicScanoutCardReadiness {
+    pub openable: bool,
+    pub atomic_capable: bool,
+    pub scanout_target: bool,
+    pub atomic_properties: bool,
+}
+
+pub(crate) fn inspect_real_atomic_scanout_card(path: &Path) -> RealAtomicScanoutCardReadiness {
+    let Ok(card) = RealAtomicScanoutCard::open_nonblocking(path) else {
+        return RealAtomicScanoutCardReadiness::default();
+    };
+    inspect_opened_real_atomic_scanout_card(&card).readiness
+}
+
+struct RealAtomicScanoutCardInspection {
+    readiness: RealAtomicScanoutCardReadiness,
+    selection: Option<LibdrmNativePrimaryPlaneSelection>,
+}
+
+fn inspect_opened_real_atomic_scanout_card(
+    card: &RealAtomicScanoutCard,
+) -> RealAtomicScanoutCardInspection {
+    let mut readiness = RealAtomicScanoutCardReadiness {
+        openable: true,
+        ..RealAtomicScanoutCardReadiness::default()
+    };
+
+    if !admit_atomic_scanout_client_capabilities(card) {
+        return RealAtomicScanoutCardInspection {
+            readiness,
+            selection: None,
+        };
+    }
+    readiness.atomic_capable = true;
+
+    let target = select_native_primary_plane_target(card);
+    if target.status != LibdrmNativePrimaryPlaneSelectionStatus::Selected {
+        return RealAtomicScanoutCardInspection {
+            readiness,
+            selection: None,
+        };
+    }
+    let Some(selection) = target.selection else {
+        return RealAtomicScanoutCardInspection {
+            readiness,
+            selection: None,
+        };
+    };
+    readiness.scanout_target = true;
+
+    let properties = discover_native_primary_plane_property_handles(
+        card,
+        selection.connector,
+        selection.crtc,
+        selection.plane,
+    );
+    readiness.atomic_properties =
+        properties.status == LibdrmNativePrimaryPlanePropertyDiscoveryStatus::Discovered;
+
+    RealAtomicScanoutCardInspection {
+        readiness,
+        selection: readiness.atomic_properties.then_some(selection),
+    }
+}
+
 #[derive(Debug)]
 pub struct RealAtomicScanoutPageFlipSession {
     card: RealAtomicScanoutCard,
@@ -258,32 +324,14 @@ pub fn select_real_atomic_scanout_card_from_dev_dri(
         let Ok(card) = RealAtomicScanoutCard::open_nonblocking(&path) else {
             continue;
         };
-        saw_openable = true;
+        let inspection = inspect_opened_real_atomic_scanout_card(&card);
+        saw_openable |= inspection.readiness.openable;
+        saw_atomic_capable |= inspection.readiness.atomic_capable;
+        saw_scanout_target |= inspection.readiness.scanout_target;
 
-        if !admit_atomic_scanout_client_capabilities(&card) {
-            continue;
-        }
-        saw_atomic_capable = true;
-
-        let target = select_native_primary_plane_target(&card);
-        let Some(selection) = target.selection else {
+        let Some(selection) = inspection.selection else {
             continue;
         };
-        if target.status != LibdrmNativePrimaryPlaneSelectionStatus::Selected {
-            continue;
-        }
-        saw_scanout_target = true;
-
-        let properties = discover_native_primary_plane_property_handles(
-            &card,
-            selection.connector,
-            selection.crtc,
-            selection.plane,
-        );
-        if properties.status != LibdrmNativePrimaryPlanePropertyDiscoveryStatus::Discovered {
-            continue;
-        }
-
         return RealAtomicScanoutCardSelection::selected(card, selection);
     }
 

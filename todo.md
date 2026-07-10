@@ -83,6 +83,9 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Unified atomic scanout preflight and real card selection around the same
+  reduced readiness probe so the non-modesetting gate cannot drift from the
+  destructive selector.
 - [x] Added a production runtime-tick seam on the real atomic page-flip session
   owner so selected DRM card, event reader, and routed poller ownership stays
   bundled while driving native GBM rendered-primary-plane scanout.

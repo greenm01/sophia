@@ -1,5 +1,5 @@
 #[cfg(feature = "libdrm-events")]
-mod atomic_scanout_card;
+pub(crate) mod atomic_scanout_card;
 mod gate;
 mod preflight;
 
