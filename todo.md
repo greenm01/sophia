@@ -67,6 +67,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Extracted backend-live runtime frame-target and reduced KMS scanout
+  target lifecycle/allocation into a dedicated runtime submodule.
 - [x] Split native page-flip plumbing into domain modules for reduced reports,
   output routing/decode, reader implementations, and poller state.
 - [x] Split rendered primary-plane scanout into domain modules for reduced
