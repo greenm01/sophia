@@ -78,6 +78,9 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Extended atomic scanout evidence to schema 4 so passing hardware captures
+  must prove primary-plane property discovery, native resource creation, and
+  atomic request build before submit.
 - [x] Strengthened atomic scanout preflight to schema 5 with a capped
   atomic-property-ready primary card count, so the smoke gate catches
   unsupported, permission-limited, target-less, or property-incomplete cards

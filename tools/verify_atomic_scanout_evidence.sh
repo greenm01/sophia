@@ -51,12 +51,15 @@ verify_phase() {
 
     declare -A observed=()
     declare -A expected=(
-        ["schema"]="3"
+        ["schema"]="4"
         ["phase"]="$phase"
         ["status"]="Passed"
         ["scanout_target"]="Ready"
         ["rendered_context"]="Ready"
         ["gbm_export"]="Exported"
+        ["properties"]="Discovered"
+        ["resources"]="Created"
+        ["request"]="Built"
         ["submit"]="SubmittedWaitingForPageFlip"
         ["request_scope"]="$request_scope"
         ["commit_page_flip_event"]="true"

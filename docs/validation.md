@@ -117,11 +117,12 @@ Without that environment variable, the test returns early and never opens or
 modesets hardware.
 The stable evidence shape for that run is the
 `sophia_atomic_scanout_evidence` line pair: schema version, phase, overall
-status, rendered context status, GBM export status, primary-plane submit
-status, reduced request scope, page-flip poll status, reduced commit flags,
-page-flip event status, retirement status, retire-time resource destroy status,
-and retire-time cleanup-pending status only. A passing capture must contain
-both `InitialModeset` and `SteadyPageFlip`.
+status, rendered context status, GBM export status, primary-plane property
+discovery status, native resource creation status, atomic request build status,
+primary-plane submit status, reduced request scope, page-flip poll status,
+reduced commit flags, page-flip event status, retirement status, retire-time
+resource destroy status, and retire-time cleanup-pending status only. A passing
+capture must contain both `InitialModeset` and `SteadyPageFlip`.
 The stable evidence shape for the GBM/EGL renderer smoke is
 `LiveRealGbmSmokeEvidence`: status, draw status, presentation status, and
 frame-target allocation status only.
@@ -180,11 +181,13 @@ tools/verify_atomic_scanout_preflight.sh /tmp/sophia-atomic-scanout-preflight.lo
 ```
 
 The verifier accepts only reduced evidence that proves a rendered GBM
-front-buffer export, primary-plane atomic submit, nonblocking page-flip commit
-flags, native page-flip delivery, and explicit resource retirement for both the
-initial modeset and steady-state page-flip phases. It also requires the current
-evidence schema and rejects duplicate or unknown fields, so a passing capture
-cannot smuggle native object identity into the reduced log.
+front-buffer export, primary-plane property discovery, native resource
+creation, atomic request build, primary-plane atomic submit, nonblocking
+page-flip commit flags, native page-flip delivery, and explicit resource
+retirement for both the initial modeset and steady-state page-flip phases. It
+also requires the current evidence schema and rejects duplicate or unknown
+fields, so a passing capture cannot smuggle native object identity into the
+reduced log.
 
 ## Retiring `DEFAULT_DISPLAY`
 
