@@ -78,6 +78,9 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Added a local non-hardware atomic scanout gate that runs formatting,
+  GBM/EGL scanout feature tests, backend-live scanout intake tests, and reduced
+  verifier fixture checks.
 - [x] Added atomic scanout verifier fixture checks so reduced preflight and
   evidence logs reject unavailable hosts, missing steady-state evidence, wrong
   steady-state request scope, and native identity leakage.

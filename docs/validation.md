@@ -141,6 +141,16 @@ cargo test --offline -p sophia-backend-live --features libinput-events
 cargo test --offline -p sophia-backend-live --features libdrm-events,libinput-events
 ```
 
+For the current atomic scanout backend work, the local non-hardware gate is:
+
+```sh
+tools/check_atomic_scanout_local.sh
+```
+
+It runs formatting, the GBM/EGL renderer checks, the backend-live
+libdrm/libinput scanout feature checks, and the reduced verifier fixture
+checks. It does not request DRM master or modeset hardware.
+
 Run the opt-in local hardware smoke only when you want real render-node
 coverage:
 
