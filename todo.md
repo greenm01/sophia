@@ -67,6 +67,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Extracted backend-live runtime page-flip observation, atomic-commit
+  reporting, and callback queue draining into a dedicated runtime submodule.
 - [x] Extracted backend-live runtime rendered-primary-plane ownership,
   backpressure, retirement, and cleanup tracking into a dedicated runtime
   submodule.
