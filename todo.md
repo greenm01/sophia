@@ -78,6 +78,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Split `hardware_validation` into gate and atomic preflight domains while
+  keeping the public backend-live API stable.
 - [x] Extended atomic scanout evidence to schema 4 so passing hardware captures
   must prove primary-plane property discovery, native resource creation, and
   atomic request build before submit.
