@@ -168,7 +168,7 @@ where
         self.last_target = Some(target);
         self.last_target_lifecycle = Some(target_lifecycle);
 
-        if target.status != LiveGbmEglFrameTargetStatus::Ready {
+        if !target.is_valid_scanout_target() {
             self.last_export_status = Some(LiveRendererScanoutBufferExportStatus::InvalidTarget);
             return LiveRenderedScanoutBufferExport {
                 status: LiveRendererScanoutBufferExportStatus::InvalidTarget,

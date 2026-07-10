@@ -37,7 +37,7 @@ impl LiveKmsScanoutTargetReport {
             };
         };
 
-        if frame_target.status != LiveGbmEglFrameTargetStatus::Ready {
+        if !frame_target.is_valid_scanout_target() {
             return Self {
                 status: LiveKmsScanoutTargetStatus::InvalidFrameTarget,
                 size: Some(frame_target.size),

@@ -3292,6 +3292,42 @@ fn native_gbm_rendered_scanout_exporter_rejects_invalid_target_before_device_ope
 
 #[cfg(feature = "gbm-probe")]
 #[test]
+fn native_gbm_rendered_scanout_exporter_rejects_forged_ready_target_before_device_open() {
+    let mut exporter = NativeGbmRenderedScanoutBufferDiscoveryExporter::new(MissingRenderDevice);
+    let target = LiveGbmEglFrameTargetRecord {
+        status: LiveGbmEglFrameTargetStatus::Ready,
+        size: Size {
+            width: -1,
+            height: 720,
+        },
+    };
+
+    let export = exporter.export_rendered_scanout_buffer(target);
+
+    assert_eq!(
+        export.status,
+        LiveRendererScanoutBufferExportStatus::InvalidTarget
+    );
+    assert_eq!(exporter.export_attempts(), 1);
+    assert_eq!(exporter.context_open_attempts(), 0);
+    assert_eq!(exporter.context_status(), None);
+    assert!(!exporter.context_ready());
+    assert_eq!(
+        exporter.last_export_status(),
+        Some(LiveRendererScanoutBufferExportStatus::InvalidTarget)
+    );
+    assert_eq!(exporter.last_target(), Some(target));
+    assert_eq!(
+        exporter.last_target_lifecycle(),
+        Some(LiveGbmEglFrameTargetLifecycleReport {
+            status: LiveGbmEglFrameTargetLifecycleStatus::Created,
+            target,
+        })
+    );
+}
+
+#[cfg(feature = "gbm-probe")]
+#[test]
 fn native_gbm_rendered_scanout_exporter_tracks_reduced_target_reuse_and_resize() {
     let mut exporter = NativeGbmRenderedScanoutBufferDiscoveryExporter::new(MissingRenderDevice);
     let first = LiveGbmEglFrameTargetRecord::new(Size {
@@ -5607,7 +5643,7 @@ mod atomic_scanout_hardware_smoke {
         let slot = LibdrmNativeOutputSlot::new(1).expect("slot one should be valid");
         let output = OutputId::from_raw(1);
         let target = LiveGbmEglFrameTargetRecord::new(selected.size());
-        let scanout_target = if target.status != LiveGbmEglFrameTargetStatus::Ready {
+        let scanout_target = if !target.is_valid_scanout_target() {
             LiveKmsScanoutTargetStatus::InvalidFrameTarget
         } else if target.size != selected.size() {
             LiveKmsScanoutTargetStatus::FrameTargetSizeMismatch

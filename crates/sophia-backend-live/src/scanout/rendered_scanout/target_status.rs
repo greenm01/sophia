@@ -11,7 +11,7 @@ pub(crate) fn reduced_scanout_target_status_from_native_selection(
         return current_status;
     }
 
-    if target.status != LiveGbmEglFrameTargetStatus::Ready {
+    if !target.is_valid_scanout_target() {
         return LiveKmsScanoutTargetStatus::InvalidFrameTarget;
     }
 

@@ -83,6 +83,8 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Hardened rendered GBM scanout target validation so forged ready frame
+  targets are rejected before native render-device discovery.
 - [x] Centralized backend runtime tick report construction so plain and
   rendered-scanout ticks expose the same reduced evidence shape.
 - [x] Split rendered primary-plane scanout target reduction and tracked runtime
