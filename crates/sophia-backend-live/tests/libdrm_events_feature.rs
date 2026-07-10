@@ -3154,6 +3154,150 @@ fn live_session_loop_tick_observes_readiness_then_retire_and_submit() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+#[cfg(feature = "libinput-events")]
+#[test]
+fn live_session_loop_tick_drains_pending_page_flip_callbacks_without_new_readiness() {
+    let root = ready_drm_sysfs_fixture("session-loop-pending-page-flip-without-readiness");
+    let config = LiveBackendConfig::new(&root).with_input_device(LibinputDeviceDescriptor {
+        seat: SeatId::from_raw(1),
+        device: DeviceId::from_raw(2),
+        kind: LibinputDeviceKind::Pointer,
+    });
+    let report = discover_live_backend(&config);
+    let (sender, receiver) = mpsc::sync_channel(4);
+    let poller = LiveInputReadinessGatedPoller::new(NativeLibinputEventPoller::new(
+        FakeLiveLibinputEventReader::new([]),
+        4,
+    ));
+    let mut assembly = report
+        .into_live_runtime_assembly(poller)
+        .expect("ready backend should seed live assembly")
+        .with_page_flip_callback_queue(LivePageFlipCallbackQueue::new(receiver, 4));
+    let device = full_primary_plane_scanout_device();
+    let mut initial_exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+    let submitted = assembly
+        .submit_and_track_rendered_primary_plane_scanout_with(&device, &mut initial_exporter);
+    assert_eq!(
+        submitted.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+    );
+
+    let slot = LibdrmNativeOutputSlot::new(1).expect("slot one should be valid");
+    let source = LibdrmNativePageFlipSource::from_authority(
+        LibdrmBackendFdAuthority::new(39).expect("nonzero authority should mint"),
+    );
+    let page_flip_poller =
+        NativeLibdrmPageFlipEventPoller::new(source).with_routes([LibdrmNativeOutputRoute {
+            slot,
+            output: OutputId::from_raw(1),
+        }]);
+    let mut session_loop = LiveBackendSessionLoop::new(
+        page_flip_poller,
+        LiveBackendSessionLoopPageFlipBudget::new(4, 1),
+    );
+    let mut reader = FakeLibdrmNativePageFlipReader::new([
+        LibdrmNativePageFlipCallback::new(slot, 201),
+        LibdrmNativePageFlipCallback::new(slot, 202),
+    ]);
+    let mut first_exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+
+    let first = session_loop
+        .run_tick_with_rendered_primary_plane_scanout_and_native_page_flip_events_with(
+            &mut assembly,
+            CompositorBackendTickInput::default(),
+            LiveBackendSessionLoopReadiness::page_flip_ready(),
+            &device,
+            &mut first_exporter,
+            &mut reader,
+            &sender,
+        )
+        .expect("first tick should read native page flips and emit one callback");
+
+    assert_eq!(
+        first.native_page_flip.read_loop,
+        LibdrmNativeReadLoopReport::callback_decoded(2)
+            .expect("two native callbacks should decode")
+    );
+    assert_eq!(
+        first.native_page_flip.poll.status,
+        LibdrmPageFlipEventPollStatus::EmitLimitReached
+    );
+    assert_eq!(first.native_page_flip.poll.callbacks.emitted, 1);
+    assert_eq!(first.native_page_flip.poll.callbacks.queued_remaining, 1);
+    assert_eq!(reader.queued_len(), 0);
+    assert_eq!(session_loop.page_flip_poller().pending_callback_count(), 1);
+    assert_eq!(
+        first
+            .tick
+            .rendered_primary_plane_scanout_retire
+            .expect("first emitted callback should retire initial scanout")
+            .status,
+        LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip
+    );
+    assert_eq!(
+        first
+            .tick
+            .rendered_primary_plane_scanout_submit
+            .expect("runtime should submit the next scanout")
+            .status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+    );
+
+    let mut second_exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+    let second = session_loop
+        .run_tick_with_rendered_primary_plane_scanout_and_native_page_flip_events_with(
+            &mut assembly,
+            CompositorBackendTickInput::default(),
+            LiveBackendSessionLoopReadiness::idle(),
+            &device,
+            &mut second_exporter,
+            &mut reader,
+            &sender,
+        )
+        .expect("pending decoded callback should drain without fresh readiness");
+
+    assert_eq!(
+        second.native_page_flip.read_loop,
+        LibdrmNativeReadLoopReport::callback_decoded(1)
+            .expect("pending callback emission should be reduced as decoded")
+    );
+    assert_eq!(
+        second.native_page_flip.poll.status,
+        LibdrmPageFlipEventPollStatus::Emitted
+    );
+    assert_eq!(second.native_page_flip.poll.callbacks.emitted, 1);
+    assert_eq!(second.native_page_flip.poll.callbacks.queued_remaining, 0);
+    assert_eq!(reader.queued_len(), 0);
+    assert_eq!(session_loop.page_flip_poller().pending_callback_count(), 0);
+    assert_eq!(
+        second
+            .tick
+            .rendered_primary_plane_scanout_retire
+            .expect("pending callback should retire the next scanout")
+            .status,
+        LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip
+    );
+    assert_eq!(
+        second
+            .tick
+            .rendered_primary_plane_scanout_submit
+            .expect("runtime should continue with the next scanout")
+            .status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+    );
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn live_runtime_tick_rejects_rendered_scanout_when_kms_target_is_not_ready() {
     let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-kms-not-ready");

@@ -83,6 +83,9 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Added session-loop coverage proving pending decoded native page-flip
+  callbacks drain under the bounded emit budget without requiring another
+  reduced page-flip readiness token.
 - [x] Queued reduced `Deferred` scanout lifecycle states for direct rendered
   primary-plane handoff paths, so in-flight and cleanup-blocked scanout attempts
   are delivered to the next engine tick instead of living only in submit reports.

@@ -1008,6 +1008,11 @@ Direct rendered primary-plane handoff paths now queue reduced `Deferred`
 scanout lifecycle states as well. That keeps in-flight backpressure and
 cleanup-blocked submit attempts visible to the next engine tick instead of
 leaving them only in backend submit reports.
+Session-loop coverage now proves bounded native page-flip emission does not
+strand decoded callbacks behind a fresh fd-readiness requirement. If a DRM read
+decodes more callbacks than the current emit budget allows, the next tick can
+drain the pending callback and retire the next rendered primary-plane owner even
+when no new page-flip readiness token arrives.
 
 ## 2026-07-10: Atomic Scanout Hardware Evidence
 
