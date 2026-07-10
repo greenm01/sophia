@@ -806,6 +806,9 @@ The atomic scanout seam now has a backend-live report shape.
 idle/waiting/committed/rejected state plus `LivePageFlipEvent`, without
 transaction IDs, surface IDs, or KMS object identity. This is the report a real
 KMS page-flip backend should update after the native commit boundary.
+`LiveAtomicScanoutCommitter` is the matching backend-owned trait; the fake
+implementation proves the runtime assembly can commit through a backend object
+instead of writing page-flip state directly.
 
 ## Open Questions
 

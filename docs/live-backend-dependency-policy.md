@@ -126,6 +126,10 @@ transaction and surface identity, and reports only whether the commit is idle,
 waiting, committed, or rejected plus the derived `LivePageFlipEvent`. A real
 KMS backend should call this after page-flip completion or rejection instead of
 writing page-flip state directly.
+`LiveAtomicScanoutCommitter` is the backend-owned interface for that handoff.
+The deterministic fake implementation records only committed count. A native
+implementation may own KMS state privately, but the runtime-facing result must
+remain `LiveAtomicScanoutCommitReport`.
 
 Backend-live runtime ticks carry the current reduced scanout readiness report,
 KMS scanout target report, and page-flip event beside renderer health. This

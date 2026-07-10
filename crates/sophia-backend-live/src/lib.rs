@@ -669,6 +669,37 @@ pub enum LiveAtomicScanoutCommitStatus {
     Rejected,
 }
 
+pub trait LiveAtomicScanoutCommitter {
+    fn commit_atomic_scanout(
+        &mut self,
+        outcome: &PageFlipCommitOutcome,
+    ) -> LiveAtomicScanoutCommitReport;
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct FakeAtomicScanoutCommitter {
+    committed: usize,
+}
+
+impl FakeAtomicScanoutCommitter {
+    pub const fn committed_count(&self) -> usize {
+        self.committed
+    }
+}
+
+impl LiveAtomicScanoutCommitter for FakeAtomicScanoutCommitter {
+    fn commit_atomic_scanout(
+        &mut self,
+        outcome: &PageFlipCommitOutcome,
+    ) -> LiveAtomicScanoutCommitReport {
+        let report = LiveAtomicScanoutCommitReport::from_page_flip_outcome(outcome);
+        if report.status == LiveAtomicScanoutCommitStatus::Committed {
+            self.committed = self.committed.saturating_add(1);
+        }
+        report
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LivePageFlipCallback {
     pub output: OutputId,
@@ -2499,6 +2530,19 @@ where
         outcome: &PageFlipCommitOutcome,
     ) -> LiveAtomicScanoutCommitReport {
         let report = LiveAtomicScanoutCommitReport::from_page_flip_outcome(outcome);
+        self.page_flip_event = report.page_flip;
+        report
+    }
+
+    pub fn commit_atomic_scanout_with<C>(
+        &mut self,
+        committer: &mut C,
+        outcome: &PageFlipCommitOutcome,
+    ) -> LiveAtomicScanoutCommitReport
+    where
+        C: LiveAtomicScanoutCommitter,
+    {
+        let report = committer.commit_atomic_scanout(outcome);
         self.page_flip_event = report.page_flip;
         report
     }

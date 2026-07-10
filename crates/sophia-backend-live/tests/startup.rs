@@ -3,9 +3,10 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 use sophia_backend_live::{
-    BufferSource, CompositorBackendTickInput, DeviceId, FakeGbmEglFrameTargetAllocator,
-    FakePageFlipCallbackSource, HeadlessOutput, LibinputDeviceDescriptor, LibinputDeviceKind,
-    LiveAtomicScanoutCommitReport, LiveAtomicScanoutCommitStatus, LiveBackendConfig,
+    BufferSource, CompositorBackendTickInput, DeviceId, FakeAtomicScanoutCommitter,
+    FakeGbmEglFrameTargetAllocator, FakePageFlipCallbackSource, HeadlessOutput,
+    LibinputDeviceDescriptor, LibinputDeviceKind, LiveAtomicScanoutCommitReport,
+    LiveAtomicScanoutCommitStatus, LiveAtomicScanoutCommitter, LiveBackendConfig,
     LiveBackendDependencyDecision, LiveBackendDependencyKind, LiveBackendDependencyUse,
     LiveCompositorBackendDiscoveryStatus, LiveGbmEglFrameTargetAllocationReport,
     LiveGbmEglFrameTargetAllocationStatus, LiveGbmEglFrameTargetLifecycleReport,
@@ -383,14 +384,18 @@ fn live_runtime_assembly_threads_scanout_and_page_flip_observations() {
         }
     );
 
-    let atomic_commit = assembly.observe_atomic_scanout_commit(&PageFlipCommitOutcome::Committed {
-        frame_serial: 121,
-        commit: TransactionCommit {
-            transaction: TransactionId::from_raw(71),
-            outcome: TransactionOutcome::Committed,
-            applied_surfaces: vec![sophia_protocol::SurfaceId::new(101, 1)],
+    let mut committer = FakeAtomicScanoutCommitter::default();
+    let atomic_commit = assembly.commit_atomic_scanout_with(
+        &mut committer,
+        &PageFlipCommitOutcome::Committed {
+            frame_serial: 121,
+            commit: TransactionCommit {
+                transaction: TransactionId::from_raw(71),
+                outcome: TransactionOutcome::Committed,
+                applied_surfaces: vec![sophia_protocol::SurfaceId::new(101, 1)],
+            },
         },
-    });
+    );
     assert_eq!(
         atomic_commit,
         LiveAtomicScanoutCommitReport {
@@ -401,6 +406,7 @@ fn live_runtime_assembly_threads_scanout_and_page_flip_observations() {
             },
         }
     );
+    assert_eq!(committer.committed_count(), 1);
     let tick = assembly
         .run_tick(CompositorBackendTickInput::default())
         .expect("runtime tick should succeed");
@@ -1544,6 +1550,44 @@ fn atomic_scanout_commit_report_reduces_page_flip_outcomes() {
             },
         }
     );
+}
+
+#[test]
+fn fake_atomic_scanout_committer_counts_only_committed_outcomes() {
+    let mut committer = FakeAtomicScanoutCommitter::default();
+
+    let committed = committer.commit_atomic_scanout(&PageFlipCommitOutcome::Committed {
+        frame_serial: 91,
+        commit: TransactionCommit {
+            transaction: TransactionId::from_raw(57),
+            outcome: TransactionOutcome::Committed,
+            applied_surfaces: vec![sophia_protocol::SurfaceId::new(88, 1)],
+        },
+    });
+    assert_eq!(committed.status, LiveAtomicScanoutCommitStatus::Committed);
+    assert_eq!(committer.committed_count(), 1);
+
+    let waiting =
+        committer.commit_atomic_scanout(&PageFlipCommitOutcome::WaitingForTransactionReadiness {
+            transaction: TransactionId::from_raw(59),
+            pending_surfaces: vec![sophia_protocol::SurfaceId::new(90, 1)],
+        });
+    assert_eq!(
+        waiting.status,
+        LiveAtomicScanoutCommitStatus::WaitingForTransactionReadiness
+    );
+    assert_eq!(committer.committed_count(), 1);
+
+    let rejected = committer.commit_atomic_scanout(&PageFlipCommitOutcome::Rejected {
+        frame_serial: 92,
+        commit: TransactionCommit {
+            transaction: TransactionId::from_raw(58),
+            outcome: TransactionOutcome::RejectedInvalidSurface,
+            applied_surfaces: vec![sophia_protocol::SurfaceId::new(89, 1)],
+        },
+    });
+    assert_eq!(rejected.status, LiveAtomicScanoutCommitStatus::Rejected);
+    assert_eq!(committer.committed_count(), 1);
 }
 
 fn drm_sysfs_fixture(name: &str) -> PathBuf {

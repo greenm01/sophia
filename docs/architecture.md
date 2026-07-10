@@ -650,6 +650,9 @@ Backend-live observes that seam through `LiveAtomicScanoutCommitReport`, a
 reduced commit report that records only idle/waiting/committed/rejected state
 and the derived page-flip event. It deliberately drops transaction IDs, surface
 IDs, and native scanout identity before the runtime tick observes the result.
+`LiveAtomicScanoutCommitter` is the backend-owned interface that produces that
+report; a real KMS implementation will replace the deterministic fake committer
+without widening the runtime observation shape.
 
 The XLibre prototype scheduler may still consume X Damage. In that path,
 `schedule_frame_from_damage` combines a frame-clock tick, an optional X-derived
