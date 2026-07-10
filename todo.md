@@ -83,6 +83,8 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Split the opt-in real atomic scanout hardware smoke out of the large
+  `libdrm_events_feature` integration test into its own test-domain module.
 - [x] Aligned the opt-in atomic hardware smoke with preflight readiness by
   choosing an atomic-scanout-ready primary card instead of the first merely
   openable card.
