@@ -1014,6 +1014,97 @@ fn live_runtime_assembly_observes_reduced_page_flip_callbacks() {
 }
 
 #[test]
+fn live_runtime_assembly_commits_atomic_scanout_after_accepted_page_flip() {
+    let root = ready_drm_sysfs_fixture("runtime-atomic-scanout-page-flip");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed live assembly");
+    let mut committer = FakeAtomicScanoutCommitter::default();
+
+    let report = assembly.commit_atomic_scanout_after_page_flip_with(
+        &mut committer,
+        LivePageFlipCallback {
+            output: OutputId::from_raw(1),
+            frame_serial: 31,
+        },
+        &PageFlipCommitOutcome::Committed {
+            frame_serial: 31,
+            commit: TransactionCommit {
+                transaction: TransactionId::from_raw(61),
+                outcome: TransactionOutcome::Committed,
+                applied_surfaces: vec![sophia_protocol::SurfaceId::new(111, 1)],
+            },
+        },
+    );
+
+    assert_eq!(
+        report,
+        LiveAtomicScanoutCommitReport {
+            status: LiveAtomicScanoutCommitStatus::Committed,
+            page_flip: LivePageFlipEvent {
+                status: LivePageFlipEventStatus::Presented,
+                frame_serial: Some(31),
+            },
+        }
+    );
+    assert_eq!(committer.committed_count(), 1);
+    assert_eq!(
+        assembly.page_flip_observation(),
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(31),
+        }
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_runtime_assembly_rejects_stale_page_flip_before_atomic_scanout_commit() {
+    let root = ready_drm_sysfs_fixture("runtime-atomic-scanout-stale-page-flip");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed live assembly");
+    let mut committer = FakeAtomicScanoutCommitter::default();
+
+    assembly.observe_page_flip_callback(LivePageFlipCallback {
+        output: OutputId::from_raw(1),
+        frame_serial: 41,
+    });
+    let report = assembly.commit_atomic_scanout_after_page_flip_with(
+        &mut committer,
+        LivePageFlipCallback {
+            output: OutputId::from_raw(1),
+            frame_serial: 41,
+        },
+        &PageFlipCommitOutcome::Committed {
+            frame_serial: 41,
+            commit: TransactionCommit {
+                transaction: TransactionId::from_raw(62),
+                outcome: TransactionOutcome::Committed,
+                applied_surfaces: vec![sophia_protocol::SurfaceId::new(112, 1)],
+            },
+        },
+    );
+
+    assert_eq!(
+        report,
+        LiveAtomicScanoutCommitReport {
+            status: LiveAtomicScanoutCommitStatus::Rejected,
+            page_flip: LivePageFlipEvent {
+                status: LivePageFlipEventStatus::Rejected,
+                frame_serial: Some(41),
+            },
+        }
+    );
+    assert_eq!(committer.committed_count(), 0);
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn live_runtime_assembly_drains_bounded_page_flip_callback_queue() {
     let root = ready_drm_sysfs_fixture("runtime-page-flip-callback-queue");
     let report = discover_live_backend(&LiveBackendConfig::new(&root));
@@ -1547,6 +1638,38 @@ fn atomic_scanout_commit_report_reduces_page_flip_outcomes() {
             page_flip: LivePageFlipEvent {
                 status: LivePageFlipEventStatus::WaitingForTransactionReadiness,
                 frame_serial: None,
+            },
+        }
+    );
+}
+
+#[test]
+fn atomic_scanout_commit_report_rejects_mismatched_page_flip_frame_serial() {
+    let callback = LivePageFlipCallbackReport {
+        decision: LivePageFlipCallbackDecision::Accepted,
+        event: LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(90),
+        },
+    };
+
+    assert_eq!(
+        LiveAtomicScanoutCommitReport::from_page_flip_callback_and_outcome(
+            &callback,
+            &PageFlipCommitOutcome::Committed {
+                frame_serial: 91,
+                commit: TransactionCommit {
+                    transaction: TransactionId::from_raw(57),
+                    outcome: TransactionOutcome::Committed,
+                    applied_surfaces: vec![sophia_protocol::SurfaceId::new(88, 1)],
+                },
+            },
+        ),
+        LiveAtomicScanoutCommitReport {
+            status: LiveAtomicScanoutCommitStatus::Rejected,
+            page_flip: LivePageFlipEvent {
+                status: LivePageFlipEventStatus::Rejected,
+                frame_serial: Some(90),
             },
         }
     );

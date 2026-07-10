@@ -653,6 +653,11 @@ IDs, and native scanout identity before the runtime tick observes the result.
 `LiveAtomicScanoutCommitter` is the backend-owned interface that produces that
 report; a real KMS implementation will replace the deterministic fake committer
 without widening the runtime observation shape.
+If a native page-flip callback is used as the commit trigger, backend-live must
+validate it first. Accepted callbacks may advance the atomic commit report only
+when the reduced output route matches, the frame serial is monotonic, and any
+terminal Engine outcome carries the same frame serial. Rejected callbacks keep
+the compositor in a fail-closed waiting or rejected state.
 
 The XLibre prototype scheduler may still consume X Damage. In that path,
 `schedule_frame_from_damage` combines a frame-clock tick, an optional X-derived

@@ -130,6 +130,12 @@ writing page-flip state directly.
 The deterministic fake implementation records only committed count. A native
 implementation may own KMS state privately, but the runtime-facing result must
 remain `LiveAtomicScanoutCommitReport`.
+When page-flip callbacks are available, backend-live must treat them as evidence
+for the commit rather than as raw presentation state. The callback must pass the
+reduced output route and monotonic frame-serial checks before
+`commit_atomic_scanout_after_page_flip` can publish a committed report. Stale,
+wrong-output, or frame-serial-mismatched callbacks fail closed and do not advance
+committed scanout state.
 
 Backend-live runtime ticks carry the current reduced scanout readiness report,
 KMS scanout target report, and page-flip event beside renderer health. This

@@ -809,6 +809,10 @@ KMS page-flip backend should update after the native commit boundary.
 `LiveAtomicScanoutCommitter` is the matching backend-owned trait; the fake
 implementation proves the runtime assembly can commit through a backend object
 instead of writing page-flip state directly.
+The commit path now also accepts reduced page-flip callback evidence. The
+callback must survive backend-live intake checks before an atomic report can be
+published, and terminal Engine outcomes must agree with the callback frame
+serial. This keeps stale native events from advancing committed visual state.
 
 ## Open Questions
 
