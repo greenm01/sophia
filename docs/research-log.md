@@ -825,6 +825,10 @@ The native atomic request builder can now assemble the standard full-output
 primary-plane property set from backend-private KMS handles. The public evidence
 is reduced to built or invalid-size status; KMS object and property identity
 remain private.
+The matching property discovery seam can resolve the required connector, CRTC,
+and plane property handles through a real DRM device or a deterministic fake.
+Discovery failures are reduced to read failure or missing resource-property
+groups before the builder can run.
 
 ## Open Questions
 

@@ -15,7 +15,8 @@ use sophia_backend_live::{
     LibdrmNativePageFlipReadResult, LibdrmNativePageFlipReader, LibdrmNativePageFlipSource,
     LibdrmNativePageFlipSourceReport, LibdrmNativePageFlipSourceStatus,
     LibdrmNativePollerDiagnostics, LibdrmNativePrimaryPlaneObjects,
-    LibdrmNativePrimaryPlanePropertyHandles, LibdrmNativeReadAndPollReport,
+    LibdrmNativePrimaryPlanePropertyDiscoveryStatus, LibdrmNativePrimaryPlanePropertyHandles,
+    LibdrmNativePropertyHandleSet, LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport,
     LibdrmNativeReadLoopReport, LibdrmNativeReadLoopStatus, LibdrmPageFlipEventPollReport,
     LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller, LiveBackendConfig,
     LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
@@ -26,7 +27,8 @@ use sophia_backend_live::{
     LivePageFlipEventStatus, NativeLibdrmAtomicScanoutCommitter, NativeLibdrmPageFlipEventPoller,
     NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller, Size,
     build_native_primary_plane_atomic_request, decode_native_page_flip_batch,
-    discover_live_backend, libdrm_dependency_admission_report, libdrm_fd_authority_report,
+    discover_live_backend, discover_native_primary_plane_property_handles,
+    libdrm_dependency_admission_report, libdrm_fd_authority_report,
     native_libdrm_event_adapter_report, native_libdrm_event_adapter_report_for_authority,
     real_libdrm_events_validation_gate, real_libdrm_events_validation_smoke_report,
     reduce_native_page_flip_event,
@@ -183,8 +185,57 @@ impl LibdrmNativeAtomicCommitDevice for FakeNativeAtomicCommitDevice {
     }
 }
 
+#[derive(Debug)]
+struct FakeNativePropertyLookupDevice {
+    connector: io::Result<LibdrmNativePropertyHandleSet>,
+    crtc: io::Result<LibdrmNativePropertyHandleSet>,
+    plane: io::Result<LibdrmNativePropertyHandleSet>,
+}
+
+impl LibdrmNativePropertyLookupDevice for FakeNativePropertyLookupDevice {
+    fn connector_property_handles(
+        &self,
+        _connector: drm::control::connector::Handle,
+    ) -> io::Result<LibdrmNativePropertyHandleSet> {
+        clone_io_result(&self.connector)
+    }
+
+    fn crtc_property_handles(
+        &self,
+        _crtc: drm::control::crtc::Handle,
+    ) -> io::Result<LibdrmNativePropertyHandleSet> {
+        clone_io_result(&self.crtc)
+    }
+
+    fn plane_property_handles(
+        &self,
+        _plane: drm::control::plane::Handle,
+    ) -> io::Result<LibdrmNativePropertyHandleSet> {
+        clone_io_result(&self.plane)
+    }
+}
+
+fn clone_io_result<T: Clone>(result: &io::Result<T>) -> io::Result<T> {
+    result
+        .as_ref()
+        .cloned()
+        .map_err(|error| io::Error::new(error.kind(), "synthetic property lookup failure"))
+}
+
 fn property_handle(raw: u32) -> drm::control::property::Handle {
     drm::control::from_u32(raw).expect("test property handle should be nonzero")
+}
+
+fn connector_handle() -> drm::control::connector::Handle {
+    drm::control::from_u32(11).expect("test connector handle should be nonzero")
+}
+
+fn crtc_handle() -> drm::control::crtc::Handle {
+    drm::control::from_u32(12).expect("test crtc handle should be nonzero")
+}
+
+fn plane_handle() -> drm::control::plane::Handle {
+    drm::control::from_u32(13).expect("test plane handle should be nonzero")
 }
 
 fn primary_plane_properties() -> LibdrmNativePrimaryPlanePropertyHandles {
@@ -207,13 +258,38 @@ fn primary_plane_properties() -> LibdrmNativePrimaryPlanePropertyHandles {
 
 fn primary_plane_objects(size: Size) -> LibdrmNativePrimaryPlaneObjects {
     LibdrmNativePrimaryPlaneObjects::new(
-        drm::control::from_u32(11).expect("test connector handle should be nonzero"),
-        drm::control::from_u32(12).expect("test crtc handle should be nonzero"),
-        drm::control::from_u32(13).expect("test plane handle should be nonzero"),
+        connector_handle(),
+        crtc_handle(),
+        plane_handle(),
         drm::control::from_u32(14).expect("test framebuffer handle should be nonzero"),
         15,
         size,
     )
+}
+
+fn full_property_lookup_device() -> FakeNativePropertyLookupDevice {
+    FakeNativePropertyLookupDevice {
+        connector: Ok(LibdrmNativePropertyHandleSet::new([(
+            "CRTC_ID",
+            property_handle(101),
+        )])),
+        crtc: Ok(LibdrmNativePropertyHandleSet::new([
+            ("MODE_ID", property_handle(102)),
+            ("ACTIVE", property_handle(103)),
+        ])),
+        plane: Ok(LibdrmNativePropertyHandleSet::new([
+            ("FB_ID", property_handle(104)),
+            ("CRTC_ID", property_handle(105)),
+            ("SRC_X", property_handle(106)),
+            ("SRC_Y", property_handle(107)),
+            ("SRC_W", property_handle(108)),
+            ("SRC_H", property_handle(109)),
+            ("CRTC_X", property_handle(110)),
+            ("CRTC_Y", property_handle(111)),
+            ("CRTC_W", property_handle(112)),
+            ("CRTC_H", property_handle(113)),
+        ])),
+    }
 }
 
 #[test]
@@ -245,6 +321,111 @@ fn native_libdrm_atomic_commit_request_reports_reduced_flags() {
             test_only: true,
         }
     );
+}
+
+#[test]
+fn native_libdrm_primary_plane_property_discovery_feeds_request_builder() {
+    let discovery = discover_native_primary_plane_property_handles(
+        &full_property_lookup_device(),
+        connector_handle(),
+        crtc_handle(),
+        plane_handle(),
+    );
+
+    assert_eq!(
+        discovery.status,
+        LibdrmNativePrimaryPlanePropertyDiscoveryStatus::Discovered
+    );
+    let properties = discovery
+        .properties
+        .expect("complete lookup should produce private property handles");
+    let build = build_native_primary_plane_atomic_request(
+        primary_plane_objects(Size {
+            width: 1280,
+            height: 720,
+        }),
+        properties,
+    );
+
+    assert_eq!(build.status, LibdrmNativeAtomicRequestBuildStatus::Built);
+    assert!(build.request.is_some());
+}
+
+#[test]
+fn native_libdrm_primary_plane_property_discovery_fails_closed_for_missing_groups() {
+    let missing_connector = FakeNativePropertyLookupDevice {
+        connector: Ok(LibdrmNativePropertyHandleSet::new(Vec::<(
+            &str,
+            drm::control::property::Handle,
+        )>::new())),
+        ..full_property_lookup_device()
+    };
+    assert_eq!(
+        discover_native_primary_plane_property_handles(
+            &missing_connector,
+            connector_handle(),
+            crtc_handle(),
+            plane_handle(),
+        )
+        .status,
+        LibdrmNativePrimaryPlanePropertyDiscoveryStatus::MissingConnectorProperty
+    );
+
+    let missing_crtc = FakeNativePropertyLookupDevice {
+        crtc: Ok(LibdrmNativePropertyHandleSet::new([(
+            "MODE_ID",
+            property_handle(102),
+        )])),
+        ..full_property_lookup_device()
+    };
+    assert_eq!(
+        discover_native_primary_plane_property_handles(
+            &missing_crtc,
+            connector_handle(),
+            crtc_handle(),
+            plane_handle(),
+        )
+        .status,
+        LibdrmNativePrimaryPlanePropertyDiscoveryStatus::MissingCrtcProperty
+    );
+
+    let missing_plane = FakeNativePropertyLookupDevice {
+        plane: Ok(LibdrmNativePropertyHandleSet::new([
+            ("FB_ID", property_handle(104)),
+            ("CRTC_ID", property_handle(105)),
+        ])),
+        ..full_property_lookup_device()
+    };
+    assert_eq!(
+        discover_native_primary_plane_property_handles(
+            &missing_plane,
+            connector_handle(),
+            crtc_handle(),
+            plane_handle(),
+        )
+        .status,
+        LibdrmNativePrimaryPlanePropertyDiscoveryStatus::MissingPlaneProperty
+    );
+}
+
+#[test]
+fn native_libdrm_primary_plane_property_discovery_fails_closed_on_read_error() {
+    let read_failed = FakeNativePropertyLookupDevice {
+        connector: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+        ..full_property_lookup_device()
+    };
+    let discovery = discover_native_primary_plane_property_handles(
+        &read_failed,
+        connector_handle(),
+        crtc_handle(),
+        plane_handle(),
+    );
+
+    assert_eq!(
+        discovery.status,
+        LibdrmNativePrimaryPlanePropertyDiscoveryStatus::ReadFailed
+    );
+    assert!(discovery.properties.is_none());
 }
 
 #[test]

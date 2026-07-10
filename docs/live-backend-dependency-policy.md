@@ -152,6 +152,11 @@ mode blob, and full-output rectangle into a `drm::control::atomic::AtomicModeReq
 while exposing only built/invalid-size status. This is still not a full scanout
 pipeline: object discovery, property-name lookup, framebuffer lifetime, and
 hardware smoke remain separate work.
+`discover_native_primary_plane_property_handles` resolves the required atomic
+property names for that builder through the real `drm::control::Device`
+property APIs, but reduces failures to read-failed or missing connector, CRTC,
+or plane property groups. Property IDs remain in backend-private handle bundles
+and must not appear in runtime reports.
 
 Backend-live runtime ticks carry the current reduced scanout readiness report,
 KMS scanout target report, and page-flip event beside renderer health. This

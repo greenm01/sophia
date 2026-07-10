@@ -54,8 +54,8 @@ active milestone to `docs/roadmap-history.md`.
   scanout timing are stable.
 - [x] Build the first real KMS atomic property-set shape from backend-private
   connector, CRTC, plane, framebuffer, and mode state.
-- [ ] Add live KMS object/property discovery that can feed the private atomic
-  request builder.
+- [ ] Add live KMS connector/CRTC/plane/framebuffer selection that can feed the
+  private atomic request builder.
 - [ ] Keep the XLibre prototype docs and bridge smokes as compatibility lessons
   until Sophia X Authority has equivalent live coverage.
 - [ ] Revisit wgpu only after GBM/EGL startup, drawing, presentation,
@@ -77,6 +77,8 @@ active milestone to `docs/roadmap-history.md`.
   atomic commit API but waits for page-flip evidence before visual commit.
 - [x] Added a feature-gated primary-plane atomic request builder for the
   full-output scanout case.
+- [x] Added feature-gated DRM atomic property discovery for the primary-plane
+  request builder.
 - [x] Defined opt-in environment gates for real libdrm and libinput validation.
 - [x] Kept default workspace validation independent of device nodes and seats.
 - [x] Added reduced real-hardware smoke reports that fail closed before concrete
