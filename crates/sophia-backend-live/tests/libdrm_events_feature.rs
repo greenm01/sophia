@@ -4523,6 +4523,27 @@ fn native_libdrm_primary_plane_modeset_builder_requires_mode_blob() {
     );
     assert!(modeset.request.is_none());
 
+    let zero_mode_blob_objects = LibdrmNativePrimaryPlaneObjects::new_with_optional_mode_blob(
+        connector_handle(),
+        crtc_handle(),
+        plane_handle(),
+        framebuffer_handle(),
+        Some(0),
+        Size {
+            width: 1280,
+            height: 720,
+        },
+    );
+    let zero_mode_blob = build_native_primary_plane_atomic_request(
+        zero_mode_blob_objects,
+        primary_plane_properties(),
+    );
+    assert_eq!(
+        zero_mode_blob.status,
+        LibdrmNativeAtomicRequestBuildStatus::MissingModeBlob
+    );
+    assert!(zero_mode_blob.request.is_none());
+
     let page_flip =
         build_native_primary_plane_page_flip_atomic_request(objects, primary_plane_properties());
     assert_eq!(

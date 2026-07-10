@@ -69,6 +69,12 @@ fn build_native_primary_plane_atomic_request_with_scope(
                 request: None,
             };
         };
+        if mode_blob == 0 {
+            return LibdrmNativeAtomicRequestBuildResult {
+                status: LibdrmNativeAtomicRequestBuildStatus::MissingModeBlob,
+                request: None,
+            };
+        }
         request.add_property(
             objects.connector,
             properties.connector_crtc_id,
