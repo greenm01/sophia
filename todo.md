@@ -14,6 +14,9 @@ active milestone to `docs/roadmap-history.md`.
 
 ### Atomic Hardware Evidence
 
+- [ ] Use a Linux host with an atomic-KMS primary `/dev/dri/card*`, connected
+  output, read/write card access, DRM-master availability, and acceptable
+  modeset disruption.
 - [ ] Run the non-modesetting atomic scanout preflight with
   `tools/atomic_scanout_preflight.sh`.
 - [ ] Run the opt-in atomic hardware smoke on a DRM-master-capable machine.

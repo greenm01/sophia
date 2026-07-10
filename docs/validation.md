@@ -108,6 +108,21 @@ Real card-selection and page-flip-session setup failures reduce themselves into
 `LibdrmNativeAtomicScanoutSmokeEvidence`, so setup evidence stays consistent
 outside the smoke harness as well.
 
+The real DRM-master hardware proof needs a machine and login session with these
+properties:
+
+- Linux exposes at least one primary `/dev/dri/card*` node and the active
+  kernel driver supports atomic KMS.
+- At least one display connector is physically connected and has a usable mode.
+- The operator has read/write access to the selected primary card node.
+- The run can become DRM master. In practice, this usually means using a local
+  TTY or a dedicated test session after stopping the active display manager or
+  compositor.
+- Modeset disruption is acceptable. The destructive smoke is allowed to change
+  scanout state while it proves initial modeset and steady page-flip behavior.
+- The machine can build the feature-gated backend-live CLI commands offline
+  from the checked-out dependency set.
+
 Run `tools/atomic_scanout_smoke.sh` only from a session that may take DRM master
 on a primary `/dev/dri/card*` node. The helper verifies preflight first, then
 runs the feature-gated `sophia atomic-scanout-smoke` CLI command with
