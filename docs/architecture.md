@@ -658,6 +658,10 @@ validate it first. Accepted callbacks may advance the atomic commit report only
 when the reduced output route matches, the frame serial is monotonic, and any
 terminal Engine outcome carries the same frame serial. Rejected callbacks keep
 the compositor in a fail-closed waiting or rejected state.
+`NativeLibdrmPageFlipEventReader` is the first concrete native reader for that
+path. It is compiled only behind `libdrm-events`, reduces DRM page-flip events
+through private CRTC routes, and emits only backend-local slots and frame
+serials into the existing reduced callback pipeline.
 
 The XLibre prototype scheduler may still consume X Damage. In that path,
 `schedule_frame_from_damage` combines a frame-clock tick, an optional X-derived

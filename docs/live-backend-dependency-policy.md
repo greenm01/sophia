@@ -270,10 +270,10 @@ The report may count rejected native callbacks separately from decoded
 callbacks. Rejection counts stay inside backend-live diagnostics and do not emit
 runtime callbacks.
 
-`NativeLibdrmPageFlipEventPoller` is a non-polling skeleton over
-`LibdrmNativePageFlipSource`. It implements the same `LibdrmPageFlipEventPoller`
-trait as the deterministic fake, but currently returns the idle reduced report
-and emits no callbacks. Real polling must replace only the private read-loop
+`NativeLibdrmPageFlipEventPoller` owns the backend-local page-flip source and
+the reduced callback queue handoff. It can drain injected callback batches for
+deterministic tests, and it can consume a `LibdrmNativePageFlipReader` when a
+native reader is available. Real polling replaces only the private read-loop
 implementation, not the public queue, report, or runtime observation contracts.
 
 Native page-flip callback decoding uses `LibdrmNativeOutputSlot` and
@@ -290,11 +290,11 @@ most the caller-provided limit, reports decoded and rejected counts through
 emit-limit state through `LibdrmPageFlipEventPollReport`. It still does not read
 from a file descriptor or expose native DRM/KMS resource identity.
 
-The non-polling `NativeLibdrmPageFlipEventPoller` may drain injected callback
-batches through that helper. This gives the eventual native fd reader a place to
-hand off already-reduced callback facts while preserving queue backpressure and
-retaining undelivered callbacks. It remains a testable seam, not a live fd
-poller.
+`NativeLibdrmPageFlipEventPoller` may drain injected callback batches through
+that helper, or receive already-reduced callback facts from
+`NativeLibdrmPageFlipEventReader`. This preserves queue backpressure and
+retains undelivered callbacks while keeping the native fd read loop behind the
+feature-gated reader.
 Decoded callback counts describe native callback facts that passed reduction
 before queue handoff; emitted callback counts describe facts that actually
 entered the runtime queue. If the queue is disconnected, pending injected
@@ -318,6 +318,14 @@ Native libdrm poller startup status is likewise reduced to ready/no-output or
 backend-not-ready state plus route count. It is a startup health record, not a
 native resource inventory.
 
+`NativeLibdrmPageFlipEventReader` is the first concrete page-flip reader behind
+`libdrm-events`. It wraps a value implementing `drm::control::Device`, calls
+`receive_events()` only when the caller has chosen to read, reduces page-flip
+events through a private CRTC-to-slot table, and emits only
+`LibdrmNativePageFlipCallback` values. CRTC handles remain inside backend-live;
+the runtime still sees only reduced output routes, frame serials, counts, and
+fail-closed read status.
+
 The `libinput-events` feature defines the first native-shaped live input intake
 contract without admitting a concrete libinput crate. `LiveLibinputEventReader`
 returns bounded `InputEventPacket` batches plus `LibinputNativeEventReadReport`;
@@ -333,10 +341,11 @@ Real hardware validation for libdrm and libinput is opt-in only. The gates are
 The gate report must not expose env values, device paths, file descriptors,
 connector identity, seat names, or native error strings. Default validation must
 remain independent of DRM device nodes and `/dev/input` devices.
-`LiveHardwareValidationSmokeReport` is the next reduced layer. Before concrete
-native readers are admitted, a requested real-hardware smoke reports
-`BackendUnavailable` rather than opening devices. Future readers may change that
-status to passed or failed, but they must keep the same reduced shape.
+`LiveHardwareValidationSmokeReport` is the next reduced layer. Until
+device-opening hardware smoke is admitted, a requested real-hardware smoke
+reports `BackendUnavailable` rather than opening devices. Future hardware
+validation may change that status to passed or failed, but it must keep the same
+reduced shape.
 
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout

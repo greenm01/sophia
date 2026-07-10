@@ -5,7 +5,7 @@ use std::sync::mpsc;
 use sophia_backend_live::{
     CompositorBackendTickInput, FakeLibdrmNativePageFlipReader, FakeLibdrmPageFlipEventPoller,
     LibdrmBackendFdAuthority, LibdrmBackendFdAuthorityReport, LibdrmBackendFdAuthorityStatus,
-    LibdrmDependencyAdmissionReport, LibdrmDependencyAdmissionStatus,
+    LibdrmDependencyAdmissionReport, LibdrmDependencyAdmissionStatus, LibdrmNativeCrtcRoute,
     LibdrmNativeEventAdapterReport, LibdrmNativeEventAdapterStatus, LibdrmNativeOutputRoute,
     LibdrmNativeOutputSlot, LibdrmNativePageFlipCallback, LibdrmNativePageFlipDecodeReport,
     LibdrmNativePageFlipDecodeStatus, LibdrmNativePageFlipReadResult, LibdrmNativePageFlipReader,
@@ -18,10 +18,11 @@ use sophia_backend_live::{
     LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
     LiveLibdrmPollerStartupStatus, LivePageFlipCallback, LivePageFlipCallbackQueue,
     LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus,
-    NativeLibdrmPageFlipEventPoller, OutputId, QueuedInputPoller, decode_native_page_flip_batch,
-    discover_live_backend, libdrm_dependency_admission_report, libdrm_fd_authority_report,
-    native_libdrm_event_adapter_report, native_libdrm_event_adapter_report_for_authority,
-    real_libdrm_events_validation_gate, real_libdrm_events_validation_smoke_report,
+    NativeLibdrmPageFlipEventPoller, NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller,
+    decode_native_page_flip_batch, discover_live_backend, libdrm_dependency_admission_report,
+    libdrm_fd_authority_report, native_libdrm_event_adapter_report,
+    native_libdrm_event_adapter_report_for_authority, real_libdrm_events_validation_gate,
+    real_libdrm_events_validation_smoke_report, reduce_native_page_flip_event,
 };
 
 #[test]
@@ -70,7 +71,7 @@ fn real_libdrm_event_validation_gate_is_explicit_and_reduced() {
 }
 
 #[test]
-fn real_libdrm_event_validation_smoke_fails_closed_without_native_reader() {
+fn real_libdrm_event_validation_smoke_fails_closed_without_device_opening_smoke() {
     let skipped = LiveHardwareValidationSmokeReport::fail_closed_from_gate(
         LiveHardwareValidationGateReport::from_env_presence(
             LiveHardwareValidationTarget::LibdrmEvents,
@@ -311,6 +312,40 @@ fn native_libdrm_reader_reads_bounded_callbacks_without_kms_identity() {
     let empty = reader.read_ready_page_flip_callbacks(4);
     assert_eq!(empty.report, LibdrmNativeReadLoopReport::would_block());
     assert!(empty.callbacks.is_empty());
+}
+
+#[test]
+fn native_libdrm_page_flip_event_reducer_uses_private_crtc_routes() {
+    let crtc = drm::control::from_u32::<drm::control::crtc::Handle>(44)
+        .expect("nonzero crtc handle should be constructible");
+    let other_crtc = drm::control::from_u32::<drm::control::crtc::Handle>(45)
+        .expect("nonzero crtc handle should be constructible");
+    let slot = LibdrmNativeOutputSlot::new(3).expect("nonzero slot should be valid");
+    let event = drm::control::PageFlipEvent {
+        frame: 91,
+        duration: std::time::Duration::from_millis(16),
+        crtc,
+    };
+
+    assert_eq!(
+        reduce_native_page_flip_event(&event, &[LibdrmNativeCrtcRoute::new(crtc, slot)]),
+        Some(LibdrmNativePageFlipCallback::new(slot, 91))
+    );
+    assert_eq!(
+        reduce_native_page_flip_event(&event, &[LibdrmNativeCrtcRoute::new(other_crtc, slot)]),
+        None
+    );
+}
+
+#[test]
+fn native_libdrm_page_flip_event_reader_owns_device_and_private_crtc_routes() {
+    let crtc = drm::control::from_u32::<drm::control::crtc::Handle>(44)
+        .expect("nonzero crtc handle should be constructible");
+    let slot = LibdrmNativeOutputSlot::new(3).expect("nonzero slot should be valid");
+    let reader = NativeLibdrmPageFlipEventReader::new(())
+        .with_crtc_routes([LibdrmNativeCrtcRoute::new(crtc, slot)]);
+
+    assert_eq!(reader.crtc_route_count(), 1);
 }
 
 #[test]

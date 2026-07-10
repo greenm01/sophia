@@ -25,9 +25,9 @@ active milestone to `docs/roadmap-history.md`.
 
 ### 1. Real Libdrm Event Reader
 
-- [ ] Add a concrete page-flip reader only behind `libdrm-events`.
-- [ ] Preserve reduced output-route decoding before runtime observation.
-- [ ] Keep scanout object identity private to backend-live.
+- [x] Add a concrete page-flip reader only behind `libdrm-events`.
+- [x] Preserve reduced output-route decoding before runtime observation.
+- [x] Keep scanout object identity private to backend-live.
 
 ### 2. Authority Probe Selection
 
@@ -67,6 +67,8 @@ active milestone to `docs/roadmap-history.md`.
   backend-owned scanout boundary.
 - [x] Required accepted page-flip callback evidence before callback-driven
   atomic scanout commits can publish committed state.
+- [x] Added a concrete `NativeLibdrmPageFlipEventReader` behind
+  `libdrm-events` without opening devices during default validation.
 - [x] Defined opt-in environment gates for real libdrm and libinput validation.
 - [x] Kept default workspace validation independent of device nodes and seats.
 - [x] Added reduced real-hardware smoke reports that fail closed before concrete
