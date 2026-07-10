@@ -83,6 +83,9 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Split native primary-plane scanout policy, submission ownership,
+  submit/retire reports, and page-flip retirement into separate modules so the
+  syscall-facing submit path is easier to audit before hardware smoke capture.
 - [x] Added runtime assembly coverage proving a timed-out atomic scanout commit
   remains visible after page-flip callback intake instead of becoming a generic
   rejection or committed scanout.

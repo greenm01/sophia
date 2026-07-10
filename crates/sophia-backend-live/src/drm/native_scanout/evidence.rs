@@ -1,10 +1,5 @@
 use crate::prelude::*;
 
-use super::submit::{
-    LibdrmNativePrimaryPlaneScanoutRetireResult, LibdrmNativePrimaryPlaneScanoutRetireStatus,
-    LibdrmNativePrimaryPlaneScanoutSubmitResult, LibdrmNativePrimaryPlaneScanoutSubmitStatus,
-};
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LibdrmNativeRenderedScanoutContextStatus {
     Ready,

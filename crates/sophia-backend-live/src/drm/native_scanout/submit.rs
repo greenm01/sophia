@@ -2,88 +2,6 @@ use crate::prelude::*;
 
 use super::commit::LibdrmNativeAtomicCommitDevice;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct LibdrmNativePrimaryPlaneScanoutSubmission {
-    resources: LibdrmNativePrimaryPlaneResourceBundle,
-}
-
-impl LibdrmNativePrimaryPlaneScanoutSubmission {
-    pub fn retire<D>(self, device: &D) -> LibdrmNativePrimaryPlaneResourceDestroyReport
-    where
-        D: LibdrmNativePrimaryPlaneResourceDevice,
-    {
-        destroy_native_primary_plane_resources(device, self.resources)
-    }
-}
-
-#[derive(Debug)]
-pub struct LibdrmNativePrimaryPlaneScanoutSubmitResult {
-    pub status: LibdrmNativePrimaryPlaneScanoutSubmitStatus,
-    pub selection: LibdrmNativePrimaryPlaneSelectionStatus,
-    pub scanout_buffer: LiveRendererScanoutBufferStatus,
-    pub properties: Option<LibdrmNativePrimaryPlanePropertyDiscoveryStatus>,
-    pub resources: Option<LibdrmNativePrimaryPlaneResourceCreateStatus>,
-    pub request: Option<LibdrmNativeAtomicRequestBuildStatus>,
-    pub request_scope: Option<LibdrmNativeAtomicCommitRequestScope>,
-    pub commit_flags: Option<LibdrmNativeAtomicCommitFlagsReport>,
-    pub submit: Option<LibdrmNativeAtomicCommitSubmitStatus>,
-    pub submission: Option<LibdrmNativePrimaryPlaneScanoutSubmission>,
-    pub cleanup: Option<LibdrmNativePrimaryPlaneResourceCleanup>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LibdrmNativePrimaryPlaneScanoutSubmitStatus {
-    SubmittedWaitingForPageFlip,
-    KmsTargetUnavailable,
-    ScanoutBufferUnavailable,
-    PropertyDiscoveryUnavailable,
-    ResourceCreationUnavailable,
-    AtomicRequestBuildFailed,
-    AtomicSubmitFailed,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct LibdrmNativePrimaryPlaneScanoutSubmitPolicy {
-    pub allow_modeset: bool,
-}
-
-impl LibdrmNativePrimaryPlaneScanoutSubmitPolicy {
-    pub const fn page_flip() -> Self {
-        Self {
-            allow_modeset: false,
-        }
-    }
-
-    pub const fn modeset() -> Self {
-        Self {
-            allow_modeset: true,
-        }
-    }
-
-    pub const fn expected_request_scope(self) -> LibdrmNativeAtomicCommitRequestScope {
-        if self.allow_modeset {
-            LibdrmNativeAtomicCommitRequestScope::Modeset
-        } else {
-            LibdrmNativeAtomicCommitRequestScope::PageFlip
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct LibdrmNativePrimaryPlaneScanoutRetireResult {
-    pub status: LibdrmNativePrimaryPlaneScanoutRetireStatus,
-    pub destroy: Option<LibdrmNativePrimaryPlaneResourceDestroyStatus>,
-    pub submission: Option<LibdrmNativePrimaryPlaneScanoutSubmission>,
-    pub cleanup: Option<LibdrmNativePrimaryPlaneResourceCleanup>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LibdrmNativePrimaryPlaneScanoutRetireStatus {
-    RetiredAfterPageFlip,
-    WaitingForAcceptedPageFlip,
-    ResourceRetireFailed,
-}
-
 pub fn submit_native_primary_plane_scanout_from_renderer_descriptor<D>(
     device: &D,
     descriptor: LiveRendererScanoutBufferDescriptor,
@@ -289,43 +207,6 @@ where
         submission: Some(LibdrmNativePrimaryPlaneScanoutSubmission {
             resources: resource_bundle,
         }),
-        cleanup: None,
-    }
-}
-
-pub fn retire_native_primary_plane_scanout_after_page_flip<D>(
-    device: &D,
-    submission: LibdrmNativePrimaryPlaneScanoutSubmission,
-    callback: &LivePageFlipCallbackReport,
-) -> LibdrmNativePrimaryPlaneScanoutRetireResult
-where
-    D: LibdrmNativePrimaryPlaneResourceDevice,
-{
-    if callback.decision != LivePageFlipCallbackDecision::Accepted
-        || callback.event.status != LivePageFlipEventStatus::Presented
-    {
-        return LibdrmNativePrimaryPlaneScanoutRetireResult {
-            status: LibdrmNativePrimaryPlaneScanoutRetireStatus::WaitingForAcceptedPageFlip,
-            destroy: None,
-            submission: Some(submission),
-            cleanup: None,
-        };
-    }
-
-    let destroy = submission.retire(device);
-    if destroy.status != LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed {
-        return LibdrmNativePrimaryPlaneScanoutRetireResult {
-            status: LibdrmNativePrimaryPlaneScanoutRetireStatus::ResourceRetireFailed,
-            destroy: Some(destroy.status),
-            submission: None,
-            cleanup: destroy.cleanup,
-        };
-    }
-
-    LibdrmNativePrimaryPlaneScanoutRetireResult {
-        status: LibdrmNativePrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip,
-        destroy: Some(destroy.status),
-        submission: None,
         cleanup: None,
     }
 }
