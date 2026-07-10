@@ -1054,6 +1054,12 @@ distinguish missing callbacks, callback rejection, poll backpressure,
 disconnected pollers, waiting retirement, missing retirement, and native
 resource-retire failure.
 
+Reduced atomic scanout evidence is now schema 8. The new `framebuffer` field
+keeps repeated `FramebufferCreateFailed` hardware-smoke failures actionable
+without leaking framebuffer IDs, GEM handles, or errno values. The reduced value
+records whether backend-live created the framebuffer with AddFB2, AddFB2 with
+modifiers, legacy AddFB fallback, or failed the attempted registration path.
+
 The opt-in hardware smoke cannot complete in this environment. Its preflight
 stops before modesetting with reduced status `DeviceDirectoryUnavailable` and
 zero primary card counts. The remaining proof must run on a DRM-master-capable

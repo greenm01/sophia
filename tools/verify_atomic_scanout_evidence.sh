@@ -51,7 +51,7 @@ verify_phase() {
 
     declare -A observed=()
     declare -A expected=(
-        ["schema"]="7"
+        ["schema"]="8"
         ["phase"]="$phase"
         ["status"]="Passed"
         ["scanout_target"]="Ready"
@@ -61,6 +61,7 @@ verify_phase() {
         ["scanout_buffer"]="Ready"
         ["properties"]="Discovered"
         ["resources"]="Created"
+        ["framebuffer"]="CreatedWithAddFb2"
         ["request"]="Built"
         ["submit"]="SubmittedWaitingForPageFlip"
         ["request_scope"]="$request_scope"

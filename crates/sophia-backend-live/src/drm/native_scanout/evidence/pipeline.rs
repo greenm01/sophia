@@ -104,6 +104,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
         let scanout_buffer = submit.map(|report| report.scanout_buffer);
         let properties = submit.and_then(|report| report.properties);
         let resources = submit.and_then(|report| report.resources);
+        let framebuffer = submit.and_then(|report| report.framebuffer);
         let request = submit.and_then(|report| report.request);
         let request_scope = submit.and_then(|report| report.request_scope);
         let commit_flags = submit.and_then(|report| report.commit_flags);
@@ -169,6 +170,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             scanout_buffer,
             properties,
             resources,
+            framebuffer,
             request,
             submit: submit_status,
             request_scope,

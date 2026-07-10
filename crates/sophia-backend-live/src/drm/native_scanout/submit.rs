@@ -106,6 +106,7 @@ where
         );
         result.properties = Some(properties.status);
         result.resources = Some(resources.status);
+        result.framebuffer = resources.framebuffer;
         result.cleanup = resources.cleanup;
         return result;
     };
@@ -125,6 +126,7 @@ where
         );
         result.properties = Some(properties.status);
         result.resources = Some(resources.status);
+        result.framebuffer = resources.framebuffer;
         result.request = Some(request.status);
         result.cleanup = destroy.cleanup;
         return result;
@@ -145,6 +147,7 @@ where
         );
         result.properties = Some(properties.status);
         result.resources = Some(resources.status);
+        result.framebuffer = resources.framebuffer;
         result.request = Some(LibdrmNativeAtomicRequestBuildStatus::Built);
         result.request_scope = Some(request_scope);
         result.commit_flags = Some(request.reduced_flags());
@@ -170,6 +173,7 @@ where
         );
         result.properties = Some(properties.status);
         result.resources = Some(resources.status);
+        result.framebuffer = resources.framebuffer;
         result.request = Some(LibdrmNativeAtomicRequestBuildStatus::Built);
         result.request_scope = Some(request_scope);
         result.commit_flags = Some(commit_flags);
@@ -185,6 +189,7 @@ where
     );
     result.properties = Some(properties.status);
     result.resources = Some(resources.status);
+    result.framebuffer = resources.framebuffer;
     result.request = Some(LibdrmNativeAtomicRequestBuildStatus::Built);
     result.request_scope = Some(request_scope);
     result.commit_flags = Some(commit_flags);

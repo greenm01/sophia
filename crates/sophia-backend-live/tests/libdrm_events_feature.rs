@@ -20,7 +20,8 @@ use sophia_backend_live::{
     LibdrmNativePageFlipCallback, LibdrmNativePageFlipDecodeReport,
     LibdrmNativePageFlipDecodeStatus, LibdrmNativePageFlipReadResult, LibdrmNativePageFlipReader,
     LibdrmNativePageFlipSource, LibdrmNativePageFlipSourceReport, LibdrmNativePageFlipSourceStatus,
-    LibdrmNativePlaneSnapshot, LibdrmNativePollerDiagnostics, LibdrmNativePrimaryPlaneObjects,
+    LibdrmNativePlaneSnapshot, LibdrmNativePollerDiagnostics,
+    LibdrmNativePrimaryPlaneFramebufferCreateDetail, LibdrmNativePrimaryPlaneObjects,
     LibdrmNativePrimaryPlanePropertyDiscoveryStatus, LibdrmNativePrimaryPlanePropertyHandles,
     LibdrmNativePrimaryPlaneResourceCreateStatus, LibdrmNativePrimaryPlaneResourceDestroyStatus,
     LibdrmNativePrimaryPlaneResourceDevice, LibdrmNativePrimaryPlaneScanoutRetireResult,
@@ -721,12 +722,34 @@ impl LibdrmNativePrimaryPlaneResourceDevice for FakeNativePrimaryPlaneResourceDe
         clone_io_result(&self.mode_blob)
     }
 
-    fn add_scanout_framebuffer<B>(
+    fn add_scanout_framebuffer_with_modifiers<B>(
         &self,
         _buffer: &B,
     ) -> io::Result<drm::control::framebuffer::Handle>
     where
         B: drm::buffer::PlanarBuffer + ?Sized,
+    {
+        clone_io_result(&self.framebuffer)
+    }
+
+    fn add_scanout_framebuffer_without_modifiers<B>(
+        &self,
+        _buffer: &B,
+    ) -> io::Result<drm::control::framebuffer::Handle>
+    where
+        B: drm::buffer::PlanarBuffer + ?Sized,
+    {
+        clone_io_result(&self.framebuffer)
+    }
+
+    fn add_legacy_scanout_framebuffer<B>(
+        &self,
+        _buffer: &B,
+        _depth: u32,
+        _bpp: u32,
+    ) -> io::Result<drm::control::framebuffer::Handle>
+    where
+        B: drm::buffer::Buffer + ?Sized,
     {
         clone_io_result(&self.framebuffer)
     }
@@ -824,14 +847,39 @@ impl LibdrmNativePrimaryPlaneResourceDevice for FakeNativePrimaryPlaneScanoutDev
         self.resources.create_mode_blob_for_selection(selection)
     }
 
-    fn add_scanout_framebuffer<B>(
+    fn add_scanout_framebuffer_with_modifiers<B>(
         &self,
         buffer: &B,
     ) -> io::Result<drm::control::framebuffer::Handle>
     where
         B: drm::buffer::PlanarBuffer + ?Sized,
     {
-        self.resources.add_scanout_framebuffer(buffer)
+        self.resources
+            .add_scanout_framebuffer_with_modifiers(buffer)
+    }
+
+    fn add_scanout_framebuffer_without_modifiers<B>(
+        &self,
+        buffer: &B,
+    ) -> io::Result<drm::control::framebuffer::Handle>
+    where
+        B: drm::buffer::PlanarBuffer + ?Sized,
+    {
+        self.resources
+            .add_scanout_framebuffer_without_modifiers(buffer)
+    }
+
+    fn add_legacy_scanout_framebuffer<B>(
+        &self,
+        buffer: &B,
+        depth: u32,
+        bpp: u32,
+    ) -> io::Result<drm::control::framebuffer::Handle>
+    where
+        B: drm::buffer::Buffer + ?Sized,
+    {
+        self.resources
+            .add_legacy_scanout_framebuffer(buffer, depth, bpp)
     }
 
     fn destroy_scanout_framebuffer(
