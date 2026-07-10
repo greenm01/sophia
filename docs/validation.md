@@ -113,7 +113,9 @@ on a primary `/dev/dri/card*` node. The helper verifies preflight first, then
 runs the feature-gated `sophia atomic-scanout-smoke` CLI command with
 `SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1`. The CLI parent spawns a child process
 for the destructive proof and emits reduced `SmokeChildTimeout` evidence if the
-child fails to produce page-flip evidence within the bounded deadline.
+child fails to produce page-flip evidence within the bounded deadline. The
+helper forwards optional CLI targeting arguments: `--slot`, `--output`,
+`--authority`, and `--page-flip-timeout-ms`.
 Backend-live first uses the production `select_real_atomic_scanout_card` seam to
 choose an opaque card owner that opens read/write, admits UniversalPlanes and
 Atomic client capabilities, exposes a reduced KMS primary-plane scanout target,

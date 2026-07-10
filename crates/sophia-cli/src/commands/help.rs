@@ -36,7 +36,9 @@ pub(crate) fn print(verbose: bool) {
     #[cfg(feature = "atomic-scanout-live")]
     println!("commands: atomic-scanout-preflight");
     #[cfg(feature = "atomic-scanout-smoke-live")]
-    println!("commands: atomic-scanout-smoke");
+    println!(
+        "commands: atomic-scanout-smoke [--slot=1] [--output=1] [--authority=1] [--page-flip-timeout-ms=2000]"
+    );
 
     if verbose {
         tracing::debug!("verbose tracing enabled");

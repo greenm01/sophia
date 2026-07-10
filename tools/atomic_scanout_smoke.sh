@@ -27,7 +27,7 @@ set +e
     SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 \
         cargo run --quiet --offline -p sophia-cli \
         --features "atomic-scanout-smoke-live" \
-        -- atomic-scanout-smoke
+        -- atomic-scanout-smoke "$@"
 ) 2>&1 | tee "$EVIDENCE_FILE"
 test_status="${PIPESTATUS[0]}"
 set -e
