@@ -159,6 +159,7 @@ pub struct LibdrmNativeAtomicScanoutSmokeEvidence {
     pub page_flip: Option<LivePageFlipEventStatus>,
     pub retire: Option<LibdrmNativePrimaryPlaneScanoutRetireStatus>,
     pub retire_destroy: Option<LibdrmNativePrimaryPlaneResourceDestroyStatus>,
+    pub retire_cleanup_pending: bool,
 }
 
 #[cfg(feature = "libdrm-events")]
@@ -173,6 +174,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             page_flip: None,
             retire: None,
             retire_destroy: None,
+            retire_cleanup_pending: false,
         }
     }
 
@@ -186,6 +188,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             page_flip: None,
             retire: None,
             retire_destroy: None,
+            retire_cleanup_pending: false,
         }
     }
 
@@ -204,6 +207,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             callback.map(|report| report.decision) == Some(LivePageFlipCallbackDecision::Accepted);
         let retire_status = retire.map(|report| report.status);
         let retire_destroy = retire.and_then(|report| report.destroy);
+        let retire_cleanup_pending = retire.is_some_and(|report| report.cleanup.is_some());
 
         let status = if matches!(
             rendered_context,
@@ -241,6 +245,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             page_flip,
             retire: retire_status,
             retire_destroy,
+            retire_cleanup_pending,
         }
     }
 }

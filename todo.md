@@ -108,6 +108,8 @@ active milestone to `docs/roadmap-history.md`.
   sequence so replayed accepted callbacks cannot retire a newer owner.
 - [x] Made rendered scanout cleanup retryable after accepted page-flip cleanup
   failure without exposing framebuffer/blob identity.
+- [x] Threaded reduced cleanup-pending diagnostics through runtime ticks and
+  atomic scanout smoke evidence.
 - [x] Added reduced live scanout submit intake so backend-live rendered
   primary-plane submit results can drive runtime `SubmitScanout`.
 - [x] Added shared runtime scanout lifecycle state so rendered frames progress

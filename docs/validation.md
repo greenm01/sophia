@@ -90,7 +90,7 @@ The stable evidence shape for that run is
 `LibdrmNativeAtomicScanoutSmokeEvidence`: overall status, rendered context
 status, GBM export status, primary-plane submit status, page-flip poll status,
 page-flip event status, retirement status, and retire-time resource destroy
-status only.
+status, and retire-time cleanup-pending status only.
 The stable evidence shape for the GBM/EGL renderer smoke is
 `LiveRealGbmSmokeEvidence`: status, draw status, presentation status, and
 frame-target allocation status only.

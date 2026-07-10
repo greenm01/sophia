@@ -605,7 +605,8 @@ current GBM/KMS owner.
 If the page flip is accepted but framebuffer/blob cleanup fails, backend-live
 ends the in-flight scanout state but retains an opaque cleanup owner with the
 rendered buffer owner. The runtime may retry that cleanup later; it must not
-drop native handles or pretend cleanup succeeded.
+drop native handles or pretend cleanup succeeded. Runtime tick reports and
+atomic scanout smoke evidence expose only the reduced cleanup-pending bit.
 Those terminal reduced states are queued inside backend-live and drained into
 the next runtime tick as scanout lifecycle observations. The shared reducer
 records the retirement or rejection without treating it as a fresh render

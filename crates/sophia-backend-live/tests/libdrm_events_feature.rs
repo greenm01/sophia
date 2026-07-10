@@ -1451,6 +1451,15 @@ fn live_runtime_assembly_retains_failed_rendered_scanout_cleanup_for_retry() {
     assert!(assembly.rendered_primary_plane_scanout_cleanup_pending());
     assert_eq!(assembly.pending_runtime_scanout_state_count(), 1);
 
+    let tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should observe cleanup failure as rejected scanout state");
+    assert_eq!(
+        tick.runtime_scanout_states,
+        vec![RuntimeScanoutState::Rejected]
+    );
+    assert_eq!(tick.rendered_primary_plane_scanout_cleanup_pending, true);
+
     let cleanup = assembly.retry_tracked_rendered_primary_plane_scanout_cleanup(&retry_device);
 
     assert_eq!(
@@ -1472,12 +1481,12 @@ fn live_runtime_assembly_retains_failed_rendered_scanout_cleanup_for_retry() {
     assert_eq!(no_cleanup.destroy, None);
     assert_eq!(no_cleanup.cleanup_pending, false);
 
-    let tick = assembly
+    let clean_tick = assembly
         .run_tick(CompositorBackendTickInput::default())
-        .expect("runtime tick should observe cleanup failure as rejected scanout state");
+        .expect("runtime tick should observe cleared cleanup state");
     assert_eq!(
-        tick.runtime_scanout_states,
-        vec![RuntimeScanoutState::Rejected]
+        clean_tick.rendered_primary_plane_scanout_cleanup_pending,
+        false
     );
 
     std::fs::remove_dir_all(root).unwrap();
@@ -1921,6 +1930,7 @@ fn native_atomic_scanout_smoke_evidence_passes_only_after_submit_page_flip_and_r
             page_flip: Some(LivePageFlipEventStatus::Presented),
             retire: Some(LibdrmNativePrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip),
             retire_destroy: Some(LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed),
+            retire_cleanup_pending: false,
         }
     );
 }
@@ -1970,6 +1980,7 @@ fn native_atomic_scanout_smoke_evidence_fails_closed_before_page_flip() {
         Some(LibdrmPageFlipEventPollStatus::Idle)
     );
     assert_eq!(evidence.retire_destroy, None);
+    assert_eq!(evidence.retire_cleanup_pending, false);
     assert_eq!(
         submission.retire(&device).status,
         LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed
@@ -2035,6 +2046,7 @@ fn native_atomic_scanout_smoke_evidence_reports_resource_retire_failure() {
         evidence.retire_destroy,
         Some(LibdrmNativePrimaryPlaneResourceDestroyStatus::FramebufferDestroyFailed)
     );
+    assert_eq!(evidence.retire_cleanup_pending, true);
 }
 
 #[test]

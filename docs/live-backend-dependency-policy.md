@@ -252,7 +252,9 @@ callbacks at or below the baseline must leave the owner in flight.
 Accepted page-flip evidence can end the in-flight scanout state, but failed
 framebuffer/blob cleanup must remain retryable. Backend-live stores the
 remaining native cleanup work with the rendered buffer owner and exposes only
-reduced cleanup-pending and cleanup-retry reports.
+reduced cleanup-pending and cleanup-retry reports. Runtime tick reports and
+opt-in atomic smoke evidence may carry the reduced cleanup-pending bit, but no
+framebuffer, blob, or GBM identity.
 `retire_native_primary_plane_scanout_after_page_flip` consumes that owner only
 when a reduced callback report is accepted and presented. Rejected or stale
 callbacks return the owner to the caller, preserving buffer and framebuffer
@@ -268,7 +270,8 @@ persistent rendered-context failure, GBM export failure, submit failure, missing
 page-flip evidence, retirement failure, or passed. When retirement fails, the
 record also carries the reduced resource-destroy status so diagnostics can tell
 an accepted page flip from a framebuffer/blob cleanup failure. Native handles
-and object IDs remain private.
+and object IDs remain private. A reduced cleanup-pending bit says whether a
+retry owner still exists after the smoke path attempts retirement.
 
 Backend-live runtime ticks carry the current reduced scanout readiness report,
 KMS scanout target report, and page-flip event beside renderer health. This

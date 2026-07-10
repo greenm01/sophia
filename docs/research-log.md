@@ -875,7 +875,9 @@ identity outside backend-live.
 Resource cleanup after accepted page flip is now retryable. If framebuffer or
 mode-blob destruction fails, backend-live clears the in-flight scanout owner but
 keeps an opaque cleanup owner with the rendered buffer owner. A later retry can
-finish cleanup without leaking native IDs into runtime state.
+finish cleanup without leaking native IDs into runtime state. Runtime ticks and
+atomic smoke evidence now expose only a reduced cleanup-pending bit for this
+case.
 The page-flip callback queue now carries the latest accepted reduced callback
 report. `run_tick_with_rendered_primary_plane_scanout_with` consumes that report
 before draining lifecycle states, so one live tick can retire the old rendered

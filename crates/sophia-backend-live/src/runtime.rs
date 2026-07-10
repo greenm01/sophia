@@ -437,6 +437,9 @@ where
             page_flip_callbacks,
             runtime_scanout_states,
             #[cfg(feature = "libdrm-events")]
+            rendered_primary_plane_scanout_cleanup_pending: self
+                .rendered_primary_plane_scanout_cleanup_pending(),
+            #[cfg(feature = "libdrm-events")]
             rendered_primary_plane_scanout_in_flight_ticks: self
                 .rendered_primary_plane_scanout_in_flight_ticks,
             #[cfg(feature = "libdrm-events")]
@@ -525,6 +528,8 @@ where
             page_flip: self.page_flip_event,
             page_flip_callbacks,
             runtime_scanout_states,
+            rendered_primary_plane_scanout_cleanup_pending: self
+                .rendered_primary_plane_scanout_cleanup_pending(),
             rendered_primary_plane_scanout_in_flight_ticks: self
                 .rendered_primary_plane_scanout_in_flight_ticks,
             rendered_primary_plane_scanout_submit,
@@ -609,6 +614,8 @@ pub struct LiveBackendRuntimeTickReport {
     pub page_flip: LivePageFlipEvent,
     pub page_flip_callbacks: LivePageFlipCallbackQueueReport,
     pub runtime_scanout_states: Vec<RuntimeScanoutState>,
+    #[cfg(feature = "libdrm-events")]
+    pub rendered_primary_plane_scanout_cleanup_pending: bool,
     #[cfg(feature = "libdrm-events")]
     pub rendered_primary_plane_scanout_in_flight_ticks: u64,
     #[cfg(feature = "libdrm-events")]
