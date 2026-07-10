@@ -147,7 +147,7 @@ impl RealAtomicScanoutPageFlipSession {
             );
         }
 
-        let (Some(descriptor), Some(_owned_buffer)) = (export.descriptor, export.owner) else {
+        let (Some(descriptor), Some(owned_buffer)) = (export.descriptor, export.owner) else {
             let mut evidence = reduced_smoke_evidence_for_phase(
                 phase,
                 scanout_target,
@@ -200,8 +200,16 @@ impl RealAtomicScanoutPageFlipSession {
             return evidence;
         };
 
-        let page_flip =
-            self.wait_for_submitted_page_flip_retirement(intake, submission, wait_policy);
+        let rendered_submission = LiveRenderedPrimaryPlaneScanoutSubmission {
+            scanout_buffer: owned_buffer,
+            primary_plane: submission,
+            submitted_after_page_flip_serial: None,
+        };
+        let page_flip = self.wait_for_rendered_submitted_page_flip_retirement(
+            intake,
+            rendered_submission,
+            wait_policy,
+        );
         reduced_smoke_evidence_for_phase(
             phase,
             scanout_target,

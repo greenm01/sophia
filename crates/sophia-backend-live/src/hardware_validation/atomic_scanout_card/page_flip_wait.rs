@@ -37,6 +37,22 @@ pub struct RealAtomicScanoutPageFlipWaitReport {
 }
 
 impl RealAtomicScanoutPageFlipSession {
+    pub fn wait_for_rendered_submitted_page_flip_retirement<Owner>(
+        &mut self,
+        intake: &mut LivePageFlipCallbackIntake,
+        submission: LiveRenderedPrimaryPlaneScanoutSubmission<Owner>,
+        policy: RealAtomicScanoutPageFlipWaitPolicy,
+    ) -> RealAtomicScanoutPageFlipWaitReport {
+        let LiveRenderedPrimaryPlaneScanoutSubmission {
+            scanout_buffer,
+            primary_plane,
+            submitted_after_page_flip_serial: _,
+        } = submission;
+        let report = self.wait_for_submitted_page_flip_retirement(intake, primary_plane, policy);
+        drop(scanout_buffer);
+        report
+    }
+
     pub fn wait_for_submitted_page_flip_retirement(
         &mut self,
         intake: &mut LivePageFlipCallbackIntake,

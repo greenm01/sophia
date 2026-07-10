@@ -808,7 +808,10 @@ front-buffer descriptor plus its opaque owner, submits the descriptor through
 the primary-plane path, and returns a combined owner. The rendered buffer owner
 and the KMS submission owner then travel together until accepted page-flip
 evidence allows `retire_rendered_primary_plane_scanout_after_page_flip` to drop
-both safely.
+both safely. The opt-in hardware smoke follows the same lifetime rule: its
+rendered front-buffer owner is wrapped with the primary-plane submission before
+waiting for page-flip evidence, so the proof does not validate a framebuffer
+whose renderer-owned backing storage has already been released.
 Native primary-plane submit can also consume a preselected KMS target snapshot.
 That path is required when the Engine has already sized a rendered frame target
 from a specific connector/CRTC/plane selection; readiness, buffer production,

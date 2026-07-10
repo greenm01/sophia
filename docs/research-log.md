@@ -931,7 +931,10 @@ actual proof phases: it opens a primary DRM card, enables the atomic KMS
 capabilities, allocates the GBM scanout buffer from a persistent GBM/EGL
 rendered-scanout context in the same handle namespace, submits primary-plane
 scanout, waits for a native page-flip callback, validates the reduced callback,
-and retires the submitted resources.
+and retires the submitted resources. The smoke now retains the renderer-owned
+front-buffer owner in the same combined rendered-scanout submission shape used
+by the runtime path, so page-flip evidence cannot pass after the GBM backing
+owner has already been dropped.
 The reduced evidence records context startup separately from GBM export,
 includes the reduced KMS scanout target readiness status, and reports reduced
 retire-time resource destroy status when cleanup fails. Non-ready scanout

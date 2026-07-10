@@ -85,6 +85,9 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Made the opt-in atomic hardware smoke retain the renderer-owned GBM
+  front-buffer owner with the primary-plane submission until page-flip
+  retirement, matching the production runtime lifetime rule.
 - [x] Added session-loop coverage proving pending decoded native page-flip
   callbacks drain under the bounded emit budget without requiring another
   reduced page-flip readiness token.
