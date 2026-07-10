@@ -22,18 +22,17 @@ use sophia_backend_live::{
     LibdrmNativePrimaryPlanePropertyDiscoveryStatus, LibdrmNativePrimaryPlanePropertyHandles,
     LibdrmNativePrimaryPlaneResourceCreateStatus, LibdrmNativePrimaryPlaneResourceDestroyStatus,
     LibdrmNativePrimaryPlaneResourceDevice, LibdrmNativePrimaryPlaneScanoutRetireResult,
-    LibdrmNativePrimaryPlaneScanoutRetireStatus, LibdrmNativePrimaryPlaneScanoutSubmission,
-    LibdrmNativePrimaryPlaneScanoutSubmitPolicy, LibdrmNativePrimaryPlaneScanoutSubmitStatus,
-    LibdrmNativePrimaryPlaneSelectionResult, LibdrmNativePrimaryPlaneSelectionStatus,
-    LibdrmNativePropertyHandleSet, LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport,
-    LibdrmNativeReadLoopReport, LibdrmNativeReadLoopStatus,
-    LibdrmNativeRenderedScanoutContextStatus, LibdrmPageFlipEventPollReport,
-    LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller, LibdrmRendererScanoutBuffer,
-    LiveAtomicScanoutPreflightReport, LiveAtomicScanoutPreflightStatus, LiveBackendConfig,
-    LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
-    LiveHardwareValidationSmokeReport, LiveHardwareValidationSmokeStatus,
-    LiveHardwareValidationTarget, LiveKmsScanoutTargetStatus, LiveLibdrmPollerDiagnostics,
-    LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
+    LibdrmNativePrimaryPlaneScanoutRetireStatus, LibdrmNativePrimaryPlaneScanoutSubmitPolicy,
+    LibdrmNativePrimaryPlaneScanoutSubmitStatus, LibdrmNativePrimaryPlaneSelectionResult,
+    LibdrmNativePrimaryPlaneSelectionStatus, LibdrmNativePropertyHandleSet,
+    LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport, LibdrmNativeReadLoopReport,
+    LibdrmNativeReadLoopStatus, LibdrmNativeRenderedScanoutContextStatus,
+    LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller,
+    LibdrmRendererScanoutBuffer, LiveAtomicScanoutPreflightReport,
+    LiveAtomicScanoutPreflightStatus, LiveBackendConfig, LiveHardwareValidationGateReport,
+    LiveHardwareValidationGateStatus, LiveHardwareValidationSmokeReport,
+    LiveHardwareValidationSmokeStatus, LiveHardwareValidationTarget, LiveKmsScanoutTargetStatus,
+    LiveLibdrmPollerDiagnostics, LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
     LiveLibdrmPollerStartupStatus, LivePageFlipCallback, LivePageFlipCallbackDecision,
     LivePageFlipCallbackQueue, LivePageFlipCallbackReport, LivePageFlipCallbackSourceReport,
     LivePageFlipEvent, LivePageFlipEventStatus, LiveRenderedPrimaryPlaneScanoutBackpressureReport,
@@ -67,8 +66,9 @@ use sophia_backend_live::{
 };
 #[cfg(feature = "gbm-probe")]
 use sophia_backend_live::{
-    LiveGbmEglFrameTargetStatus, NativeGbmRenderedScanoutBufferDiscoveryExporter,
-    NativeGbmRenderedScanoutContextStatus, RenderDeviceDiscoveryBackend,
+    LibdrmNativePrimaryPlaneScanoutSubmission, LiveGbmEglFrameTargetStatus,
+    NativeGbmRenderedScanoutBufferDiscoveryExporter, NativeGbmRenderedScanoutContextStatus,
+    RenderDeviceDiscoveryBackend,
 };
 #[cfg(feature = "libinput-events")]
 use sophia_protocol::{InputEventKind, Point};
