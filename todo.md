@@ -28,6 +28,8 @@ Support now exists for that hardware proof:
   passing evidence automatically.
 - `tools/atomic_scanout_preflight.sh` records reduced host readiness without
   requesting DRM master or modesetting hardware.
+- `tools/verify_atomic_scanout_preflight.sh` can verify that a captured
+  preflight log is ready for the DRM-master smoke.
 - `tools/verify_atomic_scanout_evidence.sh` can verify a captured log offline
   against the reduced atomic scanout evidence contract.
 
@@ -71,6 +73,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Added strict verification fixtures for atomic scanout preflight logs so
+  hardware readiness can be checked before attempting the modesetting smoke.
 - [x] Added a non-modesetting atomic scanout preflight report and tool so
   hardware validation can distinguish missing primary card nodes before the
   DRM-master smoke.
