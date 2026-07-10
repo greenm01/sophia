@@ -834,6 +834,10 @@ scanout framebuffer from a DRM buffer, validate target/buffer size, and destroy
 the framebuffer/blob pair after use. The request-builder test path now runs
 target selection, resource creation, property discovery, and atomic request
 construction together.
+Renderer-live and backend-live now share a reduced scanout-buffer descriptor
+contract. Renderer-live exports only size, pitch, XRGB8888 format, and GEM
+handle facts; backend-live validates that descriptor and turns it into a private
+DRM buffer adapter for framebuffer registration.
 The matching property discovery seam can resolve the required connector, CRTC,
 and plane property handles through a real DRM device or a deterministic fake.
 Discovery failures are reduced to read failure or missing resource-property

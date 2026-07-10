@@ -21,8 +21,8 @@ use sophia_backend_live::{
     LibdrmNativePrimaryPlaneResourceDevice, LibdrmNativePrimaryPlaneSelectionStatus,
     LibdrmNativePropertyHandleSet, LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport,
     LibdrmNativeReadLoopReport, LibdrmNativeReadLoopStatus, LibdrmPageFlipEventPollReport,
-    LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller, LiveBackendConfig,
-    LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
+    LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller, LibdrmRendererScanoutBuffer,
+    LiveBackendConfig, LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
     LiveHardwareValidationSmokeReport, LiveHardwareValidationSmokeStatus,
     LiveHardwareValidationTarget, LiveLibdrmPollerDiagnostics, LiveLibdrmPollerDiagnosticsStatus,
     LiveLibdrmPollerStartupReport, LiveLibdrmPollerStartupStatus, LivePageFlipCallback,
@@ -36,6 +36,11 @@ use sophia_backend_live::{
     native_libdrm_event_adapter_report_for_authority, real_libdrm_events_validation_gate,
     real_libdrm_events_validation_smoke_report, reduce_native_page_flip_event,
     select_native_primary_plane_target,
+};
+use sophia_renderer_live::{
+    FakeRendererScanoutBufferExporter, LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+    LiveGbmEglFrameTargetRecord, LiveRendererScanoutBufferExportStatus,
+    LiveRendererScanoutBufferExporter,
 };
 
 #[test]
@@ -312,31 +317,6 @@ impl LibdrmNativePrimaryPlaneResourceDevice for FakeNativePrimaryPlaneResourceDe
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-struct FakeScanoutBuffer {
-    size: (u32, u32),
-    pitch: u32,
-    handle: drm::buffer::Handle,
-}
-
-impl drm::buffer::Buffer for FakeScanoutBuffer {
-    fn size(&self) -> (u32, u32) {
-        self.size
-    }
-
-    fn format(&self) -> drm::buffer::DrmFourcc {
-        drm::buffer::DrmFourcc::Xrgb8888
-    }
-
-    fn pitch(&self) -> u32 {
-        self.pitch
-    }
-
-    fn handle(&self) -> drm::buffer::Handle {
-        self.handle
-    }
-}
-
 fn clone_io_result<T: Clone>(result: &io::Result<T>) -> io::Result<T> {
     result
         .as_ref()
@@ -366,10 +346,6 @@ fn plane_handle() -> drm::control::plane::Handle {
 
 fn framebuffer_handle() -> drm::control::framebuffer::Handle {
     drm::control::from_u32(14).expect("test framebuffer handle should be nonzero")
-}
-
-fn buffer_handle() -> drm::buffer::Handle {
-    drm::control::from_u32(17).expect("test buffer handle should be nonzero")
 }
 
 fn primary_plane_properties() -> LibdrmNativePrimaryPlanePropertyHandles {
@@ -458,12 +434,21 @@ fn full_primary_plane_resource_device() -> FakeNativePrimaryPlaneResourceDevice 
     }
 }
 
-fn scanout_buffer(size: Size) -> FakeScanoutBuffer {
-    FakeScanoutBuffer {
-        size: (size.width as u32, size.height as u32),
-        pitch: size.width as u32 * 4,
-        handle: buffer_handle(),
-    }
+fn scanout_buffer(size: Size) -> LibdrmRendererScanoutBuffer {
+    let mut exporter =
+        FakeRendererScanoutBufferExporter::new(LiveRendererScanoutBufferExportStatus::Exported)
+            .with_descriptor(
+                size.width as u32 * 4,
+                LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+                17,
+            );
+    let descriptor = exporter
+        .export_scanout_buffer(LiveGbmEglFrameTargetRecord::new(size))
+        .descriptor
+        .expect("ready fake renderer export should include a scanout descriptor");
+
+    LibdrmRendererScanoutBuffer::from_descriptor(descriptor)
+        .expect("ready renderer descriptor should become a backend-private DRM buffer")
 }
 
 #[test]
@@ -684,6 +669,30 @@ fn native_libdrm_primary_plane_resources_validate_size_and_lifetime() {
     assert_eq!(
         destroyed.status,
         LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed
+    );
+}
+
+#[test]
+fn native_libdrm_renderer_scanout_buffer_rejects_invalid_renderer_descriptors() {
+    let target = LiveGbmEglFrameTargetRecord::new(Size {
+        width: 1280,
+        height: 720,
+    });
+    let mut invalid_exporter =
+        FakeRendererScanoutBufferExporter::new(LiveRendererScanoutBufferExportStatus::Exported)
+            .with_descriptor(0, LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888, 17);
+    let invalid_descriptor = invalid_exporter.export_scanout_buffer(target).descriptor;
+    assert!(invalid_descriptor.is_none());
+
+    let mut unsupported_format =
+        FakeRendererScanoutBufferExporter::new(LiveRendererScanoutBufferExportStatus::Exported)
+            .with_descriptor(1280 * 4, 0, 17);
+    assert!(
+        unsupported_format
+            .export_scanout_buffer(target)
+            .descriptor
+            .and_then(LibdrmRendererScanoutBuffer::from_descriptor)
+            .is_none()
     );
 }
 

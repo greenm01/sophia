@@ -675,6 +675,9 @@ keeping those native handles backend-private.
 The resource lifecycle seam can then create a mode blob, register a scanout
 framebuffer from a renderer-owned buffer, and retire both resources without
 exposing their native IDs outside backend-live.
+Renderer-live now exposes a reduced scanout-buffer descriptor for that path:
+size, pitch, XRGB8888 format, and GEM handle. Backend-live converts only ready
+descriptors into a private DRM buffer adapter before framebuffer registration.
 Property discovery for that path now uses the native DRM property APIs and
 collapses lookup problems to reduced missing-property groups. The property
 handles themselves stay backend-private.

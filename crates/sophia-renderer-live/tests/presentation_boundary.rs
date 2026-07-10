@@ -1,9 +1,12 @@
 use sophia_renderer_live::{
-    FakeGbmEglFrameTargetAllocator, FakePresentationSmoke, LiveGbmEglFrameTargetAllocationReport,
-    LiveGbmEglFrameTargetAllocationRequest, LiveGbmEglFrameTargetAllocationStatus,
-    LiveGbmEglFrameTargetAllocator, LiveGbmEglFrameTargetLifecycleReport,
-    LiveGbmEglFrameTargetLifecycleStatus, LiveGbmEglFrameTargetRecord, LiveGbmEglFrameTargetStatus,
-    LiveRendererPresentationReport, LiveRendererPresentationStatus, Size,
+    FakeGbmEglFrameTargetAllocator, FakePresentationSmoke, LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+    LiveGbmEglFrameTargetAllocationReport, LiveGbmEglFrameTargetAllocationRequest,
+    LiveGbmEglFrameTargetAllocationStatus, LiveGbmEglFrameTargetAllocator,
+    LiveGbmEglFrameTargetLifecycleReport, LiveGbmEglFrameTargetLifecycleStatus,
+    LiveGbmEglFrameTargetRecord, LiveGbmEglFrameTargetStatus, LiveRendererPresentationReport,
+    LiveRendererPresentationStatus, LiveRendererScanoutBufferDescriptor,
+    LiveRendererScanoutBufferExportReport, LiveRendererScanoutBufferExportStatus,
+    LiveRendererScanoutBufferExporter, LiveRendererScanoutBufferStatus, Size,
 };
 
 #[test]
@@ -137,6 +140,108 @@ fn fake_gbm_egl_frame_target_allocator_reports_ready_without_handles() {
                 },
             },
         }
+    );
+}
+
+#[test]
+fn renderer_scanout_buffer_descriptor_validates_scanout_shape() {
+    let ready = LiveRendererScanoutBufferDescriptor::new(
+        Size {
+            width: 1920,
+            height: 1080,
+        },
+        1920 * 4,
+        LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+        44,
+    );
+    assert_eq!(ready.status, LiveRendererScanoutBufferStatus::Ready);
+
+    for descriptor in [
+        LiveRendererScanoutBufferDescriptor::new(
+            Size {
+                width: 0,
+                height: 1080,
+            },
+            1920 * 4,
+            LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+            44,
+        ),
+        LiveRendererScanoutBufferDescriptor::new(
+            Size {
+                width: 1920,
+                height: 1080,
+            },
+            0,
+            LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+            44,
+        ),
+        LiveRendererScanoutBufferDescriptor::new(
+            Size {
+                width: 1920,
+                height: 1080,
+            },
+            1920 * 4,
+            0,
+            44,
+        ),
+        LiveRendererScanoutBufferDescriptor::new(
+            Size {
+                width: 1920,
+                height: 1080,
+            },
+            1920 * 4,
+            LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+            0,
+        ),
+    ] {
+        assert_eq!(descriptor.status, LiveRendererScanoutBufferStatus::Invalid);
+    }
+}
+
+#[test]
+fn fake_renderer_scanout_exporter_reports_reduced_status_without_native_handles() {
+    let target = LiveGbmEglFrameTargetRecord::new(Size {
+        width: 1280,
+        height: 720,
+    });
+    let mut ready = sophia_renderer_live::FakeRendererScanoutBufferExporter::new(
+        LiveRendererScanoutBufferExportStatus::Exported,
+    )
+    .with_descriptor(1280 * 4, LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888, 55);
+    let report = ready.export_scanout_buffer(target);
+    assert_eq!(
+        report,
+        LiveRendererScanoutBufferExportReport {
+            status: LiveRendererScanoutBufferExportStatus::Exported,
+            descriptor: Some(LiveRendererScanoutBufferDescriptor::new(
+                target.size,
+                1280 * 4,
+                LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+                55,
+            )),
+        }
+    );
+
+    let mut unavailable = sophia_renderer_live::FakeRendererScanoutBufferExporter::new(
+        LiveRendererScanoutBufferExportStatus::Unavailable,
+    );
+    assert_eq!(
+        unavailable.export_scanout_buffer(target).status,
+        LiveRendererScanoutBufferExportStatus::Unavailable
+    );
+
+    let mut invalid_target = sophia_renderer_live::FakeRendererScanoutBufferExporter::new(
+        LiveRendererScanoutBufferExportStatus::Exported,
+    )
+    .with_descriptor(1280 * 4, LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888, 55);
+    assert_eq!(
+        invalid_target
+            .export_scanout_buffer(LiveGbmEglFrameTargetRecord::new(Size {
+                width: 0,
+                height: 720,
+            }))
+            .status,
+        LiveRendererScanoutBufferExportStatus::InvalidTarget
     );
 }
 

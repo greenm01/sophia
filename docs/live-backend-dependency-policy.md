@@ -150,7 +150,7 @@ plane, connector, property, and fd identity stay inside backend-live.
 property-set builder. It wires a connector, CRTC, primary plane, framebuffer,
 mode blob, and full-output rectangle into a `drm::control::atomic::AtomicModeReq`
 while exposing only built/invalid-size status. This is still not a full scanout
-pipeline: renderer-backed buffer production and hardware smoke remain separate
+pipeline: native GBM buffer-object production and hardware smoke remain separate
 work.
 `select_native_primary_plane_target` chooses a connected connector, usable
 encoder/CRTC, display mode size, and compatible primary plane through real DRM
@@ -162,6 +162,11 @@ bundle. It creates a mode blob, registers a scanout framebuffer from a
 renderer-owned DRM buffer, validates buffer size against the selected target,
 and destroys framebuffer/blob resources on retirement. It reports only reduced
 create/destroy status.
+Renderer-live may pass buffers to that seam through
+`LiveRendererScanoutBufferDescriptor`. The descriptor carries only reduced
+scanout facts: size, pitch, XRGB8888 format, and GEM handle. Backend-live
+accepts only ready descriptors and wraps them in a private `drm::buffer::Buffer`
+adapter before registering a framebuffer.
 `discover_native_primary_plane_property_handles` resolves the required atomic
 property names for that builder through the real `drm::control::Device`
 property APIs, but reduces failures to read-failed or missing connector, CRTC,
