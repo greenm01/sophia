@@ -30,11 +30,7 @@ where
                 )
             });
         self.advance_rendered_primary_plane_scanout_age_if_in_flight();
-        let runtime_scanout_states: Vec<RuntimeScanoutState> =
-            self.pending_runtime_scanout_states.drain(..).collect();
-        input
-            .scanout_lifecycle_states
-            .extend(runtime_scanout_states.iter().copied());
+        let runtime_scanout_states = self.drain_pending_runtime_scanout_states_into(&mut input);
 
         let target = self.gbm_egl_frame_target;
         let scanout_target = self.kms_scanout_target.status;

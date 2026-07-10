@@ -12,14 +12,7 @@ where
 
         #[cfg(feature = "libdrm-events")]
         self.advance_rendered_primary_plane_scanout_age_if_in_flight();
-        #[cfg(feature = "libdrm-events")]
-        let runtime_scanout_states: Vec<RuntimeScanoutState> =
-            self.pending_runtime_scanout_states.drain(..).collect();
-        #[cfg(not(feature = "libdrm-events"))]
-        let runtime_scanout_states: Vec<RuntimeScanoutState> = Vec::new();
-        input
-            .scanout_lifecycle_states
-            .extend(runtime_scanout_states.iter().copied());
+        let runtime_scanout_states = self.drain_pending_runtime_scanout_states_into(&mut input);
 
         let engine = self.assembly.run_tick(input)?;
 

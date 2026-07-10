@@ -9,6 +9,7 @@ mod rendered_primary_plane;
 #[cfg(feature = "libdrm-events")]
 mod rendered_tick;
 mod reports;
+mod scanout_lifecycle;
 mod tick;
 
 pub use assembly::*;
