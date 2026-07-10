@@ -33,7 +33,11 @@ where
     }
 
     pub fn observe_output_size(&mut self, size: Size) {
+        let previous = self.output_size;
         self.output_size = Some(size);
+        if previous != self.output_size {
+            self.gbm_egl_frame_target_allocation = None;
+        }
         self.refresh_kms_scanout_target(self.current_renderer_presentation_report());
     }
 

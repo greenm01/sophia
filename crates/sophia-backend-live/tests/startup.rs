@@ -672,6 +672,42 @@ fn live_runtime_assembly_blocks_page_flip_until_frame_target_matches_output_resi
 }
 
 #[test]
+fn live_runtime_assembly_clears_stale_frame_target_allocation_on_output_resize() {
+    let root = ready_drm_sysfs_fixture("runtime-output-resize-clears-allocation");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed live assembly");
+    let mut allocator =
+        FakeGbmEglFrameTargetAllocator::new(LiveGbmEglFrameTargetAllocationStatus::Ready);
+    let original_size = assembly
+        .output_size_observation()
+        .expect("ready output size");
+    let allocation = assembly
+        .allocate_gbm_egl_frame_target(&mut allocator)
+        .expect("ready target should allocate");
+
+    assembly.observe_output_size(original_size);
+    assert_eq!(
+        assembly.gbm_egl_frame_target_allocation_observation(),
+        Some(allocation)
+    );
+
+    assembly.observe_output_size(Size {
+        width: 1920,
+        height: 1080,
+    });
+
+    assert_eq!(assembly.gbm_egl_frame_target_allocation_observation(), None);
+    assert_eq!(
+        assembly.kms_scanout_target_observation().status,
+        LiveKmsScanoutTargetStatus::FrameTargetSizeMismatch
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn live_runtime_assembly_keeps_degraded_scanout_target_reduced() {
     let root = ready_drm_sysfs_fixture("runtime-kms-scanout-target-degraded");
     let report = discover_live_backend(&LiveBackendConfig::new(&root));
