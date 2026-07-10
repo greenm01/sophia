@@ -78,6 +78,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Split the libinput event adapter into report, gate, device-map, native
+  reader, poller, and fake-reader modules.
 - [x] Made modeset resource-creation cleanup retryable when framebuffer
   registration fails after mode-blob creation.
 - [x] Made submit-time framebuffer/blob cleanup failures retryable instead of
