@@ -218,6 +218,22 @@ pub struct RealAtomicScanoutPageFlipSessionResult {
     pub session: Option<RealAtomicScanoutPageFlipSession>,
 }
 
+impl RealAtomicScanoutPageFlipSessionResult {
+    pub fn failure_evidence(&self) -> Option<LibdrmNativeAtomicScanoutSmokeEvidence> {
+        match self.status {
+            RealAtomicScanoutPageFlipSessionStatus::Ready => None,
+            RealAtomicScanoutPageFlipSessionStatus::CardSelectionFailed => {
+                Some(self.card_selection_status.failure_evidence())
+            }
+            RealAtomicScanoutPageFlipSessionStatus::CardCloneFailed => {
+                let mut evidence = LibdrmNativeAtomicScanoutSmokeEvidence::kms_selection_failed();
+                evidence.status = LibdrmNativeAtomicScanoutSmokeStatus::PageFlipReaderUnavailable;
+                Some(evidence)
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RealAtomicScanoutPageFlipSessionStatus {
     Ready,
@@ -290,6 +306,32 @@ pub enum RealAtomicScanoutCardSelectionStatus {
     AtomicClientCapabilityUnavailable,
     KmsScanoutTargetUnavailable,
     AtomicPropertyDiscoveryUnavailable,
+}
+
+impl RealAtomicScanoutCardSelectionStatus {
+    pub const fn failure_evidence(self) -> LibdrmNativeAtomicScanoutSmokeEvidence {
+        match self {
+            RealAtomicScanoutCardSelectionStatus::Selected => {
+                LibdrmNativeAtomicScanoutSmokeEvidence::kms_selection_failed()
+            }
+            RealAtomicScanoutCardSelectionStatus::DeviceDirectoryUnavailable
+            | RealAtomicScanoutCardSelectionStatus::NoPrimaryCardNodes => {
+                LibdrmNativeAtomicScanoutSmokeEvidence::no_primary_card()
+            }
+            RealAtomicScanoutCardSelectionStatus::PrimaryCardOpenUnavailable => {
+                LibdrmNativeAtomicScanoutSmokeEvidence::primary_card_open_failed()
+            }
+            RealAtomicScanoutCardSelectionStatus::AtomicClientCapabilityUnavailable => {
+                LibdrmNativeAtomicScanoutSmokeEvidence::client_capability_failed()
+            }
+            RealAtomicScanoutCardSelectionStatus::KmsScanoutTargetUnavailable => {
+                LibdrmNativeAtomicScanoutSmokeEvidence::kms_selection_failed()
+            }
+            RealAtomicScanoutCardSelectionStatus::AtomicPropertyDiscoveryUnavailable => {
+                LibdrmNativeAtomicScanoutSmokeEvidence::property_discovery_failed()
+            }
+        }
+    }
 }
 
 pub fn select_real_atomic_scanout_card() -> RealAtomicScanoutCardSelection {

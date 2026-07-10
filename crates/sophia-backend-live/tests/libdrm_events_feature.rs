@@ -213,6 +213,10 @@ fn real_atomic_scanout_card_selection_fails_closed_without_device_identity() {
         missing.status,
         RealAtomicScanoutCardSelectionStatus::DeviceDirectoryUnavailable
     );
+    assert_eq!(
+        missing.status.failure_evidence().status,
+        LibdrmNativeAtomicScanoutSmokeStatus::NoPrimaryCard
+    );
     assert!(missing.card.is_none());
     assert!(missing.selection.is_none());
     let slot = LibdrmNativeOutputSlot::new(1).expect("slot one should be valid");
@@ -227,6 +231,13 @@ fn real_atomic_scanout_card_selection_fails_closed_without_device_identity() {
         missing_session.card_selection_status,
         RealAtomicScanoutCardSelectionStatus::DeviceDirectoryUnavailable
     );
+    assert_eq!(
+        missing_session
+            .failure_evidence()
+            .expect("failed session should reduce to smoke evidence")
+            .status,
+        LibdrmNativeAtomicScanoutSmokeStatus::NoPrimaryCard
+    );
     assert!(missing_session.session.is_none());
 
     let empty_root = std::env::temp_dir().join("sophia-empty-dri-card-selection");
@@ -236,6 +247,10 @@ fn real_atomic_scanout_card_selection_fails_closed_without_device_identity() {
     assert_eq!(
         empty.status,
         RealAtomicScanoutCardSelectionStatus::NoPrimaryCardNodes
+    );
+    assert_eq!(
+        empty.status.failure_evidence().status,
+        LibdrmNativeAtomicScanoutSmokeStatus::NoPrimaryCard
     );
     assert!(empty.card.is_none());
     assert!(empty.selection.is_none());

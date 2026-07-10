@@ -83,6 +83,9 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Moved real atomic card/session setup failure mapping into production
+  reduced evidence helpers, removing duplicated status matching from the
+  hardware smoke.
 - [x] Unified atomic scanout preflight and real card selection around the same
   reduced readiness probe so the non-modesetting gate cannot drift from the
   destructive selector.

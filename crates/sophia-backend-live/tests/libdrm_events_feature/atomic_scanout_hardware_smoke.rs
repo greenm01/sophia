@@ -2,8 +2,7 @@ use std::time::{Duration, Instant};
 
 use super::*;
 use sophia_backend_live::{
-    LivePageFlipCallbackIntake, RealAtomicScanoutCard, RealAtomicScanoutCardSelectionStatus,
-    RealAtomicScanoutPageFlipSessionStatus, select_real_atomic_scanout_card,
+    LivePageFlipCallbackIntake, RealAtomicScanoutCard, select_real_atomic_scanout_card,
 };
 use sophia_renderer_live::{
     LiveRendererScanoutBufferExportStatus, NativeGbmRenderedScanoutContextStatus,
@@ -63,10 +62,11 @@ fn native_atomic_scanout_real_primary_card_child() {
     let mut session_result =
         select_real_atomic_scanout_card().into_page_flip_session(slot, output, authority);
     let Some(mut session) = session_result.session.take() else {
-        fail_atomic_scanout_smoke(evidence_from_page_flip_session_failure(
-            session_result.status,
-            session_result.card_selection_status,
-        ));
+        fail_atomic_scanout_smoke(
+            session_result
+                .failure_evidence()
+                .unwrap_or_else(LibdrmNativeAtomicScanoutSmokeEvidence::kms_selection_failed),
+        );
     };
     let selected = session.selection();
     let target = LiveGbmEglFrameTargetRecord::new(selected.size());
@@ -327,51 +327,6 @@ fn rendered_context_status_from_native(
             LibdrmNativeRenderedScanoutContextStatus::Degraded
         }
     })
-}
-
-fn evidence_from_card_selection_failure(
-    status: RealAtomicScanoutCardSelectionStatus,
-) -> LibdrmNativeAtomicScanoutSmokeEvidence {
-    match status {
-        RealAtomicScanoutCardSelectionStatus::Selected => {
-            LibdrmNativeAtomicScanoutSmokeEvidence::kms_selection_failed()
-        }
-        RealAtomicScanoutCardSelectionStatus::DeviceDirectoryUnavailable
-        | RealAtomicScanoutCardSelectionStatus::NoPrimaryCardNodes => {
-            LibdrmNativeAtomicScanoutSmokeEvidence::no_primary_card()
-        }
-        RealAtomicScanoutCardSelectionStatus::PrimaryCardOpenUnavailable => {
-            LibdrmNativeAtomicScanoutSmokeEvidence::primary_card_open_failed()
-        }
-        RealAtomicScanoutCardSelectionStatus::AtomicClientCapabilityUnavailable => {
-            LibdrmNativeAtomicScanoutSmokeEvidence::client_capability_failed()
-        }
-        RealAtomicScanoutCardSelectionStatus::KmsScanoutTargetUnavailable => {
-            LibdrmNativeAtomicScanoutSmokeEvidence::kms_selection_failed()
-        }
-        RealAtomicScanoutCardSelectionStatus::AtomicPropertyDiscoveryUnavailable => {
-            LibdrmNativeAtomicScanoutSmokeEvidence::property_discovery_failed()
-        }
-    }
-}
-
-fn evidence_from_page_flip_session_failure(
-    status: RealAtomicScanoutPageFlipSessionStatus,
-    card_selection_status: RealAtomicScanoutCardSelectionStatus,
-) -> LibdrmNativeAtomicScanoutSmokeEvidence {
-    match status {
-        RealAtomicScanoutPageFlipSessionStatus::Ready => {
-            LibdrmNativeAtomicScanoutSmokeEvidence::kms_selection_failed()
-        }
-        RealAtomicScanoutPageFlipSessionStatus::CardSelectionFailed => {
-            evidence_from_card_selection_failure(card_selection_status)
-        }
-        RealAtomicScanoutPageFlipSessionStatus::CardCloneFailed => {
-            let mut evidence = LibdrmNativeAtomicScanoutSmokeEvidence::kms_selection_failed();
-            evidence.status = LibdrmNativeAtomicScanoutSmokeStatus::PageFlipReaderUnavailable;
-            evidence
-        }
-    }
 }
 
 struct RealAtomicPageFlipWaitReport {
