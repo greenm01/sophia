@@ -189,6 +189,17 @@ also requires the current evidence schema and rejects duplicate or unknown
 fields, so a passing capture cannot smuggle native object identity into the
 reduced log.
 
+The verifier fixtures can be checked without hardware:
+
+```sh
+tools/check_atomic_scanout_verifiers.sh
+```
+
+That script proves the preflight verifier accepts only an atomic-ready reduced
+host record and that the scanout evidence verifier rejects missing steady-state
+page-flip evidence, the wrong steady-state request scope, and native identity
+fields.
+
 ## Retiring `DEFAULT_DISPLAY`
 
 The `DEFAULT_DISPLAY` EGL smoke is temporary, but it is not removable merely

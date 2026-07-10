@@ -78,6 +78,9 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Added atomic scanout verifier fixture checks so reduced preflight and
+  evidence logs reject unavailable hosts, missing steady-state evidence, wrong
+  steady-state request scope, and native identity leakage.
 - [x] Split backend-live runtime assembly, tick reports, and tick orchestration
   into domain modules while preserving the runtime facade.
 - [x] Split backend-live session-loop readiness, page-flip budget/reporting,
