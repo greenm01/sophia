@@ -241,6 +241,10 @@ resource ownership stays in backend-live, and stale page-flip evidence does not
 emit a runtime lifecycle state. Runtime reports may expose only reduced
 in-flight tick age for a retained scanout owner, which is enough to diagnose a
 missing page flip without leaking framebuffer, GBM, or KMS identity.
+Backpressure classification is reduced as well: backend-live may report idle,
+waiting, or stalled waiting for page-flip evidence against a caller-provided
+tick threshold, but that classification must not release resources or publish a
+false retirement.
 `retire_native_primary_plane_scanout_after_page_flip` consumes that owner only
 when a reduced callback report is accepted and presented. Rejected or stale
 callbacks return the owner to the caller, preserving buffer and framebuffer

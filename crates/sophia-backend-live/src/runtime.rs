@@ -88,6 +88,18 @@ where
     }
 
     #[cfg(feature = "libdrm-events")]
+    pub fn rendered_primary_plane_scanout_backpressure_report(
+        &self,
+        threshold_ticks: u64,
+    ) -> LiveRenderedPrimaryPlaneScanoutBackpressureReport {
+        LiveRenderedPrimaryPlaneScanoutBackpressureReport::from_in_flight_state(
+            self.rendered_primary_plane_scanout_in_flight(),
+            self.rendered_primary_plane_scanout_in_flight_ticks,
+            threshold_ticks,
+        )
+    }
+
+    #[cfg(feature = "libdrm-events")]
     pub fn rendered_primary_plane_runtime_scanout_state(&self) -> Option<RuntimeScanoutState> {
         self.rendered_primary_plane_runtime_scanout_state
     }

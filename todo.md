@@ -102,6 +102,8 @@ active milestone to `docs/roadmap-history.md`.
   evidence keeps GBM/KMS resources in flight until accepted retirement.
 - [x] Added reduced in-flight tick age for tracked rendered scanout ownership so
   missing page flips are observable without exposing GBM/KMS identity.
+- [x] Added reduced rendered-scanout backpressure classification so callers can
+  distinguish idle, waiting, and stalled page-flip states without retiring early.
 - [x] Added reduced live scanout submit intake so backend-live rendered
   primary-plane submit results can drive runtime `SubmitScanout`.
 - [x] Added shared runtime scanout lifecycle state so rendered frames progress

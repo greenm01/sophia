@@ -33,8 +33,10 @@ use sophia_backend_live::{
     LiveLibdrmPollerStartupReport, LiveLibdrmPollerStartupStatus, LivePageFlipCallback,
     LivePageFlipCallbackDecision, LivePageFlipCallbackQueue, LivePageFlipCallbackReport,
     LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus,
-    LiveRenderedPrimaryPlaneScanoutSubmitStatus, LiveRenderedScanoutBufferExport,
-    LiveRenderedScanoutBufferExporter, LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus,
+    LiveRenderedPrimaryPlaneScanoutBackpressureReport,
+    LiveRenderedPrimaryPlaneScanoutBackpressureStatus, LiveRenderedPrimaryPlaneScanoutSubmitStatus,
+    LiveRenderedScanoutBufferExport, LiveRenderedScanoutBufferExporter,
+    LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus,
     LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus,
     NativeGbmRenderedScanoutBufferDiscoveryExporter, NativeGbmRenderedScanoutContextStatus,
     NativeLibdrmAtomicScanoutCommitter, NativeLibdrmPageFlipEventPoller,
@@ -1096,6 +1098,16 @@ fn live_runtime_assembly_tracks_rendered_scanout_until_accepted_page_flip() {
         height: 720,
     });
 
+    assert_eq!(
+        assembly.rendered_primary_plane_scanout_backpressure_report(2),
+        LiveRenderedPrimaryPlaneScanoutBackpressureReport {
+            status: LiveRenderedPrimaryPlaneScanoutBackpressureStatus::Idle,
+            in_flight: false,
+            in_flight_ticks: 0,
+            threshold_ticks: 2,
+        }
+    );
+
     let submitted =
         assembly.submit_and_track_rendered_primary_plane_scanout_with(&device, &mut exporter);
 
@@ -1111,6 +1123,15 @@ fn live_runtime_assembly_tracks_rendered_scanout_until_accepted_page_flip() {
     assert_eq!(submitted.in_flight_ticks, 0);
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), true);
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight_ticks(), 0);
+    assert_eq!(
+        assembly.rendered_primary_plane_scanout_backpressure_report(2),
+        LiveRenderedPrimaryPlaneScanoutBackpressureReport {
+            status: LiveRenderedPrimaryPlaneScanoutBackpressureStatus::WaitingForPageFlip,
+            in_flight: true,
+            in_flight_ticks: 0,
+            threshold_ticks: 2,
+        }
+    );
     assert_eq!(
         assembly.rendered_primary_plane_runtime_scanout_state(),
         Some(RuntimeScanoutState::Submitted)
@@ -1136,6 +1157,41 @@ fn live_runtime_assembly_tracks_rendered_scanout_until_accepted_page_flip() {
         .expect("runtime tick should age in-flight scanout ownership");
     assert_eq!(aged_tick.rendered_primary_plane_scanout_in_flight_ticks, 1);
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight_ticks(), 1);
+    assert_eq!(
+        assembly.rendered_primary_plane_scanout_backpressure_report(2),
+        LiveRenderedPrimaryPlaneScanoutBackpressureReport {
+            status: LiveRenderedPrimaryPlaneScanoutBackpressureStatus::WaitingForPageFlip,
+            in_flight: true,
+            in_flight_ticks: 1,
+            threshold_ticks: 2,
+        }
+    );
+
+    let stalled_tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should classify old in-flight scanout ownership");
+    assert_eq!(
+        stalled_tick.rendered_primary_plane_scanout_in_flight_ticks,
+        2
+    );
+    assert_eq!(
+        assembly.rendered_primary_plane_scanout_backpressure_report(2),
+        LiveRenderedPrimaryPlaneScanoutBackpressureReport {
+            status: LiveRenderedPrimaryPlaneScanoutBackpressureStatus::StalledWaitingForPageFlip,
+            in_flight: true,
+            in_flight_ticks: 2,
+            threshold_ticks: 2,
+        }
+    );
+    assert_eq!(
+        assembly.rendered_primary_plane_scanout_backpressure_report(0),
+        LiveRenderedPrimaryPlaneScanoutBackpressureReport {
+            status: LiveRenderedPrimaryPlaneScanoutBackpressureStatus::WaitingForPageFlip,
+            in_flight: true,
+            in_flight_ticks: 2,
+            threshold_ticks: 0,
+        }
+    );
 
     let stale = LivePageFlipCallbackReport {
         decision: LivePageFlipCallbackDecision::RejectedStaleFrameSerial,
@@ -1153,7 +1209,7 @@ fn live_runtime_assembly_tracks_rendered_scanout_until_accepted_page_flip() {
     );
     assert_eq!(waiting.runtime_scanout_state, None);
     assert_eq!(waiting.in_flight, true);
-    assert_eq!(waiting.in_flight_ticks, 1);
+    assert_eq!(waiting.in_flight_ticks, 2);
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), true);
 
     let accepted = LivePageFlipCallbackReport {
@@ -1178,6 +1234,15 @@ fn live_runtime_assembly_tracks_rendered_scanout_until_accepted_page_flip() {
     assert_eq!(retired.in_flight_ticks, 0);
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), false);
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight_ticks(), 0);
+    assert_eq!(
+        assembly.rendered_primary_plane_scanout_backpressure_report(2),
+        LiveRenderedPrimaryPlaneScanoutBackpressureReport {
+            status: LiveRenderedPrimaryPlaneScanoutBackpressureStatus::Idle,
+            in_flight: false,
+            in_flight_ticks: 0,
+            threshold_ticks: 2,
+        }
+    );
     assert_eq!(
         assembly.rendered_primary_plane_runtime_scanout_state(),
         Some(RuntimeScanoutState::Retired)

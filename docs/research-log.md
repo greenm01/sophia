@@ -863,6 +863,10 @@ KMS submission is still awaiting page-flip evidence, backend-live reports
 runtime tick age of the in-flight owner so repeated deferrals can be diagnosed
 without releasing GBM/KMS resources early. The runtime continues through portal
 and chrome phases without altering in-flight scanout counts.
+That age now feeds a reduced backpressure classifier: idle, waiting for
+page-flip evidence, or stalled past a caller-provided threshold. It is a
+diagnostic/policy hook only; resource retirement still requires accepted
+page-flip evidence.
 The page-flip callback queue now carries the latest accepted reduced callback
 report. `run_tick_with_rendered_primary_plane_scanout_with` consumes that report
 before draining lifecycle states, so one live tick can retire the old rendered
