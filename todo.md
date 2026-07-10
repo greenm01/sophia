@@ -111,6 +111,9 @@ smoke still needs a DRM-master-capable machine.
 - [x] Added `tools/atomic_scanout_hardware_proof.sh` as the combined operator
   proof for preflight, two-phase atomic scanout, and runtime submit-to-retire
   evidence.
+- [x] Added reduced `sophia_runtime_rendered_scanout_failure` evidence so
+  runtime proof capture reports initial tick, missing submit, retire tick, and
+  retire-timeout failures instead of producing an empty log.
 - [x] Added session-loop coverage proving pending decoded native page-flip
   callbacks drain under the bounded emit budget without requiring another
   reduced page-flip readiness token.
