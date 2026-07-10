@@ -812,6 +812,11 @@ both safely. The opt-in hardware smoke follows the same lifetime rule: its
 rendered front-buffer owner is wrapped with the primary-plane submission before
 waiting for page-flip evidence, so the proof does not validate a framebuffer
 whose renderer-owned backing storage has already been released.
+Runtime rendered-primary-plane submit reports preserve the reduced native submit
+stages as well: property discovery, resource creation, atomic request build, and
+atomic commit submit. This lets the production loop explain why a scanout was
+rejected without exposing DRM object IDs, GBM handles, or authority-bearing file
+descriptors.
 Native primary-plane submit can also consume a preselected KMS target snapshot.
 That path is required when the Engine has already sized a rendered frame target
 from a specific connector/CRTC/plane selection; readiness, buffer production,

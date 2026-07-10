@@ -942,6 +942,12 @@ targets fail the evidence before the smoke can treat export or submit as
 sufficient. This path compiled, the local preflight failed closed with
 `DeviceDirectoryUnavailable`, and a skipped-preflight local run reduced to
 `NoPrimaryCard`; real hardware evidence remains to be recorded.
+Runtime rendered-primary-plane submit reports now retain the same reduced native
+submit-stage diagnostics used by the smoke evidence: property discovery,
+resource creation, atomic request build, and atomic commit submit. Deterministic
+runtime tests cover both a submitted scanout and an atomic-submit rejection, so
+the live loop can distinguish a policy-level rejection from the underlying
+native stage that caused it.
 Primary-plane submit now also has a preselected-target entry point. The opt-in
 atomic smoke uses one KMS selection snapshot for frame-target sizing, readiness
 evidence, and atomic submit instead of selecting again after rendering. A

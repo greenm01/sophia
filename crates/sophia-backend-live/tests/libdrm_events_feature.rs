@@ -2158,6 +2158,22 @@ fn live_runtime_assembly_retains_submit_failure_cleanup_for_retry() {
         Some(LibdrmNativePrimaryPlaneScanoutSubmitStatus::AtomicSubmitFailed)
     );
     assert_eq!(
+        submitted.properties,
+        Some(LibdrmNativePrimaryPlanePropertyDiscoveryStatus::Discovered)
+    );
+    assert_eq!(
+        submitted.resources,
+        Some(LibdrmNativePrimaryPlaneResourceCreateStatus::Created)
+    );
+    assert_eq!(
+        submitted.request,
+        Some(LibdrmNativeAtomicRequestBuildStatus::Built)
+    );
+    assert_eq!(
+        submitted.commit_submit,
+        Some(LibdrmNativeAtomicCommitSubmitStatus::Rejected)
+    );
+    assert_eq!(
         submitted.scanout_buffer,
         Some(sophia_renderer_live::LiveRendererScanoutBufferStatus::Ready)
     );
@@ -2492,6 +2508,25 @@ fn live_runtime_tick_submits_rendered_scanout_when_runtime_requests_scanout() {
             .expect("active scanout submit should be reported")
             .status,
         LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+    );
+    let submit = tick
+        .rendered_primary_plane_scanout_submit
+        .expect("active scanout submit should be reported");
+    assert_eq!(
+        submit.properties,
+        Some(LibdrmNativePrimaryPlanePropertyDiscoveryStatus::Discovered)
+    );
+    assert_eq!(
+        submit.resources,
+        Some(LibdrmNativePrimaryPlaneResourceCreateStatus::Created)
+    );
+    assert_eq!(
+        submit.request,
+        Some(LibdrmNativeAtomicRequestBuildStatus::Built)
+    );
+    assert_eq!(
+        submit.commit_submit,
+        Some(LibdrmNativeAtomicCommitSubmitStatus::Submitted)
     );
     assert_eq!(tick.engine.runtime.runtime_state.scanout_submissions, 1);
     assert_eq!(

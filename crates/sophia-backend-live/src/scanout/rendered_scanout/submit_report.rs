@@ -9,9 +9,13 @@ pub struct LiveRenderedPrimaryPlaneScanoutSubmitResult<Owner> {
     pub target: Option<LiveGbmEglFrameTargetStatus>,
     pub export: Option<LiveRendererScanoutBufferExportStatus>,
     pub scanout_buffer: Option<LiveRendererScanoutBufferStatus>,
+    pub properties: Option<LibdrmNativePrimaryPlanePropertyDiscoveryStatus>,
+    pub resources: Option<LibdrmNativePrimaryPlaneResourceCreateStatus>,
+    pub request: Option<LibdrmNativeAtomicRequestBuildStatus>,
     pub submit: Option<LibdrmNativePrimaryPlaneScanoutSubmitStatus>,
     pub request_scope: Option<LibdrmNativeAtomicCommitRequestScope>,
     pub commit_flags: Option<LibdrmNativeAtomicCommitFlagsReport>,
+    pub commit_submit: Option<LibdrmNativeAtomicCommitSubmitStatus>,
     pub submission: Option<LiveRenderedPrimaryPlaneScanoutSubmission<Owner>>,
     pub cleanup: Option<LiveRenderedPrimaryPlaneScanoutCleanup<Owner>>,
 }
