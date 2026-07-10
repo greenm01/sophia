@@ -147,6 +147,55 @@ fn real_libdrm_event_validation_gate_is_explicit_and_reduced() {
 }
 
 #[test]
+fn runtime_page_flip_observation_prefers_accepted_callback_over_later_stale_rejection() {
+    let root = ready_drm_sysfs_fixture("runtime-page-flip-accepted-dominates-stale");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let (sender, receiver) = mpsc::sync_channel(4);
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready backend should seed live assembly")
+        .with_page_flip_callback_queue(LivePageFlipCallbackQueue::new(receiver, 4));
+
+    sender
+        .try_send(LivePageFlipCallback {
+            output: OutputId::from_raw(1),
+            frame_serial: 62,
+        })
+        .expect("test channel should accept first callback");
+    sender
+        .try_send(LivePageFlipCallback {
+            output: OutputId::from_raw(1),
+            frame_serial: 61,
+        })
+        .expect("test channel should accept stale callback");
+
+    let tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should drain callbacks");
+
+    assert_eq!(
+        tick.page_flip,
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(62),
+        }
+    );
+    assert_eq!(tick.page_flip_callbacks.drained, 2);
+    assert_eq!(tick.page_flip_callbacks.accepted, 1);
+    assert_eq!(tick.page_flip_callbacks.rejected_stale_frame_serial, 1);
+    assert_eq!(
+        tick.page_flip_callbacks
+            .last_accepted
+            .expect("accepted callback should be retained")
+            .event
+            .frame_serial,
+        Some(62)
+    );
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn real_libdrm_event_validation_smoke_fails_closed_without_device_opening_smoke() {
     let skipped = LiveHardwareValidationSmokeReport::fail_closed_from_gate(
         LiveHardwareValidationGateReport::from_env_presence(

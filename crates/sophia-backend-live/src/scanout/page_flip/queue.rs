@@ -49,27 +49,34 @@ impl LivePageFlipCallbackQueue {
         page_flip_event: &mut LivePageFlipEvent,
     ) -> LivePageFlipCallbackQueueReport {
         let mut report = LivePageFlipCallbackQueueReport::default();
+        let mut last_rejected_event = None;
 
         for _ in 0..self.max_drain_per_tick {
             match self.receiver.try_recv() {
                 Ok(callback) => {
                     let callback_report = intake.observe(callback);
-                    *page_flip_event = callback_report.event;
                     report.drained = report.drained.saturating_add(1);
                     report.record_decision(callback_report.decision);
                     if callback_report.decision == LivePageFlipCallbackDecision::Accepted {
                         report.last_accepted = Some(callback_report);
+                    } else {
+                        last_rejected_event = Some(callback_report.event);
                     }
                 }
-                Err(TryRecvError::Empty) => return report,
+                Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
                     report.disconnected = true;
-                    return report;
+                    break;
                 }
             }
         }
 
-        report.max_reached = true;
+        report.max_reached = report.drained == self.max_drain_per_tick;
+        if let Some(accepted) = report.last_accepted {
+            *page_flip_event = accepted.event;
+        } else if let Some(rejected) = last_rejected_event {
+            *page_flip_event = rejected;
+        }
         report
     }
 }
