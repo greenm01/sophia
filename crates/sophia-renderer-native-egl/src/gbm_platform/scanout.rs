@@ -453,7 +453,15 @@ fn render_initialized_gbm_scanout_front_buffer<T: std::os::fd::AsFd>(
             &candidate.modifiers,
             candidate.usage,
         ) {
-            Ok(buffer) => return Ok(buffer),
+            Ok(buffer) if is_supported_rendered_scanout_candidate_buffer(&buffer) => {
+                return Ok(buffer);
+            }
+            Ok(_buffer) => {
+                last_detail = preferred_scanout_failure_detail(
+                    last_detail,
+                    NativeGbmScanoutBufferExportDetail::InvalidBufferDescriptor,
+                );
+            }
             Err(detail) => last_detail = preferred_scanout_failure_detail(last_detail, detail),
         }
     }
@@ -639,6 +647,14 @@ fn reduced_gbm_scanout_modifiers(modifiers: &[u64]) -> Vec<gbm::Modifier> {
 
 const MAX_PREFERRED_SCANOUT_MODIFIERS: usize = 16;
 
+fn is_supported_rendered_scanout_candidate_buffer(buffer: &NativeGbmOwnedScanoutBuffer) -> bool {
+    is_supported_rendered_scanout_candidate_shape(buffer.plane_count())
+}
+
+const fn is_supported_rendered_scanout_candidate_shape(plane_count: u8) -> bool {
+    plane_count == 1
+}
+
 fn rendered_scanout_usage() -> gbm::BufferObjectFlags {
     gbm::BufferObjectFlags::SCANOUT | gbm::BufferObjectFlags::RENDERING
 }
@@ -675,5 +691,18 @@ fn failed_scanout_buffer_report(
         status: detail.status(),
         detail,
         buffer: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rendered_scanout_candidate_shape_requires_single_plane() {
+        assert!(is_supported_rendered_scanout_candidate_shape(1));
+        assert!(!is_supported_rendered_scanout_candidate_shape(0));
+        assert!(!is_supported_rendered_scanout_candidate_shape(2));
+        assert!(!is_supported_rendered_scanout_candidate_shape(4));
     }
 }

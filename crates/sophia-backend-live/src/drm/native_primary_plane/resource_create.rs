@@ -185,10 +185,12 @@ where
                 detail: LibdrmNativePrimaryPlaneFramebufferCreateDetail::CreatedWithAddFb2Modifiers,
                 framebuffer: Some(framebuffer),
             },
-            Err(_) if has_non_linear_modifier(buffer) => LibdrmNativePrimaryPlaneFramebufferCreateResult {
-                detail: LibdrmNativePrimaryPlaneFramebufferCreateDetail::AddFb2ModifiersFailed,
-                framebuffer: None,
-            },
+            Err(_) if has_non_linear_modifier(buffer) => {
+                LibdrmNativePrimaryPlaneFramebufferCreateResult {
+                    detail: LibdrmNativePrimaryPlaneFramebufferCreateDetail::AddFb2ModifiersFailed,
+                    framebuffer: None,
+                }
+            }
             Err(_) => create_implicit_or_legacy_scanout_framebuffer(
                 device,
                 buffer,
@@ -269,7 +271,7 @@ where
     }
 
     if !is_supported_native_scanout_format(drm::buffer::Buffer::format(buffer))
-        || active_native_scanout_buffer_planes(buffer) != 1
+        || !is_supported_native_scanout_buffer_planes(buffer)
         || buffer.pitch() < buffer_width * LIVE_RENDERER_SCANOUT_BYTES_PER_XRGB8888_PIXEL
     {
         return Some(LibdrmNativePrimaryPlaneResourceCreateStatus::InvalidBuffer);
@@ -291,6 +293,18 @@ where
         .iter()
         .filter(|handle| handle.is_some())
         .count()
+}
+
+#[cfg(feature = "libdrm-events")]
+fn is_supported_native_scanout_buffer_planes<B>(buffer: &B) -> bool
+where
+    B: drm::buffer::PlanarBuffer + ?Sized,
+{
+    match active_native_scanout_buffer_planes(buffer) {
+        1 => true,
+        2..=4 => has_non_linear_modifier(buffer),
+        _ => false,
+    }
 }
 
 #[cfg(feature = "libdrm-events")]

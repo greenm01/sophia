@@ -771,6 +771,67 @@ impl LibdrmNativePrimaryPlaneResourceDevice for FakeNativePrimaryPlaneResourceDe
 }
 
 #[derive(Debug)]
+struct FakeModifierOnlyPrimaryPlaneResourceDevice {
+    mode_blob: io::Result<u64>,
+    framebuffer_with_modifiers: io::Result<drm::control::framebuffer::Handle>,
+    fallback_framebuffer: io::Result<drm::control::framebuffer::Handle>,
+    destroy_framebuffer: io::Result<()>,
+    destroy_mode_blob: io::Result<()>,
+}
+
+impl LibdrmNativePrimaryPlaneResourceDevice for FakeModifierOnlyPrimaryPlaneResourceDevice {
+    fn create_mode_blob_for_selection(
+        &self,
+        _selection: sophia_backend_live::LibdrmNativePrimaryPlaneSelection,
+    ) -> io::Result<u64> {
+        clone_io_result(&self.mode_blob)
+    }
+
+    fn add_scanout_framebuffer_with_modifiers<B>(
+        &self,
+        _buffer: &B,
+    ) -> io::Result<drm::control::framebuffer::Handle>
+    where
+        B: drm::buffer::PlanarBuffer + ?Sized,
+    {
+        clone_io_result(&self.framebuffer_with_modifiers)
+    }
+
+    fn add_scanout_framebuffer_without_modifiers<B>(
+        &self,
+        _buffer: &B,
+    ) -> io::Result<drm::control::framebuffer::Handle>
+    where
+        B: drm::buffer::PlanarBuffer + ?Sized,
+    {
+        clone_io_result(&self.fallback_framebuffer)
+    }
+
+    fn add_legacy_scanout_framebuffer<B>(
+        &self,
+        _buffer: &B,
+        _depth: u32,
+        _bpp: u32,
+    ) -> io::Result<drm::control::framebuffer::Handle>
+    where
+        B: drm::buffer::Buffer + ?Sized,
+    {
+        clone_io_result(&self.fallback_framebuffer)
+    }
+
+    fn destroy_scanout_framebuffer(
+        &self,
+        _framebuffer: drm::control::framebuffer::Handle,
+    ) -> io::Result<()> {
+        clone_io_result(&self.destroy_framebuffer)
+    }
+
+    fn destroy_mode_blob(&self, _mode_blob: u64) -> io::Result<()> {
+        clone_io_result(&self.destroy_mode_blob)
+    }
+}
+
+#[derive(Debug)]
 struct FakeNativePrimaryPlaneScanoutDevice {
     selection: FakeNativeKmsSelectionDevice,
     properties: FakeNativePropertyLookupDevice,
@@ -1067,6 +1128,7 @@ struct FakeDrmBuffer {
     plane_handles: [Option<drm::buffer::Handle>; 4],
     plane_pitches: [u32; 4],
     plane_offsets: [u32; 4],
+    modifier: Option<drm::buffer::DrmModifier>,
 }
 
 impl FakeDrmBuffer {
@@ -1084,6 +1146,7 @@ impl FakeDrmBuffer {
             ],
             plane_pitches: [size.width as u32 * 4, 0, 0, 0],
             plane_offsets: [0, 0, 0, 0],
+            modifier: None,
         }
     }
 
@@ -1102,6 +1165,11 @@ impl FakeDrmBuffer {
         self.plane_handles[1] =
             Some(drm::control::from_u32(18).expect("test buffer handle should be nonzero"));
         self.plane_pitches[1] = self.pitch;
+        self
+    }
+
+    fn with_modifier(mut self, modifier: drm::buffer::DrmModifier) -> Self {
+        self.modifier = Some(modifier);
         self
     }
 }
@@ -1134,7 +1202,7 @@ impl drm::buffer::PlanarBuffer for FakeDrmBuffer {
     }
 
     fn modifier(&self) -> Option<drm::buffer::DrmModifier> {
-        None
+        self.modifier
     }
 
     fn pitches(&self) -> [u32; 4] {
@@ -4399,7 +4467,7 @@ fn native_libdrm_primary_plane_resources_validate_size_and_lifetime() {
     assert!(invalid_format.resources.is_none());
     assert!(invalid_format.cleanup.is_none());
 
-    let multi_plane_packed_format = create_native_primary_plane_page_flip_resources(
+    let multi_plane_without_modifier = create_native_primary_plane_page_flip_resources(
         &FakeNativePrimaryPlaneResourceDevice {
             mode_blob: Ok(15),
             framebuffer: Ok(framebuffer_handle()),
@@ -4410,15 +4478,80 @@ fn native_libdrm_primary_plane_resources_validate_size_and_lifetime() {
         &FakeDrmBuffer::xrgb8888(selected.size()).with_two_planes(),
     );
     assert_eq!(
-        multi_plane_packed_format.status,
+        multi_plane_without_modifier.status,
         LibdrmNativePrimaryPlaneResourceCreateStatus::InvalidBuffer
     );
     assert_eq!(
-        multi_plane_packed_format.framebuffer,
+        multi_plane_without_modifier.framebuffer,
         Some(LibdrmNativePrimaryPlaneFramebufferCreateDetail::NotAttempted)
     );
-    assert!(multi_plane_packed_format.resources.is_none());
-    assert!(multi_plane_packed_format.cleanup.is_none());
+    assert!(multi_plane_without_modifier.resources.is_none());
+    assert!(multi_plane_without_modifier.cleanup.is_none());
+
+    let multi_plane_linear_modifier = create_native_primary_plane_page_flip_resources(
+        &FakeNativePrimaryPlaneResourceDevice {
+            mode_blob: Ok(15),
+            framebuffer: Ok(framebuffer_handle()),
+            destroy_framebuffer: Ok(()),
+            destroy_mode_blob: Ok(()),
+        },
+        selected,
+        &FakeDrmBuffer::xrgb8888(selected.size())
+            .with_two_planes()
+            .with_modifier(drm::buffer::DrmModifier::Linear),
+    );
+    assert_eq!(
+        multi_plane_linear_modifier.status,
+        LibdrmNativePrimaryPlaneResourceCreateStatus::InvalidBuffer
+    );
+    assert_eq!(
+        multi_plane_linear_modifier.framebuffer,
+        Some(LibdrmNativePrimaryPlaneFramebufferCreateDetail::NotAttempted)
+    );
+    assert!(multi_plane_linear_modifier.resources.is_none());
+    assert!(multi_plane_linear_modifier.cleanup.is_none());
+
+    let multi_plane_non_linear_modifier = create_native_primary_plane_page_flip_resources(
+        &full_primary_plane_resource_device(),
+        selected,
+        &FakeDrmBuffer::xrgb8888(selected.size())
+            .with_two_planes()
+            .with_modifier(drm::buffer::DrmModifier::I915_x_tiled),
+    );
+    assert_eq!(
+        multi_plane_non_linear_modifier.status,
+        LibdrmNativePrimaryPlaneResourceCreateStatus::Created
+    );
+    assert_eq!(
+        multi_plane_non_linear_modifier.framebuffer,
+        Some(LibdrmNativePrimaryPlaneFramebufferCreateDetail::CreatedWithAddFb2Modifiers)
+    );
+    assert!(multi_plane_non_linear_modifier.resources.is_some());
+    assert!(multi_plane_non_linear_modifier.cleanup.is_none());
+
+    let multi_plane_non_linear_addfb2_failure = create_native_primary_plane_page_flip_resources(
+        &FakeModifierOnlyPrimaryPlaneResourceDevice {
+            mode_blob: Ok(15),
+            framebuffer_with_modifiers: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+            fallback_framebuffer: Ok(framebuffer_handle()),
+            destroy_framebuffer: Ok(()),
+            destroy_mode_blob: Ok(()),
+        },
+        selected,
+        &FakeDrmBuffer::xrgb8888(selected.size())
+            .with_two_planes()
+            .with_modifier(drm::buffer::DrmModifier::I915_x_tiled),
+    );
+    assert_eq!(
+        multi_plane_non_linear_addfb2_failure.status,
+        LibdrmNativePrimaryPlaneResourceCreateStatus::FramebufferCreateFailed
+    );
+    assert_eq!(
+        multi_plane_non_linear_addfb2_failure.framebuffer,
+        Some(LibdrmNativePrimaryPlaneFramebufferCreateDetail::AddFb2ModifiersFailed)
+    );
+    assert!(multi_plane_non_linear_addfb2_failure.resources.is_none());
+    assert!(multi_plane_non_linear_addfb2_failure.cleanup.is_none());
 
     let zero_mode_blob = create_native_primary_plane_resources(
         &FakeNativePrimaryPlaneResourceDevice {

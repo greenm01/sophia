@@ -56,23 +56,26 @@ smoke still needs a DRM-master-capable machine.
 
 Current hardware smoke state from the DRM-master host:
 
-- [ ] Resume atomic scanout at the scanout-buffer shape failure, not at generic
-  framebuffer creation. The latest smoke reaches rendered GBM export with a
-  primary-plane-supported non-linear modifier, but the exported buffer is
-  multi-plane and Sophia's current packed primary-plane path rejects it before
-  attempting AddFB:
+- [x] Resume atomic scanout at the scanout-buffer shape failure, not at generic
+  framebuffer creation. Backend-live now admits explicit non-linear multi-plane
+  XRGB8888 buffers into modifier-aware AddFB2 instead of rejecting them before
+  framebuffer creation.
+- [x] Try the fallback scanout-buffer strategy by making the rendered GBM/EGL
+  exporter skip multi-plane exports and continue searching for a single-plane
+  candidate.
+- [ ] Resume at framebuffer registration handle import. The latest smoke reaches
+  a single-plane XRGB8888 implicit buffer, but AddFB2 and legacy AddFB both fail
+  to register it:
 
   ```text
-  sophia_atomic_scanout_evidence schema=10 phase=InitialModeset status=ResourceCreationFailed scanout_target=Ready rendered_context=Ready gbm_export=Exported gbm_export_detail=Exported scanout_buffer=Ready buffer_format=Xrgb8888 buffer_modifier=NonLinear buffer_planes=Multiple properties=Discovered format_table=Present resources=InvalidBuffer framebuffer=NotAttempted request=none submit=ResourceCreationUnavailable request_scope=none commit_page_flip_event=none commit_nonblocking=none commit_allow_modeset=none commit_test_only=none page_flip_wait=CallbackMissing page_flip_poll=none page_flip=none retire=none retire_destroy=none retire_cleanup_pending=false
+  sophia_atomic_scanout_evidence schema=10 phase=InitialModeset status=ResourceCreationFailed scanout_target=Ready rendered_context=Ready gbm_export=Exported gbm_export_detail=Exported scanout_buffer=Ready buffer_format=Xrgb8888 buffer_modifier=Implicit buffer_planes=Single properties=Discovered format_table=Present resources=FramebufferCreateFailed framebuffer=AddFb2ThenLegacyAddFbFailed request=none submit=ResourceCreationUnavailable request_scope=none commit_page_flip_event=none commit_nonblocking=none commit_allow_modeset=none commit_test_only=none page_flip_wait=CallbackMissing page_flip_poll=none page_flip=none retire=none retire_destroy=none retire_cleanup_pending=false
   ```
 
-- [ ] Decide the next scanout-buffer strategy:
-  - Prefer: teach native primary-plane framebuffer creation to accept valid
-    multi-plane XRGB8888 GBM buffers with per-plane handles, pitches, offsets,
-    and modifiers through AddFB2-with-modifiers.
-  - Fallback: make the renderer avoid multi-plane non-linear modifiers and
-    continue searching for a single-plane scanout candidate, accepting that some
-    drivers may not offer one.
+- [ ] Add a backend-private PRIME import path for rendered GBM scanout buffers:
+  export per-plane DMA-BUF fds from the retained renderer owner, import them into
+  the KMS submit device with `prime_fd_to_buffer`, use the imported handles for
+  AddFB2/AddFB, and close imported GEM handles on failure or after framebuffer
+  registration transfers ownership.
 - [ ] Keep `tools/check_atomic_scanout_local.sh` as the non-hardware gate before
   each retry, then rerun `tools/atomic_scanout_smoke.sh` from the DRM-master
   TTY and compare `buffer_modifier`, `buffer_planes`, `resources`, and
@@ -118,6 +121,14 @@ Current hardware smoke state from the DRM-master host:
 
 ## Done Recently
 
+- [x] Made rendered GBM/EGL scanout skip multi-plane export candidates and keep
+  searching for a single-plane candidate. Hardware evidence moved from
+  `buffer_modifier=NonLinear buffer_planes=Multiple
+  framebuffer=AddFb2ModifiersFailed` to `buffer_modifier=Implicit
+  buffer_planes=Single framebuffer=AddFb2ThenLegacyAddFbFailed`.
+- [x] Allowed explicit non-linear multi-plane XRGB8888/ARGB8888 scanout buffers
+  to reach modifier-aware AddFB2 while keeping multi-plane implicit/linear
+  buffers rejected before framebuffer creation.
 - [x] Fed selected-primary-plane `IN_FORMATS` modifiers into the rendered
   GBM/EGL scanout exporter. Hardware evidence moved from implicit single-plane
   AddFB failure to non-linear multi-plane buffer rejection, proving modifier

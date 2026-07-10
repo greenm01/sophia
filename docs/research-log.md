@@ -1114,12 +1114,30 @@ surfaces. If the driver accepts it, the exported descriptor should report
 `buffer_modifier=Linear`, letting backend-live use modifier-aware AddFB2 instead
 of the implicit AddFB path.
 
-The primary-plane resource path now admits only one active plane for the packed
-XRGB8888/ARGB8888 scanout formats Sophia supports today. Multi-plane scanout
-descriptors fail closed as `InvalidBuffer` before mode-blob creation,
-framebuffer registration, or cleanup bookkeeping. Supporting multi-plane
-formats later should be tied to reduced `IN_FORMATS` plane capability parsing,
-not accidental AddFB probing.
+The primary-plane resource path initially admitted only one active plane for the
+packed XRGB8888/ARGB8888 scanout formats Sophia supported. Multi-plane scanout
+descriptors failed closed as `InvalidBuffer` before mode-blob creation,
+framebuffer registration, or cleanup bookkeeping.
+
+TTY3 hardware evidence changed that decision. Backend-live now admits explicit
+non-linear multi-plane XRGB8888/ARGB8888 buffers to modifier-aware AddFB2 while
+still rejecting implicit and linear multi-plane buffers before framebuffer
+creation. The first retry moved the reduced failure from
+`resources=InvalidBuffer framebuffer=NotAttempted` to
+`resources=FramebufferCreateFailed framebuffer=AddFb2ModifiersFailed`, proving
+Sophia reached the intended native framebuffer registration path.
+
+Because the driver still rejected that multi-plane framebuffer, the rendered
+GBM/EGL exporter now treats multi-plane exports as rejected candidates and keeps
+searching for a single-plane scanout buffer. The next TTY3 smoke reached
+`buffer_format=Xrgb8888`, `buffer_modifier=Implicit`, `buffer_planes=Single`,
+and `framebuffer=AddFb2ThenLegacyAddFbFailed`. A temporary local diagnostic
+reported AddFB2 and legacy AddFB failing with `ENOENT`, which points to the KMS
+submit fd not seeing the GEM handle exported in the renderer descriptor. The
+next production-shaped fix should be backend-private PRIME import: retain
+renderer-owned DMA-BUF fds, import them into the KMS submit device, register the
+framebuffer from KMS-local GEM handles, and close imported handles on failure or
+after framebuffer registration transfers ownership.
 
 The opt-in hardware smoke cannot complete in this environment. Its preflight
 stops before modesetting with reduced status `DeviceDirectoryUnavailable` and
