@@ -42,5 +42,6 @@ expect_fail tools/verify_atomic_scanout_evidence.sh atomic_scanout_evidence_clea
 expect_fail tools/verify_atomic_scanout_evidence.sh atomic_scanout_evidence_test_only_commit.log
 expect_fail tools/verify_atomic_scanout_evidence.sh atomic_scanout_evidence_blocking_commit.log
 expect_fail tools/verify_atomic_scanout_evidence.sh atomic_scanout_evidence_missing_page_flip_event_flag.log
+expect_fail tools/verify_atomic_scanout_evidence.sh atomic_scanout_evidence_smoke_child_timeout.log
 
 echo "atomic scanout verifier fixtures passed"
