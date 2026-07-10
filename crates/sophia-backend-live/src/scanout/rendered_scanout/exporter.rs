@@ -25,6 +25,37 @@ pub struct LiveRenderedScanoutBufferExport<Owner> {
 }
 
 #[cfg(feature = "libdrm-events")]
+impl<Owner> LiveRenderedScanoutBufferExport<Owner> {
+    pub fn new(
+        status: LiveRendererScanoutBufferExportStatus,
+        descriptor: Option<LiveRendererScanoutBufferDescriptor>,
+        owner: Option<Owner>,
+    ) -> Self {
+        match (status, descriptor.is_some() && owner.is_some()) {
+            (LiveRendererScanoutBufferExportStatus::Exported, true) => Self {
+                status,
+                descriptor,
+                owner,
+            },
+            (LiveRendererScanoutBufferExportStatus::Exported, false) => Self {
+                status: LiveRendererScanoutBufferExportStatus::Degraded,
+                descriptor: None,
+                owner: None,
+            },
+            (status, _) => Self {
+                status,
+                descriptor: None,
+                owner: None,
+            },
+        }
+    }
+
+    pub fn normalized(self) -> Self {
+        Self::new(self.status, self.descriptor, self.owner)
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
 pub trait LiveRenderedScanoutBufferExporter {
     type Owner;
 
@@ -60,11 +91,11 @@ where
         target: LiveGbmEglFrameTargetRecord,
     ) -> LiveRenderedScanoutBufferExport<Self::Owner> {
         let Some(device) = self.device.take() else {
-            return LiveRenderedScanoutBufferExport {
-                status: LiveRendererScanoutBufferExportStatus::Unavailable,
-                descriptor: None,
-                owner: None,
-            };
+            return LiveRenderedScanoutBufferExport::new(
+                LiveRendererScanoutBufferExportStatus::Unavailable,
+                None,
+                None,
+            );
         };
 
         let report =
@@ -73,11 +104,7 @@ where
             );
         let descriptor = report.buffer.as_ref().map(|buffer| buffer.descriptor());
 
-        LiveRenderedScanoutBufferExport {
-            status: report.status,
-            descriptor,
-            owner: report.buffer,
-        }
+        LiveRenderedScanoutBufferExport::new(report.status, descriptor, report.buffer)
     }
 }
 
@@ -170,11 +197,11 @@ where
 
         if !target.is_valid_scanout_target() {
             self.last_export_status = Some(LiveRendererScanoutBufferExportStatus::InvalidTarget);
-            return LiveRenderedScanoutBufferExport {
-                status: LiveRendererScanoutBufferExportStatus::InvalidTarget,
-                descriptor: None,
-                owner: None,
-            };
+            return LiveRenderedScanoutBufferExport::new(
+                LiveRendererScanoutBufferExportStatus::InvalidTarget,
+                None,
+                None,
+            );
         }
 
         if self.context.is_none() {
@@ -199,20 +226,12 @@ where
                 }
             };
             self.last_export_status = Some(status);
-            return LiveRenderedScanoutBufferExport {
-                status,
-                descriptor: None,
-                owner: None,
-            };
+            return LiveRenderedScanoutBufferExport::new(status, None, None);
         };
 
         let report = context.export_rendered_owned_scanout_buffer(target);
         let descriptor = report.buffer.as_ref().map(|buffer| buffer.descriptor());
         self.last_export_status = Some(report.status);
-        LiveRenderedScanoutBufferExport {
-            status: report.status,
-            descriptor,
-            owner: report.buffer,
-        }
+        LiveRenderedScanoutBufferExport::new(report.status, descriptor, report.buffer)
     }
 }

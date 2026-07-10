@@ -65,7 +65,7 @@ where
         };
     }
 
-    let export = exporter.export_rendered_scanout_buffer(target);
+    let export = exporter.export_rendered_scanout_buffer(target).normalized();
     if export.status != LiveRendererScanoutBufferExportStatus::Exported {
         return LiveRenderedPrimaryPlaneScanoutSubmitResult {
             status: LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutExportFailed,

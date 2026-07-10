@@ -1675,6 +1675,42 @@ fn live_runtime_assembly_reports_invalid_rendered_scanout_buffer_status() {
 }
 
 #[test]
+fn live_runtime_assembly_drops_resources_from_non_exported_rendered_scanout() {
+    let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-non-exported-buffer");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready backend should seed live assembly");
+    let device = full_primary_plane_scanout_device();
+    let mut exporter = FakeRenderedScanoutExporter {
+        status: LiveRendererScanoutBufferExportStatus::Unavailable,
+        descriptor: Some(scanout_descriptor(Size {
+            width: 1280,
+            height: 720,
+        })),
+        owner: Some(FakeRenderedScanoutOwner { raw: 11 }),
+        export_attempts: 0,
+    };
+
+    let submitted = assembly.submit_rendered_primary_plane_scanout_with(&device, &mut exporter);
+
+    assert_eq!(
+        submitted.status,
+        LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutExportFailed
+    );
+    assert_eq!(
+        submitted.export,
+        Some(LiveRendererScanoutBufferExportStatus::Unavailable)
+    );
+    assert_eq!(submitted.scanout_buffer, None);
+    assert_eq!(submitted.submit, None);
+    assert!(submitted.submission.is_none());
+    assert!(submitted.cleanup.is_none());
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn live_runtime_assembly_tracks_rendered_scanout_until_accepted_page_flip() {
     let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-tracked-retire");
     let report = discover_live_backend(&LiveBackendConfig::new(&root));

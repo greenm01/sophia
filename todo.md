@@ -83,6 +83,9 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Normalized backend-live rendered scanout exports before submit so
+  non-exported reports cannot carry forged descriptors or retained owners into
+  the DRM path.
 - [x] Hardened renderer-live native GBM scanout export reports so only reports
   with exported status can retain native buffer ownership.
 - [x] Added a negative atomic scanout evidence fixture proving the shell verifier
