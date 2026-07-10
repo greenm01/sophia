@@ -553,6 +553,40 @@ where
         })
     }
 
+    #[cfg(feature = "libdrm-events")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_tick_with_rendered_primary_plane_scanout_and_native_page_flip_events_with<D, E, R>(
+        &mut self,
+        input: CompositorBackendTickInput,
+        device: &D,
+        exporter: &mut E,
+        reader: &mut R,
+        poller: &mut NativeLibdrmPageFlipEventPoller,
+        sender: &std::sync::mpsc::SyncSender<LivePageFlipCallback>,
+        max_read: usize,
+        max_emit: usize,
+    ) -> Result<LiveBackendRuntimeNativePageFlipTickReport, CompositorBackendAssemblyError>
+    where
+        D: LibdrmNativeKmsSelectionDevice
+            + LibdrmNativePropertyLookupDevice
+            + LibdrmNativePrimaryPlaneResourceDevice
+            + LibdrmNativeAtomicCommitDevice,
+        E: LiveRenderedScanoutBufferExporter,
+        E::Owner: 'static,
+        R: LibdrmNativePageFlipReader,
+    {
+        let native_page_flip =
+            poller.read_and_poll_page_flip_events(reader, sender, max_read, max_emit);
+        self.observe_native_libdrm_poller_diagnostics(poller.diagnostics());
+        let tick =
+            self.run_tick_with_rendered_primary_plane_scanout_with(input, device, exporter)?;
+
+        Ok(LiveBackendRuntimeNativePageFlipTickReport {
+            native_page_flip,
+            tick,
+        })
+    }
+
     #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
     pub fn run_tick_with_native_gbm_rendered_primary_plane_scanout_with<D, R>(
         &mut self,
@@ -643,4 +677,11 @@ pub struct LiveBackendRuntimeTickReport {
     pub rendered_primary_plane_scanout_retire:
         Option<LiveTrackedRenderedPrimaryPlaneScanoutRetireReport>,
     pub libdrm_poller: LiveLibdrmPollerDiagnostics,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Debug, PartialEq)]
+pub struct LiveBackendRuntimeNativePageFlipTickReport {
+    pub native_page_flip: LibdrmNativeReadAndPollReport,
+    pub tick: LiveBackendRuntimeTickReport,
 }

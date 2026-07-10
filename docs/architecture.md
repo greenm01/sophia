@@ -739,6 +739,12 @@ the compositor in a fail-closed waiting or rejected state.
 path. It is compiled only behind `libdrm-events`, reduces DRM page-flip events
 through private CRTC routes, and emits only backend-local slots and frame
 serials into the existing reduced callback pipeline.
+The live rendered-primary-plane runtime path can now consume that reader in one
+tick: backend-live reads and polls native page-flip events into the bounded
+callback queue, updates reduced poller diagnostics, drains accepted callbacks to
+retire in-flight KMS/GBM owners, and only then submits the next rendered
+scanout. This is the production sequencing path; manual queue injection remains
+only a deterministic test seam.
 `NativeLibdrmAtomicScanoutCommitter` is the matching native submit boundary. It
 may submit a backend-owned `AtomicModeReq` to DRM/KMS, but a successful ioctl
 only means the kernel accepted the request. Sophia still waits for the reduced

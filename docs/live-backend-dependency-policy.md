@@ -468,6 +468,11 @@ that helper, or receive already-reduced callback facts from
 `NativeLibdrmPageFlipEventReader`. This preserves queue backpressure and
 retains undelivered callbacks while keeping the native fd read loop behind the
 feature-gated reader.
+Backend-live exposes a combined rendered-primary-plane tick helper that reads
+native page-flip events, polls them into the bounded callback queue, records
+reduced diagnostics, and then runs the scanout tick. This is the preferred live
+path because accepted page-flip evidence is observed before retirement and
+before any next scanout submit.
 Decoded callback counts describe native callback facts that passed reduction
 before queue handoff; emitted callback counts describe facts that actually
 entered the runtime queue. If the queue is disconnected, pending injected

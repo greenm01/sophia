@@ -939,6 +939,12 @@ modeset loop.
 `LibdrmNativeAtomicScanoutSmokeEvidence` now includes those reduced commit
 flags, so captured opt-in hardware evidence can prove the commit policy used by
 the submit that generated the page-flip evidence.
+The live runtime now has a native page-flip intake tick for rendered
+primary-plane scanout. It reads/polls the feature-gated libdrm page-flip reader
+into the bounded callback queue, updates reduced poller diagnostics, retires
+the in-flight owner from accepted evidence, and submits the next rendered frame
+in the same runtime tick. A fake-reader test proves the ordering without
+opening DRM devices.
 
 ## Open Questions
 

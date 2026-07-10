@@ -136,6 +136,8 @@ active milestone to `docs/roadmap-history.md`.
   commits without `ALLOW_MODESET`, while modeset permission stays explicit.
 - [x] Added reduced commit flags to atomic scanout smoke evidence so hardware
   captures prove the submit policy used by the page-flip.
+- [x] Added a native page-flip intake runtime tick so rendered primary-plane
+  scanout reads libdrm events before retirement and next-submit sequencing.
 - [x] Added reduced live scanout submit intake so backend-live rendered
   primary-plane submit results can drive runtime `SubmitScanout`.
 - [x] Added shared runtime scanout lifecycle state so rendered frames progress
