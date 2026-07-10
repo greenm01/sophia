@@ -24,8 +24,9 @@ active milestone to `docs/roadmap-history.md`.
 
 Support now exists for that hardware proof:
 
-- `tools/atomic_scanout_smoke.sh` records the opt-in smoke log and verifies
-  passing evidence automatically.
+- `tools/atomic_scanout_smoke.sh` runs verified preflight before the opt-in
+  modesetting smoke, records the smoke log, and verifies passing evidence
+  automatically.
 - `tools/atomic_scanout_preflight.sh` records reduced host readiness without
   requesting DRM master or modesetting hardware.
 - `tools/verify_atomic_scanout_preflight.sh` can verify that a captured
@@ -73,6 +74,9 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Gated the modesetting atomic scanout smoke helper behind verified
+  non-modesetting preflight so unsupported hosts fail before requesting DRM
+  master.
 - [x] Added strict verification fixtures for atomic scanout preflight logs so
   hardware readiness can be checked before attempting the modesetting smoke.
 - [x] Added a non-modesetting atomic scanout preflight report and tool so
