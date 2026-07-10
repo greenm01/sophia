@@ -643,6 +643,14 @@ fn live_runtime_assembly_blocks_page_flip_until_frame_target_matches_output_resi
             frame_serial: None,
         }
     );
+    let mismatch_tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should report output resize mismatch");
+    assert_eq!(mismatch_tick.output_size, Some(resized_output));
+    assert_eq!(
+        mismatch_tick.kms_scanout_target.status,
+        LiveKmsScanoutTargetStatus::FrameTargetSizeMismatch
+    );
 
     let frame_target = assembly.observe_gbm_egl_frame_target_size(resized_output);
 
@@ -665,6 +673,18 @@ fn live_runtime_assembly_blocks_page_flip_until_frame_target_matches_output_resi
         LivePageFlipEvent {
             status: LivePageFlipEventStatus::Ready,
             frame_serial: None,
+        }
+    );
+    let ready_tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should report matched output and frame target");
+    assert_eq!(ready_tick.output_size, Some(resized_output));
+    assert_eq!(ready_tick.gbm_egl_frame_target, Some(frame_target));
+    assert_eq!(
+        ready_tick.kms_scanout_target,
+        LiveKmsScanoutTargetReport {
+            status: LiveKmsScanoutTargetStatus::Ready,
+            size: Some(resized_output),
         }
     );
 
