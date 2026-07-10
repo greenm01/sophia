@@ -5399,12 +5399,7 @@ mod atomic_scanout_hardware_smoke {
 
         let Some(card_path) = first_openable_primary_card_node() else {
             let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::no_primary_card();
-            println!("{}", evidence.reduced_log_line());
-            assert_eq!(
-                evidence.status,
-                LibdrmNativeAtomicScanoutSmokeStatus::Passed
-            );
-            return;
+            fail_atomic_scanout_smoke(evidence);
         };
         let card = RealDrmCard::open(&card_path).expect("primary DRM card should open read/write");
 
@@ -5416,11 +5411,7 @@ mod atomic_scanout_hardware_smoke {
         let selection = select_native_primary_plane_target(&card);
         if selection.status != LibdrmNativePrimaryPlaneSelectionStatus::Selected {
             let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::kms_selection_failed();
-            println!("{}", evidence.reduced_log_line());
-            assert_eq!(
-                evidence.status,
-                LibdrmNativeAtomicScanoutSmokeStatus::Passed
-            );
+            fail_atomic_scanout_smoke(evidence);
         }
         let selected = selection
             .selection
@@ -5445,12 +5436,7 @@ mod atomic_scanout_hardware_smoke {
                 None,
                 None,
             );
-            println!("{}", evidence.reduced_log_line());
-            assert_eq!(
-                evidence.status,
-                LibdrmNativeAtomicScanoutSmokeStatus::Passed
-            );
-            return;
+            fail_atomic_scanout_smoke(evidence);
         }
 
         let context_report =
@@ -5487,12 +5473,7 @@ mod atomic_scanout_hardware_smoke {
                 None,
                 None,
             );
-            println!("{}", evidence.reduced_log_line());
-            assert_eq!(
-                evidence.status,
-                LibdrmNativeAtomicScanoutSmokeStatus::Passed
-            );
-            return;
+            fail_atomic_scanout_smoke(evidence);
         };
 
         let export = context.export_rendered_owned_scanout_buffer(target);
@@ -5506,11 +5487,7 @@ mod atomic_scanout_hardware_smoke {
                 None,
                 None,
             );
-            println!("{}", evidence.reduced_log_line());
-            assert_eq!(
-                evidence.status,
-                LibdrmNativeAtomicScanoutSmokeStatus::Passed
-            );
+            fail_atomic_scanout_smoke(evidence);
         }
         let owned_buffer = export
             .buffer
@@ -5535,11 +5512,7 @@ mod atomic_scanout_hardware_smoke {
                 None,
                 None,
             );
-            println!("{}", evidence.reduced_log_line());
-            assert_eq!(
-                evidence.status,
-                LibdrmNativeAtomicScanoutSmokeStatus::Passed
-            );
+            fail_atomic_scanout_smoke(evidence);
         }
         let submission = submit
             .submission
@@ -5569,11 +5542,7 @@ mod atomic_scanout_hardware_smoke {
             page_flip.callback_report.as_ref(),
             page_flip.retired.as_ref(),
         );
-        println!("{}", evidence.reduced_log_line());
-        assert_eq!(
-            evidence.status,
-            LibdrmNativeAtomicScanoutSmokeStatus::Passed
-        );
+        require_atomic_scanout_smoke_passed(evidence);
         drop(owned_buffer);
 
         let steady_export = context.export_rendered_owned_scanout_buffer(target);
@@ -5587,11 +5556,7 @@ mod atomic_scanout_hardware_smoke {
                 None,
                 None,
             );
-            println!("{}", evidence.reduced_log_line());
-            assert_eq!(
-                evidence.status,
-                LibdrmNativeAtomicScanoutSmokeStatus::Passed
-            );
+            fail_atomic_scanout_smoke(evidence);
         }
         let steady_owned_buffer = steady_export
             .buffer
@@ -5619,11 +5584,7 @@ mod atomic_scanout_hardware_smoke {
                 None,
                 None,
             );
-            println!("{}", evidence.reduced_log_line());
-            assert_eq!(
-                evidence.status,
-                LibdrmNativeAtomicScanoutSmokeStatus::Passed
-            );
+            fail_atomic_scanout_smoke(evidence);
         }
         let steady_submission = steady_submit
             .submission
@@ -5648,12 +5609,24 @@ mod atomic_scanout_hardware_smoke {
                 steady_page_flip.callback_report.as_ref(),
                 steady_page_flip.retired.as_ref(),
             );
-        println!("{}", steady_evidence.reduced_log_line());
+        require_atomic_scanout_smoke_passed(steady_evidence);
+        drop(steady_owned_buffer);
+    }
+
+    fn require_atomic_scanout_smoke_passed(evidence: LibdrmNativeAtomicScanoutSmokeEvidence) {
+        println!("{}", evidence.reduced_log_line());
         assert_eq!(
-            steady_evidence.status,
+            evidence.status,
             LibdrmNativeAtomicScanoutSmokeStatus::Passed
         );
-        drop(steady_owned_buffer);
+    }
+
+    fn fail_atomic_scanout_smoke(evidence: LibdrmNativeAtomicScanoutSmokeEvidence) -> ! {
+        println!("{}", evidence.reduced_log_line());
+        panic!(
+            "real atomic scanout smoke failed with status {:?}",
+            evidence.status
+        );
     }
 
     struct RealAtomicPageFlipWaitReport {

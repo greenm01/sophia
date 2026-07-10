@@ -78,6 +78,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Made opt-in atomic hardware smoke early failures print reduced evidence
+  and fail with the actual reduced status instead of asserting `Passed`.
 - [x] Made reduced atomic scanout smoke evidence require phase-correct commit
   flags before reporting `Passed`, matching the shell verifier contract.
 - [x] Made native primary-plane scanout policy expose its required reduced
