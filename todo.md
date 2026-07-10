@@ -14,9 +14,9 @@ active milestone to `docs/roadmap-history.md`.
 
 ### Real Libinput Adapter
 
-- [ ] Add a concrete libinput reader only behind `libinput-events`.
-- [ ] Preserve the existing native-shaped reader and poller report contract.
-- [ ] Avoid raw device paths, fd values, seat names, or libinput error strings in
+- [x] Add a concrete libinput reader only behind `libinput-events`.
+- [x] Preserve the existing native-shaped reader and poller report contract.
+- [x] Avoid raw device paths, fd values, seat names, or libinput error strings in
   public runtime reports.
 
 ---
@@ -71,6 +71,9 @@ active milestone to `docs/roadmap-history.md`.
 
 ## Done Recently
 
+- [x] Added a concrete safe-wrapper libinput reader behind `libinput-events`
+  that reduces pointer/key events into Sophia input packets without exposing
+  native paths, fds, seat names, or libinput error strings.
 - [x] Combined native page-flip intake with the persistent native GBM rendered
   scanout exporter so runtime ticks retire accepted GBM/KMS owners before the
   next reusable export attempt.

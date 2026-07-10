@@ -10,8 +10,6 @@ pub(crate) use std::io;
 pub(crate) use std::os::fd::AsFd;
 
 pub(crate) use crate::api::*;
-#[cfg(feature = "libinput-events")]
-pub(crate) use crate::libinput::*;
 #[cfg(feature = "libdrm-events")]
 pub(crate) use crate::native_atomic::*;
 #[cfg(feature = "libdrm-events")]

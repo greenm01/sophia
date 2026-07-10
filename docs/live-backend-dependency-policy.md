@@ -510,13 +510,18 @@ events through a private CRTC-to-slot table, and emits only
 the runtime still sees only reduced output routes, frame serials, counts, and
 fail-closed read status.
 
-The `libinput-events` feature defines the first native-shaped live input intake
-contract without admitting a concrete libinput crate. `LiveLibinputEventReader`
-returns bounded `InputEventPacket` batches plus `LibinputNativeEventReadReport`;
-`NativeLibinputEventPoller` implements Sophia Engine's `NonBlockingInputPoller`
-contract. The public report exposes only read status, event count, and remaining
-queued count. A later real libinput adapter must replace the reader, not the
-engine input adapter or runtime loop contract.
+The `libinput-events` feature defines the native-shaped live input intake
+contract and admits the safe Rust `input` wrapper as the only concrete libinput
+dependency. `LiveLibinputEventReader` returns bounded `InputEventPacket`
+batches plus `LibinputNativeEventReadReport`; `NativeLibinputEventPoller`
+implements Sophia Engine's `NonBlockingInputPoller` contract. The public report
+exposes only read status, event count, and remaining queued count.
+`NativeLibinputEventReader` owns a backend-created `input::Libinput` context,
+dispatches it, and reduces pointer motion, pointer button, and keyboard key
+events through a caller-provided `NativeLibinputDeviceMap`. It must not expose
+device paths, fd values, libinput seat names, raw device identity, or native
+error strings. New libinput event kinds should extend that reduced mapper, not
+the engine input adapter or runtime loop contract.
 
 Real hardware validation for libdrm and libinput is opt-in only. The gates are
 `SOPHIA_RUN_REAL_LIBDRM_EVENTS_SMOKE` and

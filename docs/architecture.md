@@ -908,6 +908,12 @@ in order for the routing pipeline. `NonBlockingInputPoller` and
 will dispatch ready file-descriptor events without blocking the engine loop,
 while the deterministic `QueuedInputPoller` keeps tests independent of kernel
 devices.
+The first concrete libinput reader is admitted only behind `libinput-events` and
+uses the safe Rust `input` wrapper rather than hand-written FFI. It accepts a
+backend-owned `Libinput` context plus a reduced seat/device map, dispatches
+ready events, and converts pointer motion, pointer button, and keyboard key
+events into `InputEventPacket` values. Native device paths, fd values, seat
+names, and libinput error strings do not enter public reports.
 
 The first live compositor backend boundary is dependency-neutral. An
 `OutputDiscoveryBackend` produces a `DrmKmsOutputRegistry`; an

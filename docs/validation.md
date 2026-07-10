@@ -50,16 +50,19 @@ smokes must return a reduced skipped report and avoid opening DRM device nodes.
 Until a concrete native page-flip reader exists, the reduced smoke report fails
 closed as `BackendUnavailable` when this gate is requested.
 
-The `libinput-events` feature currently admits no native dependency. It defines
-the first reduced live input event reader and poller shape, then proves that the
-poller implements Sophia Engine's non-blocking input contract. A later concrete
-libinput dependency must plug into this seam without changing runtime reports.
+The `libinput-events` feature admits the safe Rust `input` wrapper as the
+concrete libinput dependency. It defines the reduced live input event reader and
+poller shape, proves that the poller implements Sophia Engine's non-blocking
+input contract, and smoke-tests an empty path-based libinput context without
+opening devices. The reader reduces pointer motion, pointer button, and
+keyboard key events through a reduced seat/device map without changing runtime
+reports.
 Real libinput validation is gated by
 `SOPHIA_RUN_REAL_LIBINPUT_EVENTS_SMOKE=1`. Without that variable, future
 hardware smokes must return a reduced skipped report and avoid opening input
 devices or reporting device paths, seat names, file descriptors, or libinput
-error strings. Until a concrete libinput reader exists, the reduced smoke report
-fails closed as `BackendUnavailable` when this gate is requested.
+error strings. Until device-opening hardware smoke is admitted, the reduced
+smoke report fails closed as `BackendUnavailable` when this gate is requested.
 
 The backend-live GBM feature suite includes an opt-in real-device smoke. Set
 `SOPHIA_RUN_REAL_GBM_SMOKE=1` to let the test look for an openable

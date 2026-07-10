@@ -951,6 +951,15 @@ then attempt the next rendered primary-plane export through the reusable
 backend-live exporter. The deterministic coverage uses an unavailable render
 device to prove the ordering and fail-closed reduced states without touching
 real hardware.
+The libinput backend now admits the safe Rust `input` wrapper behind
+`libinput-events`. `NativeLibinputEventReader` owns a backend-created
+`Libinput` context, dispatches it through the existing bounded reader contract,
+and reduces pointer motion, pointer button, and keyboard key events through a
+caller-provided reduced seat/device map. The first concrete smoke constructs an
+empty path-based context and proves idle polling without opening devices or
+publishing native paths, fds, seat names, raw device identity, or libinput error
+strings. Real device-opening validation remains behind
+`SOPHIA_RUN_REAL_LIBINPUT_EVENTS_SMOKE`.
 
 ## Open Questions
 

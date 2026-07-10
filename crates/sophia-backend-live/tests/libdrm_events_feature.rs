@@ -2,8 +2,6 @@
 
 use std::{io, sync::mpsc};
 
-#[cfg(feature = "gbm-probe")]
-use sophia_backend_live::RenderDeviceDiscoveryBackend;
 use sophia_backend_live::{
     CompositorBackendTickInput, FakeLibdrmNativePageFlipReader, FakeLibdrmPageFlipEventPoller,
     LibdrmBackendFdAuthority, LibdrmBackendFdAuthorityReport, LibdrmBackendFdAuthorityStatus,
@@ -28,10 +26,10 @@ use sophia_backend_live::{
     LibdrmNativeReadLoopReport, LibdrmNativeReadLoopStatus,
     LibdrmNativeRenderedScanoutContextStatus, LibdrmPageFlipEventPollReport,
     LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller, LibdrmRendererScanoutBuffer,
-    LiveBackendConfig, LiveGbmEglFrameTargetStatus, LiveHardwareValidationGateReport,
-    LiveHardwareValidationGateStatus, LiveHardwareValidationSmokeReport,
-    LiveHardwareValidationSmokeStatus, LiveHardwareValidationTarget, LiveKmsScanoutTargetStatus,
-    LiveLibdrmPollerDiagnostics, LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
+    LiveBackendConfig, LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
+    LiveHardwareValidationSmokeReport, LiveHardwareValidationSmokeStatus,
+    LiveHardwareValidationTarget, LiveKmsScanoutTargetStatus, LiveLibdrmPollerDiagnostics,
+    LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
     LiveLibdrmPollerStartupStatus, LivePageFlipCallback, LivePageFlipCallbackDecision,
     LivePageFlipCallbackQueue, LivePageFlipCallbackReport, LivePageFlipCallbackSourceReport,
     LivePageFlipEvent, LivePageFlipEventStatus, LiveRenderedPrimaryPlaneScanoutBackpressureReport,
@@ -39,12 +37,11 @@ use sophia_backend_live::{
     LiveRenderedScanoutBufferExport, LiveRenderedScanoutBufferExporter,
     LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus,
     LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus,
-    LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus,
-    NativeGbmRenderedScanoutBufferDiscoveryExporter, NativeGbmRenderedScanoutContextStatus,
-    NativeLibdrmAtomicScanoutCommitter, NativeLibdrmPageFlipEventPoller,
-    NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller, RuntimeScanoutState, Size,
-    build_native_primary_plane_atomic_request, create_native_primary_plane_resources,
-    decode_native_page_flip_batch, destroy_native_primary_plane_resources, discover_live_backend,
+    LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus, NativeLibdrmAtomicScanoutCommitter,
+    NativeLibdrmPageFlipEventPoller, NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller,
+    RuntimeScanoutState, Size, build_native_primary_plane_atomic_request,
+    create_native_primary_plane_resources, decode_native_page_flip_batch,
+    destroy_native_primary_plane_resources, discover_live_backend,
     discover_native_primary_plane_property_handles, libdrm_dependency_admission_report,
     libdrm_fd_authority_report, native_libdrm_event_adapter_report,
     native_libdrm_event_adapter_report_for_authority, real_atomic_scanout_validation_gate,
@@ -56,11 +53,20 @@ use sophia_backend_live::{
     submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor,
     submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_policy,
 };
+#[cfg(feature = "gbm-probe")]
+use sophia_backend_live::{
+    LiveGbmEglFrameTargetStatus, NativeGbmRenderedScanoutBufferDiscoveryExporter,
+    NativeGbmRenderedScanoutContextStatus, RenderDeviceDiscoveryBackend,
+};
 use sophia_renderer_live::{
     FakeRendererScanoutBufferExporter, LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
-    LiveGbmEglFrameTargetLifecycleReport, LiveGbmEglFrameTargetLifecycleStatus,
     LiveGbmEglFrameTargetRecord, LiveRendererScanoutBufferExportStatus,
-    LiveRendererScanoutBufferExporter, NativeGbmRenderedScanoutContext,
+    LiveRendererScanoutBufferExporter,
+};
+#[cfg(feature = "gbm-probe")]
+use sophia_renderer_live::{
+    LiveGbmEglFrameTargetLifecycleReport, LiveGbmEglFrameTargetLifecycleStatus,
+    NativeGbmRenderedScanoutContext,
 };
 
 #[test]

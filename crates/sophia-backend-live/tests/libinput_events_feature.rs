@@ -1,6 +1,7 @@
 #![cfg(feature = "libinput-events")]
 
 use std::fs;
+use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 
 use sophia_backend_live::{
@@ -10,9 +11,10 @@ use sophia_backend_live::{
     LibinputNativeEventReadReport, LibinputNativeEventReadStatus, LibinputPhysicalInputAdapter,
     LiveBackendConfig, LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
     LiveHardwareValidationSmokeReport, LiveHardwareValidationSmokeStatus,
-    LiveHardwareValidationTarget, NativeLibinputEventPoller, NonBlockingInputPoller, SeatId,
-    discover_live_backend, native_libinput_event_adapter_report,
-    real_libinput_events_validation_gate, real_libinput_events_validation_smoke_report,
+    LiveHardwareValidationTarget, NativeLibinputDeviceMap, NativeLibinputEventPoller,
+    NativeLibinputEventReader, NonBlockingInputPoller, SeatId, discover_live_backend,
+    native_libinput_event_adapter_report, real_libinput_events_validation_gate,
+    real_libinput_events_validation_smoke_report,
 };
 use sophia_protocol::{InputEventKind, Point};
 
@@ -148,6 +150,33 @@ fn native_libinput_event_poller_reports_reduced_read_failure() {
 }
 
 #[test]
+fn native_libinput_event_reader_idles_without_exposing_native_identity() {
+    let reader = NativeLibinputEventReader::new(
+        input::Libinput::new_from_path(RejectingLibinputInterface),
+        NativeLibinputDeviceMap::new(SeatId::from_raw(1))
+            .with_pointer_device(DeviceId::from_raw(2))
+            .with_keyboard_device(DeviceId::from_raw(3)),
+    );
+    let mut poller = NativeLibinputEventPoller::new(reader, 4);
+
+    let events = poller
+        .poll_ready()
+        .expect("empty path libinput context should reduce to idle");
+
+    assert!(events.is_empty());
+    assert_eq!(
+        poller.last_read_report(),
+        LibinputNativeEventReadReport::idle()
+    );
+    assert_eq!(
+        poller.reader().devices(),
+        NativeLibinputDeviceMap::new(SeatId::from_raw(1))
+            .with_pointer_device(DeviceId::from_raw(2))
+            .with_keyboard_device(DeviceId::from_raw(3))
+    );
+}
+
+#[test]
 fn native_libinput_event_poller_feeds_engine_input_adapter_contract() {
     let mut source = LibinputEventSource::new();
     source.register_device(LibinputDeviceDescriptor {
@@ -242,4 +271,16 @@ fn ready_drm_sysfs_fixture(name: &str) -> PathBuf {
 
 fn write_fixture_file(root: &Path, name: &str, value: &str) {
     fs::write(root.join(name), value).unwrap();
+}
+
+struct RejectingLibinputInterface;
+
+impl input::LibinputInterface for RejectingLibinputInterface {
+    fn open_restricted(&mut self, _path: &Path, _flags: i32) -> Result<OwnedFd, i32> {
+        Err(1)
+    }
+
+    fn close_restricted(&mut self, fd: OwnedFd) {
+        drop(fd);
+    }
 }

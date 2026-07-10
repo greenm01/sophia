@@ -11,13 +11,14 @@ sophia-engine = { path = "../sophia-engine" }
 sophia-protocol = { path = "../sophia-protocol" }
 sophia-renderer-live = { path = "../sophia-renderer-live" }
 drm = { version = "0.15", optional = true, default-features = false }
+input = { version = "0.10", optional = true, default-features = false, features = ["libinput_1_19"] }
 
 [features]
 default = []
 gbm-probe = ["sophia-renderer-live/gbm-probe"]
 egl-probe = ["sophia-renderer-live/egl-probe"]
 libdrm-events = ["dep:drm"]
-libinput-events = []
+libinput-events = ["dep:input"]
 
 [lints]
 workspace = true
