@@ -55,9 +55,10 @@ active milestone to `docs/roadmap-history.md`.
 - [x] Build the first real KMS atomic property-set shape from backend-private
   connector, CRTC, plane, framebuffer, and mode state.
 - [ ] Run the opt-in atomic hardware smoke on a DRM-master-capable machine and
-  capture `LibdrmNativeAtomicScanoutSmokeEvidence` proving rendered GBM
-  front-buffer export, primary-plane atomic submit, native page-flip callback,
-  and resource retirement.
+  capture `LibdrmNativeAtomicScanoutSmokeEvidence` with
+  `tools/atomic_scanout_smoke.sh`, proving rendered GBM front-buffer export,
+  primary-plane atomic submit, native page-flip callback, and resource
+  retirement.
 - [ ] Keep the XLibre prototype docs and bridge smokes as compatibility lessons
   until Sophia X Authority has equivalent live coverage.
 - [ ] Revisit wgpu only after GBM/EGL startup, drawing, presentation,

@@ -127,6 +127,15 @@ SOPHIA_RUN_REAL_LIBINPUT_EVENTS_SMOKE=1 cargo test --offline -p sophia-backend-l
 Until those readers exist, these variables only document the future opt-in
 shape. The deterministic feature tests must continue to pass without them.
 
+Run the atomic scanout hardware smoke only from a local session where modeset
+and DRM master disruption are acceptable. The helper captures the reduced
+evidence log and runs only the opt-in atomic scanout test:
+
+```sh
+tools/atomic_scanout_smoke.sh
+SOPHIA_ATOMIC_SCANOUT_EVIDENCE=/tmp/sophia-atomic-smoke.log tools/atomic_scanout_smoke.sh
+```
+
 ## Retiring `DEFAULT_DISPLAY`
 
 The `DEFAULT_DISPLAY` EGL smoke is temporary, but it is not removable merely
