@@ -582,9 +582,12 @@ the backend-owned scanout resources, and returns only the reduced runtime state.
 This keeps real scanout submission phase-aligned with the TEA loop instead of
 precomputing native KMS work before the runtime asks for it.
 The native GBM variant can use a reusable backend-live exporter object that owns
-render-device discovery and records only reduced export health. If the render
-device is unavailable, the runtime sees only reduced scanout rejection; no file
-descriptor, path, GBM handle, or native error crosses into Engine state.
+render-device discovery and records only reduced export health. That exporter
+initializes a persistent renderer-live GBM/EGL rendered-scanout context on the
+first valid export, then reuses it across runtime ticks. If context startup or
+render-device discovery fails, the runtime sees only reduced scanout rejection;
+no file descriptor, path, GBM handle, EGL display, or native error crosses into
+Engine state.
 For rendered primary-plane scanout, backend-live can also retain the combined
 rendered-buffer owner and KMS submission owner internally. Stale page-flip
 evidence keeps that owner in flight. Accepted presented page-flip evidence

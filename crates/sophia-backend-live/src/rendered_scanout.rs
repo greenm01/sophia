@@ -9,6 +9,10 @@ use std::{any::Any, collections::VecDeque};
 
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
 use sophia_renderer_live::{NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExporter};
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+use sophia_renderer_live::{
+    NativeGbmRenderedScanoutContext, NativeGbmRenderedScanoutContextStatus,
+};
 
 #[cfg(feature = "libdrm-events")]
 #[derive(Debug)]
@@ -75,18 +79,27 @@ where
 }
 
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
-#[derive(Debug)]
-pub struct NativeGbmRenderedScanoutBufferDiscoveryExporter<R> {
+pub struct NativeGbmRenderedScanoutBufferDiscoveryExporter<R>
+where
+    R: RenderDeviceDiscoveryBackend,
+{
     discovery: R,
+    context: Option<NativeGbmRenderedScanoutContext<R::Device>>,
+    context_status: Option<NativeGbmRenderedScanoutContextStatus>,
     export_attempts: usize,
     last_export_status: Option<LiveRendererScanoutBufferExportStatus>,
 }
 
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
-impl<R> NativeGbmRenderedScanoutBufferDiscoveryExporter<R> {
-    pub const fn new(discovery: R) -> Self {
+impl<R> NativeGbmRenderedScanoutBufferDiscoveryExporter<R>
+where
+    R: RenderDeviceDiscoveryBackend,
+{
+    pub fn new(discovery: R) -> Self {
         Self {
             discovery,
+            context: None,
+            context_status: None,
             export_attempts: 0,
             last_export_status: None,
         }
@@ -98,6 +111,14 @@ impl<R> NativeGbmRenderedScanoutBufferDiscoveryExporter<R> {
 
     pub const fn last_export_status(&self) -> Option<LiveRendererScanoutBufferExportStatus> {
         self.last_export_status
+    }
+
+    pub const fn context_status(&self) -> Option<NativeGbmRenderedScanoutContextStatus> {
+        self.context_status
+    }
+
+    pub const fn context_ready(&self) -> bool {
+        self.context.is_some()
     }
 
     pub fn discovery(&self) -> &R {
@@ -121,11 +142,51 @@ where
         target: LiveGbmEglFrameTargetRecord,
     ) -> LiveRenderedScanoutBufferExport<Self::Owner> {
         self.export_attempts = self.export_attempts.saturating_add(1);
-        let mut exporter =
-            NativeGbmRenderedScanoutBufferExporter::new(self.discovery.open_render_device());
-        let export = exporter.export_rendered_scanout_buffer(target);
-        self.last_export_status = Some(export.status);
-        export
+        if target.status != LiveGbmEglFrameTargetStatus::Ready {
+            self.last_export_status = Some(LiveRendererScanoutBufferExportStatus::InvalidTarget);
+            return LiveRenderedScanoutBufferExport {
+                status: LiveRendererScanoutBufferExportStatus::InvalidTarget,
+                descriptor: None,
+                owner: None,
+            };
+        }
+
+        if self.context.is_none() {
+            let report = NativeGbmRenderedScanoutContext::from_backend_device_result(
+                self.discovery.open_render_device(),
+            );
+            self.context_status = Some(report.status);
+            self.context = report.context;
+        }
+
+        let Some(context) = &self.context else {
+            let status = match self.context_status {
+                Some(NativeGbmRenderedScanoutContextStatus::Degraded) => {
+                    LiveRendererScanoutBufferExportStatus::Degraded
+                }
+                Some(NativeGbmRenderedScanoutContextStatus::Ready) => {
+                    LiveRendererScanoutBufferExportStatus::Degraded
+                }
+                Some(NativeGbmRenderedScanoutContextStatus::Unavailable) | None => {
+                    LiveRendererScanoutBufferExportStatus::Unavailable
+                }
+            };
+            self.last_export_status = Some(status);
+            return LiveRenderedScanoutBufferExport {
+                status,
+                descriptor: None,
+                owner: None,
+            };
+        };
+
+        let report = context.export_rendered_owned_scanout_buffer(target);
+        let descriptor = report.buffer.as_ref().map(|buffer| buffer.descriptor());
+        self.last_export_status = Some(report.status);
+        LiveRenderedScanoutBufferExport {
+            status: report.status,
+            descriptor,
+            owner: report.buffer,
+        }
     }
 }
 

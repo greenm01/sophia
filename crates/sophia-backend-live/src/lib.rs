@@ -80,7 +80,9 @@ pub use sophia_renderer_live::{
     LiveRendererSelectionObservation,
 };
 #[cfg(feature = "gbm-probe")]
-pub use sophia_renderer_live::{GbmCapabilityProbeReport, NativeGbmCapabilityProbe};
+pub use sophia_renderer_live::{
+    GbmCapabilityProbeReport, NativeGbmCapabilityProbe, NativeGbmRenderedScanoutContextStatus,
+};
 #[cfg(feature = "libdrm-events")]
 use sophia_renderer_live::{
     LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888, LiveRendererScanoutBufferDescriptor,

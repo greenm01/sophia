@@ -35,11 +35,11 @@ use sophia_backend_live::{
     LiveRenderedPrimaryPlaneScanoutSubmitStatus, LiveRenderedScanoutBufferExport,
     LiveRenderedScanoutBufferExporter, LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus,
     LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus,
-    NativeGbmRenderedScanoutBufferDiscoveryExporter, NativeLibdrmAtomicScanoutCommitter,
-    NativeLibdrmPageFlipEventPoller, NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller,
-    RuntimeScanoutState, Size, build_native_primary_plane_atomic_request,
-    create_native_primary_plane_resources, decode_native_page_flip_batch,
-    destroy_native_primary_plane_resources, discover_live_backend,
+    NativeGbmRenderedScanoutBufferDiscoveryExporter, NativeGbmRenderedScanoutContextStatus,
+    NativeLibdrmAtomicScanoutCommitter, NativeLibdrmPageFlipEventPoller,
+    NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller, RuntimeScanoutState, Size,
+    build_native_primary_plane_atomic_request, create_native_primary_plane_resources,
+    decode_native_page_flip_batch, destroy_native_primary_plane_resources, discover_live_backend,
     discover_native_primary_plane_property_handles, libdrm_dependency_admission_report,
     libdrm_fd_authority_report, native_libdrm_event_adapter_report,
     native_libdrm_event_adapter_report_for_authority, real_atomic_scanout_validation_gate,
@@ -1472,6 +1472,11 @@ fn live_runtime_tick_native_gbm_rendered_scanout_fails_closed_when_render_device
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), false);
     assert_eq!(exporter.export_attempts(), 1);
     assert_eq!(
+        exporter.context_status(),
+        Some(NativeGbmRenderedScanoutContextStatus::Unavailable)
+    );
+    assert!(!exporter.context_ready());
+    assert_eq!(
         exporter.last_export_status(),
         Some(LiveRendererScanoutBufferExportStatus::Unavailable)
     );
@@ -1492,6 +1497,11 @@ fn live_runtime_tick_native_gbm_rendered_scanout_fails_closed_when_render_device
         LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutExportFailed
     );
     assert_eq!(exporter.export_attempts(), 2);
+    assert_eq!(
+        exporter.context_status(),
+        Some(NativeGbmRenderedScanoutContextStatus::Unavailable)
+    );
+    assert!(!exporter.context_ready());
     assert_eq!(
         exporter.last_export_status(),
         Some(LiveRendererScanoutBufferExportStatus::Unavailable)

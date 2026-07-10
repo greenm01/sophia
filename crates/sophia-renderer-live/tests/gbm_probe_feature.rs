@@ -4,7 +4,8 @@ use sophia_renderer_live::{
     FakeGbmCapabilityProbe, GbmCapabilityProbeReport, GbmCapabilityProbeStatus,
     GbmRenderDeviceToken, LiveRendererImportHealth, LiveRendererImportPathStatus,
     LiveRendererImportStartupStatus, LiveRendererScanoutBufferExportStatus,
-    NativeGbmCapabilityProbe, NativeGbmScanoutBufferExporter,
+    NativeGbmCapabilityProbe, NativeGbmRenderedScanoutContext,
+    NativeGbmRenderedScanoutContextStatus, NativeGbmScanoutBufferExporter,
 };
 
 #[test]
@@ -151,4 +152,19 @@ fn native_rendered_gbm_scanout_exporter_fails_closed_without_backend_device() {
         .status,
         LiveRendererScanoutBufferExportStatus::Unavailable
     );
+}
+
+#[test]
+fn native_rendered_gbm_scanout_context_fails_closed_without_backend_device() {
+    let missing_device = Err(std::io::Error::from_raw_os_error(19));
+
+    let report = NativeGbmRenderedScanoutContext::<std::fs::File>::from_backend_device_result(
+        missing_device,
+    );
+
+    assert_eq!(
+        report.status,
+        NativeGbmRenderedScanoutContextStatus::Unavailable
+    );
+    assert!(report.context.is_none());
 }

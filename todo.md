@@ -86,6 +86,9 @@ active milestone to `docs/roadmap-history.md`.
 - [x] Added a reusable native GBM rendered-scanout exporter for runtime ticks;
   render-device discovery stays inside backend-live and failures reduce to
   runtime scanout rejection.
+- [x] Added a persistent renderer-live GBM/EGL rendered-scanout context so the
+  reusable backend exporter no longer reinitializes GBM/EGL on every valid
+  export.
 - [x] Added a backend-live runtime tick path that answers active `SubmitScanout`
   commands through rendered GBM/KMS primary-plane scanout.
 - [x] Threaded backend-live terminal scanout states into the shared runtime tick

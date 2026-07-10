@@ -61,6 +61,14 @@ pub enum NativeGbmScanoutBufferExportStatus {
 }
 
 #[cfg(feature = "gbm-platform")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeGbmRenderedScanoutContextStatus {
+    Ready,
+    Unavailable,
+    Degraded,
+}
+
+#[cfg(feature = "gbm-platform")]
 #[derive(Debug)]
 pub struct NativeGbmOwnedScanoutBuffer {
     width: u32,
@@ -100,6 +108,113 @@ impl NativeGbmOwnedScanoutBuffer {
 pub struct NativeGbmOwnedScanoutBufferExportReport {
     pub status: NativeGbmScanoutBufferExportStatus,
     pub buffer: Option<NativeGbmOwnedScanoutBuffer>,
+}
+
+#[cfg(feature = "gbm-platform")]
+pub struct NativeGbmRenderedScanoutContext<T: std::os::fd::AsFd> {
+    egl: khronos_egl::DynamicInstance<khronos_egl::EGL1_5>,
+    display: khronos_egl::Display,
+    gbm_device: gbm::Device<T>,
+}
+
+#[cfg(feature = "gbm-platform")]
+impl<T> NativeGbmRenderedScanoutContext<T>
+where
+    T: std::os::fd::AsFd,
+{
+    pub fn from_backend_device_result(
+        device: std::io::Result<T>,
+    ) -> NativeGbmRenderedScanoutContextReport<T> {
+        match device {
+            Ok(device) => match Self::new(device) {
+                Ok(context) => NativeGbmRenderedScanoutContextReport {
+                    status: NativeGbmRenderedScanoutContextStatus::Ready,
+                    context: Some(context),
+                },
+                Err(status) => NativeGbmRenderedScanoutContextReport {
+                    status,
+                    context: None,
+                },
+            },
+            Err(_error) => NativeGbmRenderedScanoutContextReport {
+                status: NativeGbmRenderedScanoutContextStatus::Unavailable,
+                context: None,
+            },
+        }
+    }
+
+    fn new(device: T) -> Result<Self, NativeGbmRenderedScanoutContextStatus> {
+        use gbm::AsRaw as _;
+
+        let gbm_device = gbm::Device::new(device)
+            .map_err(|_error| NativeGbmRenderedScanoutContextStatus::Unavailable)?;
+        let egl = unsafe { khronos_egl::DynamicInstance::<khronos_egl::EGL1_5>::load_required() }
+            .map_err(|_error| NativeGbmRenderedScanoutContextStatus::Unavailable)?;
+        let native_display = gbm_device.as_raw() as khronos_egl::NativeDisplayType;
+        let display = unsafe {
+            egl.get_platform_display(
+                EGL_PLATFORM_GBM_KHR,
+                native_display,
+                &[khronos_egl::ATTRIB_NONE],
+            )
+        }
+        .map_err(|_error| NativeGbmRenderedScanoutContextStatus::Unavailable)?;
+
+        egl.initialize(display)
+            .map_err(|_error| NativeGbmRenderedScanoutContextStatus::Degraded)?;
+
+        Ok(Self {
+            egl,
+            display,
+            gbm_device,
+        })
+    }
+
+    pub fn export_rendered_owned_scanout_buffer(
+        &self,
+        width: u32,
+        height: u32,
+    ) -> NativeGbmOwnedScanoutBufferExportReport {
+        if width == 0 || height == 0 {
+            return NativeGbmOwnedScanoutBufferExportReport {
+                status: NativeGbmScanoutBufferExportStatus::InvalidTarget,
+                buffer: None,
+            };
+        }
+
+        match render_initialized_gbm_scanout_front_buffer(
+            &self.egl,
+            self.display,
+            &self.gbm_device,
+            width,
+            height,
+        ) {
+            Ok(buffer) => NativeGbmOwnedScanoutBufferExportReport {
+                status: NativeGbmScanoutBufferExportStatus::Exported,
+                buffer: Some(buffer),
+            },
+            Err(status) => NativeGbmOwnedScanoutBufferExportReport {
+                status,
+                buffer: None,
+            },
+        }
+    }
+}
+
+#[cfg(feature = "gbm-platform")]
+impl<T> Drop for NativeGbmRenderedScanoutContext<T>
+where
+    T: std::os::fd::AsFd,
+{
+    fn drop(&mut self) {
+        let _ = self.egl.terminate(self.display);
+    }
+}
+
+#[cfg(feature = "gbm-platform")]
+pub struct NativeGbmRenderedScanoutContextReport<T: std::os::fd::AsFd> {
+    pub status: NativeGbmRenderedScanoutContextStatus,
+    pub context: Option<NativeGbmRenderedScanoutContext<T>>,
 }
 
 pub fn probe_default_display_context() -> NativeEglProbeStatus {

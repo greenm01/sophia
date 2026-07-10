@@ -317,6 +317,75 @@ pub struct NativeGbmOwnedScanoutBufferExportReport {
 
 #[cfg(feature = "gbm-probe")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeGbmRenderedScanoutContextStatus {
+    Ready,
+    Unavailable,
+    Degraded,
+}
+
+#[cfg(feature = "gbm-probe")]
+pub struct NativeGbmRenderedScanoutContext<T: std::os::fd::AsFd> {
+    inner: sophia_renderer_native_egl::NativeGbmRenderedScanoutContext<T>,
+}
+
+#[cfg(feature = "gbm-probe")]
+impl<T> NativeGbmRenderedScanoutContext<T>
+where
+    T: std::os::fd::AsFd,
+{
+    pub fn from_backend_device_result(
+        device: std::io::Result<T>,
+    ) -> NativeGbmRenderedScanoutContextReport<T> {
+        let report =
+            sophia_renderer_native_egl::NativeGbmRenderedScanoutContext::from_backend_device_result(
+                device,
+            );
+        NativeGbmRenderedScanoutContextReport {
+            status: match report.status {
+                sophia_renderer_native_egl::NativeGbmRenderedScanoutContextStatus::Ready => {
+                    NativeGbmRenderedScanoutContextStatus::Ready
+                }
+                sophia_renderer_native_egl::NativeGbmRenderedScanoutContextStatus::Unavailable => {
+                    NativeGbmRenderedScanoutContextStatus::Unavailable
+                }
+                sophia_renderer_native_egl::NativeGbmRenderedScanoutContextStatus::Degraded => {
+                    NativeGbmRenderedScanoutContextStatus::Degraded
+                }
+            },
+            context: report
+                .context
+                .map(|inner| NativeGbmRenderedScanoutContext { inner }),
+        }
+    }
+
+    pub fn export_rendered_owned_scanout_buffer(
+        &self,
+        target: LiveGbmEglFrameTargetRecord,
+    ) -> NativeGbmOwnedScanoutBufferExportReport {
+        if target.status != LiveGbmEglFrameTargetStatus::Ready {
+            return NativeGbmOwnedScanoutBufferExportReport {
+                status: LiveRendererScanoutBufferExportStatus::InvalidTarget,
+                buffer: None,
+            };
+        }
+
+        reduced_native_owned_scanout_buffer_export_report(
+            self.inner.export_rendered_owned_scanout_buffer(
+                target.size.width as u32,
+                target.size.height as u32,
+            ),
+        )
+    }
+}
+
+#[cfg(feature = "gbm-probe")]
+pub struct NativeGbmRenderedScanoutContextReport<T: std::os::fd::AsFd> {
+    pub status: NativeGbmRenderedScanoutContextStatus,
+    pub context: Option<NativeGbmRenderedScanoutContext<T>>,
+}
+
+#[cfg(feature = "gbm-probe")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NativeGbmScanoutBufferExporter;
 
 #[cfg(feature = "gbm-probe")]
@@ -366,6 +435,13 @@ where
     }
 
     let report = export(device, target.size.width as u32, target.size.height as u32);
+    reduced_native_owned_scanout_buffer_export_report(report)
+}
+
+#[cfg(feature = "gbm-probe")]
+fn reduced_native_owned_scanout_buffer_export_report(
+    report: sophia_renderer_native_egl::NativeGbmOwnedScanoutBufferExportReport,
+) -> NativeGbmOwnedScanoutBufferExportReport {
     let status = match report.status {
         sophia_renderer_native_egl::NativeGbmScanoutBufferExportStatus::Exported => {
             LiveRendererScanoutBufferExportStatus::Exported
