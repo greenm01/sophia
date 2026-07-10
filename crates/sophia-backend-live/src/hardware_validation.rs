@@ -82,15 +82,22 @@ pub struct LiveAtomicScanoutPreflightReport {
     pub target: LiveHardwareValidationTarget,
     pub status: LiveAtomicScanoutPreflightStatus,
     pub primary_card_nodes: u8,
+    pub openable_primary_card_nodes: u8,
 }
 
 impl LiveAtomicScanoutPreflightReport {
-    pub const fn from_primary_card_count(
+    pub const fn from_primary_card_counts(
         device_directory_available: bool,
         primary_card_nodes: usize,
+        openable_primary_card_nodes: usize,
     ) -> Self {
         let primary_card_nodes = if device_directory_available {
             capped_primary_card_count(primary_card_nodes)
+        } else {
+            0
+        };
+        let openable_primary_card_nodes = if device_directory_available {
+            capped_primary_card_count(openable_primary_card_nodes)
         } else {
             0
         };
@@ -98,21 +105,24 @@ impl LiveAtomicScanoutPreflightReport {
             LiveAtomicScanoutPreflightStatus::DeviceDirectoryUnavailable
         } else if primary_card_nodes == 0 {
             LiveAtomicScanoutPreflightStatus::NoPrimaryCardNodes
+        } else if openable_primary_card_nodes == 0 {
+            LiveAtomicScanoutPreflightStatus::PrimaryCardOpenUnavailable
         } else {
-            LiveAtomicScanoutPreflightStatus::CandidatePrimaryCardsPresent
+            LiveAtomicScanoutPreflightStatus::CandidatePrimaryCardsOpenable
         };
 
         Self {
             target: LiveHardwareValidationTarget::AtomicScanout,
             status,
             primary_card_nodes,
+            openable_primary_card_nodes,
         }
     }
 
     pub fn reduced_log_line(self) -> String {
         format!(
-            "sophia_atomic_scanout_preflight schema=1 target={:?} status={:?} primary_card_nodes={}",
-            self.target, self.status, self.primary_card_nodes
+            "sophia_atomic_scanout_preflight schema=2 target={:?} status={:?} primary_card_nodes={} openable_primary_card_nodes={}",
+            self.target, self.status, self.primary_card_nodes, self.openable_primary_card_nodes
         )
     }
 }
@@ -121,7 +131,8 @@ impl LiveAtomicScanoutPreflightReport {
 pub enum LiveAtomicScanoutPreflightStatus {
     DeviceDirectoryUnavailable,
     NoPrimaryCardNodes,
-    CandidatePrimaryCardsPresent,
+    PrimaryCardOpenUnavailable,
+    CandidatePrimaryCardsOpenable,
 }
 
 pub const fn capped_primary_card_count(primary_card_nodes: usize) -> u8 {
@@ -176,27 +187,55 @@ pub fn real_atomic_scanout_preflight_report_from_dev_dri(
     dev_dri: &std::path::Path,
 ) -> LiveAtomicScanoutPreflightReport {
     let Ok(entries) = std::fs::read_dir(dev_dri) else {
-        return LiveAtomicScanoutPreflightReport::from_primary_card_count(false, 0);
+        return LiveAtomicScanoutPreflightReport::from_primary_card_counts(false, 0, 0);
     };
 
-    let primary_card_nodes = entries
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            let name = entry.file_name();
-            let Some(name) = name.to_str() else {
-                return false;
-            };
-            if !is_primary_card_node_name(name) {
-                return false;
-            }
-            entry
-                .file_type()
-                .map(|file_type| is_drm_card_node_file_type(&file_type))
-                .unwrap_or(false)
-        })
-        .count();
+    let mut primary_card_nodes = 0usize;
+    let mut openable_primary_card_nodes = 0usize;
 
-    LiveAtomicScanoutPreflightReport::from_primary_card_count(true, primary_card_nodes)
+    for entry in entries
+        .filter_map(Result::ok)
+        .filter(is_primary_card_node_entry)
+    {
+        primary_card_nodes = primary_card_nodes.saturating_add(1);
+        if primary_card_nodes > LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS as usize
+            && openable_primary_card_nodes
+                > LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS as usize
+        {
+            continue;
+        }
+        if can_open_primary_card_node_read_write(&entry.path()) {
+            openable_primary_card_nodes = openable_primary_card_nodes.saturating_add(1);
+        }
+    }
+
+    LiveAtomicScanoutPreflightReport::from_primary_card_counts(
+        true,
+        primary_card_nodes,
+        openable_primary_card_nodes,
+    )
+}
+
+fn is_primary_card_node_entry(entry: &std::fs::DirEntry) -> bool {
+    let name = entry.file_name();
+    let Some(name) = name.to_str() else {
+        return false;
+    };
+    if !is_primary_card_node_name(name) {
+        return false;
+    }
+    entry
+        .file_type()
+        .map(|file_type| is_drm_card_node_file_type(&file_type))
+        .unwrap_or(false)
+}
+
+fn can_open_primary_card_node_read_write(path: &std::path::Path) -> bool {
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .is_ok()
 }
 
 fn is_primary_card_node_name(name: &str) -> bool {

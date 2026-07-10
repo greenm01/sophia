@@ -29,7 +29,8 @@ Support now exists for that hardware proof:
   modesetting smoke, records the smoke log, and verifies passing evidence
   automatically.
 - `tools/atomic_scanout_preflight.sh` records reduced host readiness without
-  requesting DRM master or modesetting hardware.
+  requesting DRM master or modesetting hardware, and proves at least one primary
+  card node can be opened read/write before the destructive smoke runs.
 - `tools/verify_atomic_scanout_preflight.sh` can verify that a captured
   preflight log is ready for the DRM-master smoke.
 - `tools/verify_atomic_scanout_evidence.sh` can verify a captured log offline
@@ -75,6 +76,9 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Strengthened atomic scanout preflight to schema 2 with a capped
+  read/write-openable primary card count, so the smoke gate catches permission
+  failures before the modesetting test.
 - [x] Split backend-live native scanout into commit, evidence, and submit
   modules while keeping the public DRM façade stable.
 - [x] Opened the opt-in atomic hardware smoke card fd with `O_NONBLOCK` so the
