@@ -1884,7 +1884,7 @@ fn live_runtime_tick_rejects_rendered_scanout_when_kms_target_is_not_ready() {
     );
     assert_eq!(
         submit.scanout_target,
-        Some(LiveKmsScanoutTargetStatus::FrameTargetSizeMismatch)
+        LiveKmsScanoutTargetStatus::FrameTargetSizeMismatch
     );
     assert_eq!(submit.export, None);
     assert_eq!(submit.submit, None);
@@ -1895,6 +1895,46 @@ fn live_runtime_tick_rejects_rendered_scanout_when_kms_target_is_not_ready() {
         Some(RuntimeScanoutState::Rejected)
     );
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), false);
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_runtime_direct_rendered_scanout_submit_rejects_not_ready_kms_target() {
+    let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-direct-kms-not-ready");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready backend should seed live assembly");
+    let device = full_primary_plane_scanout_device();
+    let mut exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+
+    assembly.observe_gbm_egl_frame_target_size(Size {
+        width: 1280,
+        height: 720,
+    });
+
+    let submitted = assembly.submit_rendered_primary_plane_scanout_with(&device, &mut exporter);
+
+    assert_eq!(
+        submitted.status,
+        LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutTargetNotReady
+    );
+    assert_eq!(
+        submitted.scanout_target,
+        LiveKmsScanoutTargetStatus::FrameTargetSizeMismatch
+    );
+    assert_eq!(submitted.export, None);
+    assert_eq!(submitted.submit, None);
+    assert!(submitted.submission.is_none());
+    assert_eq!(exporter.export_attempts(), 0);
+    assert_eq!(
+        submitted.runtime_scanout_state(),
+        RuntimeScanoutState::Rejected
+    );
 
     std::fs::remove_dir_all(root).unwrap();
 }

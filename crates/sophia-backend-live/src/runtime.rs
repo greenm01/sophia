@@ -227,7 +227,7 @@ where
         E: LiveRenderedScanoutBufferExporter,
     {
         submit_rendered_primary_plane_scanout_from_scanout_target_with(
-            Some(self.kms_scanout_target.status),
+            self.kms_scanout_target.status,
             self.gbm_egl_frame_target,
             device,
             exporter,
@@ -250,7 +250,7 @@ where
     {
         let cleanup_pending = self.rendered_primary_plane_scanout_cleanup_pending();
         track_rendered_primary_plane_scanout_submit_from_target_with(
-            Some(self.kms_scanout_target.status),
+            self.kms_scanout_target.status,
             self.gbm_egl_frame_target,
             &mut self.rendered_primary_plane_scanout_submission,
             &mut self.rendered_primary_plane_runtime_scanout_state,
@@ -498,7 +498,7 @@ where
             .extend(runtime_scanout_states.iter().copied());
 
         let target = self.gbm_egl_frame_target;
-        let scanout_target = Some(self.kms_scanout_target.status);
+        let scanout_target = self.kms_scanout_target.status;
         let rendered_primary_plane_scanout_cleanup_pending =
             self.rendered_primary_plane_scanout_cleanup_pending();
         let rendered_primary_plane_scanout_submission =

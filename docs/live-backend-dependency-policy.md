@@ -256,7 +256,9 @@ connector, CRTC, plane, or mode object identity.
 Rendered primary-plane submit tracking must consume the reduced KMS scanout
 target status and reject before renderer export when that status is not ready.
 The rejection may expose only the reduced target status, not native KMS object
-identity.
+identity. This reduced target status is mandatory for rendered submit reports;
+backend-live must not allow a rendered primary-plane submit path that omits
+readiness evidence.
 Each tracked rendered scanout owner must carry the last reduced page-flip
 sequence observed before submission. Backend-live may retire that owner only
 when accepted page-flip evidence is newer than the baseline; accepted-looking
