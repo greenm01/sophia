@@ -3,7 +3,7 @@ const RETIRE_PREFIX: &str = "sophia_runtime_rendered_scanout_retire";
 const CLEANUP_PREFIX: &str = "sophia_runtime_rendered_scanout_cleanup";
 
 const CLEAN_SUBMIT_FIELDS: &[(&str, &str)] = &[
-    ("schema", "3"),
+    ("schema", "4"),
     ("status", "SubmittedWaitingForPageFlip"),
     ("scanout_target", "Ready"),
     ("output_size", "1280x720"),
@@ -13,6 +13,7 @@ const CLEAN_SUBMIT_FIELDS: &[(&str, &str)] = &[
     ("scanout_buffer", "Ready"),
     ("properties", "Discovered"),
     ("resources", "Created"),
+    ("framebuffer", "CreatedWithAddFb2"),
     ("request", "Built"),
     ("submit", "SubmittedWaitingForPageFlip"),
     ("request_scope", "PageFlip"),

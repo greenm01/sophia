@@ -951,10 +951,11 @@ native stage that caused it. Those reports now expose a stable
 `sophia_runtime_rendered_scanout_submit` reduced log line, giving runtime
 diagnostics the same copyable, identity-free shape as the hardware validation
 evidence.
-That submit line has advanced to schema 3. It now records reduced output size,
-reduced GBM frame-target size, and reduced cleanup-pending state, which lets
-runtime evidence prove that the submitted buffer was sized for the output
-snapshot and immediately expose submit-time cleanup debt without exposing
+That submit line has advanced to schema 4. It now records reduced output size,
+reduced GBM frame-target size, reduced framebuffer-creation detail, and reduced
+cleanup-pending state. Runtime evidence can prove that the submitted buffer was
+sized for the output snapshot, identify the AddFB path used for framebuffer
+registration, and immediately expose submit-time cleanup debt without exposing
 connector, mode, framebuffer, or GBM identity. Retire, cleanup, and failure
 evidence keep their existing reduced shapes.
 Rendered scanout retirement and cleanup retry reports now expose the same kind

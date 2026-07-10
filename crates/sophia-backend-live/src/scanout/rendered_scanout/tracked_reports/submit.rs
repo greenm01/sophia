@@ -13,6 +13,7 @@ pub struct LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
     pub scanout_buffer: Option<LiveRendererScanoutBufferStatus>,
     pub properties: Option<LibdrmNativePrimaryPlanePropertyDiscoveryStatus>,
     pub resources: Option<LibdrmNativePrimaryPlaneResourceCreateStatus>,
+    pub framebuffer: Option<LibdrmNativePrimaryPlaneFramebufferCreateDetail>,
     pub request: Option<LibdrmNativeAtomicRequestBuildStatus>,
     pub submit: Option<LibdrmNativePrimaryPlaneScanoutSubmitStatus>,
     pub request_scope: Option<LibdrmNativeAtomicCommitRequestScope>,
@@ -46,7 +47,7 @@ impl LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
                 });
 
         format!(
-            "sophia_runtime_rendered_scanout_submit schema=3 status={:?} scanout_target={:?} output_size={} target={} target_size={} export={} scanout_buffer={} properties={} resources={} request={} submit={} request_scope={} commit_page_flip_event={} commit_nonblocking={} commit_allow_modeset={} commit_test_only={} commit_submit={} runtime_scanout_state={} in_flight={} in_flight_ticks={} cleanup_pending={}",
+            "sophia_runtime_rendered_scanout_submit schema=4 status={:?} scanout_target={:?} output_size={} target={} target_size={} export={} scanout_buffer={} properties={} resources={} framebuffer={} request={} submit={} request_scope={} commit_page_flip_event={} commit_nonblocking={} commit_allow_modeset={} commit_test_only={} commit_submit={} runtime_scanout_state={} in_flight={} in_flight_ticks={} cleanup_pending={}",
             self.status,
             self.scanout_target,
             reduced_size(self.output_size),
@@ -56,6 +57,7 @@ impl LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
             reduced_status(self.scanout_buffer),
             reduced_status(self.properties),
             reduced_status(self.resources),
+            reduced_status(self.framebuffer),
             reduced_status(self.request),
             reduced_status(self.submit),
             reduced_status(self.request_scope),

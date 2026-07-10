@@ -92,7 +92,7 @@ verify_line() {
 }
 
 declare -A expected_submit=(
-    ["schema"]="3"
+    ["schema"]="4"
     ["status"]="SubmittedWaitingForPageFlip"
     ["scanout_target"]="Ready"
     ["output_size"]="1280x720"
@@ -102,6 +102,7 @@ declare -A expected_submit=(
     ["scanout_buffer"]="Ready"
     ["properties"]="Discovered"
     ["resources"]="Created"
+    ["framebuffer"]="CreatedWithAddFb2"
     ["request"]="Built"
     ["submit"]="SubmittedWaitingForPageFlip"
     ["request_scope"]="PageFlip"

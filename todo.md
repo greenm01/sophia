@@ -97,8 +97,9 @@ smoke still needs a DRM-master-capable machine.
 - [x] Extended atomic scanout evidence to schema 8 with reduced framebuffer
   creation detail, distinguishing AddFB2, AddFB2-with-modifiers, legacy AddFB
   fallback, and failed framebuffer registration without exposing native IDs.
-- [x] Advanced runtime rendered-scanout submit evidence to schema 3 with a
-  reduced cleanup-pending field for submit-time native cleanup debt.
+- [x] Advanced runtime rendered-scanout submit evidence to schema 4 with reduced
+  framebuffer-creation detail and cleanup-pending state for submit-time native
+  cleanup debt.
 - [x] Made native primary-plane scanout submit fail closed when a supplied KMS
   selection payload disagrees with its reduced selection status.
 - [x] Made native primary-plane modeset request building reject zero mode-blob
