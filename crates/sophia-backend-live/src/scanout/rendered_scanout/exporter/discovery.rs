@@ -1,4 +1,6 @@
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
 use super::{LiveRenderedScanoutBufferExport, LiveRenderedScanoutBufferExporter};
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
 use crate::api::*;
 
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]

@@ -1,4 +1,6 @@
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
 use super::{LiveRenderedScanoutBufferExport, LiveRenderedScanoutBufferExporter};
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
 use crate::api::*;
 
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
@@ -6,7 +8,7 @@ use std::io;
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
 use std::os::fd::AsFd;
 
-#[cfg(feature = "libdrm-events")]
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
 use sophia_renderer_live::LiveRendererScanoutBufferExportStatus;
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
 use sophia_renderer_live::{NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExporter};

@@ -1,6 +1,7 @@
 #[cfg(feature = "atomic-scanout-smoke-live")]
 use std::time::{Duration, Instant};
 
+#[cfg(feature = "atomic-scanout-smoke-live")]
 use super::prelude::{arg_value, parse_u64};
 #[cfg(feature = "atomic-scanout-smoke-live")]
 use sophia_cli::backend_evidence::runtime_rendered_scanout_evidence_is_clean;
