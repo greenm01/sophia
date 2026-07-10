@@ -5,7 +5,6 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EVIDENCE_FILE="${SOPHIA_ATOMIC_SCANOUT_EVIDENCE:-/tmp/sophia-atomic-scanout-evidence.log}"
 PREFLIGHT_FILE="${SOPHIA_ATOMIC_SCANOUT_PREFLIGHT:-/tmp/sophia-atomic-scanout-preflight.log}"
 SKIP_PREFLIGHT="${SOPHIA_ATOMIC_SCANOUT_SKIP_PREFLIGHT:-0}"
-TEST_FILTER="atomic_scanout_hardware_smoke::native_atomic_scanout_smokes_real_primary_card_when_enabled"
 
 mkdir -p "$(dirname "$EVIDENCE_FILE")"
 mkdir -p "$(dirname "$PREFLIGHT_FILE")"
@@ -26,10 +25,9 @@ set +e
 (
     cd "$ROOT_DIR"
     SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 \
-        cargo test --offline -p sophia-backend-live \
-        --features "libdrm-events gbm-probe" \
-        "$TEST_FILTER" \
-        -- --nocapture
+        cargo run --quiet --offline -p sophia-cli \
+        --features "atomic-scanout-smoke-live" \
+        -- atomic-scanout-smoke
 ) 2>&1 | tee "$EVIDENCE_FILE"
 test_status="${PIPESTATUS[0]}"
 set -e

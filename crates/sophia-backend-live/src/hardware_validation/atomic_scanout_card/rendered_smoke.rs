@@ -2,6 +2,57 @@ use super::{RealAtomicScanoutPageFlipSession, RealAtomicScanoutPageFlipWaitPolic
 use crate::prelude::*;
 use sophia_renderer_live::NativeGbmRenderedScanoutContextStatus;
 
+pub fn run_real_atomic_scanout_smoke_phases() -> Vec<LibdrmNativeAtomicScanoutSmokeEvidence> {
+    let slot = LibdrmNativeOutputSlot::new(1).expect("slot one should be valid");
+    let output = OutputId::from_raw(1);
+    let authority =
+        LibdrmBackendFdAuthority::new(1).expect("nonzero authority generation should mint");
+    let mut session_result =
+        select_real_atomic_scanout_card().into_page_flip_session(slot, output, authority);
+    let Some(mut session) = session_result.session.take() else {
+        return vec![
+            session_result
+                .failure_evidence()
+                .unwrap_or_else(LibdrmNativeAtomicScanoutSmokeEvidence::kms_selection_failed),
+        ];
+    };
+    let discovery = match session.render_device_discovery() {
+        Ok(discovery) => discovery,
+        Err(_) => {
+            return vec![
+                LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+                    LiveKmsScanoutTargetStatus::Ready,
+                    Some(LibdrmNativeRenderedScanoutContextStatus::Unavailable),
+                    LiveRendererScanoutBufferExportStatus::Unavailable,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+            ];
+        }
+    };
+    let mut exporter = NativeGbmRenderedScanoutBufferDiscoveryExporter::new(discovery);
+    let mut intake = LivePageFlipCallbackIntake::new(output);
+    let initial = session.run_native_gbm_rendered_primary_plane_smoke_phase(
+        LibdrmNativeAtomicScanoutSmokePhase::InitialModeset,
+        &mut exporter,
+        &mut intake,
+        RealAtomicScanoutPageFlipWaitPolicy::hardware_smoke(),
+    );
+    if initial.status != LibdrmNativeAtomicScanoutSmokeStatus::Passed {
+        return vec![initial];
+    }
+
+    let steady = session.run_native_gbm_rendered_primary_plane_smoke_phase(
+        LibdrmNativeAtomicScanoutSmokePhase::SteadyPageFlip,
+        &mut exporter,
+        &mut intake,
+        RealAtomicScanoutPageFlipWaitPolicy::hardware_smoke(),
+    );
+    vec![initial, steady]
+}
+
 impl RealAtomicScanoutPageFlipSession {
     pub fn run_native_gbm_rendered_primary_plane_smoke_phase<R>(
         &mut self,

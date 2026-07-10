@@ -108,31 +108,35 @@ Real card-selection and page-flip-session setup failures reduce themselves into
 `LibdrmNativeAtomicScanoutSmokeEvidence`, so setup evidence stays consistent
 outside the smoke harness as well.
 
-Set `SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1` only from a session that may take
-DRM master on a primary `/dev/dri/card*` node. Backend-live first uses the
-production `select_real_atomic_scanout_card` seam to choose an opaque card owner
-that opens read/write, admits UniversalPlanes and Atomic client capabilities,
-exposes a reduced KMS primary-plane scanout target, and has the atomic property
-handles needed for primary-plane commit. The selected card is then promoted into
-a page-flip session owner that keeps the submit card, cloned event reader, and
-routed poller together. With `libinput-events` enabled, that same owner can
-drive one backend runtime tick through the native GBM rendered-primary-plane
-scanout path and native page-flip poller, so callers do not have to split fd
-ownership apart. That same page-flip session owner also owns the destructive
-hardware proof phases. The smoke child creates a persistent backend-live GBM/EGL
-rendered-scanout exporter, then asks the session to run `InitialModeset` and
-`SteadyPageFlip` proof phases. The session clears a GBM surface, locks the
-rendered front buffer through the normal runtime export seam, submits a
-primary-plane atomic modeset, waits for reduced page-flip evidence, and retires
-the submitted framebuffer resources. It then exports a second rendered front
-buffer and submits it through the steady-state page-flip policy, proving the
-post-modeset path without `ALLOW_MODESET`. Each submitted phase waits within a
-bounded deadline for native page-flip evidence before reducing the final smoke
-record.
+Run `tools/atomic_scanout_smoke.sh` only from a session that may take DRM master
+on a primary `/dev/dri/card*` node. The helper verifies preflight first, then
+runs the feature-gated `sophia atomic-scanout-smoke` CLI command with
+`SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1`. The CLI parent spawns a child process
+for the destructive proof and emits reduced `SmokeChildTimeout` evidence if the
+child fails to produce page-flip evidence within the bounded deadline.
+Backend-live first uses the production `select_real_atomic_scanout_card` seam to
+choose an opaque card owner that opens read/write, admits UniversalPlanes and
+Atomic client capabilities, exposes a reduced KMS primary-plane scanout target,
+and has the atomic property handles needed for primary-plane commit. The
+selected card is then promoted into a page-flip session owner that keeps the
+submit card, cloned event reader, and routed poller together. With
+`libinput-events` enabled, that same owner can drive one backend runtime tick
+through the native GBM rendered-primary-plane scanout path and native page-flip
+poller, so callers do not have to split fd ownership apart. That same page-flip
+session owner also owns the destructive hardware proof phases. The smoke child
+creates a persistent backend-live GBM/EGL rendered-scanout exporter, then asks
+the session to run `InitialModeset` and `SteadyPageFlip` proof phases. The
+session clears a GBM surface, locks the rendered front buffer through the normal
+runtime export seam, submits a primary-plane atomic modeset, waits for reduced
+page-flip evidence, and retires the submitted framebuffer resources. It then
+exports a second rendered front buffer and submits it through the steady-state
+page-flip policy, proving the post-modeset path without `ALLOW_MODESET`. Each
+submitted phase waits within a bounded deadline for native page-flip evidence
+before reducing the final smoke record.
 The real card fd is opened nonblocking, so missing callbacks reduce as missing
 evidence instead of hanging inside the DRM event read.
-Without that environment variable, the test returns early and never opens or
-modesets hardware.
+Without verified preflight and that environment variable, the destructive path
+never opens or modesets hardware.
 The stable evidence shape for that run is the
 `sophia_atomic_scanout_evidence` line pair: schema version, phase, overall
 status, rendered context status, GBM export status, primary-plane property
