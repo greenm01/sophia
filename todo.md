@@ -83,6 +83,9 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Hardened renderer-live scanout descriptors so XRGB8888 buffers must report
+  a row pitch large enough for the target width before backend-live can import
+  them for primary-plane scanout.
 - [x] Made atomic scanout preflight inspect each primary DRM node through one
   ordered readiness probe, so reduced counts come from a consistent live fd
   observation instead of separate repeated opens.

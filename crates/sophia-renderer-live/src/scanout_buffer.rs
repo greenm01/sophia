@@ -13,12 +13,7 @@ pub struct LiveRendererScanoutBufferDescriptor {
 impl LiveRendererScanoutBufferDescriptor {
     pub const fn new(size: Size, pitch: u32, format: u32, gem_handle: u32) -> Self {
         Self {
-            status: if size.width > 0
-                && size.height > 0
-                && pitch > 0
-                && gem_handle > 0
-                && format == LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888
-            {
+            status: if is_valid_scanout_buffer_shape(size, pitch, format, gem_handle) {
                 LiveRendererScanoutBufferStatus::Ready
             } else {
                 LiveRendererScanoutBufferStatus::Invalid
@@ -32,12 +27,28 @@ impl LiveRendererScanoutBufferDescriptor {
 
     pub const fn is_valid_scanout_buffer(self) -> bool {
         matches!(self.status, LiveRendererScanoutBufferStatus::Ready)
-            && self.size.width > 0
-            && self.size.height > 0
-            && self.pitch > 0
-            && self.gem_handle > 0
-            && self.format == LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888
+            && is_valid_scanout_buffer_shape(self.size, self.pitch, self.format, self.gem_handle)
     }
+}
+
+const fn is_valid_scanout_buffer_shape(
+    size: Size,
+    pitch: u32,
+    format: u32,
+    gem_handle: u32,
+) -> bool {
+    size.width > 0
+        && size.height > 0
+        && size.width <= (u32::MAX / LIVE_RENDERER_SCANOUT_BYTES_PER_XRGB8888_PIXEL) as i32
+        && pitch >= minimum_xrgb8888_pitch(size.width)
+        && gem_handle > 0
+        && format == LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888
+}
+
+const LIVE_RENDERER_SCANOUT_BYTES_PER_XRGB8888_PIXEL: u32 = 4;
+
+const fn minimum_xrgb8888_pitch(width: i32) -> u32 {
+    width as u32 * LIVE_RENDERER_SCANOUT_BYTES_PER_XRGB8888_PIXEL
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

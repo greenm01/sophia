@@ -211,6 +211,15 @@ fn renderer_scanout_buffer_descriptor_validates_scanout_shape() {
                 width: 1920,
                 height: 1080,
             },
+            1920 * 4 - 1,
+            LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+            44,
+        ),
+        LiveRendererScanoutBufferDescriptor::new(
+            Size {
+                width: 1920,
+                height: 1080,
+            },
             1920 * 4,
             0,
             44,
@@ -240,6 +249,18 @@ fn renderer_scanout_buffer_descriptor_validates_scanout_shape() {
         gem_handle: 44,
     };
     assert!(!forged_ready.is_valid_scanout_buffer());
+
+    let forged_undersized_pitch = LiveRendererScanoutBufferDescriptor {
+        status: LiveRendererScanoutBufferStatus::Ready,
+        size: Size {
+            width: 1920,
+            height: 1080,
+        },
+        pitch: 1920 * 4 - 1,
+        format: LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+        gem_handle: 44,
+    };
+    assert!(!forged_undersized_pitch.is_valid_scanout_buffer());
 }
 
 #[test]
@@ -300,6 +321,15 @@ fn fake_renderer_scanout_exporter_reports_reduced_status_without_native_handles(
             .export_scanout_buffer(malformed_ready_target)
             .status,
         LiveRendererScanoutBufferExportStatus::InvalidTarget
+    );
+
+    let mut undersized_pitch = sophia_renderer_live::FakeRendererScanoutBufferExporter::new(
+        LiveRendererScanoutBufferExportStatus::Exported,
+    )
+    .with_descriptor(1280 * 4 - 1, LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888, 55);
+    assert_eq!(
+        undersized_pitch.export_scanout_buffer(target).status,
+        LiveRendererScanoutBufferExportStatus::Degraded
     );
 }
 
