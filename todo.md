@@ -83,6 +83,8 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Tightened atomic scanout preflight verification so hardware-smoke readiness
+  logs must contain exactly one reduced preflight record.
 - [x] Added negative atomic scanout preflight fixtures proving duplicate and
   malformed fields are rejected before the hardware smoke gate trusts host
   readiness.

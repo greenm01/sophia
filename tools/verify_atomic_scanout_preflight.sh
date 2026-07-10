@@ -9,12 +9,19 @@ if [[ ! -s "$PREFLIGHT_FILE" ]]; then
     exit 1
 fi
 
-preflight="$(grep -F "$PREFLIGHT_PREFIX" "$PREFLIGHT_FILE" | tail -n 1 || true)"
+mapfile -t preflight_lines < <(grep -F "$PREFLIGHT_PREFIX" "$PREFLIGHT_FILE" || true)
 
-if [[ -z "$preflight" ]]; then
+if [[ "${#preflight_lines[@]}" -eq 0 ]]; then
     echo "atomic scanout preflight line not found in: $PREFLIGHT_FILE" >&2
     exit 1
 fi
+if [[ "${#preflight_lines[@]}" -ne 1 ]]; then
+    echo "atomic scanout preflight expected exactly 1 line, got ${#preflight_lines[@]}" >&2
+    printf '%s\n' "${preflight_lines[@]}" >&2
+    exit 1
+fi
+
+preflight="${preflight_lines[0]}"
 
 read -r -a parts <<< "$preflight"
 prefix="${parts[0]:-}"

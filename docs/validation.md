@@ -87,10 +87,10 @@ opt-in validation failure instead of terminating ordinary deterministic tests.
 The combined `libdrm-events,gbm-probe` backend suite also includes an opt-in
 atomic scanout smoke. Run `tools/atomic_scanout_preflight.sh` first when the
 host state is unknown. That preflight does not request DRM master, does not
-modeset hardware, and emits only a reduced
+modeset hardware, and emits exactly one reduced
 `sophia_atomic_scanout_preflight` line: schema version, validation target,
 readiness status, capped primary card count, capped read/write-openable primary
-card count, capped atomic-capability-admitted primary card count, and capped KMS
+card count, capped atomic-capability-admitted primary card count, capped KMS
 scanout-target primary card count, and capped atomic-property-ready primary card
 count. It does not expose device paths, file descriptors, native errors,
 permissions, or KMS object identity.
