@@ -102,6 +102,8 @@ smoke still needs a DRM-master-capable machine.
   scanout ticks hand pending states to the Engine through one path.
 - [x] Shared ready runtime scanout assembly construction between startup and
   runtime rendered-scanout hardware evidence paths.
+- [x] Moved atomic scanout operator CLI watchdog argument coverage out of
+  production command source and into integration tests.
 - [x] Made the opt-in atomic hardware smoke retain the renderer-owned GBM
   front-buffer owner with the primary-plane submission until page-flip
   retirement, matching the production runtime lifetime rule.
