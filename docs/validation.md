@@ -285,6 +285,18 @@ tools/verify_atomic_scanout_preflight.sh /tmp/sophia-atomic-scanout-preflight.lo
 tools/verify_runtime_rendered_scanout_evidence.sh /tmp/sophia-runtime-rendered-scanout.log
 ```
 
+To inspect the default hardware-proof logs and local device visibility in one
+place, use:
+
+```sh
+tools/atomic_scanout_hardware_status.sh
+```
+
+This helper does not request DRM master and does not modeset hardware. It may
+print local diagnostic facts such as toolchain availability and `/dev/dri` node
+counts, so its output is for the operator. The reduced proof artifacts remain
+the three verifier-accepted logs.
+
 The verifier accepts only reduced evidence that proves a rendered GBM
 front-buffer export, primary-plane property discovery, native resource
 creation, atomic request build, primary-plane atomic submit, nonblocking

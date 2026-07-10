@@ -16,5 +16,6 @@ bash -n tools/atomic_scanout_preflight.sh
 bash -n tools/atomic_scanout_smoke.sh
 bash -n tools/runtime_rendered_scanout_evidence.sh
 bash -n tools/atomic_scanout_hardware_proof.sh
+bash -n tools/atomic_scanout_hardware_status.sh
 
 echo "atomic scanout local checks passed"
