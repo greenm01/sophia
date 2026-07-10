@@ -1,6 +1,8 @@
 use crate::prelude::*;
 
 mod assembly;
+#[cfg(feature = "libdrm-events")]
+mod composition_smoke;
 mod frame_target;
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
 mod native_gbm_tick;
@@ -13,4 +15,6 @@ mod scanout_lifecycle;
 mod tick;
 
 pub use assembly::*;
+#[cfg(feature = "libdrm-events")]
+pub use composition_smoke::*;
 pub use reports::*;

@@ -3,6 +3,20 @@
 This file records early decisions, assumptions, and open questions. Keep it
 short and chronological.
 
+## 2026-07-10: Live Session Composition Smoke
+
+`live-session-composition-smoke` now composes the Sophia X Authority
+Present-pixmap socket path, bounded authority batch intake, runtime commit
+projection, renderer-live frame-target observation, and backend-live rendered
+primary-plane scanout submit reporting into one non-destructive operator smoke.
+
+The passing reduced evidence was `status=Passed`,
+`authority_batches_drained=1`, `authority_transactions_committed=1`,
+`authority_surfaces_applied=1`, and
+`rendered_scanout_submit=SubmittedWaitingForPageFlip`. The remaining live
+composition work is to extend this same public evidence surface through
+deterministic page-flip retire and cleanup reporting.
+
 ## 2026-07-10: xclock as External X Authority Probe
 
 `x-authority-xclock-smoke` now launches `/usr/bin/xclock` against Sophia X

@@ -742,6 +742,38 @@ enum XclockObservation {
 
 fn run_x_authority_present_pixmap_smoke()
 -> Result<XAuthorityPresentPixmapSmokeReport, Box<dyn std::error::Error>> {
+    let artifacts = run_x_authority_present_pixmap_smoke_artifacts()?;
+    let runtime_state = runtime_state_from_observed_batches(&artifacts.batches)?;
+
+    Ok(XAuthorityPresentPixmapSmokeReport {
+        display: artifacts.display,
+        extension_opcode: artifacts.extension_opcode,
+        transactions: artifacts
+            .batches
+            .iter()
+            .map(|batch| batch.transactions.len())
+            .sum(),
+        runtime_committed: runtime_state.authority_transactions_committed,
+        runtime_surfaces: runtime_state.authority_surfaces_applied,
+    })
+}
+
+#[cfg(feature = "atomic-scanout-live")]
+pub(crate) fn collect_x_authority_present_pixmap_authority_batches()
+-> Result<Vec<AuthorityTransactionIntake>, Box<dyn std::error::Error>> {
+    let artifacts = run_x_authority_present_pixmap_smoke_artifacts()?;
+    Ok(authority_intakes_from_observed_batches(&artifacts.batches))
+}
+
+#[derive(Clone, Debug)]
+struct XAuthorityPresentPixmapSmokeArtifacts {
+    display: String,
+    extension_opcode: u8,
+    batches: Vec<XAuthorityObservedTransactionBatch>,
+}
+
+fn run_x_authority_present_pixmap_smoke_artifacts()
+-> Result<XAuthorityPresentPixmapSmokeArtifacts, Box<dyn std::error::Error>> {
     use std::io::Write;
 
     let (display, socket_path) = temp_xauthority_display(5600)?;
@@ -798,14 +830,11 @@ fn run_x_authority_present_pixmap_smoke()
         .map_err(|_| "X authority X11 socket server thread panicked")?
         .map_err(|error| format!("X authority X11 socket server failed: {error}"))?;
     let batches = receiver.try_iter().collect::<Vec<_>>();
-    let runtime_state = runtime_state_from_observed_batches(&batches)?;
 
-    Ok(XAuthorityPresentPixmapSmokeReport {
+    Ok(XAuthorityPresentPixmapSmokeArtifacts {
         display,
         extension_opcode: extension[9],
-        transactions: batches.iter().map(|batch| batch.transactions.len()).sum(),
-        runtime_committed: runtime_state.authority_transactions_committed,
-        runtime_surfaces: runtime_state.authority_surfaces_applied,
+        batches,
     })
 }
 
@@ -819,10 +848,7 @@ fn runtime_state_from_observed_batches(
     let engine = HeadlessEngine::default();
     let committed = seed_committed_states_for_transactions(&transactions);
     let (sender, receiver) = sync_channel(batches.len().max(1));
-    for batch in batches
-        .iter()
-        .map(|batch| AuthorityTransactionIntake::new(batch.transaction, batch.transactions.clone()))
-    {
+    for batch in authority_intakes_from_observed_batches(batches) {
         sender.try_send(batch)?;
     }
     let inbox = AuthorityTransactionInbox::new(receiver, batches.len().max(1));
@@ -840,6 +866,15 @@ fn runtime_state_from_observed_batches(
         scanout_lifecycle_states: Vec::new(),
     })?;
     Ok(report.runtime.runtime_state)
+}
+
+fn authority_intakes_from_observed_batches(
+    batches: &[XAuthorityObservedTransactionBatch],
+) -> Vec<AuthorityTransactionIntake> {
+    batches
+        .iter()
+        .map(|batch| AuthorityTransactionIntake::new(batch.transaction, batch.transactions.clone()))
+        .collect()
 }
 
 fn runtime_state_from_observed_transactions(

@@ -28,6 +28,26 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
         return Ok(true);
     }
 
+    if args
+        .iter()
+        .any(|arg| arg == "live-session-composition-smoke")
+    {
+        let authority_batches =
+            super::x_authority::collect_x_authority_present_pixmap_authority_batches()?;
+        let report = sophia_backend_live::run_live_session_composition_smoke(authority_batches);
+        println!("{}", report.reduced_log_line());
+
+        if report.status != sophia_backend_live::LiveSessionCompositionSmokeStatus::Passed {
+            return Err(format!(
+                "live session composition smoke failed with status {:?}",
+                report.status
+            )
+            .into());
+        }
+
+        return Ok(true);
+    }
+
     #[cfg(feature = "atomic-scanout-smoke-live")]
     if args.iter().any(|arg| arg == "atomic-scanout-smoke") {
         if std::env::var_os("SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE").is_none() {

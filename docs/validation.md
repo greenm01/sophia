@@ -29,6 +29,19 @@ conformance test. Its reduced output must keep `first_error=none`, report the
 proof-window outcome explicitly, and include request/opcode counters so future
 client-driven regressions show which compatibility surface changed.
 
+For live composition changes that connect X Authority transaction intake to
+backend-live rendered scanout reporting, run:
+
+```sh
+cargo test --offline -q -p sophia-backend-live --features libdrm-events live_session_composition
+cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- live-session-composition-smoke
+```
+
+`live-session-composition-smoke` is non-destructive. Its reduced output must
+report `status=Passed`, one or more drained authority batches, committed runtime
+transactions, applied runtime surfaces, and
+`rendered_scanout_submit=SubmittedWaitingForPageFlip`.
+
 The optional renderer-native features have extra local checks:
 
 ```sh

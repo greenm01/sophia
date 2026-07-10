@@ -51,7 +51,7 @@ use sophia_backend_live::{
     LiveRenderedScanoutBufferExport, LiveRenderedScanoutBufferExporter,
     LiveRenderedScanoutBufferPrimeSource, LiveRenderedScanoutDmaBufFds,
     LiveRendererScanoutBufferExportDetail, LiveRuntimeRenderedScanoutEvidenceFailureReport,
-    LiveRuntimeRenderedScanoutEvidenceFailureStatus,
+    LiveRuntimeRenderedScanoutEvidenceFailureStatus, LiveSessionCompositionSmokeStatus,
     LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus,
     LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus,
     LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus, NativeLibdrmAtomicScanoutCommitter,
@@ -69,8 +69,8 @@ use sophia_backend_live::{
     real_atomic_scanout_validation_gate, real_atomic_scanout_validation_smoke_report,
     real_libdrm_events_validation_gate, real_libdrm_events_validation_smoke_report,
     reduce_native_page_flip_event, retire_native_primary_plane_scanout_after_page_flip,
-    retire_rendered_primary_plane_scanout_after_page_flip, select_native_primary_plane_target,
-    select_real_atomic_scanout_card_from_dev_dri,
+    retire_rendered_primary_plane_scanout_after_page_flip, run_live_session_composition_smoke,
+    select_native_primary_plane_target, select_real_atomic_scanout_card_from_dev_dri,
     submit_native_primary_plane_scanout_from_renderer_descriptor,
     submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor,
     submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_policy,
@@ -92,6 +92,11 @@ use sophia_backend_live::{
 use sophia_backend_live::{
     LiveRendererImportHealth, LiveRendererImportPathStatus, LiveRendererRuntimeObservation,
     LiveRendererSelectionObservation, real_atomic_runtime_rendered_scanout_renderer_observation,
+};
+use sophia_engine::AuthorityTransactionIntake;
+use sophia_protocol::{
+    AuthorityKind, BufferSource, NamespaceId, Rect, Region, SurfaceId, SurfaceTransaction,
+    SurfaceTransactionReadiness, TransactionId,
 };
 #[cfg(feature = "libinput-events")]
 use sophia_protocol::{InputEventKind, Point};
@@ -117,6 +122,70 @@ fn runtime_rendered_scanout_failure_evidence_has_stable_reduced_line() {
         report.reduced_log_line(),
         "sophia_runtime_rendered_scanout_failure schema=1 status=RetireTimedOut submit_seen=true retire_seen=false"
     );
+}
+
+#[test]
+fn live_session_composition_smoke_rejects_empty_authority_batches() {
+    let report = run_live_session_composition_smoke(Vec::new());
+
+    assert_eq!(
+        report.status,
+        LiveSessionCompositionSmokeStatus::NoAuthorityBatches
+    );
+    assert_eq!(
+        report.reduced_log_line(),
+        "sophia_live_session_composition schema=1 status=NoAuthorityBatches authority_batches_input=0 authority_batches_drained=0 authority_transactions_committed=0 authority_surfaces_applied=0 rendered_scanout_submit=none runtime_scanout_state=none rendered_scanout_in_flight=false cleanup_pending=false"
+    );
+}
+
+#[test]
+fn live_session_composition_smoke_commits_authority_batch_and_submits_rendered_scanout() {
+    let transaction_id = TransactionId::from_raw(90);
+    let report = run_live_session_composition_smoke(vec![AuthorityTransactionIntake::new(
+        transaction_id,
+        vec![live_session_composition_transaction(transaction_id)],
+    )]);
+
+    assert_eq!(report.status, LiveSessionCompositionSmokeStatus::Passed);
+    assert_eq!(report.authority_batches_input, 1);
+    assert_eq!(report.authority_batches_drained, 1);
+    assert_eq!(report.authority_transactions_committed, 1);
+    assert_eq!(report.authority_surfaces_applied, 1);
+    assert_eq!(
+        report.rendered_scanout_submit,
+        Some(LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip)
+    );
+    assert!(report.rendered_scanout_in_flight);
+    assert!(!report.cleanup_pending);
+    assert_eq!(
+        report.reduced_log_line(),
+        "sophia_live_session_composition schema=1 status=Passed authority_batches_input=1 authority_batches_drained=1 authority_transactions_committed=1 authority_surfaces_applied=1 rendered_scanout_submit=SubmittedWaitingForPageFlip runtime_scanout_state=Submitted rendered_scanout_in_flight=true cleanup_pending=false"
+    );
+}
+
+fn live_session_composition_transaction(transaction: TransactionId) -> SurfaceTransaction {
+    SurfaceTransaction {
+        transaction,
+        authority: AuthorityKind::SophiaX,
+        surface: SurfaceId::new(9, 1),
+        namespace: Some(NamespaceId::from_raw(47)),
+        target_geometry: Rect {
+            x: 20,
+            y: 30,
+            width: 640,
+            height: 480,
+        },
+        target_buffer: BufferSource::CpuBuffer { handle: 0x990 },
+        damage: Region::single(Rect {
+            x: 0,
+            y: 0,
+            width: 640,
+            height: 480,
+        }),
+        readiness: SurfaceTransactionReadiness::Ready,
+        timeout_msec: 250,
+        previous_committed_generation: 0,
+    }
 }
 
 #[cfg(feature = "gbm-probe")]

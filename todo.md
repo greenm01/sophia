@@ -26,12 +26,11 @@ Current architecture read:
 
 Current milestone target:
 
-- [ ] Compose Sophia X Authority's bounded transaction queue, runtime intake,
-  renderer-live frame targets, and backend-live rendered scanout into one
-  operator smoke.
-- [ ] Preserve reduced evidence as the public validation surface for authority
-  health, runtime transaction intake, rendered scanout submit, page-flip retire,
-  and cleanup.
+- [x] Compose Sophia X Authority's bounded transaction queue, runtime intake,
+  renderer-live frame targets, and backend-live rendered scanout submit into one
+  non-destructive operator smoke.
+- [ ] Extend the same reduced evidence surface through deterministic page-flip
+  retire and cleanup reporting.
 - [ ] Keep Wayland Authority and wgpu deferred until the X Authority plus live
   scanout path is stable.
 
@@ -41,12 +40,11 @@ Current milestone target:
 
 ### 1. Live Session Composition
 
-- [ ] Compose Sophia X Authority's bounded transaction queue, runtime intake,
-  renderer-live frame targets, and backend-live rendered scanout into one
-  operator smoke.
-- [ ] Preserve reduced evidence as the public validation surface for authority
-  health, runtime transaction intake, rendered scanout submit, page-flip retire,
-  and cleanup.
+- [x] Compose Sophia X Authority's bounded transaction queue, runtime intake,
+  renderer-live frame targets, and backend-live rendered scanout submit into one
+  non-destructive operator smoke.
+- [ ] Extend the same reduced evidence surface through deterministic page-flip
+  retire and cleanup reporting.
 - [ ] Keep Wayland Authority and wgpu deferred until the X Authority plus live
   scanout path is stable.
 
@@ -81,6 +79,10 @@ Current milestone target:
 
 ## Done Recently
 
+- [x] `live-session-composition-smoke` now reuses the X Authority
+  Present-pixmap socket path, drains the bounded authority queue into runtime
+  intake, commits one authority transaction, and submits a rendered primary
+  plane scanout with reduced evidence.
 - [x] `x-authority-xclock-smoke` launches `/usr/bin/xclock`, reaches mapped
   surface exposure, decodes the xclock-driven font, pixmap, window, and drawing
   requests, and commits observed authority transactions through Engine/Runtime
