@@ -1616,6 +1616,11 @@ fn live_runtime_assembly_tracks_rendered_scanout_until_accepted_page_flip() {
     assert_eq!(blocked.in_flight, true);
     assert_eq!(blocked.in_flight_ticks, 0);
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), true);
+    assert_eq!(
+        assembly.rendered_primary_plane_runtime_scanout_state(),
+        Some(RuntimeScanoutState::Deferred)
+    );
+    assert_eq!(assembly.pending_runtime_scanout_state_count(), 0);
 
     let aged_tick = assembly
         .run_tick(CompositorBackendTickInput::default())
@@ -1916,6 +1921,11 @@ fn live_runtime_assembly_retains_submit_failure_cleanup_for_retry() {
         blocked.runtime_scanout_state,
         Some(RuntimeScanoutState::Deferred)
     );
+    assert_eq!(
+        assembly.rendered_primary_plane_runtime_scanout_state(),
+        Some(RuntimeScanoutState::Deferred)
+    );
+    assert_eq!(assembly.pending_runtime_scanout_state_count(), 1);
 
     let cleanup = assembly.retry_tracked_rendered_primary_plane_scanout_cleanup(&retry_device);
     assert_eq!(

@@ -199,6 +199,7 @@ where
     E::Owner: 'static,
 {
     if rendered_primary_plane_scanout_submission.is_some() {
+        *rendered_primary_plane_runtime_scanout_state = Some(RuntimeScanoutState::Deferred);
         return LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
             status: LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::AlreadyInFlight,
             scanout_target,
@@ -214,6 +215,7 @@ where
     }
 
     if rendered_primary_plane_scanout_cleanup.is_some() {
+        *rendered_primary_plane_runtime_scanout_state = Some(RuntimeScanoutState::Deferred);
         return LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
             status: LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::CleanupPending,
             scanout_target,

@@ -78,6 +78,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Made deferred rendered-scanout submits update the backend's latest reduced
+  scanout diagnostic state without queueing a terminal lifecycle event.
 - [x] Added negative preflight verifier fixtures for impossible reduced count
   relationships and native host identity leakage.
 - [x] Made opt-in atomic hardware smoke early failures print reduced evidence
