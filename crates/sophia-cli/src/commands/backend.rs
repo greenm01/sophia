@@ -2,6 +2,8 @@
 use std::time::{Duration, Instant};
 
 use super::prelude::{arg_value, parse_u64};
+#[cfg(feature = "atomic-scanout-smoke-live")]
+use sophia_cli::backend_evidence::runtime_rendered_scanout_evidence_is_clean;
 
 #[cfg(feature = "atomic-scanout-smoke-live")]
 const ATOMIC_SCANOUT_SMOKE_CHILD_TIMEOUT_MS: u64 = 10_000;
@@ -50,18 +52,7 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
         for line in &lines {
             println!("{line}");
         }
-        if !lines.iter().any(|line| {
-            line.starts_with("sophia_runtime_rendered_scanout_submit ")
-                && line.contains(" status=SubmittedWaitingForPageFlip ")
-                && line.contains(" runtime_scanout_state=Submitted ")
-        }) || !lines.iter().any(|line| {
-            line.starts_with("sophia_runtime_rendered_scanout_retire ")
-                && line.contains(" status=RetiredAfterPageFlip ")
-                && line.contains(" cleanup_pending=false")
-        }) || lines
-            .iter()
-            .any(|line| line.starts_with("sophia_runtime_rendered_scanout_cleanup "))
-        {
+        if !runtime_rendered_scanout_evidence_is_clean(&lines) {
             return Err(
                 "atomic scanout runtime evidence did not capture a clean submit-to-retire frame"
                     .into(),
