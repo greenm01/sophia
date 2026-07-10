@@ -593,6 +593,13 @@ with native page-flip intake. It drains and reduces page-flip evidence before
 the next rendered primary-plane submit, so an accepted callback retires the
 previous GBM/KMS owner before the exporter reuses or recreates the next rendered
 scanout buffer.
+The same tick can run with a libinput-shaped input poller owned by the live
+runtime assembly. Reduced physical input packets enter the Engine before the
+runtime reaches scanout submission, while page-flip evidence still retires old
+GBM/KMS owners before the next submit. This proves the sequencing shape for the
+future production loop: input readiness, page-flip retirement, rendering, and
+atomic scanout are coordinated by backend-live without putting native fds or
+device identity into Engine state.
 The reusable exporter also records the last reduced frame-target lifecycle:
 created, retained, resized, invalidated, or retired. This gives the backend
 resize/target-continuity evidence for production scanout while keeping native
@@ -914,6 +921,10 @@ backend-owned `Libinput` context plus a reduced seat/device map, dispatches
 ready events, and converts pointer motion, pointer button, and keyboard key
 events into `InputEventPacket` values. Native device paths, fd values, seat
 names, and libinput error strings do not enter public reports.
+The next production input-loop seam is fd readiness gating. The concrete reader
+must not become the session selector. Backend-live should observe readiness in
+the outer loop, call libinput dispatch only when ready, and continue scanout
+ticks when input is idle.
 
 The first live compositor backend boundary is dependency-neutral. An
 `OutputDiscoveryBackend` produces a `DrmKmsOutputRegistry`; an

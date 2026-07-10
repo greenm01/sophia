@@ -960,6 +960,12 @@ empty path-based context and proves idle polling without opening devices or
 publishing native paths, fds, seat names, raw device identity, or libinput error
 strings. Real device-opening validation remains behind
 `SOPHIA_RUN_REAL_LIBINPUT_EVENTS_SMOKE`.
+The live runtime now also has cross-feature coverage for input plus scanout in
+one tick. A libinput-shaped poller feeds a physical pointer event while native
+libdrm page-flip intake retires the previous rendered GBM/KMS owner and the
+runtime submits the next rendered primary-plane frame. This is still a
+deterministic fake-reader test, but it proves the sequencing contract needed by
+the production loop before backend-live owns real fd readiness.
 
 ## Open Questions
 

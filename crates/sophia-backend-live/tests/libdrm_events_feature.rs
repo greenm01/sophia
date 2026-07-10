@@ -53,11 +53,18 @@ use sophia_backend_live::{
     submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor,
     submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_policy,
 };
+#[cfg(feature = "libinput-events")]
+use sophia_backend_live::{
+    DeviceId, FakeLiveLibinputEventReader, InputEventPacket, LibinputDeviceDescriptor,
+    LibinputDeviceKind, NativeLibinputEventPoller, SeatId,
+};
 #[cfg(feature = "gbm-probe")]
 use sophia_backend_live::{
     LiveGbmEglFrameTargetStatus, NativeGbmRenderedScanoutBufferDiscoveryExporter,
     NativeGbmRenderedScanoutContextStatus, RenderDeviceDiscoveryBackend,
 };
+#[cfg(feature = "libinput-events")]
+use sophia_protocol::{InputEventKind, Point};
 use sophia_renderer_live::{
     FakeRendererScanoutBufferExporter, LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
     LiveGbmEglFrameTargetRecord, LiveRendererScanoutBufferExportStatus,
@@ -706,6 +713,21 @@ impl LiveRenderedScanoutBufferExporter for FakeRenderedScanoutExporter {
             descriptor: self.descriptor,
             owner: self.owner.take(),
         }
+    }
+}
+
+#[cfg(feature = "libinput-events")]
+fn libinput_motion_event(serial: u64, x: f64, y: f64) -> InputEventPacket {
+    InputEventPacket {
+        serial,
+        seat: SeatId::from_raw(1),
+        device: DeviceId::from_raw(2),
+        time_msec: serial * 10,
+        kind: InputEventKind::PointerMotion,
+        global_position: Some(Point { x, y }),
+        target_surface: None,
+        target_window: None,
+        local_position: None,
     }
 }
 
@@ -2024,6 +2046,96 @@ fn live_runtime_tick_reads_native_page_flip_events_before_rendered_scanout() {
     );
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), true);
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight_ticks(), 0);
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(feature = "libinput-events")]
+#[test]
+fn live_runtime_tick_polls_libinput_shaped_input_while_retiring_and_submitting_scanout() {
+    let root = ready_drm_sysfs_fixture("runtime-input-native-page-flip-rendered-scanout");
+    let config = LiveBackendConfig::new(&root).with_input_device(LibinputDeviceDescriptor {
+        seat: SeatId::from_raw(1),
+        device: DeviceId::from_raw(2),
+        kind: LibinputDeviceKind::Pointer,
+    });
+    let report = discover_live_backend(&config);
+    let (sender, receiver) = mpsc::sync_channel(2);
+    let poller = NativeLibinputEventPoller::new(
+        FakeLiveLibinputEventReader::new([libinput_motion_event(1, 42.0, 24.0)]),
+        4,
+    );
+    let mut assembly = report
+        .into_live_runtime_assembly(poller)
+        .expect("ready backend should seed live assembly")
+        .with_page_flip_callback_queue(LivePageFlipCallbackQueue::new(receiver, 2));
+    let device = full_primary_plane_scanout_device();
+    let mut exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+    let submitted =
+        assembly.submit_and_track_rendered_primary_plane_scanout_with(&device, &mut exporter);
+    assert_eq!(
+        submitted.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+    );
+
+    let slot = LibdrmNativeOutputSlot::new(1).expect("slot one should be valid");
+    let source = LibdrmNativePageFlipSource::from_authority(
+        LibdrmBackendFdAuthority::new(35).expect("nonzero authority should mint"),
+    );
+    let mut page_flip_poller =
+        NativeLibdrmPageFlipEventPoller::new(source).with_routes([LibdrmNativeOutputRoute {
+            slot,
+            output: OutputId::from_raw(1),
+        }]);
+    let mut reader =
+        FakeLibdrmNativePageFlipReader::new([LibdrmNativePageFlipCallback::new(slot, 101)]);
+    let mut next_exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+
+    let report = assembly
+        .run_tick_with_rendered_primary_plane_scanout_and_native_page_flip_events_with(
+            CompositorBackendTickInput::default(),
+            &device,
+            &mut next_exporter,
+            &mut reader,
+            &mut page_flip_poller,
+            &sender,
+            4,
+            4,
+        )
+        .expect("input, page-flip retirement, and scanout submit should share one tick");
+
+    assert_eq!(report.tick.engine.input_poll.polled, 1);
+    assert_eq!(report.tick.engine.input_poll.accepted, 1);
+    assert!(report.tick.engine.input_poll.rejected.is_empty());
+    assert_eq!(assembly.assembly().input().source().pending_len(), 1);
+    assert_eq!(
+        report.native_page_flip.read_loop,
+        LibdrmNativeReadLoopReport::callback_decoded(1)
+            .expect("one callback should produce read evidence")
+    );
+    assert_eq!(
+        report
+            .tick
+            .rendered_primary_plane_scanout_retire
+            .expect("native page flip should retire in-flight scanout")
+            .status,
+        LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip
+    );
+    assert_eq!(
+        report
+            .tick
+            .rendered_primary_plane_scanout_submit
+            .expect("runtime should submit the next scanout")
+            .status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+    );
+    assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), true);
 
     std::fs::remove_dir_all(root).unwrap();
 }

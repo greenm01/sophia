@@ -12,12 +12,14 @@ active milestone to `docs/roadmap-history.md`.
 
 ## Active Milestone
 
-### Real Libinput Adapter
+### Real Input Loop
 
-- [x] Add a concrete libinput reader only behind `libinput-events`.
-- [x] Preserve the existing native-shaped reader and poller report contract.
-- [x] Avoid raw device paths, fd values, seat names, or libinput error strings in
-  public runtime reports.
+- [x] Prove libinput-shaped input polling, native page-flip retirement, and
+  rendered scanout submit can share one runtime tick.
+- [ ] Add a runtime-owned readiness gate so concrete libinput dispatch runs only
+  after the session loop observes input fd readiness.
+- [ ] Keep physical input and routed-input transformation separate.
+- [ ] Preserve deterministic queued poller tests as the default validation path.
 
 ---
 
@@ -38,11 +40,12 @@ active milestone to `docs/roadmap-history.md`.
 - [ ] Keep Wayland Authority deferred until backend event intake and scanout
   timing are stable.
 
-### 3. Real Input Loop
+### 3. Runtime Loop Assembly
 
-- [ ] Poll concrete input readers from the live runtime without blocking scanout.
-- [ ] Keep physical input and routed-input transformation separate.
-- [ ] Preserve deterministic queued poller tests as the default validation path.
+- [ ] Collapse the one-shot helper calls into a reusable session loop owner.
+- [ ] Feed reduced input, page-flip, and scanout facts through one bounded tick
+  budget.
+- [ ] Keep real file-descriptor readiness outside Sophia Engine state.
 ---
 
 ## Later Backlog
@@ -71,6 +74,8 @@ active milestone to `docs/roadmap-history.md`.
 
 ## Done Recently
 
+- [x] Proved libinput-shaped input polling can run in the same live runtime tick
+  as native page-flip retirement and rendered primary-plane scanout submit.
 - [x] Added a concrete safe-wrapper libinput reader behind `libinput-events`
   that reduces pointer/key events into Sophia input packets without exposing
   native paths, fds, seat names, or libinput error strings.

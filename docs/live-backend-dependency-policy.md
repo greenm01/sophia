@@ -522,6 +522,12 @@ events through a caller-provided `NativeLibinputDeviceMap`. It must not expose
 device paths, fd values, libinput seat names, raw device identity, or native
 error strings. New libinput event kinds should extend that reduced mapper, not
 the engine input adapter or runtime loop contract.
+Combined runtime coverage now proves a libinput-shaped input poller can run in
+the same tick as native page-flip intake, rendered scanout retirement, and the
+next rendered primary-plane submit. The next production rule is readiness
+ownership: the session loop may observe fd readiness and decide whether to call
+the concrete reader, but Sophia Engine may see only reduced input-poll reports
+and input packets.
 
 Real hardware validation for libdrm and libinput is opt-in only. The gates are
 `SOPHIA_RUN_REAL_LIBDRM_EVENTS_SMOKE` and
