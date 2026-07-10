@@ -83,6 +83,9 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Added negative atomic scanout preflight fixtures proving duplicate and
+  malformed fields are rejected before the hardware smoke gate trusts host
+  readiness.
 - [x] Added negative atomic scanout evidence fixtures proving duplicate and
   malformed fields are rejected by the local verifier gate.
 - [x] Normalized backend-live rendered scanout exports before submit so
