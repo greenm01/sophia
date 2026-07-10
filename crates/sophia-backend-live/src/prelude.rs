@@ -1,3 +1,5 @@
+#![allow(unused_imports)]
+
 #[cfg(any(feature = "libdrm-events", feature = "libinput-events"))]
 pub(crate) use std::collections::VecDeque;
 #[cfg(any(
@@ -10,21 +12,9 @@ pub(crate) use std::io;
 pub(crate) use std::os::fd::AsFd;
 
 pub(crate) use crate::api::*;
-#[cfg(feature = "libdrm-events")]
-pub(crate) use crate::native_atomic::*;
-#[cfg(feature = "libdrm-events")]
-pub(crate) use crate::native_kms::*;
-#[cfg(feature = "libdrm-events")]
-pub(crate) use crate::native_page_flip::*;
-#[cfg(feature = "libdrm-events")]
-pub(crate) use crate::native_primary_plane::*;
-#[cfg(feature = "libdrm-events")]
-pub(crate) use crate::native_scanout::*;
-pub(crate) use crate::page_flip::*;
-#[cfg(feature = "libdrm-events")]
-pub(crate) use crate::rendered_scanout::*;
+pub(crate) use crate::drm::*;
 pub(crate) use crate::runtime::*;
-pub(crate) use crate::scanout_status::*;
+pub(crate) use crate::scanout::*;
 pub(crate) use crate::startup::*;
 
 #[cfg(feature = "gbm-probe")]

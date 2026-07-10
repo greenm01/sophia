@@ -6,28 +6,14 @@
 //! can replace these adapters without changing Sophia Engine, WM IPC, or
 //! protocol authority packets.
 
-#[cfg(feature = "libdrm-events")]
-mod native_atomic;
-#[cfg(feature = "libdrm-events")]
-mod native_kms;
-#[cfg(feature = "libdrm-events")]
-mod native_page_flip;
-#[cfg(feature = "libdrm-events")]
-mod native_primary_plane;
-#[cfg(feature = "libdrm-events")]
-mod native_scanout;
-mod page_flip;
-mod prelude;
-#[cfg(feature = "libdrm-events")]
-mod rendered_scanout;
-
 mod api;
 mod dependency;
+mod drm;
 mod hardware_validation;
-#[cfg(feature = "libinput-events")]
-mod libinput;
+mod input;
+mod prelude;
 mod runtime;
-mod scanout_status;
+mod scanout;
 mod startup;
 
 pub use api::*;
