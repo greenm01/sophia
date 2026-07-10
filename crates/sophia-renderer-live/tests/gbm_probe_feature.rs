@@ -133,3 +133,22 @@ fn native_gbm_scanout_exporter_fails_closed_without_backend_device() {
         LiveRendererScanoutBufferExportStatus::Unavailable
     );
 }
+
+#[test]
+fn native_rendered_gbm_scanout_exporter_fails_closed_without_backend_device() {
+    let missing_device = Err(std::io::Error::from_raw_os_error(19));
+
+    assert_eq!(
+        NativeGbmScanoutBufferExporter::export_rendered_owned_scanout_buffer_from_backend_device_result::<
+            std::fs::File,
+        >(
+            missing_device,
+            sophia_renderer_live::LiveGbmEglFrameTargetRecord::new(sophia_renderer_live::Size {
+                width: 1280,
+                height: 720,
+            }),
+        )
+        .status,
+        LiveRendererScanoutBufferExportStatus::Unavailable
+    );
+}

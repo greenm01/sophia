@@ -2375,8 +2375,7 @@ mod atomic_scanout_hardware_smoke {
         let output = OutputId::from_raw(1);
         let target = LiveGbmEglFrameTargetRecord::new(selected.size());
 
-        let export =
-            NativeGbmScanoutBufferExporter::export_owned_scanout_buffer_from_backend_device_result(
+        let export = NativeGbmScanoutBufferExporter::export_rendered_owned_scanout_buffer_from_backend_device_result(
                 card.try_clone_file(),
                 target,
             );

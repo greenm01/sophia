@@ -81,10 +81,11 @@ The combined `libdrm-events,gbm-probe` backend suite also includes an opt-in
 atomic scanout smoke. Set `SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1` only from a
 session that may take DRM master on a primary `/dev/dri/card*` node. The child
 test opens the card read/write, enables UniversalPlanes and Atomic client
-capabilities, duplicates the same fd namespace for GBM allocation, submits a
-primary-plane atomic modeset, waits for reduced page-flip evidence, and retires
-the submitted framebuffer resources. Without that environment variable, the
-test returns early and never opens or modesets hardware.
+capabilities, duplicates the same fd namespace for GBM rendering, clears a GBM
+surface, locks the rendered front buffer, submits a primary-plane atomic
+modeset, waits for reduced page-flip evidence, and retires the submitted
+framebuffer resources. Without that environment variable, the test returns
+early and never opens or modesets hardware.
 The stable evidence shape for that run is
 `LibdrmNativeAtomicScanoutSmokeEvidence`: overall status, GBM export status,
 primary-plane submit status, page-flip poll status, page-flip event status, and

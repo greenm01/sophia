@@ -172,6 +172,10 @@ buffer objects. It delegates raw handle extraction to `sophia-renderer-native-eg
 and returns an owned buffer object plus the reduced descriptor. The owner must
 outlive the backend-live framebuffer resource that was registered from the
 descriptor.
+For production scanout validation, the rendered export path is preferred over a
+raw allocated buffer object. Renderer-native-egl creates a GBM surface with
+SCANOUT|RENDERING usage, clears it through EGL, swaps, locks the front buffer,
+and returns the locked XRGB8888 buffer behind the same reduced descriptor.
 `discover_native_primary_plane_property_handles` resolves the required atomic
 property names for that builder through the real `drm::control::Device`
 property APIs, but reduces failures to read-failed or missing connector, CRTC,

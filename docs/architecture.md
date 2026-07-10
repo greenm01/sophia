@@ -682,6 +682,12 @@ Behind the `gbm-probe` feature, renderer-native-egl can now allocate and own a
 GBM scanout buffer object while renderer-live exposes only the reduced
 descriptor. The owner object must be retained until backend-live retires the
 framebuffer resource derived from that descriptor.
+The production-facing renderer path now has a stronger variant:
+renderer-native-egl can render a known clear color into a GBM surface, swap it,
+lock the front buffer, and expose that XRGB8888 front buffer through the same
+reduced descriptor. The raw allocated-buffer exporter remains useful for
+resource-shape tests; real scanout smokes should prefer the rendered front
+buffer path.
 Property discovery for that path now uses the native DRM property APIs and
 collapses lookup problems to reduced missing-property groups. The property
 handles themselves stay backend-private.
