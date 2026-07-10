@@ -83,6 +83,9 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Split native primary-plane resource device, bundle, creation, and cleanup
+  code so framebuffer and mode-blob lifetime handling is isolated from request
+  construction and easier to audit before hardware smoke capture.
 - [x] Split native primary-plane scanout policy, submission ownership,
   submit/retire reports, and page-flip retirement into separate modules so the
   syscall-facing submit path is easier to audit before hardware smoke capture.
