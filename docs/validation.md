@@ -202,11 +202,12 @@ shape. The deterministic feature tests must continue to pass without them.
 Run the atomic scanout hardware smoke only from a local session where modeset
 and DRM master disruption are acceptable. The helper captures the reduced
 preflight log, verifies host readiness, captures the reduced evidence log, and
-runs only the opt-in atomic scanout test:
+runs only the opt-in atomic scanout CLI smoke:
 
 ```sh
 tools/atomic_scanout_smoke.sh
 SOPHIA_ATOMIC_SCANOUT_EVIDENCE=/tmp/sophia-atomic-smoke.log tools/atomic_scanout_smoke.sh
+tools/atomic_scanout_smoke.sh --slot=1 --output=1 --authority=1 --page-flip-timeout-ms=2000
 ```
 
 The helper runs the verified preflight before the smoke and
