@@ -1577,6 +1577,36 @@ fn native_libdrm_primary_plane_scanout_submit_uses_supplied_selection_snapshot()
     );
     assert!(result.submit.is_none());
     assert!(result.submission.is_none());
+
+    let selected = select_native_primary_plane_target(&device)
+        .selection
+        .expect("complete KMS path should produce a selected payload");
+    let forged_not_selected =
+        submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor(
+            &device,
+            LibdrmNativePrimaryPlaneSelectionResult {
+                status: LibdrmNativePrimaryPlaneSelectionStatus::NoCompatiblePrimaryPlane,
+                selection: Some(selected),
+            },
+            scanout_descriptor(Size {
+                width: 1280,
+                height: 720,
+            }),
+        );
+
+    assert_eq!(
+        forged_not_selected.status,
+        LibdrmNativePrimaryPlaneScanoutSubmitStatus::KmsTargetUnavailable
+    );
+    assert_eq!(
+        forged_not_selected.selection,
+        LibdrmNativePrimaryPlaneSelectionStatus::NoCompatiblePrimaryPlane
+    );
+    assert!(forged_not_selected.properties.is_none());
+    assert!(forged_not_selected.resources.is_none());
+    assert!(forged_not_selected.request.is_none());
+    assert!(forged_not_selected.submit.is_none());
+    assert!(forged_not_selected.submission.is_none());
 }
 
 #[test]

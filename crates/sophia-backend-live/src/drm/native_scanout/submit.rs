@@ -53,6 +53,14 @@ where
         LiveRendererScanoutBufferStatus::Invalid
     };
 
+    if selection.status != LibdrmNativePrimaryPlaneSelectionStatus::Selected {
+        return LibdrmNativePrimaryPlaneScanoutSubmitResult::new(
+            LibdrmNativePrimaryPlaneScanoutSubmitStatus::KmsTargetUnavailable,
+            selection.status,
+            scanout_buffer,
+        );
+    }
+
     let Some(selected) = selection.selection else {
         return LibdrmNativePrimaryPlaneScanoutSubmitResult::new(
             LibdrmNativePrimaryPlaneScanoutSubmitStatus::KmsTargetUnavailable,

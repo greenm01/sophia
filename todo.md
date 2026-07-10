@@ -91,6 +91,8 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Made native primary-plane scanout submit fail closed when a supplied KMS
+  selection payload disagrees with its reduced selection status.
 - [x] Split backend-live startup probe reports into render-device discovery,
   GPU startup, EGL startup, and GBM smoke-evidence modules.
 - [x] Split runtime rendered-scanout tracked reports into submit, retire,
