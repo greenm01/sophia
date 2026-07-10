@@ -1,4 +1,6 @@
 use crate::prelude::*;
+#[cfg(feature = "libdrm-events")]
+use std::os::fd::{AsFd, OwnedFd};
 
 #[cfg(feature = "libdrm-events")]
 #[derive(Debug)]
@@ -16,6 +18,7 @@ pub enum LibdrmNativePrimaryPlaneResourceCreateStatus {
     InvalidSelectionSize,
     BufferSizeMismatch,
     InvalidBuffer,
+    BufferImportFailed,
     MissingMode,
     ModeBlobCreateFailed,
     FramebufferCreateFailed,
@@ -91,9 +94,12 @@ where
     }
     let framebuffer_create = create_scanout_framebuffer(device, buffer);
     let Some(framebuffer) = framebuffer_create.framebuffer else {
-        let cleanup = device.destroy_mode_blob(mode_blob).is_err().then(|| {
-            LibdrmNativePrimaryPlaneResourceCleanup::from_mode_blob(mode_blob, selection.size)
-        });
+        let cleanup = cleanup_after_framebuffer_create_failure(
+            device,
+            Some(mode_blob),
+            [None; 4],
+            selection.size,
+        );
         return LibdrmNativePrimaryPlaneResourceCreateResult {
             status: LibdrmNativePrimaryPlaneResourceCreateStatus::FramebufferCreateFailed,
             framebuffer: Some(framebuffer_create.detail),
@@ -162,6 +168,288 @@ where
         )),
         cleanup: None,
     }
+}
+
+#[cfg(feature = "libdrm-events")]
+pub fn create_native_primary_plane_resources_from_dma_bufs<D>(
+    device: &D,
+    selection: LibdrmNativePrimaryPlaneSelection,
+    descriptor: LiveRendererScanoutBufferDescriptor,
+    plane_fds: [Option<OwnedFd>; 4],
+) -> LibdrmNativePrimaryPlaneResourceCreateResult
+where
+    D: LibdrmNativePrimaryPlaneResourceDevice,
+{
+    create_native_primary_plane_resources_from_dma_bufs_with_policy(
+        device, selection, descriptor, plane_fds, true,
+    )
+}
+
+#[cfg(feature = "libdrm-events")]
+pub fn create_native_primary_plane_page_flip_resources_from_dma_bufs<D>(
+    device: &D,
+    selection: LibdrmNativePrimaryPlaneSelection,
+    descriptor: LiveRendererScanoutBufferDescriptor,
+    plane_fds: [Option<OwnedFd>; 4],
+) -> LibdrmNativePrimaryPlaneResourceCreateResult
+where
+    D: LibdrmNativePrimaryPlaneResourceDevice,
+{
+    create_native_primary_plane_resources_from_dma_bufs_with_policy(
+        device, selection, descriptor, plane_fds, false,
+    )
+}
+
+#[cfg(feature = "libdrm-events")]
+fn create_native_primary_plane_resources_from_dma_bufs_with_policy<D>(
+    device: &D,
+    selection: LibdrmNativePrimaryPlaneSelection,
+    descriptor: LiveRendererScanoutBufferDescriptor,
+    plane_fds: [Option<OwnedFd>; 4],
+    create_mode_blob: bool,
+) -> LibdrmNativePrimaryPlaneResourceCreateResult
+where
+    D: LibdrmNativePrimaryPlaneResourceDevice,
+{
+    if !is_valid_native_primary_plane_scanout_size(selection.size) {
+        return LibdrmNativePrimaryPlaneResourceCreateResult {
+            status: LibdrmNativePrimaryPlaneResourceCreateStatus::InvalidSelectionSize,
+            framebuffer: Some(LibdrmNativePrimaryPlaneFramebufferCreateDetail::NotAttempted),
+            resources: None,
+            cleanup: None,
+        };
+    }
+
+    let Some(source_buffer) = LibdrmRendererScanoutBuffer::from_descriptor(descriptor) else {
+        return LibdrmNativePrimaryPlaneResourceCreateResult {
+            status: LibdrmNativePrimaryPlaneResourceCreateStatus::InvalidBuffer,
+            framebuffer: Some(LibdrmNativePrimaryPlaneFramebufferCreateDetail::NotAttempted),
+            resources: None,
+            cleanup: None,
+        };
+    };
+
+    if let Some(status) =
+        invalid_native_primary_plane_scanout_buffer_status(selection, &source_buffer)
+    {
+        return LibdrmNativePrimaryPlaneResourceCreateResult {
+            status,
+            framebuffer: Some(LibdrmNativePrimaryPlaneFramebufferCreateDetail::NotAttempted),
+            resources: None,
+            cleanup: None,
+        };
+    }
+
+    let imported = import_scanout_dma_bufs(device, descriptor, plane_fds);
+    let Some(imported) = imported.imported else {
+        return LibdrmNativePrimaryPlaneResourceCreateResult {
+            status: LibdrmNativePrimaryPlaneResourceCreateStatus::BufferImportFailed,
+            framebuffer: Some(LibdrmNativePrimaryPlaneFramebufferCreateDetail::NotAttempted),
+            resources: None,
+            cleanup: imported.cleanup,
+        };
+    };
+
+    let Some(buffer) = LibdrmRendererScanoutBuffer::from_descriptor_and_imported_plane_handles(
+        descriptor,
+        imported.plane_handles,
+    ) else {
+        let cleanup = cleanup_imported_buffers_after_failure(
+            device,
+            imported.cleanup_handles,
+            selection.size,
+        );
+        return LibdrmNativePrimaryPlaneResourceCreateResult {
+            status: LibdrmNativePrimaryPlaneResourceCreateStatus::InvalidBuffer,
+            framebuffer: Some(LibdrmNativePrimaryPlaneFramebufferCreateDetail::NotAttempted),
+            resources: None,
+            cleanup,
+        };
+    };
+
+    let mode_blob = if create_mode_blob {
+        match device.create_mode_blob_for_selection(selection) {
+            Ok(mode_blob) if mode_blob != 0 => Some(mode_blob),
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+                let cleanup = cleanup_imported_buffers_after_failure(
+                    device,
+                    imported.cleanup_handles,
+                    selection.size,
+                );
+                return LibdrmNativePrimaryPlaneResourceCreateResult {
+                    status: LibdrmNativePrimaryPlaneResourceCreateStatus::MissingMode,
+                    framebuffer: Some(
+                        LibdrmNativePrimaryPlaneFramebufferCreateDetail::NotAttempted,
+                    ),
+                    resources: None,
+                    cleanup,
+                };
+            }
+            Err(_) | Ok(_) => {
+                let cleanup = cleanup_imported_buffers_after_failure(
+                    device,
+                    imported.cleanup_handles,
+                    selection.size,
+                );
+                return LibdrmNativePrimaryPlaneResourceCreateResult {
+                    status: LibdrmNativePrimaryPlaneResourceCreateStatus::ModeBlobCreateFailed,
+                    framebuffer: Some(
+                        LibdrmNativePrimaryPlaneFramebufferCreateDetail::NotAttempted,
+                    ),
+                    resources: None,
+                    cleanup,
+                };
+            }
+        }
+    } else {
+        None
+    };
+
+    let framebuffer_create = create_scanout_framebuffer(device, &buffer);
+    let Some(framebuffer) = framebuffer_create.framebuffer else {
+        let cleanup = cleanup_after_framebuffer_create_failure(
+            device,
+            mode_blob,
+            imported.cleanup_handles,
+            selection.size,
+        );
+        return LibdrmNativePrimaryPlaneResourceCreateResult {
+            status: LibdrmNativePrimaryPlaneResourceCreateStatus::FramebufferCreateFailed,
+            framebuffer: Some(framebuffer_create.detail),
+            resources: None,
+            cleanup,
+        };
+    };
+
+    LibdrmNativePrimaryPlaneResourceCreateResult {
+        status: LibdrmNativePrimaryPlaneResourceCreateStatus::Created,
+        framebuffer: Some(framebuffer_create.detail),
+        resources: Some(
+            LibdrmNativePrimaryPlaneResourceBundle::new_with_imported_buffers(
+                framebuffer,
+                mode_blob,
+                imported.cleanup_handles,
+                selection.size,
+            ),
+        ),
+        cleanup: None,
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+struct LibdrmNativePrimaryPlaneImportedBuffer {
+    plane_handles: [Option<drm::buffer::Handle>; 4],
+    cleanup_handles: [Option<drm::buffer::Handle>; 4],
+}
+
+#[cfg(feature = "libdrm-events")]
+struct LibdrmNativePrimaryPlaneImportResult {
+    imported: Option<LibdrmNativePrimaryPlaneImportedBuffer>,
+    cleanup: Option<LibdrmNativePrimaryPlaneResourceCleanup>,
+}
+
+#[cfg(feature = "libdrm-events")]
+fn import_scanout_dma_bufs<D>(
+    device: &D,
+    descriptor: LiveRendererScanoutBufferDescriptor,
+    plane_fds: [Option<OwnedFd>; 4],
+) -> LibdrmNativePrimaryPlaneImportResult
+where
+    D: LibdrmNativePrimaryPlaneResourceDevice,
+{
+    let mut plane_handles = [None; 4];
+    let mut cleanup_handles = [None; 4];
+    let mut index = 0;
+    while index < descriptor.plane_count as usize {
+        let Some(fd) = plane_fds[index].as_ref() else {
+            let cleanup =
+                cleanup_imported_buffers_after_failure(device, cleanup_handles, descriptor.size);
+            return LibdrmNativePrimaryPlaneImportResult {
+                imported: None,
+                cleanup,
+            };
+        };
+        match device.import_scanout_dma_buf(fd.as_fd()) {
+            Ok(handle) => {
+                plane_handles[index] = Some(handle);
+                add_unique_imported_buffer_for_cleanup(&mut cleanup_handles, handle);
+            }
+            Err(_) => {
+                let cleanup = cleanup_imported_buffers_after_failure(
+                    device,
+                    cleanup_handles,
+                    descriptor.size,
+                );
+                return LibdrmNativePrimaryPlaneImportResult {
+                    imported: None,
+                    cleanup,
+                };
+            }
+        }
+        index += 1;
+    }
+
+    LibdrmNativePrimaryPlaneImportResult {
+        imported: Some(LibdrmNativePrimaryPlaneImportedBuffer {
+            plane_handles,
+            cleanup_handles,
+        }),
+        cleanup: None,
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+fn add_unique_imported_buffer_for_cleanup(
+    cleanup_handles: &mut [Option<drm::buffer::Handle>; 4],
+    handle: drm::buffer::Handle,
+) {
+    if cleanup_handles.contains(&Some(handle)) {
+        return;
+    }
+    if let Some(slot) = cleanup_handles.iter_mut().find(|slot| slot.is_none()) {
+        *slot = Some(handle);
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+fn cleanup_imported_buffers_after_failure<D>(
+    device: &D,
+    imported_buffers: [Option<drm::buffer::Handle>; 4],
+    size: Size,
+) -> Option<LibdrmNativePrimaryPlaneResourceCleanup>
+where
+    D: LibdrmNativePrimaryPlaneResourceDevice,
+{
+    destroy_native_primary_plane_resource_cleanup(
+        device,
+        LibdrmNativePrimaryPlaneResourceCleanup::from_imported_buffers(imported_buffers, size),
+    )
+    .cleanup
+}
+
+#[cfg(feature = "libdrm-events")]
+fn cleanup_after_framebuffer_create_failure<D>(
+    device: &D,
+    mode_blob: Option<u64>,
+    imported_buffers: [Option<drm::buffer::Handle>; 4],
+    size: Size,
+) -> Option<LibdrmNativePrimaryPlaneResourceCleanup>
+where
+    D: LibdrmNativePrimaryPlaneResourceDevice,
+{
+    let cleanup = match mode_blob {
+        Some(mode_blob) => {
+            LibdrmNativePrimaryPlaneResourceCleanup::from_mode_blob_and_imported_buffers(
+                mode_blob,
+                imported_buffers,
+                size,
+            )
+        }
+        None => {
+            LibdrmNativePrimaryPlaneResourceCleanup::from_imported_buffers(imported_buffers, size)
+        }
+    };
+    destroy_native_primary_plane_resource_cleanup(device, cleanup).cleanup
 }
 
 #[cfg(feature = "libdrm-events")]

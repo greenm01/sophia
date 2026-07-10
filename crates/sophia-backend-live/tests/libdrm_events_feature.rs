@@ -1,6 +1,10 @@
 #![cfg(feature = "libdrm-events")]
 
-use std::{io, sync::mpsc};
+use std::{
+    io,
+    os::fd::{BorrowedFd, OwnedFd},
+    sync::mpsc,
+};
 
 use sophia_backend_live::{
     CompositorBackendTickInput, FakeLibdrmNativePageFlipReader, FakeLibdrmPageFlipEventPoller,
@@ -45,6 +49,7 @@ use sophia_backend_live::{
     LivePageFlipEvent, LivePageFlipEventStatus, LiveRenderedPrimaryPlaneScanoutBackpressureReport,
     LiveRenderedPrimaryPlaneScanoutBackpressureStatus, LiveRenderedPrimaryPlaneScanoutSubmitStatus,
     LiveRenderedScanoutBufferExport, LiveRenderedScanoutBufferExporter,
+    LiveRenderedScanoutBufferPrimeSource, LiveRenderedScanoutDmaBufFds,
     LiveRendererScanoutBufferExportDetail, LiveRuntimeRenderedScanoutEvidenceFailureReport,
     LiveRuntimeRenderedScanoutEvidenceFailureStatus,
     LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus,
@@ -54,7 +59,9 @@ use sophia_backend_live::{
     RealAtomicScanoutCardSelectionStatus, RealAtomicScanoutPageFlipSessionStatus,
     RealAtomicScanoutPageFlipWaitPolicy, RuntimeScanoutState, Size,
     build_native_primary_plane_atomic_request, build_native_primary_plane_page_flip_atomic_request,
-    create_native_primary_plane_page_flip_resources, create_native_primary_plane_resources,
+    create_native_primary_plane_page_flip_resources,
+    create_native_primary_plane_page_flip_resources_from_dma_bufs,
+    create_native_primary_plane_resources, create_native_primary_plane_resources_from_dma_bufs,
     decode_native_page_flip_batch, destroy_native_primary_plane_resources, discover_live_backend,
     discover_native_primary_plane_property_handles, libdrm_dependency_admission_report,
     libdrm_fd_authority_report, native_libdrm_event_adapter_report,
@@ -832,6 +839,86 @@ impl LibdrmNativePrimaryPlaneResourceDevice for FakeModifierOnlyPrimaryPlaneReso
 }
 
 #[derive(Debug)]
+struct FakePrimePrimaryPlaneResourceDevice {
+    mode_blob: io::Result<u64>,
+    framebuffer: io::Result<drm::control::framebuffer::Handle>,
+    imported_buffer: io::Result<drm::buffer::Handle>,
+    close_buffer: io::Result<()>,
+    destroy_framebuffer: io::Result<()>,
+    destroy_mode_blob: io::Result<()>,
+    expected_framebuffer_buffer: Option<drm::buffer::Handle>,
+}
+
+impl LibdrmNativePrimaryPlaneResourceDevice for FakePrimePrimaryPlaneResourceDevice {
+    fn create_mode_blob_for_selection(
+        &self,
+        _selection: sophia_backend_live::LibdrmNativePrimaryPlaneSelection,
+    ) -> io::Result<u64> {
+        clone_io_result(&self.mode_blob)
+    }
+
+    fn add_scanout_framebuffer_with_modifiers<B>(
+        &self,
+        buffer: &B,
+    ) -> io::Result<drm::control::framebuffer::Handle>
+    where
+        B: drm::buffer::PlanarBuffer + ?Sized,
+    {
+        if let Some(expected) = self.expected_framebuffer_buffer {
+            assert_eq!(buffer.handles()[0], Some(expected));
+        }
+        clone_io_result(&self.framebuffer)
+    }
+
+    fn add_scanout_framebuffer_without_modifiers<B>(
+        &self,
+        buffer: &B,
+    ) -> io::Result<drm::control::framebuffer::Handle>
+    where
+        B: drm::buffer::PlanarBuffer + ?Sized,
+    {
+        if let Some(expected) = self.expected_framebuffer_buffer {
+            assert_eq!(buffer.handles()[0], Some(expected));
+        }
+        clone_io_result(&self.framebuffer)
+    }
+
+    fn add_legacy_scanout_framebuffer<B>(
+        &self,
+        buffer: &B,
+        _depth: u32,
+        _bpp: u32,
+    ) -> io::Result<drm::control::framebuffer::Handle>
+    where
+        B: drm::buffer::Buffer + ?Sized,
+    {
+        if let Some(expected) = self.expected_framebuffer_buffer {
+            assert_eq!(buffer.handle(), expected);
+        }
+        clone_io_result(&self.framebuffer)
+    }
+
+    fn destroy_scanout_framebuffer(
+        &self,
+        _framebuffer: drm::control::framebuffer::Handle,
+    ) -> io::Result<()> {
+        clone_io_result(&self.destroy_framebuffer)
+    }
+
+    fn import_scanout_dma_buf(&self, _fd: BorrowedFd<'_>) -> io::Result<drm::buffer::Handle> {
+        clone_io_result(&self.imported_buffer)
+    }
+
+    fn close_scanout_buffer(&self, _handle: drm::buffer::Handle) -> io::Result<()> {
+        clone_io_result(&self.close_buffer)
+    }
+
+    fn destroy_mode_blob(&self, _mode_blob: u64) -> io::Result<()> {
+        clone_io_result(&self.destroy_mode_blob)
+    }
+}
+
+#[derive(Debug)]
 struct FakeNativePrimaryPlaneScanoutDevice {
     selection: FakeNativeKmsSelectionDevice,
     properties: FakeNativePropertyLookupDevice,
@@ -1000,6 +1087,10 @@ fn framebuffer_handle() -> drm::control::framebuffer::Handle {
     drm::control::from_u32(14).expect("test framebuffer handle should be nonzero")
 }
 
+fn buffer_handle(raw: u32) -> drm::buffer::Handle {
+    drm::control::from_u32(raw).expect("test buffer handle should be nonzero")
+}
+
 fn primary_plane_properties() -> LibdrmNativePrimaryPlanePropertyHandles {
     LibdrmNativePrimaryPlanePropertyHandles::new(
         property_handle(101),
@@ -1089,6 +1180,26 @@ fn full_primary_plane_resource_device() -> FakeNativePrimaryPlaneResourceDevice 
         destroy_framebuffer: Ok(()),
         destroy_mode_blob: Ok(()),
     }
+}
+
+fn full_prime_primary_plane_resource_device() -> FakePrimePrimaryPlaneResourceDevice {
+    let imported = buffer_handle(33);
+    FakePrimePrimaryPlaneResourceDevice {
+        mode_blob: Ok(15),
+        framebuffer: Ok(framebuffer_handle()),
+        imported_buffer: Ok(imported),
+        close_buffer: Ok(()),
+        destroy_framebuffer: Ok(()),
+        destroy_mode_blob: Ok(()),
+        expected_framebuffer_buffer: Some(imported),
+    }
+}
+
+fn test_dma_buf_plane_fds() -> [Option<OwnedFd>; 4] {
+    let fd: OwnedFd = std::fs::File::open("/dev/null")
+        .expect("test host should expose /dev/null")
+        .into();
+    [Some(fd), None, None, None]
 }
 
 fn full_primary_plane_scanout_device() -> FakeNativePrimaryPlaneScanoutDevice {
@@ -1221,6 +1332,12 @@ impl drm::buffer::PlanarBuffer for FakeDrmBuffer {
 #[derive(Debug, Eq, PartialEq)]
 struct FakeRenderedScanoutOwner {
     raw: u32,
+}
+
+impl LiveRenderedScanoutBufferPrimeSource for FakeRenderedScanoutOwner {
+    fn export_scanout_dma_buf_fds(&self) -> io::Result<Option<LiveRenderedScanoutDmaBufFds>> {
+        Ok(None)
+    }
 }
 
 struct FakeRenderedScanoutExporter {
@@ -4856,6 +4973,108 @@ fn native_libdrm_primary_plane_resource_creation_fails_closed() {
         .expect("failed framebuffer registration must retain failed mode blob cleanup");
     assert_eq!(
         cleanup.retry(&full_primary_plane_resource_device()).status,
+        LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed
+    );
+}
+
+#[test]
+fn native_libdrm_primary_plane_resources_import_dma_buf_handles_for_framebuffer() {
+    let selected = select_native_primary_plane_target(&full_kms_selection_device())
+        .selection
+        .expect("complete KMS path should select a target");
+    let created = create_native_primary_plane_page_flip_resources_from_dma_bufs(
+        &full_prime_primary_plane_resource_device(),
+        selected,
+        scanout_descriptor(selected.size()),
+        test_dma_buf_plane_fds(),
+    );
+
+    assert_eq!(
+        created.status,
+        LibdrmNativePrimaryPlaneResourceCreateStatus::Created
+    );
+    assert_eq!(
+        created.framebuffer,
+        Some(LibdrmNativePrimaryPlaneFramebufferCreateDetail::CreatedWithAddFb2)
+    );
+    let destroyed = destroy_native_primary_plane_resources(
+        &full_prime_primary_plane_resource_device(),
+        created
+            .resources
+            .expect("created PRIME resources should be destroyable"),
+    );
+    assert_eq!(
+        destroyed.status,
+        LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed
+    );
+}
+
+#[test]
+fn native_libdrm_primary_plane_resources_retain_imported_handles_after_framebuffer_failure() {
+    let selected = select_native_primary_plane_target(&full_kms_selection_device())
+        .selection
+        .expect("complete KMS path should select a target");
+    let created = create_native_primary_plane_page_flip_resources_from_dma_bufs(
+        &FakePrimePrimaryPlaneResourceDevice {
+            framebuffer: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+            close_buffer: Err(io::Error::other("test imported buffer close failed")),
+            ..full_prime_primary_plane_resource_device()
+        },
+        selected,
+        scanout_descriptor(selected.size()),
+        test_dma_buf_plane_fds(),
+    );
+
+    assert_eq!(
+        created.status,
+        LibdrmNativePrimaryPlaneResourceCreateStatus::FramebufferCreateFailed
+    );
+    assert_eq!(
+        created.framebuffer,
+        Some(LibdrmNativePrimaryPlaneFramebufferCreateDetail::AddFb2ThenLegacyAddFbFailed)
+    );
+    let cleanup = created
+        .cleanup
+        .expect("failed framebuffer creation should retain imported buffer cleanup debt");
+    assert_eq!(
+        cleanup
+            .retry(&full_prime_primary_plane_resource_device())
+            .status,
+        LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed
+    );
+}
+
+#[test]
+fn native_libdrm_primary_plane_resources_keep_imported_handle_cleanup_retryable_after_retire() {
+    let selected = select_native_primary_plane_target(&full_kms_selection_device())
+        .selection
+        .expect("complete KMS path should select a target");
+    let created = create_native_primary_plane_resources_from_dma_bufs(
+        &full_prime_primary_plane_resource_device(),
+        selected,
+        scanout_descriptor(selected.size()),
+        test_dma_buf_plane_fds(),
+    );
+    let resources = created
+        .resources
+        .expect("created PRIME modeset resources should be destroyable");
+    let close_failed = FakePrimePrimaryPlaneResourceDevice {
+        close_buffer: Err(io::Error::other("test imported buffer close failed")),
+        ..full_prime_primary_plane_resource_device()
+    };
+    let destroyed = destroy_native_primary_plane_resources(&close_failed, resources);
+
+    assert_eq!(
+        destroyed.status,
+        LibdrmNativePrimaryPlaneResourceDestroyStatus::ImportedBufferCloseFailed
+    );
+    let cleanup = destroyed
+        .cleanup
+        .expect("failed imported buffer close should retain cleanup debt");
+    assert_eq!(
+        cleanup
+            .retry(&full_prime_primary_plane_resource_device())
+            .status,
         LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed
     );
 }

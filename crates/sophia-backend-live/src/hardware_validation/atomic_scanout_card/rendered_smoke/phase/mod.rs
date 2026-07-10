@@ -77,7 +77,19 @@ impl RealAtomicScanoutPageFlipSession {
             return evidence;
         };
 
-        let mut submit =
+        let prime_fds = owned_buffer.export_scanout_dma_buf_fds().ok();
+        let mut submit = if let Some(prime_fds) = prime_fds {
+            submit_native_primary_plane_scanout_from_selection_and_renderer_dma_bufs_with_policy(
+                self.card(),
+                LibdrmNativePrimaryPlaneSelectionResult {
+                    status: LibdrmNativePrimaryPlaneSelectionStatus::Selected,
+                    selection: Some(selected),
+                },
+                descriptor,
+                prime_fds.into_plane_fds(),
+                submit_policy_for_smoke_phase(phase),
+            )
+        } else {
             submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_policy(
                 self.card(),
                 LibdrmNativePrimaryPlaneSelectionResult {
@@ -86,7 +98,8 @@ impl RealAtomicScanoutPageFlipSession {
                 },
                 descriptor,
                 submit_policy_for_smoke_phase(phase),
-            );
+            )
+        };
         if submit.status != LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
         {
             return reduced_smoke_evidence_for_phase(

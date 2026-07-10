@@ -1,4 +1,6 @@
 use crate::prelude::*;
+#[cfg(feature = "libdrm-events")]
+use std::os::fd::BorrowedFd;
 
 #[cfg(feature = "libdrm-events")]
 pub trait LibdrmNativePrimaryPlaneResourceDevice {
@@ -34,6 +36,17 @@ pub trait LibdrmNativePrimaryPlaneResourceDevice {
         &self,
         framebuffer: drm::control::framebuffer::Handle,
     ) -> io::Result<()>;
+
+    fn import_scanout_dma_buf(&self, _fd: BorrowedFd<'_>) -> io::Result<drm::buffer::Handle> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "scanout DMA-BUF import is unavailable",
+        ))
+    }
+
+    fn close_scanout_buffer(&self, _handle: drm::buffer::Handle) -> io::Result<()> {
+        Ok(())
+    }
 
     fn destroy_mode_blob(&self, mode_blob: u64) -> io::Result<()>;
 }
@@ -99,6 +112,14 @@ where
         framebuffer: drm::control::framebuffer::Handle,
     ) -> io::Result<()> {
         self.destroy_framebuffer(framebuffer)
+    }
+
+    fn import_scanout_dma_buf(&self, fd: BorrowedFd<'_>) -> io::Result<drm::buffer::Handle> {
+        self.prime_fd_to_buffer(fd)
+    }
+
+    fn close_scanout_buffer(&self, handle: drm::buffer::Handle) -> io::Result<()> {
+        self.close_buffer(handle)
     }
 
     fn destroy_mode_blob(&self, mode_blob: u64) -> io::Result<()> {

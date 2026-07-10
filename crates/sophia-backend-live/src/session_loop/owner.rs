@@ -52,7 +52,7 @@ impl LiveBackendSessionLoop {
             + LibdrmNativePrimaryPlaneResourceDevice
             + LibdrmNativeAtomicCommitDevice,
         E: LiveRenderedScanoutBufferExporter,
-        E::Owner: 'static,
+        E::Owner: LiveRenderedScanoutBufferPrimeSource + 'static,
         R: LibdrmNativePageFlipReader,
     {
         runtime

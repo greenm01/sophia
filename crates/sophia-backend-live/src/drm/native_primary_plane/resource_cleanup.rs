@@ -13,6 +13,7 @@ pub enum LibdrmNativePrimaryPlaneResourceDestroyStatus {
     Destroyed,
     FramebufferDestroyFailed,
     ModeBlobDestroyFailed,
+    ImportedBufferCloseFailed,
 }
 
 #[cfg(feature = "libdrm-events")]
@@ -20,6 +21,7 @@ pub enum LibdrmNativePrimaryPlaneResourceDestroyStatus {
 pub struct LibdrmNativePrimaryPlaneResourceCleanup {
     framebuffer: Option<drm::control::framebuffer::Handle>,
     mode_blob: Option<u64>,
+    imported_buffers: [Option<drm::buffer::Handle>; 4],
     size: Size,
 }
 
@@ -29,6 +31,7 @@ impl LibdrmNativePrimaryPlaneResourceCleanup {
         Self {
             framebuffer: Some(resources.framebuffer),
             mode_blob: resources.mode_blob,
+            imported_buffers: resources.imported_buffers,
             size: resources.size,
         }
     }
@@ -37,6 +40,32 @@ impl LibdrmNativePrimaryPlaneResourceCleanup {
         Self {
             framebuffer: None,
             mode_blob: Some(mode_blob),
+            imported_buffers: [None, None, None, None],
+            size,
+        }
+    }
+
+    pub const fn from_imported_buffers(
+        imported_buffers: [Option<drm::buffer::Handle>; 4],
+        size: Size,
+    ) -> Self {
+        Self {
+            framebuffer: None,
+            mode_blob: None,
+            imported_buffers,
+            size,
+        }
+    }
+
+    pub const fn from_mode_blob_and_imported_buffers(
+        mode_blob: u64,
+        imported_buffers: [Option<drm::buffer::Handle>; 4],
+        size: Size,
+    ) -> Self {
+        Self {
+            framebuffer: None,
+            mode_blob: Some(mode_blob),
+            imported_buffers,
             size,
         }
     }
@@ -91,9 +120,27 @@ where
         cleanup.mode_blob = None;
     }
 
-    if cleanup.framebuffer.is_some() || cleanup.mode_blob.is_some() {
+    let mut index = 0;
+    while index < cleanup.imported_buffers.len() {
+        if let Some(handle) = cleanup.imported_buffers[index] {
+            if device.close_scanout_buffer(handle).is_err() {
+                return LibdrmNativePrimaryPlaneResourceDestroyReport {
+                    status:
+                        LibdrmNativePrimaryPlaneResourceDestroyStatus::ImportedBufferCloseFailed,
+                    cleanup: Some(cleanup),
+                };
+            }
+            cleanup.imported_buffers[index] = None;
+        }
+        index += 1;
+    }
+
+    if cleanup.framebuffer.is_some()
+        || cleanup.mode_blob.is_some()
+        || cleanup.imported_buffers.iter().any(Option::is_some)
+    {
         return LibdrmNativePrimaryPlaneResourceDestroyReport {
-            status: LibdrmNativePrimaryPlaneResourceDestroyStatus::ModeBlobDestroyFailed,
+            status: LibdrmNativePrimaryPlaneResourceDestroyStatus::ImportedBufferCloseFailed,
             cleanup: Some(cleanup),
         };
     }

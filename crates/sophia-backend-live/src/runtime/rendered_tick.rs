@@ -17,7 +17,7 @@ where
             + LibdrmNativePrimaryPlaneResourceDevice
             + LibdrmNativeAtomicCommitDevice,
         E: LiveRenderedScanoutBufferExporter,
-        E::Owner: 'static,
+        E::Owner: LiveRenderedScanoutBufferPrimeSource + 'static,
     {
         let rendered_primary_plane_scanout_cleanup_retry = self
             .rendered_primary_plane_scanout_cleanup_pending()
@@ -97,7 +97,7 @@ where
             + LibdrmNativePrimaryPlaneResourceDevice
             + LibdrmNativeAtomicCommitDevice,
         E: LiveRenderedScanoutBufferExporter,
-        E::Owner: 'static,
+        E::Owner: LiveRenderedScanoutBufferPrimeSource + 'static,
         R: LibdrmNativePageFlipReader,
     {
         let native_page_flip =

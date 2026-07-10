@@ -21,12 +21,31 @@ impl LibdrmRendererScanoutBuffer {
         }
 
         let plane_handles = scanout_plane_handles_from_descriptor(descriptor)?;
+        Self::from_descriptor_and_plane_handles(descriptor, plane_handles)
+    }
 
+    pub fn from_descriptor_and_imported_plane_handles(
+        descriptor: LiveRendererScanoutBufferDescriptor,
+        plane_handles: [Option<drm::buffer::Handle>; 4],
+    ) -> Option<Self> {
+        if !descriptor.is_valid_scanout_buffer()
+            || !imported_plane_handles_match_descriptor(descriptor, plane_handles)
+        {
+            return None;
+        }
+
+        Self::from_descriptor_and_plane_handles(descriptor, plane_handles)
+    }
+
+    fn from_descriptor_and_plane_handles(
+        descriptor: LiveRendererScanoutBufferDescriptor,
+        plane_handles: [Option<drm::buffer::Handle>; 4],
+    ) -> Option<Self> {
         Some(Self {
             size: descriptor.size,
             pitch: descriptor.pitch,
             format: descriptor.format,
-            handle: drm::control::from_u32(descriptor.gem_handle)?,
+            handle: plane_handles[0]?,
             plane_handles,
             plane_pitches: descriptor.plane_pitches,
             plane_offsets: descriptor.plane_offsets,
@@ -49,6 +68,25 @@ fn scanout_plane_handles_from_descriptor(
     }
 
     Some(handles)
+}
+
+#[cfg(feature = "libdrm-events")]
+fn imported_plane_handles_match_descriptor(
+    descriptor: LiveRendererScanoutBufferDescriptor,
+    plane_handles: [Option<drm::buffer::Handle>; 4],
+) -> bool {
+    let mut index = 0;
+    while index < plane_handles.len() {
+        if index < descriptor.plane_count as usize {
+            if plane_handles[index].is_none() {
+                return false;
+            }
+        } else if plane_handles[index].is_some() {
+            return false;
+        }
+        index += 1;
+    }
+    true
 }
 
 #[cfg(feature = "libdrm-events")]

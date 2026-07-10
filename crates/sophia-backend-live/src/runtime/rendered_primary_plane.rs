@@ -48,6 +48,7 @@ where
             + LibdrmNativePrimaryPlaneResourceDevice
             + LibdrmNativeAtomicCommitDevice,
         E: LiveRenderedScanoutBufferExporter,
+        E::Owner: LiveRenderedScanoutBufferPrimeSource,
     {
         submit_rendered_primary_plane_scanout_from_scanout_target_with(
             self.kms_scanout_target.status,
@@ -68,7 +69,7 @@ where
             + LibdrmNativePrimaryPlaneResourceDevice
             + LibdrmNativeAtomicCommitDevice,
         E: LiveRenderedScanoutBufferExporter,
-        E::Owner: 'static,
+        E::Owner: LiveRenderedScanoutBufferPrimeSource + 'static,
     {
         track_rendered_primary_plane_scanout_submit_from_target_with(
             self.kms_scanout_target.status,

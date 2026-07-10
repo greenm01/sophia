@@ -29,7 +29,7 @@ where
         + LibdrmNativePrimaryPlaneResourceDevice
         + LibdrmNativeAtomicCommitDevice,
     E: LiveRenderedScanoutBufferExporter,
-    E::Owner: 'static,
+    E::Owner: LiveRenderedScanoutBufferPrimeSource + 'static,
 {
     fn poll_x_events(&mut self) -> Result<SessionRuntimeObservation, sophia_engine::EngineError> {
         self.inner.poll_x_events()

@@ -27,7 +27,7 @@ where
         + LibdrmNativePrimaryPlaneResourceDevice
         + LibdrmNativeAtomicCommitDevice,
     E: LiveRenderedScanoutBufferExporter,
-    E::Owner: 'static,
+    E::Owner: LiveRenderedScanoutBufferPrimeSource + 'static,
 {
     if rendered_primary_plane_scanout_submission.is_some() {
         *rendered_primary_plane_runtime_scanout_state = Some(RuntimeScanoutState::Deferred);

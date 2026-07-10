@@ -1,4 +1,4 @@
-use std::os::fd::AsFd;
+use std::os::fd::{AsFd, OwnedFd};
 
 use crate::{
     LiveGbmEglFrameTargetRecord, LiveRendererScanoutBufferDescriptor,
@@ -14,6 +14,31 @@ pub struct NativeGbmOwnedScanoutBuffer {
 impl NativeGbmOwnedScanoutBuffer {
     pub const fn descriptor(&self) -> LiveRendererScanoutBufferDescriptor {
         self.descriptor
+    }
+
+    pub fn export_scanout_dma_buf_fds(&self) -> std::io::Result<NativeGbmScanoutBufferPlaneFds> {
+        self._buffer
+            .export_plane_fds()
+            .map(NativeGbmScanoutBufferPlaneFds::new)
+            .map_err(|_error| std::io::Error::other("GBM scanout DMA-BUF export failed"))
+    }
+}
+
+pub struct NativeGbmScanoutBufferPlaneFds {
+    inner: sophia_renderer_native_egl::NativeGbmOwnedScanoutBufferPlaneFds,
+}
+
+impl NativeGbmScanoutBufferPlaneFds {
+    fn new(inner: sophia_renderer_native_egl::NativeGbmOwnedScanoutBufferPlaneFds) -> Self {
+        Self { inner }
+    }
+
+    pub const fn plane_count(&self) -> u8 {
+        self.inner.plane_count()
+    }
+
+    pub fn into_plane_fds(self) -> [Option<OwnedFd>; 4] {
+        self.inner.into_plane_fds()
     }
 }
 

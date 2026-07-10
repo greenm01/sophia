@@ -1,4 +1,4 @@
-use std::{ffi::c_void, ptr};
+use std::{ffi::c_void, os::fd::OwnedFd, ptr};
 
 use crate::gbm_platform::{
     EGL_PLATFORM_GBM_KHR,
@@ -21,6 +21,7 @@ pub struct NativeGbmOwnedScanoutBuffer {
     plane_handles: [u32; 4],
     plane_pitches: [u32; 4],
     plane_offsets: [u32; 4],
+    plane_fds: Option<[Option<OwnedFd>; 4]>,
     modifier: Option<u64>,
     // Drop order matters: the locked front buffer must release before the
     // surface it was locked from is destroyed.
@@ -67,6 +68,51 @@ impl NativeGbmOwnedScanoutBuffer {
 
     pub const fn modifier(&self) -> Option<u64> {
         self.modifier
+    }
+
+    pub fn export_plane_fds(
+        &self,
+    ) -> Result<NativeGbmOwnedScanoutBufferPlaneFds, NativeGbmScanoutBufferExportDetail> {
+        if self.plane_count == 0 || self.plane_count as usize > self.plane_handles.len() {
+            return Err(NativeGbmScanoutBufferExportDetail::InvalidBufferDescriptor);
+        }
+
+        let Some(retained_plane_fds) = &self.plane_fds else {
+            return Err(NativeGbmScanoutBufferExportDetail::InvalidBufferDescriptor);
+        };
+
+        let mut plane_fds = std::array::from_fn(|_| None);
+        let mut index = 0;
+        while index < self.plane_count as usize {
+            let Some(fd) = &retained_plane_fds[index] else {
+                return Err(NativeGbmScanoutBufferExportDetail::InvalidBufferDescriptor);
+            };
+            plane_fds[index] =
+                Some(fd.try_clone().map_err(|_error| {
+                    NativeGbmScanoutBufferExportDetail::InvalidBufferDescriptor
+                })?);
+            index += 1;
+        }
+
+        Ok(NativeGbmOwnedScanoutBufferPlaneFds {
+            plane_count: self.plane_count,
+            plane_fds,
+        })
+    }
+}
+
+pub struct NativeGbmOwnedScanoutBufferPlaneFds {
+    plane_count: u8,
+    plane_fds: [Option<OwnedFd>; 4],
+}
+
+impl NativeGbmOwnedScanoutBufferPlaneFds {
+    pub const fn plane_count(&self) -> u8 {
+        self.plane_count
+    }
+
+    pub fn into_plane_fds(self) -> [Option<OwnedFd>; 4] {
+        self.plane_fds
     }
 }
 
@@ -287,6 +333,7 @@ fn native_owned_scanout_buffer_from_bo(
     let plane_handles = scanout_plane_handles(&buffer, plane_count);
     let plane_pitches = scanout_plane_pitches(&buffer, plane_count);
     let plane_offsets = scanout_plane_offsets(&buffer, plane_count);
+    let plane_fds = capture_scanout_plane_fds(&buffer, plane_count).ok();
     if pitch == 0
         || gem_handle == 0
         || !is_supported_scanout_format(format)
@@ -305,6 +352,7 @@ fn native_owned_scanout_buffer_from_bo(
         plane_handles,
         plane_pitches,
         plane_offsets,
+        plane_fds,
         modifier: normalized_scanout_modifier(buffer.modifier()),
         _buffer: buffer,
         _surface: surface,
@@ -358,6 +406,23 @@ fn plane_offset(buffer: &gbm::BufferObject<()>, plane_count: u32, plane: i32) ->
     (plane < plane_count as i32)
         .then(|| buffer.offset(plane))
         .unwrap_or(0)
+}
+
+fn capture_scanout_plane_fds(
+    buffer: &gbm::BufferObject<()>,
+    plane_count: u32,
+) -> Result<[Option<OwnedFd>; 4], NativeGbmScanoutBufferExportDetail> {
+    let mut plane_fds = std::array::from_fn(|_| None);
+    let mut index = 0;
+    while index < plane_count as usize {
+        plane_fds[index] = Some(
+            buffer
+                .fd_for_plane(index as i32)
+                .map_err(|_error| NativeGbmScanoutBufferExportDetail::InvalidBufferDescriptor)?,
+        );
+        index += 1;
+    }
+    Ok(plane_fds)
 }
 
 fn is_valid_scanout_planes(

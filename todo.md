@@ -63,19 +63,34 @@ Current hardware smoke state from the DRM-master host:
 - [x] Try the fallback scanout-buffer strategy by making the rendered GBM/EGL
   exporter skip multi-plane exports and continue searching for a single-plane
   candidate.
-- [ ] Resume at framebuffer registration handle import. The latest smoke reaches
-  a single-plane XRGB8888 implicit buffer, but AddFB2 and legacy AddFB both fail
-  to register it:
+- [x] Resume at framebuffer registration handle import. The previous smoke
+  reached a single-plane XRGB8888 implicit buffer, but AddFB2 and legacy AddFB
+  both failed to register it:
 
   ```text
   sophia_atomic_scanout_evidence schema=10 phase=InitialModeset status=ResourceCreationFailed scanout_target=Ready rendered_context=Ready gbm_export=Exported gbm_export_detail=Exported scanout_buffer=Ready buffer_format=Xrgb8888 buffer_modifier=Implicit buffer_planes=Single properties=Discovered format_table=Present resources=FramebufferCreateFailed framebuffer=AddFb2ThenLegacyAddFbFailed request=none submit=ResourceCreationUnavailable request_scope=none commit_page_flip_event=none commit_nonblocking=none commit_allow_modeset=none commit_test_only=none page_flip_wait=CallbackMissing page_flip_poll=none page_flip=none retire=none retire_destroy=none retire_cleanup_pending=false
   ```
 
-- [ ] Add a backend-private PRIME import path for rendered GBM scanout buffers:
+- [x] Add a backend-private PRIME import path for rendered GBM scanout buffers:
   export per-plane DMA-BUF fds from the retained renderer owner, import them into
   the KMS submit device with `prime_fd_to_buffer`, use the imported handles for
-  AddFB2/AddFB, and close imported GEM handles on failure or after framebuffer
-  registration transfers ownership.
+  AddFB2/AddFB, and close imported GEM handles on failure or through resource
+  retire/cleanup.
+- [ ] Resume at post-import page-flip progression. PRIME import now carries the
+  initial modeset through imported-handle AddFB2 and page-flip retirement once:
+
+  ```text
+  sophia_atomic_scanout_evidence schema=10 phase=InitialModeset status=Passed scanout_target=Ready rendered_context=Ready gbm_export=Exported gbm_export_detail=Exported scanout_buffer=Ready buffer_format=Xrgb8888 buffer_modifier=Implicit buffer_planes=Single properties=Discovered format_table=Present resources=Created framebuffer=CreatedWithAddFb2 request=Built submit=SubmittedWaitingForPageFlip request_scope=Modeset commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=true commit_test_only=false page_flip_wait=Retired page_flip_poll=Emitted page_flip=Presented retire=RetiredAfterPageFlip retire_destroy=Destroyed retire_cleanup_pending=false
+  ```
+
+  The same run then reached a created framebuffer for the steady page-flip phase
+  and failed at non-modeset atomic submit. Subsequent retries submitted the
+  imported initial modeset but did not receive the first page-flip callback
+  before timeout:
+
+  ```text
+  sophia_atomic_scanout_evidence schema=10 phase=SteadyPageFlip status=AtomicSubmitFailed scanout_target=Ready rendered_context=Ready gbm_export=Exported gbm_export_detail=Exported scanout_buffer=Ready buffer_format=Xrgb8888 buffer_modifier=Implicit buffer_planes=Single properties=Discovered format_table=Present resources=Created framebuffer=CreatedWithAddFb2 request=Built submit=AtomicSubmitFailed request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false page_flip_wait=CallbackMissing page_flip_poll=none page_flip=none retire=none retire_destroy=none retire_cleanup_pending=false
+  ```
 - [ ] Keep `tools/check_atomic_scanout_local.sh` as the non-hardware gate before
   each retry, then rerun `tools/atomic_scanout_smoke.sh` from the DRM-master
   TTY and compare `buffer_modifier`, `buffer_planes`, `resources`, and

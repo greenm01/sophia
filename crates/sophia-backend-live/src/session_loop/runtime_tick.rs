@@ -26,7 +26,7 @@ where
             + LibdrmNativePrimaryPlaneResourceDevice
             + LibdrmNativeAtomicCommitDevice,
         E: LiveRenderedScanoutBufferExporter,
-        E::Owner: 'static,
+        E::Owner: LiveRenderedScanoutBufferPrimeSource + 'static,
         R: LibdrmNativePageFlipReader,
     {
         if readiness.input_ready {

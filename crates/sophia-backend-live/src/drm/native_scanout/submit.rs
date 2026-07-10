@@ -1,4 +1,5 @@
 use crate::prelude::*;
+use std::os::fd::OwnedFd;
 
 use super::commit::LibdrmNativeAtomicCommitDevice;
 
@@ -47,6 +48,46 @@ where
         + LibdrmNativePrimaryPlaneResourceDevice
         + LibdrmNativeAtomicCommitDevice,
 {
+    submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_optional_dma_bufs(
+        device, selection, descriptor, None, policy,
+    )
+}
+
+pub fn submit_native_primary_plane_scanout_from_selection_and_renderer_dma_bufs_with_policy<D>(
+    device: &D,
+    selection: LibdrmNativePrimaryPlaneSelectionResult,
+    descriptor: LiveRendererScanoutBufferDescriptor,
+    plane_fds: [Option<OwnedFd>; 4],
+    policy: LibdrmNativePrimaryPlaneScanoutSubmitPolicy,
+) -> LibdrmNativePrimaryPlaneScanoutSubmitResult
+where
+    D: LibdrmNativePropertyLookupDevice
+        + LibdrmNativePrimaryPlaneResourceDevice
+        + LibdrmNativeAtomicCommitDevice,
+{
+    submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_optional_dma_bufs(
+        device,
+        selection,
+        descriptor,
+        Some(plane_fds),
+        policy,
+    )
+}
+
+fn submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_optional_dma_bufs<
+    D,
+>(
+    device: &D,
+    selection: LibdrmNativePrimaryPlaneSelectionResult,
+    descriptor: LiveRendererScanoutBufferDescriptor,
+    plane_fds: Option<[Option<OwnedFd>; 4]>,
+    policy: LibdrmNativePrimaryPlaneScanoutSubmitPolicy,
+) -> LibdrmNativePrimaryPlaneScanoutSubmitResult
+where
+    D: LibdrmNativePropertyLookupDevice
+        + LibdrmNativePrimaryPlaneResourceDevice
+        + LibdrmNativeAtomicCommitDevice,
+{
     let scanout_buffer = if descriptor.is_valid_scanout_buffer() {
         LiveRendererScanoutBufferStatus::Ready
     } else {
@@ -71,14 +112,15 @@ where
         );
     };
 
-    let Some(buffer) = LibdrmRendererScanoutBuffer::from_descriptor(descriptor) else {
+    let buffer = LibdrmRendererScanoutBuffer::from_descriptor(descriptor);
+    if buffer.is_none() {
         return LibdrmNativePrimaryPlaneScanoutSubmitResult::from_descriptor(
             LibdrmNativePrimaryPlaneScanoutSubmitStatus::ScanoutBufferUnavailable,
             selection.status,
             scanout_buffer,
             descriptor,
         );
-    };
+    }
 
     let properties = discover_native_primary_plane_property_handles(
         device,
@@ -99,10 +141,27 @@ where
     let format_table =
         Some(LibdrmNativePrimaryPlaneFormatTableStatus::from_property_handles(property_handles));
 
-    let resources = if policy.allow_modeset {
-        create_native_primary_plane_resources(device, selected, &buffer)
-    } else {
-        create_native_primary_plane_page_flip_resources(device, selected, &buffer)
+    let resources = match (policy.allow_modeset, plane_fds) {
+        (true, Some(plane_fds)) => create_native_primary_plane_resources_from_dma_bufs(
+            device, selected, descriptor, plane_fds,
+        ),
+        (false, Some(plane_fds)) => create_native_primary_plane_page_flip_resources_from_dma_bufs(
+            device, selected, descriptor, plane_fds,
+        ),
+        (true, None) => create_native_primary_plane_resources(
+            device,
+            selected,
+            buffer
+                .as_ref()
+                .expect("validated descriptor should produce a buffer"),
+        ),
+        (false, None) => create_native_primary_plane_page_flip_resources(
+            device,
+            selected,
+            buffer
+                .as_ref()
+                .expect("validated descriptor should produce a buffer"),
+        ),
     };
     let Some(resource_bundle) = resources.resources else {
         let mut result = LibdrmNativePrimaryPlaneScanoutSubmitResult::from_descriptor(

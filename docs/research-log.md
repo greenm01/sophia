@@ -1139,6 +1139,23 @@ renderer-owned DMA-BUF fds, import them into the KMS submit device, register the
 framebuffer from KMS-local GEM handles, and close imported handles on failure or
 after framebuffer registration transfers ownership.
 
+The backend-private PRIME import path is now implemented. The renderer-native
+GBM owner captures per-plane DMA-BUF fds while the rendered GBM/EGL front buffer
+is still freshly locked, then hands out duplicated fds to backend-live submit.
+Backend-live imports those fds into the KMS submit device with
+`prime_fd_to_buffer`, builds AddFB2/AddFB from the imported KMS-local handles,
+and keeps imported GEM handles in the existing resource cleanup debt path.
+
+TTY3 evidence moved framebuffer registration past the previous `ENOENT` handle
+visibility failure. One smoke run produced `InitialModeset status=Passed` with
+`resources=Created`, `framebuffer=CreatedWithAddFb2`, `page_flip=Presented`,
+and `retire=RetiredAfterPageFlip`. The same run then reached
+`SteadyPageFlip resources=Created framebuffer=CreatedWithAddFb2` and failed at
+the non-modeset atomic submit. Later retries submitted the imported initial
+modeset but did not receive the first page-flip callback before timeout. The
+next investigation is therefore post-import page-flip progression, not
+framebuffer registration.
+
 The opt-in hardware smoke cannot complete in this environment. Its preflight
 stops before modesetting with reduced status `DeviceDirectoryUnavailable` and
 zero primary card counts. The remaining proof must run on a DRM-master-capable

@@ -16,6 +16,7 @@ where
         + LibdrmNativePrimaryPlaneResourceDevice
         + LibdrmNativeAtomicCommitDevice,
     E: LiveRenderedScanoutBufferExporter,
+    E::Owner: LiveRenderedScanoutBufferPrimeSource,
 {
     if scanout_target != LiveKmsScanoutTargetStatus::Ready {
         return LiveRenderedPrimaryPlaneScanoutSubmitResult::stopped_before_native_submit(
@@ -66,13 +67,23 @@ where
         );
     };
 
-    let mut submit =
+    let prime_fds = owner.export_scanout_dma_buf_fds().ok().flatten();
+    let mut submit = if let Some(prime_fds) = prime_fds {
+        submit_native_primary_plane_scanout_from_selection_and_renderer_dma_bufs_with_policy(
+            device,
+            selection,
+            descriptor,
+            prime_fds.into_plane_fds(),
+            LibdrmNativePrimaryPlaneScanoutSubmitPolicy::page_flip(),
+        )
+    } else {
         submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_policy(
             device,
             selection,
             descriptor,
             LibdrmNativePrimaryPlaneScanoutSubmitPolicy::page_flip(),
-        );
+        )
+    };
     if submit.status != LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip {
         return LiveRenderedPrimaryPlaneScanoutSubmitResult {
             status: LiveRenderedPrimaryPlaneScanoutSubmitStatus::PrimaryPlaneSubmitFailed,

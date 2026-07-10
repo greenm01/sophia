@@ -1,6 +1,9 @@
 use crate::api::*;
 
 #[cfg(feature = "libdrm-events")]
+use std::os::fd::OwnedFd;
+
+#[cfg(feature = "libdrm-events")]
 use sophia_renderer_live::{
     LiveRendererScanoutBufferDescriptor, LiveRendererScanoutBufferExportDetail,
     LiveRendererScanoutBufferExportStatus,
@@ -58,4 +61,50 @@ pub trait LiveRenderedScanoutBufferExporter {
         &mut self,
         target: LiveGbmEglFrameTargetRecord,
     ) -> LiveRenderedScanoutBufferExport<Self::Owner>;
+}
+
+#[cfg(feature = "libdrm-events")]
+pub trait LiveRenderedScanoutBufferPrimeSource {
+    fn export_scanout_dma_buf_fds(&self) -> std::io::Result<Option<LiveRenderedScanoutDmaBufFds>>;
+}
+
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+impl LiveRenderedScanoutBufferPrimeSource for sophia_renderer_live::NativeGbmOwnedScanoutBuffer {
+    fn export_scanout_dma_buf_fds(&self) -> std::io::Result<Option<LiveRenderedScanoutDmaBufFds>> {
+        self.export_scanout_dma_buf_fds()
+            .map(LiveRenderedScanoutDmaBufFds::from_native_gbm)
+            .map(Some)
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+pub struct LiveRenderedScanoutDmaBufFds {
+    plane_count: u8,
+    plane_fds: [Option<OwnedFd>; 4],
+}
+
+#[cfg(feature = "libdrm-events")]
+impl LiveRenderedScanoutDmaBufFds {
+    #[cfg(feature = "gbm-probe")]
+    fn from_native_gbm(fds: sophia_renderer_live::NativeGbmScanoutBufferPlaneFds) -> Self {
+        Self {
+            plane_count: fds.plane_count(),
+            plane_fds: fds.into_plane_fds(),
+        }
+    }
+
+    pub fn new_for_test(plane_fds: [Option<OwnedFd>; 4], plane_count: u8) -> Self {
+        Self {
+            plane_count,
+            plane_fds,
+        }
+    }
+
+    pub const fn plane_count(&self) -> u8 {
+        self.plane_count
+    }
+
+    pub fn into_plane_fds(self) -> [Option<OwnedFd>; 4] {
+        self.plane_fds
+    }
 }
