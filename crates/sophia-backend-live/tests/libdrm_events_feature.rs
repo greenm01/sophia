@@ -12,13 +12,15 @@ use sophia_backend_live::{
     LibdrmNativePageFlipSource, LibdrmNativePageFlipSourceReport, LibdrmNativePageFlipSourceStatus,
     LibdrmNativePollerDiagnostics, LibdrmNativeReadAndPollReport, LibdrmNativeReadLoopReport,
     LibdrmNativeReadLoopStatus, LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus,
-    LibdrmPageFlipEventPoller, LiveBackendConfig, LiveLibdrmPollerDiagnostics,
+    LibdrmPageFlipEventPoller, LiveBackendConfig, LiveHardwareValidationGateReport,
+    LiveHardwareValidationGateStatus, LiveHardwareValidationTarget, LiveLibdrmPollerDiagnostics,
     LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
     LiveLibdrmPollerStartupStatus, LivePageFlipCallback, LivePageFlipCallbackQueue,
     LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus,
     NativeLibdrmPageFlipEventPoller, OutputId, QueuedInputPoller, decode_native_page_flip_batch,
     discover_live_backend, libdrm_dependency_admission_report, libdrm_fd_authority_report,
     native_libdrm_event_adapter_report, native_libdrm_event_adapter_report_for_authority,
+    real_libdrm_events_validation_gate,
 };
 
 #[test]
@@ -28,6 +30,41 @@ fn libdrm_dependency_is_admitted_without_exposing_native_event_shape() {
         LibdrmDependencyAdmissionReport {
             status: LibdrmDependencyAdmissionStatus::TypedPageFlipEventAvailable,
         }
+    );
+}
+
+#[test]
+fn real_libdrm_event_validation_gate_is_explicit_and_reduced() {
+    let skipped = LiveHardwareValidationGateReport::from_env_presence(
+        LiveHardwareValidationTarget::LibdrmEvents,
+        false,
+    );
+    assert_eq!(
+        skipped,
+        LiveHardwareValidationGateReport {
+            target: LiveHardwareValidationTarget::LibdrmEvents,
+            status: LiveHardwareValidationGateStatus::SkippedOptInRequired,
+        }
+    );
+    assert!(!skipped.is_requested());
+    assert_eq!(
+        skipped.target.env_var(),
+        "SOPHIA_RUN_REAL_LIBDRM_EVENTS_SMOKE"
+    );
+
+    let requested = LiveHardwareValidationGateReport::from_env_presence(
+        LiveHardwareValidationTarget::LibdrmEvents,
+        true,
+    );
+    assert_eq!(
+        requested.status,
+        LiveHardwareValidationGateStatus::Requested
+    );
+    assert!(requested.is_requested());
+
+    assert_eq!(
+        real_libdrm_events_validation_gate().target,
+        LiveHardwareValidationTarget::LibdrmEvents
     );
 }
 

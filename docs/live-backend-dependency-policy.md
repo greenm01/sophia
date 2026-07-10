@@ -309,6 +309,14 @@ contract. The public report exposes only read status, event count, and remaining
 queued count. A later real libinput adapter must replace the reader, not the
 engine input adapter or runtime loop contract.
 
+Real hardware validation for libdrm and libinput is opt-in only. The gates are
+`SOPHIA_RUN_REAL_LIBDRM_EVENTS_SMOKE` and
+`SOPHIA_RUN_REAL_LIBINPUT_EVENTS_SMOKE`; both collapse to
+`LiveHardwareValidationGateReport` with a target and skipped/requested status.
+The gate report must not expose env values, device paths, file descriptors,
+connector identity, seat names, or native error strings. Default validation must
+remain independent of DRM device nodes and `/dev/input` devices.
+
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout
 authority. On Linux, wgpu will usually target Vulkan, but Sophia must first prove

@@ -44,11 +44,19 @@ Native page-flip values must be reduced before they reach runtime observation.
 The native-shaped reader contract is still deterministic: tests feed reduced
 native callback facts through a bounded reader before the poller decodes them
 through backend-local output routes.
+Real libdrm event validation is gated by
+`SOPHIA_RUN_REAL_LIBDRM_EVENTS_SMOKE=1`. Without that variable, future hardware
+smokes must return a reduced skipped report and avoid opening DRM device nodes.
 
 The `libinput-events` feature currently admits no native dependency. It defines
 the first reduced live input event reader and poller shape, then proves that the
 poller implements Sophia Engine's non-blocking input contract. A later concrete
 libinput dependency must plug into this seam without changing runtime reports.
+Real libinput validation is gated by
+`SOPHIA_RUN_REAL_LIBINPUT_EVENTS_SMOKE=1`. Without that variable, future
+hardware smokes must return a reduced skipped report and avoid opening input
+devices or reporting device paths, seat names, file descriptors, or libinput
+error strings.
 
 The backend-live GBM feature suite includes an opt-in real-device smoke. Set
 `SOPHIA_RUN_REAL_GBM_SMOKE=1` to let the test look for an openable
@@ -88,6 +96,17 @@ coverage:
 ```sh
 SOPHIA_RUN_REAL_GBM_SMOKE=1 cargo test --offline -p sophia-backend-live --features gbm-probe,egl-probe
 ```
+
+The libdrm and libinput real-hardware gates are defined before their concrete
+native readers are admitted:
+
+```sh
+SOPHIA_RUN_REAL_LIBDRM_EVENTS_SMOKE=1 cargo test --offline -p sophia-backend-live --features libdrm-events
+SOPHIA_RUN_REAL_LIBINPUT_EVENTS_SMOKE=1 cargo test --offline -p sophia-backend-live --features libinput-events
+```
+
+Until those readers exist, these variables only document the future opt-in
+shape. The deterministic feature tests must continue to pass without them.
 
 ## Retiring `DEFAULT_DISPLAY`
 

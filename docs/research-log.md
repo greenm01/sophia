@@ -791,6 +791,12 @@ over `NonBlockingInputPoller`, preserving `QueuedInputPoller` as the default
 while allowing the native-shaped libinput poller to drive the same runtime tick.
 This chooses monomorphized backend pollers over boxed adapters for the current
 hot path.
+Real libdrm and libinput hardware validation gates are now named before the
+concrete readers exist: `SOPHIA_RUN_REAL_LIBDRM_EVENTS_SMOKE` and
+`SOPHIA_RUN_REAL_LIBINPUT_EVENTS_SMOKE`. The gate report records only target and
+skipped/requested status, keeping default validation independent of device nodes
+and preventing env values, paths, fd identity, seat names, or native error
+strings from entering public reports.
 
 ## Open Questions
 

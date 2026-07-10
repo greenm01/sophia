@@ -14,9 +14,10 @@ active milestone to `docs/roadmap-history.md`.
 
 ### Real Backend Hardware Gates
 
-- [ ] Define opt-in environment gates for real libdrm and libinput validation.
-- [ ] Require native hardware tests to fail closed and return reduced reports.
-- [ ] Keep default workspace validation independent of device nodes and seats.
+- [x] Define opt-in environment gates for real libdrm and libinput validation.
+- [x] Keep default workspace validation independent of device nodes and seats.
+- [ ] Require future native hardware tests to fail closed and return reduced
+  reports.
 
 ---
 

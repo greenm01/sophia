@@ -8,8 +8,10 @@ use sophia_backend_live::{
     LibinputDeviceDescriptor, LibinputDeviceKind, LibinputEventIngest, LibinputEventSource,
     LibinputNativeEventAdapterReport, LibinputNativeEventAdapterStatus,
     LibinputNativeEventReadReport, LibinputNativeEventReadStatus, LibinputPhysicalInputAdapter,
-    LiveBackendConfig, NativeLibinputEventPoller, NonBlockingInputPoller, SeatId,
+    LiveBackendConfig, LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
+    LiveHardwareValidationTarget, NativeLibinputEventPoller, NonBlockingInputPoller, SeatId,
     discover_live_backend, native_libinput_event_adapter_report,
+    real_libinput_events_validation_gate,
 };
 use sophia_protocol::{InputEventKind, Point};
 
@@ -20,6 +22,41 @@ fn native_libinput_event_adapter_skeleton_reports_ready_without_opening_devices(
         LibinputNativeEventAdapterReport {
             status: LibinputNativeEventAdapterStatus::SkeletonReady,
         }
+    );
+}
+
+#[test]
+fn real_libinput_event_validation_gate_is_explicit_and_reduced() {
+    let skipped = LiveHardwareValidationGateReport::from_env_presence(
+        LiveHardwareValidationTarget::LibinputEvents,
+        false,
+    );
+    assert_eq!(
+        skipped,
+        LiveHardwareValidationGateReport {
+            target: LiveHardwareValidationTarget::LibinputEvents,
+            status: LiveHardwareValidationGateStatus::SkippedOptInRequired,
+        }
+    );
+    assert!(!skipped.is_requested());
+    assert_eq!(
+        skipped.target.env_var(),
+        "SOPHIA_RUN_REAL_LIBINPUT_EVENTS_SMOKE"
+    );
+
+    let requested = LiveHardwareValidationGateReport::from_env_presence(
+        LiveHardwareValidationTarget::LibinputEvents,
+        true,
+    );
+    assert_eq!(
+        requested.status,
+        LiveHardwareValidationGateStatus::Requested
+    );
+    assert!(requested.is_requested());
+
+    assert_eq!(
+        real_libinput_events_validation_gate().target,
+        LiveHardwareValidationTarget::LibinputEvents
     );
 }
 
