@@ -78,6 +78,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Split native KMS target selection into snapshot, device, and selection
+  modules while keeping the public DRM facade stable.
 - [x] Split the libinput event adapter into report, gate, device-map, native
   reader, poller, and fake-reader modules.
 - [x] Made modeset resource-creation cleanup retryable when framebuffer
