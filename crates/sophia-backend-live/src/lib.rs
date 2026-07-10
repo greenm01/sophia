@@ -102,6 +102,33 @@ pub enum LiveHardwareValidationGateStatus {
     Requested,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveHardwareValidationSmokeReport {
+    pub target: LiveHardwareValidationTarget,
+    pub status: LiveHardwareValidationSmokeStatus,
+}
+
+impl LiveHardwareValidationSmokeReport {
+    pub const fn fail_closed_from_gate(gate: LiveHardwareValidationGateReport) -> Self {
+        Self {
+            target: gate.target,
+            status: if gate.is_requested() {
+                LiveHardwareValidationSmokeStatus::BackendUnavailable
+            } else {
+                LiveHardwareValidationSmokeStatus::SkippedOptInRequired
+            },
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveHardwareValidationSmokeStatus {
+    SkippedOptInRequired,
+    BackendUnavailable,
+    Passed,
+    Failed,
+}
+
 pub fn real_libdrm_events_validation_gate() -> LiveHardwareValidationGateReport {
     let target = LiveHardwareValidationTarget::LibdrmEvents;
     LiveHardwareValidationGateReport::from_env_presence(
@@ -116,6 +143,14 @@ pub fn real_libinput_events_validation_gate() -> LiveHardwareValidationGateRepor
         target,
         std::env::var_os(target.env_var()).is_some(),
     )
+}
+
+pub fn real_libdrm_events_validation_smoke_report() -> LiveHardwareValidationSmokeReport {
+    LiveHardwareValidationSmokeReport::fail_closed_from_gate(real_libdrm_events_validation_gate())
+}
+
+pub fn real_libinput_events_validation_smoke_report() -> LiveHardwareValidationSmokeReport {
+    LiveHardwareValidationSmokeReport::fail_closed_from_gate(real_libinput_events_validation_gate())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

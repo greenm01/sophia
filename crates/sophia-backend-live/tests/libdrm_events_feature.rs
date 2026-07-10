@@ -13,14 +13,15 @@ use sophia_backend_live::{
     LibdrmNativePollerDiagnostics, LibdrmNativeReadAndPollReport, LibdrmNativeReadLoopReport,
     LibdrmNativeReadLoopStatus, LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus,
     LibdrmPageFlipEventPoller, LiveBackendConfig, LiveHardwareValidationGateReport,
-    LiveHardwareValidationGateStatus, LiveHardwareValidationTarget, LiveLibdrmPollerDiagnostics,
+    LiveHardwareValidationGateStatus, LiveHardwareValidationSmokeReport,
+    LiveHardwareValidationSmokeStatus, LiveHardwareValidationTarget, LiveLibdrmPollerDiagnostics,
     LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
     LiveLibdrmPollerStartupStatus, LivePageFlipCallback, LivePageFlipCallbackQueue,
     LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus,
     NativeLibdrmPageFlipEventPoller, OutputId, QueuedInputPoller, decode_native_page_flip_batch,
     discover_live_backend, libdrm_dependency_admission_report, libdrm_fd_authority_report,
     native_libdrm_event_adapter_report, native_libdrm_event_adapter_report_for_authority,
-    real_libdrm_events_validation_gate,
+    real_libdrm_events_validation_gate, real_libdrm_events_validation_smoke_report,
 };
 
 #[test]
@@ -64,6 +65,42 @@ fn real_libdrm_event_validation_gate_is_explicit_and_reduced() {
 
     assert_eq!(
         real_libdrm_events_validation_gate().target,
+        LiveHardwareValidationTarget::LibdrmEvents
+    );
+}
+
+#[test]
+fn real_libdrm_event_validation_smoke_fails_closed_without_native_reader() {
+    let skipped = LiveHardwareValidationSmokeReport::fail_closed_from_gate(
+        LiveHardwareValidationGateReport::from_env_presence(
+            LiveHardwareValidationTarget::LibdrmEvents,
+            false,
+        ),
+    );
+    assert_eq!(
+        skipped,
+        LiveHardwareValidationSmokeReport {
+            target: LiveHardwareValidationTarget::LibdrmEvents,
+            status: LiveHardwareValidationSmokeStatus::SkippedOptInRequired,
+        }
+    );
+
+    let requested = LiveHardwareValidationSmokeReport::fail_closed_from_gate(
+        LiveHardwareValidationGateReport::from_env_presence(
+            LiveHardwareValidationTarget::LibdrmEvents,
+            true,
+        ),
+    );
+    assert_eq!(
+        requested,
+        LiveHardwareValidationSmokeReport {
+            target: LiveHardwareValidationTarget::LibdrmEvents,
+            status: LiveHardwareValidationSmokeStatus::BackendUnavailable,
+        }
+    );
+
+    assert_eq!(
+        real_libdrm_events_validation_smoke_report().target,
         LiveHardwareValidationTarget::LibdrmEvents
     );
 }

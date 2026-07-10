@@ -9,9 +9,10 @@ use sophia_backend_live::{
     LibinputNativeEventAdapterReport, LibinputNativeEventAdapterStatus,
     LibinputNativeEventReadReport, LibinputNativeEventReadStatus, LibinputPhysicalInputAdapter,
     LiveBackendConfig, LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
+    LiveHardwareValidationSmokeReport, LiveHardwareValidationSmokeStatus,
     LiveHardwareValidationTarget, NativeLibinputEventPoller, NonBlockingInputPoller, SeatId,
     discover_live_backend, native_libinput_event_adapter_report,
-    real_libinput_events_validation_gate,
+    real_libinput_events_validation_gate, real_libinput_events_validation_smoke_report,
 };
 use sophia_protocol::{InputEventKind, Point};
 
@@ -56,6 +57,42 @@ fn real_libinput_event_validation_gate_is_explicit_and_reduced() {
 
     assert_eq!(
         real_libinput_events_validation_gate().target,
+        LiveHardwareValidationTarget::LibinputEvents
+    );
+}
+
+#[test]
+fn real_libinput_event_validation_smoke_fails_closed_without_native_reader() {
+    let skipped = LiveHardwareValidationSmokeReport::fail_closed_from_gate(
+        LiveHardwareValidationGateReport::from_env_presence(
+            LiveHardwareValidationTarget::LibinputEvents,
+            false,
+        ),
+    );
+    assert_eq!(
+        skipped,
+        LiveHardwareValidationSmokeReport {
+            target: LiveHardwareValidationTarget::LibinputEvents,
+            status: LiveHardwareValidationSmokeStatus::SkippedOptInRequired,
+        }
+    );
+
+    let requested = LiveHardwareValidationSmokeReport::fail_closed_from_gate(
+        LiveHardwareValidationGateReport::from_env_presence(
+            LiveHardwareValidationTarget::LibinputEvents,
+            true,
+        ),
+    );
+    assert_eq!(
+        requested,
+        LiveHardwareValidationSmokeReport {
+            target: LiveHardwareValidationTarget::LibinputEvents,
+            status: LiveHardwareValidationSmokeStatus::BackendUnavailable,
+        }
+    );
+
+    assert_eq!(
+        real_libinput_events_validation_smoke_report().target,
         LiveHardwareValidationTarget::LibinputEvents
     );
 }

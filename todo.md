@@ -12,18 +12,24 @@ active milestone to `docs/roadmap-history.md`.
 
 ## Active Milestone
 
-### Real Backend Hardware Gates
+### Real Libinput Adapter
 
-- [x] Define opt-in environment gates for real libdrm and libinput validation.
-- [x] Keep default workspace validation independent of device nodes and seats.
-- [ ] Require future native hardware tests to fail closed and return reduced
-  reports.
+- [ ] Add a concrete libinput reader only behind `libinput-events`.
+- [ ] Preserve the existing native-shaped reader and poller report contract.
+- [ ] Avoid raw device paths, fd values, seat names, or libinput error strings in
+  public runtime reports.
 
 ---
 
 ## Next 3 Milestones
 
-### 1. Authority Probe Selection
+### 1. Real Libdrm Event Reader
+
+- [ ] Add a concrete page-flip reader only behind `libdrm-events`.
+- [ ] Preserve reduced output-route decoding before runtime observation.
+- [ ] Keep scanout object identity private to backend-live.
+
+### 2. Authority Probe Selection
 
 - [ ] Choose the next real Sophia X Authority app probe after backend intake
   seams settle.
@@ -32,19 +38,11 @@ active milestone to `docs/roadmap-history.md`.
 - [ ] Keep Wayland Authority deferred until backend event intake and scanout
   timing are stable.
 
-### 2. Real Libinput Adapter
+### 3. Real Input Loop
 
-- [ ] Add a concrete libinput reader only behind `libinput-events`.
-- [ ] Preserve the existing native-shaped reader and poller report contract.
-- [ ] Avoid raw device paths, fd values, seat names, or libinput error strings in
-  public runtime reports.
-
-### 3. Real Libdrm Event Reader
-
-- [ ] Add a concrete page-flip reader only behind `libdrm-events`.
-- [ ] Preserve reduced output-route decoding before runtime observation.
-- [ ] Keep scanout object identity private to backend-live.
-
+- [ ] Poll concrete input readers from the live runtime without blocking scanout.
+- [ ] Keep physical input and routed-input transformation separate.
+- [ ] Preserve deterministic queued poller tests as the default validation path.
 ---
 
 ## Later Backlog
@@ -63,6 +61,10 @@ active milestone to `docs/roadmap-history.md`.
 
 ## Done Recently
 
+- [x] Defined opt-in environment gates for real libdrm and libinput validation.
+- [x] Kept default workspace validation independent of device nodes and seats.
+- [x] Added reduced real-hardware smoke reports that fail closed before concrete
+  native readers exist.
 - [x] Made compositor backend assemblies generic over `NonBlockingInputPoller`
   instead of boxing the hot path.
 - [x] Kept `QueuedInputPoller` as the default deterministic backend assembly

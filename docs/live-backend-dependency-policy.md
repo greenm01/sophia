@@ -316,6 +316,10 @@ Real hardware validation for libdrm and libinput is opt-in only. The gates are
 The gate report must not expose env values, device paths, file descriptors,
 connector identity, seat names, or native error strings. Default validation must
 remain independent of DRM device nodes and `/dev/input` devices.
+`LiveHardwareValidationSmokeReport` is the next reduced layer. Before concrete
+native readers are admitted, a requested real-hardware smoke reports
+`BackendUnavailable` rather than opening devices. Future readers may change that
+status to passed or failed, but they must keep the same reduced shape.
 
 WebGPU/wgpu is a future compositor drawing API candidate above the Linux
 platform boundary, not a replacement for GBM, DRM/KMS, or explicit scanout

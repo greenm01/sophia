@@ -797,6 +797,9 @@ concrete readers exist: `SOPHIA_RUN_REAL_LIBDRM_EVENTS_SMOKE` and
 skipped/requested status, keeping default validation independent of device nodes
 and preventing env values, paths, fd identity, seat names, or native error
 strings from entering public reports.
+The paired smoke report fails closed: without a concrete native reader, an
+opted-in real libdrm or libinput smoke returns `BackendUnavailable` instead of
+opening devices.
 
 ## Open Questions
 

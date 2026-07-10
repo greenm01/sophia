@@ -47,6 +47,8 @@ through backend-local output routes.
 Real libdrm event validation is gated by
 `SOPHIA_RUN_REAL_LIBDRM_EVENTS_SMOKE=1`. Without that variable, future hardware
 smokes must return a reduced skipped report and avoid opening DRM device nodes.
+Until a concrete native page-flip reader exists, the reduced smoke report fails
+closed as `BackendUnavailable` when this gate is requested.
 
 The `libinput-events` feature currently admits no native dependency. It defines
 the first reduced live input event reader and poller shape, then proves that the
@@ -56,7 +58,8 @@ Real libinput validation is gated by
 `SOPHIA_RUN_REAL_LIBINPUT_EVENTS_SMOKE=1`. Without that variable, future
 hardware smokes must return a reduced skipped report and avoid opening input
 devices or reporting device paths, seat names, file descriptors, or libinput
-error strings.
+error strings. Until a concrete libinput reader exists, the reduced smoke report
+fails closed as `BackendUnavailable` when this gate is requested.
 
 The backend-live GBM feature suite includes an opt-in real-device smoke. Set
 `SOPHIA_RUN_REAL_GBM_SMOKE=1` to let the test look for an openable
