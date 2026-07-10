@@ -205,6 +205,7 @@ impl From<LiveRenderedPrimaryPlaneScanoutSubmitStatus>
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LiveTrackedRenderedPrimaryPlaneScanoutRetireReport {
     pub status: LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus,
+    pub destroy: Option<LibdrmNativePrimaryPlaneResourceDestroyStatus>,
     pub runtime_scanout_state: Option<RuntimeScanoutState>,
     pub in_flight: bool,
     pub in_flight_ticks: u64,

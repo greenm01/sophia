@@ -990,6 +990,10 @@ rendered primary-plane frame in one bounded tick. Deterministic coverage proves
 idle input readiness does not block scanout, queued page-flip callbacks are not
 read until page-flip readiness is observed, and ready input can be ingested in
 the same tick as page-flip retirement and next-frame submit.
+Tracked rendered-primary-plane retire reports now preserve the reduced native
+destroy status from accepted page-flip retirement. The runtime can distinguish
+clean retirement from retryable framebuffer/blob cleanup debt without exposing
+framebuffer IDs, mode-blob handles, GBM objects, or driver errors.
 
 ## Open Questions
 

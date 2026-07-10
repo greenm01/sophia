@@ -1913,6 +1913,13 @@ fn live_runtime_tick_submits_rendered_scanout_when_runtime_requests_scanout() {
         retire_and_submit_tick
             .rendered_primary_plane_scanout_retire
             .expect("accepted page flip should retire in-flight scanout")
+            .destroy,
+        Some(LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed)
+    );
+    assert_eq!(
+        retire_and_submit_tick
+            .rendered_primary_plane_scanout_retire
+            .expect("accepted page flip should retire in-flight scanout")
             .in_flight_ticks,
         0
     );

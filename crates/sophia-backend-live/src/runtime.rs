@@ -275,6 +275,7 @@ where
         let Some(submission) = self.rendered_primary_plane_scanout_submission.take() else {
             return LiveTrackedRenderedPrimaryPlaneScanoutRetireReport {
                 status: LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::NoSubmission,
+                destroy: None,
                 runtime_scanout_state: None,
                 in_flight: false,
                 in_flight_ticks: 0,
@@ -301,6 +302,7 @@ where
 
         LiveTrackedRenderedPrimaryPlaneScanoutRetireReport {
             status: retired.status.into(),
+            destroy: retired.destroy,
             runtime_scanout_state,
             in_flight: self.rendered_primary_plane_scanout_in_flight(),
             in_flight_ticks: self.rendered_primary_plane_scanout_in_flight_ticks,

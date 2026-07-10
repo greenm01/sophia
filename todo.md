@@ -68,6 +68,9 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Preserved reduced native destroy status in tracked rendered scanout
+  retire reports so runtime diagnostics can distinguish clean retirement from
+  retryable cleanup debt without native identity.
 - [x] Made native page-flip read-and-poll drain retained callbacks before
   reading more fd events, bounding pending callback growth under queue
   backpressure.
