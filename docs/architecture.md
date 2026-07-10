@@ -610,6 +610,10 @@ atomic scanout smoke evidence expose only the reduced cleanup-pending bit.
 Device-backed rendered scanout ticks opportunistically retry pending cleanup
 once before processing new rendered scanout submission, and report the reduced
 cleanup-retry result on the tick.
+If cleanup is still pending after that retry, backend-live defers the new
+submission. This keeps cleanup debt bounded to one opaque owner and prevents a
+new scanout from replacing the retained native cleanup state before the old
+framebuffer/blob cleanup has finished.
 Those terminal reduced states are queued inside backend-live and drained into
 the next runtime tick as scanout lifecycle observations. The shared reducer
 records the retirement or rejection without treating it as a fresh render

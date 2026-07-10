@@ -1460,6 +1460,23 @@ fn live_runtime_assembly_retains_failed_rendered_scanout_cleanup_for_retry() {
     );
     assert_eq!(tick.rendered_primary_plane_scanout_cleanup_pending, true);
 
+    let mut blocked_exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+    let blocked = assembly
+        .submit_and_track_rendered_primary_plane_scanout_with(&retry_device, &mut blocked_exporter);
+    assert_eq!(
+        blocked.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::CleanupPending
+    );
+    assert_eq!(
+        blocked.runtime_scanout_state,
+        Some(RuntimeScanoutState::Deferred)
+    );
+    assert_eq!(blocked.in_flight, false);
+    assert!(assembly.rendered_primary_plane_scanout_cleanup_pending());
+
     let cleanup = assembly.retry_tracked_rendered_primary_plane_scanout_cleanup(&retry_device);
 
     assert_eq!(
@@ -1623,6 +1640,17 @@ fn live_runtime_tick_reports_failed_rendered_scanout_cleanup_retry() {
     );
     assert_eq!(tick.rendered_primary_plane_scanout_cleanup_pending, true);
     assert!(assembly.rendered_primary_plane_scanout_cleanup_pending());
+    assert_eq!(
+        tick.rendered_primary_plane_scanout_submit
+            .expect("failed cleanup retry should defer the next submit")
+            .status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::CleanupPending
+    );
+    assert_eq!(
+        tick.engine.runtime.runtime_state.last_scanout_state,
+        Some(RuntimeScanoutState::Deferred)
+    );
+    assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), false);
 
     std::fs::remove_dir_all(root).unwrap();
 }

@@ -259,6 +259,10 @@ When `run_tick_with_rendered_primary_plane_scanout_with` has a native device, it
 may retry one pending cleanup before submitting the next rendered scanout. The
 tick report may expose only the reduced cleanup retry status and whether cleanup
 is still pending.
+If that retry fails, the next rendered primary-plane submit must reduce to
+`Deferred`/cleanup-pending rather than allocating another scanout owner.
+Backend-live currently retains one cleanup owner; cleanup debt must backpressure
+new submission until retry clears it.
 `retire_native_primary_plane_scanout_after_page_flip` consumes that owner only
 when a reduced callback report is accepted and presented. Rejected or stale
 callbacks return the owner to the caller, preserving buffer and framebuffer

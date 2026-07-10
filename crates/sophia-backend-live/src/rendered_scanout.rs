@@ -356,6 +356,7 @@ pub enum LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus {
     ScanoutExportFailed,
     PrimaryPlaneSubmitFailed,
     AlreadyInFlight,
+    CleanupPending,
 }
 
 #[cfg(feature = "libdrm-events")]
@@ -562,6 +563,7 @@ pub(crate) fn track_rendered_primary_plane_scanout_submit_from_target_with<D, E>
     >,
     rendered_primary_plane_runtime_scanout_state: &mut Option<RuntimeScanoutState>,
     rendered_primary_plane_scanout_in_flight_ticks: &mut u64,
+    cleanup_pending: bool,
     submitted_after_page_flip_serial: Option<u64>,
     pending_runtime_scanout_states: Option<&mut VecDeque<RuntimeScanoutState>>,
     device: &D,
@@ -583,6 +585,18 @@ where
             submit: None,
             runtime_scanout_state: Some(RuntimeScanoutState::Deferred),
             in_flight: true,
+            in_flight_ticks: *rendered_primary_plane_scanout_in_flight_ticks,
+        };
+    }
+
+    if cleanup_pending {
+        return LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
+            status: LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::CleanupPending,
+            target: target.map(|target| target.status),
+            export: None,
+            submit: None,
+            runtime_scanout_state: Some(RuntimeScanoutState::Deferred),
+            in_flight: false,
             in_flight_ticks: *rendered_primary_plane_scanout_in_flight_ticks,
         };
     }
@@ -625,6 +639,7 @@ pub(crate) struct LiveRenderedPrimaryPlaneRuntimeAdapter<'a, D, E> {
         &'a mut Option<BoxedRenderedPrimaryPlaneScanoutSubmission>,
     pub(crate) rendered_primary_plane_runtime_scanout_state: &'a mut Option<RuntimeScanoutState>,
     pub(crate) rendered_primary_plane_scanout_in_flight_ticks: &'a mut u64,
+    pub(crate) cleanup_pending: bool,
     pub(crate) submitted_after_page_flip_serial: Option<u64>,
     pub(crate) device: &'a D,
     pub(crate) exporter: &'a mut E,
@@ -684,6 +699,7 @@ where
             self.rendered_primary_plane_scanout_submission,
             self.rendered_primary_plane_runtime_scanout_state,
             self.rendered_primary_plane_scanout_in_flight_ticks,
+            self.cleanup_pending,
             self.submitted_after_page_flip_serial,
             None,
             self.device,

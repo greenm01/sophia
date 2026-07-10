@@ -247,11 +247,13 @@ where
         E: LiveRenderedScanoutBufferExporter,
         E::Owner: 'static,
     {
+        let cleanup_pending = self.rendered_primary_plane_scanout_cleanup_pending();
         track_rendered_primary_plane_scanout_submit_from_target_with(
             self.gbm_egl_frame_target,
             &mut self.rendered_primary_plane_scanout_submission,
             &mut self.rendered_primary_plane_runtime_scanout_state,
             &mut self.rendered_primary_plane_scanout_in_flight_ticks,
+            cleanup_pending,
             self.page_flip_callback_intake.last_frame_serial(),
             Some(&mut self.pending_runtime_scanout_states),
             device,
@@ -494,6 +496,8 @@ where
             .extend(runtime_scanout_states.iter().copied());
 
         let target = self.gbm_egl_frame_target;
+        let rendered_primary_plane_scanout_cleanup_pending =
+            self.rendered_primary_plane_scanout_cleanup_pending();
         let rendered_primary_plane_scanout_submission =
             &mut self.rendered_primary_plane_scanout_submission;
         let rendered_primary_plane_runtime_scanout_state =
@@ -513,6 +517,7 @@ where
                     rendered_primary_plane_scanout_submission,
                     rendered_primary_plane_runtime_scanout_state,
                     rendered_primary_plane_scanout_in_flight_ticks,
+                    cleanup_pending: rendered_primary_plane_scanout_cleanup_pending,
                     submitted_after_page_flip_serial,
                     device,
                     exporter,

@@ -882,6 +882,10 @@ The device-backed rendered scanout tick now retries one pending cleanup before
 new scanout submission and records the reduced retry result. This gives the live
 backend a forward-progress path for cleanup debt without adding native identity
 to the Engine-facing report.
+Cleanup debt now backpressures rendered primary-plane submission. If the retry
+still leaves cleanup pending, the runtime reports a reduced deferred scanout
+instead of submitting another buffer and risking loss of the retained cleanup
+owner.
 The page-flip callback queue now carries the latest accepted reduced callback
 report. `run_tick_with_rendered_primary_plane_scanout_with` consumes that report
 before draining lifecycle states, so one live tick can retire the old rendered
