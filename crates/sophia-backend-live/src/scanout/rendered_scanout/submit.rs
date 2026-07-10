@@ -26,6 +26,7 @@ where
             target: target.map(|target| target.status),
             export: None,
             submit: None,
+            request_scope: None,
             commit_flags: None,
             submission: None,
         };
@@ -38,6 +39,7 @@ where
             target: None,
             export: None,
             submit: None,
+            request_scope: None,
             commit_flags: None,
             submission: None,
         };
@@ -53,6 +55,7 @@ where
             target: Some(target.status),
             export: None,
             submit: None,
+            request_scope: None,
             commit_flags: None,
             submission: None,
         };
@@ -66,6 +69,7 @@ where
             target: Some(target.status),
             export: Some(export.status),
             submit: None,
+            request_scope: None,
             commit_flags: None,
             submission: None,
         };
@@ -78,6 +82,7 @@ where
             target: Some(target.status),
             export: Some(export.status),
             submit: None,
+            request_scope: None,
             commit_flags: None,
             submission: None,
         };
@@ -97,6 +102,7 @@ where
             target: Some(target.status),
             export: Some(export.status),
             submit: Some(submit.status),
+            request_scope: submit.request_scope,
             commit_flags: submit.commit_flags,
             submission: None,
         };
@@ -109,6 +115,7 @@ where
             target: Some(target.status),
             export: Some(export.status),
             submit: Some(submit.status),
+            request_scope: submit.request_scope,
             commit_flags: submit.commit_flags,
             submission: None,
         };
@@ -120,6 +127,7 @@ where
         target: Some(target.status),
         export: Some(export.status),
         submit: Some(submit.status),
+        request_scope: submit.request_scope,
         commit_flags: submit.commit_flags,
         submission: Some(LiveRenderedPrimaryPlaneScanoutSubmission {
             scanout_buffer: owner,
@@ -184,6 +192,7 @@ where
             target: target.map(|target| target.status),
             export: None,
             submit: None,
+            request_scope: None,
             commit_flags: None,
             runtime_scanout_state: Some(RuntimeScanoutState::Deferred),
             in_flight: true,
@@ -198,6 +207,7 @@ where
             target: target.map(|target| target.status),
             export: None,
             submit: None,
+            request_scope: None,
             commit_flags: None,
             runtime_scanout_state: Some(RuntimeScanoutState::Deferred),
             in_flight: false,
@@ -234,6 +244,7 @@ where
         target: result.target,
         export: result.export,
         submit: result.submit,
+        request_scope: result.request_scope,
         commit_flags: result.commit_flags,
         runtime_scanout_state,
         in_flight: rendered_primary_plane_scanout_submission.is_some(),

@@ -307,6 +307,9 @@ matches the reduced frame target, the submit report reduces to
 scanout-target-not-ready and export remains unattempted.
 When the snapshot is valid, runtime submit exports the rendered buffer and
 commits the same snapshot using page-flip policy, not modeset policy.
+Rendered scanout submit reports carry the reduced request scope from the native
+primary-plane submit, so runtime diagnostics prove the steady-state path used a
+plane-only page-flip request shape without exposing KMS identity.
 `LibdrmNativeAtomicScanoutSmokeEvidence` is the reduced record for that smoke.
 It reports only where the chain stopped: no primary card, KMS selection failure,
 persistent rendered-context failure, KMS scanout target failure, GBM export

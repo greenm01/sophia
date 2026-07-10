@@ -67,6 +67,9 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Carried reduced request scope through rendered primary-plane runtime
+  submit reports so steady-state scanout diagnostics prove page-flip request
+  shape, not only commit flags.
 - [x] Bumped atomic scanout evidence to schema 2 with reduced request scope, so
   the explicit hardware smoke proves whether it submitted a modeset or page-flip
   request shape.

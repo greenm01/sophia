@@ -1189,6 +1189,10 @@ fn live_runtime_assembly_submits_rendered_primary_plane_scanout_through_reduced_
         Some(LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip)
     );
     assert_eq!(
+        submitted.request_scope,
+        Some(LibdrmNativeAtomicCommitRequestScope::PageFlip)
+    );
+    assert_eq!(
         submitted.commit_flags,
         Some(LibdrmNativeAtomicCommitFlagsReport {
             page_flip_event: true,
@@ -1261,6 +1265,10 @@ fn live_runtime_assembly_tracks_rendered_scanout_until_accepted_page_flip() {
     assert_eq!(
         submitted.runtime_scanout_state,
         Some(RuntimeScanoutState::Submitted)
+    );
+    assert_eq!(
+        submitted.request_scope,
+        Some(LibdrmNativeAtomicCommitRequestScope::PageFlip)
     );
     assert_eq!(submitted.in_flight, true);
     assert_eq!(submitted.in_flight_ticks, 0);
