@@ -98,6 +98,8 @@ smoke still needs a DRM-master-capable machine.
   renderer-observation, and session tick-loop modules.
 - [x] Split backend-live runtime tick code into plain engine tick, rendered
   primary-plane scanout tick, and native GBM scanout wrapper modules.
+- [x] Centralized runtime scanout lifecycle-state draining so plain and rendered
+  scanout ticks hand pending states to the Engine through one path.
 - [x] Made the opt-in atomic hardware smoke retain the renderer-owned GBM
   front-buffer owner with the primary-plane submission until page-flip
   retirement, matching the production runtime lifetime rule.
