@@ -1,4 +1,46 @@
 use super::*;
+use std::path::PathBuf;
+
+use sophia_engine::{
+    StaticInputDiscoveryBackend, SysfsDrmKmsOutputBackend, discover_live_compositor_backend,
+};
+
+pub fn discover_live_backend(config: &LiveBackendConfig) -> LiveBackendStartupReport {
+    let output_backend = SysfsDrmKmsOutputBackend::new(&config.drm_sysfs_root);
+    let input_backend = StaticInputDiscoveryBackend::new(config.input_devices.clone());
+
+    LiveBackendStartupReport {
+        discovery: discover_live_compositor_backend(&output_backend, &input_backend),
+        renderer_import: config.renderer_import,
+        renderer_preference: config.renderer_preference,
+    }
+}
+
+fn selection_from_native_status(
+    status: LiveRendererImportStartupStatus,
+) -> Option<RendererSelection> {
+    if status.health != LiveRendererImportHealth::NativeImportCapable {
+        return None;
+    }
+
+    Some(RendererSelection::ImportCapable {
+        import_xpixmap: status.xpixmap == LiveRendererImportPathStatus::Enabled,
+        import_dmabuf: status.dmabuf == LiveRendererImportPathStatus::Enabled,
+    })
+}
+
+fn cpu_fallback_renderer_status() -> LiveRendererImportStartupStatus {
+    LiveRendererImportBoundary::cpu_only().startup_status()
+}
+
+fn selection_observation(selection: RendererSelection) -> LiveRendererSelectionObservation {
+    match selection {
+        RendererSelection::CpuFallback => LiveRendererSelectionObservation::CpuFallback,
+        RendererSelection::ImportCapable { .. } => {
+            LiveRendererSelectionObservation::NativeImportCapable
+        }
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LiveBackendConfig {
