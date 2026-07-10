@@ -58,17 +58,17 @@ impl RealAtomicScanoutPageFlipSession {
 
             if let Ok(callback) = receiver.try_recv() {
                 let callback_report = intake.observe(callback);
-                let retired = retire_native_primary_plane_scanout_after_page_flip(
-                    &self.card,
-                    submission
-                        .take()
-                        .expect("callback path should still own submitted resources"),
-                    &callback_report,
-                );
+                let retired = submission.take().map(|submission| {
+                    retire_native_primary_plane_scanout_after_page_flip(
+                        &self.card,
+                        submission,
+                        &callback_report,
+                    )
+                });
                 return RealAtomicScanoutPageFlipWaitReport {
                     poll: last_poll,
                     callback_report: Some(callback_report),
-                    retired: Some(retired),
+                    retired,
                 };
             }
 
