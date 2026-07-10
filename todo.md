@@ -83,6 +83,8 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Added negative atomic scanout evidence fixtures proving duplicate and
+  malformed fields are rejected by the local verifier gate.
 - [x] Normalized backend-live rendered scanout exports before submit so
   non-exported reports cannot carry forged descriptors or retained owners into
   the DRM path.
