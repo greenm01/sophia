@@ -5,20 +5,68 @@ use crate::prelude::*;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LiveBackendSessionLoopReadiness {
     pub input_ready: bool,
+    pub page_flip_ready: bool,
 }
 
 #[cfg(all(feature = "libdrm-events", feature = "libinput-events"))]
 impl LiveBackendSessionLoopReadiness {
-    pub const fn new(input_ready: bool) -> Self {
-        Self { input_ready }
+    pub const fn new(input_ready: bool, page_flip_ready: bool) -> Self {
+        Self {
+            input_ready,
+            page_flip_ready,
+        }
     }
 
     pub const fn idle() -> Self {
-        Self::new(false)
+        Self::new(false, false)
     }
 
     pub const fn input_ready() -> Self {
-        Self::new(true)
+        Self::new(true, false)
+    }
+
+    pub const fn page_flip_ready() -> Self {
+        Self::new(false, true)
+    }
+
+    pub const fn all_ready() -> Self {
+        Self::new(true, true)
+    }
+}
+
+#[cfg(all(feature = "libdrm-events", feature = "libinput-events"))]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct LiveBackendReadinessCollector {
+    input_ready: bool,
+    page_flip_ready: bool,
+}
+
+#[cfg(all(feature = "libdrm-events", feature = "libinput-events"))]
+impl LiveBackendReadinessCollector {
+    pub const fn new() -> Self {
+        Self {
+            input_ready: false,
+            page_flip_ready: false,
+        }
+    }
+
+    pub fn observe_input_ready(&mut self) {
+        self.input_ready = true;
+    }
+
+    pub fn observe_page_flip_ready(&mut self) {
+        self.page_flip_ready = true;
+    }
+
+    pub const fn snapshot(&self) -> LiveBackendSessionLoopReadiness {
+        LiveBackendSessionLoopReadiness::new(self.input_ready, self.page_flip_ready)
+    }
+
+    pub fn drain(&mut self) -> LiveBackendSessionLoopReadiness {
+        let readiness = self.snapshot();
+        self.input_ready = false;
+        self.page_flip_ready = false;
+        readiness
     }
 }
 
@@ -101,16 +149,17 @@ impl LiveBackendSessionLoop {
         E::Owner: 'static,
         R: LibdrmNativePageFlipReader,
     {
-        runtime.run_session_loop_tick_with_rendered_primary_plane_scanout_and_native_page_flip_events_with(
-            input,
-            readiness,
-            self.page_flip_budget,
-            device,
-            exporter,
-            reader,
-            &mut self.page_flip_poller,
-            sender,
-        )
+        runtime
+            .run_session_loop_tick_with_rendered_primary_plane_scanout_and_native_page_flip_events_with(
+                input,
+                readiness,
+                self.page_flip_budget,
+                device,
+                exporter,
+                reader,
+                &mut self.page_flip_poller,
+                sender,
+            )
     }
 
     #[cfg(feature = "gbm-probe")]
@@ -179,23 +228,29 @@ where
             self.assembly_mut().input_mut().poller_mut().observe_ready();
         }
 
-        let report = self
-            .run_tick_with_rendered_primary_plane_scanout_and_native_page_flip_events_with(
-                input,
-                device,
-                exporter,
+        let native_page_flip = if readiness.page_flip_ready {
+            poller.read_and_poll_page_flip_events(
                 reader,
-                poller,
                 sender,
                 page_flip_budget.max_read,
                 page_flip_budget.max_emit,
-            )?;
+            )
+        } else {
+            let poll = poller.poll_page_flip_events(sender, page_flip_budget.max_emit);
+            LibdrmNativeReadAndPollReport {
+                read_loop: poller.last_read_loop_report(),
+                poll,
+            }
+        };
+        self.observe_native_libdrm_poller_diagnostics(poller.diagnostics());
+        let tick =
+            self.run_tick_with_rendered_primary_plane_scanout_with(input, device, exporter)?;
         let input_gate = self.assembly().input().poller().last_gate_report();
 
         Ok(LiveBackendSessionLoopTickReport {
             input_gate,
-            native_page_flip: report.native_page_flip,
-            tick: report.tick,
+            native_page_flip,
+            tick,
         })
     }
 

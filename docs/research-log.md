@@ -974,12 +974,16 @@ tick continues while the gate is idle, leaves queued input untouched, then polls
 and ingests that input after readiness is marked.
 Backend-live now exposes a reduced session-loop owner for the combined
 production path. `LiveBackendSessionLoop` owns the native page-flip poller and
-bounded read/emit budgets; each tick supplies only reduced readiness such as the
-input-ready bit. The runtime observes the gated input token, drains native
-page-flip callbacks, retires accepted rendered scanout ownership, and submits
-the next rendered primary-plane frame in one bounded tick. Deterministic
-coverage proves idle input readiness does not block scanout and ready input can
-be ingested in the same tick as page-flip retirement and next-frame submit.
+bounded read/emit budgets; each tick supplies only reduced readiness facts.
+`LiveBackendReadinessCollector` records input-ready and page-flip-ready as
+one-shot booleans and drains them before the tick. The runtime observes the
+gated input token, reads native page-flip callbacks only after reduced
+page-flip readiness, drains already-pending decoded callbacks under the bounded
+emit budget, retires accepted rendered scanout ownership, and submits the next
+rendered primary-plane frame in one bounded tick. Deterministic coverage proves
+idle input readiness does not block scanout, queued page-flip callbacks are not
+read until page-flip readiness is observed, and ready input can be ingested in
+the same tick as page-flip retirement and next-frame submit.
 
 ## Open Questions
 

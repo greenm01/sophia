@@ -45,7 +45,7 @@ active milestone to `docs/roadmap-history.md`.
 - [x] Collapse the one-shot helper calls into a reusable session loop owner.
 - [x] Feed reduced input, page-flip, and scanout facts through one bounded tick
   budget.
-- [ ] Keep real file-descriptor readiness outside Sophia Engine state.
+- [x] Keep real file-descriptor readiness outside Sophia Engine state.
 ---
 
 ## Later Backlog
@@ -77,6 +77,9 @@ active milestone to `docs/roadmap-history.md`.
 - [x] Added a reduced session-loop owner that observes input readiness, drains
   native page-flip events, and drives rendered primary-plane scanout through one
   bounded runtime tick without passing fds into Sophia Engine.
+- [x] Added a reduced readiness collector so input and page-flip readiness are
+  one-shot selector facts, and native page-flip reads occur only after reduced
+  page-flip readiness is observed.
 - [x] Added a one-shot live input readiness gate so runtime ticks continue when
   input is idle and concrete libinput dispatch only runs after the outer loop
   observes readiness.

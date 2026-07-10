@@ -934,11 +934,14 @@ Sophia Engine still sees only `LibinputPollReport` and accepted input packets.
 The live backend now also has a reduced session-loop owner for the combined
 path. `LiveBackendSessionLoop` owns the page-flip poller and bounded read/emit
 budgets. Each tick accepts only `LiveBackendSessionLoopReadiness`, currently an
-input-ready bit from the outer selector. The runtime observes the readiness
-token, drains native page-flip callbacks, retries/retires rendered scanout
-ownership, and submits the next rendered primary-plane frame in one bounded
-tick. Real file descriptors and selector identity remain outside Sophia Engine
-state.
+input-ready bit and a page-flip-ready bit from the outer selector. The runtime
+observes the input token, reads native page-flip callbacks only after reduced
+page-flip readiness is observed, drains already-pending decoded callbacks under
+the bounded emit budget, retries/retires rendered scanout ownership, and submits
+the next rendered primary-plane frame in one bounded tick. Real file
+descriptors and selector identity remain outside Sophia Engine state.
+`LiveBackendReadinessCollector` is the current reduced collector shape: it
+records only one-shot readiness booleans and drains them into the session loop.
 
 The first live compositor backend boundary is dependency-neutral. An
 `OutputDiscoveryBackend` produces a `DrmKmsOutputRegistry`; an

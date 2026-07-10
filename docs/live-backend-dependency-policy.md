@@ -536,11 +536,14 @@ read-failed. The wrapper must not expose the fd, readiness source, seat name,
 device path, or native error string.
 `LiveBackendSessionLoop` is the next enforcement point. It owns the native
 page-flip poller and bounded read/emit budgets, while the outer session selector
-passes only reduced per-tick readiness into the live runtime. The session-loop
-tick observes the input token, runs native page-flip intake, retires rendered
-scanout ownership, and answers active scanout commands through the rendered
-primary-plane path. It still does not carry fds, native handles, device paths,
-connector IDs, seat names, or selector backend state into Sophia Engine.
+passes only reduced per-tick readiness into the live runtime.
+`LiveBackendReadinessCollector` records input-ready and page-flip-ready as
+one-shot booleans, then drains them into the session loop. The session-loop tick
+observes the input token, calls the native page-flip reader only after reduced
+page-flip readiness is present, retires rendered scanout ownership, and answers
+active scanout commands through the rendered primary-plane path. It still does
+not carry fds, native handles, device paths, connector IDs, seat names, or
+selector backend state into Sophia Engine.
 
 Real hardware validation for libdrm and libinput is opt-in only. The gates are
 `SOPHIA_RUN_REAL_LIBDRM_EVENTS_SMOKE` and

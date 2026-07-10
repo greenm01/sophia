@@ -56,9 +56,9 @@ use sophia_backend_live::{
 #[cfg(feature = "libinput-events")]
 use sophia_backend_live::{
     DeviceId, FakeLiveLibinputEventReader, InputEventPacket, LibinputDeviceDescriptor,
-    LibinputDeviceKind, LiveBackendSessionLoop, LiveBackendSessionLoopPageFlipBudget,
-    LiveBackendSessionLoopReadiness, LiveInputReadinessGateStatus, LiveInputReadinessGatedPoller,
-    NativeLibinputEventPoller, SeatId,
+    LibinputDeviceKind, LiveBackendReadinessCollector, LiveBackendSessionLoop,
+    LiveBackendSessionLoopPageFlipBudget, LiveBackendSessionLoopReadiness,
+    LiveInputReadinessGateStatus, LiveInputReadinessGatedPoller, NativeLibinputEventPoller, SeatId,
 };
 #[cfg(feature = "gbm-probe")]
 use sophia_backend_live::{
@@ -2216,8 +2216,127 @@ fn live_session_loop_tick_leaves_input_idle_until_reduced_readiness() {
     );
     assert_eq!(
         report.native_page_flip.read_loop.status,
-        LibdrmNativeReadLoopStatus::WouldBlock
+        LibdrmNativeReadLoopStatus::Idle
     );
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(feature = "libinput-events")]
+#[test]
+fn live_readiness_collector_drains_reduced_readiness_without_identity() {
+    let mut collector = LiveBackendReadinessCollector::new();
+
+    assert_eq!(
+        collector.snapshot(),
+        LiveBackendSessionLoopReadiness::idle()
+    );
+
+    collector.observe_input_ready();
+    assert_eq!(
+        collector.snapshot(),
+        LiveBackendSessionLoopReadiness::input_ready()
+    );
+
+    collector.observe_page_flip_ready();
+    assert_eq!(
+        collector.drain(),
+        LiveBackendSessionLoopReadiness::all_ready()
+    );
+    assert_eq!(
+        collector.snapshot(),
+        LiveBackendSessionLoopReadiness::idle()
+    );
+}
+
+#[cfg(feature = "libinput-events")]
+#[test]
+fn live_session_loop_tick_skips_page_flip_read_until_reduced_ready() {
+    let root = ready_drm_sysfs_fixture("session-loop-page-flip-readiness-gate");
+    let config = LiveBackendConfig::new(&root).with_input_device(LibinputDeviceDescriptor {
+        seat: SeatId::from_raw(1),
+        device: DeviceId::from_raw(2),
+        kind: LibinputDeviceKind::Pointer,
+    });
+    let report = discover_live_backend(&config);
+    let (sender, receiver) = mpsc::sync_channel(2);
+    let poller = LiveInputReadinessGatedPoller::new(NativeLibinputEventPoller::new(
+        FakeLiveLibinputEventReader::new([libinput_motion_event(1, 42.0, 24.0)]),
+        4,
+    ));
+    let mut assembly = report
+        .into_live_runtime_assembly(poller)
+        .expect("ready backend should seed live assembly")
+        .with_page_flip_callback_queue(LivePageFlipCallbackQueue::new(receiver, 2));
+    let device = full_primary_plane_scanout_device();
+    let mut exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+    let submitted =
+        assembly.submit_and_track_rendered_primary_plane_scanout_with(&device, &mut exporter);
+    assert_eq!(
+        submitted.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+    );
+
+    let slot = LibdrmNativeOutputSlot::new(1).expect("slot one should be valid");
+    let source = LibdrmNativePageFlipSource::from_authority(
+        LibdrmBackendFdAuthority::new(38).expect("nonzero authority should mint"),
+    );
+    let page_flip_poller =
+        NativeLibdrmPageFlipEventPoller::new(source).with_routes([LibdrmNativeOutputRoute {
+            slot,
+            output: OutputId::from_raw(1),
+        }]);
+    let mut session_loop = LiveBackendSessionLoop::new(
+        page_flip_poller,
+        LiveBackendSessionLoopPageFlipBudget::new(4, 4),
+    );
+    let mut reader =
+        FakeLibdrmNativePageFlipReader::new([LibdrmNativePageFlipCallback::new(slot, 104)]);
+    let mut next_exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+
+    let report = session_loop
+        .run_tick_with_rendered_primary_plane_scanout_and_native_page_flip_events_with(
+            &mut assembly,
+            CompositorBackendTickInput::default(),
+            LiveBackendSessionLoopReadiness::input_ready(),
+            &device,
+            &mut next_exporter,
+            &mut reader,
+            &sender,
+        )
+        .expect("session loop tick should skip native page-flip read without readiness");
+
+    assert_eq!(
+        report.input_gate.status,
+        LiveInputReadinessGateStatus::Polled
+    );
+    assert_eq!(
+        report.native_page_flip.read_loop.status,
+        LibdrmNativeReadLoopStatus::Idle
+    );
+    assert_eq!(reader.queued_len(), 1);
+    assert_eq!(
+        report
+            .tick
+            .rendered_primary_plane_scanout_retire
+            .map(|retire| retire.status),
+        None
+    );
+    assert_eq!(
+        report
+            .tick
+            .rendered_primary_plane_scanout_submit
+            .expect("in-flight owner should defer next submit")
+            .status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::AlreadyInFlight
+    );
+    assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), true);
 
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -2277,7 +2396,7 @@ fn live_session_loop_tick_observes_readiness_then_retire_and_submit() {
         .run_tick_with_rendered_primary_plane_scanout_and_native_page_flip_events_with(
             &mut assembly,
             CompositorBackendTickInput::default(),
-            LiveBackendSessionLoopReadiness::input_ready(),
+            LiveBackendSessionLoopReadiness::all_ready(),
             &device,
             &mut next_exporter,
             &mut reader,
