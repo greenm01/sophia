@@ -78,6 +78,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Split renderer-native GBM platform into config, smoke/probe, and retained
+  scanout-owner modules with explicit front-buffer lifetime notes.
 - [x] Split renderer-native EGL into status, default-display, shared GL, and
   GBM-platform modules so rendered scanout export can be hardened separately.
 - [x] Split renderer-live scanout data into presentation, frame-target,
