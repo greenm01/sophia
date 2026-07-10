@@ -28,9 +28,9 @@ fi
 
 declare -A observed=()
 declare -A expected=(
-    ["schema"]="4"
+    ["schema"]="5"
     ["target"]="AtomicScanout"
-    ["status"]="CandidatePrimaryCardsScanoutReady"
+    ["status"]="CandidatePrimaryCardsAtomicReady"
 )
 
 for field in "${fields[@]}"; do
@@ -48,7 +48,7 @@ for field in "${fields[@]}"; do
         exit 1
     fi
     case "$key" in
-        schema|target|status|primary_card_nodes|openable_primary_card_nodes|atomic_capable_primary_card_nodes|scanout_target_primary_card_nodes) ;;
+        schema|target|status|primary_card_nodes|openable_primary_card_nodes|atomic_capable_primary_card_nodes|scanout_target_primary_card_nodes|atomic_property_primary_card_nodes) ;;
         *)
             echo "atomic scanout preflight has unknown field: $key" >&2
             echo "$preflight" >&2
@@ -118,6 +118,18 @@ if [[ ! "$scanout_target_primary_card_nodes" =~ ^[0-9]+$ ]]; then
 fi
 if (( scanout_target_primary_card_nodes < 1 || scanout_target_primary_card_nodes > atomic_capable_primary_card_nodes )); then
     echo "atomic scanout preflight expected 1..atomic_capable_primary_card_nodes scanout_target_primary_card_nodes, got $scanout_target_primary_card_nodes" >&2
+    echo "$preflight" >&2
+    exit 1
+fi
+
+atomic_property_primary_card_nodes="${observed["atomic_property_primary_card_nodes"]:-}"
+if [[ ! "$atomic_property_primary_card_nodes" =~ ^[0-9]+$ ]]; then
+    echo "atomic scanout preflight expected numeric atomic_property_primary_card_nodes, got ${atomic_property_primary_card_nodes:-missing}" >&2
+    echo "$preflight" >&2
+    exit 1
+fi
+if (( atomic_property_primary_card_nodes < 1 || atomic_property_primary_card_nodes > scanout_target_primary_card_nodes )); then
+    echo "atomic scanout preflight expected 1..scanout_target_primary_card_nodes atomic_property_primary_card_nodes, got $atomic_property_primary_card_nodes" >&2
     echo "$preflight" >&2
     exit 1
 fi

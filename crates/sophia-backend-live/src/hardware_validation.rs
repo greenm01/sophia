@@ -85,6 +85,7 @@ pub struct LiveAtomicScanoutPreflightReport {
     pub openable_primary_card_nodes: u8,
     pub atomic_capable_primary_card_nodes: u8,
     pub scanout_target_primary_card_nodes: u8,
+    pub atomic_property_primary_card_nodes: u8,
 }
 
 impl LiveAtomicScanoutPreflightReport {
@@ -94,6 +95,7 @@ impl LiveAtomicScanoutPreflightReport {
         openable_primary_card_nodes: usize,
         atomic_capable_primary_card_nodes: usize,
         scanout_target_primary_card_nodes: usize,
+        atomic_property_primary_card_nodes: usize,
     ) -> Self {
         let primary_card_nodes = if device_directory_available {
             capped_primary_card_count(primary_card_nodes)
@@ -123,6 +125,15 @@ impl LiveAtomicScanoutPreflightReport {
             scanout_target_primary_card_nodes,
             atomic_capable_primary_card_nodes,
         );
+        let atomic_property_primary_card_nodes = if device_directory_available {
+            capped_primary_card_count(atomic_property_primary_card_nodes)
+        } else {
+            0
+        };
+        let atomic_property_primary_card_nodes = capped_atomic_property_primary_card_count(
+            atomic_property_primary_card_nodes,
+            scanout_target_primary_card_nodes,
+        );
         let status = if !device_directory_available {
             LiveAtomicScanoutPreflightStatus::DeviceDirectoryUnavailable
         } else if primary_card_nodes == 0 {
@@ -133,8 +144,10 @@ impl LiveAtomicScanoutPreflightReport {
             LiveAtomicScanoutPreflightStatus::AtomicClientCapabilityUnavailable
         } else if scanout_target_primary_card_nodes == 0 {
             LiveAtomicScanoutPreflightStatus::KmsScanoutTargetUnavailable
+        } else if atomic_property_primary_card_nodes == 0 {
+            LiveAtomicScanoutPreflightStatus::AtomicPropertyDiscoveryUnavailable
         } else {
-            LiveAtomicScanoutPreflightStatus::CandidatePrimaryCardsScanoutReady
+            LiveAtomicScanoutPreflightStatus::CandidatePrimaryCardsAtomicReady
         };
 
         Self {
@@ -144,18 +157,20 @@ impl LiveAtomicScanoutPreflightReport {
             openable_primary_card_nodes,
             atomic_capable_primary_card_nodes,
             scanout_target_primary_card_nodes,
+            atomic_property_primary_card_nodes,
         }
     }
 
     pub fn reduced_log_line(self) -> String {
         format!(
-            "sophia_atomic_scanout_preflight schema=4 target={:?} status={:?} primary_card_nodes={} openable_primary_card_nodes={} atomic_capable_primary_card_nodes={} scanout_target_primary_card_nodes={}",
+            "sophia_atomic_scanout_preflight schema=5 target={:?} status={:?} primary_card_nodes={} openable_primary_card_nodes={} atomic_capable_primary_card_nodes={} scanout_target_primary_card_nodes={} atomic_property_primary_card_nodes={}",
             self.target,
             self.status,
             self.primary_card_nodes,
             self.openable_primary_card_nodes,
             self.atomic_capable_primary_card_nodes,
-            self.scanout_target_primary_card_nodes
+            self.scanout_target_primary_card_nodes,
+            self.atomic_property_primary_card_nodes
         )
     }
 }
@@ -167,7 +182,8 @@ pub enum LiveAtomicScanoutPreflightStatus {
     PrimaryCardOpenUnavailable,
     AtomicClientCapabilityUnavailable,
     KmsScanoutTargetUnavailable,
-    CandidatePrimaryCardsScanoutReady,
+    AtomicPropertyDiscoveryUnavailable,
+    CandidatePrimaryCardsAtomicReady,
 }
 
 pub const fn capped_primary_card_count(primary_card_nodes: usize) -> u8 {
@@ -197,6 +213,17 @@ pub const fn capped_scanout_target_primary_card_count(
         atomic_capable_primary_card_nodes
     } else {
         scanout_target_primary_card_nodes
+    }
+}
+
+pub const fn capped_atomic_property_primary_card_count(
+    atomic_property_primary_card_nodes: u8,
+    scanout_target_primary_card_nodes: u8,
+) -> u8 {
+    if atomic_property_primary_card_nodes > scanout_target_primary_card_nodes {
+        scanout_target_primary_card_nodes
+    } else {
+        atomic_property_primary_card_nodes
     }
 }
 
@@ -244,13 +271,14 @@ pub fn real_atomic_scanout_preflight_report_from_dev_dri(
     dev_dri: &std::path::Path,
 ) -> LiveAtomicScanoutPreflightReport {
     let Ok(entries) = std::fs::read_dir(dev_dri) else {
-        return LiveAtomicScanoutPreflightReport::from_primary_card_counts(false, 0, 0, 0, 0);
+        return LiveAtomicScanoutPreflightReport::from_primary_card_counts(false, 0, 0, 0, 0, 0);
     };
 
     let mut primary_card_nodes = 0usize;
     let mut openable_primary_card_nodes = 0usize;
     let mut atomic_capable_primary_card_nodes = 0usize;
     let mut scanout_target_primary_card_nodes = 0usize;
+    let mut atomic_property_primary_card_nodes = 0usize;
 
     for entry in entries
         .filter_map(Result::ok)
@@ -263,6 +291,8 @@ pub fn real_atomic_scanout_preflight_report_from_dev_dri(
             && atomic_capable_primary_card_nodes
                 > LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS as usize
             && scanout_target_primary_card_nodes
+                > LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS as usize
+            && atomic_property_primary_card_nodes
                 > LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS as usize
         {
             continue;
@@ -277,6 +307,10 @@ pub fn real_atomic_scanout_preflight_report_from_dev_dri(
         if can_select_primary_plane_scanout_target(&path) {
             scanout_target_primary_card_nodes = scanout_target_primary_card_nodes.saturating_add(1);
         }
+        if can_discover_primary_plane_atomic_properties(&path) {
+            atomic_property_primary_card_nodes =
+                atomic_property_primary_card_nodes.saturating_add(1);
+        }
     }
 
     LiveAtomicScanoutPreflightReport::from_primary_card_counts(
@@ -285,6 +319,7 @@ pub fn real_atomic_scanout_preflight_report_from_dev_dri(
         openable_primary_card_nodes,
         atomic_capable_primary_card_nodes,
         scanout_target_primary_card_nodes,
+        atomic_property_primary_card_nodes,
     )
 }
 
@@ -332,6 +367,31 @@ fn can_select_primary_plane_scanout_target(path: &std::path::Path) -> bool {
 
 #[cfg(not(feature = "libdrm-events"))]
 fn can_select_primary_plane_scanout_target(_path: &std::path::Path) -> bool {
+    false
+}
+
+#[cfg(feature = "libdrm-events")]
+fn can_discover_primary_plane_atomic_properties(path: &std::path::Path) -> bool {
+    let Some(card) = open_atomic_preflight_card_with_client_capabilities(path) else {
+        return false;
+    };
+    let selection = crate::select_native_primary_plane_target(&card);
+    let Some(selection) = selection.selection else {
+        return false;
+    };
+
+    crate::discover_native_primary_plane_property_handles(
+        &card,
+        selection.connector,
+        selection.crtc,
+        selection.plane,
+    )
+    .status
+        == crate::LibdrmNativePrimaryPlanePropertyDiscoveryStatus::Discovered
+}
+
+#[cfg(not(feature = "libdrm-events"))]
+fn can_discover_primary_plane_atomic_properties(_path: &std::path::Path) -> bool {
     false
 }
 
