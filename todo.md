@@ -83,6 +83,8 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Hardened renderer-live native GBM scanout export reports so only reports
+  with exported status can retain native buffer ownership.
 - [x] Added a negative atomic scanout evidence fixture proving the shell verifier
   rejects missing rendered-context readiness.
 - [x] Aligned Rust atomic scanout smoke evidence with the shell verifier so

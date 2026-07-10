@@ -28,14 +28,19 @@ impl NativeGbmOwnedScanoutBufferExportReport {
         status: LiveRendererScanoutBufferExportStatus,
         buffer: Option<NativeGbmOwnedScanoutBuffer>,
     ) -> Self {
-        Self {
-            status: match (status, buffer.is_some()) {
-                (LiveRendererScanoutBufferExportStatus::Exported, false) => {
+        match status {
+            LiveRendererScanoutBufferExportStatus::Exported => Self {
+                status: if buffer.is_some() {
+                    LiveRendererScanoutBufferExportStatus::Exported
+                } else {
                     LiveRendererScanoutBufferExportStatus::Degraded
-                }
-                (status, _) => status,
+                },
+                buffer,
             },
-            buffer,
+            status => Self {
+                status,
+                buffer: None,
+            },
         }
     }
 }

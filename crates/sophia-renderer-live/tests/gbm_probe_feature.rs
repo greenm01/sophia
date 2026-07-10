@@ -150,6 +150,16 @@ fn native_gbm_scanout_export_report_rejects_exported_without_retained_buffer() {
         LiveRendererScanoutBufferExportStatus::Degraded
     );
     assert!(report.buffer.is_none());
+
+    for status in [
+        LiveRendererScanoutBufferExportStatus::InvalidTarget,
+        LiveRendererScanoutBufferExportStatus::Unavailable,
+        LiveRendererScanoutBufferExportStatus::Degraded,
+    ] {
+        let report = NativeGbmOwnedScanoutBufferExportReport::new(status, None);
+        assert_eq!(report.status, status);
+        assert!(report.buffer.is_none());
+    }
 }
 
 #[test]
