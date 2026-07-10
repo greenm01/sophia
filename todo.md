@@ -110,6 +110,8 @@ smoke still needs a DRM-master-capable machine.
   changes, while retaining it for identical-size observations.
 - [x] Added reduced output-size reporting to runtime ticks so scanout reports
   expose the output geometry paired with the GBM frame target.
+- [x] Extended runtime rendered-scanout submit evidence to schema 2 with
+  reduced output-size and GBM frame-target-size fields.
 - [x] Made the opt-in atomic hardware smoke retain the renderer-owned GBM
   front-buffer owner with the primary-plane submission until page-flip
   retirement, matching the production runtime lifetime rule.
