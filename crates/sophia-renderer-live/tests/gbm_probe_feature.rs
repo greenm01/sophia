@@ -2,10 +2,13 @@
 
 use sophia_renderer_live::{
     FakeGbmCapabilityProbe, GbmCapabilityProbeReport, GbmCapabilityProbeStatus,
-    GbmRenderDeviceToken, LiveRendererImportHealth, LiveRendererImportPathStatus,
+    GbmRenderDeviceToken, LiveGbmEglFrameTargetAllocationRequest,
+    LiveGbmEglFrameTargetAllocationStatus, LiveGbmEglFrameTargetRecord,
+    LiveGbmEglFrameTargetStatus, LiveRendererImportHealth, LiveRendererImportPathStatus,
     LiveRendererImportStartupStatus, LiveRendererScanoutBufferExportStatus,
-    NativeGbmCapabilityProbe, NativeGbmRenderedScanoutContext,
-    NativeGbmRenderedScanoutContextStatus, NativeGbmScanoutBufferExporter,
+    NativeGbmBackedEglFrameTargetAllocator, NativeGbmCapabilityProbe,
+    NativeGbmRenderedScanoutContext, NativeGbmRenderedScanoutContextStatus,
+    NativeGbmScanoutBufferExporter, Size,
 };
 
 #[test]
@@ -151,6 +154,59 @@ fn native_rendered_gbm_scanout_exporter_fails_closed_without_backend_device() {
         )
         .status,
         LiveRendererScanoutBufferExportStatus::Unavailable
+    );
+}
+
+#[test]
+fn native_gbm_scanout_exporter_rejects_malformed_ready_target_before_backend_device() {
+    let malformed_ready_target = LiveGbmEglFrameTargetRecord {
+        status: LiveGbmEglFrameTargetStatus::Ready,
+        size: Size {
+            width: -1,
+            height: 720,
+        },
+    };
+
+    assert_eq!(
+        NativeGbmScanoutBufferExporter::export_owned_scanout_buffer_from_backend_device_result::<
+            std::fs::File,
+        >(
+            Err(std::io::Error::from_raw_os_error(19)),
+            malformed_ready_target,
+        )
+        .status,
+        LiveRendererScanoutBufferExportStatus::InvalidTarget
+    );
+    assert_eq!(
+        NativeGbmScanoutBufferExporter::export_rendered_owned_scanout_buffer_from_backend_device_result::<
+            std::fs::File,
+        >(
+            Err(std::io::Error::from_raw_os_error(19)),
+            malformed_ready_target,
+        )
+        .status,
+        LiveRendererScanoutBufferExportStatus::InvalidTarget
+    );
+}
+
+#[test]
+fn native_gbm_backed_frame_target_allocator_rejects_malformed_ready_target() {
+    let request = LiveGbmEglFrameTargetAllocationRequest {
+        target: LiveGbmEglFrameTargetRecord {
+            status: LiveGbmEglFrameTargetStatus::Ready,
+            size: Size {
+                width: -1,
+                height: 720,
+            },
+        },
+    };
+
+    assert_eq!(
+        NativeGbmBackedEglFrameTargetAllocator::allocation_report_from_backend_device_result::<
+            std::fs::File,
+        >(Err(std::io::Error::from_raw_os_error(19)), request)
+        .status,
+        LiveGbmEglFrameTargetAllocationStatus::InvalidTarget
     );
 }
 

@@ -117,7 +117,7 @@ impl NativeGbmBackedEglFrameTargetAllocator {
         device: std::io::Result<T>,
         request: crate::LiveGbmEglFrameTargetAllocationRequest,
     ) -> crate::LiveGbmEglFrameTargetAllocationReport {
-        let status = if request.target.status == crate::LiveGbmEglFrameTargetStatus::Ready {
+        let status = if request.target.is_valid_scanout_target() {
             native::gbm_backed_frame_target_allocation_status_from_backend_device_result(
                 device,
                 request.target.size.width as u32,

@@ -74,6 +74,36 @@ fn gbm_egl_frame_target_record_rejects_invalid_size_without_native_errors() {
 }
 
 #[test]
+fn gbm_egl_frame_target_record_requires_ready_status_and_positive_size() {
+    let ready = LiveGbmEglFrameTargetRecord::new(Size {
+        width: 1920,
+        height: 1080,
+    });
+    assert!(ready.is_valid_scanout_target());
+
+    assert!(
+        !LiveGbmEglFrameTargetRecord {
+            status: LiveGbmEglFrameTargetStatus::Ready,
+            size: Size {
+                width: 0,
+                height: 1080,
+            },
+        }
+        .is_valid_scanout_target()
+    );
+    assert!(
+        !LiveGbmEglFrameTargetRecord {
+            status: LiveGbmEglFrameTargetStatus::InvalidSize,
+            size: Size {
+                width: 1920,
+                height: 1080,
+            },
+        }
+        .is_valid_scanout_target()
+    );
+}
+
+#[test]
 fn gbm_egl_frame_target_lifecycle_reports_reduced_transitions_without_handles() {
     let target = LiveGbmEglFrameTargetRecord::new(Size {
         width: 1920,
@@ -240,6 +270,20 @@ fn fake_renderer_scanout_exporter_reports_reduced_status_without_native_handles(
                 width: 0,
                 height: 720,
             }))
+            .status,
+        LiveRendererScanoutBufferExportStatus::InvalidTarget
+    );
+
+    let malformed_ready_target = LiveGbmEglFrameTargetRecord {
+        status: LiveGbmEglFrameTargetStatus::Ready,
+        size: Size {
+            width: -1,
+            height: 720,
+        },
+    };
+    assert_eq!(
+        invalid_target
+            .export_scanout_buffer(malformed_ready_target)
             .status,
         LiveRendererScanoutBufferExportStatus::InvalidTarget
     );

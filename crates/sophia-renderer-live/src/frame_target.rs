@@ -17,6 +17,12 @@ impl LiveGbmEglFrameTargetRecord {
             size,
         }
     }
+
+    pub const fn is_valid_scanout_target(self) -> bool {
+        matches!(self.status, LiveGbmEglFrameTargetStatus::Ready)
+            && self.size.width > 0
+            && self.size.height > 0
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -132,7 +138,7 @@ impl LiveGbmEglFrameTargetAllocator for FakeGbmEglFrameTargetAllocator {
         &mut self,
         request: LiveGbmEglFrameTargetAllocationRequest,
     ) -> LiveGbmEglFrameTargetAllocationReport {
-        let status = if request.target.status == LiveGbmEglFrameTargetStatus::Ready {
+        let status = if request.target.is_valid_scanout_target() {
             self.status
         } else {
             LiveGbmEglFrameTargetAllocationStatus::InvalidTarget

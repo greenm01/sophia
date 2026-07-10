@@ -83,6 +83,9 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Hardened renderer-live GBM/EGL scanout target validation so malformed
+  ready frame targets with non-positive dimensions reduce to `InvalidTarget`
+  before reaching native GBM/EGL allocation or export.
 - [x] Split reduced atomic scanout smoke failure status by submit stage, so
   hardware captures can distinguish property discovery, resource creation,
   request build, atomic submit, and request-shape failures without native

@@ -1,5 +1,5 @@
+use crate::Size;
 use crate::{LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888, LiveGbmEglFrameTargetRecord};
-use crate::{LiveGbmEglFrameTargetStatus, Size};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LiveRendererScanoutBufferDescriptor {
@@ -89,7 +89,7 @@ impl LiveRendererScanoutBufferExporter for FakeRendererScanoutBufferExporter {
         &mut self,
         target: LiveGbmEglFrameTargetRecord,
     ) -> LiveRendererScanoutBufferExportReport {
-        if target.status != LiveGbmEglFrameTargetStatus::Ready {
+        if !target.is_valid_scanout_target() {
             return LiveRendererScanoutBufferExportReport {
                 status: LiveRendererScanoutBufferExportStatus::InvalidTarget,
                 descriptor: None,

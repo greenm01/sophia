@@ -1,7 +1,7 @@
 use std::os::fd::AsFd;
 
 use crate::{
-    LiveGbmEglFrameTargetRecord, LiveGbmEglFrameTargetStatus, LiveRendererScanoutBufferDescriptor,
+    LiveGbmEglFrameTargetRecord, LiveRendererScanoutBufferDescriptor,
     LiveRendererScanoutBufferExportStatus, LiveRendererScanoutBufferStatus, Size,
 };
 
@@ -67,7 +67,7 @@ where
         &self,
         target: LiveGbmEglFrameTargetRecord,
     ) -> NativeGbmOwnedScanoutBufferExportReport {
-        if target.status != LiveGbmEglFrameTargetStatus::Ready {
+        if !target.is_valid_scanout_target() {
             return NativeGbmOwnedScanoutBufferExportReport {
                 status: LiveRendererScanoutBufferExportStatus::InvalidTarget,
                 buffer: None,
@@ -128,7 +128,7 @@ where
         u32,
     ) -> sophia_renderer_native_egl::NativeGbmOwnedScanoutBufferExportReport,
 {
-    if target.status != LiveGbmEglFrameTargetStatus::Ready {
+    if !target.is_valid_scanout_target() {
         return NativeGbmOwnedScanoutBufferExportReport {
             status: LiveRendererScanoutBufferExportStatus::InvalidTarget,
             buffer: None,
