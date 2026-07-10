@@ -3837,6 +3837,61 @@ fn native_atomic_scanout_smoke_evidence_fails_closed_before_page_flip() {
 }
 
 #[test]
+fn native_atomic_scanout_smoke_evidence_records_waiting_retire_on_missing_page_flip() {
+    let device = full_primary_plane_scanout_device();
+    let mut submit = submit_native_primary_plane_scanout_from_renderer_descriptor(
+        &device,
+        scanout_descriptor(Size {
+            width: 1280,
+            height: 720,
+        }),
+    );
+    let submission = submit
+        .submission
+        .take()
+        .expect("submitted scanout should retain resource ownership");
+    let poll =
+        LibdrmPageFlipEventPollReport::from_source_report(LivePageFlipCallbackSourceReport {
+            emitted: 0,
+            queued_remaining: 0,
+            backpressure: false,
+            disconnected: false,
+            max_reached: false,
+        });
+    let waiting_retire = LibdrmNativePrimaryPlaneScanoutRetireResult {
+        status: LibdrmNativePrimaryPlaneScanoutRetireStatus::WaitingForAcceptedPageFlip,
+        destroy: None,
+        submission: Some(submission),
+        cleanup: None,
+    };
+
+    let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+        LiveKmsScanoutTargetStatus::Ready,
+        Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
+        LiveRendererScanoutBufferExportStatus::Exported,
+        Some(&submit),
+        Some(&poll),
+        None,
+        Some(&waiting_retire),
+    );
+
+    assert_eq!(
+        evidence.status,
+        LibdrmNativeAtomicScanoutSmokeStatus::PageFlipMissing
+    );
+    assert_eq!(
+        evidence.retire,
+        Some(LibdrmNativePrimaryPlaneScanoutRetireStatus::WaitingForAcceptedPageFlip)
+    );
+    assert_eq!(evidence.retire_destroy, None);
+    assert_eq!(evidence.retire_cleanup_pending, false);
+    assert_eq!(
+        submission.retire(&device).status,
+        LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed
+    );
+}
+
+#[test]
 fn native_atomic_scanout_smoke_evidence_requires_modeset_request_scope() {
     let device = full_primary_plane_scanout_device();
     let mut submit = submit_native_primary_plane_scanout_from_renderer_descriptor(
@@ -6333,7 +6388,15 @@ mod atomic_scanout_hardware_smoke {
                 return RealAtomicPageFlipWaitReport {
                     poll: last_poll,
                     callback_report: None,
-                    retired: None,
+                    retired: submission.map(|submission| {
+                        LibdrmNativePrimaryPlaneScanoutRetireResult {
+                            status:
+                                LibdrmNativePrimaryPlaneScanoutRetireStatus::WaitingForAcceptedPageFlip,
+                            destroy: None,
+                            submission: Some(submission),
+                            cleanup: None,
+                        }
+                    }),
                 };
             }
 

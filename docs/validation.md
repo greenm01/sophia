@@ -128,7 +128,8 @@ reduce the stop point without native identity: primary-card open, DRM client
 capability setup, KMS target selection, rendered-context creation, GBM export,
 retained-resource ownership, scanout-buffer import, property discovery, resource
 creation, request build, atomic submit, request-shape mismatch, page-flip reader
-setup, page-flip delivery, and resource retirement are reported separately.
+setup, page-flip delivery, waiting-retire state, and resource retirement are
+reported separately.
 The stable evidence shape for the GBM/EGL renderer smoke is
 `LiveRealGbmSmokeEvidence`: status, draw status, presentation status, and
 frame-target allocation status only.

@@ -83,6 +83,9 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Made page-flip timeout evidence preserve a reduced
+  `WaitingForAcceptedPageFlip` retirement state so missing callbacks do not look
+  like invisible resource drops.
 - [x] Reduced additional atomic hardware-smoke setup failures, including primary
   card open, DRM client capability setup, retained-resource ownership, and
   page-flip reader setup, instead of losing evidence to raw panics.
