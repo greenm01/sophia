@@ -890,6 +890,9 @@ The reusable native GBM rendered-scanout exporter now records reduced
 frame-target lifecycle state across exports. This makes retained, resized, and
 invalidated targets observable while preserving the rule that native GBM/EGL
 identity stays behind backend-live.
+Reduced KMS scanout readiness now rejects frame targets whose size no longer
+matches the selected output. This catches resize/target drift before native
+primary-plane submit and maps it to a reduced page-flip-not-ready state.
 The page-flip callback queue now carries the latest accepted reduced callback
 report. `run_tick_with_rendered_primary_plane_scanout_with` consumes that report
 before draining lifecycle states, so one live tick can retire the old rendered

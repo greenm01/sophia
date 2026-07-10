@@ -249,6 +249,10 @@ Reusable native GBM rendered-scanout exporters may report only reduced
 frame-target lifecycle state across exports. Created, retained, resized, and
 invalidated target reports are acceptable; GBM handles, EGL displays, file
 descriptors, paths, and native error strings are not.
+KMS scanout target readiness must fail closed when the reduced frame-target
+size differs from the selected output size. The public report may expose only a
+reduced size-mismatch status and the frame-target size; it must not expose
+connector, CRTC, plane, or mode object identity.
 Each tracked rendered scanout owner must carry the last reduced page-flip
 sequence observed before submission. Backend-live may retire that owner only
 when accepted page-flip evidence is newer than the baseline; accepted-looking

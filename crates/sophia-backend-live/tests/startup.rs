@@ -572,6 +572,40 @@ fn live_runtime_assembly_blocks_page_flip_readiness_for_invalid_scanout_target()
 }
 
 #[test]
+fn live_runtime_assembly_blocks_page_flip_readiness_for_frame_target_size_mismatch() {
+    let root = ready_drm_sysfs_fixture("runtime-kms-scanout-target-size-mismatch");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed live assembly");
+
+    assembly.observe_gbm_egl_frame_target_size(Size {
+        width: 1920,
+        height: 1080,
+    });
+
+    assert_eq!(
+        assembly.kms_scanout_target_observation(),
+        LiveKmsScanoutTargetReport {
+            status: LiveKmsScanoutTargetStatus::FrameTargetSizeMismatch,
+            size: Some(Size {
+                width: 1920,
+                height: 1080,
+            }),
+        }
+    );
+    assert_eq!(
+        assembly.page_flip_observation(),
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::FrameTargetSizeMismatch,
+            frame_serial: None,
+        }
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn live_runtime_assembly_keeps_degraded_scanout_target_reduced() {
     let root = ready_drm_sysfs_fixture("runtime-kms-scanout-target-degraded");
     let report = discover_live_backend(&LiveBackendConfig::new(&root));
@@ -1536,6 +1570,15 @@ fn page_flip_event_projects_kms_scanout_target_without_kms_identity() {
         ),
         LivePageFlipEvent {
             status: LivePageFlipEventStatus::InvalidFrameTarget,
+            frame_serial: None,
+        }
+    );
+    assert_eq!(
+        LivePageFlipEvent::from_kms_scanout_target_status(
+            LiveKmsScanoutTargetStatus::FrameTargetSizeMismatch,
+        ),
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::FrameTargetSizeMismatch,
             frame_serial: None,
         }
     );

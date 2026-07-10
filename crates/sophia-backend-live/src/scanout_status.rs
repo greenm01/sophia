@@ -87,6 +87,13 @@ impl LiveKmsScanoutTargetReport {
             };
         }
 
+        if frame_target.size != output_size {
+            return Self {
+                status: LiveKmsScanoutTargetStatus::FrameTargetSizeMismatch,
+                size: Some(frame_target.size),
+            };
+        }
+
         Self {
             status: match presentation.status {
                 LiveRendererPresentationStatus::Ready => LiveKmsScanoutTargetStatus::Ready,
@@ -106,6 +113,7 @@ pub enum LiveKmsScanoutTargetStatus {
     OutputUnavailable,
     FrameTargetUnavailable,
     InvalidFrameTarget,
+    FrameTargetSizeMismatch,
     PresentationUnavailable,
     Degraded,
 }
@@ -145,6 +153,9 @@ impl LivePageFlipEvent {
                 }
                 LiveKmsScanoutTargetStatus::InvalidFrameTarget => {
                     LivePageFlipEventStatus::InvalidFrameTarget
+                }
+                LiveKmsScanoutTargetStatus::FrameTargetSizeMismatch => {
+                    LivePageFlipEventStatus::FrameTargetSizeMismatch
                 }
                 LiveKmsScanoutTargetStatus::PresentationUnavailable => {
                     LivePageFlipEventStatus::PresentationUnavailable
@@ -192,6 +203,7 @@ pub enum LivePageFlipEventStatus {
     OutputUnavailable,
     FrameTargetUnavailable,
     InvalidFrameTarget,
+    FrameTargetSizeMismatch,
     PresentationUnavailable,
     Degraded,
 }

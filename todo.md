@@ -119,6 +119,8 @@ active milestone to `docs/roadmap-history.md`.
 - [x] Added reduced frame-target lifecycle tracking to the reusable native GBM
   rendered-scanout exporter so resize/reuse behavior is observable without
   native identity.
+- [x] Made KMS scanout readiness fail closed when the reduced frame target size
+  does not match the selected output size.
 - [x] Added reduced live scanout submit intake so backend-live rendered
   primary-plane submit results can drive runtime `SubmitScanout`.
 - [x] Added shared runtime scanout lifecycle state so rendered frames progress

@@ -592,6 +592,10 @@ The reusable exporter also records the last reduced frame-target lifecycle:
 created, retained, resized, invalidated, or retired. This gives the backend
 resize/target-continuity evidence for production scanout while keeping native
 GBM/EGL resources and identities private.
+KMS scanout readiness now also checks that the reduced GBM/EGL frame target
+size matches the selected output size. A valid-looking but mismatched target is
+reported as reduced frame-target-size-mismatch and blocks page-flip readiness
+before any native primary-plane submit is attempted.
 For rendered primary-plane scanout, backend-live can also retain the combined
 rendered-buffer owner and KMS submission owner internally. Stale page-flip
 evidence keeps that owner in flight. Accepted presented page-flip evidence
