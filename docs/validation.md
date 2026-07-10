@@ -244,13 +244,22 @@ tools/atomic_scanout_smoke.sh --slot=1 --output=1 --authority=1 --page-flip-time
 The helper runs the verified preflight before the smoke and
 `tools/verify_atomic_scanout_evidence.sh` after a successful smoke. Set
 `SOPHIA_ATOMIC_SCANOUT_SKIP_PREFLIGHT=1` only when preflight is known to be
-wrong for the host and a modesetting smoke is still intentional. To verify a
-captured log without rerunning the hardware smoke:
+wrong for the host and a modesetting smoke is still intentional.
+
+For the full hardware proof, prefer `tools/atomic_scanout_hardware_proof.sh`.
+It runs preflight once, captures the destructive two-phase atomic evidence,
+captures the runtime rendered-scanout submit-to-retire evidence, and verifies
+all three reduced logs:
+
+```sh
+tools/atomic_scanout_hardware_proof.sh --slot=1 --output=1 --authority=1 --page-flip-timeout-ms=2000 --child-timeout-ms=10000
+```
+
+To verify captured logs without rerunning hardware:
 
 ```sh
 tools/verify_atomic_scanout_evidence.sh /tmp/sophia-atomic-smoke.log
 tools/verify_atomic_scanout_preflight.sh /tmp/sophia-atomic-scanout-preflight.log
-tools/runtime_rendered_scanout_evidence.sh --slot=1 --output=1 --authority=1 --page-flip-timeout-ms=2000
 tools/verify_runtime_rendered_scanout_evidence.sh /tmp/sophia-runtime-rendered-scanout.log
 ```
 

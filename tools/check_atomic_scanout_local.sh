@@ -11,5 +11,9 @@ cargo test --offline -p sophia-renderer-native-egl --features gbm-platform --qui
 cargo test --offline -p sophia-renderer-live --features "gbm-probe egl-probe" --quiet
 cargo test --offline -p sophia-backend-live --features "libdrm-events libinput-events gbm-probe egl-probe" --quiet
 tools/check_atomic_scanout_verifiers.sh
+bash -n tools/atomic_scanout_preflight.sh
+bash -n tools/atomic_scanout_smoke.sh
+bash -n tools/runtime_rendered_scanout_evidence.sh
+bash -n tools/atomic_scanout_hardware_proof.sh
 
 echo "atomic scanout local checks passed"

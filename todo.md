@@ -19,6 +19,9 @@ active milestone to `docs/roadmap-history.md`.
 - [ ] Run the opt-in atomic hardware smoke on a DRM-master-capable machine.
 - [ ] Capture `LibdrmNativeAtomicScanoutSmokeEvidence` with
   `tools/atomic_scanout_smoke.sh`.
+- [ ] Capture the combined hardware proof with
+  `tools/atomic_scanout_hardware_proof.sh`, including runtime rendered-scanout
+  submit-to-retire evidence.
 - [ ] Verify rendered GBM front-buffer export, primary-plane atomic submit,
   native page-flip callback, resource retirement, and steady-state page-flip
   submit appear in reduced evidence.
@@ -39,6 +42,9 @@ Support now exists for that hardware proof:
   preflight log is ready for the DRM-master smoke.
 - `tools/verify_atomic_scanout_evidence.sh` can verify a captured log offline
   against the reduced atomic scanout evidence contract.
+- `tools/atomic_scanout_hardware_proof.sh` runs preflight once, captures both
+  destructive two-phase atomic evidence and runtime rendered-scanout evidence,
+  and verifies every reduced log.
 
 Current local host note: `tools/atomic_scanout_preflight.sh` records exactly one
 reduced line and exits nonzero with `DeviceDirectoryUnavailable` and zero
@@ -102,6 +108,9 @@ smoke still needs a DRM-master-capable machine.
 - [x] Added `sophia atomic-scanout-runtime-evidence` plus
   `tools/runtime_rendered_scanout_evidence.sh` to capture and verify a real
   one-frame runtime rendered-primary-plane scanout proof.
+- [x] Added `tools/atomic_scanout_hardware_proof.sh` as the combined operator
+  proof for preflight, two-phase atomic scanout, and runtime submit-to-retire
+  evidence.
 - [x] Added session-loop coverage proving pending decoded native page-flip
   callbacks drain under the bounded emit budget without requiring another
   reduced page-flip readiness token.
