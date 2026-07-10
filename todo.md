@@ -75,6 +75,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Split backend-live native scanout into commit, evidence, and submit
+  modules while keeping the public DRM façade stable.
 - [x] Opened the opt-in atomic hardware smoke card fd with `O_NONBLOCK` so the
   bounded page-flip evidence wait cannot hang inside DRM event reads.
 - [x] Made the opt-in atomic hardware smoke wait within a bounded deadline for
