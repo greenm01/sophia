@@ -55,7 +55,7 @@ pub use sophia_renderer_live::{GbmCapabilityProbeReport, NativeGbmCapabilityProb
 #[cfg(feature = "libdrm-events")]
 use sophia_renderer_live::{
     LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888, LiveRendererScanoutBufferDescriptor,
-    LiveRendererScanoutBufferStatus,
+    LiveRendererScanoutBufferExportStatus, LiveRendererScanoutBufferStatus,
 };
 #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
 use sophia_renderer_live::{
@@ -2072,6 +2072,97 @@ pub enum LibdrmNativePrimaryPlaneScanoutRetireStatus {
     RetiredAfterPageFlip,
     WaitingForAcceptedPageFlip,
     ResourceRetireFailed,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LibdrmNativeAtomicScanoutSmokeEvidence {
+    pub status: LibdrmNativeAtomicScanoutSmokeStatus,
+    pub gbm_export: Option<LiveRendererScanoutBufferExportStatus>,
+    pub submit: Option<LibdrmNativePrimaryPlaneScanoutSubmitStatus>,
+    pub page_flip_poll: Option<LibdrmPageFlipEventPollStatus>,
+    pub page_flip: Option<LivePageFlipEventStatus>,
+    pub retire: Option<LibdrmNativePrimaryPlaneScanoutRetireStatus>,
+}
+
+#[cfg(feature = "libdrm-events")]
+impl LibdrmNativeAtomicScanoutSmokeEvidence {
+    pub const fn no_primary_card() -> Self {
+        Self {
+            status: LibdrmNativeAtomicScanoutSmokeStatus::NoPrimaryCard,
+            gbm_export: None,
+            submit: None,
+            page_flip_poll: None,
+            page_flip: None,
+            retire: None,
+        }
+    }
+
+    pub const fn kms_selection_failed() -> Self {
+        Self {
+            status: LibdrmNativeAtomicScanoutSmokeStatus::KmsSelectionFailed,
+            gbm_export: None,
+            submit: None,
+            page_flip_poll: None,
+            page_flip: None,
+            retire: None,
+        }
+    }
+
+    pub fn from_pipeline_reports(
+        gbm_export: LiveRendererScanoutBufferExportStatus,
+        submit: Option<&LibdrmNativePrimaryPlaneScanoutSubmitResult>,
+        poll: Option<&LibdrmPageFlipEventPollReport>,
+        callback: Option<&LivePageFlipCallbackReport>,
+        retire: Option<&LibdrmNativePrimaryPlaneScanoutRetireResult>,
+    ) -> Self {
+        let submit_status = submit.map(|report| report.status);
+        let page_flip_poll = poll.map(|report| report.status);
+        let page_flip = callback.map(|report| report.event.status);
+        let accepted_page_flip =
+            callback.map(|report| report.decision) == Some(LivePageFlipCallbackDecision::Accepted);
+        let retire_status = retire.map(|report| report.status);
+
+        let status = if gbm_export != LiveRendererScanoutBufferExportStatus::Exported {
+            LibdrmNativeAtomicScanoutSmokeStatus::GbmExportFailed
+        } else if submit_status
+            != Some(LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip)
+        {
+            LibdrmNativeAtomicScanoutSmokeStatus::SubmitFailed
+        } else if !accepted_page_flip
+            || page_flip_poll != Some(LibdrmPageFlipEventPollStatus::Emitted)
+            || page_flip != Some(LivePageFlipEventStatus::Presented)
+        {
+            LibdrmNativeAtomicScanoutSmokeStatus::PageFlipMissing
+        } else if retire_status
+            != Some(LibdrmNativePrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip)
+        {
+            LibdrmNativeAtomicScanoutSmokeStatus::RetireFailed
+        } else {
+            LibdrmNativeAtomicScanoutSmokeStatus::Passed
+        };
+
+        Self {
+            status,
+            gbm_export: Some(gbm_export),
+            submit: submit_status,
+            page_flip_poll,
+            page_flip,
+            retire: retire_status,
+        }
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibdrmNativeAtomicScanoutSmokeStatus {
+    Passed,
+    NoPrimaryCard,
+    KmsSelectionFailed,
+    GbmExportFailed,
+    SubmitFailed,
+    PageFlipMissing,
+    RetireFailed,
 }
 
 #[cfg(feature = "libdrm-events")]

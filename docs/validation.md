@@ -85,8 +85,13 @@ capabilities, duplicates the same fd namespace for GBM allocation, submits a
 primary-plane atomic modeset, waits for reduced page-flip evidence, and retires
 the submitted framebuffer resources. Without that environment variable, the
 test returns early and never opens or modesets hardware.
-The stable evidence shape for that run is `LiveRealGbmSmokeEvidence`: status,
-draw status, presentation status, and frame-target allocation status only.
+The stable evidence shape for that run is
+`LibdrmNativeAtomicScanoutSmokeEvidence`: overall status, GBM export status,
+primary-plane submit status, page-flip poll status, page-flip event status, and
+retirement status only.
+The stable evidence shape for the GBM/EGL renderer smoke is
+`LiveRealGbmSmokeEvidence`: status, draw status, presentation status, and
+frame-target allocation status only.
 
 When touching renderer-native code, run both paths:
 

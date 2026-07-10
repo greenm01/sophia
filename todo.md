@@ -55,8 +55,9 @@ active milestone to `docs/roadmap-history.md`.
 - [x] Build the first real KMS atomic property-set shape from backend-private
   connector, CRTC, plane, framebuffer, and mode state.
 - [ ] Run the opt-in atomic hardware smoke on a DRM-master-capable machine and
-  record reduced evidence for GBM allocation, primary-plane atomic submit,
-  native page-flip callback, and resource retirement.
+  capture `LibdrmNativeAtomicScanoutSmokeEvidence` proving GBM allocation,
+  primary-plane atomic submit, native page-flip callback, and resource
+  retirement.
 - [ ] Keep the XLibre prototype docs and bridge smokes as compatibility lessons
   until Sophia X Authority has equivalent live coverage.
 - [ ] Revisit wgpu only after GBM/EGL startup, drawing, presentation,
@@ -95,6 +96,9 @@ active milestone to `docs/roadmap-history.md`.
 - [x] Added an opt-in atomic hardware smoke child that opens real DRM/GBM
   devices, allocates an owned GBM scanout buffer, submits primary-plane scanout,
   polls native page-flip evidence, and retires the submitted resources.
+- [x] Added reduced `LibdrmNativeAtomicScanoutSmokeEvidence` so the opt-in
+  hardware smoke reports where the GBM/submit/page-flip/retire chain stopped
+  without exposing native handles or KMS object IDs.
 - [x] Added feature-gated DRM atomic property discovery for the primary-plane
   request builder.
 - [x] Defined opt-in environment gates for real libdrm and libinput validation.

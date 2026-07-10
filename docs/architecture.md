@@ -694,6 +694,11 @@ Submitted scanout retirement follows the same rule: an accepted, presented
 page-flip callback retires the framebuffer resources; stale, wrong-output, or
 rejected callbacks return the owner to the caller so in-flight resources stay
 alive.
+The opt-in hardware smoke records that chain through
+`LibdrmNativeAtomicScanoutSmokeEvidence`: GBM export, primary-plane submit,
+native page-flip polling, callback intake, and retirement collapse to reduced
+statuses only. The report deliberately omits card paths, file descriptors, KMS
+object IDs, framebuffer IDs, and GEM handles.
 
 The XLibre prototype scheduler may still consume X Damage. In that path,
 `schedule_frame_from_damage` combines a frame-clock tick, an optional X-derived
