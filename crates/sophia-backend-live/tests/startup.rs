@@ -1103,6 +1103,53 @@ fn live_runtime_assembly_commits_atomic_scanout_after_accepted_page_flip() {
 }
 
 #[test]
+fn live_runtime_assembly_preserves_timed_out_atomic_scanout_status() {
+    let root = ready_drm_sysfs_fixture("runtime-atomic-scanout-timed-out");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed live assembly");
+    let mut committer = FakeAtomicScanoutCommitter::default();
+
+    let report = assembly.commit_atomic_scanout_after_page_flip_with(
+        &mut committer,
+        LivePageFlipCallback {
+            output: OutputId::from_raw(1),
+            frame_serial: 32,
+        },
+        &PageFlipCommitOutcome::Rejected {
+            frame_serial: 32,
+            commit: TransactionCommit {
+                transaction: TransactionId::from_raw(63),
+                outcome: TransactionOutcome::TimedOut,
+                applied_surfaces: Vec::new(),
+            },
+        },
+    );
+
+    assert_eq!(
+        report,
+        LiveAtomicScanoutCommitReport {
+            status: LiveAtomicScanoutCommitStatus::TimedOut,
+            page_flip: LivePageFlipEvent {
+                status: LivePageFlipEventStatus::Rejected,
+                frame_serial: Some(32),
+            },
+        }
+    );
+    assert_eq!(committer.committed_count(), 0);
+    assert_eq!(
+        assembly.page_flip_observation(),
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Rejected,
+            frame_serial: Some(32),
+        }
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn live_runtime_assembly_rejects_stale_page_flip_before_atomic_scanout_commit() {
     let root = ready_drm_sysfs_fixture("runtime-atomic-scanout-stale-page-flip");
     let report = discover_live_backend(&LiveBackendConfig::new(&root));

@@ -83,6 +83,9 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Added runtime assembly coverage proving a timed-out atomic scanout commit
+  remains visible after page-flip callback intake instead of becoming a generic
+  rejection or committed scanout.
 - [x] Split rendered primary-plane scanout ownership, submit/retire reports,
   tracked diagnostics, and backpressure types into separate modules so buffer
   lifetime code stays isolated from reduced runtime reporting.
