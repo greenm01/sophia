@@ -1,6 +1,13 @@
+mod evidence;
+mod policy;
+mod reduced_context;
+
 use super::super::{RealAtomicScanoutPageFlipSession, RealAtomicScanoutPageFlipWaitPolicy};
 use crate::prelude::*;
-use sophia_renderer_live::NativeGbmRenderedScanoutContextStatus;
+
+use evidence::reduced_smoke_evidence_for_phase;
+use policy::submit_policy_for_smoke_phase;
+use reduced_context::reduced_rendered_context_status_from_native;
 
 impl RealAtomicScanoutPageFlipSession {
     pub fn run_native_gbm_rendered_primary_plane_smoke_phase<R>(
@@ -126,69 +133,4 @@ impl RealAtomicScanoutPageFlipSession {
             page_flip.retired.as_ref(),
         )
     }
-}
-
-fn reduced_smoke_evidence_for_phase(
-    phase: LibdrmNativeAtomicScanoutSmokePhase,
-    scanout_target: LiveKmsScanoutTargetStatus,
-    rendered_context: Option<LibdrmNativeRenderedScanoutContextStatus>,
-    gbm_export: LiveRendererScanoutBufferExportStatus,
-    submit: Option<&LibdrmNativePrimaryPlaneScanoutSubmitResult>,
-    poll: Option<&LibdrmPageFlipEventPollReport>,
-    callback: Option<&LivePageFlipCallbackReport>,
-    retire: Option<&LibdrmNativePrimaryPlaneScanoutRetireResult>,
-) -> LibdrmNativeAtomicScanoutSmokeEvidence {
-    match phase {
-        LibdrmNativeAtomicScanoutSmokePhase::InitialModeset => {
-            LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
-                scanout_target,
-                rendered_context,
-                gbm_export,
-                submit,
-                poll,
-                callback,
-                retire,
-            )
-        }
-        LibdrmNativeAtomicScanoutSmokePhase::SteadyPageFlip => {
-            LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
-                scanout_target,
-                rendered_context,
-                gbm_export,
-                submit,
-                poll,
-                callback,
-                retire,
-            )
-        }
-    }
-}
-
-fn submit_policy_for_smoke_phase(
-    phase: LibdrmNativeAtomicScanoutSmokePhase,
-) -> LibdrmNativePrimaryPlaneScanoutSubmitPolicy {
-    match phase {
-        LibdrmNativeAtomicScanoutSmokePhase::InitialModeset => {
-            LibdrmNativePrimaryPlaneScanoutSubmitPolicy::modeset()
-        }
-        LibdrmNativeAtomicScanoutSmokePhase::SteadyPageFlip => {
-            LibdrmNativePrimaryPlaneScanoutSubmitPolicy::page_flip()
-        }
-    }
-}
-
-fn reduced_rendered_context_status_from_native(
-    status: Option<NativeGbmRenderedScanoutContextStatus>,
-) -> Option<LibdrmNativeRenderedScanoutContextStatus> {
-    status.map(|status| match status {
-        NativeGbmRenderedScanoutContextStatus::Ready => {
-            LibdrmNativeRenderedScanoutContextStatus::Ready
-        }
-        NativeGbmRenderedScanoutContextStatus::Unavailable => {
-            LibdrmNativeRenderedScanoutContextStatus::Unavailable
-        }
-        NativeGbmRenderedScanoutContextStatus::Degraded => {
-            LibdrmNativeRenderedScanoutContextStatus::Degraded
-        }
-    })
 }
