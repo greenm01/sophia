@@ -67,6 +67,9 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Extracted backend-live runtime rendered-primary-plane ownership,
+  backpressure, retirement, and cleanup tracking into a dedicated runtime
+  submodule.
 - [x] Extracted backend-live runtime frame-target and reduced KMS scanout
   target lifecycle/allocation into a dedicated runtime submodule.
 - [x] Split native page-flip plumbing into domain modules for reduced reports,
