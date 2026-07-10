@@ -36,15 +36,50 @@ validation evidence in `docs/research-log.md`.
 
 ---
 
-## Active Focus - Real Backend Boundaries
+## Completed GBM/EGL Frame Target Milestones
 
-**Now**
-- [ ] Decide the opt-in real-device evidence shape for native GBM/EGL
+- [x] Defined the opt-in real-device evidence shape for native GBM/EGL
   frame-target allocation.
+- [x] Extended real GBM/EGL smoke evidence with reduced frame-target allocation
+  status while keeping native handles renderer-private.
+- [x] Threaded reduced GBM/EGL frame-target readiness and allocation reports
+  through backend-live and runtime observations without making Sophia Engine own
+  renderer-private lifecycle.
 
-**Next**
-- [ ] Extend the existing real GBM smoke evidence to include reduced
-  frame-target allocation status.
+---
+
+## Completed Atomic Scanout Smoke Milestones
+
+- [x] Added `tools/atomic_scanout_preflight.sh`,
+  `tools/atomic_scanout_smoke.sh`, and the strict reduced evidence verifiers for
+  preflight, destructive atomic scanout, and runtime rendered-scanout evidence.
+- [x] Added `tools/atomic_scanout_hardware_proof.sh` as the combined operator
+  proof for preflight, two-phase atomic scanout, and runtime submit-to-retire
+  evidence.
+- [x] Advanced reduced atomic scanout evidence to schema 10 and runtime
+  rendered-scanout submit evidence to schema 6 with reduced scanout-buffer
+  format, modifier, plane-count, format-table, framebuffer-creation, submit,
+  retire, and cleanup-debt fields.
+- [x] Added backend-private primary-plane `IN_FORMATS` discovery and bounded
+  modifier parsing so rendered GBM/EGL scanout export can choose usable scanout
+  candidates without exposing DRM property blobs or native modifier values.
+- [x] Allowed explicit non-linear multi-plane XRGB8888/ARGB8888 buffers to
+  reach modifier-aware AddFB2 while keeping unsupported implicit/linear
+  multi-plane buffers rejected before native resource creation.
+- [x] Made rendered GBM/EGL scanout skip rejected multi-plane export candidates
+  and continue searching for a single-plane buffer when the driver rejects the
+  modifier-aware framebuffer path.
+- [x] Added backend-private PRIME import for renderer-exported DMA-BUF planes:
+  backend-live imports them into the KMS submit device, builds AddFB2/AddFB from
+  KMS-local handles, and closes imported GEM handles through the existing
+  cleanup path.
+- [x] Fixed the destructive smoke lifetime rule so the initial rendered GBM/KMS
+  owner remains active until the steady page flip presents, then both resource
+  bundles retire after accepted page-flip callbacks.
+- [x] Captured TTY3 reduced smoke evidence where both `InitialModeset` and
+  `SteadyPageFlip` pass with `framebuffer=CreatedWithAddFb2`,
+  `page_flip=Presented`, `retire=RetiredAfterPageFlip`, and
+  `retire_cleanup_pending=false`.
 
 ---
 
