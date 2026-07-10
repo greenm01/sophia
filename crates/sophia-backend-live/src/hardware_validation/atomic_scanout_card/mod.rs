@@ -3,6 +3,8 @@ mod page_flip_wait;
 mod readiness;
 #[cfg(feature = "gbm-probe")]
 mod render_device;
+#[cfg(feature = "gbm-probe")]
+mod rendered_smoke;
 mod selection;
 mod session;
 

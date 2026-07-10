@@ -5,9 +5,6 @@ use sophia_backend_live::{
     LivePageFlipCallbackIntake, RealAtomicScanoutPageFlipWaitPolicy,
     select_real_atomic_scanout_card,
 };
-use sophia_renderer_live::{
-    LiveRendererScanoutBufferExportStatus, NativeGbmRenderedScanoutContextStatus,
-};
 
 #[test]
 fn native_atomic_scanout_smokes_real_primary_card_when_enabled() {
@@ -69,235 +66,40 @@ fn native_atomic_scanout_real_primary_card_child() {
                 .unwrap_or_else(LibdrmNativeAtomicScanoutSmokeEvidence::kms_selection_failed),
         );
     };
-    let selected = session.selection();
-    let target = LiveGbmEglFrameTargetRecord::new(selected.size());
-    let scanout_target = if !target.is_valid_scanout_target() {
-        LiveKmsScanoutTargetStatus::InvalidFrameTarget
-    } else if target.size != selected.size() {
-        LiveKmsScanoutTargetStatus::FrameTargetSizeMismatch
-    } else {
-        LiveKmsScanoutTargetStatus::Ready
-    };
-    if scanout_target != LiveKmsScanoutTargetStatus::Ready {
-        let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
-            scanout_target,
-            None,
-            LiveRendererScanoutBufferExportStatus::Unavailable,
-            None,
-            None,
-            None,
-            None,
-        );
-        fail_atomic_scanout_smoke(evidence);
-    }
-
     let discovery = match session.render_device_discovery() {
         Ok(discovery) => discovery,
         Err(_) => {
-            let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
-                scanout_target,
-                Some(LibdrmNativeRenderedScanoutContextStatus::Unavailable),
-                LiveRendererScanoutBufferExportStatus::Unavailable,
-                None,
-                None,
-                None,
-                None,
+            fail_atomic_scanout_smoke(
+                LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+                    LiveKmsScanoutTargetStatus::Ready,
+                    Some(LibdrmNativeRenderedScanoutContextStatus::Unavailable),
+                    LiveRendererScanoutBufferExportStatus::Unavailable,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
             );
-            fail_atomic_scanout_smoke(evidence);
         }
     };
     let mut exporter = NativeGbmRenderedScanoutBufferDiscoveryExporter::new(discovery);
 
-    let export = exporter.export_rendered_scanout_buffer(target);
-    let rendered_context = rendered_context_status_from_native(exporter.context_status());
-    if export.status != LiveRendererScanoutBufferExportStatus::Exported {
-        let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
-            scanout_target,
-            rendered_context,
-            export.status,
-            None,
-            None,
-            None,
-            None,
-        );
-        fail_atomic_scanout_smoke(evidence);
-    }
-    let Some(descriptor) = export.descriptor else {
-        let mut evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
-            scanout_target,
-            rendered_context,
-            export.status,
-            None,
-            None,
-            None,
-            None,
-        );
-        evidence.status = LibdrmNativeAtomicScanoutSmokeStatus::RetainedResourceMissing;
-        fail_atomic_scanout_smoke(evidence);
-    };
-    let Some(owned_buffer) = export.owner else {
-        let mut evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
-            scanout_target,
-            rendered_context,
-            export.status,
-            None,
-            None,
-            None,
-            None,
-        );
-        evidence.status = LibdrmNativeAtomicScanoutSmokeStatus::RetainedResourceMissing;
-        fail_atomic_scanout_smoke(evidence);
-    };
-
-    let mut submit = submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor(
-        session.card(),
-        LibdrmNativePrimaryPlaneSelectionResult {
-            status: LibdrmNativePrimaryPlaneSelectionStatus::Selected,
-            selection: Some(selected),
-        },
-        descriptor,
-    );
-    if submit.status != LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip {
-        let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
-            scanout_target,
-            rendered_context,
-            export.status,
-            Some(&submit),
-            None,
-            None,
-            None,
-        );
-        fail_atomic_scanout_smoke(evidence);
-    }
-    let Some(submission) = submit.submission.take() else {
-        let mut evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
-            scanout_target,
-            rendered_context,
-            export.status,
-            Some(&submit),
-            None,
-            None,
-            None,
-        );
-        evidence.status = LibdrmNativeAtomicScanoutSmokeStatus::RetainedResourceMissing;
-        fail_atomic_scanout_smoke(evidence);
-    };
-
     let mut intake = LivePageFlipCallbackIntake::new(output);
-    let page_flip = session.wait_for_submitted_page_flip_retirement(
+    let evidence = session.run_native_gbm_rendered_primary_plane_smoke_phase(
+        LibdrmNativeAtomicScanoutSmokePhase::InitialModeset,
+        &mut exporter,
         &mut intake,
-        submission,
         RealAtomicScanoutPageFlipWaitPolicy::hardware_smoke(),
-    );
-
-    let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
-        scanout_target,
-        rendered_context,
-        export.status,
-        Some(&submit),
-        Some(&page_flip.poll),
-        page_flip.callback_report.as_ref(),
-        page_flip.retired.as_ref(),
     );
     require_atomic_scanout_smoke_passed(evidence);
-    drop(owned_buffer);
 
-    let steady_export = exporter.export_rendered_scanout_buffer(target);
-    let steady_rendered_context = rendered_context_status_from_native(exporter.context_status());
-    if steady_export.status != LiveRendererScanoutBufferExportStatus::Exported {
-        let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
-            scanout_target,
-            steady_rendered_context,
-            steady_export.status,
-            None,
-            None,
-            None,
-            None,
-        );
-        fail_atomic_scanout_smoke(evidence);
-    }
-    let Some(steady_descriptor) = steady_export.descriptor else {
-        let mut evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
-            scanout_target,
-            steady_rendered_context,
-            steady_export.status,
-            None,
-            None,
-            None,
-            None,
-        );
-        evidence.status = LibdrmNativeAtomicScanoutSmokeStatus::RetainedResourceMissing;
-        fail_atomic_scanout_smoke(evidence);
-    };
-    let Some(steady_owned_buffer) = steady_export.owner else {
-        let mut evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
-            scanout_target,
-            steady_rendered_context,
-            steady_export.status,
-            None,
-            None,
-            None,
-            None,
-        );
-        evidence.status = LibdrmNativeAtomicScanoutSmokeStatus::RetainedResourceMissing;
-        fail_atomic_scanout_smoke(evidence);
-    };
-
-    let mut steady_submit =
-        submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_policy(
-            session.card(),
-            LibdrmNativePrimaryPlaneSelectionResult {
-                status: LibdrmNativePrimaryPlaneSelectionStatus::Selected,
-                selection: Some(selected),
-            },
-            steady_descriptor,
-            LibdrmNativePrimaryPlaneScanoutSubmitPolicy::page_flip(),
-        );
-    if steady_submit.status
-        != LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
-    {
-        let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
-            scanout_target,
-            steady_rendered_context,
-            steady_export.status,
-            Some(&steady_submit),
-            None,
-            None,
-            None,
-        );
-        fail_atomic_scanout_smoke(evidence);
-    }
-    let Some(steady_submission) = steady_submit.submission.take() else {
-        let mut evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
-            scanout_target,
-            steady_rendered_context,
-            steady_export.status,
-            Some(&steady_submit),
-            None,
-            None,
-            None,
-        );
-        evidence.status = LibdrmNativeAtomicScanoutSmokeStatus::RetainedResourceMissing;
-        fail_atomic_scanout_smoke(evidence);
-    };
-
-    let steady_page_flip = session.wait_for_submitted_page_flip_retirement(
+    let steady_evidence = session.run_native_gbm_rendered_primary_plane_smoke_phase(
+        LibdrmNativeAtomicScanoutSmokePhase::SteadyPageFlip,
+        &mut exporter,
         &mut intake,
-        steady_submission,
         RealAtomicScanoutPageFlipWaitPolicy::hardware_smoke(),
     );
-
-    let steady_evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
-        scanout_target,
-        steady_rendered_context,
-        steady_export.status,
-        Some(&steady_submit),
-        Some(&steady_page_flip.poll),
-        steady_page_flip.callback_report.as_ref(),
-        steady_page_flip.retired.as_ref(),
-    );
     require_atomic_scanout_smoke_passed(steady_evidence);
-    drop(steady_owned_buffer);
 }
 
 fn require_atomic_scanout_smoke_passed(evidence: LibdrmNativeAtomicScanoutSmokeEvidence) {
@@ -314,20 +116,4 @@ fn fail_atomic_scanout_smoke(evidence: LibdrmNativeAtomicScanoutSmokeEvidence) -
         "real atomic scanout smoke failed with status {:?}",
         evidence.status
     );
-}
-
-fn rendered_context_status_from_native(
-    status: Option<NativeGbmRenderedScanoutContextStatus>,
-) -> Option<LibdrmNativeRenderedScanoutContextStatus> {
-    status.map(|status| match status {
-        NativeGbmRenderedScanoutContextStatus::Ready => {
-            LibdrmNativeRenderedScanoutContextStatus::Ready
-        }
-        NativeGbmRenderedScanoutContextStatus::Unavailable => {
-            LibdrmNativeRenderedScanoutContextStatus::Unavailable
-        }
-        NativeGbmRenderedScanoutContextStatus::Degraded => {
-            LibdrmNativeRenderedScanoutContextStatus::Degraded
-        }
-    })
 }
