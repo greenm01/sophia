@@ -94,6 +94,10 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Tightened native GBM/EGL rendered scanout export after hardware evidence
+  reported `buffer_format=Argb8888` and `buffer_modifier=Invalid`: scanout
+  config selection now requires matching `EGL_NATIVE_VISUAL_ID`, and invalid GBM
+  modifiers normalize to the implicit path.
 - [x] Carried optional primary-plane `IN_FORMATS` discovery into reduced atomic
   schema 10 and runtime submit schema 6 as `format_table=Present|Missing`,
   setting up real format/modifier admission without leaking property blob IDs.

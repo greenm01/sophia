@@ -1088,6 +1088,15 @@ or `Missing` in atomic and runtime submit evidence. This does not parse the
 kernel blob yet, but it proves whether the authority has the metadata source
 needed for proper format/modifier admission before relying on AddFB failures.
 
+The next hardware smoke failed with `buffer_format=Argb8888`,
+`buffer_modifier=Invalid`, `buffer_planes=Single`, `format_table=Present`, and
+`framebuffer=AddFb2ThenLegacyAddFbFailed`. That showed the renderer asked for a
+scanout surface but accepted an EGL config whose native visual did not match the
+requested GBM format, and it forwarded `DRM_FORMAT_MOD_INVALID` as if it were a
+real explicit modifier. The native EGL scanout exporter now selects only configs
+whose `EGL_NATIVE_VISUAL_ID` matches the requested GBM format and normalizes an
+invalid GBM modifier to the implicit/no-modifier path.
+
 The primary-plane resource path now admits only one active plane for the packed
 XRGB8888/ARGB8888 scanout formats Sophia supports today. Multi-plane scanout
 descriptors fail closed as `InvalidBuffer` before mode-blob creation,

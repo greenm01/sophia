@@ -279,10 +279,14 @@ fn native_owned_scanout_buffer_from_bo(
         plane_handles,
         plane_pitches,
         plane_offsets,
-        modifier: Some(buffer.modifier().into()),
+        modifier: normalized_scanout_modifier(buffer.modifier()),
         _buffer: buffer,
         _surface: surface,
     })
+}
+
+fn normalized_scanout_modifier(modifier: gbm::Modifier) -> Option<u64> {
+    (!matches!(modifier, gbm::Modifier::Invalid)).then(|| modifier.into())
 }
 
 fn scanout_plane_handles(buffer: &gbm::BufferObject<()>, plane_count: u32) -> [u32; 4] {
@@ -394,9 +398,13 @@ fn render_initialized_gbm_scanout_front_buffer<T: std::os::fd::AsFd>(
 
     let mut last_detail = NativeGbmScanoutBufferExportDetail::EglConfigUnavailable;
     for candidate in rendered_scanout_candidates() {
-        let config = match egl.choose_first_config(display, &candidate.config_attributes) {
-            Ok(Some(config)) => config,
-            Ok(None) | Err(_) => continue,
+        let Some(config) = choose_scanout_config_for_format(
+            egl,
+            display,
+            candidate.config_attributes,
+            candidate.format,
+        ) else {
+            continue;
         };
 
         match render_initialized_gbm_scanout_front_buffer_with_config(
@@ -479,6 +487,25 @@ fn render_initialized_gbm_scanout_front_buffer_with_config<T: std::os::fd::AsFd>
 struct RenderedScanoutCandidate {
     format: gbm::Format,
     config_attributes: [khronos_egl::Int; 13],
+}
+
+fn choose_scanout_config_for_format(
+    egl: &khronos_egl::DynamicInstance<khronos_egl::EGL1_5>,
+    display: khronos_egl::Display,
+    config_attributes: [khronos_egl::Int; 13],
+    format: gbm::Format,
+) -> Option<khronos_egl::Config> {
+    let count = egl
+        .matching_config_count(display, &config_attributes)
+        .ok()?;
+    let mut configs = Vec::with_capacity(count);
+    egl.choose_config(display, &config_attributes, &mut configs)
+        .ok()?;
+    configs.into_iter().find(|config| {
+        egl.get_config_attrib(display, *config, khronos_egl::NATIVE_VISUAL_ID)
+            .ok()
+            == Some(format as khronos_egl::Int)
+    })
 }
 
 fn rendered_scanout_candidates() -> [RenderedScanoutCandidate; 2] {
