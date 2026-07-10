@@ -83,6 +83,8 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Split atomic scanout preflight report, count normalization, device-node
+  filtering, and live host probing into separate hardware-validation modules.
 - [x] Carried reduced scanout-buffer import status through rendered primary-plane
   submit reports so runtime diagnostics match schema 5 hardware evidence.
 - [x] Centralized native primary-plane scanout submit result construction so
