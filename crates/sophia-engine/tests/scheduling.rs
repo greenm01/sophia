@@ -189,6 +189,44 @@ fn page_flip_commit_gate_preserves_committed_state_until_transactions_are_ready(
 }
 
 #[test]
+fn page_flip_commit_gate_clears_timed_out_transactions_without_changing_visual_state() {
+    let engine = HeadlessEngine::default();
+    let old_layer = test_layer(1, 0, 0, Region::empty());
+    let mut committed = vec![engine.committed_state_from_layer(&old_layer)];
+    let mut next_layer = old_layer.clone();
+    next_layer.geometry.width = 500;
+    let transaction = next_layer.to_surface_transaction(
+        TransactionId::from_raw(84),
+        AuthorityKind::SophiaX,
+        SurfaceTransactionReadiness::TimedOut,
+        250,
+        1,
+    );
+    let mut gate = PageFlipCommitGate::new();
+    gate.stage(
+        OutputId::from_raw(1),
+        TransactionId::from_raw(84),
+        vec![transaction],
+    );
+
+    let outcome = gate.commit_on_page_flip(&engine, frame_tick(14), &mut committed);
+
+    let PageFlipCommitOutcome::Rejected {
+        frame_serial,
+        commit,
+    } = outcome
+    else {
+        panic!("expected timed-out page-flip transaction to fail closed");
+    };
+    assert_eq!(frame_serial, 14);
+    assert_eq!(commit.transaction, TransactionId::from_raw(84));
+    assert_eq!(commit.outcome, TransactionOutcome::TimedOut);
+    assert!(commit.applied_surfaces.is_empty());
+    assert_eq!(committed[0].geometry.width, old_layer.geometry.width);
+    assert!(gate.staged().is_none());
+}
+
+#[test]
 fn page_flip_commit_gate_commits_ready_transactions_on_page_flip() {
     let engine = HeadlessEngine::default();
     let old_layer = test_layer(1, 0, 0, Region::empty());

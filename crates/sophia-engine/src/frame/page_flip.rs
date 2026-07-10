@@ -88,8 +88,7 @@ impl PageFlipCommitGate {
             .filter_map(|transaction| {
                 match visual_state.transaction_commit_readiness(transaction) {
                     SurfaceTransactionCommitReadiness::NotReady(
-                        SurfaceTransactionReadiness::Pending
-                        | SurfaceTransactionReadiness::TimedOut,
+                        SurfaceTransactionReadiness::Pending,
                     ) => Some(transaction.surface),
                     _ => None,
                 }

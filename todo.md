@@ -83,6 +83,9 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Made the page-flip commit gate clear timed-out surface transactions
+  without changing committed visuals, preventing a slow client from blocking
+  future atomic commits indefinitely.
 - [x] Replaced the page-flip commit gate's staged-batch panic with an explicit
   idle fallback so the atomic visual authority fails closed.
 - [x] Removed panic-prone rendered-scanout owner retention from the page-flip
