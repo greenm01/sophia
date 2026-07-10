@@ -786,6 +786,11 @@ includes a bounded native-shaped input reader and `NonBlockingInputPoller`
 adapter without admitting a concrete libinput dependency. The combined
 validation passed with
 `cargo test --offline -p sophia-backend-live --features libdrm-events,libinput-events`.
+`LiveBackendRuntimeAssembly` and `HeadlessCompositorBackendAssembly` are generic
+over `NonBlockingInputPoller`, preserving `QueuedInputPoller` as the default
+while allowing the native-shaped libinput poller to drive the same runtime tick.
+This chooses monomorphized backend pollers over boxed adapters for the current
+hot path.
 
 ## Open Questions
 

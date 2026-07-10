@@ -12,35 +12,17 @@ active milestone to `docs/roadmap-history.md`.
 
 ## Active Milestone
 
-### Native Backend Event Intake
-
-- [x] Add a bounded native libdrm page-flip reader contract that feeds the
-  existing reduced callback queue without exposing KMS identity.
-- [x] Add a feature-gated native libinput event poller shape that implements the
-  engine's non-blocking input contract without admitting a concrete libinput
-  dependency.
-- [x] Validate both native-shaped event intake features:
-  `cargo test --offline -p sophia-backend-live --features libdrm-events,libinput-events`.
-
----
-
-## Next 3 Milestones
-
-### 1. Generic Runtime Backend Pollers
-
-- [ ] Decide whether `LiveBackendRuntimeAssembly` should become generic over
-  input poller type or accept boxed poller adapters.
-- [ ] Keep `QueuedInputPoller` as the deterministic default.
-- [ ] Add one smoke proving native-shaped input polling can drive runtime
-  assembly without changing Sophia Engine.
-
-### 2. Real Backend Hardware Gates
+### Real Backend Hardware Gates
 
 - [ ] Define opt-in environment gates for real libdrm and libinput validation.
 - [ ] Require native hardware tests to fail closed and return reduced reports.
 - [ ] Keep default workspace validation independent of device nodes and seats.
 
-### 3. Authority Probe Selection
+---
+
+## Next 3 Milestones
+
+### 1. Authority Probe Selection
 
 - [ ] Choose the next real Sophia X Authority app probe after backend intake
   seams settle.
@@ -48,6 +30,19 @@ active milestone to `docs/roadmap-history.md`.
   broad X11 completeness.
 - [ ] Keep Wayland Authority deferred until backend event intake and scanout
   timing are stable.
+
+### 2. Real Libinput Adapter
+
+- [ ] Add a concrete libinput reader only behind `libinput-events`.
+- [ ] Preserve the existing native-shaped reader and poller report contract.
+- [ ] Avoid raw device paths, fd values, seat names, or libinput error strings in
+  public runtime reports.
+
+### 3. Real Libdrm Event Reader
+
+- [ ] Add a concrete page-flip reader only behind `libdrm-events`.
+- [ ] Preserve reduced output-route decoding before runtime observation.
+- [ ] Keep scanout object identity private to backend-live.
 
 ---
 
@@ -67,6 +62,14 @@ active milestone to `docs/roadmap-history.md`.
 
 ## Done Recently
 
+- [x] Made compositor backend assemblies generic over `NonBlockingInputPoller`
+  instead of boxing the hot path.
+- [x] Kept `QueuedInputPoller` as the default deterministic backend assembly
+  poller.
+- [x] Added a native-shaped libinput runtime smoke proving live assembly can run
+  a tick without changing Sophia Engine.
+- [x] Added bounded native libdrm and libinput event intake seams.
+- [x] Validated combined native-shaped event intake features.
 - [x] Recorded real GBM/EGL evidence with frame-target allocation status.
 - [x] Added reduced frame-target lifecycle observations.
 - [x] Added reduced KMS scanout target reports and page-flip readiness

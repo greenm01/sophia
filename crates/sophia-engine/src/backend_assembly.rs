@@ -4,8 +4,8 @@ use crate::{
     DrmKmsOutputDescriptor, DrmKmsOutputRegistry, EngineError, FrameClock, FrameClockTick,
     HeadlessEngine, HeadlessOutput, HeadlessSessionDriver, HeadlessSessionDriverReport,
     ImportCapableRenderer, LibinputEventSource, LibinputPhysicalInputAdapter, LibinputPollReport,
-    LiveRuntimeDriverAdapter, LiveRuntimeDriverIntake, QueuedInputPoller, RenderFrameReport,
-    WmTransactionUpdate,
+    LiveRuntimeDriverAdapter, LiveRuntimeDriverIntake, NonBlockingInputPoller, QueuedInputPoller,
+    RenderFrameReport, WmTransactionUpdate,
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -132,18 +132,21 @@ impl From<EngineError> for CompositorBackendAssemblyError {
     }
 }
 
-pub struct HeadlessCompositorBackendAssembly {
+pub type QueuedHeadlessCompositorBackendAssembly =
+    HeadlessCompositorBackendAssembly<QueuedInputPoller>;
+
+pub struct HeadlessCompositorBackendAssembly<P = QueuedInputPoller> {
     engine: HeadlessEngine,
     driver: HeadlessSessionDriver,
     clock: DeterministicFrameClock,
     outputs: DrmKmsOutputRegistry,
-    input: LibinputPhysicalInputAdapter<QueuedInputPoller>,
+    input: LibinputPhysicalInputAdapter<P>,
     authority_inbox: Option<AuthorityTransactionInbox>,
     renderer: RendererSelection,
     committed_surfaces: Vec<CommittedSurfaceState>,
 }
 
-impl HeadlessCompositorBackendAssembly {
+impl HeadlessCompositorBackendAssembly<QueuedInputPoller> {
     pub fn new(output: HeadlessOutput) -> Self {
         let mut outputs = DrmKmsOutputRegistry::new();
         outputs.upsert(output_descriptor_from_headless_output(output));
@@ -159,12 +162,17 @@ impl HeadlessCompositorBackendAssembly {
             RendererSelection::default(),
         )
     }
+}
 
+impl<P> HeadlessCompositorBackendAssembly<P>
+where
+    P: NonBlockingInputPoller,
+{
     pub fn from_parts(
         output: HeadlessOutput,
         outputs: DrmKmsOutputRegistry,
         clock: DeterministicFrameClock,
-        input: LibinputPhysicalInputAdapter<QueuedInputPoller>,
+        input: LibinputPhysicalInputAdapter<P>,
         renderer: RendererSelection,
     ) -> Self {
         let engine = HeadlessEngine::new(output);
@@ -207,11 +215,11 @@ impl HeadlessCompositorBackendAssembly {
         &self.outputs
     }
 
-    pub fn input(&self) -> &LibinputPhysicalInputAdapter<QueuedInputPoller> {
+    pub fn input(&self) -> &LibinputPhysicalInputAdapter<P> {
         &self.input
     }
 
-    pub fn input_mut(&mut self) -> &mut LibinputPhysicalInputAdapter<QueuedInputPoller> {
+    pub fn input_mut(&mut self) -> &mut LibinputPhysicalInputAdapter<P> {
         &mut self.input
     }
 

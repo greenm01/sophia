@@ -2,7 +2,7 @@ use crate::prelude::*;
 use crate::{
     DeterministicFrameClock, DrmKmsOutputRegistry, DrmKmsSysfsDiscovery,
     HeadlessCompositorBackendAssembly, HeadlessOutput, LibinputDeviceDescriptor,
-    LibinputEventSource, LibinputPhysicalInputAdapter, QueuedInputPoller, RendererSelection,
+    LibinputEventSource, LibinputPhysicalInputAdapter, NonBlockingInputPoller, RendererSelection,
 };
 
 pub trait OutputDiscoveryBackend {
@@ -34,11 +34,14 @@ impl LiveCompositorBackendDiscoveryReport {
         self.status == LiveCompositorBackendDiscoveryStatus::Ready
     }
 
-    pub fn into_headless_assembly(
+    pub fn into_headless_assembly<P>(
         self,
-        poller: QueuedInputPoller,
+        poller: P,
         renderer: RendererSelection,
-    ) -> Option<HeadlessCompositorBackendAssembly> {
+    ) -> Option<HeadlessCompositorBackendAssembly<P>>
+    where
+        P: NonBlockingInputPoller,
+    {
         let output = self.selected_output?;
         if !self.is_ready() {
             return None;

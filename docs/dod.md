@@ -505,6 +505,9 @@ Physical input polling is represented by `NonBlockingInputPoller` and
 `LibinputPhysicalInputAdapter`. Production backends should implement the trait
 with non-blocking libinput dispatch over ready file descriptors. Tests should
 use deterministic queued pollers rather than opening `/dev/input` devices.
+Runtime backend assemblies accept any `NonBlockingInputPoller`; the default type
+remains `QueuedInputPoller`, while live backend feature tests can substitute the
+native-shaped libinput poller at the same boundary.
 
 ### InputRoute
 

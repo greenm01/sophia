@@ -696,6 +696,11 @@ before running the session driver. This proves the ownership boundary before
 real kernel file descriptors enter the loop: the assembly coordinates backends,
 but it does not own protocol policy, WM layout semantics, portal policy, or
 client resources.
+The assembly is generic over `NonBlockingInputPoller`, not boxed. This keeps the
+input hot path allocation-free and monomorphized while preserving
+`QueuedInputPoller` as the default deterministic implementation. Native-shaped
+libinput readers can therefore drive the same runtime tick without changing
+Sophia Engine or the session driver.
 
 Resize behavior measurement is tied to the same epoch state. `LayoutEpochState`
 records start time and timeout policy, and `measure_resize_behavior` reports

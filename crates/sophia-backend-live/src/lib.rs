@@ -1875,30 +1875,34 @@ impl LiveBackendStartupReport {
         )
     }
 
-    pub fn into_configured_headless_assembly(
+    pub fn into_configured_headless_assembly<P>(
         self,
-        poller: QueuedInputPoller,
-    ) -> Option<HeadlessCompositorBackendAssembly> {
+        poller: P,
+    ) -> Option<HeadlessCompositorBackendAssembly<P>>
+    where
+        P: NonBlockingInputPoller,
+    {
         let renderer = self.try_renderer_selection()?;
         self.into_headless_assembly(poller, renderer)
     }
 
-    pub fn into_live_runtime_assembly(
-        self,
-        poller: QueuedInputPoller,
-    ) -> Option<LiveBackendRuntimeAssembly> {
+    pub fn into_live_runtime_assembly<P>(self, poller: P) -> Option<LiveBackendRuntimeAssembly<P>>
+    where
+        P: NonBlockingInputPoller,
+    {
         let renderer_status =
             self.renderer_runtime_status_for_preference(self.renderer_import_status());
         self.into_live_runtime_assembly_with_status(poller, renderer_status)
     }
 
     #[cfg(feature = "gbm-probe")]
-    pub fn into_configured_headless_assembly_with_gbm_device<D>(
+    pub fn into_configured_headless_assembly_with_gbm_device<P, D>(
         self,
-        poller: QueuedInputPoller,
+        poller: P,
         discovery: &D,
-    ) -> Option<HeadlessCompositorBackendAssembly>
+    ) -> Option<HeadlessCompositorBackendAssembly<P>>
     where
+        P: NonBlockingInputPoller,
         D: RenderDeviceDiscoveryBackend,
     {
         let renderer_status = self.renderer_import_status_with_gbm_device(discovery);
@@ -1907,31 +1911,38 @@ impl LiveBackendStartupReport {
     }
 
     #[cfg(feature = "gbm-probe")]
-    pub fn into_live_runtime_assembly_with_gbm_device<D>(
+    pub fn into_live_runtime_assembly_with_gbm_device<P, D>(
         self,
-        poller: QueuedInputPoller,
+        poller: P,
         discovery: &D,
-    ) -> Option<LiveBackendRuntimeAssembly>
+    ) -> Option<LiveBackendRuntimeAssembly<P>>
     where
+        P: NonBlockingInputPoller,
         D: RenderDeviceDiscoveryBackend,
     {
         let renderer_status = self.renderer_import_status_with_gbm_device(discovery);
         self.into_live_runtime_assembly_with_status(poller, renderer_status)
     }
 
-    pub fn into_headless_assembly(
+    pub fn into_headless_assembly<P>(
         self,
-        poller: QueuedInputPoller,
+        poller: P,
         renderer: RendererSelection,
-    ) -> Option<HeadlessCompositorBackendAssembly> {
+    ) -> Option<HeadlessCompositorBackendAssembly<P>>
+    where
+        P: NonBlockingInputPoller,
+    {
         self.discovery.into_headless_assembly(poller, renderer)
     }
 
-    fn into_live_runtime_assembly_with_status(
+    fn into_live_runtime_assembly_with_status<P>(
         self,
-        poller: QueuedInputPoller,
+        poller: P,
         renderer_status: LiveRendererImportStartupStatus,
-    ) -> Option<LiveBackendRuntimeAssembly> {
+    ) -> Option<LiveBackendRuntimeAssembly<P>>
+    where
+        P: NonBlockingInputPoller,
+    {
         let renderer_selection = self.renderer_selection_for_status(renderer_status)?;
         let selected_output = self.selected_output()?;
         let renderer_observation = LiveRendererRuntimeObservation::from_startup_status(
@@ -2174,8 +2185,8 @@ pub enum LiveEglStartupStatus {
     ContextUnavailable,
 }
 
-pub struct LiveBackendRuntimeAssembly {
-    assembly: HeadlessCompositorBackendAssembly,
+pub struct LiveBackendRuntimeAssembly<P = QueuedInputPoller> {
+    assembly: HeadlessCompositorBackendAssembly<P>,
     renderer_observation: LiveRendererRuntimeObservation,
     output_size: Option<Size>,
     scanout_readiness: LiveScanoutReadinessReport,
@@ -2189,12 +2200,15 @@ pub struct LiveBackendRuntimeAssembly {
     libdrm_poller_diagnostics: LiveLibdrmPollerDiagnostics,
 }
 
-impl LiveBackendRuntimeAssembly {
-    pub fn assembly(&self) -> &HeadlessCompositorBackendAssembly {
+impl<P> LiveBackendRuntimeAssembly<P>
+where
+    P: NonBlockingInputPoller,
+{
+    pub fn assembly(&self) -> &HeadlessCompositorBackendAssembly<P> {
         &self.assembly
     }
 
-    pub fn assembly_mut(&mut self) -> &mut HeadlessCompositorBackendAssembly {
+    pub fn assembly_mut(&mut self) -> &mut HeadlessCompositorBackendAssembly<P> {
         &mut self.assembly
     }
 
@@ -2389,7 +2403,10 @@ impl LiveBackendRuntimeAssembly {
     }
 }
 
-impl LiveBackendRuntimeAssembly {
+impl<P> LiveBackendRuntimeAssembly<P>
+where
+    P: NonBlockingInputPoller,
+{
     fn refresh_kms_scanout_target(&mut self, presentation: LiveRendererPresentationReport) {
         self.kms_scanout_target = LiveKmsScanoutTargetReport::from_output_target_and_presentation(
             self.output_size,

@@ -1,11 +1,15 @@
 #![cfg(feature = "libinput-events")]
 
+use std::fs;
+use std::path::{Path, PathBuf};
+
 use sophia_backend_live::{
-    DeviceId, FakeLiveLibinputEventReader, InputEventPacket, LibinputDeviceDescriptor,
-    LibinputDeviceKind, LibinputEventIngest, LibinputEventSource, LibinputNativeEventAdapterReport,
-    LibinputNativeEventAdapterStatus, LibinputNativeEventReadReport, LibinputNativeEventReadStatus,
-    LibinputPhysicalInputAdapter, NativeLibinputEventPoller, NonBlockingInputPoller, SeatId,
-    native_libinput_event_adapter_report,
+    CompositorBackendTickInput, DeviceId, FakeLiveLibinputEventReader, InputEventPacket,
+    LibinputDeviceDescriptor, LibinputDeviceKind, LibinputEventIngest, LibinputEventSource,
+    LibinputNativeEventAdapterReport, LibinputNativeEventAdapterStatus,
+    LibinputNativeEventReadReport, LibinputNativeEventReadStatus, LibinputPhysicalInputAdapter,
+    LiveBackendConfig, NativeLibinputEventPoller, NonBlockingInputPoller, SeatId,
+    discover_live_backend, native_libinput_event_adapter_report,
 };
 use sophia_protocol::{InputEventKind, Point};
 
@@ -96,6 +100,34 @@ fn native_libinput_event_poller_feeds_engine_input_adapter_contract() {
     assert_eq!(adapter.source().pending_len(), 1);
 }
 
+#[test]
+fn live_runtime_assembly_runs_tick_with_native_shaped_input_poller() {
+    let root = ready_drm_sysfs_fixture("native-input-runtime");
+    let config = LiveBackendConfig::new(&root).with_input_device(LibinputDeviceDescriptor {
+        seat: SeatId::from_raw(1),
+        device: DeviceId::from_raw(2),
+        kind: LibinputDeviceKind::Pointer,
+    });
+    let poller = NativeLibinputEventPoller::new(
+        FakeLiveLibinputEventReader::new([motion_event(1, 10.0, 20.0)]),
+        4,
+    );
+    let mut assembly = discover_live_backend(&config)
+        .into_live_runtime_assembly(poller)
+        .expect("ready startup should accept native-shaped input poller");
+
+    let report = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("native-shaped input poller should drive runtime tick");
+
+    assert_eq!(report.engine.input_poll.polled, 1);
+    assert_eq!(report.engine.input_poll.accepted, 1);
+    assert!(report.engine.input_poll.rejected.is_empty());
+    assert_eq!(assembly.assembly().input().source().pending_len(), 1);
+
+    fs::remove_dir_all(root).unwrap();
+}
+
 fn motion_event(serial: u64, x: f64, y: f64) -> InputEventPacket {
     InputEventPacket {
         serial,
@@ -115,4 +147,25 @@ fn unknown_device_motion_event(serial: u64, x: f64, y: f64) -> InputEventPacket 
         device: DeviceId::from_raw(99),
         ..motion_event(serial, x, y)
     }
+}
+
+fn ready_drm_sysfs_fixture(name: &str) -> PathBuf {
+    let root = std::env::temp_dir().join(format!(
+        "sophia-backend-live-libinput-events-{name}-{}",
+        std::process::id()
+    ));
+    if root.exists() {
+        fs::remove_dir_all(&root).unwrap();
+    }
+    let connector = root.join("card0-HDMI-A-1");
+    fs::create_dir_all(&connector).unwrap();
+    write_fixture_file(&connector, "status", "connected\n");
+    write_fixture_file(&connector, "modes", "1920x1080\n");
+    write_fixture_file(&connector, "connector_id", "42\n");
+    write_fixture_file(&connector, "crtc_id", "99\n");
+    root
+}
+
+fn write_fixture_file(root: &Path, name: &str, value: &str) {
+    fs::write(root.join(name), value).unwrap();
 }
