@@ -72,6 +72,28 @@ WM IPC, and the headless engine orchestrator. Keep shared helpers in exactly one
 owning module and expose them as `pub(crate)` only when another engine module
 needs them.
 
+### Backend-Live Crate Modules
+
+`crates/sophia-backend-live/src/lib.rs` is also a crate boundary, not an
+implementation file. It should declare the backend domains and re-export the
+public facade.
+
+Keep kernel-facing code grouped by ownership:
+
+- `drm` owns libdrm/KMS protocol facts, atomic requests, page-flip decoding,
+  primary-plane resources, and native scanout submit/retire mechanics.
+- `input` owns libinput polling and input packet reduction.
+- `runtime` owns one-tick backend assembly and rendered primary-plane runtime
+  adapters.
+- `scanout` owns reduced scanout state, page-flip intake, rendered scanout
+  tracking, and backend-neutral scanout reports.
+- `hardware_validation` owns preflight probes, reduced validation gates, and
+  real hardware smoke/session owners.
+- `startup` owns backend discovery and renderer startup probes.
+
+When a backend-live module starts mixing those ownership boundaries, split it
+into a directory and keep the old module path as the facade.
+
 ## Test Placement
 
 Rust tests live outside production source files.

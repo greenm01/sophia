@@ -353,6 +353,11 @@ smoke still needs a DRM-master-capable machine.
 - [x] Extracted native KMS/atomic primary-plane scanout selection, property
   discovery, resource ownership, submit, and retirement from backend-live
   `lib.rs`.
+- [x] Split the real atomic scanout card owner into card, readiness, selection,
+  render-device discovery, page-flip wait, and session modules so the live
+  hardware-validation path is organized by domain rather than by crate facade.
+- [x] Moved submitted page-flip wait and retirement out of the hardware smoke
+  and into the real atomic scanout page-flip session owner.
 - [x] Added reduced `Deferred` scanout state so rendered primary-plane
   backpressure does not masquerade as rejection or corrupt in-flight accounting.
 - [x] Threaded accepted reduced page-flip evidence into the rendered scanout
