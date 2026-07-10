@@ -62,6 +62,104 @@ impl RealAtomicScanoutCardSelection {
     }
 }
 
+#[derive(Debug)]
+pub struct RealAtomicScanoutPageFlipSession {
+    card: RealAtomicScanoutCard,
+    selection: LibdrmNativePrimaryPlaneSelection,
+    reader: NativeLibdrmPageFlipEventReader<RealAtomicScanoutCard>,
+    poller: NativeLibdrmPageFlipEventPoller,
+}
+
+impl RealAtomicScanoutPageFlipSession {
+    pub fn card(&self) -> &RealAtomicScanoutCard {
+        &self.card
+    }
+
+    pub const fn selection(&self) -> LibdrmNativePrimaryPlaneSelection {
+        self.selection
+    }
+
+    pub fn page_flip_parts_mut(
+        &mut self,
+    ) -> (
+        &RealAtomicScanoutCard,
+        &mut NativeLibdrmPageFlipEventReader<RealAtomicScanoutCard>,
+        &mut NativeLibdrmPageFlipEventPoller,
+    ) {
+        (&self.card, &mut self.reader, &mut self.poller)
+    }
+}
+
+#[derive(Debug)]
+pub struct RealAtomicScanoutPageFlipSessionResult {
+    pub status: RealAtomicScanoutPageFlipSessionStatus,
+    pub card_selection_status: RealAtomicScanoutCardSelectionStatus,
+    pub session: Option<RealAtomicScanoutPageFlipSession>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RealAtomicScanoutPageFlipSessionStatus {
+    Ready,
+    CardSelectionFailed,
+    CardCloneFailed,
+}
+
+impl RealAtomicScanoutCardSelection {
+    pub fn into_page_flip_session(
+        mut self,
+        slot: LibdrmNativeOutputSlot,
+        output: OutputId,
+        authority: LibdrmBackendFdAuthority,
+    ) -> RealAtomicScanoutPageFlipSessionResult {
+        let Some(card) = self.card.take() else {
+            return RealAtomicScanoutPageFlipSessionResult {
+                status: RealAtomicScanoutPageFlipSessionStatus::CardSelectionFailed,
+                card_selection_status: self.status,
+                session: None,
+            };
+        };
+        let Some(selection) = self.selection else {
+            return RealAtomicScanoutPageFlipSessionResult {
+                status: RealAtomicScanoutPageFlipSessionStatus::CardSelectionFailed,
+                card_selection_status: self.status,
+                session: None,
+            };
+        };
+        if self.status != RealAtomicScanoutCardSelectionStatus::Selected {
+            return RealAtomicScanoutPageFlipSessionResult {
+                status: RealAtomicScanoutPageFlipSessionStatus::CardSelectionFailed,
+                card_selection_status: self.status,
+                session: None,
+            };
+        };
+
+        let Ok(reader_card) = card.try_clone() else {
+            return RealAtomicScanoutPageFlipSessionResult {
+                status: RealAtomicScanoutPageFlipSessionStatus::CardCloneFailed,
+                card_selection_status: self.status,
+                session: None,
+            };
+        };
+        let reader = NativeLibdrmPageFlipEventReader::new(reader_card)
+            .with_crtc_routes([selection.crtc_route(slot)]);
+        let poller = NativeLibdrmPageFlipEventPoller::new(
+            LibdrmNativePageFlipSource::from_authority(authority),
+        )
+        .with_routes([LibdrmNativeOutputRoute { slot, output }]);
+
+        RealAtomicScanoutPageFlipSessionResult {
+            status: RealAtomicScanoutPageFlipSessionStatus::Ready,
+            card_selection_status: self.status,
+            session: Some(RealAtomicScanoutPageFlipSession {
+                card,
+                selection,
+                reader,
+                poller,
+            }),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RealAtomicScanoutCardSelectionStatus {
     Selected,

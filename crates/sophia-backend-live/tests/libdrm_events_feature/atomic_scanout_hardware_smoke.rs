@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use super::*;
 use sophia_backend_live::{
     LivePageFlipCallbackIntake, RealAtomicScanoutCard, RealAtomicScanoutCardSelectionStatus,
-    select_real_atomic_scanout_card,
+    RealAtomicScanoutPageFlipSessionStatus, select_real_atomic_scanout_card,
 };
 use sophia_renderer_live::LiveRendererScanoutBufferExportStatus;
 
@@ -54,15 +54,19 @@ fn native_atomic_scanout_real_primary_card_child() {
         return;
     }
 
-    let mut card_selection = select_real_atomic_scanout_card();
-    let Some(card) = card_selection.card.take() else {
-        fail_atomic_scanout_smoke(evidence_from_card_selection_failure(card_selection.status));
-    };
-    let Some(selected) = card_selection.selection else {
-        fail_atomic_scanout_smoke(evidence_from_card_selection_failure(card_selection.status));
-    };
     let slot = LibdrmNativeOutputSlot::new(1).expect("slot one should be valid");
     let output = OutputId::from_raw(1);
+    let authority =
+        LibdrmBackendFdAuthority::new(1).expect("nonzero authority generation should mint");
+    let mut session_result =
+        select_real_atomic_scanout_card().into_page_flip_session(slot, output, authority);
+    let Some(mut session) = session_result.session.take() else {
+        fail_atomic_scanout_smoke(evidence_from_page_flip_session_failure(
+            session_result.status,
+            session_result.card_selection_status,
+        ));
+    };
+    let selected = session.selection();
     let target = LiveGbmEglFrameTargetRecord::new(selected.size());
     let scanout_target = if !target.is_valid_scanout_target() {
         LiveKmsScanoutTargetStatus::InvalidFrameTarget
@@ -84,8 +88,9 @@ fn native_atomic_scanout_real_primary_card_child() {
         fail_atomic_scanout_smoke(evidence);
     }
 
-    let context_report =
-        NativeGbmRenderedScanoutContext::from_backend_device_result(card.try_clone_file());
+    let context_report = NativeGbmRenderedScanoutContext::from_backend_device_result(
+        session.card().try_clone_file(),
+    );
     let rendered_context = match context_report.status {
         NativeGbmRenderedScanoutContextStatus::Ready => {
             LibdrmNativeRenderedScanoutContextStatus::Ready
@@ -149,7 +154,7 @@ fn native_atomic_scanout_real_primary_card_child() {
     };
 
     let mut submit = submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor(
-        &card,
+        session.card(),
         LibdrmNativePrimaryPlaneSelectionResult {
             status: LibdrmNativePrimaryPlaneSelectionStatus::Selected,
             selection: Some(selected),
@@ -182,32 +187,11 @@ fn native_atomic_scanout_real_primary_card_child() {
         fail_atomic_scanout_smoke(evidence);
     };
 
-    let mut reader = match card.try_clone() {
-        Ok(card) => {
-            NativeLibdrmPageFlipEventReader::new(card).with_crtc_routes([selected.crtc_route(slot)])
-        }
-        Err(_) => {
-            let mut evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
-                scanout_target,
-                Some(rendered_context),
-                export.status,
-                Some(&submit),
-                None,
-                None,
-                None,
-            );
-            evidence.status = LibdrmNativeAtomicScanoutSmokeStatus::PageFlipReaderUnavailable;
-            fail_atomic_scanout_smoke(evidence);
-        }
-    };
-    let source = LibdrmNativePageFlipSource::from_authority(
-        LibdrmBackendFdAuthority::new(1).expect("nonzero authority generation should mint"),
-    );
-    let mut poller = NativeLibdrmPageFlipEventPoller::new(source)
-        .with_routes([LibdrmNativeOutputRoute { slot, output }]);
     let mut intake = LivePageFlipCallbackIntake::new(output);
-    let page_flip =
-        wait_for_page_flip_retirement(&card, &mut reader, &mut poller, &mut intake, submission);
+    let page_flip = {
+        let (card, reader, poller) = session.page_flip_parts_mut();
+        wait_for_page_flip_retirement(card, reader, poller, &mut intake, submission)
+    };
 
     let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
         scanout_target,
@@ -250,7 +234,7 @@ fn native_atomic_scanout_real_primary_card_child() {
 
     let mut steady_submit =
         submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_policy(
-            &card,
+            session.card(),
             LibdrmNativePrimaryPlaneSelectionResult {
                 status: LibdrmNativePrimaryPlaneSelectionStatus::Selected,
                 selection: Some(selected),
@@ -286,13 +270,10 @@ fn native_atomic_scanout_real_primary_card_child() {
         fail_atomic_scanout_smoke(evidence);
     };
 
-    let steady_page_flip = wait_for_page_flip_retirement(
-        &card,
-        &mut reader,
-        &mut poller,
-        &mut intake,
-        steady_submission,
-    );
+    let steady_page_flip = {
+        let (card, reader, poller) = session.page_flip_parts_mut();
+        wait_for_page_flip_retirement(card, reader, poller, &mut intake, steady_submission)
+    };
 
     let steady_evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
         scanout_target,
@@ -345,6 +326,25 @@ fn evidence_from_card_selection_failure(
         }
         RealAtomicScanoutCardSelectionStatus::AtomicPropertyDiscoveryUnavailable => {
             LibdrmNativeAtomicScanoutSmokeEvidence::property_discovery_failed()
+        }
+    }
+}
+
+fn evidence_from_page_flip_session_failure(
+    status: RealAtomicScanoutPageFlipSessionStatus,
+    card_selection_status: RealAtomicScanoutCardSelectionStatus,
+) -> LibdrmNativeAtomicScanoutSmokeEvidence {
+    match status {
+        RealAtomicScanoutPageFlipSessionStatus::Ready => {
+            LibdrmNativeAtomicScanoutSmokeEvidence::kms_selection_failed()
+        }
+        RealAtomicScanoutPageFlipSessionStatus::CardSelectionFailed => {
+            evidence_from_card_selection_failure(card_selection_status)
+        }
+        RealAtomicScanoutPageFlipSessionStatus::CardCloneFailed => {
+            let mut evidence = LibdrmNativeAtomicScanoutSmokeEvidence::kms_selection_failed();
+            evidence.status = LibdrmNativeAtomicScanoutSmokeStatus::PageFlipReaderUnavailable;
+            evidence
         }
     }
 }

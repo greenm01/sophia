@@ -43,8 +43,9 @@ use sophia_backend_live::{
     LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus,
     LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus, NativeLibdrmAtomicScanoutCommitter,
     NativeLibdrmPageFlipEventPoller, NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller,
-    RealAtomicScanoutCardSelectionStatus, RuntimeScanoutState, Size,
-    build_native_primary_plane_atomic_request, build_native_primary_plane_page_flip_atomic_request,
+    RealAtomicScanoutCardSelectionStatus, RealAtomicScanoutPageFlipSessionStatus,
+    RuntimeScanoutState, Size, build_native_primary_plane_atomic_request,
+    build_native_primary_plane_page_flip_atomic_request,
     create_native_primary_plane_page_flip_resources, create_native_primary_plane_resources,
     decode_native_page_flip_batch, destroy_native_primary_plane_resources, discover_live_backend,
     discover_native_primary_plane_property_handles, libdrm_dependency_admission_report,
@@ -215,6 +216,19 @@ fn real_atomic_scanout_card_selection_fails_closed_without_device_identity() {
     );
     assert!(missing.card.is_none());
     assert!(missing.selection.is_none());
+    let slot = LibdrmNativeOutputSlot::new(1).expect("slot one should be valid");
+    let authority =
+        LibdrmBackendFdAuthority::new(31).expect("nonzero authority generation should mint");
+    let missing_session = missing.into_page_flip_session(slot, OutputId::from_raw(1), authority);
+    assert_eq!(
+        missing_session.status,
+        RealAtomicScanoutPageFlipSessionStatus::CardSelectionFailed
+    );
+    assert_eq!(
+        missing_session.card_selection_status,
+        RealAtomicScanoutCardSelectionStatus::DeviceDirectoryUnavailable
+    );
+    assert!(missing_session.session.is_none());
 
     let empty_root = std::env::temp_dir().join("sophia-empty-dri-card-selection");
     let _ = std::fs::remove_dir_all(&empty_root);

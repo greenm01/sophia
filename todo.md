@@ -83,6 +83,9 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Added a production page-flip session owner that promotes a selected real
+  atomic scanout card into submit-card, event-reader, and routed-poller
+  ownership.
 - [x] Added a production `select_real_atomic_scanout_card` seam that returns an
   opaque nonblocking DRM card owner only after reduced preflight-equivalent
   atomic scanout readiness is proven.
