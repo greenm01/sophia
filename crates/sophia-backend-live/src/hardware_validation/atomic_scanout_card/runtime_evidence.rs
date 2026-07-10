@@ -108,11 +108,25 @@ impl RealAtomicScanoutPageFlipSession {
                 wait_policy.max_emit,
             ) {
             Ok(report) => report.tick,
-            Err(_) => return Vec::new(),
+            Err(_) => {
+                return vec![LiveRuntimeRenderedScanoutEvidenceFailureReport::new(
+                    LiveRuntimeRenderedScanoutEvidenceFailureStatus::InitialTickFailed,
+                    false,
+                    false,
+                )
+                .reduced_log_line()];
+            }
         };
 
         let Some(submit) = first.rendered_primary_plane_scanout_submit else {
-            return Vec::new();
+            return vec![
+                LiveRuntimeRenderedScanoutEvidenceFailureReport::new(
+                    LiveRuntimeRenderedScanoutEvidenceFailureStatus::SubmitReportMissing,
+                    false,
+                    false,
+                )
+                .reduced_log_line(),
+            ];
         };
         let mut lines = vec![submit.reduced_log_line()];
         if submit.status
@@ -135,7 +149,17 @@ impl RealAtomicScanoutPageFlipSession {
                     wait_policy.max_emit,
                 ) {
                 Ok(report) => report.tick,
-                Err(_) => return lines,
+                Err(_) => {
+                    lines.push(
+                        LiveRuntimeRenderedScanoutEvidenceFailureReport::new(
+                            LiveRuntimeRenderedScanoutEvidenceFailureStatus::RetireTickFailed,
+                            true,
+                            false,
+                        )
+                        .reduced_log_line(),
+                    );
+                    return lines;
+                }
             };
 
             if let Some(retire) = tick.rendered_primary_plane_scanout_retire {
@@ -149,6 +173,14 @@ impl RealAtomicScanoutPageFlipSession {
             std::thread::sleep(wait_policy.sleep);
         }
 
+        lines.push(
+            LiveRuntimeRenderedScanoutEvidenceFailureReport::new(
+                LiveRuntimeRenderedScanoutEvidenceFailureStatus::RetireTimedOut,
+                true,
+                false,
+            )
+            .reduced_log_line(),
+        );
         lines
     }
 }

@@ -39,6 +39,8 @@ use sophia_backend_live::{
     LivePageFlipEvent, LivePageFlipEventStatus, LiveRenderedPrimaryPlaneScanoutBackpressureReport,
     LiveRenderedPrimaryPlaneScanoutBackpressureStatus, LiveRenderedPrimaryPlaneScanoutSubmitStatus,
     LiveRenderedScanoutBufferExport, LiveRenderedScanoutBufferExporter,
+    LiveRuntimeRenderedScanoutEvidenceFailureReport,
+    LiveRuntimeRenderedScanoutEvidenceFailureStatus,
     LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus,
     LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus,
     LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus, NativeLibdrmAtomicScanoutCommitter,
@@ -84,6 +86,20 @@ use sophia_renderer_live::{
 use sophia_renderer_live::{
     LiveGbmEglFrameTargetLifecycleReport, LiveGbmEglFrameTargetLifecycleStatus,
 };
+
+#[test]
+fn runtime_rendered_scanout_failure_evidence_has_stable_reduced_line() {
+    let report = LiveRuntimeRenderedScanoutEvidenceFailureReport::new(
+        LiveRuntimeRenderedScanoutEvidenceFailureStatus::RetireTimedOut,
+        true,
+        false,
+    );
+
+    assert_eq!(
+        report.reduced_log_line(),
+        "sophia_runtime_rendered_scanout_failure schema=1 status=RetireTimedOut submit_seen=true retire_seen=false"
+    );
+}
 
 #[test]
 fn libdrm_dependency_is_admitted_without_exposing_native_event_shape() {

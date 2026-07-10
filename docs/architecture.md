@@ -825,6 +825,12 @@ retire-failed page-flip outcomes; `sophia_runtime_rendered_scanout_cleanup`
 records cleanup retry status and whether native cleanup debt remains. Together
 the three runtime lines describe the production submit-to-retire path without
 exposing native object identity.
+Runtime evidence capture also emits
+`sophia_runtime_rendered_scanout_failure` when the proof path cannot produce a
+submit report, cannot continue ticking after submit, or times out before
+retirement. That line gives operators a reduced failure reason while preserving
+the clean-proof rule: only one submitted line plus one clean retired line proves
+the runtime scanout path.
 Native primary-plane submit can also consume a preselected KMS target snapshot.
 That path is required when the Engine has already sized a rendered frame target
 from a specific connector/CRTC/plane selection; readiness, buffer production,

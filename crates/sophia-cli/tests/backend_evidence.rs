@@ -78,6 +78,16 @@ fn rejects_malformed_runtime_rendered_scanout_field() {
 }
 
 #[test]
+fn rejects_runtime_rendered_scanout_failure_line() {
+    let evidence =
+        include_str!("../../../tools/fixtures/runtime_rendered_scanout_evidence_failure.log");
+
+    assert!(!runtime_rendered_scanout_evidence_is_clean(&lines(
+        evidence
+    )));
+}
+
+#[test]
 fn rejects_setup_failure_atomic_scanout_evidence() {
     let evidence = vec![
         "sophia_atomic_scanout_evidence schema=6 phase=InitialModeset status=NoPrimaryCard scanout_target=none rendered_context=none gbm_export=none scanout_buffer=none properties=none resources=none request=none submit=none request_scope=none commit_page_flip_event=none commit_nonblocking=none commit_allow_modeset=none commit_test_only=none page_flip_wait=none page_flip_poll=none page_flip=none retire=none retire_destroy=none retire_cleanup_pending=false".to_owned(),

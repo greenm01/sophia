@@ -5,19 +5,26 @@ EVIDENCE_FILE="${1:-${SOPHIA_RUNTIME_RENDERED_SCANOUT_EVIDENCE:-/tmp/sophia-runt
 SUBMIT_PREFIX="sophia_runtime_rendered_scanout_submit"
 RETIRE_PREFIX="sophia_runtime_rendered_scanout_retire"
 CLEANUP_PREFIX="sophia_runtime_rendered_scanout_cleanup"
+FAILURE_PREFIX="sophia_runtime_rendered_scanout_failure"
 
 if [[ ! -s "$EVIDENCE_FILE" ]]; then
     echo "runtime rendered scanout evidence is missing or empty: $EVIDENCE_FILE" >&2
     exit 1
 fi
 
-mapfile -t evidence_lines < <(grep -E "^($SUBMIT_PREFIX|$RETIRE_PREFIX|$CLEANUP_PREFIX) " "$EVIDENCE_FILE" || true)
+mapfile -t evidence_lines < <(grep -E "^($SUBMIT_PREFIX|$RETIRE_PREFIX|$CLEANUP_PREFIX|$FAILURE_PREFIX) " "$EVIDENCE_FILE" || true)
 mapfile -t submit_lines < <(grep -F "$SUBMIT_PREFIX" "$EVIDENCE_FILE" || true)
 mapfile -t retire_lines < <(grep -F "$RETIRE_PREFIX" "$EVIDENCE_FILE" || true)
 mapfile -t cleanup_lines < <(grep -F "$CLEANUP_PREFIX" "$EVIDENCE_FILE" || true)
+mapfile -t failure_lines < <(grep -F "$FAILURE_PREFIX" "$EVIDENCE_FILE" || true)
 
 if [[ "${#evidence_lines[@]}" -eq 0 ]]; then
     echo "runtime rendered scanout evidence lines not found in: $EVIDENCE_FILE" >&2
+    exit 1
+fi
+if [[ "${#failure_lines[@]}" -ne 0 ]]; then
+    echo "runtime rendered scanout evidence reported failure lines" >&2
+    printf '%s\n' "${evidence_lines[@]}" >&2
     exit 1
 fi
 if [[ "${#submit_lines[@]}" -ne 1 ]]; then
