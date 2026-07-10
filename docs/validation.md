@@ -172,6 +172,12 @@ Runtime retirement and cleanup retries can be captured as
 status, destroy status, runtime scanout state, in-flight age, and cleanup debt,
 so a live loop can distinguish clean retirement, stale callback waits, and
 cleanup retry failures.
+Use `tools/verify_runtime_rendered_scanout_evidence.sh` for a narrow clean
+runtime proof. It expects exactly one submitted rendered-primary-plane scanout
+line and exactly one clean retired line, rejects cleanup retry lines, and
+rejects unknown, duplicate, or malformed fields. This verifier proves a
+single-frame runtime submit-to-retire observation; the destructive two-phase
+hardware proof still comes from `tools/verify_atomic_scanout_evidence.sh`.
 The stable evidence shape for the GBM/EGL renderer smoke is
 `LiveRealGbmSmokeEvidence`: status, draw status, presentation status, and
 frame-target allocation status only.

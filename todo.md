@@ -97,6 +97,8 @@ smoke still needs a DRM-master-capable machine.
 - [x] Added schema-versioned runtime rendered-scanout retirement and cleanup
   reduced log lines, covering stale waits, clean retire, cleanup debt, and
   cleanup retry outcomes.
+- [x] Added `tools/verify_runtime_rendered_scanout_evidence.sh` and fixtures for
+  a strict clean runtime submit-to-retire evidence proof.
 - [x] Added session-loop coverage proving pending decoded native page-flip
   callbacks drain under the bounded emit budget without requiring another
   reduced page-flip readiness token.
