@@ -96,6 +96,8 @@ smoke still needs a DRM-master-capable machine.
   primary-plane path.
 - [x] Split runtime rendered-scanout evidence capture into entrypoint,
   renderer-observation, and session tick-loop modules.
+- [x] Split backend-live runtime tick code into plain engine tick, rendered
+  primary-plane scanout tick, and native GBM scanout wrapper modules.
 - [x] Made the opt-in atomic hardware smoke retain the renderer-owned GBM
   front-buffer owner with the primary-plane submission until page-flip
   retirement, matching the production runtime lifetime rule.
