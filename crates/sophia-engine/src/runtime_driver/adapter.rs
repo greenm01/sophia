@@ -3,6 +3,7 @@ use crate::{
     EngineError, HeadlessEngine, LastCommittedLayout, SessionLayerSource, SessionTickReport,
     SessionTickRequest, WmTransactionUpdate,
 };
+use sophia_runtime::RuntimeScanoutState;
 
 use super::observation::{
     runtime_observation_from_portal_commands, runtime_observation_from_wm_transaction_update,
@@ -32,6 +33,16 @@ pub trait RuntimeDriverAdapter {
         frame_serial: u64,
         last_committed: &mut LastCommittedLayout,
     ) -> Result<SessionTickReport, EngineError>;
+
+    fn submit_scanout(
+        &mut self,
+        frame_serial: u64,
+    ) -> Result<SessionRuntimeObservation, EngineError> {
+        Ok(SessionRuntimeObservation::ScanoutStateChanged {
+            state: RuntimeScanoutState::Submitted,
+            frame_serial: Some(frame_serial),
+        })
+    }
 
     fn drain_portal_commands(&mut self) -> Result<SessionRuntimeObservation, EngineError>;
 

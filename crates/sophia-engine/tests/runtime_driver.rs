@@ -270,6 +270,7 @@ fn headless_session_driver_executes_runtime_commands_to_idle() {
             SessionRuntimeCommand::RequestWmLayout,
             SessionRuntimeCommand::ScheduleFrame,
             SessionRuntimeCommand::RenderFrame { frame_serial: 90 },
+            SessionRuntimeCommand::SubmitScanout { frame_serial: 90 },
             SessionRuntimeCommand::DrainPortalCommands,
             SessionRuntimeCommand::PresentChrome,
         ]
@@ -277,6 +278,8 @@ fn headless_session_driver_executes_runtime_commands_to_idle() {
     assert_eq!(report.runtime_state.phase, SessionRuntimePhase::Idle);
     assert_eq!(report.runtime_state.x_events_polled, 1);
     assert_eq!(report.runtime_state.frames_rendered, 1);
+    assert_eq!(report.runtime_state.scanout_submissions, 1);
+    assert_eq!(report.runtime_state.in_flight_scanouts, 1);
     assert_eq!(report.runtime_state.portal_commands_drained, 1);
     assert_eq!(report.runtime_state.chrome_commands_presented, 2);
     assert_eq!(report.cached_layers, 1);
@@ -308,6 +311,11 @@ fn headless_session_driver_executes_through_runtime_adapter_trait() {
 
     assert_eq!(report.runtime_state.phase, SessionRuntimePhase::Idle);
     assert_eq!(report.runtime_state.frames_rendered, 1);
+    assert_eq!(report.runtime_state.scanout_submissions, 1);
+    assert_eq!(
+        report.runtime_state.last_scanout_state,
+        Some(RuntimeScanoutState::Submitted)
+    );
     assert_eq!(
         report
             .session_tick
@@ -341,6 +349,7 @@ fn live_runtime_driver_adapter_executes_through_shared_command_executor() {
 
     assert_eq!(report.runtime_state.phase, SessionRuntimePhase::Idle);
     assert_eq!(report.runtime_state.x_events_polled, 1);
+    assert_eq!(report.runtime_state.scanout_submissions, 1);
     assert_eq!(report.runtime_state.portal_commands_drained, 1);
     assert_eq!(report.runtime_state.chrome_commands_presented, 1);
     assert_eq!(

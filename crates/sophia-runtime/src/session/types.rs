@@ -8,6 +8,7 @@ pub enum SessionRuntimePhase {
     ApplyingWmPolicy,
     WaitingForFrame,
     Rendering,
+    SubmittingScanout,
     DrainingPortals,
     PresentingChrome,
 }
@@ -17,6 +18,10 @@ pub struct SessionRuntimeState {
     pub phase: SessionRuntimePhase,
     pub x_events_polled: u64,
     pub frames_rendered: u64,
+    pub scanout_submissions: u64,
+    pub scanout_retirements: u64,
+    pub scanout_rejections: u64,
+    pub in_flight_scanouts: u64,
     pub portal_commands_drained: u64,
     pub chrome_commands_presented: u64,
     pub wm_restart_requests: u64,
@@ -28,9 +33,18 @@ pub struct SessionRuntimeState {
     pub slow_client_preserved: u64,
     pub slow_client_degraded: u64,
     pub last_frame_serial: Option<u64>,
+    pub last_scanout_frame_serial: Option<u64>,
+    pub last_scanout_state: Option<RuntimeScanoutState>,
     pub portal_broker_health: Option<RuntimeBrokerHealth>,
     pub metadata_broker_health: Option<RuntimeBrokerHealth>,
     pub x_authority_health: Option<RuntimeAuthorityHealth>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuntimeScanoutState {
+    Submitted,
+    Retired,
+    Rejected,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -61,6 +75,10 @@ pub enum SessionRuntimeEvent {
     },
     FrameRendered {
         frame_serial: u64,
+    },
+    ScanoutStateChanged {
+        state: RuntimeScanoutState,
+        frame_serial: Option<u64>,
     },
     PortalCommandsReady {
         count: u32,
@@ -99,6 +117,7 @@ pub enum SessionRuntimeCommand {
     RequestWmLayout,
     ScheduleFrame,
     RenderFrame { frame_serial: u64 },
+    SubmitScanout { frame_serial: u64 },
     DrainPortalCommands,
     PresentChrome,
     RestartWindowManager,

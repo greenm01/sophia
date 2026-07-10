@@ -102,6 +102,10 @@ impl HeadlessSessionCommandExecutor<'_> {
                     self.session_tick = Some(report);
                     self.observe([observation])?;
                 }
+                SessionRuntimeCommand::SubmitScanout { frame_serial } => {
+                    let observation = self.adapter.submit_scanout(frame_serial)?;
+                    self.observe([observation])?;
+                }
                 SessionRuntimeCommand::DrainPortalCommands => {
                     let observation = self.adapter.drain_portal_commands()?;
                     self.observe([observation])?;

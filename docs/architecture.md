@@ -524,13 +524,17 @@ between X-derived layer state, cached layout state, and frame planning.
 
 The continuous runtime loop now has a data-only reducer. `SessionRuntimeState`
 tracks the current phase and counters for X events, rendered frames, drained
-portal commands, presented chrome commands, WM restart requests, and the last
-frame serial. `update_session_runtime` consumes runtime facts such as
+portal commands, presented chrome commands, scanout submissions, scanout
+retirements, scanout rejections, in-flight scanouts, WM restart requests, and
+the last frame serial. `update_session_runtime` consumes runtime facts such as
 `TickStarted`, `XEventsPolled`, `WmLayoutReady`, `FrameScheduled`, and
 `FrameRendered`, then emits explicit commands like `PollXEvents`,
-`RequestWmLayout`, `ScheduleFrame`, `RenderFrame`, `DrainPortalCommands`, and
-`PresentChrome`. This keeps the event loop assembly testable before wiring it
-to real file descriptors.
+`RequestWmLayout`, `ScheduleFrame`, `RenderFrame`, `SubmitScanout`,
+`DrainPortalCommands`, and `PresentChrome`. Rendering is therefore not treated
+as final presentation. A rendered frame enters `SubmittingScanout`; only a
+reduced `ScanoutStateChanged` observation moves the runtime on to portal drain
+and chrome presentation. This keeps the event loop assembly testable before
+wiring it to real file descriptors.
 
 `SessionRuntimeLoop` is the first reusable shell around that reducer. It accepts
 bounded batches of already-observed runtime events, preserves reduced state
@@ -542,8 +546,9 @@ values, then feed the loop.
 
 `SessionRuntimeObservation` is the bounded intake form for those adapters. It
 admits only scalar runtime facts: X event counts, WM layout/restart outcomes,
-frame serials, portal/chrome command counts, and broker health state plus
-status-message length. Authority process health follows the same rule:
+frame serials, reduced scanout submitted/retired/rejected state,
+portal/chrome command counts, and broker health state plus status-message
+length. Authority process health follows the same rule:
 `AuthorityProcessHealthChanged` records only supervised process kind, coarse
 health state, generation, and status-message length. `SessionRuntimeEventBatch`
 rejects batches larger than `MAX_SESSION_RUNTIME_OBSERVATION_BATCH` and rejects
@@ -559,6 +564,10 @@ runtime smokes use the same intake path for X capture counts, broker health
 decode results, WM transaction results, portal drain counts, chrome presentation
 counts, and rendered frame reports. These helpers translate facts; they do not
 poll file descriptors or execute runtime commands themselves.
+The runtime driver's default scanout adapter answers `SubmitScanout` with a
+reduced submitted observation for deterministic tests. A live adapter should
+replace that placeholder with backend-owned rendered primary-plane submit and
+later page-flip retirement/rejection observations.
 
 `HeadlessSessionDriver` is the first reusable command executor around this
 loop. It owns a `SessionRuntimeLoop` and last-committed layout cache, starts a
@@ -578,7 +587,8 @@ not full session ticks.
 `RuntimeDriverAdapter` is the live-source seam for the same executor. The
 driver asks an adapter to answer each runtime command with a reduced
 observation or concrete frame report: X event count, WM layout/restart result,
-frame scheduling/rendering, portal drain count, and chrome presentation count.
+frame scheduling/rendering, scanout submission state, portal drain count, and
+chrome presentation count.
 `HeadlessRuntimeAdapter` preserves deterministic test behavior.
 `LiveRuntimeDriverIntake` is the non-blocking handoff shape for live sources:
 the X bridge, WM socket, broker IPC, portal execution, chrome presenter, and
@@ -593,9 +603,9 @@ advance the runtime phases.
 
 The headless runtime tick smoke now drives this reducer around the existing
 capture -> session tick -> replay path. It executes the reducer's X polling,
-WM policy, frame scheduling, render, portal drain, and chrome presentation
-commands in order and reports the resulting runtime counters beside the frame
-snapshot/replay counts.
+WM policy, frame scheduling, render, scanout submit, portal drain, and chrome
+presentation commands in order and reports the resulting runtime counters
+beside the frame snapshot/replay counts.
 
 `x-smoke-live-runtime-wm-socket` is the first combined live command-executor
 smoke. Under the XLibre/Xvfb smoke script it captures real XComposite layers,
@@ -708,6 +718,11 @@ the primary-plane path, and returns a combined owner. The rendered buffer owner
 and the KMS submission owner then travel together until accepted page-flip
 evidence allows `retire_rendered_primary_plane_scanout_after_page_flip` to drop
 both safely.
+The shared session runtime now has a matching reduced lifecycle: after
+`RenderFrame`, it emits `SubmitScanout` and records submitted, retired, or
+rejected scanout state without seeing framebuffer IDs, KMS handles, or GBM
+objects. That makes the rendered primary-plane seam the future live answer to
+the runtime command rather than an ad hoc backend side path.
 The opt-in hardware smoke records that chain through
 `LibdrmNativeAtomicScanoutSmokeEvidence`: GBM export, primary-plane submit,
 native page-flip polling, callback intake, and retirement collapse to reduced

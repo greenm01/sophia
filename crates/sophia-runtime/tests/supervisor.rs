@@ -6,8 +6,8 @@ use sophia_protocol::{
 use sophia_runtime::{
     MAX_SESSION_RUNTIME_OBSERVATION_BATCH, ProcessLaunchSpec, ProcessSupervisor,
     ProcessSupervisorError, RestartPolicy, RuntimeAuthorityHealth, RuntimeAuthoritySupervisor,
-    RuntimeBrokerHealth, RuntimeBrokerSupervisors, SessionRuntimeCommand, SessionRuntimeEvent,
-    SessionRuntimeEventBatch, SessionRuntimeLoop, SessionRuntimeObservation,
+    RuntimeBrokerHealth, RuntimeBrokerSupervisors, RuntimeScanoutState, SessionRuntimeCommand,
+    SessionRuntimeEvent, SessionRuntimeEventBatch, SessionRuntimeLoop, SessionRuntimeObservation,
     SessionRuntimeObservationError, SessionRuntimePhase, SessionRuntimeState,
     SupervisedProcessKind, SupervisorCommand, SupervisorEvent, SupervisorState,
     update_session_runtime, update_supervisor,
@@ -47,6 +47,26 @@ fn session_runtime_reducer_runs_one_continuous_tick() {
     );
     assert_eq!(state.frames_rendered, 1);
     assert_eq!(state.last_frame_serial, Some(9));
+    assert_eq!(state.phase, SessionRuntimePhase::SubmittingScanout);
+    assert_eq!(
+        command,
+        SessionRuntimeCommand::SubmitScanout { frame_serial: 9 }
+    );
+
+    let (state, command) = update_session_runtime(
+        state,
+        SessionRuntimeEvent::ScanoutStateChanged {
+            state: RuntimeScanoutState::Submitted,
+            frame_serial: Some(9),
+        },
+    );
+    assert_eq!(state.scanout_submissions, 1);
+    assert_eq!(state.in_flight_scanouts, 1);
+    assert_eq!(state.last_scanout_frame_serial, Some(9));
+    assert_eq!(
+        state.last_scanout_state,
+        Some(RuntimeScanoutState::Submitted)
+    );
     assert_eq!(state.phase, SessionRuntimePhase::DrainingPortals);
     assert_eq!(command, SessionRuntimeCommand::DrainPortalCommands);
 
@@ -74,6 +94,55 @@ fn session_runtime_reducer_skips_wm_policy_when_no_x_events_arrive() {
     assert_eq!(state.x_events_polled, 0);
     assert_eq!(state.phase, SessionRuntimePhase::WaitingForFrame);
     assert_eq!(command, SessionRuntimeCommand::ScheduleFrame);
+}
+
+#[test]
+fn session_runtime_reducer_tracks_scanout_retirement_and_rejection() {
+    let state = SessionRuntimeState::default();
+
+    let (state, _command) = update_session_runtime(
+        state,
+        SessionRuntimeEvent::ScanoutStateChanged {
+            state: RuntimeScanoutState::Submitted,
+            frame_serial: Some(12),
+        },
+    );
+    assert_eq!(state.scanout_submissions, 1);
+    assert_eq!(state.in_flight_scanouts, 1);
+
+    let (state, command) = update_session_runtime(
+        state,
+        SessionRuntimeEvent::ScanoutStateChanged {
+            state: RuntimeScanoutState::Retired,
+            frame_serial: Some(12),
+        },
+    );
+    assert_eq!(state.scanout_retirements, 1);
+    assert_eq!(state.in_flight_scanouts, 0);
+    assert_eq!(state.last_scanout_state, Some(RuntimeScanoutState::Retired));
+    assert_eq!(command, SessionRuntimeCommand::DrainPortalCommands);
+
+    let (state, _command) = update_session_runtime(
+        state,
+        SessionRuntimeEvent::ScanoutStateChanged {
+            state: RuntimeScanoutState::Submitted,
+            frame_serial: Some(13),
+        },
+    );
+    let (state, command) = update_session_runtime(
+        state,
+        SessionRuntimeEvent::ScanoutStateChanged {
+            state: RuntimeScanoutState::Rejected,
+            frame_serial: Some(13),
+        },
+    );
+    assert_eq!(state.scanout_rejections, 1);
+    assert_eq!(state.in_flight_scanouts, 0);
+    assert_eq!(
+        state.last_scanout_state,
+        Some(RuntimeScanoutState::Rejected)
+    );
+    assert_eq!(command, SessionRuntimeCommand::DrainPortalCommands);
 }
 
 #[test]
@@ -324,11 +393,15 @@ fn session_runtime_loop_processes_event_batches_without_side_effects() {
         SessionRuntimeEvent::WmLayoutReady,
         SessionRuntimeEvent::FrameScheduled { frame_serial: 11 },
         SessionRuntimeEvent::FrameRendered { frame_serial: 11 },
+        SessionRuntimeEvent::ScanoutStateChanged {
+            state: RuntimeScanoutState::Submitted,
+            frame_serial: Some(11),
+        },
         SessionRuntimeEvent::PortalCommandsReady { count: 2 },
         SessionRuntimeEvent::ChromeCommandsReady { count: 1 },
     ]);
 
-    assert_eq!(report.events_processed, 7);
+    assert_eq!(report.events_processed, 8);
     assert_eq!(
         report.commands,
         vec![
@@ -336,6 +409,7 @@ fn session_runtime_loop_processes_event_batches_without_side_effects() {
             SessionRuntimeCommand::RequestWmLayout,
             SessionRuntimeCommand::ScheduleFrame,
             SessionRuntimeCommand::RenderFrame { frame_serial: 11 },
+            SessionRuntimeCommand::SubmitScanout { frame_serial: 11 },
             SessionRuntimeCommand::DrainPortalCommands,
             SessionRuntimeCommand::PresentChrome,
         ]
@@ -344,6 +418,8 @@ fn session_runtime_loop_processes_event_batches_without_side_effects() {
     assert_eq!(runtime.state().x_events_polled, 4);
     assert_eq!(runtime.state().frames_rendered, 1);
     assert_eq!(runtime.state().last_frame_serial, Some(11));
+    assert_eq!(runtime.state().scanout_submissions, 1);
+    assert_eq!(runtime.state().in_flight_scanouts, 1);
     assert_eq!(runtime.state().portal_commands_drained, 2);
     assert_eq!(runtime.state().chrome_commands_presented, 1);
 }
@@ -369,15 +445,20 @@ fn session_runtime_loop_resumes_from_previous_state() {
     let second = runtime.step([
         SessionRuntimeEvent::FrameScheduled { frame_serial: 2 },
         SessionRuntimeEvent::FrameRendered { frame_serial: 2 },
+        SessionRuntimeEvent::ScanoutStateChanged {
+            state: RuntimeScanoutState::Submitted,
+            frame_serial: Some(2),
+        },
         SessionRuntimeEvent::PortalCommandsReady { count: 0 },
         SessionRuntimeEvent::ChromeCommandsReady { count: 0 },
     ]);
 
-    assert_eq!(second.events_processed, 4);
+    assert_eq!(second.events_processed, 5);
     assert_eq!(
         second.commands,
         vec![
             SessionRuntimeCommand::RenderFrame { frame_serial: 2 },
+            SessionRuntimeCommand::SubmitScanout { frame_serial: 2 },
             SessionRuntimeCommand::DrainPortalCommands,
             SessionRuntimeCommand::PresentChrome,
         ]
@@ -396,12 +477,16 @@ fn session_runtime_observations_feed_the_batch_loop() {
             SessionRuntimeObservation::WmLayoutReady,
             SessionRuntimeObservation::FrameScheduled { frame_serial: 15 },
             SessionRuntimeObservation::FrameRendered { frame_serial: 15 },
+            SessionRuntimeObservation::ScanoutStateChanged {
+                state: RuntimeScanoutState::Submitted,
+                frame_serial: Some(15),
+            },
             SessionRuntimeObservation::PortalCommandsReady { count: 3 },
             SessionRuntimeObservation::ChromeCommandsReady { count: 2 },
         ])
         .expect("observation batch should be accepted");
 
-    assert_eq!(report.events_processed, 7);
+    assert_eq!(report.events_processed, 8);
     assert_eq!(
         report.commands,
         vec![
@@ -409,6 +494,7 @@ fn session_runtime_observations_feed_the_batch_loop() {
             SessionRuntimeCommand::RequestWmLayout,
             SessionRuntimeCommand::ScheduleFrame,
             SessionRuntimeCommand::RenderFrame { frame_serial: 15 },
+            SessionRuntimeCommand::SubmitScanout { frame_serial: 15 },
             SessionRuntimeCommand::DrainPortalCommands,
             SessionRuntimeCommand::PresentChrome,
         ]
@@ -416,6 +502,7 @@ fn session_runtime_observations_feed_the_batch_loop() {
     assert_eq!(runtime.state().phase, SessionRuntimePhase::Idle);
     assert_eq!(runtime.state().x_events_polled, 1);
     assert_eq!(runtime.state().frames_rendered, 1);
+    assert_eq!(runtime.state().scanout_submissions, 1);
     assert_eq!(runtime.state().portal_commands_drained, 3);
     assert_eq!(runtime.state().chrome_commands_presented, 2);
 }

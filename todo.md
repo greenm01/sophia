@@ -67,6 +67,8 @@ active milestone to `docs/roadmap-history.md`.
 
 ## Done Recently
 
+- [x] Added shared runtime scanout lifecycle state so rendered frames progress
+  through `SubmitScanout` before portal/chrome phases.
 - [x] Added a reduced `LiveAtomicScanoutCommitReport` that maps Engine
   `PageFlipCommitOutcome` into runtime-safe scanout commit state.
 - [x] Added `LiveAtomicScanoutCommitter` so runtime assembly commits through a

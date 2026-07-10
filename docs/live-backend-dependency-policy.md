@@ -194,6 +194,11 @@ rendered front-buffer owner for deterministic tests and native GBM/EGL, while
 `LiveRenderedPrimaryPlaneScanoutSubmission` retains that owner together with the
 KMS submission owner. If page-flip evidence is stale or rejected, retirement
 returns the combined owner to the caller.
+The shared session runtime consumes this through a reduced `SubmitScanout`
+command. The default deterministic adapter reports submitted state only; a live
+backend adapter must translate rendered primary-plane submit, accepted
+page-flip retirement, and rejection into reduced scanout observations before
+the runtime advances beyond scanout submission.
 `retire_native_primary_plane_scanout_after_page_flip` consumes that owner only
 when a reduced callback report is accepted and presented. Rejected or stale
 callbacks return the owner to the caller, preserving buffer and framebuffer

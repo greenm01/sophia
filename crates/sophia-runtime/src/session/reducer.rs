@@ -1,8 +1,8 @@
 use crate::prelude::*;
 
 use super::types::{
-    RuntimeAuthorityHealth, RuntimeBrokerHealth, SessionRuntimeCommand, SessionRuntimeEvent,
-    SessionRuntimePhase, SessionRuntimeState,
+    RuntimeAuthorityHealth, RuntimeBrokerHealth, RuntimeScanoutState, SessionRuntimeCommand,
+    SessionRuntimeEvent, SessionRuntimePhase, SessionRuntimeState,
 };
 
 pub fn update_session_runtime(
@@ -40,6 +40,29 @@ pub fn update_session_runtime(
         SessionRuntimeEvent::FrameRendered { frame_serial } => {
             state.frames_rendered = state.frames_rendered.saturating_add(1);
             state.last_frame_serial = Some(frame_serial);
+            state.phase = SessionRuntimePhase::SubmittingScanout;
+            SessionRuntimeCommand::SubmitScanout { frame_serial }
+        }
+        SessionRuntimeEvent::ScanoutStateChanged {
+            state: scanout_state,
+            frame_serial,
+        } => {
+            state.last_scanout_state = Some(scanout_state);
+            state.last_scanout_frame_serial = frame_serial;
+            match scanout_state {
+                RuntimeScanoutState::Submitted => {
+                    state.scanout_submissions = state.scanout_submissions.saturating_add(1);
+                    state.in_flight_scanouts = state.in_flight_scanouts.saturating_add(1);
+                }
+                RuntimeScanoutState::Retired => {
+                    state.scanout_retirements = state.scanout_retirements.saturating_add(1);
+                    state.in_flight_scanouts = state.in_flight_scanouts.saturating_sub(1);
+                }
+                RuntimeScanoutState::Rejected => {
+                    state.scanout_rejections = state.scanout_rejections.saturating_add(1);
+                    state.in_flight_scanouts = state.in_flight_scanouts.saturating_sub(1);
+                }
+            }
             state.phase = SessionRuntimePhase::DrainingPortals;
             SessionRuntimeCommand::DrainPortalCommands
         }

@@ -46,8 +46,8 @@ pub use sophia_protocol::{
     encode_wm_response_frame,
 };
 pub use sophia_runtime::{
-    RestartPolicy, SessionRuntimeCommand, SessionRuntimeObservation, SessionRuntimePhase,
-    SupervisedProcessKind, SupervisorCommand, SupervisorState,
+    RestartPolicy, RuntimeScanoutState, SessionRuntimeCommand, SessionRuntimeObservation,
+    SessionRuntimePhase, SupervisedProcessKind, SupervisorCommand, SupervisorState,
 };
 pub use std::fs;
 pub use std::io::{Cursor, Read, Result as IoResult, Write};

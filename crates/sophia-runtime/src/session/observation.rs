@@ -1,6 +1,6 @@
 use crate::prelude::*;
 
-use super::types::SessionRuntimeEvent;
+use super::types::{RuntimeScanoutState, SessionRuntimeEvent};
 
 pub const MAX_SESSION_RUNTIME_OBSERVATION_BATCH: usize = 64;
 
@@ -17,6 +17,10 @@ pub enum SessionRuntimeObservation {
     },
     FrameRendered {
         frame_serial: u64,
+    },
+    ScanoutStateChanged {
+        state: RuntimeScanoutState,
+        frame_serial: Option<u64>,
     },
     PortalCommandsReady {
         count: u32,
@@ -135,6 +139,13 @@ pub fn session_runtime_event_from_observation(
         SessionRuntimeObservation::FrameRendered { frame_serial } => {
             Ok(SessionRuntimeEvent::FrameRendered { frame_serial })
         }
+        SessionRuntimeObservation::ScanoutStateChanged {
+            state,
+            frame_serial,
+        } => Ok(SessionRuntimeEvent::ScanoutStateChanged {
+            state,
+            frame_serial,
+        }),
         SessionRuntimeObservation::PortalCommandsReady { count } => {
             Ok(SessionRuntimeEvent::PortalCommandsReady { count })
         }
