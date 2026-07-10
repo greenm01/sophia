@@ -117,15 +117,17 @@ a page-flip session owner that keeps the submit card, cloned event reader, and
 routed poller together. With `libinput-events` enabled, that same owner can
 drive one backend runtime tick through the native GBM rendered-primary-plane
 scanout path and native page-flip poller, so callers do not have to split fd
-ownership apart. The smoke child duplicates that fd namespace into a persistent
-backend-live GBM/EGL rendered-scanout exporter, clears a GBM surface, locks the
+ownership apart. That same page-flip session owner also owns the destructive
+hardware proof phases. The smoke child creates a persistent backend-live GBM/EGL
+rendered-scanout exporter, then asks the session to run `InitialModeset` and
+`SteadyPageFlip` proof phases. The session clears a GBM surface, locks the
 rendered front buffer through the normal runtime export seam, submits a
-primary-plane atomic
-modeset, waits for reduced page-flip evidence, and retires the submitted
-framebuffer resources. It then exports a second rendered front buffer and
-submits it through the steady-state page-flip policy, proving the post-modeset
-path without `ALLOW_MODESET`. Each submitted phase waits within a bounded
-deadline for native page-flip evidence before reducing the final smoke record.
+primary-plane atomic modeset, waits for reduced page-flip evidence, and retires
+the submitted framebuffer resources. It then exports a second rendered front
+buffer and submits it through the steady-state page-flip policy, proving the
+post-modeset path without `ALLOW_MODESET`. Each submitted phase waits within a
+bounded deadline for native page-flip evidence before reducing the final smoke
+record.
 The real card fd is opened nonblocking, so missing callbacks reduce as missing
 evidence instead of hanging inside the DRM event read.
 Without that environment variable, the test returns early and never opens or
