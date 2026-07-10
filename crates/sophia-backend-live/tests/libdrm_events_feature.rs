@@ -24,7 +24,8 @@ use sophia_backend_live::{
     LibdrmNativePrimaryPlaneResourceDevice, LibdrmNativePrimaryPlaneScanoutRetireStatus,
     LibdrmNativePrimaryPlaneScanoutSubmitStatus, LibdrmNativePrimaryPlaneSelectionStatus,
     LibdrmNativePropertyHandleSet, LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport,
-    LibdrmNativeReadLoopReport, LibdrmNativeReadLoopStatus, LibdrmPageFlipEventPollReport,
+    LibdrmNativeReadLoopReport, LibdrmNativeReadLoopStatus,
+    LibdrmNativeRenderedScanoutContextStatus, LibdrmPageFlipEventPollReport,
     LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller, LibdrmRendererScanoutBuffer,
     LiveBackendConfig, LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
     LiveHardwareValidationSmokeReport, LiveHardwareValidationSmokeStatus,
@@ -1616,6 +1617,7 @@ fn native_atomic_scanout_smoke_evidence_passes_only_after_submit_page_flip_and_r
         retire_native_primary_plane_scanout_after_page_flip(&device, submission, &callback);
 
     let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+        Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
         LiveRendererScanoutBufferExportStatus::Exported,
         Some(&submit),
         Some(&poll),
@@ -1627,6 +1629,7 @@ fn native_atomic_scanout_smoke_evidence_passes_only_after_submit_page_flip_and_r
         evidence,
         LibdrmNativeAtomicScanoutSmokeEvidence {
             status: LibdrmNativeAtomicScanoutSmokeStatus::Passed,
+            rendered_context: Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
             gbm_export: Some(LiveRendererScanoutBufferExportStatus::Exported),
             submit: Some(LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip),
             page_flip_poll: Some(LibdrmPageFlipEventPollStatus::Emitted),
@@ -1660,6 +1663,7 @@ fn native_atomic_scanout_smoke_evidence_fails_closed_before_page_flip() {
         });
 
     let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+        Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
         LiveRendererScanoutBufferExportStatus::Exported,
         Some(&submit),
         Some(&poll),
@@ -1697,6 +1701,7 @@ fn native_atomic_scanout_smoke_evidence_records_reduced_early_failures() {
     );
     assert_eq!(
         LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+            Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
             LiveRendererScanoutBufferExportStatus::Unavailable,
             None,
             None,
@@ -1705,6 +1710,18 @@ fn native_atomic_scanout_smoke_evidence_records_reduced_early_failures() {
         )
         .status,
         LibdrmNativeAtomicScanoutSmokeStatus::GbmExportFailed
+    );
+    assert_eq!(
+        LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+            Some(LibdrmNativeRenderedScanoutContextStatus::Unavailable),
+            LiveRendererScanoutBufferExportStatus::Unavailable,
+            None,
+            None,
+            None,
+            None,
+        )
+        .status,
+        LibdrmNativeAtomicScanoutSmokeStatus::RenderedContextUnavailable
     );
 }
 
@@ -3004,6 +3021,17 @@ mod atomic_scanout_hardware_smoke {
 
         let context_report =
             NativeGbmRenderedScanoutContext::from_backend_device_result(card.try_clone_file());
+        let rendered_context = match context_report.status {
+            NativeGbmRenderedScanoutContextStatus::Ready => {
+                LibdrmNativeRenderedScanoutContextStatus::Ready
+            }
+            NativeGbmRenderedScanoutContextStatus::Unavailable => {
+                LibdrmNativeRenderedScanoutContextStatus::Unavailable
+            }
+            NativeGbmRenderedScanoutContextStatus::Degraded => {
+                LibdrmNativeRenderedScanoutContextStatus::Degraded
+            }
+        };
         let Some(context) = context_report.context else {
             let export_status = match context_report.status {
                 NativeGbmRenderedScanoutContextStatus::Ready => {
@@ -3017,6 +3045,7 @@ mod atomic_scanout_hardware_smoke {
                 }
             };
             let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+                Some(rendered_context),
                 export_status,
                 None,
                 None,
@@ -3034,6 +3063,7 @@ mod atomic_scanout_hardware_smoke {
         let export = context.export_rendered_owned_scanout_buffer(target);
         if export.status != LiveRendererScanoutBufferExportStatus::Exported {
             let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+                Some(rendered_context),
                 export.status,
                 None,
                 None,
@@ -3057,6 +3087,7 @@ mod atomic_scanout_hardware_smoke {
         if submit.status != LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
         {
             let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+                Some(rendered_context),
                 export.status,
                 Some(&submit),
                 None,
@@ -3104,6 +3135,7 @@ mod atomic_scanout_hardware_smoke {
         }
 
         let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+            Some(rendered_context),
             export.status,
             Some(&submit),
             Some(&poll.poll),

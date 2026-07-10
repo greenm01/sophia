@@ -141,8 +141,17 @@ pub enum LibdrmNativePrimaryPlaneScanoutRetireStatus {
 
 #[cfg(feature = "libdrm-events")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibdrmNativeRenderedScanoutContextStatus {
+    Ready,
+    Unavailable,
+    Degraded,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LibdrmNativeAtomicScanoutSmokeEvidence {
     pub status: LibdrmNativeAtomicScanoutSmokeStatus,
+    pub rendered_context: Option<LibdrmNativeRenderedScanoutContextStatus>,
     pub gbm_export: Option<LiveRendererScanoutBufferExportStatus>,
     pub submit: Option<LibdrmNativePrimaryPlaneScanoutSubmitStatus>,
     pub page_flip_poll: Option<LibdrmPageFlipEventPollStatus>,
@@ -155,6 +164,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
     pub const fn no_primary_card() -> Self {
         Self {
             status: LibdrmNativeAtomicScanoutSmokeStatus::NoPrimaryCard,
+            rendered_context: None,
             gbm_export: None,
             submit: None,
             page_flip_poll: None,
@@ -166,6 +176,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
     pub const fn kms_selection_failed() -> Self {
         Self {
             status: LibdrmNativeAtomicScanoutSmokeStatus::KmsSelectionFailed,
+            rendered_context: None,
             gbm_export: None,
             submit: None,
             page_flip_poll: None,
@@ -175,6 +186,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
     }
 
     pub fn from_pipeline_reports(
+        rendered_context: Option<LibdrmNativeRenderedScanoutContextStatus>,
         gbm_export: LiveRendererScanoutBufferExportStatus,
         submit: Option<&LibdrmNativePrimaryPlaneScanoutSubmitResult>,
         poll: Option<&LibdrmPageFlipEventPollReport>,
@@ -188,7 +200,15 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             callback.map(|report| report.decision) == Some(LivePageFlipCallbackDecision::Accepted);
         let retire_status = retire.map(|report| report.status);
 
-        let status = if gbm_export != LiveRendererScanoutBufferExportStatus::Exported {
+        let status = if matches!(
+            rendered_context,
+            Some(
+                LibdrmNativeRenderedScanoutContextStatus::Unavailable
+                    | LibdrmNativeRenderedScanoutContextStatus::Degraded
+            )
+        ) {
+            LibdrmNativeAtomicScanoutSmokeStatus::RenderedContextUnavailable
+        } else if gbm_export != LiveRendererScanoutBufferExportStatus::Exported {
             LibdrmNativeAtomicScanoutSmokeStatus::GbmExportFailed
         } else if submit_status
             != Some(LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip)
@@ -209,6 +229,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
 
         Self {
             status,
+            rendered_context,
             gbm_export: Some(gbm_export),
             submit: submit_status,
             page_flip_poll,
@@ -224,6 +245,7 @@ pub enum LibdrmNativeAtomicScanoutSmokeStatus {
     Passed,
     NoPrimaryCard,
     KmsSelectionFailed,
+    RenderedContextUnavailable,
     GbmExportFailed,
     SubmitFailed,
     PageFlipMissing,

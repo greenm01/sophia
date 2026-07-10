@@ -89,6 +89,8 @@ active milestone to `docs/roadmap-history.md`.
 - [x] Added a persistent renderer-live GBM/EGL rendered-scanout context so the
   reusable backend exporter no longer reinitializes GBM/EGL on every valid
   export.
+- [x] Added reduced persistent-context status to atomic scanout smoke evidence
+  so context startup failure is distinct from GBM front-buffer export failure.
 - [x] Added a backend-live runtime tick path that answers active `SubmitScanout`
   commands through rendered GBM/KMS primary-plane scanout.
 - [x] Threaded backend-live terminal scanout states into the shared runtime tick
