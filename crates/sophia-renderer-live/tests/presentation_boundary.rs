@@ -257,23 +257,55 @@ fn renderer_scanout_buffer_descriptor_validates_scanout_shape() {
             width: -1,
             height: 1080,
         },
-        pitch: 1920 * 4,
-        format: LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
-        gem_handle: 44,
+        ..ready
     };
     assert!(!forged_ready.is_valid_scanout_buffer());
 
     let forged_undersized_pitch = LiveRendererScanoutBufferDescriptor {
         status: LiveRendererScanoutBufferStatus::Ready,
-        size: Size {
+        pitch: 1920 * 4 - 1,
+        ..ready
+    };
+    assert!(!forged_undersized_pitch.is_valid_scanout_buffer());
+
+    let invalid_plane_count = LiveRendererScanoutBufferDescriptor::new_with_planes(
+        Size {
             width: 1920,
             height: 1080,
         },
-        pitch: 1920 * 4 - 1,
-        format: LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
-        gem_handle: 44,
-    };
-    assert!(!forged_undersized_pitch.is_valid_scanout_buffer());
+        1920 * 4,
+        LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+        44,
+        0,
+        [44, 0, 0, 0],
+        [1920 * 4, 0, 0, 0],
+        [0, 0, 0, 0],
+        Some(0),
+    );
+    assert_eq!(
+        invalid_plane_count.status,
+        LiveRendererScanoutBufferStatus::Invalid
+    );
+
+    let valid_modified = LiveRendererScanoutBufferDescriptor::new_with_planes(
+        Size {
+            width: 1920,
+            height: 1080,
+        },
+        1920 * 4,
+        LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+        44,
+        1,
+        [44, 0, 0, 0],
+        [1920 * 4, 0, 0, 0],
+        [0, 0, 0, 0],
+        Some(0),
+    );
+    assert_eq!(
+        valid_modified.status,
+        LiveRendererScanoutBufferStatus::Ready
+    );
+    assert!(valid_modified.is_valid_scanout_buffer());
 }
 
 #[test]

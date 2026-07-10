@@ -53,7 +53,7 @@ where
     where
         B: drm::buffer::PlanarBuffer + ?Sized,
     {
-        self.add_planar_framebuffer(buffer, drm::control::FbCmd2Flags::empty())
+        self.add_planar_framebuffer(buffer, scanout_framebuffer_flags(buffer))
     }
 
     fn destroy_scanout_framebuffer(
@@ -65,5 +65,22 @@ where
 
     fn destroy_mode_blob(&self, mode_blob: u64) -> io::Result<()> {
         self.destroy_property_blob(mode_blob)
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+fn scanout_framebuffer_flags<B>(buffer: &B) -> drm::control::FbCmd2Flags
+where
+    B: drm::buffer::PlanarBuffer + ?Sized,
+{
+    if buffer.modifier().is_some_and(|modifier| {
+        !matches!(
+            modifier,
+            drm::buffer::DrmModifier::Invalid | drm::buffer::DrmModifier::Linear
+        )
+    }) {
+        drm::control::FbCmd2Flags::MODIFIERS
+    } else {
+        drm::control::FbCmd2Flags::empty()
     }
 }

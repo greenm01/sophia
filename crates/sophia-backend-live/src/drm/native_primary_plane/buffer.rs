@@ -7,6 +7,10 @@ pub struct LibdrmRendererScanoutBuffer {
     pitch: u32,
     format: u32,
     handle: drm::buffer::Handle,
+    plane_handles: [Option<drm::buffer::Handle>; 4],
+    plane_pitches: [u32; 4],
+    plane_offsets: [u32; 4],
+    modifier: Option<drm::buffer::DrmModifier>,
 }
 
 #[cfg(feature = "libdrm-events")]
@@ -16,13 +20,35 @@ impl LibdrmRendererScanoutBuffer {
             return None;
         }
 
+        let plane_handles = scanout_plane_handles_from_descriptor(descriptor)?;
+
         Some(Self {
             size: descriptor.size,
             pitch: descriptor.pitch,
             format: descriptor.format,
             handle: drm::control::from_u32(descriptor.gem_handle)?,
+            plane_handles,
+            plane_pitches: descriptor.plane_pitches,
+            plane_offsets: descriptor.plane_offsets,
+            modifier: descriptor.modifier.map(drm::buffer::DrmModifier::from),
         })
     }
+}
+
+#[cfg(feature = "libdrm-events")]
+fn scanout_plane_handles_from_descriptor(
+    descriptor: LiveRendererScanoutBufferDescriptor,
+) -> Option<[Option<drm::buffer::Handle>; 4]> {
+    let mut handles = [None, None, None, None];
+    let mut index = 0;
+    while index < handles.len() {
+        if index < descriptor.plane_count as usize {
+            handles[index] = Some(drm::control::from_u32(descriptor.plane_handles[index])?);
+        }
+        index += 1;
+    }
+
+    Some(handles)
 }
 
 #[cfg(feature = "libdrm-events")]
@@ -58,18 +84,23 @@ impl drm::buffer::PlanarBuffer for LibdrmRendererScanoutBuffer {
     }
 
     fn modifier(&self) -> Option<drm::buffer::DrmModifier> {
-        None
+        self.modifier.filter(|modifier| {
+            !matches!(
+                modifier,
+                drm::buffer::DrmModifier::Invalid | drm::buffer::DrmModifier::Linear
+            )
+        })
     }
 
     fn pitches(&self) -> [u32; 4] {
-        [self.pitch, 0, 0, 0]
+        self.plane_pitches
     }
 
     fn handles(&self) -> [Option<drm::buffer::Handle>; 4] {
-        [Some(self.handle), None, None, None]
+        self.plane_handles
     }
 
     fn offsets(&self) -> [u32; 4] {
-        [0, 0, 0, 0]
+        self.plane_offsets
     }
 }

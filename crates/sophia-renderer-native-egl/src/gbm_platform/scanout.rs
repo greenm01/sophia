@@ -17,6 +17,11 @@ pub struct NativeGbmOwnedScanoutBuffer {
     pitch: u32,
     format: u32,
     gem_handle: u32,
+    plane_count: u8,
+    plane_handles: [u32; 4],
+    plane_pitches: [u32; 4],
+    plane_offsets: [u32; 4],
+    modifier: Option<u64>,
     // Drop order matters: the locked front buffer must release before the
     // surface it was locked from is destroyed.
     _buffer: gbm::BufferObject<()>,
@@ -42,6 +47,26 @@ impl NativeGbmOwnedScanoutBuffer {
 
     pub const fn gem_handle(&self) -> u32 {
         self.gem_handle
+    }
+
+    pub const fn plane_count(&self) -> u8 {
+        self.plane_count
+    }
+
+    pub const fn plane_handles(&self) -> [u32; 4] {
+        self.plane_handles
+    }
+
+    pub const fn plane_pitches(&self) -> [u32; 4] {
+        self.plane_pitches
+    }
+
+    pub const fn plane_offsets(&self) -> [u32; 4] {
+        self.plane_offsets
+    }
+
+    pub const fn modifier(&self) -> Option<u64> {
+        self.modifier
     }
 }
 
@@ -232,7 +257,15 @@ fn native_owned_scanout_buffer_from_bo(
     let pitch = buffer.stride();
     let format = buffer.format() as u32;
     let gem_handle = unsafe { buffer.handle().u32_ };
-    if pitch == 0 || gem_handle == 0 || !is_supported_scanout_format(format) {
+    let plane_count = buffer.plane_count();
+    let plane_handles = scanout_plane_handles(&buffer, plane_count);
+    let plane_pitches = scanout_plane_pitches(&buffer, plane_count);
+    let plane_offsets = scanout_plane_offsets(&buffer, plane_count);
+    if pitch == 0
+        || gem_handle == 0
+        || !is_supported_scanout_format(format)
+        || !is_valid_scanout_planes(gem_handle, plane_count, plane_handles, plane_pitches)
+    {
         return Err(NativeGbmScanoutBufferExportDetail::InvalidBufferDescriptor);
     }
 
@@ -242,9 +275,81 @@ fn native_owned_scanout_buffer_from_bo(
         pitch,
         format,
         gem_handle,
+        plane_count: plane_count as u8,
+        plane_handles,
+        plane_pitches,
+        plane_offsets,
+        modifier: Some(buffer.modifier().into()),
         _buffer: buffer,
         _surface: surface,
     })
+}
+
+fn scanout_plane_handles(buffer: &gbm::BufferObject<()>, plane_count: u32) -> [u32; 4] {
+    [
+        plane_handle(buffer, plane_count, 0),
+        plane_handle(buffer, plane_count, 1),
+        plane_handle(buffer, plane_count, 2),
+        plane_handle(buffer, plane_count, 3),
+    ]
+}
+
+fn scanout_plane_pitches(buffer: &gbm::BufferObject<()>, plane_count: u32) -> [u32; 4] {
+    [
+        plane_pitch(buffer, plane_count, 0),
+        plane_pitch(buffer, plane_count, 1),
+        plane_pitch(buffer, plane_count, 2),
+        plane_pitch(buffer, plane_count, 3),
+    ]
+}
+
+fn scanout_plane_offsets(buffer: &gbm::BufferObject<()>, plane_count: u32) -> [u32; 4] {
+    [
+        plane_offset(buffer, plane_count, 0),
+        plane_offset(buffer, plane_count, 1),
+        plane_offset(buffer, plane_count, 2),
+        plane_offset(buffer, plane_count, 3),
+    ]
+}
+
+fn plane_handle(buffer: &gbm::BufferObject<()>, plane_count: u32, plane: i32) -> u32 {
+    (plane < plane_count as i32)
+        .then(|| unsafe { buffer.handle_for_plane(plane).u32_ })
+        .unwrap_or(0)
+}
+
+fn plane_pitch(buffer: &gbm::BufferObject<()>, plane_count: u32, plane: i32) -> u32 {
+    (plane < plane_count as i32)
+        .then(|| buffer.stride_for_plane(plane))
+        .unwrap_or(0)
+}
+
+fn plane_offset(buffer: &gbm::BufferObject<()>, plane_count: u32, plane: i32) -> u32 {
+    (plane < plane_count as i32)
+        .then(|| buffer.offset(plane))
+        .unwrap_or(0)
+}
+
+fn is_valid_scanout_planes(
+    gem_handle: u32,
+    plane_count: u32,
+    plane_handles: [u32; 4],
+    plane_pitches: [u32; 4],
+) -> bool {
+    plane_count > 0
+        && plane_count <= 4
+        && plane_handles[0] == gem_handle
+        && plane_handles
+            .iter()
+            .zip(plane_pitches)
+            .enumerate()
+            .all(|(index, (handle, pitch))| {
+                if index < plane_count as usize {
+                    *handle != 0 && pitch != 0
+                } else {
+                    *handle == 0 && pitch == 0
+                }
+            })
 }
 
 fn render_gbm_scanout_front_buffer<T: std::os::fd::AsFd>(

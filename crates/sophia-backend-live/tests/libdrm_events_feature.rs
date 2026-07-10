@@ -1663,13 +1663,11 @@ fn native_libdrm_primary_plane_scanout_submit_fails_closed_for_bad_descriptor() 
 
     let forged_undersized_pitch = sophia_renderer_live::LiveRendererScanoutBufferDescriptor {
         status: sophia_renderer_live::LiveRendererScanoutBufferStatus::Ready,
-        size: Size {
+        pitch: 1280 * 4 - 1,
+        ..scanout_descriptor(Size {
             width: 1280,
             height: 720,
-        },
-        pitch: 1280 * 4 - 1,
-        format: LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
-        gem_handle: 17,
+        })
     };
     let undersized_pitch = submit_native_primary_plane_scanout_from_renderer_descriptor(
         &device,
@@ -1863,9 +1861,10 @@ fn live_runtime_assembly_reports_invalid_rendered_scanout_buffer_status() {
                 width: -1,
                 height: 720,
             },
-            pitch: 1280 * 4,
-            format: LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
-            gem_handle: 17,
+            ..scanout_descriptor(Size {
+                width: 1280,
+                height: 720,
+            })
         }),
         owner: Some(FakeRenderedScanoutOwner { raw: 9 }),
         export_attempts: 0,
@@ -4297,6 +4296,47 @@ fn native_libdrm_renderer_scanout_buffer_rejects_invalid_renderer_descriptors() 
     );
     assert_eq!(drm::buffer::PlanarBuffer::modifier(&argb_buffer), None);
 
+    let linear_descriptor =
+        sophia_renderer_live::LiveRendererScanoutBufferDescriptor::new_with_planes(
+            Size {
+                width: 1280,
+                height: 720,
+            },
+            1280 * 4,
+            LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+            20,
+            1,
+            [20, 0, 0, 0],
+            [1280 * 4, 0, 0, 0],
+            [0, 0, 0, 0],
+            Some(u64::from(drm::buffer::DrmModifier::Linear)),
+        );
+    let linear_buffer = LibdrmRendererScanoutBuffer::from_descriptor(linear_descriptor)
+        .expect("linear modified descriptors should stay valid");
+    assert_eq!(drm::buffer::PlanarBuffer::modifier(&linear_buffer), None);
+
+    let tiled_descriptor =
+        sophia_renderer_live::LiveRendererScanoutBufferDescriptor::new_with_planes(
+            Size {
+                width: 1280,
+                height: 720,
+            },
+            1280 * 4,
+            LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+            21,
+            1,
+            [21, 0, 0, 0],
+            [1280 * 4, 0, 0, 0],
+            [0, 0, 0, 0],
+            Some(u64::from(drm::buffer::DrmModifier::I915_x_tiled)),
+        );
+    let tiled_buffer = LibdrmRendererScanoutBuffer::from_descriptor(tiled_descriptor)
+        .expect("nonlinear modified descriptors should stay valid");
+    assert_eq!(
+        drm::buffer::PlanarBuffer::modifier(&tiled_buffer),
+        Some(drm::buffer::DrmModifier::I915_x_tiled)
+    );
+
     let mut invalid_exporter =
         FakeRendererScanoutBufferExporter::new(LiveRendererScanoutBufferExportStatus::Exported)
             .with_descriptor(0, LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888, 17);
@@ -4320,21 +4360,20 @@ fn native_libdrm_renderer_scanout_buffer_rejects_invalid_renderer_descriptors() 
             width: -1,
             height: 720,
         },
-        pitch: 1280 * 4,
-        format: LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
-        gem_handle: 17,
+        ..scanout_descriptor(Size {
+            width: 1280,
+            height: 720,
+        })
     };
     assert!(LibdrmRendererScanoutBuffer::from_descriptor(forged_ready).is_none());
 
     let forged_undersized_pitch = sophia_renderer_live::LiveRendererScanoutBufferDescriptor {
         status: sophia_renderer_live::LiveRendererScanoutBufferStatus::Ready,
-        size: Size {
+        pitch: 1280 * 4 - 1,
+        ..scanout_descriptor(Size {
             width: 1280,
             height: 720,
-        },
-        pitch: 1280 * 4 - 1,
-        format: LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
-        gem_handle: 17,
+        })
     };
     assert!(LibdrmRendererScanoutBuffer::from_descriptor(forged_undersized_pitch).is_none());
 

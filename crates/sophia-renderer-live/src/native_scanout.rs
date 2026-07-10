@@ -190,7 +190,7 @@ fn reduced_native_owned_scanout_buffer_export_report(
     };
 
     let buffer = report.buffer.and_then(|buffer| {
-        let descriptor = LiveRendererScanoutBufferDescriptor::new(
+        let descriptor = LiveRendererScanoutBufferDescriptor::new_with_planes(
             Size {
                 width: buffer.width() as i32,
                 height: buffer.height() as i32,
@@ -198,6 +198,11 @@ fn reduced_native_owned_scanout_buffer_export_report(
             buffer.pitch(),
             buffer.format(),
             buffer.gem_handle(),
+            buffer.plane_count(),
+            buffer.plane_handles(),
+            buffer.plane_pitches(),
+            buffer.plane_offsets(),
+            buffer.modifier(),
         );
         descriptor
             .is_valid_scanout_buffer()

@@ -542,9 +542,15 @@ fn native_atomic_scanout_smoke_evidence_reports_precise_submit_stage_failures() 
             width: -1,
             height: 720,
         },
-        pitch: 1280 * 4,
-        format: LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
-        gem_handle: 17,
+        ..sophia_renderer_live::LiveRendererScanoutBufferDescriptor::new(
+            Size {
+                width: 1280,
+                height: 720,
+            },
+            1280 * 4,
+            LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+            17,
+        )
     };
     let scanout_buffer_failed =
         submit_native_primary_plane_scanout_from_renderer_descriptor(&device, forged_ready);
