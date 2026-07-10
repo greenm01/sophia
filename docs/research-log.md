@@ -852,6 +852,10 @@ validation, mode blob/framebuffer creation, atomic request build, and atomic
 submit. The result intentionally stops at `SubmittedWaitingForPageFlip`; a
 future hardware smoke must wire the retained submission owner to native
 page-flip evidence before resources are retired.
+Submitted scanout owners now retire only through a reduced accepted/presented
+page-flip callback report. Rejected or stale callback reports return the owner
+to the caller, which preserves resource lifetime across the exact failure cases
+that would otherwise turn a pending kernel scanout into a use-after-retire bug.
 
 ## Open Questions
 

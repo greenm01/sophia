@@ -2055,6 +2055,22 @@ pub enum LibdrmNativePrimaryPlaneScanoutSubmitStatus {
 }
 
 #[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LibdrmNativePrimaryPlaneScanoutRetireResult {
+    pub status: LibdrmNativePrimaryPlaneScanoutRetireStatus,
+    pub destroy: Option<LibdrmNativePrimaryPlaneResourceDestroyStatus>,
+    pub submission: Option<LibdrmNativePrimaryPlaneScanoutSubmission>,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibdrmNativePrimaryPlaneScanoutRetireStatus {
+    RetiredAfterPageFlip,
+    WaitingForAcceptedPageFlip,
+    ResourceRetireFailed,
+}
+
+#[cfg(feature = "libdrm-events")]
 pub fn submit_native_primary_plane_scanout_from_renderer_descriptor<D>(
     device: &D,
     descriptor: LiveRendererScanoutBufferDescriptor,
@@ -2178,6 +2194,41 @@ where
         submission: Some(LibdrmNativePrimaryPlaneScanoutSubmission {
             resources: resource_bundle,
         }),
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+pub fn retire_native_primary_plane_scanout_after_page_flip<D>(
+    device: &D,
+    submission: LibdrmNativePrimaryPlaneScanoutSubmission,
+    callback: &LivePageFlipCallbackReport,
+) -> LibdrmNativePrimaryPlaneScanoutRetireResult
+where
+    D: LibdrmNativePrimaryPlaneResourceDevice,
+{
+    if callback.decision != LivePageFlipCallbackDecision::Accepted
+        || callback.event.status != LivePageFlipEventStatus::Presented
+    {
+        return LibdrmNativePrimaryPlaneScanoutRetireResult {
+            status: LibdrmNativePrimaryPlaneScanoutRetireStatus::WaitingForAcceptedPageFlip,
+            destroy: None,
+            submission: Some(submission),
+        };
+    }
+
+    let destroy = submission.retire(device);
+    if destroy.status != LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed {
+        return LibdrmNativePrimaryPlaneScanoutRetireResult {
+            status: LibdrmNativePrimaryPlaneScanoutRetireStatus::ResourceRetireFailed,
+            destroy: Some(destroy.status),
+            submission: None,
+        };
+    }
+
+    LibdrmNativePrimaryPlaneScanoutRetireResult {
+        status: LibdrmNativePrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip,
+        destroy: Some(destroy.status),
+        submission: None,
     }
 }
 

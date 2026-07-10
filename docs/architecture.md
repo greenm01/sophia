@@ -690,6 +690,10 @@ the KMS target, validate a renderer scanout descriptor, create the mode blob and
 framebuffer, build the atomic request, submit it, and retain an opaque
 submission owner. That owner is not visual truth. The runtime may retire it only
 after native page-flip evidence has passed the reduced callback checks.
+Submitted scanout retirement follows the same rule: an accepted, presented
+page-flip callback retires the framebuffer resources; stale, wrong-output, or
+rejected callbacks return the owner to the caller so in-flight resources stay
+alive.
 
 The XLibre prototype scheduler may still consume X Damage. In that path,
 `schedule_frame_from_damage` combines a frame-clock tick, an optional X-derived

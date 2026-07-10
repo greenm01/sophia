@@ -184,6 +184,10 @@ and submits it with modeset permission. A successful return is only
 `SubmittedWaitingForPageFlip`; the opaque submission owner must remain alive
 until backend-live accepts native page-flip evidence and explicitly retires the
 resources.
+`retire_native_primary_plane_scanout_after_page_flip` consumes that owner only
+when a reduced callback report is accepted and presented. Rejected or stale
+callbacks return the owner to the caller, preserving buffer and framebuffer
+lifetime until a real presentation event arrives.
 
 Backend-live runtime ticks carry the current reduced scanout readiness report,
 KMS scanout target report, and page-flip event beside renderer health. This

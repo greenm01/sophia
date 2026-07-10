@@ -18,17 +18,18 @@ use sophia_backend_live::{
     LibdrmNativePollerDiagnostics, LibdrmNativePrimaryPlaneObjects,
     LibdrmNativePrimaryPlanePropertyDiscoveryStatus, LibdrmNativePrimaryPlanePropertyHandles,
     LibdrmNativePrimaryPlaneResourceCreateStatus, LibdrmNativePrimaryPlaneResourceDestroyStatus,
-    LibdrmNativePrimaryPlaneResourceDevice, LibdrmNativePrimaryPlaneScanoutSubmitStatus,
-    LibdrmNativePrimaryPlaneSelectionStatus, LibdrmNativePropertyHandleSet,
-    LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport, LibdrmNativeReadLoopReport,
-    LibdrmNativeReadLoopStatus, LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus,
-    LibdrmPageFlipEventPoller, LibdrmRendererScanoutBuffer, LiveBackendConfig,
-    LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
+    LibdrmNativePrimaryPlaneResourceDevice, LibdrmNativePrimaryPlaneScanoutRetireStatus,
+    LibdrmNativePrimaryPlaneScanoutSubmitStatus, LibdrmNativePrimaryPlaneSelectionStatus,
+    LibdrmNativePropertyHandleSet, LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport,
+    LibdrmNativeReadLoopReport, LibdrmNativeReadLoopStatus, LibdrmPageFlipEventPollReport,
+    LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller, LibdrmRendererScanoutBuffer,
+    LiveBackendConfig, LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
     LiveHardwareValidationSmokeReport, LiveHardwareValidationSmokeStatus,
     LiveHardwareValidationTarget, LiveLibdrmPollerDiagnostics, LiveLibdrmPollerDiagnosticsStatus,
     LiveLibdrmPollerStartupReport, LiveLibdrmPollerStartupStatus, LivePageFlipCallback,
-    LivePageFlipCallbackQueue, LivePageFlipCallbackSourceReport, LivePageFlipEvent,
-    LivePageFlipEventStatus, NativeLibdrmAtomicScanoutCommitter, NativeLibdrmPageFlipEventPoller,
+    LivePageFlipCallbackDecision, LivePageFlipCallbackQueue, LivePageFlipCallbackReport,
+    LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus,
+    NativeLibdrmAtomicScanoutCommitter, NativeLibdrmPageFlipEventPoller,
     NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller, Size,
     build_native_primary_plane_atomic_request, create_native_primary_plane_resources,
     decode_native_page_flip_batch, destroy_native_primary_plane_resources, discover_live_backend,
@@ -37,7 +38,7 @@ use sophia_backend_live::{
     native_libdrm_event_adapter_report_for_authority, real_atomic_scanout_validation_gate,
     real_atomic_scanout_validation_smoke_report, real_libdrm_events_validation_gate,
     real_libdrm_events_validation_smoke_report, reduce_native_page_flip_event,
-    select_native_primary_plane_target,
+    retire_native_primary_plane_scanout_after_page_flip, select_native_primary_plane_target,
     submit_native_primary_plane_scanout_from_renderer_descriptor,
 };
 use sophia_renderer_live::{
@@ -873,6 +874,83 @@ fn native_libdrm_primary_plane_scanout_submit_fails_closed_for_bad_descriptor() 
     assert!(result.request.is_none());
     assert!(result.submit.is_none());
     assert!(result.submission.is_none());
+}
+
+#[test]
+fn native_libdrm_primary_plane_scanout_retires_only_after_accepted_page_flip() {
+    let device = full_primary_plane_scanout_device();
+    let result = submit_native_primary_plane_scanout_from_renderer_descriptor(
+        &device,
+        scanout_descriptor(Size {
+            width: 1280,
+            height: 720,
+        }),
+    );
+    let submission = result
+        .submission
+        .expect("submitted scanout should retain resource ownership");
+
+    let retired = retire_native_primary_plane_scanout_after_page_flip(
+        &device,
+        submission,
+        &LivePageFlipCallbackReport {
+            decision: LivePageFlipCallbackDecision::Accepted,
+            event: LivePageFlipEvent {
+                status: LivePageFlipEventStatus::Presented,
+                frame_serial: Some(42),
+            },
+        },
+    );
+
+    assert_eq!(
+        retired.status,
+        LibdrmNativePrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip
+    );
+    assert_eq!(
+        retired.destroy,
+        Some(LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed)
+    );
+    assert!(retired.submission.is_none());
+}
+
+#[test]
+fn native_libdrm_primary_plane_scanout_keeps_submission_until_page_flip_is_accepted() {
+    let device = full_primary_plane_scanout_device();
+    let result = submit_native_primary_plane_scanout_from_renderer_descriptor(
+        &device,
+        scanout_descriptor(Size {
+            width: 1280,
+            height: 720,
+        }),
+    );
+    let submission = result
+        .submission
+        .expect("submitted scanout should retain resource ownership");
+
+    let waiting = retire_native_primary_plane_scanout_after_page_flip(
+        &device,
+        submission,
+        &LivePageFlipCallbackReport {
+            decision: LivePageFlipCallbackDecision::RejectedStaleFrameSerial,
+            event: LivePageFlipEvent {
+                status: LivePageFlipEventStatus::Rejected,
+                frame_serial: Some(41),
+            },
+        },
+    );
+
+    assert_eq!(
+        waiting.status,
+        LibdrmNativePrimaryPlaneScanoutRetireStatus::WaitingForAcceptedPageFlip
+    );
+    assert!(waiting.destroy.is_none());
+    let submission = waiting
+        .submission
+        .expect("rejected page flip must return the in-flight resource owner");
+    assert_eq!(
+        submission.retire(&device).status,
+        LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed
+    );
 }
 
 #[test]
