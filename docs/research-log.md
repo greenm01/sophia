@@ -1011,6 +1011,13 @@ The local non-hardware atomic scanout gate passes, including GBM/EGL scanout
 feature tests, backend-live scanout intake tests, and strict reduced verifier
 fixtures.
 
+Reduced atomic scanout evidence is now schema 6. The new `page_flip_wait` field
+keeps the destructive hardware smoke diagnosable without native IDs: passing
+captures must reduce both phases to `Retired`, while failed captures can now
+distinguish missing callbacks, callback rejection, poll backpressure,
+disconnected pollers, waiting retirement, missing retirement, and native
+resource-retire failure.
+
 The opt-in hardware smoke cannot complete in this environment. Its preflight
 stops before modesetting with reduced status `DeviceDirectoryUnavailable` and
 zero primary card counts. The remaining proof must run on a DRM-master-capable

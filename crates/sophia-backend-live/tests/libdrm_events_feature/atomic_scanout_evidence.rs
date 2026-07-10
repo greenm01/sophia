@@ -62,6 +62,7 @@ fn native_atomic_scanout_smoke_evidence_passes_only_after_submit_page_flip_and_r
                 allow_modeset: true,
                 test_only: false,
             }),
+            page_flip_wait: Some(LibdrmNativeAtomicScanoutPageFlipWaitStatus::Retired),
             page_flip_poll: Some(LibdrmPageFlipEventPollStatus::Emitted),
             page_flip: Some(LivePageFlipEventStatus::Presented),
             retire: Some(LibdrmNativePrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip),
@@ -71,7 +72,7 @@ fn native_atomic_scanout_smoke_evidence_passes_only_after_submit_page_flip_and_r
     );
     assert_eq!(
         evidence.reduced_log_line(),
-        "sophia_atomic_scanout_evidence schema=5 phase=InitialModeset status=Passed scanout_target=Ready rendered_context=Ready gbm_export=Exported scanout_buffer=Ready properties=Discovered resources=Created request=Built submit=SubmittedWaitingForPageFlip request_scope=Modeset commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=true commit_test_only=false page_flip_poll=Emitted page_flip=Presented retire=RetiredAfterPageFlip retire_destroy=Destroyed retire_cleanup_pending=false"
+        "sophia_atomic_scanout_evidence schema=6 phase=InitialModeset status=Passed scanout_target=Ready rendered_context=Ready gbm_export=Exported scanout_buffer=Ready properties=Discovered resources=Created request=Built submit=SubmittedWaitingForPageFlip request_scope=Modeset commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=true commit_test_only=false page_flip_wait=Retired page_flip_poll=Emitted page_flip=Presented retire=RetiredAfterPageFlip retire_destroy=Destroyed retire_cleanup_pending=false"
     );
 }
 
@@ -144,7 +145,7 @@ fn native_atomic_scanout_steady_state_evidence_requires_page_flip_request_scope(
     );
     assert_eq!(
         evidence.reduced_log_line(),
-        "sophia_atomic_scanout_evidence schema=5 phase=SteadyPageFlip status=Passed scanout_target=Ready rendered_context=Ready gbm_export=Exported scanout_buffer=Ready properties=Discovered resources=Created request=Built submit=SubmittedWaitingForPageFlip request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false page_flip_poll=Emitted page_flip=Presented retire=RetiredAfterPageFlip retire_destroy=Destroyed retire_cleanup_pending=false"
+        "sophia_atomic_scanout_evidence schema=6 phase=SteadyPageFlip status=Passed scanout_target=Ready rendered_context=Ready gbm_export=Exported scanout_buffer=Ready properties=Discovered resources=Created request=Built submit=SubmittedWaitingForPageFlip request_scope=PageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=false commit_test_only=false page_flip_wait=Retired page_flip_poll=Emitted page_flip=Presented retire=RetiredAfterPageFlip retire_destroy=Destroyed retire_cleanup_pending=false"
     );
 }
 
@@ -206,6 +207,10 @@ fn native_atomic_scanout_smoke_evidence_fails_closed_before_page_flip() {
         evidence.page_flip_poll,
         Some(LibdrmPageFlipEventPollStatus::Idle)
     );
+    assert_eq!(
+        evidence.page_flip_wait,
+        Some(LibdrmNativeAtomicScanoutPageFlipWaitStatus::CallbackMissing)
+    );
     assert_eq!(evidence.retire_destroy, None);
     assert_eq!(evidence.retire_cleanup_pending, false);
     assert_eq!(
@@ -261,12 +266,120 @@ fn native_atomic_scanout_smoke_evidence_records_waiting_retire_on_missing_page_f
         evidence.retire,
         Some(LibdrmNativePrimaryPlaneScanoutRetireStatus::WaitingForAcceptedPageFlip)
     );
+    assert_eq!(
+        evidence.page_flip_wait,
+        Some(LibdrmNativeAtomicScanoutPageFlipWaitStatus::CallbackMissing)
+    );
     assert_eq!(evidence.retire_destroy, None);
     assert_eq!(evidence.retire_cleanup_pending, false);
     assert_eq!(
         submission.retire(&device).status,
         LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed
     );
+}
+
+#[test]
+fn native_atomic_scanout_smoke_evidence_classifies_page_flip_wait_failures() {
+    let device = full_primary_plane_scanout_device();
+    let submit = submit_native_primary_plane_scanout_from_renderer_descriptor(
+        &device,
+        scanout_descriptor(Size {
+            width: 1280,
+            height: 720,
+        }),
+    );
+
+    let backpressure_poll =
+        LibdrmPageFlipEventPollReport::from_source_report(LivePageFlipCallbackSourceReport {
+            emitted: 0,
+            queued_remaining: 1,
+            backpressure: true,
+            disconnected: false,
+            max_reached: false,
+        });
+    assert_eq!(
+        LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+            LiveKmsScanoutTargetStatus::Ready,
+            Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
+            LiveRendererScanoutBufferExportStatus::Exported,
+            Some(&submit),
+            Some(&backpressure_poll),
+            None,
+            None,
+        )
+        .page_flip_wait,
+        Some(LibdrmNativeAtomicScanoutPageFlipWaitStatus::PollBackpressure)
+    );
+
+    let disconnected_poll =
+        LibdrmPageFlipEventPollReport::from_source_report(LivePageFlipCallbackSourceReport {
+            emitted: 0,
+            queued_remaining: 0,
+            backpressure: false,
+            disconnected: true,
+            max_reached: false,
+        });
+    assert_eq!(
+        LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+            LiveKmsScanoutTargetStatus::Ready,
+            Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
+            LiveRendererScanoutBufferExportStatus::Exported,
+            Some(&submit),
+            Some(&disconnected_poll),
+            None,
+            None,
+        )
+        .page_flip_wait,
+        Some(LibdrmNativeAtomicScanoutPageFlipWaitStatus::PollDisconnected)
+    );
+
+    let rejected_callback = LivePageFlipCallbackReport {
+        decision: LivePageFlipCallbackDecision::RejectedStaleFrameSerial,
+        event: LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Rejected,
+            frame_serial: Some(41),
+        },
+    };
+    assert_eq!(
+        LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+            LiveKmsScanoutTargetStatus::Ready,
+            Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
+            LiveRendererScanoutBufferExportStatus::Exported,
+            Some(&submit),
+            Some(&backpressure_poll),
+            Some(&rejected_callback),
+            None,
+        )
+        .page_flip_wait,
+        Some(LibdrmNativeAtomicScanoutPageFlipWaitStatus::PollBackpressure)
+    );
+
+    let emitted_poll =
+        LibdrmPageFlipEventPollReport::from_source_report(LivePageFlipCallbackSourceReport {
+            emitted: 1,
+            queued_remaining: 0,
+            backpressure: false,
+            disconnected: false,
+            max_reached: false,
+        });
+    assert_eq!(
+        LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+            LiveKmsScanoutTargetStatus::Ready,
+            Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
+            LiveRendererScanoutBufferExportStatus::Exported,
+            Some(&submit),
+            Some(&emitted_poll),
+            Some(&rejected_callback),
+            None,
+        )
+        .page_flip_wait,
+        Some(LibdrmNativeAtomicScanoutPageFlipWaitStatus::CallbackRejected)
+    );
+
+    submit
+        .submission
+        .expect("submitted scanout should retain resources")
+        .retire(&device);
 }
 
 #[test]
@@ -620,6 +733,10 @@ fn native_atomic_scanout_smoke_evidence_reports_resource_retire_failure() {
         Some(LibdrmNativePrimaryPlaneScanoutRetireStatus::ResourceRetireFailed)
     );
     assert_eq!(
+        evidence.page_flip_wait,
+        Some(LibdrmNativeAtomicScanoutPageFlipWaitStatus::ResourceRetireFailed)
+    );
+    assert_eq!(
         evidence.retire_destroy,
         Some(LibdrmNativePrimaryPlaneResourceDestroyStatus::FramebufferDestroyFailed)
     );
@@ -675,6 +792,10 @@ fn native_atomic_scanout_smoke_evidence_requires_destroyed_retire_resources() {
     assert_eq!(
         evidence.retire_destroy,
         Some(LibdrmNativePrimaryPlaneResourceDestroyStatus::FramebufferDestroyFailed)
+    );
+    assert_eq!(
+        evidence.page_flip_wait,
+        Some(LibdrmNativeAtomicScanoutPageFlipWaitStatus::RetireMissing)
     );
 }
 

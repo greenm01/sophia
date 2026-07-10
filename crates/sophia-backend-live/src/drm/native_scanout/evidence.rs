@@ -21,6 +21,7 @@ pub struct LibdrmNativeAtomicScanoutSmokeEvidence {
     pub submit: Option<LibdrmNativePrimaryPlaneScanoutSubmitStatus>,
     pub request_scope: Option<LibdrmNativeAtomicCommitRequestScope>,
     pub commit_flags: Option<LibdrmNativeAtomicCommitFlagsReport>,
+    pub page_flip_wait: Option<LibdrmNativeAtomicScanoutPageFlipWaitStatus>,
     pub page_flip_poll: Option<LibdrmPageFlipEventPollStatus>,
     pub page_flip: Option<LivePageFlipEventStatus>,
     pub retire: Option<LibdrmNativePrimaryPlaneScanoutRetireStatus>,
@@ -56,7 +57,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
                 });
 
         format!(
-            "sophia_atomic_scanout_evidence schema=5 phase={:?} status={:?} scanout_target={} rendered_context={} gbm_export={} scanout_buffer={} properties={} resources={} request={} submit={} request_scope={} commit_page_flip_event={} commit_nonblocking={} commit_allow_modeset={} commit_test_only={} page_flip_poll={} page_flip={} retire={} retire_destroy={} retire_cleanup_pending={}",
+            "sophia_atomic_scanout_evidence schema=6 phase={:?} status={:?} scanout_target={} rendered_context={} gbm_export={} scanout_buffer={} properties={} resources={} request={} submit={} request_scope={} commit_page_flip_event={} commit_nonblocking={} commit_allow_modeset={} commit_test_only={} page_flip_wait={} page_flip_poll={} page_flip={} retire={} retire_destroy={} retire_cleanup_pending={}",
             self.phase,
             self.status,
             status(self.scanout_target),
@@ -72,6 +73,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             commit_nonblocking,
             commit_allow_modeset,
             commit_test_only,
+            status(self.page_flip_wait),
             status(self.page_flip_poll),
             status(self.page_flip),
             status(self.retire),
@@ -94,6 +96,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             submit: None,
             request_scope: None,
             commit_flags: None,
+            page_flip_wait: None,
             page_flip_poll: None,
             page_flip: None,
             retire: None,
@@ -116,6 +119,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             submit: None,
             request_scope: None,
             commit_flags: None,
+            page_flip_wait: None,
             page_flip_poll: None,
             page_flip: None,
             retire: None,
@@ -138,6 +142,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             submit: None,
             request_scope: None,
             commit_flags: None,
+            page_flip_wait: None,
             page_flip_poll: None,
             page_flip: None,
             retire: None,
@@ -160,6 +165,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             request_scope: None,
             submit: None,
             commit_flags: None,
+            page_flip_wait: None,
             page_flip_poll: None,
             page_flip: None,
             retire: None,
@@ -182,6 +188,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             submit: None,
             request_scope: None,
             commit_flags: None,
+            page_flip_wait: None,
             page_flip_poll: None,
             page_flip: None,
             retire: None,
@@ -204,6 +211,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             submit: None,
             request_scope: None,
             commit_flags: None,
+            page_flip_wait: None,
             page_flip_poll: None,
             page_flip: None,
             retire: None,
@@ -278,6 +286,13 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
         let retire_status = retire.map(|report| report.status);
         let retire_destroy = retire.and_then(|report| report.destroy);
         let retire_cleanup_pending = retire.is_some_and(|report| report.cleanup.is_some());
+        let page_flip_wait = LibdrmNativeAtomicScanoutPageFlipWaitStatus::from_reduced_reports(
+            page_flip_poll,
+            callback,
+            retire_status,
+            retire_destroy,
+            retire_cleanup_pending,
+        );
 
         let status = if scanout_target != LiveKmsScanoutTargetStatus::Ready {
             LibdrmNativeAtomicScanoutSmokeStatus::KmsTargetUnavailable
@@ -329,11 +344,69 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             submit: submit_status,
             request_scope,
             commit_flags,
+            page_flip_wait: Some(page_flip_wait),
             page_flip_poll,
             page_flip,
             retire: retire_status,
             retire_destroy,
             retire_cleanup_pending,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibdrmNativeAtomicScanoutPageFlipWaitStatus {
+    Retired,
+    CallbackMissing,
+    CallbackRejected,
+    PollBackpressure,
+    PollDisconnected,
+    RetireMissing,
+    WaitingForAcceptedPageFlip,
+    ResourceRetireFailed,
+}
+
+impl LibdrmNativeAtomicScanoutPageFlipWaitStatus {
+    fn from_reduced_reports(
+        page_flip_poll: Option<LibdrmPageFlipEventPollStatus>,
+        callback: Option<&LivePageFlipCallbackReport>,
+        retire: Option<LibdrmNativePrimaryPlaneScanoutRetireStatus>,
+        retire_destroy: Option<LibdrmNativePrimaryPlaneResourceDestroyStatus>,
+        retire_cleanup_pending: bool,
+    ) -> Self {
+        if page_flip_poll == Some(LibdrmPageFlipEventPollStatus::Disconnected) {
+            return Self::PollDisconnected;
+        }
+        if page_flip_poll == Some(LibdrmPageFlipEventPollStatus::Backpressure) {
+            return Self::PollBackpressure;
+        }
+
+        let Some(callback) = callback else {
+            return Self::CallbackMissing;
+        };
+        if callback.decision != LivePageFlipCallbackDecision::Accepted
+            || callback.event.status != LivePageFlipEventStatus::Presented
+        {
+            return Self::CallbackRejected;
+        }
+
+        match retire {
+            Some(LibdrmNativePrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip)
+                if retire_destroy
+                    == Some(LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed)
+                    && !retire_cleanup_pending =>
+            {
+                Self::Retired
+            }
+            Some(LibdrmNativePrimaryPlaneScanoutRetireStatus::WaitingForAcceptedPageFlip) => {
+                Self::WaitingForAcceptedPageFlip
+            }
+            Some(LibdrmNativePrimaryPlaneScanoutRetireStatus::ResourceRetireFailed) => {
+                Self::ResourceRetireFailed
+            }
+            Some(LibdrmNativePrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip) | None => {
+                Self::RetireMissing
+            }
         }
     }
 }

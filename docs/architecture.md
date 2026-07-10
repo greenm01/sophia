@@ -831,11 +831,12 @@ The opt-in hardware smoke records that chain through
 `LibdrmNativeAtomicScanoutSmokeEvidence`: persistent rendered context startup,
 KMS scanout target readiness, GBM export, primary-plane submit, reduced commit
 phase, scanout-buffer import status, scope and flags, native page-flip polling,
-callback intake, retirement, retire-time resource destroy, and the evidence
-schema version collapse to reduced fields only. Passing hardware evidence must
-include an initial modeset phase and a steady page-flip phase. A non-ready target
-or invalid scanout buffer fails the smoke evidence before a successful submit can
-pass. The report deliberately omits
+callback intake, reduced page-flip wait outcome, retirement, retire-time
+resource destroy, and the evidence schema version collapse to reduced fields
+only. Passing hardware evidence must include an initial modeset phase and a
+steady page-flip phase, and each phase must reduce the page-flip wait to
+`Retired`. A non-ready target or invalid scanout buffer fails the smoke evidence
+before a successful submit can pass. The report deliberately omits
 card paths, file descriptors, EGL displays, KMS object IDs, framebuffer IDs, and
 GEM handles.
 

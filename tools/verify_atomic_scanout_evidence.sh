@@ -51,7 +51,7 @@ verify_phase() {
 
     declare -A observed=()
     declare -A expected=(
-        ["schema"]="5"
+        ["schema"]="6"
         ["phase"]="$phase"
         ["status"]="Passed"
         ["scanout_target"]="Ready"
@@ -67,6 +67,7 @@ verify_phase() {
         ["commit_nonblocking"]="true"
         ["commit_allow_modeset"]="$commit_allow_modeset"
         ["commit_test_only"]="false"
+        ["page_flip_wait"]="Retired"
         ["page_flip_poll"]="Emitted"
         ["page_flip"]="Presented"
         ["retire"]="RetiredAfterPageFlip"
