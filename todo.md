@@ -83,6 +83,8 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Split atomic scanout evidence contract tests into their own
+  `libdrm_events_feature` test-domain module.
 - [x] Split the opt-in real atomic scanout hardware smoke out of the large
   `libdrm_events_feature` integration test into its own test-domain module.
 - [x] Aligned the opt-in atomic hardware smoke with preflight readiness by
