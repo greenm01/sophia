@@ -223,11 +223,13 @@ still observe only `RuntimeScanoutState`.
 Backend-live also exposes a reusable native GBM rendered-scanout exporter that
 owns `RenderDeviceDiscoveryBackend` inside the backend boundary. Runtime ticks
 may hold this exporter across frames while it reports only reduced export
-attempt count and status. The exporter initializes a persistent renderer-live
-GBM/EGL rendered-scanout context on first valid use; context startup reports only
-ready, unavailable, or degraded. Render-device or context failure is reduced to
-scanout export failure and runtime rejection; raw fds, paths, GBM handles, EGL
-displays, and native error text remain private.
+attempt count, context-open attempt count, context status, and export status.
+The exporter initializes a persistent renderer-live GBM/EGL rendered-scanout
+context on first valid use; context startup reports only ready, unavailable, or
+degraded. Invalid targets fail before any render-device open attempt.
+Render-device or context failure is reduced to scanout export failure and
+runtime rejection; raw fds, paths, GBM handles, EGL displays, and native error
+text remain private.
 The tracked rendered primary-plane path keeps the combined rendered buffer owner
 and KMS submission owner inside backend-live until page-flip evidence is strong
 enough to retire it. This is the resource-lifetime half of atomic rendering:

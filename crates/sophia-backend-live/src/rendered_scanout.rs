@@ -86,6 +86,7 @@ where
     discovery: R,
     context: Option<NativeGbmRenderedScanoutContext<R::Device>>,
     context_status: Option<NativeGbmRenderedScanoutContextStatus>,
+    context_open_attempts: usize,
     export_attempts: usize,
     last_export_status: Option<LiveRendererScanoutBufferExportStatus>,
 }
@@ -100,9 +101,14 @@ where
             discovery,
             context: None,
             context_status: None,
+            context_open_attempts: 0,
             export_attempts: 0,
             last_export_status: None,
         }
+    }
+
+    pub const fn context_open_attempts(&self) -> usize {
+        self.context_open_attempts
     }
 
     pub const fn export_attempts(&self) -> usize {
@@ -152,6 +158,7 @@ where
         }
 
         if self.context.is_none() {
+            self.context_open_attempts = self.context_open_attempts.saturating_add(1);
             let report = NativeGbmRenderedScanoutContext::from_backend_device_result(
                 self.discovery.open_render_device(),
             );

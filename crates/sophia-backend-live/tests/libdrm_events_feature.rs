@@ -1472,6 +1472,7 @@ fn live_runtime_tick_native_gbm_rendered_scanout_fails_closed_when_render_device
     assert_eq!(tick.engine.runtime.runtime_state.scanout_rejections, 1);
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), false);
     assert_eq!(exporter.export_attempts(), 1);
+    assert_eq!(exporter.context_open_attempts(), 1);
     assert_eq!(
         exporter.context_status(),
         Some(NativeGbmRenderedScanoutContextStatus::Unavailable)
@@ -1498,6 +1499,7 @@ fn live_runtime_tick_native_gbm_rendered_scanout_fails_closed_when_render_device
         LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutExportFailed
     );
     assert_eq!(exporter.export_attempts(), 2);
+    assert_eq!(exporter.context_open_attempts(), 2);
     assert_eq!(
         exporter.context_status(),
         Some(NativeGbmRenderedScanoutContextStatus::Unavailable)
@@ -1509,6 +1511,30 @@ fn live_runtime_tick_native_gbm_rendered_scanout_fails_closed_when_render_device
     );
 
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(feature = "gbm-probe")]
+#[test]
+fn native_gbm_rendered_scanout_exporter_rejects_invalid_target_before_device_open() {
+    let mut exporter = NativeGbmRenderedScanoutBufferDiscoveryExporter::new(MissingRenderDevice);
+
+    let export = exporter.export_rendered_scanout_buffer(LiveGbmEglFrameTargetRecord::new(Size {
+        width: 0,
+        height: 720,
+    }));
+
+    assert_eq!(
+        export.status,
+        LiveRendererScanoutBufferExportStatus::InvalidTarget
+    );
+    assert_eq!(exporter.export_attempts(), 1);
+    assert_eq!(exporter.context_open_attempts(), 0);
+    assert_eq!(exporter.context_status(), None);
+    assert!(!exporter.context_ready());
+    assert_eq!(
+        exporter.last_export_status(),
+        Some(LiveRendererScanoutBufferExportStatus::InvalidTarget)
+    );
 }
 
 #[test]

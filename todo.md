@@ -91,6 +91,9 @@ active milestone to `docs/roadmap-history.md`.
   export.
 - [x] Added reduced persistent-context status to atomic scanout smoke evidence
   so context startup failure is distinct from GBM front-buffer export failure.
+- [x] Added reduced context-open attempt counts to the reusable native GBM
+  rendered-scanout exporter so context reuse/failure can be observed without
+  leaking device identity.
 - [x] Added a backend-live runtime tick path that answers active `SubmitScanout`
   commands through rendered GBM/KMS primary-plane scanout.
 - [x] Threaded backend-live terminal scanout states into the shared runtime tick

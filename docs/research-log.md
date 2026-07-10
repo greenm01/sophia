@@ -868,10 +868,12 @@ primary-plane owner and submit the next rendered frame while keeping native
 object identity private.
 The live runtime assembly now also has a reusable native GBM rendered-scanout
 exporter path. The exporter owns backend render-device discovery across runtime
-ticks, records only reduced export attempt count/status, and initializes a
-persistent renderer-live GBM/EGL rendered-scanout context only when the runtime
-reaches `SubmitScanout`. Unavailable render devices or degraded context startup
-fail closed as reduced scanout export failure and runtime rejection.
+ticks, records only reduced export attempt count/status plus context-open
+attempt count/status, and initializes a persistent renderer-live GBM/EGL
+rendered-scanout context only when the runtime reaches `SubmitScanout`.
+Invalid targets fail before render-device opening; unavailable render devices or
+degraded context startup fail closed as reduced scanout export failure and
+runtime rejection.
 The opt-in atomic scanout hardware smoke now exists behind
 `SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1`. It opens a primary DRM card in a child
 process, enables the atomic KMS capabilities, allocates the GBM scanout buffer
