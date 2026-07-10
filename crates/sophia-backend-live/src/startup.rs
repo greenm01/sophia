@@ -505,6 +505,8 @@ impl LiveBackendStartupReport {
                 #[cfg(feature = "libdrm-events")]
                 rendered_primary_plane_scanout_submission: None,
                 #[cfg(feature = "libdrm-events")]
+                rendered_primary_plane_scanout_cleanup: None,
+                #[cfg(feature = "libdrm-events")]
                 rendered_primary_plane_runtime_scanout_state: None,
                 #[cfg(feature = "libdrm-events")]
                 rendered_primary_plane_scanout_in_flight_ticks: 0,

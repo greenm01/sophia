@@ -36,6 +36,7 @@ use sophia_backend_live::{
     LiveRenderedPrimaryPlaneScanoutBackpressureReport,
     LiveRenderedPrimaryPlaneScanoutBackpressureStatus, LiveRenderedPrimaryPlaneScanoutSubmitStatus,
     LiveRenderedScanoutBufferExport, LiveRenderedScanoutBufferExporter,
+    LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus,
     LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus,
     LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus,
     NativeGbmRenderedScanoutBufferDiscoveryExporter, NativeGbmRenderedScanoutContextStatus,
@@ -1394,6 +1395,90 @@ fn live_runtime_assembly_does_not_track_failed_rendered_scanout_submit() {
     assert_eq!(retired.runtime_scanout_state, None);
     assert_eq!(retired.in_flight, false);
     assert_eq!(retired.in_flight_ticks, 0);
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_runtime_assembly_retains_failed_rendered_scanout_cleanup_for_retry() {
+    let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-cleanup-retry");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready backend should seed live assembly");
+    let failing_device = FakeNativePrimaryPlaneScanoutDevice {
+        resources: FakeNativePrimaryPlaneResourceDevice {
+            destroy_framebuffer: Err(io::Error::other("test framebuffer destroy failed")),
+            ..full_primary_plane_resource_device()
+        },
+        ..full_primary_plane_scanout_device()
+    };
+    let retry_device = full_primary_plane_scanout_device();
+    let mut exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+
+    let submitted = assembly
+        .submit_and_track_rendered_primary_plane_scanout_with(&failing_device, &mut exporter);
+    assert_eq!(
+        submitted.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+    );
+    assert_eq!(submitted.in_flight, true);
+    assert!(!assembly.rendered_primary_plane_scanout_cleanup_pending());
+
+    let accepted = LivePageFlipCallbackReport {
+        decision: LivePageFlipCallbackDecision::Accepted,
+        event: LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(55),
+        },
+    };
+    let retired = assembly
+        .retire_tracked_rendered_primary_plane_scanout_after_page_flip(&failing_device, &accepted);
+
+    assert_eq!(
+        retired.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::ResourceRetireFailed
+    );
+    assert_eq!(
+        retired.runtime_scanout_state,
+        Some(RuntimeScanoutState::Rejected)
+    );
+    assert_eq!(retired.in_flight, false);
+    assert_eq!(retired.cleanup_pending, true);
+    assert!(assembly.rendered_primary_plane_scanout_cleanup_pending());
+    assert_eq!(assembly.pending_runtime_scanout_state_count(), 1);
+
+    let cleanup = assembly.retry_tracked_rendered_primary_plane_scanout_cleanup(&retry_device);
+
+    assert_eq!(
+        cleanup.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus::CleanedUp
+    );
+    assert_eq!(
+        cleanup.destroy,
+        Some(LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed)
+    );
+    assert_eq!(cleanup.cleanup_pending, false);
+    assert!(!assembly.rendered_primary_plane_scanout_cleanup_pending());
+
+    let no_cleanup = assembly.retry_tracked_rendered_primary_plane_scanout_cleanup(&retry_device);
+    assert_eq!(
+        no_cleanup.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus::NoCleanupPending
+    );
+    assert_eq!(no_cleanup.destroy, None);
+    assert_eq!(no_cleanup.cleanup_pending, false);
+
+    let tick = assembly
+        .run_tick(CompositorBackendTickInput::default())
+        .expect("runtime tick should observe cleanup failure as rejected scanout state");
+    assert_eq!(
+        tick.runtime_scanout_states,
+        vec![RuntimeScanoutState::Rejected]
+    );
 
     std::fs::remove_dir_all(root).unwrap();
 }

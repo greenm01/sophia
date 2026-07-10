@@ -17,6 +17,9 @@ pub struct LiveBackendRuntimeAssembly<P = QueuedInputPoller> {
     pub(crate) rendered_primary_plane_scanout_submission:
         Option<BoxedRenderedPrimaryPlaneScanoutSubmission>,
     #[cfg(feature = "libdrm-events")]
+    pub(crate) rendered_primary_plane_scanout_cleanup:
+        Option<BoxedRenderedPrimaryPlaneScanoutCleanup>,
+    #[cfg(feature = "libdrm-events")]
     pub(crate) rendered_primary_plane_runtime_scanout_state: Option<RuntimeScanoutState>,
     #[cfg(feature = "libdrm-events")]
     pub(crate) rendered_primary_plane_scanout_in_flight_ticks: u64,
@@ -80,6 +83,11 @@ where
     #[cfg(feature = "libdrm-events")]
     pub fn rendered_primary_plane_scanout_in_flight(&self) -> bool {
         self.rendered_primary_plane_scanout_submission.is_some()
+    }
+
+    #[cfg(feature = "libdrm-events")]
+    pub fn rendered_primary_plane_scanout_cleanup_pending(&self) -> bool {
+        self.rendered_primary_plane_scanout_cleanup.is_some()
     }
 
     #[cfg(feature = "libdrm-events")]
@@ -266,6 +274,7 @@ where
                 runtime_scanout_state: None,
                 in_flight: false,
                 in_flight_ticks: 0,
+                cleanup_pending: self.rendered_primary_plane_scanout_cleanup_pending(),
             };
         };
 
@@ -276,6 +285,9 @@ where
             self.rendered_primary_plane_scanout_submission = Some(submission);
         } else {
             self.rendered_primary_plane_scanout_in_flight_ticks = 0;
+        }
+        if let Some(cleanup) = retired.cleanup {
+            self.rendered_primary_plane_scanout_cleanup = Some(cleanup);
         }
         if let Some(runtime_scanout_state) = runtime_scanout_state {
             self.rendered_primary_plane_runtime_scanout_state = Some(runtime_scanout_state);
@@ -288,6 +300,40 @@ where
             runtime_scanout_state,
             in_flight: self.rendered_primary_plane_scanout_in_flight(),
             in_flight_ticks: self.rendered_primary_plane_scanout_in_flight_ticks,
+            cleanup_pending: self.rendered_primary_plane_scanout_cleanup_pending(),
+        }
+    }
+
+    #[cfg(feature = "libdrm-events")]
+    pub fn retry_tracked_rendered_primary_plane_scanout_cleanup<D>(
+        &mut self,
+        device: &D,
+    ) -> LiveTrackedRenderedPrimaryPlaneScanoutCleanupReport
+    where
+        D: LibdrmNativePrimaryPlaneResourceDevice,
+    {
+        let Some(cleanup) = self.rendered_primary_plane_scanout_cleanup.take() else {
+            return LiveTrackedRenderedPrimaryPlaneScanoutCleanupReport {
+                status: LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus::NoCleanupPending,
+                destroy: None,
+                cleanup_pending: false,
+            };
+        };
+
+        let retried = retry_rendered_primary_plane_scanout_cleanup(device, cleanup);
+        let status = if retried.cleanup.is_some() {
+            LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus::CleanupFailed
+        } else {
+            LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus::CleanedUp
+        };
+        if let Some(cleanup) = retried.cleanup {
+            self.rendered_primary_plane_scanout_cleanup = Some(cleanup);
+        }
+
+        LiveTrackedRenderedPrimaryPlaneScanoutCleanupReport {
+            status,
+            destroy: Some(retried.destroy),
+            cleanup_pending: self.rendered_primary_plane_scanout_cleanup_pending(),
         }
     }
 

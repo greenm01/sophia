@@ -106,6 +106,8 @@ active milestone to `docs/roadmap-history.md`.
   distinguish idle, waiting, and stalled page-flip states without retiring early.
 - [x] Bound tracked rendered scanout submissions to the last observed page-flip
   sequence so replayed accepted callbacks cannot retire a newer owner.
+- [x] Made rendered scanout cleanup retryable after accepted page-flip cleanup
+  failure without exposing framebuffer/blob identity.
 - [x] Added reduced live scanout submit intake so backend-live rendered
   primary-plane submit results can drive runtime `SubmitScanout`.
 - [x] Added shared runtime scanout lifecycle state so rendered frames progress

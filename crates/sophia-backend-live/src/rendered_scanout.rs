@@ -279,10 +279,39 @@ pub(crate) type BoxedRenderedPrimaryPlaneScanoutSubmission =
 
 #[cfg(feature = "libdrm-events")]
 #[derive(Debug)]
+pub struct LiveRenderedPrimaryPlaneScanoutCleanup<Owner> {
+    pub(crate) scanout_buffer: Owner,
+    pub(crate) primary_plane: LibdrmNativePrimaryPlaneResourceCleanup,
+}
+
+#[cfg(feature = "libdrm-events")]
+impl<Owner> LiveRenderedPrimaryPlaneScanoutCleanup<Owner> {
+    pub fn into_scanout_buffer(self) -> Owner {
+        self.scanout_buffer
+    }
+
+    pub fn map_scanout_buffer<Next>(
+        self,
+        map: impl FnOnce(Owner) -> Next,
+    ) -> LiveRenderedPrimaryPlaneScanoutCleanup<Next> {
+        LiveRenderedPrimaryPlaneScanoutCleanup {
+            scanout_buffer: map(self.scanout_buffer),
+            primary_plane: self.primary_plane,
+        }
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+pub(crate) type BoxedRenderedPrimaryPlaneScanoutCleanup =
+    LiveRenderedPrimaryPlaneScanoutCleanup<Box<dyn Any>>;
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Debug)]
 pub struct LiveRenderedPrimaryPlaneScanoutRetireResult<Owner> {
     pub status: LibdrmNativePrimaryPlaneScanoutRetireStatus,
     pub destroy: Option<LibdrmNativePrimaryPlaneResourceDestroyStatus>,
     pub submission: Option<LiveRenderedPrimaryPlaneScanoutSubmission<Owner>>,
+    pub cleanup: Option<LiveRenderedPrimaryPlaneScanoutCleanup<Owner>>,
 }
 
 #[cfg(feature = "libdrm-events")]
@@ -358,6 +387,7 @@ pub struct LiveTrackedRenderedPrimaryPlaneScanoutRetireReport {
     pub runtime_scanout_state: Option<RuntimeScanoutState>,
     pub in_flight: bool,
     pub in_flight_ticks: u64,
+    pub cleanup_pending: bool,
 }
 
 #[cfg(feature = "libdrm-events")]
@@ -367,6 +397,22 @@ pub enum LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus {
     RetiredAfterPageFlip,
     WaitingForAcceptedPageFlip,
     ResourceRetireFailed,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveTrackedRenderedPrimaryPlaneScanoutCleanupReport {
+    pub status: LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus,
+    pub destroy: Option<LibdrmNativePrimaryPlaneResourceDestroyStatus>,
+    pub cleanup_pending: bool,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus {
+    NoCleanupPending,
+    CleanedUp,
+    CleanupFailed,
 }
 
 #[cfg(feature = "libdrm-events")]
@@ -686,10 +732,12 @@ where
             status: LibdrmNativePrimaryPlaneScanoutRetireStatus::WaitingForAcceptedPageFlip,
             destroy: None,
             submission: Some(submission),
+            cleanup: None,
         };
     }
 
-    let owner = submission.scanout_buffer;
+    let mut owner = Some(submission.scanout_buffer);
+    let submitted_after_page_flip_serial = submission.submitted_after_page_flip_serial;
     let retired = retire_native_primary_plane_scanout_after_page_flip(
         device,
         submission.primary_plane,
@@ -699,14 +747,55 @@ where
         retired
             .submission
             .map(|primary_plane| LiveRenderedPrimaryPlaneScanoutSubmission {
-                scanout_buffer: owner,
+                scanout_buffer: owner
+                    .take()
+                    .expect("waiting retirement should retain rendered owner"),
                 primary_plane,
-                submitted_after_page_flip_serial: submission.submitted_after_page_flip_serial,
+                submitted_after_page_flip_serial,
             });
+    let cleanup = retired
+        .cleanup
+        .map(|primary_plane| LiveRenderedPrimaryPlaneScanoutCleanup {
+            scanout_buffer: owner
+                .take()
+                .expect("cleanup failure should retain rendered owner"),
+            primary_plane,
+        });
 
     LiveRenderedPrimaryPlaneScanoutRetireResult {
         status: retired.status,
         destroy: retired.destroy,
         submission,
+        cleanup,
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Debug)]
+pub struct LiveRenderedPrimaryPlaneScanoutCleanupResult<Owner> {
+    pub destroy: LibdrmNativePrimaryPlaneResourceDestroyStatus,
+    pub cleanup: Option<LiveRenderedPrimaryPlaneScanoutCleanup<Owner>>,
+}
+
+#[cfg(feature = "libdrm-events")]
+pub fn retry_rendered_primary_plane_scanout_cleanup<D, Owner>(
+    device: &D,
+    cleanup: LiveRenderedPrimaryPlaneScanoutCleanup<Owner>,
+) -> LiveRenderedPrimaryPlaneScanoutCleanupResult<Owner>
+where
+    D: LibdrmNativePrimaryPlaneResourceDevice,
+{
+    let owner = cleanup.scanout_buffer;
+    let report = cleanup.primary_plane.retry(device);
+    let cleanup = report
+        .cleanup
+        .map(|primary_plane| LiveRenderedPrimaryPlaneScanoutCleanup {
+            scanout_buffer: owner,
+            primary_plane,
+        });
+
+    LiveRenderedPrimaryPlaneScanoutCleanupResult {
+        destroy: report.status,
+        cleanup,
     }
 }

@@ -129,6 +129,7 @@ pub struct LibdrmNativePrimaryPlaneScanoutRetireResult {
     pub status: LibdrmNativePrimaryPlaneScanoutRetireStatus,
     pub destroy: Option<LibdrmNativePrimaryPlaneResourceDestroyStatus>,
     pub submission: Option<LibdrmNativePrimaryPlaneScanoutSubmission>,
+    pub cleanup: Option<LibdrmNativePrimaryPlaneResourceCleanup>,
 }
 
 #[cfg(feature = "libdrm-events")]
@@ -400,6 +401,7 @@ where
             status: LibdrmNativePrimaryPlaneScanoutRetireStatus::WaitingForAcceptedPageFlip,
             destroy: None,
             submission: Some(submission),
+            cleanup: None,
         };
     }
 
@@ -409,6 +411,7 @@ where
             status: LibdrmNativePrimaryPlaneScanoutRetireStatus::ResourceRetireFailed,
             destroy: Some(destroy.status),
             submission: None,
+            cleanup: destroy.cleanup,
         };
     }
 
@@ -416,6 +419,7 @@ where
         status: LibdrmNativePrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip,
         destroy: Some(destroy.status),
         submission: None,
+        cleanup: None,
     }
 }
 
