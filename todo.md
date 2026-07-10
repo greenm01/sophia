@@ -78,6 +78,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Split renderer-live scanout data into presentation, frame-target,
+  scanout-buffer, native GBM ownership, and import-boundary modules.
 - [x] Split native atomic request flags/status from primary-plane property
   discovery while keeping the public DRM facade stable.
 - [x] Split native KMS target selection into snapshot, device, and selection

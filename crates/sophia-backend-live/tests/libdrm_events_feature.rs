@@ -22,17 +22,18 @@ use sophia_backend_live::{
     LibdrmNativePrimaryPlanePropertyDiscoveryStatus, LibdrmNativePrimaryPlanePropertyHandles,
     LibdrmNativePrimaryPlaneResourceCreateStatus, LibdrmNativePrimaryPlaneResourceDestroyStatus,
     LibdrmNativePrimaryPlaneResourceDevice, LibdrmNativePrimaryPlaneScanoutRetireResult,
-    LibdrmNativePrimaryPlaneScanoutRetireStatus, LibdrmNativePrimaryPlaneScanoutSubmitPolicy,
-    LibdrmNativePrimaryPlaneScanoutSubmitStatus, LibdrmNativePrimaryPlaneSelectionResult,
-    LibdrmNativePrimaryPlaneSelectionStatus, LibdrmNativePropertyHandleSet,
-    LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport, LibdrmNativeReadLoopReport,
-    LibdrmNativeReadLoopStatus, LibdrmNativeRenderedScanoutContextStatus,
-    LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller,
-    LibdrmRendererScanoutBuffer, LiveAtomicScanoutPreflightReport,
-    LiveAtomicScanoutPreflightStatus, LiveBackendConfig, LiveHardwareValidationGateReport,
-    LiveHardwareValidationGateStatus, LiveHardwareValidationSmokeReport,
-    LiveHardwareValidationSmokeStatus, LiveHardwareValidationTarget, LiveKmsScanoutTargetStatus,
-    LiveLibdrmPollerDiagnostics, LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
+    LibdrmNativePrimaryPlaneScanoutRetireStatus, LibdrmNativePrimaryPlaneScanoutSubmission,
+    LibdrmNativePrimaryPlaneScanoutSubmitPolicy, LibdrmNativePrimaryPlaneScanoutSubmitStatus,
+    LibdrmNativePrimaryPlaneSelectionResult, LibdrmNativePrimaryPlaneSelectionStatus,
+    LibdrmNativePropertyHandleSet, LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport,
+    LibdrmNativeReadLoopReport, LibdrmNativeReadLoopStatus,
+    LibdrmNativeRenderedScanoutContextStatus, LibdrmPageFlipEventPollReport,
+    LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller, LibdrmRendererScanoutBuffer,
+    LiveAtomicScanoutPreflightReport, LiveAtomicScanoutPreflightStatus, LiveBackendConfig,
+    LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
+    LiveHardwareValidationSmokeReport, LiveHardwareValidationSmokeStatus,
+    LiveHardwareValidationTarget, LiveKmsScanoutTargetStatus, LiveLibdrmPollerDiagnostics,
+    LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
     LiveLibdrmPollerStartupStatus, LivePageFlipCallback, LivePageFlipCallbackDecision,
     LivePageFlipCallbackQueue, LivePageFlipCallbackReport, LivePageFlipCallbackSourceReport,
     LivePageFlipEvent, LivePageFlipEventStatus, LiveRenderedPrimaryPlaneScanoutBackpressureReport,
@@ -5591,11 +5592,10 @@ mod atomic_scanout_hardware_smoke {
         let (sender, receiver) = mpsc::sync_channel(1);
         let deadline = Instant::now() + Duration::from_secs(2);
         let mut submission = Some(submission);
-        let mut last_poll = LibdrmNativeReadLoopReport::idle().into_poll_report();
 
         loop {
             let report = poller.read_and_poll_page_flip_events(reader, &sender, 4, 1);
-            last_poll = report.poll;
+            let last_poll = report.poll;
 
             if let Ok(callback) = receiver.try_recv() {
                 let callback_report = intake.observe(callback);
