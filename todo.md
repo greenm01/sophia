@@ -67,6 +67,9 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Bumped atomic scanout evidence to schema 2 with reduced request scope, so
+  the explicit hardware smoke proves whether it submitted a modeset or page-flip
+  request shape.
 - [x] Split primary-plane atomic request building so runtime page-flip policy
   emits plane-only requests while explicit modeset smokes keep connector,
   CRTC, mode, and active properties.

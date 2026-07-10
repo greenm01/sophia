@@ -3035,6 +3035,7 @@ fn native_atomic_scanout_smoke_evidence_passes_only_after_submit_page_flip_and_r
             rendered_context: Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
             gbm_export: Some(LiveRendererScanoutBufferExportStatus::Exported),
             submit: Some(LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip),
+            request_scope: Some(LibdrmNativeAtomicCommitRequestScope::Modeset),
             commit_flags: Some(LibdrmNativeAtomicCommitFlagsReport {
                 page_flip_event: true,
                 nonblocking: true,
@@ -3050,7 +3051,7 @@ fn native_atomic_scanout_smoke_evidence_passes_only_after_submit_page_flip_and_r
     );
     assert_eq!(
         evidence.reduced_log_line(),
-        "sophia_atomic_scanout_evidence schema=1 status=Passed scanout_target=Ready rendered_context=Ready gbm_export=Exported submit=SubmittedWaitingForPageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=true commit_test_only=false page_flip_poll=Emitted page_flip=Presented retire=RetiredAfterPageFlip retire_destroy=Destroyed retire_cleanup_pending=false"
+        "sophia_atomic_scanout_evidence schema=2 status=Passed scanout_target=Ready rendered_context=Ready gbm_export=Exported submit=SubmittedWaitingForPageFlip request_scope=Modeset commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=true commit_test_only=false page_flip_poll=Emitted page_flip=Presented retire=RetiredAfterPageFlip retire_destroy=Destroyed retire_cleanup_pending=false"
     );
 }
 
@@ -3105,6 +3106,10 @@ fn native_atomic_scanout_smoke_evidence_fails_closed_before_page_flip() {
         })
     );
     assert_eq!(
+        evidence.request_scope,
+        Some(LibdrmNativeAtomicCommitRequestScope::Modeset)
+    );
+    assert_eq!(
         evidence.page_flip_poll,
         Some(LibdrmPageFlipEventPollStatus::Idle)
     );
@@ -3113,6 +3118,59 @@ fn native_atomic_scanout_smoke_evidence_fails_closed_before_page_flip() {
     assert_eq!(
         submission.retire(&device).status,
         LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed
+    );
+}
+
+#[test]
+fn native_atomic_scanout_smoke_evidence_requires_modeset_request_scope() {
+    let device = full_primary_plane_scanout_device();
+    let mut submit = submit_native_primary_plane_scanout_from_renderer_descriptor(
+        &device,
+        scanout_descriptor(Size {
+            width: 1280,
+            height: 720,
+        }),
+    );
+    submit.request_scope = Some(LibdrmNativeAtomicCommitRequestScope::PageFlip);
+    let submission = submit
+        .submission
+        .take()
+        .expect("submitted scanout should retain resource ownership");
+    let poll =
+        LibdrmPageFlipEventPollReport::from_source_report(LivePageFlipCallbackSourceReport {
+            emitted: 1,
+            queued_remaining: 0,
+            backpressure: false,
+            disconnected: false,
+            max_reached: false,
+        });
+    let callback = LivePageFlipCallbackReport {
+        decision: LivePageFlipCallbackDecision::Accepted,
+        event: LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(42),
+        },
+    };
+    let retired =
+        retire_native_primary_plane_scanout_after_page_flip(&device, submission, &callback);
+
+    let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+        LiveKmsScanoutTargetStatus::Ready,
+        Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
+        LiveRendererScanoutBufferExportStatus::Exported,
+        Some(&submit),
+        Some(&poll),
+        Some(&callback),
+        Some(&retired),
+    );
+
+    assert_eq!(
+        evidence.status,
+        LibdrmNativeAtomicScanoutSmokeStatus::SubmitFailed
+    );
+    assert_eq!(
+        evidence.request_scope,
+        Some(LibdrmNativeAtomicCommitRequestScope::PageFlip)
     );
 }
 
@@ -3137,6 +3195,7 @@ fn native_atomic_scanout_smoke_evidence_fails_before_submit_for_not_ready_target
         Some(LiveKmsScanoutTargetStatus::FrameTargetSizeMismatch)
     );
     assert!(evidence.submit.is_none());
+    assert!(evidence.request_scope.is_none());
     assert!(evidence.commit_flags.is_none());
 }
 

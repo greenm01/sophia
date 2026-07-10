@@ -28,12 +28,13 @@ fi
 
 declare -A observed=()
 declare -A expected=(
-    ["schema"]="1"
+    ["schema"]="2"
     ["status"]="Passed"
     ["scanout_target"]="Ready"
     ["rendered_context"]="Ready"
     ["gbm_export"]="Exported"
     ["submit"]="SubmittedWaitingForPageFlip"
+    ["request_scope"]="Modeset"
     ["commit_page_flip_event"]="true"
     ["commit_nonblocking"]="true"
     ["commit_allow_modeset"]="true"

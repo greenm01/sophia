@@ -179,6 +179,7 @@ pub struct LibdrmNativeAtomicScanoutSmokeEvidence {
     pub rendered_context: Option<LibdrmNativeRenderedScanoutContextStatus>,
     pub gbm_export: Option<LiveRendererScanoutBufferExportStatus>,
     pub submit: Option<LibdrmNativePrimaryPlaneScanoutSubmitStatus>,
+    pub request_scope: Option<LibdrmNativeAtomicCommitRequestScope>,
     pub commit_flags: Option<LibdrmNativeAtomicCommitFlagsReport>,
     pub page_flip_poll: Option<LibdrmPageFlipEventPollStatus>,
     pub page_flip: Option<LivePageFlipEventStatus>,
@@ -216,12 +217,13 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
                 });
 
         format!(
-            "sophia_atomic_scanout_evidence schema=1 status={:?} scanout_target={} rendered_context={} gbm_export={} submit={} commit_page_flip_event={} commit_nonblocking={} commit_allow_modeset={} commit_test_only={} page_flip_poll={} page_flip={} retire={} retire_destroy={} retire_cleanup_pending={}",
+            "sophia_atomic_scanout_evidence schema=2 status={:?} scanout_target={} rendered_context={} gbm_export={} submit={} request_scope={} commit_page_flip_event={} commit_nonblocking={} commit_allow_modeset={} commit_test_only={} page_flip_poll={} page_flip={} retire={} retire_destroy={} retire_cleanup_pending={}",
             self.status,
             status(self.scanout_target),
             status(self.rendered_context),
             status(self.gbm_export),
             status(self.submit),
+            status(self.request_scope),
             commit_page_flip_event,
             commit_nonblocking,
             commit_allow_modeset,
@@ -241,6 +243,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             rendered_context: None,
             gbm_export: None,
             submit: None,
+            request_scope: None,
             commit_flags: None,
             page_flip_poll: None,
             page_flip: None,
@@ -257,6 +260,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             rendered_context: None,
             gbm_export: None,
             submit: None,
+            request_scope: None,
             commit_flags: None,
             page_flip_poll: None,
             page_flip: None,
@@ -276,6 +280,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
         retire: Option<&LibdrmNativePrimaryPlaneScanoutRetireResult>,
     ) -> Self {
         let submit_status = submit.map(|report| report.status);
+        let request_scope = submit.and_then(|report| report.request_scope);
         let commit_flags = submit.and_then(|report| report.commit_flags);
         let page_flip_poll = poll.map(|report| report.status);
         let page_flip = callback.map(|report| report.event.status);
@@ -299,6 +304,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             LibdrmNativeAtomicScanoutSmokeStatus::GbmExportFailed
         } else if submit_status
             != Some(LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip)
+            || request_scope != Some(LibdrmNativeAtomicCommitRequestScope::Modeset)
         {
             LibdrmNativeAtomicScanoutSmokeStatus::SubmitFailed
         } else if !accepted_page_flip
@@ -322,6 +328,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             rendered_context,
             gbm_export: Some(gbm_export),
             submit: submit_status,
+            request_scope,
             commit_flags,
             page_flip_poll,
             page_flip,
