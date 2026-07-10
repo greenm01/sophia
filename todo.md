@@ -83,6 +83,9 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Split rendered primary-plane scanout ownership, submit/retire reports,
+  tracked diagnostics, and backpressure types into separate modules so buffer
+  lifetime code stays isolated from reduced runtime reporting.
 - [x] Added a reduced `TimedOut` atomic scanout commit status so slow-client
   fail-closed commits are visible without being flattened into generic
   rejection.
