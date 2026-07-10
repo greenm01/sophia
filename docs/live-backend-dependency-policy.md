@@ -534,6 +534,13 @@ returns an empty batch when the token has not been observed. Polling consumes
 the token and records only reduced gate status: idle, ready, polled, or
 read-failed. The wrapper must not expose the fd, readiness source, seat name,
 device path, or native error string.
+`LiveBackendSessionLoopReadiness` is the next enforcement point. It lets the
+outer session selector pass only reduced readiness and page-flip budgets into
+the live runtime. The session-loop tick observes the input token, runs native
+page-flip intake, retires rendered scanout ownership, and answers active
+scanout commands through the rendered primary-plane path. It still does not
+carry fds, native handles, device paths, connector IDs, seat names, or selector
+backend state into Sophia Engine.
 
 Real hardware validation for libdrm and libinput is opt-in only. The gates are
 `SOPHIA_RUN_REAL_LIBDRM_EVENTS_SMOKE` and

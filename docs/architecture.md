@@ -931,6 +931,12 @@ and still advances the runtime. A tick after readiness is observed consumes the
 token and calls the wrapped concrete poller exactly once. The future session
 loop must own the actual `poll`/`epoll` wait and feed these readiness tokens;
 Sophia Engine still sees only `LibinputPollReport` and accepted input packets.
+The live backend now also has a reduced session-loop tick boundary for the
+combined path. `LiveBackendSessionLoopReadiness` carries only an input-ready bit
+and page-flip read/emit budgets. The runtime observes the readiness token,
+drains native page-flip callbacks, retries/reties rendered scanout ownership,
+and submits the next rendered primary-plane frame in one bounded tick. Real
+file descriptors and selector identity remain outside Sophia Engine state.
 
 The first live compositor backend boundary is dependency-neutral. An
 `OutputDiscoveryBackend` produces a `DrmKmsOutputRegistry`; an

@@ -972,6 +972,14 @@ the outer loop observes readiness. Polling consumes the token, so repeated
 dispatch requires repeated readiness observations. The runtime coverage proves a
 tick continues while the gate is idle, leaves queued input untouched, then polls
 and ingests that input after readiness is marked.
+Backend-live now exposes a reduced session-loop tick for the combined
+production path. The caller supplies `LiveBackendSessionLoopReadiness`, which
+contains only an input-ready bit plus native page-flip read/emit budgets. The
+runtime observes the gated input token, drains native page-flip callbacks,
+retires accepted rendered scanout ownership, and submits the next rendered
+primary-plane frame in one bounded tick. Deterministic coverage proves idle
+input readiness does not block scanout and ready input can be ingested in the
+same tick as page-flip retirement and next-frame submit.
 
 ## Open Questions
 
