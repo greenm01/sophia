@@ -1,0 +1,141 @@
+use std::{ffi::c_void, ptr};
+
+use crate::gl::{context_attributes, smoke_current_gl_context_with_loader};
+use crate::{NativeEglDrawSmokeStatus, NativeEglProbeStatus};
+
+pub fn probe_default_display_context() -> NativeEglProbeStatus {
+    match probe_context() {
+        Ok(()) => NativeEglProbeStatus::NativeDrawingCapable,
+        Err(error) => error,
+    }
+}
+
+pub fn smoke_default_display_pbuffer() -> NativeEglDrawSmokeStatus {
+    match smoke_pbuffer() {
+        Ok(()) => NativeEglDrawSmokeStatus::ClearColorReady,
+        Err(error) => error,
+    }
+}
+
+fn probe_context() -> Result<(), NativeEglProbeStatus> {
+    // The loaded library is not trusted beyond this adapter; all failures reduce
+    // to NativeEglProbeStatus before returning to safe Sophia crates.
+    let egl = unsafe { khronos_egl::DynamicInstance::<khronos_egl::EGL1_4>::load_required() }
+        .map_err(|_error| NativeEglProbeStatus::PlatformUnavailable)?;
+    // DEFAULT_DISPLAY is the only native display token used by this probe and is
+    // never exposed outside the adapter.
+    let display = unsafe { egl.get_display(khronos_egl::DEFAULT_DISPLAY) }
+        .ok_or(NativeEglProbeStatus::PlatformUnavailable)?;
+
+    egl.initialize(display)
+        .map_err(|_error| NativeEglProbeStatus::PlatformDegraded)?;
+    let result = probe_initialized_context(&egl, display);
+    let _ = egl.terminate(display);
+    result
+}
+
+fn smoke_pbuffer() -> Result<(), NativeEglDrawSmokeStatus> {
+    // The loaded library is not trusted beyond this adapter; all failures reduce
+    // to NativeEglDrawSmokeStatus before returning to safe Sophia crates.
+    let egl = unsafe { khronos_egl::DynamicInstance::<khronos_egl::EGL1_4>::load_required() }
+        .map_err(|_error| NativeEglDrawSmokeStatus::PlatformUnavailable)?;
+    // DEFAULT_DISPLAY is the only native display token used by this smoke and
+    // is never exposed outside the adapter.
+    let display = unsafe { egl.get_display(khronos_egl::DEFAULT_DISPLAY) }
+        .ok_or(NativeEglDrawSmokeStatus::PlatformUnavailable)?;
+
+    egl.initialize(display)
+        .map_err(|_error| NativeEglDrawSmokeStatus::PlatformDegraded)?;
+    let result = smoke_initialized_pbuffer(&egl, display);
+    let _ = egl.terminate(display);
+    result
+}
+
+fn probe_initialized_context(
+    egl: &khronos_egl::DynamicInstance<khronos_egl::EGL1_4>,
+    display: khronos_egl::Display,
+) -> Result<(), NativeEglProbeStatus> {
+    egl.bind_api(khronos_egl::OPENGL_API)
+        .map_err(|_error| NativeEglProbeStatus::ContextUnavailable)?;
+
+    let config = egl
+        .choose_first_config(display, &config_attributes())
+        .map_err(|_error| NativeEglProbeStatus::ContextUnavailable)?
+        .ok_or(NativeEglProbeStatus::ContextUnavailable)?;
+    let context = egl
+        .create_context(display, config, None, &context_attributes())
+        .map_err(|_error| NativeEglProbeStatus::ContextUnavailable)?;
+    let _ = egl.destroy_context(display, context);
+
+    Ok(())
+}
+
+fn smoke_initialized_pbuffer(
+    egl: &khronos_egl::DynamicInstance<khronos_egl::EGL1_4>,
+    display: khronos_egl::Display,
+) -> Result<(), NativeEglDrawSmokeStatus> {
+    egl.bind_api(khronos_egl::OPENGL_API)
+        .map_err(|_error| NativeEglDrawSmokeStatus::ContextUnavailable)?;
+
+    let config = egl
+        .choose_first_config(display, &config_attributes())
+        .map_err(|_error| NativeEglDrawSmokeStatus::ContextUnavailable)?
+        .ok_or(NativeEglDrawSmokeStatus::ContextUnavailable)?;
+    let surface = egl
+        .create_pbuffer_surface(display, config, &pbuffer_attributes())
+        .map_err(|_error| NativeEglDrawSmokeStatus::SurfaceUnavailable)?;
+    let context = match egl.create_context(display, config, None, &context_attributes()) {
+        Ok(context) => context,
+        Err(_error) => {
+            let _ = egl.destroy_surface(display, surface);
+            return Err(NativeEglDrawSmokeStatus::ContextUnavailable);
+        }
+    };
+
+    let result = egl
+        .make_current(display, Some(surface), Some(surface), Some(context))
+        .map_err(|_error| NativeEglDrawSmokeStatus::MakeCurrentUnavailable)
+        .and_then(|()| smoke_current_gl_context(egl));
+    let _ = egl.make_current(display, None, None, None);
+    let _ = egl.destroy_context(display, context);
+    let _ = egl.destroy_surface(display, surface);
+
+    result
+}
+
+fn smoke_current_gl_context(
+    egl: &khronos_egl::DynamicInstance<khronos_egl::EGL1_4>,
+) -> Result<(), NativeEglDrawSmokeStatus> {
+    smoke_current_gl_context_with_loader(|name| {
+        egl.get_proc_address(name)
+            .map_or(ptr::null(), |proc| proc as *const c_void)
+    })
+}
+
+fn config_attributes() -> [khronos_egl::Int; 13] {
+    [
+        khronos_egl::SURFACE_TYPE,
+        khronos_egl::PBUFFER_BIT,
+        khronos_egl::RENDERABLE_TYPE,
+        khronos_egl::OPENGL_BIT,
+        khronos_egl::RED_SIZE,
+        8,
+        khronos_egl::GREEN_SIZE,
+        8,
+        khronos_egl::BLUE_SIZE,
+        8,
+        khronos_egl::ALPHA_SIZE,
+        8,
+        khronos_egl::NONE,
+    ]
+}
+
+fn pbuffer_attributes() -> [khronos_egl::Int; 5] {
+    [
+        khronos_egl::WIDTH,
+        1,
+        khronos_egl::HEIGHT,
+        1,
+        khronos_egl::NONE,
+    ]
+}

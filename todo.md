@@ -78,6 +78,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Split renderer-native EGL into status, default-display, shared GL, and
+  GBM-platform modules so rendered scanout export can be hardened separately.
 - [x] Split renderer-live scanout data into presentation, frame-target,
   scanout-buffer, native GBM ownership, and import-boundary modules.
 - [x] Split native atomic request flags/status from primary-plane property
