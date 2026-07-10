@@ -111,6 +111,9 @@ outside the smoke harness as well.
 The real DRM-master hardware proof needs a machine and login session with these
 properties:
 
+- Rust 1.96 or newer is active. Rustup users should pick up
+  `rust-toolchain.toml`; distro-package users must install an equivalent
+  compiler before running the proof scripts.
 - Linux exposes at least one primary `/dev/dri/card*` node and the active
   kernel driver supports atomic KMS.
 - At least one display connector is physically connected and has a usable mode.

@@ -7,6 +7,8 @@ ATOMIC_EVIDENCE_FILE="${SOPHIA_ATOMIC_SCANOUT_EVIDENCE:-/tmp/sophia-atomic-scano
 RUNTIME_EVIDENCE_FILE="${SOPHIA_RUNTIME_RENDERED_SCANOUT_EVIDENCE:-/tmp/sophia-runtime-rendered-scanout.log}"
 
 status=0
+MIN_RUST_MAJOR=1
+MIN_RUST_MINOR=96
 
 print_command_version() {
     local name="$1"
@@ -14,6 +16,28 @@ print_command_version() {
         "$name" --version 2>/dev/null | head -n 1 || true
     else
         echo "$name: not found"
+        status=1
+    fi
+}
+
+check_rustc_minimum() {
+    if ! command -v rustc >/dev/null 2>&1; then
+        return
+    fi
+
+    local rustc_version
+    rustc_version="$(rustc --version 2>/dev/null || true)"
+    if [[ "$rustc_version" =~ ^rustc[[:space:]]+([0-9]+)\.([0-9]+)\. ]]; then
+        local major="${BASH_REMATCH[1]}"
+        local minor="${BASH_REMATCH[2]}"
+        if (( major < MIN_RUST_MAJOR || (major == MIN_RUST_MAJOR && minor < MIN_RUST_MINOR) )); then
+            echo "rustc minimum: need ${MIN_RUST_MAJOR}.${MIN_RUST_MINOR} or newer"
+            status=1
+            return
+        fi
+        echo "rustc minimum: ok"
+    else
+        echo "rustc minimum: unable to parse version"
         status=1
     fi
 }
@@ -57,6 +81,7 @@ echo
 echo "Toolchain"
 print_command_version rustc
 print_command_version cargo
+check_rustc_minimum
 echo
 
 echo "DRM device visibility"
