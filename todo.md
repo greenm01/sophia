@@ -83,6 +83,9 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Normalized renderer-live native GBM scanout export reports so an exported
+  native result without a retained valid reduced buffer degrades before
+  backend-live sees it.
 - [x] Hardened native primary-plane resource creation so generic DRM buffers
   with unsupported format or undersized pitch fail before mode-blob or
   framebuffer allocation.

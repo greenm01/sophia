@@ -23,6 +23,23 @@ pub struct NativeGbmOwnedScanoutBufferExportReport {
     pub buffer: Option<NativeGbmOwnedScanoutBuffer>,
 }
 
+impl NativeGbmOwnedScanoutBufferExportReport {
+    pub fn new(
+        status: LiveRendererScanoutBufferExportStatus,
+        buffer: Option<NativeGbmOwnedScanoutBuffer>,
+    ) -> Self {
+        Self {
+            status: match (status, buffer.is_some()) {
+                (LiveRendererScanoutBufferExportStatus::Exported, false) => {
+                    LiveRendererScanoutBufferExportStatus::Degraded
+                }
+                (status, _) => status,
+            },
+            buffer,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeGbmRenderedScanoutContextStatus {
     Ready,
@@ -68,10 +85,10 @@ where
         target: LiveGbmEglFrameTargetRecord,
     ) -> NativeGbmOwnedScanoutBufferExportReport {
         if !target.is_valid_scanout_target() {
-            return NativeGbmOwnedScanoutBufferExportReport {
-                status: LiveRendererScanoutBufferExportStatus::InvalidTarget,
-                buffer: None,
-            };
+            return NativeGbmOwnedScanoutBufferExportReport::new(
+                LiveRendererScanoutBufferExportStatus::InvalidTarget,
+                None,
+            );
         }
 
         reduced_native_owned_scanout_buffer_export_report(
@@ -129,10 +146,10 @@ where
     ) -> sophia_renderer_native_egl::NativeGbmOwnedScanoutBufferExportReport,
 {
     if !target.is_valid_scanout_target() {
-        return NativeGbmOwnedScanoutBufferExportReport {
-            status: LiveRendererScanoutBufferExportStatus::InvalidTarget,
-            buffer: None,
-        };
+        return NativeGbmOwnedScanoutBufferExportReport::new(
+            LiveRendererScanoutBufferExportStatus::InvalidTarget,
+            None,
+        );
     }
 
     let report = export(device, target.size.width as u32, target.size.height as u32);
@@ -174,5 +191,5 @@ fn reduced_native_owned_scanout_buffer_export_report(
                 _buffer: buffer,
             })
     });
-    NativeGbmOwnedScanoutBufferExportReport { status, buffer }
+    NativeGbmOwnedScanoutBufferExportReport::new(status, buffer)
 }

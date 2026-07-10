@@ -7,8 +7,8 @@ use sophia_renderer_live::{
     LiveGbmEglFrameTargetStatus, LiveRendererImportHealth, LiveRendererImportPathStatus,
     LiveRendererImportStartupStatus, LiveRendererScanoutBufferExportStatus,
     NativeGbmBackedEglFrameTargetAllocator, NativeGbmCapabilityProbe,
-    NativeGbmRenderedScanoutContext, NativeGbmRenderedScanoutContextStatus,
-    NativeGbmScanoutBufferExporter, Size,
+    NativeGbmOwnedScanoutBufferExportReport, NativeGbmRenderedScanoutContext,
+    NativeGbmRenderedScanoutContextStatus, NativeGbmScanoutBufferExporter, Size,
 };
 
 #[test]
@@ -136,6 +136,20 @@ fn native_gbm_scanout_exporter_fails_closed_without_backend_device() {
         .status,
         LiveRendererScanoutBufferExportStatus::Unavailable
     );
+}
+
+#[test]
+fn native_gbm_scanout_export_report_rejects_exported_without_retained_buffer() {
+    let report = NativeGbmOwnedScanoutBufferExportReport::new(
+        LiveRendererScanoutBufferExportStatus::Exported,
+        None,
+    );
+
+    assert_eq!(
+        report.status,
+        LiveRendererScanoutBufferExportStatus::Degraded
+    );
+    assert!(report.buffer.is_none());
 }
 
 #[test]
