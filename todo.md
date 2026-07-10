@@ -68,6 +68,9 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Split rendered primary-plane scanout into domain modules for reduced
+  report types, submit tracking, command-time runtime adaptation, and
+  page-flip retirement/cleanup.
 - [x] Preserved reduced native destroy status in tracked rendered scanout
   retire reports so runtime diagnostics can distinguish clean retirement from
   retryable cleanup debt without native identity.
