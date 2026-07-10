@@ -67,6 +67,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Versioned the reduced atomic scanout evidence schema and hardened the
+  verifier to parse fields exactly, rejecting duplicate or unknown fields.
 - [x] Extracted backend-live runtime page-flip observation, atomic-commit
   reporting, and callback queue draining into a dedicated runtime submodule.
 - [x] Extracted backend-live runtime rendered-primary-plane ownership,

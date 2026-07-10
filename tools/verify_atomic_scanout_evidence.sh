@@ -16,29 +16,71 @@ if [[ -z "$evidence" ]]; then
     exit 1
 fi
 
-require_pattern() {
-    local pattern="$1"
+read -r -a parts <<< "$evidence"
+prefix="${parts[0]:-}"
+fields=("${parts[@]:1}")
 
-    if [[ "$evidence" != *"$pattern"* ]]; then
-        echo "atomic scanout evidence is missing: $pattern" >&2
+if [[ "$prefix" != "$EVIDENCE_PREFIX" ]]; then
+    echo "atomic scanout evidence has wrong prefix: $prefix" >&2
+    echo "$evidence" >&2
+    exit 1
+fi
+
+declare -A observed=()
+declare -A expected=(
+    ["schema"]="1"
+    ["status"]="Passed"
+    ["scanout_target"]="Ready"
+    ["rendered_context"]="Ready"
+    ["gbm_export"]="Exported"
+    ["submit"]="SubmittedWaitingForPageFlip"
+    ["commit_page_flip_event"]="true"
+    ["commit_nonblocking"]="true"
+    ["commit_allow_modeset"]="true"
+    ["commit_test_only"]="false"
+    ["page_flip_poll"]="Emitted"
+    ["page_flip"]="Presented"
+    ["retire"]="RetiredAfterPageFlip"
+    ["retire_destroy"]="Destroyed"
+    ["retire_cleanup_pending"]="false"
+)
+
+for field in "${fields[@]}"; do
+    if [[ "$field" != *=* ]]; then
+        echo "atomic scanout evidence has malformed field: $field" >&2
+        echo "$evidence" >&2
+        exit 1
+    fi
+
+    key="${field%%=*}"
+    value="${field#*=}"
+    if [[ -n "${observed[$key]+set}" ]]; then
+        echo "atomic scanout evidence has duplicate field: $key" >&2
+        echo "$evidence" >&2
+        exit 1
+    fi
+    if [[ -z "${expected[$key]+set}" ]]; then
+        echo "atomic scanout evidence has unknown field: $key" >&2
+        echo "$evidence" >&2
+        exit 1
+    fi
+    observed["$key"]="$value"
+done
+
+require_field() {
+    local key="$1"
+    local expected="$2"
+    local actual="${observed[$key]:-}"
+
+    if [[ "$actual" != "$expected" ]]; then
+        echo "atomic scanout evidence expected $key=$expected, got ${actual:-missing}" >&2
         echo "$evidence" >&2
         exit 1
     fi
 }
 
-require_pattern "status=Passed"
-require_pattern "scanout_target=Ready"
-require_pattern "rendered_context=Ready"
-require_pattern "gbm_export=Exported"
-require_pattern "submit=SubmittedWaitingForPageFlip"
-require_pattern "commit_page_flip_event=true"
-require_pattern "commit_nonblocking=true"
-require_pattern "commit_allow_modeset=true"
-require_pattern "commit_test_only=false"
-require_pattern "page_flip_poll=Emitted"
-require_pattern "page_flip=Presented"
-require_pattern "retire=RetiredAfterPageFlip"
-require_pattern "retire_destroy=Destroyed"
-require_pattern "retire_cleanup_pending=false"
+for key in "${!expected[@]}"; do
+    require_field "$key" "${expected[$key]}"
+done
 
 echo "atomic scanout evidence passed: $EVIDENCE_FILE"

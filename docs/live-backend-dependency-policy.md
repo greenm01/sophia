@@ -310,11 +310,12 @@ It reports only where the chain stopped: no primary card, KMS selection failure,
 persistent rendered-context failure, KMS scanout target failure, GBM export
 failure, submit failure, missing page-flip evidence, retirement failure, or
 passed. The record carries only the reduced KMS scanout target status and
-reduced commit flags, never KMS object identity. When retirement fails, the
-record also carries the reduced resource-destroy status so diagnostics can tell
-an accepted page flip from a framebuffer/blob cleanup failure. Native handles
-and object IDs remain private. A reduced cleanup-pending bit says whether a
-retry owner still exists after the smoke path attempts retirement.
+reduced commit flags plus the reduced evidence schema version, never KMS object
+identity. When retirement fails, the record also carries the reduced
+resource-destroy status so diagnostics can tell an accepted page flip from a
+framebuffer/blob cleanup failure. Native handles and object IDs remain private.
+A reduced cleanup-pending bit says whether a retry owner still exists after the
+smoke path attempts retirement.
 
 Backend-live runtime ticks carry the current reduced scanout readiness report,
 KMS scanout target report, and page-flip event beside renderer health. This

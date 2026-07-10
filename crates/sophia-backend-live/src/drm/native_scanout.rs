@@ -215,7 +215,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
                 });
 
         format!(
-            "sophia_atomic_scanout_evidence status={:?} scanout_target={} rendered_context={} gbm_export={} submit={} commit_page_flip_event={} commit_nonblocking={} commit_allow_modeset={} commit_test_only={} page_flip_poll={} page_flip={} retire={} retire_destroy={} retire_cleanup_pending={}",
+            "sophia_atomic_scanout_evidence schema=1 status={:?} scanout_target={} rendered_context={} gbm_export={} submit={} commit_page_flip_event={} commit_nonblocking={} commit_allow_modeset={} commit_test_only={} page_flip_poll={} page_flip={} retire={} retire_destroy={} retire_cleanup_pending={}",
             self.status,
             status(self.scanout_target),
             status(self.rendered_context),

@@ -3033,7 +3033,7 @@ fn native_atomic_scanout_smoke_evidence_passes_only_after_submit_page_flip_and_r
     );
     assert_eq!(
         evidence.reduced_log_line(),
-        "sophia_atomic_scanout_evidence status=Passed scanout_target=Ready rendered_context=Ready gbm_export=Exported submit=SubmittedWaitingForPageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=true commit_test_only=false page_flip_poll=Emitted page_flip=Presented retire=RetiredAfterPageFlip retire_destroy=Destroyed retire_cleanup_pending=false"
+        "sophia_atomic_scanout_evidence schema=1 status=Passed scanout_target=Ready rendered_context=Ready gbm_export=Exported submit=SubmittedWaitingForPageFlip commit_page_flip_event=true commit_nonblocking=true commit_allow_modeset=true commit_test_only=false page_flip_poll=Emitted page_flip=Presented retire=RetiredAfterPageFlip retire_destroy=Destroyed retire_cleanup_pending=false"
     );
 }
 
