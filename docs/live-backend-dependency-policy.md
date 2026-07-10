@@ -150,8 +150,13 @@ plane, connector, property, and fd identity stay inside backend-live.
 property-set builder. It wires a connector, CRTC, primary plane, framebuffer,
 mode blob, and full-output rectangle into a `drm::control::atomic::AtomicModeReq`
 while exposing only built/invalid-size status. This is still not a full scanout
-pipeline: object discovery, property-name lookup, framebuffer lifetime, and
-hardware smoke remain separate work.
+pipeline: framebuffer lifetime, mode-blob lifetime, and hardware smoke remain
+separate work.
+`select_native_primary_plane_target` chooses a connected connector, usable
+encoder/CRTC, display mode size, and compatible primary plane through real DRM
+resource APIs. It reduces failures to read-failed or missing resource groups;
+the selected connector, CRTC, and plane handles remain in a backend-private
+bundle until a framebuffer and mode blob are available.
 `discover_native_primary_plane_property_handles` resolves the required atomic
 property names for that builder through the real `drm::control::Device`
 property APIs, but reduces failures to read-failed or missing connector, CRTC,

@@ -9,29 +9,31 @@ use sophia_backend_live::{
     LibdrmNativeAtomicCommitDevice, LibdrmNativeAtomicCommitFlagsReport,
     LibdrmNativeAtomicCommitRequest, LibdrmNativeAtomicCommitSubmitReport,
     LibdrmNativeAtomicCommitSubmitStatus, LibdrmNativeAtomicRequestBuildStatus,
-    LibdrmNativeCrtcRoute, LibdrmNativeEventAdapterReport, LibdrmNativeEventAdapterStatus,
+    LibdrmNativeConnectorSnapshot, LibdrmNativeCrtcRoute, LibdrmNativeEncoderSnapshot,
+    LibdrmNativeEventAdapterReport, LibdrmNativeEventAdapterStatus, LibdrmNativeKmsSelectionDevice,
     LibdrmNativeOutputRoute, LibdrmNativeOutputSlot, LibdrmNativePageFlipCallback,
     LibdrmNativePageFlipDecodeReport, LibdrmNativePageFlipDecodeStatus,
     LibdrmNativePageFlipReadResult, LibdrmNativePageFlipReader, LibdrmNativePageFlipSource,
-    LibdrmNativePageFlipSourceReport, LibdrmNativePageFlipSourceStatus,
+    LibdrmNativePageFlipSourceReport, LibdrmNativePageFlipSourceStatus, LibdrmNativePlaneSnapshot,
     LibdrmNativePollerDiagnostics, LibdrmNativePrimaryPlaneObjects,
     LibdrmNativePrimaryPlanePropertyDiscoveryStatus, LibdrmNativePrimaryPlanePropertyHandles,
-    LibdrmNativePropertyHandleSet, LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport,
-    LibdrmNativeReadLoopReport, LibdrmNativeReadLoopStatus, LibdrmPageFlipEventPollReport,
-    LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller, LiveBackendConfig,
-    LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
-    LiveHardwareValidationSmokeReport, LiveHardwareValidationSmokeStatus,
-    LiveHardwareValidationTarget, LiveLibdrmPollerDiagnostics, LiveLibdrmPollerDiagnosticsStatus,
-    LiveLibdrmPollerStartupReport, LiveLibdrmPollerStartupStatus, LivePageFlipCallback,
-    LivePageFlipCallbackQueue, LivePageFlipCallbackSourceReport, LivePageFlipEvent,
-    LivePageFlipEventStatus, NativeLibdrmAtomicScanoutCommitter, NativeLibdrmPageFlipEventPoller,
+    LibdrmNativePrimaryPlaneSelectionStatus, LibdrmNativePropertyHandleSet,
+    LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport, LibdrmNativeReadLoopReport,
+    LibdrmNativeReadLoopStatus, LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus,
+    LibdrmPageFlipEventPoller, LiveBackendConfig, LiveHardwareValidationGateReport,
+    LiveHardwareValidationGateStatus, LiveHardwareValidationSmokeReport,
+    LiveHardwareValidationSmokeStatus, LiveHardwareValidationTarget, LiveLibdrmPollerDiagnostics,
+    LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
+    LiveLibdrmPollerStartupStatus, LivePageFlipCallback, LivePageFlipCallbackQueue,
+    LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus,
+    NativeLibdrmAtomicScanoutCommitter, NativeLibdrmPageFlipEventPoller,
     NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller, Size,
     build_native_primary_plane_atomic_request, decode_native_page_flip_batch,
     discover_live_backend, discover_native_primary_plane_property_handles,
     libdrm_dependency_admission_report, libdrm_fd_authority_report,
     native_libdrm_event_adapter_report, native_libdrm_event_adapter_report_for_authority,
     real_libdrm_events_validation_gate, real_libdrm_events_validation_smoke_report,
-    reduce_native_page_flip_event,
+    reduce_native_page_flip_event, select_native_primary_plane_target,
 };
 
 #[test]
@@ -215,6 +217,59 @@ impl LibdrmNativePropertyLookupDevice for FakeNativePropertyLookupDevice {
     }
 }
 
+#[derive(Debug)]
+struct FakeNativeKmsSelectionDevice {
+    connectors: io::Result<Vec<drm::control::connector::Handle>>,
+    crtcs: io::Result<Vec<drm::control::crtc::Handle>>,
+    planes: io::Result<Vec<drm::control::plane::Handle>>,
+    connector_snapshot: io::Result<LibdrmNativeConnectorSnapshot>,
+    encoder_snapshot: io::Result<LibdrmNativeEncoderSnapshot>,
+    plane_snapshot: io::Result<LibdrmNativePlaneSnapshot>,
+    plane_type: io::Result<Option<drm::control::PlaneType>>,
+}
+
+impl LibdrmNativeKmsSelectionDevice for FakeNativeKmsSelectionDevice {
+    fn connector_handles(&self) -> io::Result<Vec<drm::control::connector::Handle>> {
+        clone_io_result(&self.connectors)
+    }
+
+    fn crtc_handles(&self) -> io::Result<Vec<drm::control::crtc::Handle>> {
+        clone_io_result(&self.crtcs)
+    }
+
+    fn connector_snapshot(
+        &self,
+        _connector: drm::control::connector::Handle,
+    ) -> io::Result<LibdrmNativeConnectorSnapshot> {
+        clone_io_result(&self.connector_snapshot)
+    }
+
+    fn encoder_snapshot(
+        &self,
+        _encoder: drm::control::encoder::Handle,
+    ) -> io::Result<LibdrmNativeEncoderSnapshot> {
+        clone_io_result(&self.encoder_snapshot)
+    }
+
+    fn plane_handles(&self) -> io::Result<Vec<drm::control::plane::Handle>> {
+        clone_io_result(&self.planes)
+    }
+
+    fn plane_snapshot(
+        &self,
+        _plane: drm::control::plane::Handle,
+    ) -> io::Result<LibdrmNativePlaneSnapshot> {
+        clone_io_result(&self.plane_snapshot)
+    }
+
+    fn plane_type(
+        &self,
+        _plane: drm::control::plane::Handle,
+    ) -> io::Result<Option<drm::control::PlaneType>> {
+        clone_io_result(&self.plane_type)
+    }
+}
+
 fn clone_io_result<T: Clone>(result: &io::Result<T>) -> io::Result<T> {
     result
         .as_ref()
@@ -232,6 +287,10 @@ fn connector_handle() -> drm::control::connector::Handle {
 
 fn crtc_handle() -> drm::control::crtc::Handle {
     drm::control::from_u32(12).expect("test crtc handle should be nonzero")
+}
+
+fn encoder_handle() -> drm::control::encoder::Handle {
+    drm::control::from_u32(16).expect("test encoder handle should be nonzero")
 }
 
 fn plane_handle() -> drm::control::plane::Handle {
@@ -289,6 +348,29 @@ fn full_property_lookup_device() -> FakeNativePropertyLookupDevice {
             ("CRTC_W", property_handle(112)),
             ("CRTC_H", property_handle(113)),
         ])),
+    }
+}
+
+fn full_kms_selection_device() -> FakeNativeKmsSelectionDevice {
+    FakeNativeKmsSelectionDevice {
+        connectors: Ok(vec![connector_handle()]),
+        crtcs: Ok(vec![crtc_handle()]),
+        planes: Ok(vec![plane_handle()]),
+        connector_snapshot: Ok(LibdrmNativeConnectorSnapshot::new(
+            true,
+            Some(encoder_handle()),
+            [encoder_handle()],
+            Some(Size {
+                width: 1280,
+                height: 720,
+            }),
+        )),
+        encoder_snapshot: Ok(LibdrmNativeEncoderSnapshot::new(
+            Some(crtc_handle()),
+            [crtc_handle()],
+        )),
+        plane_snapshot: Ok(LibdrmNativePlaneSnapshot::new([crtc_handle()])),
+        plane_type: Ok(Some(drm::control::PlaneType::Primary)),
     }
 }
 
@@ -426,6 +508,138 @@ fn native_libdrm_primary_plane_property_discovery_fails_closed_on_read_error() {
         LibdrmNativePrimaryPlanePropertyDiscoveryStatus::ReadFailed
     );
     assert!(discovery.properties.is_none());
+}
+
+#[test]
+fn native_libdrm_primary_plane_selection_feeds_request_builder() {
+    let selection = select_native_primary_plane_target(&full_kms_selection_device());
+
+    assert_eq!(
+        selection.status,
+        LibdrmNativePrimaryPlaneSelectionStatus::Selected
+    );
+    let selected = selection
+        .selection
+        .expect("complete KMS path should select a private primary plane target");
+    assert_eq!(
+        selected.size(),
+        Size {
+            width: 1280,
+            height: 720,
+        }
+    );
+    let objects = selected.into_objects(
+        drm::control::from_u32(14).expect("test framebuffer handle should be nonzero"),
+        15,
+    );
+    let properties = discover_native_primary_plane_property_handles(
+        &full_property_lookup_device(),
+        connector_handle(),
+        crtc_handle(),
+        plane_handle(),
+    )
+    .properties
+    .expect("complete property lookup should produce private property handles");
+    let build = build_native_primary_plane_atomic_request(objects, properties);
+
+    assert_eq!(build.status, LibdrmNativeAtomicRequestBuildStatus::Built);
+    assert!(build.request.is_some());
+}
+
+#[test]
+fn native_libdrm_primary_plane_selection_reduces_missing_resource_groups() {
+    let disconnected = FakeNativeKmsSelectionDevice {
+        connector_snapshot: Ok(LibdrmNativeConnectorSnapshot::new(
+            false,
+            Some(encoder_handle()),
+            [encoder_handle()],
+            Some(Size {
+                width: 1280,
+                height: 720,
+            }),
+        )),
+        ..full_kms_selection_device()
+    };
+    assert_eq!(
+        select_native_primary_plane_target(&disconnected).status,
+        LibdrmNativePrimaryPlaneSelectionStatus::NoConnectedConnector
+    );
+
+    let modeless = FakeNativeKmsSelectionDevice {
+        connector_snapshot: Ok(LibdrmNativeConnectorSnapshot::new(
+            true,
+            Some(encoder_handle()),
+            [encoder_handle()],
+            None,
+        )),
+        ..full_kms_selection_device()
+    };
+    assert_eq!(
+        select_native_primary_plane_target(&modeless).status,
+        LibdrmNativePrimaryPlaneSelectionStatus::NoUsableMode
+    );
+
+    let no_encoder = FakeNativeKmsSelectionDevice {
+        connector_snapshot: Ok(LibdrmNativeConnectorSnapshot::new(
+            true,
+            None,
+            [],
+            Some(Size {
+                width: 1280,
+                height: 720,
+            }),
+        )),
+        ..full_kms_selection_device()
+    };
+    assert_eq!(
+        select_native_primary_plane_target(&no_encoder).status,
+        LibdrmNativePrimaryPlaneSelectionStatus::NoUsableEncoder
+    );
+
+    let incompatible_crtc = FakeNativeKmsSelectionDevice {
+        encoder_snapshot: Ok(LibdrmNativeEncoderSnapshot::new(None, [])),
+        ..full_kms_selection_device()
+    };
+    assert_eq!(
+        select_native_primary_plane_target(&incompatible_crtc).status,
+        LibdrmNativePrimaryPlaneSelectionStatus::NoCompatibleCrtc
+    );
+
+    let no_primary_plane = FakeNativeKmsSelectionDevice {
+        plane_type: Ok(Some(drm::control::PlaneType::Overlay)),
+        ..full_kms_selection_device()
+    };
+    assert_eq!(
+        select_native_primary_plane_target(&no_primary_plane).status,
+        LibdrmNativePrimaryPlaneSelectionStatus::NoCompatiblePrimaryPlane
+    );
+}
+
+#[test]
+fn native_libdrm_primary_plane_selection_fails_closed_on_read_error() {
+    let read_failed = FakeNativeKmsSelectionDevice {
+        connectors: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+        ..full_kms_selection_device()
+    };
+    let selection = select_native_primary_plane_target(&read_failed);
+
+    assert_eq!(
+        selection.status,
+        LibdrmNativePrimaryPlaneSelectionStatus::ReadFailed
+    );
+    assert!(selection.selection.is_none());
+
+    let plane_read_failed = FakeNativeKmsSelectionDevice {
+        plane_snapshot: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+        ..full_kms_selection_device()
+    };
+    let selection = select_native_primary_plane_target(&plane_read_failed);
+
+    assert_eq!(
+        selection.status,
+        LibdrmNativePrimaryPlaneSelectionStatus::ReadFailed
+    );
+    assert!(selection.selection.is_none());
 }
 
 #[test]

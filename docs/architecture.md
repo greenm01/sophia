@@ -669,6 +669,9 @@ page-flip callback before making the visual commit observable.
 The first native request builder covers the simple full-output primary-plane
 case. It packages connector, CRTC, plane, framebuffer, mode blob, and rectangle
 properties behind backend-live types and exports only reduced build status.
+The matching KMS selector can choose a connected connector, usable encoder/CRTC,
+display mode size, and compatible primary plane from real DRM resources while
+keeping those native handles backend-private.
 Property discovery for that path now uses the native DRM property APIs and
 collapses lookup problems to reduced missing-property groups. The property
 handles themselves stay backend-private.
