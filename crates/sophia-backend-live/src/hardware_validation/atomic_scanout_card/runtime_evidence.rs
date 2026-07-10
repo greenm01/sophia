@@ -47,6 +47,15 @@ pub fn run_real_atomic_runtime_rendered_scanout_evidence_with(
 }
 
 #[cfg(feature = "gbm-probe")]
+pub fn real_atomic_runtime_rendered_scanout_renderer_observation() -> LiveRendererRuntimeObservation
+{
+    LiveRendererRuntimeObservation::from_startup_status(
+        LiveRendererImportBoundary::with_native_imports(false, true).startup_status(),
+        LiveRendererSelectionObservation::NativeImportCapable,
+    )
+}
+
+#[cfg(feature = "gbm-probe")]
 impl RealAtomicScanoutPageFlipSession {
     pub fn run_runtime_rendered_scanout_evidence_lines<R>(
         &mut self,
@@ -66,10 +75,7 @@ impl RealAtomicScanoutPageFlipSession {
         let (sender, receiver) = std::sync::mpsc::sync_channel(4);
         let mut runtime = LiveBackendRuntimeAssembly {
             assembly: HeadlessCompositorBackendAssembly::new(output),
-            renderer_observation: LiveRendererRuntimeObservation::from_startup_status(
-                LiveRendererImportBoundary::cpu_only().startup_status(),
-                LiveRendererSelectionObservation::CpuFallback,
-            ),
+            renderer_observation: real_atomic_runtime_rendered_scanout_renderer_observation(),
             output_size: Some(output.size),
             scanout_readiness: LiveScanoutReadinessReport {
                 status: LiveScanoutReadinessStatus::Ready,

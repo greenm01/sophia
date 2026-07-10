@@ -75,6 +75,11 @@ use sophia_backend_live::{
     NativeGbmRenderedScanoutContextStatus, RealAtomicScanoutSmokeConfig,
     RenderDeviceDiscoveryBackend,
 };
+#[cfg(feature = "gbm-probe")]
+use sophia_backend_live::{
+    LiveRendererImportHealth, LiveRendererImportPathStatus, LiveRendererRuntimeObservation,
+    LiveRendererSelectionObservation, real_atomic_runtime_rendered_scanout_renderer_observation,
+};
 #[cfg(feature = "libinput-events")]
 use sophia_protocol::{InputEventKind, Point};
 use sophia_renderer_live::{
@@ -98,6 +103,20 @@ fn runtime_rendered_scanout_failure_evidence_has_stable_reduced_line() {
     assert_eq!(
         report.reduced_log_line(),
         "sophia_runtime_rendered_scanout_failure schema=1 status=RetireTimedOut submit_seen=true retire_seen=false"
+    );
+}
+
+#[cfg(feature = "gbm-probe")]
+#[test]
+fn real_runtime_rendered_scanout_evidence_reports_native_renderer_observation() {
+    assert_eq!(
+        real_atomic_runtime_rendered_scanout_renderer_observation(),
+        LiveRendererRuntimeObservation {
+            health: LiveRendererImportHealth::NativeImportCapable,
+            xpixmap: LiveRendererImportPathStatus::Disabled,
+            dmabuf: LiveRendererImportPathStatus::Enabled,
+            selection: LiveRendererSelectionObservation::NativeImportCapable,
+        }
     );
 }
 
