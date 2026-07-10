@@ -83,7 +83,6 @@ use sophia_renderer_live::{
 #[cfg(feature = "gbm-probe")]
 use sophia_renderer_live::{
     LiveGbmEglFrameTargetLifecycleReport, LiveGbmEglFrameTargetLifecycleStatus,
-    NativeGbmRenderedScanoutContext,
 };
 
 #[test]

@@ -83,6 +83,10 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Switched the opt-in atomic hardware smoke from direct renderer-live
+  context calls to the backend-live rendered scanout exporter seam.
+- [x] Added a render-device discovery owner for selected real atomic scanout
+  cards, so persistent GBM/EGL export can be built from an opaque cloned fd.
 - [x] Added a production page-flip session owner that promotes a selected real
   atomic scanout card into submit-card, event-reader, and routed-poller
   ownership.

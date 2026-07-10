@@ -88,6 +88,35 @@ impl RealAtomicScanoutPageFlipSession {
     ) {
         (&self.card, &mut self.reader, &mut self.poller)
     }
+
+    #[cfg(feature = "gbm-probe")]
+    pub fn render_device_discovery(&self) -> io::Result<RealAtomicScanoutRenderDeviceDiscovery> {
+        RealAtomicScanoutRenderDeviceDiscovery::from_card(&self.card)
+    }
+}
+
+#[cfg(feature = "gbm-probe")]
+#[derive(Debug)]
+pub struct RealAtomicScanoutRenderDeviceDiscovery {
+    device: std::fs::File,
+}
+
+#[cfg(feature = "gbm-probe")]
+impl RealAtomicScanoutRenderDeviceDiscovery {
+    pub fn from_card(card: &RealAtomicScanoutCard) -> io::Result<Self> {
+        Ok(Self {
+            device: card.try_clone_file()?,
+        })
+    }
+}
+
+#[cfg(feature = "gbm-probe")]
+impl RenderDeviceDiscoveryBackend for RealAtomicScanoutRenderDeviceDiscovery {
+    type Device = std::fs::File;
+
+    fn open_render_device(&self) -> io::Result<Self::Device> {
+        self.device.try_clone()
+    }
 }
 
 #[derive(Debug)]

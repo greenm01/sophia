@@ -110,8 +110,9 @@ exposes a reduced KMS primary-plane scanout target, and has the atomic property
 handles needed for primary-plane commit. The selected card is then promoted into
 a page-flip session owner that keeps the submit card, cloned event reader, and
 routed poller together. The smoke child duplicates that fd namespace into a
-persistent GBM/EGL rendered-scanout context, clears a GBM surface, locks the
-rendered front buffer, submits a primary-plane atomic
+persistent backend-live GBM/EGL rendered-scanout exporter, clears a GBM surface,
+locks the rendered front buffer through the normal runtime export seam, submits
+a primary-plane atomic
 modeset, waits for reduced page-flip evidence, and retires the submitted
 framebuffer resources. It then exports a second rendered front buffer and
 submits it through the steady-state page-flip policy, proving the post-modeset

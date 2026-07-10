@@ -5,7 +5,9 @@ use sophia_backend_live::{
     LivePageFlipCallbackIntake, RealAtomicScanoutCard, RealAtomicScanoutCardSelectionStatus,
     RealAtomicScanoutPageFlipSessionStatus, select_real_atomic_scanout_card,
 };
-use sophia_renderer_live::LiveRendererScanoutBufferExportStatus;
+use sophia_renderer_live::{
+    LiveRendererScanoutBufferExportStatus, NativeGbmRenderedScanoutContextStatus,
+};
 
 #[test]
 fn native_atomic_scanout_smokes_real_primary_card_when_enabled() {
@@ -88,49 +90,29 @@ fn native_atomic_scanout_real_primary_card_child() {
         fail_atomic_scanout_smoke(evidence);
     }
 
-    let context_report = NativeGbmRenderedScanoutContext::from_backend_device_result(
-        session.card().try_clone_file(),
-    );
-    let rendered_context = match context_report.status {
-        NativeGbmRenderedScanoutContextStatus::Ready => {
-            LibdrmNativeRenderedScanoutContextStatus::Ready
-        }
-        NativeGbmRenderedScanoutContextStatus::Unavailable => {
-            LibdrmNativeRenderedScanoutContextStatus::Unavailable
-        }
-        NativeGbmRenderedScanoutContextStatus::Degraded => {
-            LibdrmNativeRenderedScanoutContextStatus::Degraded
+    let discovery = match session.render_device_discovery() {
+        Ok(discovery) => discovery,
+        Err(_) => {
+            let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+                scanout_target,
+                Some(LibdrmNativeRenderedScanoutContextStatus::Unavailable),
+                LiveRendererScanoutBufferExportStatus::Unavailable,
+                None,
+                None,
+                None,
+                None,
+            );
+            fail_atomic_scanout_smoke(evidence);
         }
     };
-    let Some(context) = context_report.context else {
-        let export_status = match context_report.status {
-            NativeGbmRenderedScanoutContextStatus::Ready => {
-                LiveRendererScanoutBufferExportStatus::Degraded
-            }
-            NativeGbmRenderedScanoutContextStatus::Unavailable => {
-                LiveRendererScanoutBufferExportStatus::Unavailable
-            }
-            NativeGbmRenderedScanoutContextStatus::Degraded => {
-                LiveRendererScanoutBufferExportStatus::Degraded
-            }
-        };
-        let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
-            scanout_target,
-            Some(rendered_context),
-            export_status,
-            None,
-            None,
-            None,
-            None,
-        );
-        fail_atomic_scanout_smoke(evidence);
-    };
+    let mut exporter = NativeGbmRenderedScanoutBufferDiscoveryExporter::new(discovery);
 
-    let export = context.export_rendered_owned_scanout_buffer(target);
+    let export = exporter.export_rendered_scanout_buffer(target);
+    let rendered_context = rendered_context_status_from_native(exporter.context_status());
     if export.status != LiveRendererScanoutBufferExportStatus::Exported {
         let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
             scanout_target,
-            Some(rendered_context),
+            rendered_context,
             export.status,
             None,
             None,
@@ -139,10 +121,23 @@ fn native_atomic_scanout_real_primary_card_child() {
         );
         fail_atomic_scanout_smoke(evidence);
     }
-    let Some(owned_buffer) = export.buffer else {
+    let Some(descriptor) = export.descriptor else {
         let mut evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
             scanout_target,
-            Some(rendered_context),
+            rendered_context,
+            export.status,
+            None,
+            None,
+            None,
+            None,
+        );
+        evidence.status = LibdrmNativeAtomicScanoutSmokeStatus::RetainedResourceMissing;
+        fail_atomic_scanout_smoke(evidence);
+    };
+    let Some(owned_buffer) = export.owner else {
+        let mut evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+            scanout_target,
+            rendered_context,
             export.status,
             None,
             None,
@@ -159,12 +154,12 @@ fn native_atomic_scanout_real_primary_card_child() {
             status: LibdrmNativePrimaryPlaneSelectionStatus::Selected,
             selection: Some(selected),
         },
-        owned_buffer.descriptor(),
+        descriptor,
     );
     if submit.status != LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip {
         let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
             scanout_target,
-            Some(rendered_context),
+            rendered_context,
             export.status,
             Some(&submit),
             None,
@@ -176,7 +171,7 @@ fn native_atomic_scanout_real_primary_card_child() {
     let Some(submission) = submit.submission.take() else {
         let mut evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
             scanout_target,
-            Some(rendered_context),
+            rendered_context,
             export.status,
             Some(&submit),
             None,
@@ -195,7 +190,7 @@ fn native_atomic_scanout_real_primary_card_child() {
 
     let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
         scanout_target,
-        Some(rendered_context),
+        rendered_context,
         export.status,
         Some(&submit),
         Some(&page_flip.poll),
@@ -205,11 +200,12 @@ fn native_atomic_scanout_real_primary_card_child() {
     require_atomic_scanout_smoke_passed(evidence);
     drop(owned_buffer);
 
-    let steady_export = context.export_rendered_owned_scanout_buffer(target);
+    let steady_export = exporter.export_rendered_scanout_buffer(target);
+    let steady_rendered_context = rendered_context_status_from_native(exporter.context_status());
     if steady_export.status != LiveRendererScanoutBufferExportStatus::Exported {
         let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
             scanout_target,
-            Some(rendered_context),
+            steady_rendered_context,
             steady_export.status,
             None,
             None,
@@ -218,10 +214,23 @@ fn native_atomic_scanout_real_primary_card_child() {
         );
         fail_atomic_scanout_smoke(evidence);
     }
-    let Some(steady_owned_buffer) = steady_export.buffer else {
+    let Some(steady_descriptor) = steady_export.descriptor else {
         let mut evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
             scanout_target,
-            Some(rendered_context),
+            steady_rendered_context,
+            steady_export.status,
+            None,
+            None,
+            None,
+            None,
+        );
+        evidence.status = LibdrmNativeAtomicScanoutSmokeStatus::RetainedResourceMissing;
+        fail_atomic_scanout_smoke(evidence);
+    };
+    let Some(steady_owned_buffer) = steady_export.owner else {
+        let mut evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
+            scanout_target,
+            steady_rendered_context,
             steady_export.status,
             None,
             None,
@@ -239,7 +248,7 @@ fn native_atomic_scanout_real_primary_card_child() {
                 status: LibdrmNativePrimaryPlaneSelectionStatus::Selected,
                 selection: Some(selected),
             },
-            steady_owned_buffer.descriptor(),
+            steady_descriptor,
             LibdrmNativePrimaryPlaneScanoutSubmitPolicy::page_flip(),
         );
     if steady_submit.status
@@ -247,7 +256,7 @@ fn native_atomic_scanout_real_primary_card_child() {
     {
         let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
             scanout_target,
-            Some(rendered_context),
+            steady_rendered_context,
             steady_export.status,
             Some(&steady_submit),
             None,
@@ -259,7 +268,7 @@ fn native_atomic_scanout_real_primary_card_child() {
     let Some(steady_submission) = steady_submit.submission.take() else {
         let mut evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
             scanout_target,
-            Some(rendered_context),
+            steady_rendered_context,
             steady_export.status,
             Some(&steady_submit),
             None,
@@ -277,7 +286,7 @@ fn native_atomic_scanout_real_primary_card_child() {
 
     let steady_evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_page_flip_pipeline_reports(
         scanout_target,
-        Some(rendered_context),
+        steady_rendered_context,
         steady_export.status,
         Some(&steady_submit),
         Some(&steady_page_flip.poll),
@@ -302,6 +311,22 @@ fn fail_atomic_scanout_smoke(evidence: LibdrmNativeAtomicScanoutSmokeEvidence) -
         "real atomic scanout smoke failed with status {:?}",
         evidence.status
     );
+}
+
+fn rendered_context_status_from_native(
+    status: Option<NativeGbmRenderedScanoutContextStatus>,
+) -> Option<LibdrmNativeRenderedScanoutContextStatus> {
+    status.map(|status| match status {
+        NativeGbmRenderedScanoutContextStatus::Ready => {
+            LibdrmNativeRenderedScanoutContextStatus::Ready
+        }
+        NativeGbmRenderedScanoutContextStatus::Unavailable => {
+            LibdrmNativeRenderedScanoutContextStatus::Unavailable
+        }
+        NativeGbmRenderedScanoutContextStatus::Degraded => {
+            LibdrmNativeRenderedScanoutContextStatus::Degraded
+        }
+    })
 }
 
 fn evidence_from_card_selection_failure(
