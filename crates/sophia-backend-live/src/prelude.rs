@@ -15,6 +15,8 @@ pub(crate) use crate::api::*;
 pub(crate) use crate::drm::*;
 pub(crate) use crate::runtime::*;
 pub(crate) use crate::scanout::*;
+#[cfg(all(feature = "libdrm-events", feature = "libinput-events"))]
+pub(crate) use crate::session_loop::*;
 pub(crate) use crate::startup::*;
 
 #[cfg(feature = "gbm-probe")]

@@ -6,4 +6,6 @@ pub use crate::hardware_validation::*;
 pub use crate::input::*;
 pub use crate::runtime::*;
 pub use crate::scanout::*;
+#[cfg(all(feature = "libdrm-events", feature = "libinput-events"))]
+pub use crate::session_loop::*;
 pub use crate::startup::*;

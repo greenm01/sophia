@@ -74,9 +74,9 @@ active milestone to `docs/roadmap-history.md`.
 
 ## Done Recently
 
-- [x] Added a reduced session-loop tick API that observes input readiness,
-  drains native page-flip events, and drives rendered primary-plane scanout
-  through one bounded runtime tick without passing fds into Sophia Engine.
+- [x] Added a reduced session-loop owner that observes input readiness, drains
+  native page-flip events, and drives rendered primary-plane scanout through one
+  bounded runtime tick without passing fds into Sophia Engine.
 - [x] Added a one-shot live input readiness gate so runtime ticks continue when
   input is idle and concrete libinput dispatch only runs after the outer loop
   observes readiness.

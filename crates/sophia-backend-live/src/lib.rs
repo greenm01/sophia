@@ -14,6 +14,7 @@ mod input;
 mod prelude;
 mod runtime;
 mod scanout;
+mod session_loop;
 mod startup;
 
 pub use api::*;

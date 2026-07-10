@@ -56,8 +56,9 @@ use sophia_backend_live::{
 #[cfg(feature = "libinput-events")]
 use sophia_backend_live::{
     DeviceId, FakeLiveLibinputEventReader, InputEventPacket, LibinputDeviceDescriptor,
-    LibinputDeviceKind, LiveBackendSessionLoopPageFlipBudget, LiveBackendSessionLoopReadiness,
-    LiveInputReadinessGateStatus, LiveInputReadinessGatedPoller, NativeLibinputEventPoller, SeatId,
+    LibinputDeviceKind, LiveBackendSessionLoop, LiveBackendSessionLoopPageFlipBudget,
+    LiveBackendSessionLoopReadiness, LiveInputReadinessGateStatus, LiveInputReadinessGatedPoller,
+    NativeLibinputEventPoller, SeatId,
 };
 #[cfg(feature = "gbm-probe")]
 use sophia_backend_live::{
@@ -2169,21 +2170,25 @@ fn live_session_loop_tick_leaves_input_idle_until_reduced_readiness() {
     let source = LibdrmNativePageFlipSource::from_authority(
         LibdrmBackendFdAuthority::new(36).expect("nonzero authority should mint"),
     );
-    let mut page_flip_poller =
+    let page_flip_poller =
         NativeLibdrmPageFlipEventPoller::new(source).with_routes([LibdrmNativeOutputRoute {
             slot,
             output: OutputId::from_raw(1),
         }]);
+    let mut session_loop = LiveBackendSessionLoop::new(
+        page_flip_poller,
+        LiveBackendSessionLoopPageFlipBudget::new(4, 4),
+    );
     let mut reader = FakeLibdrmNativePageFlipReader::new([]);
 
-    let report = assembly
-        .run_session_loop_tick_with_rendered_primary_plane_scanout_and_native_page_flip_events_with(
+    let report = session_loop
+        .run_tick_with_rendered_primary_plane_scanout_and_native_page_flip_events_with(
+            &mut assembly,
             CompositorBackendTickInput::default(),
-            LiveBackendSessionLoopReadiness::idle(LiveBackendSessionLoopPageFlipBudget::new(4, 4)),
+            LiveBackendSessionLoopReadiness::idle(),
             &device,
             &mut exporter,
             &mut reader,
-            &mut page_flip_poller,
             &sender,
         )
         .expect("session loop tick should keep moving when input is idle");
@@ -2252,11 +2257,15 @@ fn live_session_loop_tick_observes_readiness_then_retire_and_submit() {
     let source = LibdrmNativePageFlipSource::from_authority(
         LibdrmBackendFdAuthority::new(37).expect("nonzero authority should mint"),
     );
-    let mut page_flip_poller =
+    let page_flip_poller =
         NativeLibdrmPageFlipEventPoller::new(source).with_routes([LibdrmNativeOutputRoute {
             slot,
             output: OutputId::from_raw(1),
         }]);
+    let mut session_loop = LiveBackendSessionLoop::new(
+        page_flip_poller,
+        LiveBackendSessionLoopPageFlipBudget::new(4, 4),
+    );
     let mut reader =
         FakeLibdrmNativePageFlipReader::new([LibdrmNativePageFlipCallback::new(slot, 103)]);
     let mut next_exporter = FakeRenderedScanoutExporter::exported(Size {
@@ -2264,16 +2273,14 @@ fn live_session_loop_tick_observes_readiness_then_retire_and_submit() {
         height: 720,
     });
 
-    let report = assembly
-        .run_session_loop_tick_with_rendered_primary_plane_scanout_and_native_page_flip_events_with(
+    let report = session_loop
+        .run_tick_with_rendered_primary_plane_scanout_and_native_page_flip_events_with(
+            &mut assembly,
             CompositorBackendTickInput::default(),
-            LiveBackendSessionLoopReadiness::input_ready(
-                LiveBackendSessionLoopPageFlipBudget::new(4, 4),
-            ),
+            LiveBackendSessionLoopReadiness::input_ready(),
             &device,
             &mut next_exporter,
             &mut reader,
-            &mut page_flip_poller,
             &sender,
         )
         .expect("session loop tick should ingest readiness, retire, and submit");
