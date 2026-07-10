@@ -572,6 +572,11 @@ later page-flip retirement/rejection observations.
 for that handoff. Backend-live maps rendered primary-plane submit status into
 `Submitted` or `Rejected`, then the live runtime adapter converts that fact into
 `ScanoutStateChanged` when the executor reaches `SubmitScanout`.
+For rendered primary-plane scanout, backend-live can also retain the combined
+rendered-buffer owner and KMS submission owner internally. Stale page-flip
+evidence keeps that owner in flight. Accepted presented page-flip evidence
+retires the owner and maps to reduced `Retired` state; resource retirement
+failure maps to reduced `Rejected` state.
 
 `HeadlessSessionDriver` is the first reusable command executor around this
 loop. It owns a `SessionRuntimeLoop` and last-committed layout cache, starts a

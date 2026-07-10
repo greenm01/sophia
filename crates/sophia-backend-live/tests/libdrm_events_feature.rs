@@ -31,7 +31,8 @@ use sophia_backend_live::{
     LivePageFlipCallbackDecision, LivePageFlipCallbackQueue, LivePageFlipCallbackReport,
     LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus,
     LiveRenderedPrimaryPlaneScanoutSubmitStatus, LiveRenderedScanoutBufferExport,
-    LiveRenderedScanoutBufferExporter, NativeLibdrmAtomicScanoutCommitter,
+    LiveRenderedScanoutBufferExporter, LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus,
+    LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus, NativeLibdrmAtomicScanoutCommitter,
     NativeLibdrmPageFlipEventPoller, NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller,
     RuntimeScanoutState, Size, build_native_primary_plane_atomic_request,
     create_native_primary_plane_resources, decode_native_page_flip_batch,
@@ -1059,6 +1060,142 @@ fn live_runtime_assembly_submits_rendered_primary_plane_scanout_through_reduced_
         Some(LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed)
     );
     assert!(retired.submission.is_none());
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_runtime_assembly_tracks_rendered_scanout_until_accepted_page_flip() {
+    let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-tracked-retire");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready backend should seed live assembly");
+    let device = full_primary_plane_scanout_device();
+    let mut exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+
+    let submitted =
+        assembly.submit_and_track_rendered_primary_plane_scanout_with(&device, &mut exporter);
+
+    assert_eq!(
+        submitted.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+    );
+    assert_eq!(
+        submitted.runtime_scanout_state,
+        Some(RuntimeScanoutState::Submitted)
+    );
+    assert_eq!(submitted.in_flight, true);
+    assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), true);
+    assert_eq!(
+        assembly.rendered_primary_plane_runtime_scanout_state(),
+        Some(RuntimeScanoutState::Submitted)
+    );
+
+    let blocked =
+        assembly.submit_and_track_rendered_primary_plane_scanout_with(&device, &mut exporter);
+
+    assert_eq!(
+        blocked.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::AlreadyInFlight
+    );
+    assert_eq!(blocked.runtime_scanout_state, None);
+    assert_eq!(blocked.in_flight, true);
+    assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), true);
+
+    let stale = LivePageFlipCallbackReport {
+        decision: LivePageFlipCallbackDecision::RejectedStaleFrameSerial,
+        event: LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Rejected,
+            frame_serial: Some(54),
+        },
+    };
+    let waiting =
+        assembly.retire_tracked_rendered_primary_plane_scanout_after_page_flip(&device, &stale);
+
+    assert_eq!(
+        waiting.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::WaitingForAcceptedPageFlip
+    );
+    assert_eq!(waiting.runtime_scanout_state, None);
+    assert_eq!(waiting.in_flight, true);
+    assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), true);
+
+    let accepted = LivePageFlipCallbackReport {
+        decision: LivePageFlipCallbackDecision::Accepted,
+        event: LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(55),
+        },
+    };
+    let retired =
+        assembly.retire_tracked_rendered_primary_plane_scanout_after_page_flip(&device, &accepted);
+
+    assert_eq!(
+        retired.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip
+    );
+    assert_eq!(
+        retired.runtime_scanout_state,
+        Some(RuntimeScanoutState::Retired)
+    );
+    assert_eq!(retired.in_flight, false);
+    assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), false);
+    assert_eq!(
+        assembly.rendered_primary_plane_runtime_scanout_state(),
+        Some(RuntimeScanoutState::Retired)
+    );
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_runtime_assembly_does_not_track_failed_rendered_scanout_submit() {
+    let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-tracked-fail");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready backend should seed live assembly");
+    let device = full_primary_plane_scanout_device();
+    let mut exporter = FakeRenderedScanoutExporter::unavailable();
+
+    let submitted =
+        assembly.submit_and_track_rendered_primary_plane_scanout_with(&device, &mut exporter);
+
+    assert_eq!(
+        submitted.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutExportFailed
+    );
+    assert_eq!(
+        submitted.runtime_scanout_state,
+        Some(RuntimeScanoutState::Rejected)
+    );
+    assert_eq!(submitted.in_flight, false);
+    assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), false);
+    assert_eq!(
+        assembly.rendered_primary_plane_runtime_scanout_state(),
+        Some(RuntimeScanoutState::Rejected)
+    );
+
+    let accepted = LivePageFlipCallbackReport {
+        decision: LivePageFlipCallbackDecision::Accepted,
+        event: LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(55),
+        },
+    };
+    let retired =
+        assembly.retire_tracked_rendered_primary_plane_scanout_after_page_flip(&device, &accepted);
+
+    assert_eq!(
+        retired.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::NoSubmission
+    );
+    assert_eq!(retired.runtime_scanout_state, None);
+    assert_eq!(retired.in_flight, false);
 
     std::fs::remove_dir_all(root).unwrap();
 }

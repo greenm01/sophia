@@ -205,6 +205,11 @@ state, while frame-target, export, or primary-plane submit failure becomes
 reduced rejected state. Accepted page-flip retirement maps to reduced retired
 state; stale page-flip evidence produces no runtime state change because the
 submission remains in flight.
+The tracked rendered primary-plane path keeps the combined rendered buffer owner
+and KMS submission owner inside backend-live until page-flip evidence is strong
+enough to retire it. This is the resource-lifetime half of atomic rendering:
+the runtime can observe submitted/retired/rejected state, but it never sees or
+owns GBM buffers, DRM framebuffers, property handles, or KMS submission objects.
 `retire_native_primary_plane_scanout_after_page_flip` consumes that owner only
 when a reduced callback report is accepted and presented. Rejected or stale
 callbacks return the owner to the caller, preserving buffer and framebuffer

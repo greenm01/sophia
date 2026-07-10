@@ -67,6 +67,8 @@ active milestone to `docs/roadmap-history.md`.
 
 ## Done Recently
 
+- [x] Added backend-live tracked rendered scanout ownership so stale page-flip
+  evidence keeps GBM/KMS resources in flight until accepted retirement.
 - [x] Added reduced live scanout submit intake so backend-live rendered
   primary-plane submit results can drive runtime `SubmitScanout`.
 - [x] Added shared runtime scanout lifecycle state so rendered frames progress

@@ -6,6 +6,8 @@
 //! can replace these adapters without changing Sophia Engine, WM IPC, or
 //! protocol authority packets.
 
+#[cfg(feature = "libdrm-events")]
+use std::any::Any;
 use std::collections::VecDeque;
 #[cfg(any(
     feature = "gbm-probe",
@@ -2196,7 +2198,21 @@ impl<Owner> LiveRenderedPrimaryPlaneScanoutSubmission<Owner> {
     pub fn into_scanout_buffer(self) -> Owner {
         self.scanout_buffer
     }
+
+    pub fn map_scanout_buffer<Next>(
+        self,
+        map: impl FnOnce(Owner) -> Next,
+    ) -> LiveRenderedPrimaryPlaneScanoutSubmission<Next> {
+        LiveRenderedPrimaryPlaneScanoutSubmission {
+            scanout_buffer: map(self.scanout_buffer),
+            primary_plane: self.primary_plane,
+        }
+    }
 }
+
+#[cfg(feature = "libdrm-events")]
+type BoxedRenderedPrimaryPlaneScanoutSubmission =
+    LiveRenderedPrimaryPlaneScanoutSubmission<Box<dyn Any>>;
 
 #[cfg(feature = "libdrm-events")]
 #[derive(Debug)]
@@ -2224,6 +2240,85 @@ pub fn runtime_scanout_state_from_rendered_primary_plane_retire_status(
         LibdrmNativePrimaryPlaneScanoutRetireStatus::WaitingForAcceptedPageFlip => None,
         LibdrmNativePrimaryPlaneScanoutRetireStatus::ResourceRetireFailed => {
             Some(RuntimeScanoutState::Rejected)
+        }
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
+    pub status: LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus,
+    pub target: Option<LiveGbmEglFrameTargetStatus>,
+    pub export: Option<LiveRendererScanoutBufferExportStatus>,
+    pub submit: Option<LibdrmNativePrimaryPlaneScanoutSubmitStatus>,
+    pub runtime_scanout_state: Option<RuntimeScanoutState>,
+    pub in_flight: bool,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus {
+    SubmittedWaitingForPageFlip,
+    FrameTargetUnavailable,
+    ScanoutExportFailed,
+    PrimaryPlaneSubmitFailed,
+    AlreadyInFlight,
+}
+
+#[cfg(feature = "libdrm-events")]
+impl From<LiveRenderedPrimaryPlaneScanoutSubmitStatus>
+    for LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus
+{
+    fn from(status: LiveRenderedPrimaryPlaneScanoutSubmitStatus) -> Self {
+        match status {
+            LiveRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip => {
+                Self::SubmittedWaitingForPageFlip
+            }
+            LiveRenderedPrimaryPlaneScanoutSubmitStatus::FrameTargetUnavailable => {
+                Self::FrameTargetUnavailable
+            }
+            LiveRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutExportFailed => {
+                Self::ScanoutExportFailed
+            }
+            LiveRenderedPrimaryPlaneScanoutSubmitStatus::PrimaryPlaneSubmitFailed => {
+                Self::PrimaryPlaneSubmitFailed
+            }
+        }
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveTrackedRenderedPrimaryPlaneScanoutRetireReport {
+    pub status: LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus,
+    pub runtime_scanout_state: Option<RuntimeScanoutState>,
+    pub in_flight: bool,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus {
+    NoSubmission,
+    RetiredAfterPageFlip,
+    WaitingForAcceptedPageFlip,
+    ResourceRetireFailed,
+}
+
+#[cfg(feature = "libdrm-events")]
+impl From<LibdrmNativePrimaryPlaneScanoutRetireStatus>
+    for LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus
+{
+    fn from(status: LibdrmNativePrimaryPlaneScanoutRetireStatus) -> Self {
+        match status {
+            LibdrmNativePrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip => {
+                Self::RetiredAfterPageFlip
+            }
+            LibdrmNativePrimaryPlaneScanoutRetireStatus::WaitingForAcceptedPageFlip => {
+                Self::WaitingForAcceptedPageFlip
+            }
+            LibdrmNativePrimaryPlaneScanoutRetireStatus::ResourceRetireFailed => {
+                Self::ResourceRetireFailed
+            }
         }
     }
 }
@@ -4087,6 +4182,10 @@ impl LiveBackendStartupReport {
                 page_flip_callback_intake,
                 page_flip_callback_queue: None,
                 libdrm_poller_diagnostics: LiveLibdrmPollerDiagnostics::not_configured(),
+                #[cfg(feature = "libdrm-events")]
+                rendered_primary_plane_scanout_submission: None,
+                #[cfg(feature = "libdrm-events")]
+                rendered_primary_plane_runtime_scanout_state: None,
             })
     }
 }
@@ -4310,6 +4409,10 @@ pub struct LiveBackendRuntimeAssembly<P = QueuedInputPoller> {
     page_flip_callback_intake: LivePageFlipCallbackIntake,
     page_flip_callback_queue: Option<LivePageFlipCallbackQueue>,
     libdrm_poller_diagnostics: LiveLibdrmPollerDiagnostics,
+    #[cfg(feature = "libdrm-events")]
+    rendered_primary_plane_scanout_submission: Option<BoxedRenderedPrimaryPlaneScanoutSubmission>,
+    #[cfg(feature = "libdrm-events")]
+    rendered_primary_plane_runtime_scanout_state: Option<RuntimeScanoutState>,
 }
 
 impl<P> LiveBackendRuntimeAssembly<P>
@@ -4363,6 +4466,16 @@ where
 
     pub fn libdrm_poller_diagnostics(&self) -> LiveLibdrmPollerDiagnostics {
         self.libdrm_poller_diagnostics
+    }
+
+    #[cfg(feature = "libdrm-events")]
+    pub fn rendered_primary_plane_scanout_in_flight(&self) -> bool {
+        self.rendered_primary_plane_scanout_submission.is_some()
+    }
+
+    #[cfg(feature = "libdrm-events")]
+    pub fn rendered_primary_plane_runtime_scanout_state(&self) -> Option<RuntimeScanoutState> {
+        self.rendered_primary_plane_runtime_scanout_state
     }
 
     pub fn scanout_readiness_observation(&self) -> LiveScanoutReadinessReport {
@@ -4537,6 +4650,84 @@ where
                 scanout_buffer: owner,
                 primary_plane,
             }),
+        }
+    }
+
+    #[cfg(feature = "libdrm-events")]
+    pub fn submit_and_track_rendered_primary_plane_scanout_with<D, E>(
+        &mut self,
+        device: &D,
+        exporter: &mut E,
+    ) -> LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport
+    where
+        D: LibdrmNativeKmsSelectionDevice
+            + LibdrmNativePropertyLookupDevice
+            + LibdrmNativePrimaryPlaneResourceDevice
+            + LibdrmNativeAtomicCommitDevice,
+        E: LiveRenderedScanoutBufferExporter,
+        E::Owner: 'static,
+    {
+        if self.rendered_primary_plane_scanout_in_flight() {
+            return LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
+                status: LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::AlreadyInFlight,
+                target: self.gbm_egl_frame_target.map(|target| target.status),
+                export: None,
+                submit: None,
+                runtime_scanout_state: None,
+                in_flight: true,
+            };
+        }
+
+        let mut result = self.submit_rendered_primary_plane_scanout_with(device, exporter);
+        let runtime_scanout_state = Some(result.runtime_scanout_state());
+
+        if let Some(submission) = result.submission.take() {
+            self.rendered_primary_plane_scanout_submission =
+                Some(submission.map_scanout_buffer(|owner| Box::new(owner) as Box<dyn Any>));
+        }
+        self.rendered_primary_plane_runtime_scanout_state = runtime_scanout_state;
+
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
+            status: result.status.into(),
+            target: result.target,
+            export: result.export,
+            submit: result.submit,
+            runtime_scanout_state,
+            in_flight: self.rendered_primary_plane_scanout_in_flight(),
+        }
+    }
+
+    #[cfg(feature = "libdrm-events")]
+    pub fn retire_tracked_rendered_primary_plane_scanout_after_page_flip<D>(
+        &mut self,
+        device: &D,
+        callback: &LivePageFlipCallbackReport,
+    ) -> LiveTrackedRenderedPrimaryPlaneScanoutRetireReport
+    where
+        D: LibdrmNativePrimaryPlaneResourceDevice,
+    {
+        let Some(submission) = self.rendered_primary_plane_scanout_submission.take() else {
+            return LiveTrackedRenderedPrimaryPlaneScanoutRetireReport {
+                status: LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::NoSubmission,
+                runtime_scanout_state: None,
+                in_flight: false,
+            };
+        };
+
+        let retired =
+            retire_rendered_primary_plane_scanout_after_page_flip(device, submission, callback);
+        let runtime_scanout_state = retired.runtime_scanout_state();
+        if let Some(submission) = retired.submission {
+            self.rendered_primary_plane_scanout_submission = Some(submission);
+        }
+        if let Some(runtime_scanout_state) = runtime_scanout_state {
+            self.rendered_primary_plane_runtime_scanout_state = Some(runtime_scanout_state);
+        }
+
+        LiveTrackedRenderedPrimaryPlaneScanoutRetireReport {
+            status: retired.status.into(),
+            runtime_scanout_state,
+            in_flight: self.rendered_primary_plane_scanout_in_flight(),
         }
     }
 
