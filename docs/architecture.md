@@ -662,6 +662,10 @@ the compositor in a fail-closed waiting or rejected state.
 path. It is compiled only behind `libdrm-events`, reduces DRM page-flip events
 through private CRTC routes, and emits only backend-local slots and frame
 serials into the existing reduced callback pipeline.
+`NativeLibdrmAtomicScanoutCommitter` is the matching native submit boundary. It
+may submit a backend-owned `AtomicModeReq` to DRM/KMS, but a successful ioctl
+only means the kernel accepted the request. Sophia still waits for the reduced
+page-flip callback before making the visual commit observable.
 
 The XLibre prototype scheduler may still consume X Damage. In that path,
 `schedule_frame_from_damage` combines a frame-clock tick, an optional X-derived

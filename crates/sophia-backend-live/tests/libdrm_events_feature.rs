@@ -1,13 +1,16 @@
 #![cfg(feature = "libdrm-events")]
 
-use std::sync::mpsc;
+use std::{io, sync::mpsc};
 
 use sophia_backend_live::{
     CompositorBackendTickInput, FakeLibdrmNativePageFlipReader, FakeLibdrmPageFlipEventPoller,
     LibdrmBackendFdAuthority, LibdrmBackendFdAuthorityReport, LibdrmBackendFdAuthorityStatus,
-    LibdrmDependencyAdmissionReport, LibdrmDependencyAdmissionStatus, LibdrmNativeCrtcRoute,
-    LibdrmNativeEventAdapterReport, LibdrmNativeEventAdapterStatus, LibdrmNativeOutputRoute,
-    LibdrmNativeOutputSlot, LibdrmNativePageFlipCallback, LibdrmNativePageFlipDecodeReport,
+    LibdrmDependencyAdmissionReport, LibdrmDependencyAdmissionStatus,
+    LibdrmNativeAtomicCommitDevice, LibdrmNativeAtomicCommitFlagsReport,
+    LibdrmNativeAtomicCommitRequest, LibdrmNativeAtomicCommitSubmitReport,
+    LibdrmNativeAtomicCommitSubmitStatus, LibdrmNativeCrtcRoute, LibdrmNativeEventAdapterReport,
+    LibdrmNativeEventAdapterStatus, LibdrmNativeOutputRoute, LibdrmNativeOutputSlot,
+    LibdrmNativePageFlipCallback, LibdrmNativePageFlipDecodeReport,
     LibdrmNativePageFlipDecodeStatus, LibdrmNativePageFlipReadResult, LibdrmNativePageFlipReader,
     LibdrmNativePageFlipSource, LibdrmNativePageFlipSourceReport, LibdrmNativePageFlipSourceStatus,
     LibdrmNativePollerDiagnostics, LibdrmNativeReadAndPollReport, LibdrmNativeReadLoopReport,
@@ -18,11 +21,12 @@ use sophia_backend_live::{
     LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
     LiveLibdrmPollerStartupStatus, LivePageFlipCallback, LivePageFlipCallbackQueue,
     LivePageFlipCallbackSourceReport, LivePageFlipEvent, LivePageFlipEventStatus,
-    NativeLibdrmPageFlipEventPoller, NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller,
-    decode_native_page_flip_batch, discover_live_backend, libdrm_dependency_admission_report,
-    libdrm_fd_authority_report, native_libdrm_event_adapter_report,
-    native_libdrm_event_adapter_report_for_authority, real_libdrm_events_validation_gate,
-    real_libdrm_events_validation_smoke_report, reduce_native_page_flip_event,
+    NativeLibdrmAtomicScanoutCommitter, NativeLibdrmPageFlipEventPoller,
+    NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller, decode_native_page_flip_batch,
+    discover_live_backend, libdrm_dependency_admission_report, libdrm_fd_authority_report,
+    native_libdrm_event_adapter_report, native_libdrm_event_adapter_report_for_authority,
+    real_libdrm_events_validation_gate, real_libdrm_events_validation_smoke_report,
+    reduce_native_page_flip_event,
 };
 
 #[test]
@@ -156,6 +160,99 @@ fn native_libdrm_page_flip_source_constructs_from_authority_without_reading_even
             status: LibdrmNativePageFlipSourceStatus::ConstructedWithoutPolling,
         }
     );
+}
+
+#[derive(Debug)]
+struct FakeNativeAtomicCommitDevice {
+    result: io::Result<()>,
+}
+
+impl LibdrmNativeAtomicCommitDevice for FakeNativeAtomicCommitDevice {
+    fn submit_atomic_commit(
+        &self,
+        _flags: drm::control::AtomicCommitFlags,
+        _request: drm::control::atomic::AtomicModeReq,
+    ) -> io::Result<()> {
+        self.result
+            .as_ref()
+            .map(|_| ())
+            .map_err(|error| io::Error::new(error.kind(), "synthetic atomic commit failure"))
+    }
+}
+
+#[test]
+fn native_libdrm_atomic_commit_request_reports_reduced_flags() {
+    let default_request =
+        LibdrmNativeAtomicCommitRequest::new(drm::control::atomic::AtomicModeReq::new());
+    assert_eq!(
+        default_request.reduced_flags(),
+        LibdrmNativeAtomicCommitFlagsReport {
+            page_flip_event: true,
+            nonblocking: true,
+            allow_modeset: false,
+            test_only: false,
+        }
+    );
+
+    let explicit_request =
+        LibdrmNativeAtomicCommitRequest::new(drm::control::atomic::AtomicModeReq::new())
+            .without_page_flip_event()
+            .blocking()
+            .allow_modeset()
+            .test_only();
+    assert_eq!(
+        explicit_request.reduced_flags(),
+        LibdrmNativeAtomicCommitFlagsReport {
+            page_flip_event: false,
+            nonblocking: false,
+            allow_modeset: true,
+            test_only: true,
+        }
+    );
+}
+
+#[test]
+fn native_libdrm_atomic_committer_reduces_submit_results() {
+    let mut committer =
+        NativeLibdrmAtomicScanoutCommitter::new(FakeNativeAtomicCommitDevice { result: Ok(()) });
+    assert_eq!(
+        committer.submit_native_atomic_commit(LibdrmNativeAtomicCommitRequest::new(
+            drm::control::atomic::AtomicModeReq::new()
+        )),
+        LibdrmNativeAtomicCommitSubmitReport {
+            status: LibdrmNativeAtomicCommitSubmitStatus::Submitted,
+        }
+    );
+    assert_eq!(committer.submitted_count(), 1);
+    assert_eq!(committer.rejected_count(), 0);
+
+    let mut would_block = NativeLibdrmAtomicScanoutCommitter::new(FakeNativeAtomicCommitDevice {
+        result: Err(io::Error::from(io::ErrorKind::WouldBlock)),
+    });
+    assert_eq!(
+        would_block.submit_native_atomic_commit(LibdrmNativeAtomicCommitRequest::new(
+            drm::control::atomic::AtomicModeReq::new()
+        )),
+        LibdrmNativeAtomicCommitSubmitReport {
+            status: LibdrmNativeAtomicCommitSubmitStatus::WouldBlock,
+        }
+    );
+    assert_eq!(would_block.submitted_count(), 0);
+    assert_eq!(would_block.rejected_count(), 0);
+
+    let mut rejected = NativeLibdrmAtomicScanoutCommitter::new(FakeNativeAtomicCommitDevice {
+        result: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+    });
+    assert_eq!(
+        rejected.submit_native_atomic_commit(LibdrmNativeAtomicCommitRequest::new(
+            drm::control::atomic::AtomicModeReq::new()
+        )),
+        LibdrmNativeAtomicCommitSubmitReport {
+            status: LibdrmNativeAtomicCommitSubmitStatus::Rejected,
+        }
+    );
+    assert_eq!(rejected.submitted_count(), 0);
+    assert_eq!(rejected.rejected_count(), 1);
 }
 
 #[test]

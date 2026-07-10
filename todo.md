@@ -52,6 +52,8 @@ active milestone to `docs/roadmap-history.md`.
   behavior over broad X11 completeness.
 - [ ] Start Sophia Wayland Authority only after live backend frame targets and
   scanout timing are stable.
+- [ ] Build real KMS atomic property sets from backend-private connector, CRTC,
+  plane, framebuffer, and mode state.
 - [ ] Keep the XLibre prototype docs and bridge smokes as compatibility lessons
   until Sophia X Authority has equivalent live coverage.
 - [ ] Revisit wgpu only after GBM/EGL startup, drawing, presentation,
@@ -69,6 +71,8 @@ active milestone to `docs/roadmap-history.md`.
   atomic scanout commits can publish committed state.
 - [x] Added a concrete `NativeLibdrmPageFlipEventReader` behind
   `libdrm-events` without opening devices during default validation.
+- [x] Added a feature-gated native atomic submit committer that calls the DRM
+  atomic commit API but waits for page-flip evidence before visual commit.
 - [x] Defined opt-in environment gates for real libdrm and libinput validation.
 - [x] Kept default workspace validation independent of device nodes and seats.
 - [x] Added reduced real-hardware smoke reports that fail closed before concrete

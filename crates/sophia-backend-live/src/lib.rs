@@ -764,6 +764,202 @@ impl LiveAtomicScanoutCommitter for FakeAtomicScanoutCommitter {
     }
 }
 
+#[cfg(feature = "libdrm-events")]
+pub struct LibdrmNativeAtomicCommitRequest {
+    request: drm::control::atomic::AtomicModeReq,
+    page_flip_event: bool,
+    nonblocking: bool,
+    allow_modeset: bool,
+    test_only: bool,
+}
+
+#[cfg(feature = "libdrm-events")]
+impl LibdrmNativeAtomicCommitRequest {
+    pub const fn new(request: drm::control::atomic::AtomicModeReq) -> Self {
+        Self {
+            request,
+            page_flip_event: true,
+            nonblocking: true,
+            allow_modeset: false,
+            test_only: false,
+        }
+    }
+
+    pub const fn without_page_flip_event(mut self) -> Self {
+        self.page_flip_event = false;
+        self
+    }
+
+    pub const fn blocking(mut self) -> Self {
+        self.nonblocking = false;
+        self
+    }
+
+    pub const fn allow_modeset(mut self) -> Self {
+        self.allow_modeset = true;
+        self
+    }
+
+    pub const fn test_only(mut self) -> Self {
+        self.test_only = true;
+        self
+    }
+
+    pub const fn reduced_flags(&self) -> LibdrmNativeAtomicCommitFlagsReport {
+        LibdrmNativeAtomicCommitFlagsReport {
+            page_flip_event: self.page_flip_event,
+            nonblocking: self.nonblocking,
+            allow_modeset: self.allow_modeset,
+            test_only: self.test_only,
+        }
+    }
+
+    fn into_native(
+        self,
+    ) -> (
+        drm::control::AtomicCommitFlags,
+        drm::control::atomic::AtomicModeReq,
+    ) {
+        let mut flags = drm::control::AtomicCommitFlags::empty();
+        if self.page_flip_event {
+            flags |= drm::control::AtomicCommitFlags::PAGE_FLIP_EVENT;
+        }
+        if self.nonblocking {
+            flags |= drm::control::AtomicCommitFlags::NONBLOCK;
+        }
+        if self.allow_modeset {
+            flags |= drm::control::AtomicCommitFlags::ALLOW_MODESET;
+        }
+        if self.test_only {
+            flags |= drm::control::AtomicCommitFlags::TEST_ONLY;
+        }
+        (flags, self.request)
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LibdrmNativeAtomicCommitFlagsReport {
+    pub page_flip_event: bool,
+    pub nonblocking: bool,
+    pub allow_modeset: bool,
+    pub test_only: bool,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LibdrmNativeAtomicCommitSubmitReport {
+    pub status: LibdrmNativeAtomicCommitSubmitStatus,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibdrmNativeAtomicCommitSubmitStatus {
+    Submitted,
+    WouldBlock,
+    Rejected,
+}
+
+#[cfg(feature = "libdrm-events")]
+pub trait LibdrmNativeAtomicCommitDevice {
+    fn submit_atomic_commit(
+        &self,
+        flags: drm::control::AtomicCommitFlags,
+        request: drm::control::atomic::AtomicModeReq,
+    ) -> io::Result<()>;
+}
+
+#[cfg(feature = "libdrm-events")]
+impl<D> LibdrmNativeAtomicCommitDevice for D
+where
+    D: drm::control::Device,
+{
+    fn submit_atomic_commit(
+        &self,
+        flags: drm::control::AtomicCommitFlags,
+        request: drm::control::atomic::AtomicModeReq,
+    ) -> io::Result<()> {
+        self.atomic_commit(flags, request)
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Debug)]
+pub struct NativeLibdrmAtomicScanoutCommitter<D> {
+    device: D,
+    submitted: usize,
+    rejected: usize,
+}
+
+#[cfg(feature = "libdrm-events")]
+impl<D> NativeLibdrmAtomicScanoutCommitter<D> {
+    pub const fn new(device: D) -> Self {
+        Self {
+            device,
+            submitted: 0,
+            rejected: 0,
+        }
+    }
+
+    pub const fn submitted_count(&self) -> usize {
+        self.submitted
+    }
+
+    pub const fn rejected_count(&self) -> usize {
+        self.rejected
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+impl<D> NativeLibdrmAtomicScanoutCommitter<D>
+where
+    D: LibdrmNativeAtomicCommitDevice,
+{
+    pub fn submit_native_atomic_commit(
+        &mut self,
+        request: LibdrmNativeAtomicCommitRequest,
+    ) -> LibdrmNativeAtomicCommitSubmitReport {
+        let (flags, request) = request.into_native();
+        match self.device.submit_atomic_commit(flags, request) {
+            Ok(()) => {
+                self.submitted = self.submitted.saturating_add(1);
+                LibdrmNativeAtomicCommitSubmitReport {
+                    status: LibdrmNativeAtomicCommitSubmitStatus::Submitted,
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                LibdrmNativeAtomicCommitSubmitReport {
+                    status: LibdrmNativeAtomicCommitSubmitStatus::WouldBlock,
+                }
+            }
+            Err(_) => {
+                self.rejected = self.rejected.saturating_add(1);
+                LibdrmNativeAtomicCommitSubmitReport {
+                    status: LibdrmNativeAtomicCommitSubmitStatus::Rejected,
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+impl<D> LiveAtomicScanoutCommitter for NativeLibdrmAtomicScanoutCommitter<D> {
+    fn commit_atomic_scanout(
+        &mut self,
+        outcome: &PageFlipCommitOutcome,
+    ) -> LiveAtomicScanoutCommitReport {
+        LiveAtomicScanoutCommitReport::from_page_flip_outcome(outcome)
+    }
+
+    fn commit_atomic_scanout_after_page_flip(
+        &mut self,
+        callback: &LivePageFlipCallbackReport,
+        outcome: &PageFlipCommitOutcome,
+    ) -> LiveAtomicScanoutCommitReport {
+        LiveAtomicScanoutCommitReport::from_page_flip_callback_and_outcome(callback, outcome)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LivePageFlipCallback {
     pub output: OutputId,

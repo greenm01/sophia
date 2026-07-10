@@ -137,6 +137,16 @@ reduced output route and monotonic frame-serial checks before
 wrong-output, or frame-serial-mismatched callbacks fail closed and do not advance
 committed scanout state.
 
+`NativeLibdrmAtomicScanoutCommitter` is the first native atomic submit seam
+behind `libdrm-events`. It accepts a `LibdrmNativeAtomicCommitRequest`, calls the
+real `drm::control::Device::atomic_commit` API when backed by a real DRM device,
+and reduces the result to submitted, would-block, or rejected. A submitted ioctl
+is not a committed Sophia frame. The runtime may publish committed visual state
+only after the matching reduced page-flip evidence is accepted.
+`LibdrmNativeAtomicCommitRequest` owns the native atomic request privately and
+exposes only reduced flag facts for tests and diagnostics; framebuffer, CRTC,
+plane, connector, property, and fd identity stay inside backend-live.
+
 Backend-live runtime ticks carry the current reduced scanout readiness report,
 KMS scanout target report, and page-flip event beside renderer health. This
 keeps the runtime-facing diagnostics useful without introducing KMS dependencies

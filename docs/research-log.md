@@ -817,6 +817,10 @@ The first concrete libdrm reader is now feature-gated behind `libdrm-events`.
 `NativeLibdrmPageFlipEventReader` wraps a `drm::control::Device`, reduces
 `PageFlipEvent` through private CRTC routes, and feeds the same
 `LibdrmNativePageFlipReader` contract used by the deterministic fake.
+`NativeLibdrmAtomicScanoutCommitter` adds the corresponding atomic request
+submit boundary. The submit report says only submitted, would-block, or
+rejected; it deliberately does not publish committed visual state without the
+accepted page-flip callback path.
 
 ## Open Questions
 
