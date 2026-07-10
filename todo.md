@@ -83,6 +83,8 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Split page-flip callback intake, callback queue draining, poller
+  diagnostics, and fake callback emission into separate scanout modules.
 - [x] Hardened rendered GBM scanout target validation so forged ready frame
   targets are rejected before native render-device discovery.
 - [x] Centralized backend runtime tick report construction so plain and
