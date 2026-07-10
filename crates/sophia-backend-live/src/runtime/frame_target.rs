@@ -28,6 +28,15 @@ where
         self.gbm_egl_frame_target_allocation
     }
 
+    pub fn output_size_observation(&self) -> Option<Size> {
+        self.output_size
+    }
+
+    pub fn observe_output_size(&mut self, size: Size) {
+        self.output_size = Some(size);
+        self.refresh_kms_scanout_target(self.current_renderer_presentation_report());
+    }
+
     pub fn observe_gbm_egl_frame_target_size(&mut self, size: Size) -> LiveGbmEglFrameTargetRecord {
         let previous = self.gbm_egl_frame_target;
         let record = LiveGbmEglFrameTargetRecord::new(size);

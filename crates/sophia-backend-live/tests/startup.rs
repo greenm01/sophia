@@ -612,6 +612,66 @@ fn live_runtime_assembly_blocks_page_flip_readiness_for_frame_target_size_mismat
 }
 
 #[test]
+fn live_runtime_assembly_blocks_page_flip_until_frame_target_matches_output_resize() {
+    let root = ready_drm_sysfs_fixture("runtime-output-size-mismatch");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready startup should seed live assembly");
+    let resized_output = Size {
+        width: 1920,
+        height: 1080,
+    };
+
+    assembly.observe_output_size(resized_output);
+
+    assert_eq!(assembly.output_size_observation(), Some(resized_output));
+    assert_eq!(
+        assembly.kms_scanout_target_observation(),
+        LiveKmsScanoutTargetReport {
+            status: LiveKmsScanoutTargetStatus::FrameTargetSizeMismatch,
+            size: Some(Size {
+                width: 1280,
+                height: 720,
+            }),
+        }
+    );
+    assert_eq!(
+        assembly.page_flip_observation(),
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::FrameTargetSizeMismatch,
+            frame_serial: None,
+        }
+    );
+
+    let frame_target = assembly.observe_gbm_egl_frame_target_size(resized_output);
+
+    assert_eq!(
+        frame_target,
+        LiveGbmEglFrameTargetRecord {
+            status: LiveGbmEglFrameTargetStatus::Ready,
+            size: resized_output,
+        }
+    );
+    assert_eq!(
+        assembly.kms_scanout_target_observation(),
+        LiveKmsScanoutTargetReport {
+            status: LiveKmsScanoutTargetStatus::Ready,
+            size: Some(resized_output),
+        }
+    );
+    assert_eq!(
+        assembly.page_flip_observation(),
+        LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Ready,
+            frame_serial: None,
+        }
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn live_runtime_assembly_keeps_degraded_scanout_target_reduced() {
     let root = ready_drm_sysfs_fixture("runtime-kms-scanout-target-degraded");
     let report = discover_live_backend(&LiveBackendConfig::new(&root));
