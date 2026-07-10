@@ -3677,7 +3677,7 @@ fn native_atomic_scanout_smoke_evidence_requires_modeset_request_scope() {
 
     assert_eq!(
         evidence.status,
-        LibdrmNativeAtomicScanoutSmokeStatus::SubmitFailed
+        LibdrmNativeAtomicScanoutSmokeStatus::RequestShapeMismatch
     );
     assert_eq!(
         evidence.request_scope,
@@ -3739,7 +3739,7 @@ fn native_atomic_scanout_smoke_evidence_requires_phase_commit_flags() {
 
     assert_eq!(
         evidence.status,
-        LibdrmNativeAtomicScanoutSmokeStatus::SubmitFailed
+        LibdrmNativeAtomicScanoutSmokeStatus::RequestShapeMismatch
     );
     assert_eq!(
         evidence.request_scope,
@@ -3779,6 +3779,121 @@ fn native_atomic_scanout_smoke_evidence_fails_before_submit_for_not_ready_target
     assert!(evidence.submit.is_none());
     assert!(evidence.request_scope.is_none());
     assert!(evidence.commit_flags.is_none());
+}
+
+#[test]
+fn native_atomic_scanout_smoke_evidence_reports_precise_submit_stage_failures() {
+    let device = full_primary_plane_scanout_device();
+
+    let mut property_failed = submit_native_primary_plane_scanout_from_renderer_descriptor(
+        &device,
+        scanout_descriptor(Size {
+            width: 1280,
+            height: 720,
+        }),
+    );
+    property_failed.properties =
+        Some(LibdrmNativePrimaryPlanePropertyDiscoveryStatus::MissingPlaneProperty);
+    assert_eq!(
+        LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+            LiveKmsScanoutTargetStatus::Ready,
+            Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
+            LiveRendererScanoutBufferExportStatus::Exported,
+            Some(&property_failed),
+            None,
+            None,
+            None,
+        )
+        .status,
+        LibdrmNativeAtomicScanoutSmokeStatus::PropertyDiscoveryFailed
+    );
+    property_failed
+        .submission
+        .take()
+        .expect("submitted scanout should retain resources")
+        .retire(&device);
+
+    let mut resource_failed = submit_native_primary_plane_scanout_from_renderer_descriptor(
+        &device,
+        scanout_descriptor(Size {
+            width: 1280,
+            height: 720,
+        }),
+    );
+    resource_failed.resources =
+        Some(LibdrmNativePrimaryPlaneResourceCreateStatus::FramebufferCreateFailed);
+    assert_eq!(
+        LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+            LiveKmsScanoutTargetStatus::Ready,
+            Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
+            LiveRendererScanoutBufferExportStatus::Exported,
+            Some(&resource_failed),
+            None,
+            None,
+            None,
+        )
+        .status,
+        LibdrmNativeAtomicScanoutSmokeStatus::ResourceCreationFailed
+    );
+    resource_failed
+        .submission
+        .take()
+        .expect("submitted scanout should retain resources")
+        .retire(&device);
+
+    let mut request_failed = submit_native_primary_plane_scanout_from_renderer_descriptor(
+        &device,
+        scanout_descriptor(Size {
+            width: 1280,
+            height: 720,
+        }),
+    );
+    request_failed.request = Some(LibdrmNativeAtomicRequestBuildStatus::MissingModeBlob);
+    assert_eq!(
+        LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+            LiveKmsScanoutTargetStatus::Ready,
+            Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
+            LiveRendererScanoutBufferExportStatus::Exported,
+            Some(&request_failed),
+            None,
+            None,
+            None,
+        )
+        .status,
+        LibdrmNativeAtomicScanoutSmokeStatus::RequestBuildFailed
+    );
+    request_failed
+        .submission
+        .take()
+        .expect("submitted scanout should retain resources")
+        .retire(&device);
+
+    let mut submit_failed = submit_native_primary_plane_scanout_from_renderer_descriptor(
+        &device,
+        scanout_descriptor(Size {
+            width: 1280,
+            height: 720,
+        }),
+    );
+    submit_failed.status = LibdrmNativePrimaryPlaneScanoutSubmitStatus::AtomicSubmitFailed;
+    assert_eq!(
+        LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+            LiveKmsScanoutTargetStatus::Ready,
+            Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
+            LiveRendererScanoutBufferExportStatus::Exported,
+            Some(&submit_failed),
+            None,
+            None,
+            None,
+        )
+        .status,
+        LibdrmNativeAtomicScanoutSmokeStatus::AtomicSubmitFailed
+    );
+    submit_failed
+        .submission
+        .take()
+        .expect("submitted scanout should retain resources")
+        .retire(&device);
 }
 
 #[test]

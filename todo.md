@@ -83,6 +83,10 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Split reduced atomic scanout smoke failure status by submit stage, so
+  hardware captures can distinguish property discovery, resource creation,
+  request build, atomic submit, and request-shape failures without native
+  identity.
 - [x] Split native primary-plane resource device, bundle, creation, and cleanup
   code so framebuffer and mode-blob lifetime handling is isolated from request
   construction and easier to audit before hardware smoke capture.

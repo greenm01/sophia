@@ -122,7 +122,10 @@ discovery status, native resource creation status, atomic request build status,
 primary-plane submit status, reduced request scope, page-flip poll status,
 reduced commit flags, page-flip event status, retirement status, retire-time
 resource destroy status, and retire-time cleanup-pending status only. A passing
-capture must contain both `InitialModeset` and `SteadyPageFlip`.
+capture must contain both `InitialModeset` and `SteadyPageFlip`. Failed captures
+reduce the stop point without native identity: property discovery, resource
+creation, request build, atomic submit, and request-shape mismatches are
+reported separately.
 The stable evidence shape for the GBM/EGL renderer smoke is
 `LiveRealGbmSmokeEvidence`: status, draw status, presentation status, and
 frame-target allocation status only.

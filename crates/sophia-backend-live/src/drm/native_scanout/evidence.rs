@@ -198,17 +198,20 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             LibdrmNativeAtomicScanoutSmokeStatus::RenderedContextUnavailable
         } else if gbm_export != LiveRendererScanoutBufferExportStatus::Exported {
             LibdrmNativeAtomicScanoutSmokeStatus::GbmExportFailed
-        } else if properties != Some(LibdrmNativePrimaryPlanePropertyDiscoveryStatus::Discovered)
-            || resources != Some(LibdrmNativePrimaryPlaneResourceCreateStatus::Created)
-            || request != Some(LibdrmNativeAtomicRequestBuildStatus::Built)
-        {
-            LibdrmNativeAtomicScanoutSmokeStatus::SubmitFailed
+        } else if properties != Some(LibdrmNativePrimaryPlanePropertyDiscoveryStatus::Discovered) {
+            LibdrmNativeAtomicScanoutSmokeStatus::PropertyDiscoveryFailed
+        } else if resources != Some(LibdrmNativePrimaryPlaneResourceCreateStatus::Created) {
+            LibdrmNativeAtomicScanoutSmokeStatus::ResourceCreationFailed
+        } else if request != Some(LibdrmNativeAtomicRequestBuildStatus::Built) {
+            LibdrmNativeAtomicScanoutSmokeStatus::RequestBuildFailed
         } else if submit_status
             != Some(LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip)
-            || request_scope != Some(phase.required_request_scope())
+        {
+            LibdrmNativeAtomicScanoutSmokeStatus::AtomicSubmitFailed
+        } else if request_scope != Some(phase.required_request_scope())
             || commit_flags != Some(phase.required_commit_flags())
         {
-            LibdrmNativeAtomicScanoutSmokeStatus::SubmitFailed
+            LibdrmNativeAtomicScanoutSmokeStatus::RequestShapeMismatch
         } else if !accepted_page_flip
             || page_flip_poll != Some(LibdrmPageFlipEventPollStatus::Emitted)
             || page_flip != Some(LivePageFlipEventStatus::Presented)
@@ -285,7 +288,11 @@ pub enum LibdrmNativeAtomicScanoutSmokeStatus {
     KmsTargetUnavailable,
     RenderedContextUnavailable,
     GbmExportFailed,
-    SubmitFailed,
+    PropertyDiscoveryFailed,
+    ResourceCreationFailed,
+    RequestBuildFailed,
+    AtomicSubmitFailed,
+    RequestShapeMismatch,
     PageFlipMissing,
     RetireFailed,
 }

@@ -328,14 +328,16 @@ modeset.
 `LibdrmNativeAtomicScanoutSmokeEvidence` is the reduced record for that smoke.
 It reports only where the chain stopped: no primary card, KMS selection failure,
 persistent rendered-context failure, KMS scanout target failure, GBM export
-failure, submit failure, missing page-flip evidence, retirement failure, or
-passed. The record carries only the reduced KMS scanout target status and
-reduced request scope, reduced commit flags, and reduced evidence schema
-version, never KMS object identity. The explicit hardware smoke now requires
-both phases: an initial modeset-scoped request and a steady-state page-flip
-request without modeset permission. When retirement fails, the record also
-carries the reduced resource-destroy status so diagnostics can tell an accepted
-page flip from a framebuffer/blob cleanup failure. Native handles and object
+failure, property discovery failure, resource creation failure, request build
+failure, atomic submit failure, request-shape mismatch, missing page-flip
+evidence, retirement failure, or passed. The record carries only the reduced KMS
+scanout target status and reduced request scope, reduced commit flags, and
+reduced evidence schema version, never KMS object identity. The explicit
+hardware smoke now requires both phases: an initial modeset-scoped request and a
+steady-state page-flip request without modeset permission. When retirement
+fails, the record also carries the reduced resource-destroy status so
+diagnostics can tell an accepted page flip from a framebuffer/blob cleanup
+failure. Native handles and object
 IDs remain private. A reduced cleanup-pending bit says whether a retry owner
 still exists after the smoke path attempts retirement.
 
