@@ -1,6 +1,8 @@
 use crate::prelude::*;
 
 mod config;
+#[cfg(feature = "egl-probe")]
+mod egl;
 #[cfg(any(feature = "gbm-probe", feature = "egl-probe"))]
 mod probe;
 mod renderer;
@@ -95,142 +97,6 @@ impl LiveBackendStartupReport {
                 authority,
             ))
             .with_routes(self.native_libdrm_output_routes()),
-        )
-    }
-
-    #[cfg(feature = "egl-probe")]
-    pub fn egl_probe_report(
-        &self,
-        platform: EglPlatformStatus,
-        context: EglContextProbeStatus,
-    ) -> LiveEglStartupReport {
-        LiveEglStartupReport::from_probe_status(
-            FakeEglCapabilityProbe::new(platform, context)
-                .probe_report()
-                .status,
-        )
-    }
-
-    #[cfg(feature = "egl-probe")]
-    pub fn native_egl_probe_report(&self) -> LiveEglStartupReport {
-        LiveEglStartupReport::from_probe_status(NativeEglCapabilityProbe::probe_report().status)
-    }
-
-    #[cfg(feature = "egl-probe")]
-    pub fn native_egl_draw_smoke_report(&self) -> EglDrawSmokeReport {
-        NativeEglDrawSmoke::smoke_report()
-    }
-
-    #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
-    pub fn gbm_backed_egl_platform_report(
-        &self,
-        gpu_startup: LiveGpuStartupReport,
-    ) -> LiveGbmBackedEglPlatformReport {
-        LiveGbmBackedEglPlatformReport::from_gpu_startup(gpu_startup)
-    }
-
-    #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
-    pub fn native_gbm_backed_egl_platform_report_from_device_result<T: AsFd>(
-        &self,
-        device: io::Result<T>,
-    ) -> LiveGbmBackedEglPlatformReport {
-        LiveGbmBackedEglPlatformReport {
-            status: NativeGbmBackedEglPlatformProbe::platform_status_from_backend_device_result(
-                device,
-            ),
-        }
-    }
-
-    #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
-    pub fn native_gbm_backed_egl_platform_report_with_gbm_device<D>(
-        &self,
-        discovery: &D,
-    ) -> LiveGbmBackedEglPlatformReport
-    where
-        D: RenderDeviceDiscoveryBackend,
-    {
-        self.native_gbm_backed_egl_platform_report_from_device_result(
-            discovery.open_render_device(),
-        )
-    }
-
-    #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
-    pub fn native_gbm_backed_egl_draw_smoke_report_from_device_result<T: AsFd>(
-        &self,
-        device: io::Result<T>,
-    ) -> EglDrawSmokeReport {
-        NativeGbmBackedEglDrawSmoke::smoke_report_from_backend_device_result(device)
-    }
-
-    #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
-    pub fn native_gbm_backed_egl_draw_smoke_report_with_gbm_device<D>(
-        &self,
-        discovery: &D,
-    ) -> EglDrawSmokeReport
-    where
-        D: RenderDeviceDiscoveryBackend,
-    {
-        self.native_gbm_backed_egl_draw_smoke_report_from_device_result(
-            discovery.open_render_device(),
-        )
-    }
-
-    #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
-    pub fn native_gbm_backed_egl_presentation_smoke_report_from_device_result<T: AsFd>(
-        &self,
-        device: io::Result<T>,
-    ) -> LiveRendererPresentationReport {
-        NativeGbmBackedEglPresentationSmoke::smoke_report_from_backend_device_result(device)
-    }
-
-    #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
-    pub fn native_gbm_backed_egl_presentation_smoke_report_with_gbm_device<D>(
-        &self,
-        discovery: &D,
-    ) -> LiveRendererPresentationReport
-    where
-        D: RenderDeviceDiscoveryBackend,
-    {
-        self.native_gbm_backed_egl_presentation_smoke_report_from_device_result(
-            discovery.open_render_device(),
-        )
-    }
-
-    #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
-    pub fn native_gbm_backed_egl_frame_target_allocation_report_from_device_result<T: AsFd>(
-        &self,
-        device: io::Result<T>,
-        request: LiveGbmEglFrameTargetAllocationRequest,
-    ) -> LiveGbmEglFrameTargetAllocationReport {
-        NativeGbmBackedEglFrameTargetAllocator::allocation_report_from_backend_device_result(
-            device, request,
-        )
-    }
-
-    #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
-    pub fn native_gbm_backed_egl_frame_target_allocation_report_with_gbm_device<D>(
-        &self,
-        discovery: &D,
-        request: LiveGbmEglFrameTargetAllocationRequest,
-    ) -> LiveGbmEglFrameTargetAllocationReport
-    where
-        D: RenderDeviceDiscoveryBackend,
-    {
-        self.native_gbm_backed_egl_frame_target_allocation_report_from_device_result(
-            discovery.open_render_device(),
-            request,
-        )
-    }
-
-    #[cfg(all(feature = "egl-probe", feature = "gbm-probe"))]
-    pub fn egl_probe_report_from_gbm_startup(
-        &self,
-        gpu_startup: LiveGpuStartupReport,
-        context: EglContextProbeStatus,
-    ) -> LiveEglStartupReport {
-        self.egl_probe_report(
-            self.gbm_backed_egl_platform_report(gpu_startup).status,
-            context,
         )
     }
 
