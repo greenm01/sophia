@@ -379,3 +379,18 @@ client-provided shared memory with `shmat` would add host-memory lifetime,
 detach, namespace cleanup, and crash-recovery obligations before the engine can
 use the data. Until that backend exists, core `PutImage` and private
 `SOPHIA-PRESENT` remain the supported pixel handoff seams.
+
+## External xclock Probe
+
+`x-authority-xclock-smoke` launches `/usr/bin/xclock` against a temporary Sophia
+X Authority socket and treats the client as the compatibility driver. The probe
+added only the request surface xclock actually exercised: printable atom names,
+pixmap resources, copy-area flow, basic font replies, list-font replies,
+window-attribute and subwindow mapping no-ops, expose events, and bounded core
+draw transactions for line, segment, polygon, rectangle, image, and copy damage.
+
+The passing proof reached mapped exposure and seven Engine/Runtime committed
+authority transactions with no X protocol error before the harness killed the
+long-running xclock process. The authority still does not become a full X
+server: unsupported requests remain fail-closed, and only reduced transaction
+facts cross into runtime.

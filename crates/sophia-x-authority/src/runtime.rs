@@ -1,5 +1,5 @@
 use sophia_portal::ClipboardPortal;
-use sophia_protocol::{NamespaceId, Region, TransactionId};
+use sophia_protocol::{AuthoritySurface, NamespaceId, Region, TransactionId};
 
 use crate::{
     ClipboardSelectionFailureRequest, XAuthorityPortalCommand, XAuthorityRequestKind,
@@ -224,6 +224,103 @@ impl XAuthorityRuntime {
             .map_err(Into::into)
     }
 
+    pub fn map_namespace_windows(
+        &mut self,
+        namespace: NamespaceId,
+        generation: u64,
+    ) -> Result<Vec<AuthoritySurface>, XAuthorityRuntimeError> {
+        let mut surfaces = Vec::new();
+        for window in self.windows.ids_for_namespace(namespace) {
+            if let Some(surface) = self.windows.apply(XWindowLifecycleEvent::Mapped {
+                id: window,
+                generation,
+            })? {
+                surfaces.push(surface);
+            }
+        }
+        Ok(surfaces)
+    }
+
+    pub fn create_pixmap(
+        &mut self,
+        namespace: NamespaceId,
+        pixmap: crate::XResourceId,
+        generation: u64,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        self.resources
+            .insert(pixmap, XResourceKind::Pixmap, namespace, generation)
+            .map_err(Into::into)
+    }
+
+    pub fn free_pixmap(
+        &mut self,
+        namespace: NamespaceId,
+        pixmap: crate::XResourceId,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        self.resources
+            .lookup(namespace, pixmap, XResourceKind::Pixmap)?;
+        self.resources.remove(pixmap);
+        Ok(())
+    }
+
+    pub fn validate_pixmap_access(
+        &self,
+        namespace: NamespaceId,
+        pixmap: crate::XResourceId,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        self.resources
+            .lookup(namespace, pixmap, XResourceKind::Pixmap)
+            .map(|_| ())
+            .map_err(Into::into)
+    }
+
+    pub fn open_font(
+        &mut self,
+        namespace: NamespaceId,
+        font: crate::XResourceId,
+        generation: u64,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        self.resources
+            .insert(font, XResourceKind::Font, namespace, generation)
+            .map_err(Into::into)
+    }
+
+    pub fn close_font(
+        &mut self,
+        namespace: NamespaceId,
+        font: crate::XResourceId,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        self.resources
+            .lookup(namespace, font, XResourceKind::Font)?;
+        self.resources.remove(font);
+        Ok(())
+    }
+
+    pub fn validate_font_access(
+        &self,
+        namespace: NamespaceId,
+        font: crate::XResourceId,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        self.resources
+            .lookup(namespace, font, XResourceKind::Font)
+            .map(|_| ())
+            .map_err(Into::into)
+    }
+
+    pub fn validate_drawable_access(
+        &self,
+        namespace: NamespaceId,
+        drawable: crate::XResourceId,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        if drawable.local.raw() == u64::from(crate::X_SETUP_DEFAULT_ROOT) {
+            return Ok(());
+        }
+        if self.validate_window_access(namespace, drawable).is_ok() {
+            return Ok(());
+        }
+        self.validate_pixmap_access(namespace, drawable)
+    }
+
     pub fn apply_core_draw(
         &self,
         transaction: TransactionId,
@@ -255,6 +352,23 @@ impl XAuthorityRuntime {
             Err(error) => return XAuthorityResponsePacket::rejected(transaction, error.into()),
         }
         response
+    }
+
+    pub fn apply_copy_area(
+        &self,
+        transaction: TransactionId,
+        namespace: NamespaceId,
+        source: crate::XResourceId,
+        destination: crate::XResourceId,
+        damage: Region,
+    ) -> XAuthorityResponsePacket {
+        if let Err(error) = self.validate_drawable_access(namespace, source) {
+            return XAuthorityResponsePacket::rejected(transaction, error);
+        }
+        if self.validate_pixmap_access(namespace, destination).is_ok() {
+            return XAuthorityResponsePacket::accepted(transaction);
+        }
+        self.apply_core_draw(transaction, namespace, destination, damage)
     }
 
     pub fn apply_put_image(

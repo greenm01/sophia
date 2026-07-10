@@ -259,7 +259,14 @@ fn read_x11_core_request(
     let mut header = [0; 4];
     match stream.read_exact(&mut header) {
         Ok(()) => {}
-        Err(error) if error.kind() == ErrorKind::UnexpectedEof => return Ok(None),
+        Err(error)
+            if matches!(
+                error.kind(),
+                ErrorKind::UnexpectedEof | ErrorKind::ConnectionReset
+            ) =>
+        {
+            return Ok(None);
+        }
         Err(error) => {
             return Err(X11SetupSocketError::new(format!(
                 "failed to read X11 request header: {error}"

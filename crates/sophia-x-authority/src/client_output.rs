@@ -6,6 +6,7 @@ use crate::{
 pub const X_CLIENT_OUTPUT_RECORD_LEN: usize = 32;
 
 const X_ERROR: u8 = 0;
+const X_EXPOSE: u8 = 12;
 const X_MAP_NOTIFY: u8 = 19;
 const X_CONFIGURE_NOTIFY: u8 = 22;
 const X_PROPERTY_NOTIFY: u8 = 28;
@@ -49,6 +50,15 @@ pub struct XClientError {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum XClientEvent {
+    Expose {
+        sequence: u16,
+        window: XResourceId,
+        x: u16,
+        y: u16,
+        width: u16,
+        height: u16,
+        count: u16,
+    },
     MapNotify {
         sequence: u16,
         event: XResourceId,
@@ -104,6 +114,14 @@ pub enum XClientReply {
     ListExtensions {
         sequence: u16,
     },
+    ListFonts {
+        sequence: u16,
+        names: Vec<String>,
+    },
+    ListFontsWithInfo {
+        sequence: u16,
+        names: Vec<String>,
+    },
     QueryBestSize {
         sequence: u16,
         width: u16,
@@ -120,6 +138,11 @@ pub enum XClientReply {
         sequence: u16,
         focus: XResourceId,
         revert_to: u8,
+    },
+    QueryFont {
+        sequence: u16,
+        font_ascent: i16,
+        font_descent: i16,
     },
     GetProperty {
         sequence: u16,
@@ -194,6 +217,45 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             out[1] = 0;
             out
         }
+        XClientReply::ListFonts { sequence, names } => {
+            let names_len = names.iter().map(|name| 1 + name.len()).sum::<usize>();
+            let padded_names_len = padded_len(names_len);
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN + padded_names_len];
+            write_reply_header(
+                byte_order,
+                &mut out[..X_CLIENT_OUTPUT_RECORD_LEN],
+                sequence,
+                u32::try_from(padded_names_len / 4).unwrap_or(0),
+            );
+            put_u16(
+                byte_order,
+                &mut out[8..10],
+                u16::try_from(names.len()).unwrap_or(0),
+            );
+            let mut offset = X_CLIENT_OUTPUT_RECORD_LEN;
+            for name in names {
+                let bytes = name.as_bytes();
+                out[offset] = u8::try_from(bytes.len()).unwrap_or(0);
+                offset += 1;
+                out[offset..offset + bytes.len()].copy_from_slice(bytes);
+                offset += bytes.len();
+            }
+            out
+        }
+        XClientReply::ListFontsWithInfo { sequence, names } => {
+            let mut out = Vec::new();
+            for name in names {
+                out.extend(encode_font_info_reply(
+                    byte_order,
+                    sequence,
+                    8,
+                    2,
+                    Some(name.as_bytes()),
+                ));
+            }
+            out.extend(encode_font_info_reply(byte_order, sequence, 0, 0, None));
+            out
+        }
         XClientReply::QueryBestSize {
             sequence,
             width,
@@ -231,6 +293,11 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             put_resource(byte_order, &mut out[8..12], focus);
             out
         }
+        XClientReply::QueryFont {
+            sequence,
+            font_ascent,
+            font_descent,
+        } => encode_font_info_reply(byte_order, sequence, font_ascent, font_descent, None),
         XClientReply::GetProperty {
             sequence,
             property_type,
@@ -278,6 +345,23 @@ pub fn encode_x_client_event(
 ) -> [u8; X_CLIENT_OUTPUT_RECORD_LEN] {
     let mut out = [0; X_CLIENT_OUTPUT_RECORD_LEN];
     match event {
+        XClientEvent::Expose {
+            sequence,
+            window,
+            x,
+            y,
+            width,
+            height,
+            count,
+        } => {
+            write_event_header(byte_order, &mut out, X_EXPOSE, 0, sequence);
+            put_resource(byte_order, &mut out[4..8], window);
+            put_u16(byte_order, &mut out[8..10], x);
+            put_u16(byte_order, &mut out[10..12], y);
+            put_u16(byte_order, &mut out[12..14], width);
+            put_u16(byte_order, &mut out[14..16], height);
+            put_u16(byte_order, &mut out[16..18], count);
+        }
         XClientEvent::MapNotify {
             sequence,
             event,
@@ -416,6 +500,52 @@ pub fn x_selection_failure_event(
         target,
         property: X_ATOM_NONE,
     }
+}
+
+fn encode_font_info_reply(
+    byte_order: XByteOrder,
+    sequence: u16,
+    font_ascent: i16,
+    font_descent: i16,
+    name: Option<&[u8]>,
+) -> Vec<u8> {
+    let name = name.unwrap_or_default();
+    let padded_name_len = padded_len(name.len());
+    let mut out = vec![0; 60 + padded_name_len];
+    write_reply_header(
+        byte_order,
+        &mut out[..X_CLIENT_OUTPUT_RECORD_LEN],
+        sequence,
+        u32::try_from(7 + (padded_name_len / 4)).unwrap_or(7),
+    );
+    out[1] = u8::try_from(name.len()).unwrap_or(0);
+    // min_bounds charinfo
+    put_i16(byte_order, &mut out[8..10], 0);
+    put_i16(byte_order, &mut out[10..12], 0);
+    put_i16(byte_order, &mut out[12..14], 8);
+    put_i16(byte_order, &mut out[14..16], 8);
+    put_i16(byte_order, &mut out[16..18], 2);
+    put_u16(byte_order, &mut out[18..20], 0);
+    // max_bounds charinfo
+    put_i16(byte_order, &mut out[24..26], 0);
+    put_i16(byte_order, &mut out[26..28], 0);
+    put_i16(byte_order, &mut out[28..30], 8);
+    put_i16(byte_order, &mut out[30..32], 8);
+    put_i16(byte_order, &mut out[32..34], 2);
+    put_u16(byte_order, &mut out[34..36], 0);
+    put_u16(byte_order, &mut out[40..42], 0);
+    put_u16(byte_order, &mut out[42..44], 255);
+    put_u16(byte_order, &mut out[44..46], 0);
+    put_u16(byte_order, &mut out[46..48], 0);
+    out[48] = 0;
+    out[49] = 0;
+    out[50] = 0;
+    out[51] = 1;
+    put_i16(byte_order, &mut out[52..54], font_ascent);
+    put_i16(byte_order, &mut out[54..56], font_descent);
+    put_u32(byte_order, &mut out[56..60], 0);
+    out[60..60 + name.len()].copy_from_slice(name);
+    out
 }
 
 fn write_event_header(

@@ -196,7 +196,10 @@ fn validated_atom_name(name: &str) -> Result<&str, XAtomError> {
             max: X_ATOM_MAX_NAME_LEN,
         });
     }
-    if !name.bytes().all(|byte| byte.is_ascii_graphic()) {
+    if !name
+        .bytes()
+        .all(|byte| byte.is_ascii() && !byte.is_ascii_control())
+    {
         return Err(XAtomError::InvalidName);
     }
     Ok(name)

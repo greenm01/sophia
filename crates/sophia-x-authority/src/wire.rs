@@ -8,8 +8,10 @@ use crate::{
 };
 
 const X_CREATE_WINDOW: u8 = 1;
+const X_CHANGE_WINDOW_ATTRIBUTES: u8 = 2;
 const X_DESTROY_WINDOW: u8 = 4;
 const X_MAP_WINDOW: u8 = 8;
+const X_MAP_SUBWINDOWS: u8 = 9;
 const X_INTERN_ATOM: u8 = 16;
 const X_GET_ATOM_NAME: u8 = 17;
 const X_CHANGE_PROPERTY: u8 = 18;
@@ -17,8 +19,19 @@ const X_GET_PROPERTY: u8 = 20;
 const X_SET_SELECTION_OWNER: u8 = 22;
 const X_CONVERT_SELECTION: u8 = 24;
 const X_GET_INPUT_FOCUS: u8 = 43;
+const X_OPEN_FONT: u8 = 45;
+const X_CLOSE_FONT: u8 = 46;
+const X_QUERY_FONT: u8 = 47;
+const X_LIST_FONTS: u8 = 49;
+const X_LIST_FONTS_WITH_INFO: u8 = 50;
+const X_CREATE_PIXMAP: u8 = 53;
+const X_FREE_PIXMAP: u8 = 54;
 const X_CREATE_GC: u8 = 55;
 const X_FREE_GC: u8 = 60;
+const X_COPY_AREA: u8 = 62;
+const X_POLY_LINE: u8 = 65;
+const X_POLY_SEGMENT: u8 = 66;
+const X_FILL_POLY: u8 = 69;
 const X_POLY_FILL_RECTANGLE: u8 = 70;
 const X_PUT_IMAGE: u8 = 72;
 const X_QUERY_EXTENSION: u8 = 98;
@@ -36,8 +49,10 @@ pub const X_MIT_SHM_DETACH_MINOR_OPCODE: u8 = 2;
 pub const X_MIT_SHM_PUT_IMAGE_MINOR_OPCODE: u8 = 3;
 
 const X_CREATE_WINDOW_REQ_LEN: usize = 32;
+const X_CHANGE_WINDOW_ATTRIBUTES_REQ_LEN: usize = 12;
 const X_DESTROY_WINDOW_REQ_LEN: usize = 8;
 const X_MAP_WINDOW_REQ_LEN: usize = 8;
+const X_MAP_SUBWINDOWS_REQ_LEN: usize = 8;
 const X_INTERN_ATOM_REQ_LEN: usize = 8;
 const X_GET_ATOM_NAME_REQ_LEN: usize = 8;
 const X_CHANGE_PROPERTY_REQ_LEN: usize = 24;
@@ -45,8 +60,19 @@ const X_GET_PROPERTY_REQ_LEN: usize = 24;
 const X_SET_SELECTION_OWNER_REQ_LEN: usize = 16;
 const X_CONVERT_SELECTION_REQ_LEN: usize = 24;
 const X_GET_INPUT_FOCUS_REQ_LEN: usize = 4;
+const X_OPEN_FONT_REQ_LEN: usize = 12;
+const X_CLOSE_FONT_REQ_LEN: usize = 8;
+const X_QUERY_FONT_REQ_LEN: usize = 8;
+const X_LIST_FONTS_REQ_LEN: usize = 8;
+const X_LIST_FONTS_WITH_INFO_REQ_LEN: usize = 8;
+const X_CREATE_PIXMAP_REQ_LEN: usize = 16;
+const X_FREE_PIXMAP_REQ_LEN: usize = 8;
 const X_CREATE_GC_REQ_LEN: usize = 16;
 const X_FREE_GC_REQ_LEN: usize = 8;
+const X_COPY_AREA_REQ_LEN: usize = 28;
+const X_POLY_LINE_REQ_LEN: usize = 12;
+const X_POLY_SEGMENT_REQ_LEN: usize = 12;
+const X_FILL_POLY_REQ_LEN: usize = 16;
 const X_POLY_FILL_RECTANGLE_REQ_LEN: usize = 12;
 const X_PUT_IMAGE_REQ_LEN: usize = 24;
 const X_QUERY_EXTENSION_REQ_LEN: usize = 8;
@@ -70,7 +96,13 @@ pub struct XWireClientContext {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum XWireRequest {
     Authority(XAuthorityRequestPacket),
+    ChangeWindowAttributes {
+        window: XResourceId,
+    },
     DestroyWindow {
+        window: XResourceId,
+    },
+    MapSubwindows {
         window: XResourceId,
     },
     InternAtom {
@@ -107,6 +139,34 @@ pub enum XWireRequest {
         data_len: usize,
     },
     GetInputFocus,
+    OpenFont {
+        font: XResourceId,
+        name: String,
+    },
+    CloseFont {
+        font: XResourceId,
+    },
+    QueryFont {
+        font: XResourceId,
+    },
+    ListFonts {
+        max_names: u16,
+        pattern: String,
+    },
+    ListFontsWithInfo {
+        max_names: u16,
+        pattern: String,
+    },
+    CreatePixmap {
+        depth: u8,
+        pixmap: XResourceId,
+        drawable: XResourceId,
+        width: u16,
+        height: u16,
+    },
+    FreePixmap {
+        pixmap: XResourceId,
+    },
     QueryExtension {
         name: String,
     },
@@ -116,6 +176,32 @@ pub enum XWireRequest {
         drawable: XResourceId,
         width: u16,
         height: u16,
+    },
+    CopyArea {
+        source: XResourceId,
+        destination: XResourceId,
+        gc: XResourceId,
+        src_x: i16,
+        src_y: i16,
+        dst_x: i16,
+        dst_y: i16,
+        width: u16,
+        height: u16,
+    },
+    PolySegment {
+        drawable: XResourceId,
+        gc: XResourceId,
+        damage: Vec<Rect>,
+    },
+    PolyLine {
+        drawable: XResourceId,
+        gc: XResourceId,
+        damage: Option<Rect>,
+    },
+    FillPoly {
+        drawable: XResourceId,
+        gc: XResourceId,
+        damage: Option<Rect>,
     },
     ShmQueryVersion,
     ShmAttach {
@@ -206,8 +292,10 @@ pub fn decode_x11_core_request(
 
     match opcode {
         X_CREATE_WINDOW => decode_create_window(context, bytes),
+        X_CHANGE_WINDOW_ATTRIBUTES => decode_change_window_attributes(context, bytes),
         X_DESTROY_WINDOW => decode_destroy_window(context, bytes),
         X_MAP_WINDOW => decode_map_window(context, bytes),
+        X_MAP_SUBWINDOWS => decode_map_subwindows(context, bytes),
         X_INTERN_ATOM => decode_intern_atom(context, bytes),
         X_GET_ATOM_NAME => decode_get_atom_name(context, bytes),
         X_CHANGE_PROPERTY => decode_change_property(context, bytes),
@@ -215,8 +303,19 @@ pub fn decode_x11_core_request(
         X_SET_SELECTION_OWNER => decode_set_selection_owner(context, bytes),
         X_CONVERT_SELECTION => decode_convert_selection(context, bytes),
         X_GET_INPUT_FOCUS => decode_get_input_focus(bytes),
+        X_OPEN_FONT => decode_open_font(context, bytes),
+        X_CLOSE_FONT => decode_close_font(context, bytes),
+        X_QUERY_FONT => decode_query_font(context, bytes),
+        X_LIST_FONTS => decode_list_fonts(context, bytes),
+        X_LIST_FONTS_WITH_INFO => decode_list_fonts_with_info(context, bytes),
+        X_CREATE_PIXMAP => decode_create_pixmap(context, bytes),
+        X_FREE_PIXMAP => decode_free_pixmap(context, bytes),
         X_CREATE_GC => decode_create_gc(context, bytes),
         X_FREE_GC => decode_free_gc(context, bytes),
+        X_COPY_AREA => decode_copy_area(context, bytes),
+        X_POLY_LINE => decode_poly_line(context, bytes),
+        X_POLY_SEGMENT => decode_poly_segment(context, bytes),
+        X_FILL_POLY => decode_fill_poly(context, bytes),
         X_POLY_FILL_RECTANGLE => decode_poly_fill_rectangle(context, bytes),
         X_PUT_IMAGE => decode_put_image(context, bytes),
         X_QUERY_BEST_SIZE => decode_query_best_size(context, bytes),
@@ -352,6 +451,126 @@ fn decode_put_image(
     })
 }
 
+fn decode_copy_area(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_COPY_AREA, X_COPY_AREA_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::CopyArea {
+        source: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        destination: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
+        gc: XResourceId::new(u64::from(context.byte_order.u32(&bytes[12..16])), 1),
+        src_x: context.byte_order.i16(&bytes[16..18]),
+        src_y: context.byte_order.i16(&bytes[18..20]),
+        dst_x: context.byte_order.i16(&bytes[20..22]),
+        dst_y: context.byte_order.i16(&bytes[22..24]),
+        width: context.byte_order.u16(&bytes[24..26]),
+        height: context.byte_order.u16(&bytes[26..28]),
+    })
+}
+
+fn decode_poly_segment(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_len(X_POLY_SEGMENT, X_POLY_SEGMENT_REQ_LEN, bytes.len())?;
+    let segment_bytes = &bytes[X_POLY_SEGMENT_REQ_LEN..];
+    if segment_bytes.len() % 8 != 0 {
+        return Err(XWireParseError::InvalidLength {
+            opcode: X_POLY_SEGMENT,
+            expected_at_least: X_POLY_SEGMENT_REQ_LEN + ((segment_bytes.len() + 7) & !7),
+            actual: bytes.len(),
+        });
+    }
+    let mut damage = Vec::with_capacity(segment_bytes.len() / 8);
+    for segment in segment_bytes.chunks_exact(8) {
+        let x1 = i32::from(context.byte_order.i16(&segment[0..2]));
+        let y1 = i32::from(context.byte_order.i16(&segment[2..4]));
+        let x2 = i32::from(context.byte_order.i16(&segment[4..6]));
+        let y2 = i32::from(context.byte_order.i16(&segment[6..8]));
+        let x = x1.min(x2);
+        let y = y1.min(y2);
+        damage.push(Rect {
+            x,
+            y,
+            width: x1.max(x2).saturating_sub(x).saturating_add(1),
+            height: y1.max(y2).saturating_sub(y).saturating_add(1),
+        });
+    }
+    Ok(XWireRequest::PolySegment {
+        drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        gc: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
+        damage,
+    })
+}
+
+fn decode_poly_line(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_len(X_POLY_LINE, X_POLY_LINE_REQ_LEN, bytes.len())?;
+    let point_bytes = &bytes[X_POLY_LINE_REQ_LEN..];
+    if point_bytes.len() % 4 != 0 {
+        return Err(XWireParseError::InvalidLength {
+            opcode: X_POLY_LINE,
+            expected_at_least: X_POLY_LINE_REQ_LEN + ((point_bytes.len() + 3) & !3),
+            actual: bytes.len(),
+        });
+    }
+
+    Ok(XWireRequest::PolyLine {
+        drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        gc: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
+        damage: point_damage_bounds(context, point_bytes),
+    })
+}
+
+fn decode_fill_poly(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_len(X_FILL_POLY, X_FILL_POLY_REQ_LEN, bytes.len())?;
+    let point_bytes = &bytes[X_FILL_POLY_REQ_LEN..];
+    if point_bytes.len() % 4 != 0 {
+        return Err(XWireParseError::InvalidLength {
+            opcode: X_FILL_POLY,
+            expected_at_least: X_FILL_POLY_REQ_LEN + ((point_bytes.len() + 3) & !3),
+            actual: bytes.len(),
+        });
+    }
+
+    Ok(XWireRequest::FillPoly {
+        drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        gc: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
+        damage: point_damage_bounds(context, point_bytes),
+    })
+}
+
+fn point_damage_bounds(context: XWireClientContext, point_bytes: &[u8]) -> Option<Rect> {
+    let mut min_x = i32::MAX;
+    let mut min_y = i32::MAX;
+    let mut max_x = i32::MIN;
+    let mut max_y = i32::MIN;
+    for point in point_bytes.chunks_exact(4) {
+        let x = i32::from(context.byte_order.i16(&point[0..2]));
+        let y = i32::from(context.byte_order.i16(&point[2..4]));
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(y);
+    }
+    if min_x == i32::MAX {
+        None
+    } else {
+        Some(Rect {
+            x: min_x,
+            y: min_y,
+            width: max_x.saturating_sub(min_x).saturating_add(1),
+            height: max_y.saturating_sub(min_y).saturating_add(1),
+        })
+    }
+}
+
 fn decode_poly_fill_rectangle(
     context: XWireClientContext,
     bytes: &[u8],
@@ -392,6 +611,135 @@ fn decode_free_gc(
     require_exact_len(X_FREE_GC, X_FREE_GC_REQ_LEN, bytes.len())?;
     Ok(XWireRequest::FreeGraphicsContext {
         gc: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+    })
+}
+
+fn decode_create_pixmap(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_CREATE_PIXMAP, X_CREATE_PIXMAP_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::CreatePixmap {
+        depth: bytes[1],
+        pixmap: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
+        width: context.byte_order.u16(&bytes[12..14]),
+        height: context.byte_order.u16(&bytes[14..16]),
+    })
+}
+
+fn decode_open_font(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_len(X_OPEN_FONT, X_OPEN_FONT_REQ_LEN, bytes.len())?;
+    let name_len = usize::from(context.byte_order.u16(&bytes[8..10]));
+    let expected_len = X_OPEN_FONT_REQ_LEN + padded_len(name_len);
+    if bytes.len() != expected_len {
+        return Err(XWireParseError::InvalidLength {
+            opcode: X_OPEN_FONT,
+            expected_at_least: expected_len,
+            actual: bytes.len(),
+        });
+    }
+    let name = core::str::from_utf8(&bytes[X_OPEN_FONT_REQ_LEN..X_OPEN_FONT_REQ_LEN + name_len])
+        .map_err(|_| XWireParseError::InvalidLength {
+            opcode: X_OPEN_FONT,
+            expected_at_least: expected_len,
+            actual: bytes.len(),
+        })?;
+    Ok(XWireRequest::OpenFont {
+        font: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        name: name.to_owned(),
+    })
+}
+
+fn decode_close_font(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_CLOSE_FONT, X_CLOSE_FONT_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::CloseFont {
+        font: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+    })
+}
+
+fn decode_query_font(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_QUERY_FONT, X_QUERY_FONT_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::QueryFont {
+        font: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+    })
+}
+
+fn decode_list_fonts(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_len(X_LIST_FONTS, X_LIST_FONTS_REQ_LEN, bytes.len())?;
+    let pattern_len = usize::from(context.byte_order.u16(&bytes[6..8]));
+    let expected_len = X_LIST_FONTS_REQ_LEN + padded_len(pattern_len);
+    if bytes.len() != expected_len {
+        return Err(XWireParseError::InvalidLength {
+            opcode: X_LIST_FONTS,
+            expected_at_least: expected_len,
+            actual: bytes.len(),
+        });
+    }
+    let pattern =
+        core::str::from_utf8(&bytes[X_LIST_FONTS_REQ_LEN..X_LIST_FONTS_REQ_LEN + pattern_len])
+            .map_err(|_| XWireParseError::InvalidLength {
+                opcode: X_LIST_FONTS,
+                expected_at_least: expected_len,
+                actual: bytes.len(),
+            })?;
+    Ok(XWireRequest::ListFonts {
+        max_names: context.byte_order.u16(&bytes[4..6]),
+        pattern: pattern.to_owned(),
+    })
+}
+
+fn decode_list_fonts_with_info(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_len(
+        X_LIST_FONTS_WITH_INFO,
+        X_LIST_FONTS_WITH_INFO_REQ_LEN,
+        bytes.len(),
+    )?;
+    let pattern_len = usize::from(context.byte_order.u16(&bytes[6..8]));
+    let expected_len = X_LIST_FONTS_WITH_INFO_REQ_LEN + padded_len(pattern_len);
+    if bytes.len() != expected_len {
+        return Err(XWireParseError::InvalidLength {
+            opcode: X_LIST_FONTS_WITH_INFO,
+            expected_at_least: expected_len,
+            actual: bytes.len(),
+        });
+    }
+    let pattern = core::str::from_utf8(
+        &bytes[X_LIST_FONTS_WITH_INFO_REQ_LEN..X_LIST_FONTS_WITH_INFO_REQ_LEN + pattern_len],
+    )
+    .map_err(|_| XWireParseError::InvalidLength {
+        opcode: X_LIST_FONTS_WITH_INFO,
+        expected_at_least: expected_len,
+        actual: bytes.len(),
+    })?;
+    Ok(XWireRequest::ListFontsWithInfo {
+        max_names: context.byte_order.u16(&bytes[4..6]),
+        pattern: pattern.to_owned(),
+    })
+}
+
+fn decode_free_pixmap(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_FREE_PIXMAP, X_FREE_PIXMAP_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::FreePixmap {
+        pixmap: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
     })
 }
 
@@ -472,6 +820,20 @@ fn decode_destroy_window(
 ) -> Result<XWireRequest, XWireParseError> {
     require_exact_len(X_DESTROY_WINDOW, X_DESTROY_WINDOW_REQ_LEN, bytes.len())?;
     Ok(XWireRequest::DestroyWindow {
+        window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+    })
+}
+
+fn decode_change_window_attributes(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_len(
+        X_CHANGE_WINDOW_ATTRIBUTES,
+        X_CHANGE_WINDOW_ATTRIBUTES_REQ_LEN,
+        bytes.len(),
+    )?;
+    Ok(XWireRequest::ChangeWindowAttributes {
         window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
     })
 }
@@ -559,6 +921,16 @@ fn decode_map_window(
             generation: 2,
         },
     }))
+}
+
+fn decode_map_subwindows(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_MAP_SUBWINDOWS, X_MAP_SUBWINDOWS_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::MapSubwindows {
+        window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+    })
 }
 
 fn decode_change_property(

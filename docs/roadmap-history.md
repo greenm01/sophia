@@ -153,6 +153,8 @@ validation evidence in `docs/research-log.md`.
   behind deterministic backend discovery and assembly seams.
 - [x] Sketch the first live compositor backend crate boundary and keep kernel
   IO behind traits that preserve deterministic headless tests.
+- [x] Pass `/usr/bin/xclock` against the Sophia X Authority socket through
+  mapped exposure and observed Engine/Runtime authority transactions.
 - [x] Add one smoke that proves backend discovery can fail closed without
   affecting protocol authority or WM IPC contracts.
 - [x] Add a live backend dependency policy before adding crates that touch

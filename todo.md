@@ -12,7 +12,7 @@ active milestone to `docs/roadmap-history.md`.
 
 ## Active Milestone
 
-### External X Client Probe: xclock
+### Live Session Composition
 
 Current architecture read:
 
@@ -24,31 +24,7 @@ Current architecture read:
 - Sophia WM remains blind policy. XLibre remains prototype/reference material,
   not the destination architecture.
 
-Current probe target:
-
-- [ ] Add an `x-authority-xclock-smoke` probe that launches `/usr/bin/xclock`
-  against the Sophia X Authority socket.
-- [ ] Let the first concrete missing opcode, reply, event, or extension from
-  `xclock` drive the next X Authority implementation step.
-- [ ] Pass only when the probe reaches at least one Engine/Runtime committed
-  authority transaction without leaking XIDs, namespace IDs, titles, classes,
-  PIDs, or raw property payloads across the WM boundary.
-
----
-
-## Next 3 Milestones
-
-### 1. External X Client Probe: xclock
-
-- [ ] Add an `x-authority-xclock-smoke` probe that launches `/usr/bin/xclock`
-  against the Sophia X Authority socket.
-- [ ] Let the first concrete missing opcode, reply, event, or extension from
-  `xclock` drive the next X Authority implementation step.
-- [ ] Pass only when the probe reaches at least one Engine/Runtime committed
-  authority transaction without leaking XIDs, namespace IDs, titles, classes,
-  PIDs, or raw property payloads across the WM boundary.
-
-### 2. Live Session Composition
+Current milestone target:
 
 - [ ] Compose Sophia X Authority's bounded transaction queue, runtime intake,
   renderer-live frame targets, and backend-live rendered scanout into one
@@ -59,7 +35,22 @@ Current probe target:
 - [ ] Keep Wayland Authority and wgpu deferred until the X Authority plus live
   scanout path is stable.
 
-### 3. Authority Coverage From Real Probe Failures
+---
+
+## Next 3 Milestones
+
+### 1. Live Session Composition
+
+- [ ] Compose Sophia X Authority's bounded transaction queue, runtime intake,
+  renderer-live frame targets, and backend-live rendered scanout into one
+  operator smoke.
+- [ ] Preserve reduced evidence as the public validation surface for authority
+  health, runtime transaction intake, rendered scanout submit, page-flip retire,
+  and cleanup.
+- [ ] Keep Wayland Authority and wgpu deferred until the X Authority plus live
+  scanout path is stable.
+
+### 2. Authority Coverage From Real Probe Failures
 
 - [ ] Expand Sophia X Authority only where `xclock` and later real probes demand
   it.
@@ -67,6 +58,15 @@ Current probe target:
   behavior over broad X11 completeness.
 - [ ] Keep XLibre bridge smokes as prototype references until Sophia X Authority
   has equivalent live coverage.
+
+### 3. Wayland Authority Skeleton
+
+- [ ] Define the first minimal Wayland Authority socket/setup boundary without
+  committing to wgpu or broad compositor-framework adoption.
+- [ ] Preserve the same authority contract: protocol resources in the authority,
+  visual truth and commit readiness in Sophia Engine.
+- [ ] Start only after live X Authority transaction intake and rendered scanout
+  composition have one operator-grade smoke.
 
 ---
 
@@ -81,6 +81,10 @@ Current probe target:
 
 ## Done Recently
 
+- [x] `x-authority-xclock-smoke` launches `/usr/bin/xclock`, reaches mapped
+  surface exposure, decodes the xclock-driven font, pixmap, window, and drawing
+  requests, and commits observed authority transactions through Engine/Runtime
+  counters without X protocol errors.
 - [x] Closed the TTY3 combined hardware proof: preflight, destructive two-phase
   atomic scanout, and runtime rendered-scanout submit-to-retire evidence all
   pass their reduced verifiers.

@@ -30,6 +30,7 @@ pub enum XResourceKind {
     Atom,
     Property,
     GraphicsContext,
+    Font,
     Cursor,
 }
 

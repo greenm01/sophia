@@ -130,6 +130,14 @@ impl XWindowTable {
         self.windows.get(&id)
     }
 
+    pub fn ids_for_namespace(&self, namespace: NamespaceId) -> Vec<XResourceId> {
+        self.windows
+            .values()
+            .filter(|record| record.namespace == namespace)
+            .map(|record| record.id)
+            .collect()
+    }
+
     pub fn len(&self) -> usize {
         self.windows.len()
     }

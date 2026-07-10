@@ -3,6 +3,18 @@
 This file records early decisions, assumptions, and open questions. Keep it
 short and chronological.
 
+## 2026-07-10: xclock as External X Authority Probe
+
+`x-authority-xclock-smoke` now launches `/usr/bin/xclock` against Sophia X
+Authority and reaches mapped exposure plus Engine/Runtime committed authority
+transactions. The compatibility work stayed probe-driven: xclock added bounded
+font replies, pixmap/copy handling, subwindow mapping exposure, and core draw
+transactions for the line, segment, and polygon opcodes it actually used.
+
+The passing reduced evidence was `transactions=7`, `runtime_committed=7`,
+`runtime_surfaces=7`, and `first_error=none`; the harness kills xclock after
+the proof window because the client is intentionally long-running.
+
 ## 2026-07-07: Project Name
 
 The project is named **Sophia**.

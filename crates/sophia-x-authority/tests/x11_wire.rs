@@ -158,6 +158,16 @@ fn x11_core_decoder_maps_create_and_map_to_authority_packets() {
         &resource_request(XByteOrder::LittleEndian, 8, 0x220001),
     )
     .unwrap();
+    let map_subwindows = decode_x11_core_request(
+        context(namespace, 503, XByteOrder::LittleEndian),
+        &resource_request(XByteOrder::LittleEndian, 9, X_SETUP_DEFAULT_ROOT),
+    )
+    .unwrap();
+    let attributes = decode_x11_core_request(
+        context(namespace, 504, XByteOrder::LittleEndian),
+        &change_window_attributes_request(XByteOrder::LittleEndian, X_SETUP_DEFAULT_ROOT),
+    )
+    .unwrap();
 
     let XWireRequest::Authority(create) = create else {
         panic!("expected authority request");
@@ -190,6 +200,18 @@ fn x11_core_decoder_maps_create_and_map_to_authority_packets() {
         XAuthorityRequestKind::MapWindow {
             window: XResourceId::new(0x220001, 1),
             generation: 2,
+        }
+    );
+    assert_eq!(
+        map_subwindows,
+        XWireRequest::MapSubwindows {
+            window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+        }
+    );
+    assert_eq!(
+        attributes,
+        XWireRequest::ChangeWindowAttributes {
+            window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
         }
     );
 }
@@ -355,6 +377,7 @@ fn x11_atom_table_resolves_predefined_and_dynamic_names() {
         atoms.intern(X_ATOM_NAME_NET_WM_NAME, true).unwrap(),
         net_wm_name
     );
+    assert!(atoms.intern("SOPHIA PRINTABLE", false).unwrap().is_some());
     assert_eq!(atoms.intern("SOPHIA_UNKNOWN", true).unwrap(), None);
     assert!(atoms.intern("", false).is_err());
 }
@@ -471,6 +494,89 @@ fn x11_core_decoder_captures_poly_fill_rectangle_requests() {
             ],
         }
     );
+
+    let segments = decode_x11_core_request(
+        context(namespace, 508, XByteOrder::LittleEndian),
+        &poly_segment_request(
+            XByteOrder::LittleEndian,
+            0x220010,
+            0x220011,
+            &[(5, 6, 15, 16), (20, 30, 10, 24)],
+        ),
+    )
+    .unwrap();
+
+    assert_eq!(
+        segments,
+        XWireRequest::PolySegment {
+            drawable: XResourceId::new(0x220010, 1),
+            gc: XResourceId::new(0x220011, 1),
+            damage: vec![
+                Rect {
+                    x: 5,
+                    y: 6,
+                    width: 11,
+                    height: 11,
+                },
+                Rect {
+                    x: 10,
+                    y: 24,
+                    width: 11,
+                    height: 7,
+                },
+            ],
+        }
+    );
+
+    let line = decode_x11_core_request(
+        context(namespace, 509, XByteOrder::LittleEndian),
+        &poly_line_request(
+            XByteOrder::LittleEndian,
+            0x220010,
+            0x220011,
+            &[(3, 4), (13, 9), (8, 20)],
+        ),
+    )
+    .unwrap();
+
+    assert_eq!(
+        line,
+        XWireRequest::PolyLine {
+            drawable: XResourceId::new(0x220010, 1),
+            gc: XResourceId::new(0x220011, 1),
+            damage: Some(Rect {
+                x: 3,
+                y: 4,
+                width: 11,
+                height: 17,
+            }),
+        }
+    );
+
+    let fill_poly = decode_x11_core_request(
+        context(namespace, 510, XByteOrder::LittleEndian),
+        &fill_poly_request(
+            XByteOrder::LittleEndian,
+            0x220010,
+            0x220011,
+            &[(5, 6), (15, 16), (8, 20)],
+        ),
+    )
+    .unwrap();
+
+    assert_eq!(
+        fill_poly,
+        XWireRequest::FillPoly {
+            drawable: XResourceId::new(0x220010, 1),
+            gc: XResourceId::new(0x220011, 1),
+            damage: Some(Rect {
+                x: 5,
+                y: 6,
+                width: 11,
+                height: 15,
+            }),
+        }
+    );
 }
 
 #[test]
@@ -504,6 +610,124 @@ fn x11_core_decoder_captures_put_image_requests() {
             left_pad: 0,
             depth: 24,
             data_len: 128,
+        }
+    );
+}
+
+#[test]
+fn x11_core_decoder_captures_pixmap_and_copy_area_requests() {
+    let namespace = NamespaceId::from_raw(45);
+    let create = decode_x11_core_request(
+        context(namespace, 571, XByteOrder::LittleEndian),
+        &create_pixmap_request(XByteOrder::LittleEndian, 24, 0x220030, 0x220031, 32, 16),
+    )
+    .unwrap();
+    assert_eq!(
+        create,
+        XWireRequest::CreatePixmap {
+            depth: 24,
+            pixmap: XResourceId::new(0x220030, 1),
+            drawable: XResourceId::new(0x220031, 1),
+            width: 32,
+            height: 16,
+        }
+    );
+
+    let copy = decode_x11_core_request(
+        context(namespace, 572, XByteOrder::LittleEndian),
+        &copy_area_request(
+            XByteOrder::LittleEndian,
+            0x220030,
+            0x220031,
+            0x220032,
+            1,
+            2,
+            3,
+            4,
+            20,
+            10,
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        copy,
+        XWireRequest::CopyArea {
+            source: XResourceId::new(0x220030, 1),
+            destination: XResourceId::new(0x220031, 1),
+            gc: XResourceId::new(0x220032, 1),
+            src_x: 1,
+            src_y: 2,
+            dst_x: 3,
+            dst_y: 4,
+            width: 20,
+            height: 10,
+        }
+    );
+}
+
+#[test]
+fn x11_core_decoder_captures_font_requests() {
+    let namespace = NamespaceId::from_raw(45);
+    let open = decode_x11_core_request(
+        context(namespace, 573, XByteOrder::LittleEndian),
+        &open_font_request(XByteOrder::LittleEndian, 0x220040, "fixed"),
+    )
+    .unwrap();
+    assert_eq!(
+        open,
+        XWireRequest::OpenFont {
+            font: XResourceId::new(0x220040, 1),
+            name: "fixed".to_owned(),
+        }
+    );
+
+    let close = decode_x11_core_request(
+        context(namespace, 574, XByteOrder::LittleEndian),
+        &resource_request(XByteOrder::LittleEndian, 47, 0x220040),
+    )
+    .unwrap();
+    assert_eq!(
+        close,
+        XWireRequest::QueryFont {
+            font: XResourceId::new(0x220040, 1),
+        }
+    );
+
+    let close = decode_x11_core_request(
+        context(namespace, 575, XByteOrder::LittleEndian),
+        &resource_request(XByteOrder::LittleEndian, 46, 0x220040),
+    )
+    .unwrap();
+    assert_eq!(
+        close,
+        XWireRequest::CloseFont {
+            font: XResourceId::new(0x220040, 1),
+        }
+    );
+
+    let list = decode_x11_core_request(
+        context(namespace, 576, XByteOrder::LittleEndian),
+        &list_fonts_request(XByteOrder::LittleEndian, 5, "*"),
+    )
+    .unwrap();
+    assert_eq!(
+        list,
+        XWireRequest::ListFonts {
+            max_names: 5,
+            pattern: "*".to_owned(),
+        }
+    );
+
+    let list = decode_x11_core_request(
+        context(namespace, 577, XByteOrder::LittleEndian),
+        &list_fonts_with_info_request(XByteOrder::LittleEndian, 5, "*"),
+    )
+    .unwrap();
+    assert_eq!(
+        list,
+        XWireRequest::ListFontsWithInfo {
+            max_names: 5,
+            pattern: "*".to_owned(),
         }
     );
 }
@@ -1415,14 +1639,54 @@ fn x11_dispatch_emits_configure_map_property_and_selection_failure_outputs() {
         &mut atoms,
         &mut properties,
     );
-    assert_eq!(map.outputs.len(), 1);
+    assert_eq!(map.outputs.len(), 2);
     assert_eq!(
         encode_x_client_output(XByteOrder::LittleEndian, map.outputs[0].clone())[0],
         19
     );
+    assert_eq!(
+        encode_x_client_output(XByteOrder::LittleEndian, map.outputs[1].clone())[0],
+        12
+    );
+
+    let map_subwindows = decode_x11_core_request(
+        context(namespace, 603, XByteOrder::LittleEndian),
+        &resource_request(XByteOrder::LittleEndian, 9, X_SETUP_DEFAULT_ROOT),
+    )
+    .unwrap();
+    let map_subwindows = dispatch_x11_wire_request(
+        dispatch_context(namespace, 3, XByteOrder::LittleEndian, 9),
+        map_subwindows,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert_eq!(map_subwindows.outputs.len(), 2);
+    assert_eq!(
+        encode_x_client_output(XByteOrder::LittleEndian, map_subwindows.outputs[0].clone())[0],
+        19
+    );
+    assert_eq!(
+        encode_x_client_output(XByteOrder::LittleEndian, map_subwindows.outputs[1].clone())[0],
+        12
+    );
+
+    let attributes = decode_x11_core_request(
+        context(namespace, 604, XByteOrder::LittleEndian),
+        &change_window_attributes_request(XByteOrder::LittleEndian, X_SETUP_DEFAULT_ROOT),
+    )
+    .unwrap();
+    let attributes = dispatch_x11_wire_request(
+        dispatch_context(namespace, 4, XByteOrder::LittleEndian, 2),
+        attributes,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert!(attributes.outputs.is_empty());
 
     let property = decode_x11_core_request(
-        context(namespace, 603, XByteOrder::LittleEndian),
+        context(namespace, 605, XByteOrder::LittleEndian),
         &change_property_request(
             XByteOrder::LittleEndian,
             XPropertyMode::Replace,
@@ -1556,6 +1820,111 @@ fn x11_dispatch_poly_fill_rectangle_emits_core_draw_transaction() {
             height: 30,
         })
     );
+
+    let segments = decode_x11_core_request(
+        context(namespace, 603, XByteOrder::LittleEndian),
+        &poly_segment_request(
+            XByteOrder::LittleEndian,
+            0x220101,
+            0x220102,
+            &[(2, 3, 12, 8)],
+        ),
+    )
+    .unwrap();
+    let segments = dispatch_x11_wire_request(
+        dispatch_context(namespace, 3, XByteOrder::LittleEndian, 66),
+        segments,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    assert!(segments.outputs.is_empty());
+    let response = segments.response.unwrap();
+    assert_eq!(response.transactions.len(), 1);
+    assert_eq!(
+        response.transactions[0].surface,
+        SurfaceId::new(0x220101, 1)
+    );
+    assert_eq!(
+        response.transactions[0].damage,
+        Region::single(Rect {
+            x: 2,
+            y: 3,
+            width: 11,
+            height: 6,
+        })
+    );
+
+    let line = decode_x11_core_request(
+        context(namespace, 604, XByteOrder::LittleEndian),
+        &poly_line_request(
+            XByteOrder::LittleEndian,
+            0x220101,
+            0x220102,
+            &[(1, 2), (11, 7), (5, 18)],
+        ),
+    )
+    .unwrap();
+    let line = dispatch_x11_wire_request(
+        dispatch_context(namespace, 4, XByteOrder::LittleEndian, 65),
+        line,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    assert!(line.outputs.is_empty());
+    let response = line.response.unwrap();
+    assert_eq!(response.transactions.len(), 1);
+    assert_eq!(
+        response.transactions[0].surface,
+        SurfaceId::new(0x220101, 1)
+    );
+    assert_eq!(
+        response.transactions[0].damage,
+        Region::single(Rect {
+            x: 1,
+            y: 2,
+            width: 11,
+            height: 17,
+        })
+    );
+
+    let fill_poly = decode_x11_core_request(
+        context(namespace, 605, XByteOrder::LittleEndian),
+        &fill_poly_request(
+            XByteOrder::LittleEndian,
+            0x220101,
+            0x220102,
+            &[(4, 5), (14, 10), (7, 20)],
+        ),
+    )
+    .unwrap();
+    let fill_poly = dispatch_x11_wire_request(
+        dispatch_context(namespace, 5, XByteOrder::LittleEndian, 69),
+        fill_poly,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    assert!(fill_poly.outputs.is_empty());
+    let response = fill_poly.response.unwrap();
+    assert_eq!(response.transactions.len(), 1);
+    assert_eq!(
+        response.transactions[0].surface,
+        SurfaceId::new(0x220101, 1)
+    );
+    assert_eq!(
+        response.transactions[0].damage,
+        Region::single(Rect {
+            x: 4,
+            y: 5,
+            width: 11,
+            height: 16,
+        })
+    );
 }
 
 #[test]
@@ -1619,6 +1988,199 @@ fn x11_dispatch_put_image_emits_software_surface_transaction() {
             height: 4,
         })
     );
+}
+
+#[test]
+fn x11_dispatch_pixmap_put_image_and_copy_area_emit_window_transaction() {
+    let namespace = NamespaceId::from_raw(46);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let create = decode_x11_core_request(
+        context(namespace, 621, XByteOrder::LittleEndian),
+        &create_window_request(XByteOrder::LittleEndian, 0x220121, 10, 20, 640, 480),
+    )
+    .unwrap();
+    dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 1),
+        create,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    let pixmap = decode_x11_core_request(
+        context(namespace, 622, XByteOrder::LittleEndian),
+        &create_pixmap_request(XByteOrder::LittleEndian, 24, 0x220122, 0x220121, 64, 32),
+    )
+    .unwrap();
+    let pixmap = dispatch_x11_wire_request(
+        dispatch_context(namespace, 2, XByteOrder::LittleEndian, 53),
+        pixmap,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert!(pixmap.outputs.is_empty());
+
+    let put = decode_x11_core_request(
+        context(namespace, 623, XByteOrder::LittleEndian),
+        &put_image_request(
+            XByteOrder::LittleEndian,
+            0x220122,
+            0x220123,
+            8,
+            4,
+            0,
+            0,
+            &[0xaa; 128],
+        ),
+    )
+    .unwrap();
+    let put = dispatch_x11_wire_request(
+        dispatch_context(namespace, 3, XByteOrder::LittleEndian, 72),
+        put,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert!(put.outputs.is_empty());
+    assert!(put.response.unwrap().transactions.is_empty());
+
+    let copy = decode_x11_core_request(
+        context(namespace, 624, XByteOrder::LittleEndian),
+        &copy_area_request(
+            XByteOrder::LittleEndian,
+            0x220122,
+            0x220121,
+            0x220123,
+            0,
+            0,
+            5,
+            6,
+            8,
+            4,
+        ),
+    )
+    .unwrap();
+    let copy = dispatch_x11_wire_request(
+        dispatch_context(namespace, 4, XByteOrder::LittleEndian, 62),
+        copy,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert!(copy.outputs.is_empty());
+    let response = copy.response.unwrap();
+    assert_eq!(response.transactions.len(), 1);
+    assert_eq!(
+        response.transactions[0].surface,
+        SurfaceId::new(0x220121, 1)
+    );
+    assert_eq!(
+        response.transactions[0].damage,
+        Region::single(Rect {
+            x: 5,
+            y: 6,
+            width: 8,
+            height: 4,
+        })
+    );
+}
+
+#[test]
+fn x11_dispatch_accepts_open_and_close_font_resources() {
+    let namespace = NamespaceId::from_raw(46);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+
+    let open = decode_x11_core_request(
+        context(namespace, 631, XByteOrder::LittleEndian),
+        &open_font_request(XByteOrder::LittleEndian, 0x220131, "fixed"),
+    )
+    .unwrap();
+    let open = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 45),
+        open,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert!(open.outputs.is_empty());
+
+    let query = decode_x11_core_request(
+        context(namespace, 632, XByteOrder::LittleEndian),
+        &resource_request(XByteOrder::LittleEndian, 47, 0x220131),
+    )
+    .unwrap();
+    let query = dispatch_x11_wire_request(
+        dispatch_context(namespace, 2, XByteOrder::LittleEndian, 47),
+        query,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = query.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded.len(), 1);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][4..8]), 7);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][56..60]), 0);
+
+    let list = decode_x11_core_request(
+        context(namespace, 634, XByteOrder::LittleEndian),
+        &list_fonts_request(XByteOrder::LittleEndian, 5, "*"),
+    )
+    .unwrap();
+    let list = dispatch_x11_wire_request(
+        dispatch_context(namespace, 3, XByteOrder::LittleEndian, 49),
+        list,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = list.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded.len(), 1);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][8..10]), 1);
+    assert_eq!(encoded[0][32], 5);
+    assert_eq!(&encoded[0][33..38], b"fixed");
+
+    let list = decode_x11_core_request(
+        context(namespace, 635, XByteOrder::LittleEndian),
+        &list_fonts_with_info_request(XByteOrder::LittleEndian, 5, "*"),
+    )
+    .unwrap();
+    let list = dispatch_x11_wire_request(
+        dispatch_context(namespace, 4, XByteOrder::LittleEndian, 50),
+        list,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = list.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded.len(), 1);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(encoded[0][1], 5);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][4..8]), 9);
+    assert_eq!(&encoded[0][60..65], b"fixed");
+    assert_eq!(encoded[0][68], 1);
+    assert_eq!(encoded[0][69], 0);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][72..76]), 7);
+
+    let close = decode_x11_core_request(
+        context(namespace, 636, XByteOrder::LittleEndian),
+        &resource_request(XByteOrder::LittleEndian, 46, 0x220131),
+    )
+    .unwrap();
+    let close = dispatch_x11_wire_request(
+        dispatch_context(namespace, 5, XByteOrder::LittleEndian, 46),
+        close,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert!(close.outputs.is_empty());
 }
 
 #[test]
@@ -1837,6 +2399,9 @@ fn x11_core_socket_smoke_round_trips_atom_property_and_window_events() {
     let map = read_x_record(&mut stream);
     assert_eq!(map[0], 19);
     assert_eq!(read_u32(XByteOrder::LittleEndian, &map[8..12]), 0x220201);
+    let expose = read_x_record(&mut stream);
+    assert_eq!(expose[0], 12);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &expose[4..8]), 0x220201);
 
     stream
         .write_all(&change_property_request(
@@ -2320,6 +2885,14 @@ fn get_atom_name_request(byte_order: XByteOrder, atom: u32) -> Vec<u8> {
     out
 }
 
+fn change_window_attributes_request(byte_order: XByteOrder, window: u32) -> Vec<u8> {
+    let mut out = vec![2, 0];
+    push_u16(&mut out, byte_order, 3);
+    push_u32(&mut out, byte_order, window);
+    push_u32(&mut out, byte_order, 0);
+    out
+}
+
 fn set_selection_owner_request(
     byte_order: XByteOrder,
     owner: u32,
@@ -2408,6 +2981,84 @@ fn create_gc_request(byte_order: XByteOrder, gc: u32, drawable: u32) -> Vec<u8> 
     out
 }
 
+fn create_pixmap_request(
+    byte_order: XByteOrder,
+    depth: u8,
+    pixmap: u32,
+    drawable: u32,
+    width: u16,
+    height: u16,
+) -> Vec<u8> {
+    let mut out = vec![53, depth];
+    push_u16(&mut out, byte_order, 4);
+    push_u32(&mut out, byte_order, pixmap);
+    push_u32(&mut out, byte_order, drawable);
+    push_u16(&mut out, byte_order, width);
+    push_u16(&mut out, byte_order, height);
+    out
+}
+
+fn open_font_request(byte_order: XByteOrder, font: u32, name: &str) -> Vec<u8> {
+    let mut out = vec![45, 0];
+    let len_units = (12 + padded_len_for_test(name.len())) / 4;
+    push_u16(&mut out, byte_order, len_units as u16);
+    push_u32(&mut out, byte_order, font);
+    push_u16(&mut out, byte_order, name.len() as u16);
+    push_u16(&mut out, byte_order, 0);
+    out.extend_from_slice(name.as_bytes());
+    pad_to_four(&mut out);
+    out
+}
+
+fn list_fonts_request(byte_order: XByteOrder, max_names: u16, pattern: &str) -> Vec<u8> {
+    let mut out = vec![49, 0];
+    let len_units = (8 + padded_len_for_test(pattern.len())) / 4;
+    push_u16(&mut out, byte_order, len_units as u16);
+    push_u16(&mut out, byte_order, max_names);
+    push_u16(&mut out, byte_order, pattern.len() as u16);
+    out.extend_from_slice(pattern.as_bytes());
+    pad_to_four(&mut out);
+    out
+}
+
+fn list_fonts_with_info_request(byte_order: XByteOrder, max_names: u16, pattern: &str) -> Vec<u8> {
+    let mut out = vec![50, 0];
+    let len_units = (8 + padded_len_for_test(pattern.len())) / 4;
+    push_u16(&mut out, byte_order, len_units as u16);
+    push_u16(&mut out, byte_order, max_names);
+    push_u16(&mut out, byte_order, pattern.len() as u16);
+    out.extend_from_slice(pattern.as_bytes());
+    pad_to_four(&mut out);
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn copy_area_request(
+    byte_order: XByteOrder,
+    source: u32,
+    destination: u32,
+    gc: u32,
+    src_x: i16,
+    src_y: i16,
+    dst_x: i16,
+    dst_y: i16,
+    width: u16,
+    height: u16,
+) -> Vec<u8> {
+    let mut out = vec![62, 0];
+    push_u16(&mut out, byte_order, 7);
+    push_u32(&mut out, byte_order, source);
+    push_u32(&mut out, byte_order, destination);
+    push_u32(&mut out, byte_order, gc);
+    push_i16(&mut out, byte_order, src_x);
+    push_i16(&mut out, byte_order, src_y);
+    push_i16(&mut out, byte_order, dst_x);
+    push_i16(&mut out, byte_order, dst_y);
+    push_u16(&mut out, byte_order, width);
+    push_u16(&mut out, byte_order, height);
+    out
+}
+
 fn poly_fill_rectangle_request(
     byte_order: XByteOrder,
     drawable: u32,
@@ -2424,6 +3075,63 @@ fn poly_fill_rectangle_request(
         push_i16(&mut out, byte_order, *y);
         push_u16(&mut out, byte_order, *width);
         push_u16(&mut out, byte_order, *height);
+    }
+    out
+}
+
+fn poly_segment_request(
+    byte_order: XByteOrder,
+    drawable: u32,
+    gc: u32,
+    segments: &[(i16, i16, i16, i16)],
+) -> Vec<u8> {
+    let mut out = vec![66, 0];
+    let len_units = 3 + segments.len() * 2;
+    push_u16(&mut out, byte_order, len_units as u16);
+    push_u32(&mut out, byte_order, drawable);
+    push_u32(&mut out, byte_order, gc);
+    for (x1, y1, x2, y2) in segments {
+        push_i16(&mut out, byte_order, *x1);
+        push_i16(&mut out, byte_order, *y1);
+        push_i16(&mut out, byte_order, *x2);
+        push_i16(&mut out, byte_order, *y2);
+    }
+    out
+}
+
+fn poly_line_request(
+    byte_order: XByteOrder,
+    drawable: u32,
+    gc: u32,
+    points: &[(i16, i16)],
+) -> Vec<u8> {
+    let mut out = vec![65, 0];
+    let len_units = 3 + points.len();
+    push_u16(&mut out, byte_order, len_units as u16);
+    push_u32(&mut out, byte_order, drawable);
+    push_u32(&mut out, byte_order, gc);
+    for (x, y) in points {
+        push_i16(&mut out, byte_order, *x);
+        push_i16(&mut out, byte_order, *y);
+    }
+    out
+}
+
+fn fill_poly_request(
+    byte_order: XByteOrder,
+    drawable: u32,
+    gc: u32,
+    points: &[(i16, i16)],
+) -> Vec<u8> {
+    let mut out = vec![69, 0];
+    let len_units = 4 + points.len();
+    push_u16(&mut out, byte_order, len_units as u16);
+    push_u32(&mut out, byte_order, drawable);
+    push_u32(&mut out, byte_order, gc);
+    out.extend_from_slice(&[0, 0, 0, 0]);
+    for (x, y) in points {
+        push_i16(&mut out, byte_order, *x);
+        push_i16(&mut out, byte_order, *y);
     }
     out
 }

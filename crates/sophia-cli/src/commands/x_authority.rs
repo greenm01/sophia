@@ -1,6 +1,22 @@
 use super::prelude::*;
 
 pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
+    if args.iter().any(|arg| arg == "x-authority-xclock-smoke") {
+        let report = run_x_authority_xclock_smoke()?;
+        println!(
+            "x-authority-xclock-smoke display={} status={} stdout_bytes={} stderr_bytes={} transactions={} runtime_committed={} runtime_surfaces={} first_error={}",
+            report.display,
+            report.status,
+            report.stdout_bytes,
+            report.stderr_bytes,
+            report.transactions,
+            report.runtime_committed,
+            report.runtime_surfaces,
+            report.first_error.as_deref().unwrap_or("none")
+        );
+        return Ok(true);
+    }
+
     if args
         .iter()
         .any(|arg| arg == "x-authority-present-pixmap-smoke")
@@ -182,6 +198,18 @@ struct XAuthorityXlibPutImageSmokeReport {
     transactions: usize,
     runtime_committed: u64,
     runtime_surfaces: u64,
+}
+
+#[derive(Clone, Debug)]
+struct XAuthorityXclockSmokeReport {
+    display: String,
+    status: i32,
+    stdout_bytes: usize,
+    stderr_bytes: usize,
+    transactions: usize,
+    runtime_committed: u64,
+    runtime_surfaces: u64,
+    first_error: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -549,6 +577,130 @@ fn run_x_authority_xlib_put_image_smoke()
         runtime_committed: runtime_state.authority_transactions_committed,
         runtime_surfaces: runtime_state.authority_surfaces_applied,
     })
+}
+
+fn run_x_authority_xclock_smoke() -> Result<XAuthorityXclockSmokeReport, Box<dyn std::error::Error>>
+{
+    let (display, socket_path) = temp_xauthority_display(6600)?;
+    let server_path = socket_path.clone();
+    let (sender, receiver) = sync_channel(32);
+    let server = std::thread::spawn(move || {
+        run_x11_core_socket_server_once_observed(
+            &server_path,
+            NamespaceId::from_raw(48),
+            |result| {
+                for output in &result.outputs {
+                    if let XClientOutput::Error(error) = output {
+                        let _ = sender.try_send(XclockObservation::Error(format!(
+                            "{:?}:major={}:resource={:#x}",
+                            error.code, error.major_code, error.resource_id
+                        )));
+                    }
+                }
+                if let Some(response) = &result.response {
+                    if !response.transactions.is_empty() {
+                        let _ = sender.try_send(XclockObservation::Transactions(
+                            response.transactions.clone(),
+                        ));
+                    }
+                }
+            },
+        )
+    });
+    wait_for_socket_path(&socket_path)?;
+
+    let mut child = std::process::Command::new("/usr/bin/xclock")
+        .arg("-analog")
+        .arg("-norender")
+        .arg("-update")
+        .arg("1")
+        .arg("-display")
+        .arg(&display)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(4);
+    let mut transactions = Vec::new();
+    let mut first_error = None;
+
+    while std::time::Instant::now() < deadline {
+        while let Ok(observation) = receiver.try_recv() {
+            match observation {
+                XclockObservation::Transactions(batch) => transactions.extend(batch),
+                XclockObservation::Error(error) => {
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
+        if !transactions.is_empty() {
+            break;
+        }
+        if child.try_wait()?.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    if child.try_wait()?.is_none() {
+        let _ = child.kill();
+    }
+    let output = child.wait_with_output()?;
+    let status = output.status.code().unwrap_or(-1);
+
+    let _ = std::fs::remove_file(&socket_path);
+    server
+        .join()
+        .map_err(|_| "X authority xclock socket server thread panicked")?
+        .map_err(|error| format!("X authority xclock socket server failed: {error}"))?;
+
+    while let Ok(observation) = receiver.try_recv() {
+        match observation {
+            XclockObservation::Transactions(batch) => transactions.extend(batch),
+            XclockObservation::Error(error) => {
+                first_error.get_or_insert(error);
+            }
+        }
+    }
+
+    if transactions.is_empty() {
+        return Err(format!(
+            "xclock did not produce an authority transaction for {display}: status={status} stderr={} first_error={}",
+            String::from_utf8_lossy(&output.stderr).trim(),
+            first_error.as_deref().unwrap_or("none")
+        )
+        .into());
+    }
+
+    let runtime_state = runtime_state_from_observed_transactions(&transactions)?;
+    if runtime_state.authority_transactions_committed == 0
+        || runtime_state.authority_surfaces_applied == 0
+    {
+        return Err(format!(
+            "xclock transactions did not commit through runtime for {display}: transactions={} committed={} surfaces={}",
+            transactions.len(),
+            runtime_state.authority_transactions_committed,
+            runtime_state.authority_surfaces_applied
+        )
+        .into());
+    }
+
+    Ok(XAuthorityXclockSmokeReport {
+        display,
+        status,
+        stdout_bytes: output.stdout.len(),
+        stderr_bytes: output.stderr.len(),
+        transactions: transactions.len(),
+        runtime_committed: runtime_state.authority_transactions_committed,
+        runtime_surfaces: runtime_state.authority_surfaces_applied,
+        first_error,
+    })
+}
+
+#[derive(Clone, Debug)]
+enum XclockObservation {
+    Transactions(Vec<SurfaceTransaction>),
+    Error(String),
 }
 
 fn run_x_authority_present_pixmap_smoke()

@@ -51,6 +51,24 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
+        XWireRequest::ChangeWindowAttributes { window } => {
+            let outputs =
+                if let Err(error) = runtime.validate_drawable_access(context.namespace, window) {
+                    vec![XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(window.local.raw()).unwrap_or(0),
+                    ))]
+                } else {
+                    Vec::new()
+                };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::DestroyWindow { window } => {
             let outputs =
                 if let Err(error) = runtime.validate_window_access(context.namespace, window) {
@@ -63,6 +81,58 @@ pub fn dispatch_x11_wire_request(
                 } else {
                     Vec::new()
                 };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::MapSubwindows { window } => {
+            let outputs = if let Err(error) =
+                runtime.validate_drawable_access(context.namespace, window)
+            {
+                vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(window.local.raw()).unwrap_or(0),
+                ))]
+            } else {
+                match runtime.map_namespace_windows(context.namespace, u64::from(context.sequence))
+                {
+                    Ok(surfaces) => surfaces
+                        .into_iter()
+                        .flat_map(|surface| {
+                            let window = XResourceId {
+                                local: surface.local_id,
+                            };
+                            [
+                                XClientOutput::Event(XClientEvent::MapNotify {
+                                    sequence: context.sequence,
+                                    event: window,
+                                    window,
+                                    override_redirect: false,
+                                }),
+                                XClientOutput::Event(XClientEvent::Expose {
+                                    sequence: context.sequence,
+                                    window,
+                                    x: 0,
+                                    y: 0,
+                                    width: clamp_u16(surface.geometry.width),
+                                    height: clamp_u16(surface.geometry.height),
+                                    count: 0,
+                                }),
+                            ]
+                        })
+                        .collect(),
+                    Err(error) => vec![XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(window.local.raw()).unwrap_or(0),
+                    ))],
+                }
+            };
             XDispatchResult {
                 response: None,
                 outputs,
@@ -187,6 +257,128 @@ pub fn dispatch_x11_wire_request(
             XDispatchResult {
                 response: None,
                 outputs: Vec::new(),
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::OpenFont { font, .. } => {
+            let outputs =
+                match runtime.open_font(context.namespace, font, u64::from(context.sequence)) {
+                    Ok(()) => Vec::new(),
+                    Err(error) => vec![XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(font.local.raw()).unwrap_or(0),
+                    ))],
+                };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::CloseFont { font } => {
+            let outputs = match runtime.close_font(context.namespace, font) {
+                Ok(()) => Vec::new(),
+                Err(error) => vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(font.local.raw()).unwrap_or(0),
+                ))],
+            };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::QueryFont { font } => {
+            let output = match runtime.validate_font_access(context.namespace, font) {
+                Ok(()) => XClientOutput::Reply(XClientReply::QueryFont {
+                    sequence: context.sequence,
+                    font_ascent: 8,
+                    font_descent: 2,
+                }),
+                Err(error) => XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(font.local.raw()).unwrap_or(0),
+                )),
+            };
+            XDispatchResult {
+                response: None,
+                outputs: vec![output],
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::ListFonts { max_names, .. } => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::ListFonts {
+                sequence: context.sequence,
+                names: if max_names == 0 {
+                    Vec::new()
+                } else {
+                    vec!["fixed".to_owned()]
+                },
+            })],
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::ListFontsWithInfo { max_names, .. } => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::ListFontsWithInfo {
+                sequence: context.sequence,
+                names: if max_names == 0 {
+                    Vec::new()
+                } else {
+                    vec!["fixed".to_owned()]
+                },
+            })],
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::CreatePixmap {
+            pixmap, drawable, ..
+        } => {
+            let outputs =
+                if let Err(error) = runtime.validate_drawable_access(context.namespace, drawable) {
+                    vec![XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(drawable.local.raw()).unwrap_or(0),
+                    ))]
+                } else if let Err(error) =
+                    runtime.create_pixmap(context.namespace, pixmap, u64::from(context.sequence))
+                {
+                    vec![XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(pixmap.local.raw()).unwrap_or(0),
+                    ))]
+                } else {
+                    Vec::new()
+                };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::FreePixmap { pixmap } => {
+            let outputs = match runtime.free_pixmap(context.namespace, pixmap) {
+                Ok(()) => Vec::new(),
+                Err(error) => vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(pixmap.local.raw()).unwrap_or(0),
+                ))],
+            };
+            XDispatchResult {
+                response: None,
+                outputs,
                 metadata_candidates: Vec::new(),
             }
         }
@@ -324,12 +516,171 @@ pub fn dispatch_x11_wire_request(
             ..
         } => {
             let transaction = TransactionId::from_raw(u64::from(context.sequence));
+            if runtime
+                .validate_pixmap_access(context.namespace, drawable)
+                .is_ok()
+            {
+                return XDispatchResult {
+                    response: Some(XAuthorityResponsePacket::accepted(transaction)),
+                    outputs: Vec::new(),
+                    metadata_candidates: Vec::new(),
+                };
+            }
             let mut damage = Region::empty();
             for rectangle in rectangles {
                 damage.push(rectangle);
             }
             let response =
                 runtime.apply_core_draw(transaction, context.namespace, drawable, damage);
+            let outputs = if let XAuthorityResponseOutcome::Rejected(error) = response.outcome {
+                vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(drawable.local.raw()).unwrap_or(0),
+                ))]
+            } else {
+                Vec::new()
+            };
+            XDispatchResult {
+                response: Some(response),
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::CopyArea {
+            source,
+            destination,
+            dst_x,
+            dst_y,
+            width,
+            height,
+            ..
+        } => {
+            let transaction = TransactionId::from_raw(u64::from(context.sequence));
+            let damage = Region::single(Rect {
+                x: i32::from(dst_x),
+                y: i32::from(dst_y),
+                width: i32::from(width),
+                height: i32::from(height),
+            });
+            let response = runtime.apply_copy_area(
+                transaction,
+                context.namespace,
+                source,
+                destination,
+                damage,
+            );
+            let outputs = if let XAuthorityResponseOutcome::Rejected(error) = response.outcome {
+                vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(destination.local.raw()).unwrap_or(0),
+                ))]
+            } else {
+                Vec::new()
+            };
+            XDispatchResult {
+                response: Some(response),
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::PolyLine {
+            drawable, damage, ..
+        } => {
+            let transaction = TransactionId::from_raw(u64::from(context.sequence));
+            if damage.is_none()
+                || runtime
+                    .validate_pixmap_access(context.namespace, drawable)
+                    .is_ok()
+            {
+                return XDispatchResult {
+                    response: Some(XAuthorityResponsePacket::accepted(transaction)),
+                    outputs: Vec::new(),
+                    metadata_candidates: Vec::new(),
+                };
+            }
+            let response = runtime.apply_core_draw(
+                transaction,
+                context.namespace,
+                drawable,
+                Region::single(damage.unwrap()),
+            );
+            let outputs = if let XAuthorityResponseOutcome::Rejected(error) = response.outcome {
+                vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(drawable.local.raw()).unwrap_or(0),
+                ))]
+            } else {
+                Vec::new()
+            };
+            XDispatchResult {
+                response: Some(response),
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::PolySegment {
+            drawable, damage, ..
+        } => {
+            let transaction = TransactionId::from_raw(u64::from(context.sequence));
+            if runtime
+                .validate_pixmap_access(context.namespace, drawable)
+                .is_ok()
+            {
+                return XDispatchResult {
+                    response: Some(XAuthorityResponsePacket::accepted(transaction)),
+                    outputs: Vec::new(),
+                    metadata_candidates: Vec::new(),
+                };
+            }
+            let mut region = Region::empty();
+            for rect in damage {
+                region.push(rect);
+            }
+            let response =
+                runtime.apply_core_draw(transaction, context.namespace, drawable, region);
+            let outputs = if let XAuthorityResponseOutcome::Rejected(error) = response.outcome {
+                vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(drawable.local.raw()).unwrap_or(0),
+                ))]
+            } else {
+                Vec::new()
+            };
+            XDispatchResult {
+                response: Some(response),
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::FillPoly {
+            drawable, damage, ..
+        } => {
+            let transaction = TransactionId::from_raw(u64::from(context.sequence));
+            if damage.is_none()
+                || runtime
+                    .validate_pixmap_access(context.namespace, drawable)
+                    .is_ok()
+            {
+                return XDispatchResult {
+                    response: Some(XAuthorityResponsePacket::accepted(transaction)),
+                    outputs: Vec::new(),
+                    metadata_candidates: Vec::new(),
+                };
+            }
+            let response = runtime.apply_core_draw(
+                transaction,
+                context.namespace,
+                drawable,
+                Region::single(damage.unwrap()),
+            );
             let outputs = if let XAuthorityResponseOutcome::Rejected(error) = response.outcome {
                 vec![XClientOutput::Error(x_error_from_runtime(
                     error,
@@ -356,6 +707,16 @@ pub fn dispatch_x11_wire_request(
             ..
         } => {
             let transaction = TransactionId::from_raw(u64::from(context.sequence));
+            if runtime
+                .validate_pixmap_access(context.namespace, drawable)
+                .is_ok()
+            {
+                return XDispatchResult {
+                    response: Some(XAuthorityResponsePacket::accepted(transaction)),
+                    outputs: Vec::new(),
+                    metadata_candidates: Vec::new(),
+                };
+            }
             let damage = Region::single(Rect {
                 x: i32::from(dst_x),
                 y: i32::from(dst_y),
@@ -478,12 +839,24 @@ fn outputs_from_authority_response(
             override_redirect: false,
         })],
         XAuthorityRequestKind::MapWindow { window, .. } => {
-            vec![XClientOutput::Event(XClientEvent::MapNotify {
+            let mut outputs = vec![XClientOutput::Event(XClientEvent::MapNotify {
                 sequence: context.sequence,
                 event: *window,
                 window: *window,
                 override_redirect: false,
-            })]
+            })];
+            if let Some(surface) = response.surfaces.iter().find(|surface| surface.mapped) {
+                outputs.push(XClientOutput::Event(XClientEvent::Expose {
+                    sequence: context.sequence,
+                    window: *window,
+                    x: 0,
+                    y: 0,
+                    width: clamp_u16(surface.geometry.width),
+                    height: clamp_u16(surface.geometry.height),
+                    count: 0,
+                }));
+            }
+            outputs
         }
         XAuthorityRequestKind::RequestSelection { .. } => Vec::new(),
         XAuthorityRequestKind::SetSelectionOwner { .. }
