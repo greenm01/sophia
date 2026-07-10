@@ -23,36 +23,17 @@ where
 
         let engine = self.assembly.run_tick(input)?;
 
-        Ok(LiveBackendRuntimeTickReport {
+        Ok(self.build_tick_report(LiveBackendRuntimeTickReportInput {
             engine,
-            renderer: self.renderer_observation,
-            scanout: self.scanout_readiness,
-            kms_scanout_target: self.kms_scanout_target,
-            gbm_egl_frame_target: self.gbm_egl_frame_target,
-            gbm_egl_frame_target_lifecycle: self.gbm_egl_frame_target_lifecycle,
-            gbm_egl_frame_target_allocation: self.gbm_egl_frame_target_allocation,
-            page_flip: self.page_flip_event,
             page_flip_callbacks,
             runtime_scanout_states,
             #[cfg(feature = "libdrm-events")]
-            rendered_primary_plane_scanout_cleanup_pending: self
-                .rendered_primary_plane_scanout_cleanup_pending(),
-            #[cfg(feature = "libdrm-events")]
             rendered_primary_plane_scanout_cleanup_retry: None,
-            #[cfg(feature = "libdrm-events")]
-            rendered_primary_plane_scanout_in_flight_ticks: self
-                .rendered_primary_plane_scanout_in_flight_ticks,
-            #[cfg(feature = "libdrm-events")]
-            rendered_primary_plane_scanout_backpressure: self
-                .rendered_primary_plane_scanout_backpressure_report(
-                    LIVE_RENDERED_PRIMARY_PLANE_SCANOUT_STALL_THRESHOLD_TICKS,
-                ),
             #[cfg(feature = "libdrm-events")]
             rendered_primary_plane_scanout_submit: None,
             #[cfg(feature = "libdrm-events")]
             rendered_primary_plane_scanout_retire: None,
-            libdrm_poller: self.libdrm_poller_diagnostics,
-        })
+        }))
     }
 
     #[cfg(feature = "libdrm-events")]
@@ -121,30 +102,14 @@ where
             |adapter| adapter.inner.renderer.committed_surfaces.clone(),
         )?;
 
-        Ok(LiveBackendRuntimeTickReport {
+        Ok(self.build_tick_report(LiveBackendRuntimeTickReportInput {
             engine,
-            renderer: self.renderer_observation,
-            scanout: self.scanout_readiness,
-            kms_scanout_target: self.kms_scanout_target,
-            gbm_egl_frame_target: self.gbm_egl_frame_target,
-            gbm_egl_frame_target_lifecycle: self.gbm_egl_frame_target_lifecycle,
-            gbm_egl_frame_target_allocation: self.gbm_egl_frame_target_allocation,
-            page_flip: self.page_flip_event,
             page_flip_callbacks,
             runtime_scanout_states,
-            rendered_primary_plane_scanout_cleanup_pending: self
-                .rendered_primary_plane_scanout_cleanup_pending(),
             rendered_primary_plane_scanout_cleanup_retry,
-            rendered_primary_plane_scanout_in_flight_ticks: self
-                .rendered_primary_plane_scanout_in_flight_ticks,
-            rendered_primary_plane_scanout_backpressure: self
-                .rendered_primary_plane_scanout_backpressure_report(
-                    LIVE_RENDERED_PRIMARY_PLANE_SCANOUT_STALL_THRESHOLD_TICKS,
-                ),
             rendered_primary_plane_scanout_submit,
             rendered_primary_plane_scanout_retire,
-            libdrm_poller: self.libdrm_poller_diagnostics,
-        })
+        }))
     }
 
     #[cfg(feature = "libdrm-events")]

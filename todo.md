@@ -83,6 +83,8 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Centralized backend runtime tick report construction so plain and
+  rendered-scanout ticks expose the same reduced evidence shape.
 - [x] Split rendered primary-plane scanout target reduction and tracked runtime
   submit bookkeeping out of the one-shot submit translator.
 - [x] Normalized reduced native scanout submit reports so forged ready
