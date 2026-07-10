@@ -7,16 +7,16 @@ use sophia_backend_live::{
     LibdrmBackendFdAuthority, LibdrmBackendFdAuthorityReport, LibdrmBackendFdAuthorityStatus,
     LibdrmDependencyAdmissionReport, LibdrmDependencyAdmissionStatus,
     LibdrmNativeAtomicCommitDevice, LibdrmNativeAtomicCommitFlagsReport,
-    LibdrmNativeAtomicCommitRequest, LibdrmNativeAtomicCommitSubmitReport,
-    LibdrmNativeAtomicCommitSubmitStatus, LibdrmNativeAtomicRequestBuildStatus,
-    LibdrmNativeAtomicScanoutSmokeEvidence, LibdrmNativeAtomicScanoutSmokeStatus,
-    LibdrmNativeConnectorSnapshot, LibdrmNativeCrtcRoute, LibdrmNativeEncoderSnapshot,
-    LibdrmNativeEventAdapterReport, LibdrmNativeEventAdapterStatus, LibdrmNativeKmsSelectionDevice,
-    LibdrmNativeOutputRoute, LibdrmNativeOutputSlot, LibdrmNativePageFlipCallback,
-    LibdrmNativePageFlipDecodeReport, LibdrmNativePageFlipDecodeStatus,
-    LibdrmNativePageFlipReadResult, LibdrmNativePageFlipReader, LibdrmNativePageFlipSource,
-    LibdrmNativePageFlipSourceReport, LibdrmNativePageFlipSourceStatus, LibdrmNativePlaneSnapshot,
-    LibdrmNativePollerDiagnostics, LibdrmNativePrimaryPlaneObjects,
+    LibdrmNativeAtomicCommitRequest, LibdrmNativeAtomicCommitRequestScope,
+    LibdrmNativeAtomicCommitSubmitReport, LibdrmNativeAtomicCommitSubmitStatus,
+    LibdrmNativeAtomicRequestBuildStatus, LibdrmNativeAtomicScanoutSmokeEvidence,
+    LibdrmNativeAtomicScanoutSmokeStatus, LibdrmNativeConnectorSnapshot, LibdrmNativeCrtcRoute,
+    LibdrmNativeEncoderSnapshot, LibdrmNativeEventAdapterReport, LibdrmNativeEventAdapterStatus,
+    LibdrmNativeKmsSelectionDevice, LibdrmNativeOutputRoute, LibdrmNativeOutputSlot,
+    LibdrmNativePageFlipCallback, LibdrmNativePageFlipDecodeReport,
+    LibdrmNativePageFlipDecodeStatus, LibdrmNativePageFlipReadResult, LibdrmNativePageFlipReader,
+    LibdrmNativePageFlipSource, LibdrmNativePageFlipSourceReport, LibdrmNativePageFlipSourceStatus,
+    LibdrmNativePlaneSnapshot, LibdrmNativePollerDiagnostics, LibdrmNativePrimaryPlaneObjects,
     LibdrmNativePrimaryPlanePropertyDiscoveryStatus, LibdrmNativePrimaryPlanePropertyHandles,
     LibdrmNativePrimaryPlaneResourceCreateStatus, LibdrmNativePrimaryPlaneResourceDestroyStatus,
     LibdrmNativePrimaryPlaneResourceDevice, LibdrmNativePrimaryPlaneScanoutRetireResult,
@@ -40,8 +40,8 @@ use sophia_backend_live::{
     LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus, NativeLibdrmAtomicScanoutCommitter,
     NativeLibdrmPageFlipEventPoller, NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller,
     RuntimeScanoutState, Size, build_native_primary_plane_atomic_request,
-    create_native_primary_plane_resources, decode_native_page_flip_batch,
-    destroy_native_primary_plane_resources, discover_live_backend,
+    build_native_primary_plane_page_flip_atomic_request, create_native_primary_plane_resources,
+    decode_native_page_flip_batch, destroy_native_primary_plane_resources, discover_live_backend,
     discover_native_primary_plane_property_handles, libdrm_dependency_admission_report,
     libdrm_fd_authority_report, native_libdrm_event_adapter_report,
     native_libdrm_event_adapter_report_for_authority, real_atomic_scanout_validation_gate,
@@ -738,6 +738,10 @@ fn native_libdrm_atomic_commit_request_reports_reduced_flags() {
     let default_request =
         LibdrmNativeAtomicCommitRequest::new(drm::control::atomic::AtomicModeReq::new());
     assert_eq!(
+        default_request.reduced_scope(),
+        LibdrmNativeAtomicCommitRequestScope::PageFlip
+    );
+    assert_eq!(
         default_request.reduced_flags(),
         LibdrmNativeAtomicCommitFlagsReport {
             page_flip_event: true,
@@ -745,6 +749,11 @@ fn native_libdrm_atomic_commit_request_reports_reduced_flags() {
             allow_modeset: false,
             test_only: false,
         }
+    );
+    assert_eq!(
+        LibdrmNativeAtomicCommitRequest::modeset(drm::control::atomic::AtomicModeReq::new())
+            .reduced_scope(),
+        LibdrmNativeAtomicCommitRequestScope::Modeset
     );
 
     let explicit_request =
@@ -958,6 +967,10 @@ fn native_libdrm_primary_plane_scanout_submit_chains_renderer_descriptor_to_atom
             test_only: false,
         })
     );
+    assert_eq!(
+        result.request_scope,
+        Some(LibdrmNativeAtomicCommitRequestScope::Modeset)
+    );
 
     let retired = result
         .submission
@@ -996,6 +1009,10 @@ fn native_libdrm_primary_plane_scanout_submit_page_flip_policy_disallows_modeset
             allow_modeset: false,
             test_only: false,
         })
+    );
+    assert_eq!(
+        result.request_scope,
+        Some(LibdrmNativeAtomicCommitRequestScope::PageFlip)
     );
     assert_eq!(
         result
@@ -3501,6 +3518,10 @@ fn native_libdrm_primary_plane_builder_creates_submit_ready_request() {
     assert_eq!(build.status, LibdrmNativeAtomicRequestBuildStatus::Built);
     let request = build.request.expect("valid objects should build request");
     assert_eq!(
+        request.reduced_scope(),
+        LibdrmNativeAtomicCommitRequestScope::Modeset
+    );
+    assert_eq!(
         request.reduced_flags(),
         LibdrmNativeAtomicCommitFlagsReport {
             page_flip_event: true,
@@ -3516,6 +3537,35 @@ fn native_libdrm_primary_plane_builder_creates_submit_ready_request() {
         committer.submit_native_atomic_commit(request),
         LibdrmNativeAtomicCommitSubmitReport {
             status: LibdrmNativeAtomicCommitSubmitStatus::Submitted,
+        }
+    );
+}
+
+#[test]
+fn native_libdrm_primary_plane_page_flip_builder_creates_plane_only_request() {
+    let build = build_native_primary_plane_page_flip_atomic_request(
+        primary_plane_objects(Size {
+            width: 1280,
+            height: 720,
+        }),
+        primary_plane_properties(),
+    );
+
+    assert_eq!(build.status, LibdrmNativeAtomicRequestBuildStatus::Built);
+    let request = build
+        .request
+        .expect("valid objects should build page-flip request");
+    assert_eq!(
+        request.reduced_scope(),
+        LibdrmNativeAtomicCommitRequestScope::PageFlip
+    );
+    assert_eq!(
+        request.reduced_flags(),
+        LibdrmNativeAtomicCommitFlagsReport {
+            page_flip_event: true,
+            nonblocking: true,
+            allow_modeset: false,
+            test_only: false,
         }
     );
 }

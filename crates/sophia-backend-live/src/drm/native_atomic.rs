@@ -3,6 +3,7 @@ use crate::prelude::*;
 #[derive(Debug)]
 pub struct LibdrmNativeAtomicCommitRequest {
     request: drm::control::atomic::AtomicModeReq,
+    scope: LibdrmNativeAtomicCommitRequestScope,
     page_flip_event: bool,
     nonblocking: bool,
     allow_modeset: bool,
@@ -14,6 +15,18 @@ impl LibdrmNativeAtomicCommitRequest {
     pub const fn new(request: drm::control::atomic::AtomicModeReq) -> Self {
         Self {
             request,
+            scope: LibdrmNativeAtomicCommitRequestScope::PageFlip,
+            page_flip_event: true,
+            nonblocking: true,
+            allow_modeset: false,
+            test_only: false,
+        }
+    }
+
+    pub const fn modeset(request: drm::control::atomic::AtomicModeReq) -> Self {
+        Self {
+            request,
+            scope: LibdrmNativeAtomicCommitRequestScope::Modeset,
             page_flip_event: true,
             nonblocking: true,
             allow_modeset: false,
@@ -50,6 +63,10 @@ impl LibdrmNativeAtomicCommitRequest {
         }
     }
 
+    pub const fn reduced_scope(&self) -> LibdrmNativeAtomicCommitRequestScope {
+        self.scope
+    }
+
     pub(crate) fn into_native(
         self,
     ) -> (
@@ -71,6 +88,13 @@ impl LibdrmNativeAtomicCommitRequest {
         }
         (flags, self.request)
     }
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibdrmNativeAtomicCommitRequestScope {
+    PageFlip,
+    Modeset,
 }
 
 #[cfg(feature = "libdrm-events")]

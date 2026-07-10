@@ -67,6 +67,9 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Split primary-plane atomic request building so runtime page-flip policy
+  emits plane-only requests while explicit modeset smokes keep connector,
+  CRTC, mode, and active properties.
 - [x] Made reduced atomic scanout evidence require explicit destroyed-resource
   status and no cleanup debt before reporting `Passed`.
 - [x] Versioned the reduced atomic scanout evidence schema and hardened the

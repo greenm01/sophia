@@ -441,6 +441,78 @@ pub fn build_native_primary_plane_atomic_request(
 
     LibdrmNativeAtomicRequestBuildResult {
         status: LibdrmNativeAtomicRequestBuildStatus::Built,
+        request: Some(LibdrmNativeAtomicCommitRequest::modeset(request)),
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+pub fn build_native_primary_plane_page_flip_atomic_request(
+    objects: LibdrmNativePrimaryPlaneObjects,
+    properties: LibdrmNativePrimaryPlanePropertyHandles,
+) -> LibdrmNativeAtomicRequestBuildResult {
+    if objects.size.width <= 0 || objects.size.height <= 0 {
+        return LibdrmNativeAtomicRequestBuildResult {
+            status: LibdrmNativeAtomicRequestBuildStatus::InvalidSize,
+            request: None,
+        };
+    }
+
+    let width = objects.size.width as u64;
+    let height = objects.size.height as u64;
+    let mut request = drm::control::atomic::AtomicModeReq::new();
+    request.add_property(
+        objects.plane,
+        properties.plane_fb_id,
+        drm::control::property::Value::Framebuffer(Some(objects.framebuffer)),
+    );
+    request.add_property(
+        objects.plane,
+        properties.plane_crtc_id,
+        drm::control::property::Value::CRTC(Some(objects.crtc)),
+    );
+    request.add_property(
+        objects.plane,
+        properties.plane_src_x,
+        drm::control::property::Value::UnsignedRange(0),
+    );
+    request.add_property(
+        objects.plane,
+        properties.plane_src_y,
+        drm::control::property::Value::UnsignedRange(0),
+    );
+    request.add_property(
+        objects.plane,
+        properties.plane_src_w,
+        drm::control::property::Value::UnsignedRange(width << 16),
+    );
+    request.add_property(
+        objects.plane,
+        properties.plane_src_h,
+        drm::control::property::Value::UnsignedRange(height << 16),
+    );
+    request.add_property(
+        objects.plane,
+        properties.plane_crtc_x,
+        drm::control::property::Value::SignedRange(0),
+    );
+    request.add_property(
+        objects.plane,
+        properties.plane_crtc_y,
+        drm::control::property::Value::SignedRange(0),
+    );
+    request.add_property(
+        objects.plane,
+        properties.plane_crtc_w,
+        drm::control::property::Value::UnsignedRange(width),
+    );
+    request.add_property(
+        objects.plane,
+        properties.plane_crtc_h,
+        drm::control::property::Value::UnsignedRange(height),
+    );
+
+    LibdrmNativeAtomicRequestBuildResult {
+        status: LibdrmNativeAtomicRequestBuildStatus::Built,
         request: Some(LibdrmNativeAtomicCommitRequest::new(request)),
     }
 }

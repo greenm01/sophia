@@ -107,6 +107,7 @@ pub struct LibdrmNativePrimaryPlaneScanoutSubmitResult {
     pub properties: Option<LibdrmNativePrimaryPlanePropertyDiscoveryStatus>,
     pub resources: Option<LibdrmNativePrimaryPlaneResourceCreateStatus>,
     pub request: Option<LibdrmNativeAtomicRequestBuildStatus>,
+    pub request_scope: Option<LibdrmNativeAtomicCommitRequestScope>,
     pub commit_flags: Option<LibdrmNativeAtomicCommitFlagsReport>,
     pub submit: Option<LibdrmNativeAtomicCommitSubmitStatus>,
     pub submission: Option<LibdrmNativePrimaryPlaneScanoutSubmission>,
@@ -401,6 +402,7 @@ where
             properties: None,
             resources: None,
             request: None,
+            request_scope: None,
             commit_flags: None,
             submit: None,
             submission: None,
@@ -415,6 +417,7 @@ where
             properties: None,
             resources: None,
             request: None,
+            request_scope: None,
             commit_flags: None,
             submit: None,
             submission: None,
@@ -435,6 +438,7 @@ where
             properties: Some(properties.status),
             resources: None,
             request: None,
+            request_scope: None,
             commit_flags: None,
             submit: None,
             submission: None,
@@ -450,16 +454,19 @@ where
             properties: Some(properties.status),
             resources: Some(resources.status),
             request: None,
+            request_scope: None,
             commit_flags: None,
             submit: None,
             submission: None,
         };
     };
 
-    let request = build_native_primary_plane_atomic_request(
-        resource_bundle.into_objects(selected),
-        property_handles,
-    );
+    let objects = resource_bundle.into_objects(selected);
+    let request = if policy.allow_modeset {
+        build_native_primary_plane_atomic_request(objects, property_handles)
+    } else {
+        build_native_primary_plane_page_flip_atomic_request(objects, property_handles)
+    };
     let Some(request) = request.request else {
         let _ = destroy_native_primary_plane_resources(device, resource_bundle);
         return LibdrmNativePrimaryPlaneScanoutSubmitResult {
@@ -469,6 +476,7 @@ where
             properties: Some(properties.status),
             resources: Some(resources.status),
             request: Some(request.status),
+            request_scope: None,
             commit_flags: None,
             submit: None,
             submission: None,
@@ -480,6 +488,7 @@ where
     } else {
         request
     };
+    let request_scope = request.reduced_scope();
     let commit_flags = request.reduced_flags();
     let (flags, request) = request.into_native();
     let submit = match device.submit_atomic_commit(flags, request) {
@@ -499,6 +508,7 @@ where
             properties: Some(properties.status),
             resources: Some(resources.status),
             request: Some(LibdrmNativeAtomicRequestBuildStatus::Built),
+            request_scope: Some(request_scope),
             commit_flags: Some(commit_flags),
             submit: Some(submit),
             submission: None,
@@ -512,6 +522,7 @@ where
         properties: Some(properties.status),
         resources: Some(resources.status),
         request: Some(LibdrmNativeAtomicRequestBuildStatus::Built),
+        request_scope: Some(request_scope),
         commit_flags: Some(commit_flags),
         submit: Some(submit),
         submission: Some(LibdrmNativePrimaryPlaneScanoutSubmission {

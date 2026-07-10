@@ -155,12 +155,14 @@ next submit.
 `LibdrmNativeAtomicCommitRequest` owns the native atomic request privately and
 exposes only reduced flag facts for tests and diagnostics; framebuffer, CRTC,
 plane, connector, property, and fd identity stay inside backend-live.
-`build_native_primary_plane_atomic_request` is the first backend-private KMS
-property-set builder. It wires a connector, CRTC, primary plane, framebuffer,
-mode blob, and full-output rectangle into a `drm::control::atomic::AtomicModeReq`
-while exposing only built/invalid-size status. This is still not a full scanout
-pipeline: native GBM buffer-object production and hardware smoke remain separate
-work.
+`build_native_primary_plane_atomic_request` is the explicit modeset builder. It
+wires a connector, CRTC, primary plane, framebuffer, mode blob, and full-output
+rectangle into a `drm::control::atomic::AtomicModeReq` while exposing only
+built/invalid-size status. Runtime page flips use the separate plane-only
+`build_native_primary_plane_page_flip_atomic_request`, so ordinary scanout does
+not smuggle connector, CRTC, mode, or active properties into a non-modeset
+commit. This is still not complete hardware proof until real DRM-master evidence
+shows the full submit, callback, and retirement chain.
 `select_native_primary_plane_target` chooses a connected connector, usable
 encoder/CRTC, display mode size, and compatible primary plane through real DRM
 resource APIs. It reduces failures to read-failed or missing resource groups;
