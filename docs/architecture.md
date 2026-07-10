@@ -795,6 +795,9 @@ selects the native KMS target once, verifies that the selected size still
 matches the frame target, and only then asks the renderer for a scanout buffer.
 If the native target changed or disappeared, the runtime reports a reduced
 not-ready scanout target and leaves the renderer untouched.
+Runtime submits that selected target with page-flip policy, so the reduced
+commit flags keep `ALLOW_MODESET` false. Modeset permission remains explicit for
+the opt-in hardware smoke and future target-reconfiguration paths.
 The shared session runtime now has a matching reduced lifecycle: after
 `RenderFrame`, it emits `SubmitScanout` and records submitted, retired, or
 rejected scanout state without seeing framebuffer IDs, KMS handles, or GBM

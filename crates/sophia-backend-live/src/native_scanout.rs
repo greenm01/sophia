@@ -107,6 +107,7 @@ pub struct LibdrmNativePrimaryPlaneScanoutSubmitResult {
     pub properties: Option<LibdrmNativePrimaryPlanePropertyDiscoveryStatus>,
     pub resources: Option<LibdrmNativePrimaryPlaneResourceCreateStatus>,
     pub request: Option<LibdrmNativeAtomicRequestBuildStatus>,
+    pub commit_flags: Option<LibdrmNativeAtomicCommitFlagsReport>,
     pub submit: Option<LibdrmNativeAtomicCommitSubmitStatus>,
     pub submission: Option<LibdrmNativePrimaryPlaneScanoutSubmission>,
 }
@@ -121,6 +122,27 @@ pub enum LibdrmNativePrimaryPlaneScanoutSubmitStatus {
     ResourceCreationUnavailable,
     AtomicRequestBuildFailed,
     AtomicSubmitFailed,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LibdrmNativePrimaryPlaneScanoutSubmitPolicy {
+    pub allow_modeset: bool,
+}
+
+#[cfg(feature = "libdrm-events")]
+impl LibdrmNativePrimaryPlaneScanoutSubmitPolicy {
+    pub const fn page_flip() -> Self {
+        Self {
+            allow_modeset: false,
+        }
+    }
+
+    pub const fn modeset() -> Self {
+        Self {
+            allow_modeset: true,
+        }
+    }
 }
 
 #[cfg(feature = "libdrm-events")]
@@ -299,6 +321,26 @@ where
         + LibdrmNativePrimaryPlaneResourceDevice
         + LibdrmNativeAtomicCommitDevice,
 {
+    submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_policy(
+        device,
+        selection,
+        descriptor,
+        LibdrmNativePrimaryPlaneScanoutSubmitPolicy::modeset(),
+    )
+}
+
+#[cfg(feature = "libdrm-events")]
+pub fn submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_policy<D>(
+    device: &D,
+    selection: LibdrmNativePrimaryPlaneSelectionResult,
+    descriptor: LiveRendererScanoutBufferDescriptor,
+    policy: LibdrmNativePrimaryPlaneScanoutSubmitPolicy,
+) -> LibdrmNativePrimaryPlaneScanoutSubmitResult
+where
+    D: LibdrmNativePropertyLookupDevice
+        + LibdrmNativePrimaryPlaneResourceDevice
+        + LibdrmNativeAtomicCommitDevice,
+{
     let Some(selected) = selection.selection else {
         return LibdrmNativePrimaryPlaneScanoutSubmitResult {
             status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::KmsTargetUnavailable,
@@ -307,6 +349,7 @@ where
             properties: None,
             resources: None,
             request: None,
+            commit_flags: None,
             submit: None,
             submission: None,
         };
@@ -320,6 +363,7 @@ where
             properties: None,
             resources: None,
             request: None,
+            commit_flags: None,
             submit: None,
             submission: None,
         };
@@ -339,6 +383,7 @@ where
             properties: Some(properties.status),
             resources: None,
             request: None,
+            commit_flags: None,
             submit: None,
             submission: None,
         };
@@ -353,6 +398,7 @@ where
             properties: Some(properties.status),
             resources: Some(resources.status),
             request: None,
+            commit_flags: None,
             submit: None,
             submission: None,
         };
@@ -371,12 +417,18 @@ where
             properties: Some(properties.status),
             resources: Some(resources.status),
             request: Some(request.status),
+            commit_flags: None,
             submit: None,
             submission: None,
         };
     };
 
-    let request = request.allow_modeset();
+    let request = if policy.allow_modeset {
+        request.allow_modeset()
+    } else {
+        request
+    };
+    let commit_flags = request.reduced_flags();
     let (flags, request) = request.into_native();
     let submit = match device.submit_atomic_commit(flags, request) {
         Ok(()) => LibdrmNativeAtomicCommitSubmitStatus::Submitted,
@@ -395,6 +447,7 @@ where
             properties: Some(properties.status),
             resources: Some(resources.status),
             request: Some(LibdrmNativeAtomicRequestBuildStatus::Built),
+            commit_flags: Some(commit_flags),
             submit: Some(submit),
             submission: None,
         };
@@ -407,6 +460,7 @@ where
         properties: Some(properties.status),
         resources: Some(resources.status),
         request: Some(LibdrmNativeAtomicRequestBuildStatus::Built),
+        commit_flags: Some(commit_flags),
         submit: Some(submit),
         submission: Some(LibdrmNativePrimaryPlaneScanoutSubmission {
             resources: resource_bundle,

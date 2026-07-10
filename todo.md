@@ -131,6 +131,8 @@ active milestone to `docs/roadmap-history.md`.
   sizing and atomic submit can share one coherent selection snapshot.
 - [x] Rechecked the native KMS target snapshot before runtime rendered scanout
   export so stale readiness cannot render into the wrong target.
+- [x] Split atomic submit policy so runtime rendered scanout uses page-flip
+  commits without `ALLOW_MODESET`, while modeset permission stays explicit.
 - [x] Added reduced live scanout submit intake so backend-live rendered
   primary-plane submit results can drive runtime `SubmitScanout`.
 - [x] Added shared runtime scanout lifecycle state so rendered frames progress

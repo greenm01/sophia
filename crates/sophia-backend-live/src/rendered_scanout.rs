@@ -222,6 +222,7 @@ pub struct LiveRenderedPrimaryPlaneScanoutSubmitResult<Owner> {
     pub target: Option<LiveGbmEglFrameTargetStatus>,
     pub export: Option<LiveRendererScanoutBufferExportStatus>,
     pub submit: Option<LibdrmNativePrimaryPlaneScanoutSubmitStatus>,
+    pub commit_flags: Option<LibdrmNativeAtomicCommitFlagsReport>,
     pub submission: Option<LiveRenderedPrimaryPlaneScanoutSubmission<Owner>>,
 }
 
@@ -364,6 +365,7 @@ pub struct LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
     pub target: Option<LiveGbmEglFrameTargetStatus>,
     pub export: Option<LiveRendererScanoutBufferExportStatus>,
     pub submit: Option<LibdrmNativePrimaryPlaneScanoutSubmitStatus>,
+    pub commit_flags: Option<LibdrmNativeAtomicCommitFlagsReport>,
     pub runtime_scanout_state: Option<RuntimeScanoutState>,
     pub in_flight: bool,
     pub in_flight_ticks: u64,
@@ -522,6 +524,7 @@ where
             target: target.map(|target| target.status),
             export: None,
             submit: None,
+            commit_flags: None,
             submission: None,
         };
     }
@@ -533,6 +536,7 @@ where
             target: None,
             export: None,
             submit: None,
+            commit_flags: None,
             submission: None,
         };
     };
@@ -547,6 +551,7 @@ where
             target: Some(target.status),
             export: None,
             submit: None,
+            commit_flags: None,
             submission: None,
         };
     }
@@ -559,6 +564,7 @@ where
             target: Some(target.status),
             export: Some(export.status),
             submit: None,
+            commit_flags: None,
             submission: None,
         };
     }
@@ -570,13 +576,18 @@ where
             target: Some(target.status),
             export: Some(export.status),
             submit: None,
+            commit_flags: None,
             submission: None,
         };
     };
 
-    let mut submit = submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor(
-        device, selection, descriptor,
-    );
+    let mut submit =
+        submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_policy(
+            device,
+            selection,
+            descriptor,
+            LibdrmNativePrimaryPlaneScanoutSubmitPolicy::page_flip(),
+        );
     if submit.status != LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip {
         return LiveRenderedPrimaryPlaneScanoutSubmitResult {
             status: LiveRenderedPrimaryPlaneScanoutSubmitStatus::PrimaryPlaneSubmitFailed,
@@ -584,6 +595,7 @@ where
             target: Some(target.status),
             export: Some(export.status),
             submit: Some(submit.status),
+            commit_flags: submit.commit_flags,
             submission: None,
         };
     }
@@ -595,6 +607,7 @@ where
             target: Some(target.status),
             export: Some(export.status),
             submit: Some(submit.status),
+            commit_flags: submit.commit_flags,
             submission: None,
         };
     };
@@ -605,6 +618,7 @@ where
         target: Some(target.status),
         export: Some(export.status),
         submit: Some(submit.status),
+        commit_flags: submit.commit_flags,
         submission: Some(LiveRenderedPrimaryPlaneScanoutSubmission {
             scanout_buffer: owner,
             primary_plane,
@@ -668,6 +682,7 @@ where
             target: target.map(|target| target.status),
             export: None,
             submit: None,
+            commit_flags: None,
             runtime_scanout_state: Some(RuntimeScanoutState::Deferred),
             in_flight: true,
             in_flight_ticks: *rendered_primary_plane_scanout_in_flight_ticks,
@@ -681,6 +696,7 @@ where
             target: target.map(|target| target.status),
             export: None,
             submit: None,
+            commit_flags: None,
             runtime_scanout_state: Some(RuntimeScanoutState::Deferred),
             in_flight: false,
             in_flight_ticks: *rendered_primary_plane_scanout_in_flight_ticks,
@@ -716,6 +732,7 @@ where
         target: result.target,
         export: result.export,
         submit: result.submit,
+        commit_flags: result.commit_flags,
         runtime_scanout_state,
         in_flight: rendered_primary_plane_scanout_submission.is_some(),
         in_flight_ticks: *rendered_primary_plane_scanout_in_flight_ticks,

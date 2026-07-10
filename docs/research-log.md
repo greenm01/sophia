@@ -931,6 +931,11 @@ rechecks the native KMS target snapshot before asking the renderer for a scanout
 buffer, verifies the selected size against the reduced frame target, and then
 submits the same snapshot. A fake drift test proves a disappeared native target
 returns reduced scanout-target-not-ready with zero export attempts.
+Atomic submit policy is now explicit. The direct primary-plane smoke helper
+still reports reduced commit flags with modeset permission, while runtime
+rendered-primary-plane submit uses page-flip policy and reports `ALLOW_MODESET`
+as false. This prevents the steady scanout loop from accidentally becoming a
+modeset loop.
 
 ## Open Questions
 

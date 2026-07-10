@@ -193,10 +193,12 @@ and must not appear in runtime reports.
 `submit_native_primary_plane_scanout_from_renderer_descriptor` is the first
 reduced end-to-end submit chain. It selects a KMS target, validates the reduced
 renderer descriptor, creates framebuffer resources, builds the atomic request,
-and submits it with modeset permission. A successful return is only
+and submits it with explicit modeset permission. A successful return is only
 `SubmittedWaitingForPageFlip`; the opaque submission owner must remain alive
 until backend-live accepts native page-flip evidence and explicitly retires the
-resources.
+resources. Steady runtime scanout must instead use the policy-aware selection
+submit path with page-flip policy, which keeps `ALLOW_MODESET` false and reports
+the reduced commit flags.
 Runtime code should use the rendered-owner wrapper instead of calling the
 descriptor submit seam directly. `LiveRenderedScanoutBufferExporter` abstracts a
 rendered front-buffer owner for deterministic tests and native GBM/EGL, while
@@ -295,6 +297,8 @@ before renderer export. A stale reduced readiness report is not enough to open
 or render into a scanout target. If the native snapshot is missing or no longer
 matches the reduced frame target, the submit report reduces to
 scanout-target-not-ready and export remains unattempted.
+When the snapshot is valid, runtime submit exports the rendered buffer and
+commits the same snapshot using page-flip policy, not modeset policy.
 `LibdrmNativeAtomicScanoutSmokeEvidence` is the reduced record for that smoke.
 It reports only where the chain stopped: no primary card, KMS selection failure,
 persistent rendered-context failure, KMS scanout target failure, GBM export
