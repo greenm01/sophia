@@ -4222,6 +4222,19 @@ fn native_atomic_scanout_smoke_evidence_records_reduced_early_failures() {
     assert_eq!(
         LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
             LiveKmsScanoutTargetStatus::Ready,
+            None,
+            LiveRendererScanoutBufferExportStatus::Exported,
+            None,
+            None,
+            None,
+            None,
+        )
+        .status,
+        LibdrmNativeAtomicScanoutSmokeStatus::RenderedContextUnavailable
+    );
+    assert_eq!(
+        LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+            LiveKmsScanoutTargetStatus::Ready,
             Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
             LiveRendererScanoutBufferExportStatus::Unavailable,
             None,

@@ -193,13 +193,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
 
         let status = if scanout_target != LiveKmsScanoutTargetStatus::Ready {
             LibdrmNativeAtomicScanoutSmokeStatus::KmsTargetUnavailable
-        } else if matches!(
-            rendered_context,
-            Some(
-                LibdrmNativeRenderedScanoutContextStatus::Unavailable
-                    | LibdrmNativeRenderedScanoutContextStatus::Degraded
-            )
-        ) {
+        } else if rendered_context != Some(LibdrmNativeRenderedScanoutContextStatus::Ready) {
             LibdrmNativeAtomicScanoutSmokeStatus::RenderedContextUnavailable
         } else if gbm_export != LiveRendererScanoutBufferExportStatus::Exported {
             LibdrmNativeAtomicScanoutSmokeStatus::GbmExportFailed

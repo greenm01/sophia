@@ -83,6 +83,8 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Aligned Rust atomic scanout smoke evidence with the shell verifier so
+  missing rendered-context readiness fails before GBM export can pass.
 - [x] Normalized renderer-live native GBM scanout export reports so an exported
   native result without a retained valid reduced buffer degrades before
   backend-live sees it.
