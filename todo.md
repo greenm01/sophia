@@ -14,6 +14,8 @@ active milestone to `docs/roadmap-history.md`.
 
 ### Atomic Hardware Evidence
 
+- [ ] Run the non-modesetting atomic scanout preflight with
+  `tools/atomic_scanout_preflight.sh`.
 - [ ] Run the opt-in atomic hardware smoke on a DRM-master-capable machine.
 - [ ] Capture `LibdrmNativeAtomicScanoutSmokeEvidence` with
   `tools/atomic_scanout_smoke.sh`.
@@ -24,6 +26,8 @@ Support now exists for that hardware proof:
 
 - `tools/atomic_scanout_smoke.sh` records the opt-in smoke log and verifies
   passing evidence automatically.
+- `tools/atomic_scanout_preflight.sh` records reduced host readiness without
+  requesting DRM master or modesetting hardware.
 - `tools/verify_atomic_scanout_evidence.sh` can verify a captured log offline
   against the reduced atomic scanout evidence contract.
 
@@ -67,6 +71,9 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Added a non-modesetting atomic scanout preflight report and tool so
+  hardware validation can distinguish missing primary card nodes before the
+  DRM-master smoke.
 - [x] Carried reduced request scope through rendered primary-plane runtime
   submit reports so steady-state scanout diagnostics prove page-flip request
   shape, not only commit flags.

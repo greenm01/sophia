@@ -85,14 +85,21 @@ runs the native path in a child test process so a driver crash reports as an
 opt-in validation failure instead of terminating ordinary deterministic tests.
 
 The combined `libdrm-events,gbm-probe` backend suite also includes an opt-in
-atomic scanout smoke. Set `SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1` only from a
-session that may take DRM master on a primary `/dev/dri/card*` node. The child
-test opens the card read/write, enables UniversalPlanes and Atomic client
-capabilities, duplicates the same fd namespace into a persistent GBM/EGL
-rendered-scanout context, clears a GBM surface, locks the rendered front buffer,
-submits a primary-plane atomic modeset, waits for reduced page-flip evidence,
-and retires the submitted framebuffer resources. Without that environment
-variable, the test returns early and never opens or modesets hardware.
+atomic scanout smoke. Run `tools/atomic_scanout_preflight.sh` first when the
+host state is unknown. That preflight does not request DRM master, does not
+modeset hardware, and emits only a reduced
+`sophia_atomic_scanout_preflight` line: schema version, validation target,
+readiness status, and a capped count of primary card nodes. It does not expose
+device paths, file descriptors, native errors, or KMS object identity.
+
+Set `SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1` only from a session that may take
+DRM master on a primary `/dev/dri/card*` node. The child test opens the card
+read/write, enables UniversalPlanes and Atomic client capabilities, duplicates
+the same fd namespace into a persistent GBM/EGL rendered-scanout context,
+clears a GBM surface, locks the rendered front buffer, submits a primary-plane
+atomic modeset, waits for reduced page-flip evidence, and retires the submitted
+framebuffer resources. Without that environment variable, the test returns
+early and never opens or modesets hardware.
 The stable evidence shape for that run is the
 `sophia_atomic_scanout_evidence` line: schema version, overall status, rendered
 context status, GBM export status, primary-plane submit status, reduced request

@@ -2,6 +2,7 @@ pub const LIVE_PAGE_FLIP_CALLBACK_CHANNEL_CAPACITY: usize = 128;
 pub const SOPHIA_RUN_REAL_LIBDRM_EVENTS_SMOKE: &str = "SOPHIA_RUN_REAL_LIBDRM_EVENTS_SMOKE";
 pub const SOPHIA_RUN_REAL_LIBINPUT_EVENTS_SMOKE: &str = "SOPHIA_RUN_REAL_LIBINPUT_EVENTS_SMOKE";
 pub const SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE: &str = "SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE";
+pub const LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS: u8 = 8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LiveHardwareValidationGateReport {
@@ -76,6 +77,61 @@ pub enum LiveHardwareValidationSmokeStatus {
     Failed,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveAtomicScanoutPreflightReport {
+    pub target: LiveHardwareValidationTarget,
+    pub status: LiveAtomicScanoutPreflightStatus,
+    pub primary_card_nodes: u8,
+}
+
+impl LiveAtomicScanoutPreflightReport {
+    pub const fn from_primary_card_count(
+        device_directory_available: bool,
+        primary_card_nodes: usize,
+    ) -> Self {
+        let primary_card_nodes = if device_directory_available {
+            capped_primary_card_count(primary_card_nodes)
+        } else {
+            0
+        };
+        let status = if !device_directory_available {
+            LiveAtomicScanoutPreflightStatus::DeviceDirectoryUnavailable
+        } else if primary_card_nodes == 0 {
+            LiveAtomicScanoutPreflightStatus::NoPrimaryCardNodes
+        } else {
+            LiveAtomicScanoutPreflightStatus::CandidatePrimaryCardsPresent
+        };
+
+        Self {
+            target: LiveHardwareValidationTarget::AtomicScanout,
+            status,
+            primary_card_nodes,
+        }
+    }
+
+    pub fn reduced_log_line(self) -> String {
+        format!(
+            "sophia_atomic_scanout_preflight schema=1 target={:?} status={:?} primary_card_nodes={}",
+            self.target, self.status, self.primary_card_nodes
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveAtomicScanoutPreflightStatus {
+    DeviceDirectoryUnavailable,
+    NoPrimaryCardNodes,
+    CandidatePrimaryCardsPresent,
+}
+
+pub const fn capped_primary_card_count(primary_card_nodes: usize) -> u8 {
+    if primary_card_nodes > LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS as usize {
+        LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS
+    } else {
+        primary_card_nodes as u8
+    }
+}
+
 pub fn real_libdrm_events_validation_gate() -> LiveHardwareValidationGateReport {
     let target = LiveHardwareValidationTarget::LibdrmEvents;
     LiveHardwareValidationGateReport::from_env_presence(
@@ -110,4 +166,54 @@ pub fn real_libinput_events_validation_smoke_report() -> LiveHardwareValidationS
 
 pub fn real_atomic_scanout_validation_smoke_report() -> LiveHardwareValidationSmokeReport {
     LiveHardwareValidationSmokeReport::fail_closed_from_gate(real_atomic_scanout_validation_gate())
+}
+
+pub fn real_atomic_scanout_preflight_report() -> LiveAtomicScanoutPreflightReport {
+    real_atomic_scanout_preflight_report_from_dev_dri(std::path::Path::new("/dev/dri"))
+}
+
+pub fn real_atomic_scanout_preflight_report_from_dev_dri(
+    dev_dri: &std::path::Path,
+) -> LiveAtomicScanoutPreflightReport {
+    let Ok(entries) = std::fs::read_dir(dev_dri) else {
+        return LiveAtomicScanoutPreflightReport::from_primary_card_count(false, 0);
+    };
+
+    let primary_card_nodes = entries
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                return false;
+            };
+            if !is_primary_card_node_name(name) {
+                return false;
+            }
+            entry
+                .file_type()
+                .map(|file_type| is_drm_card_node_file_type(&file_type))
+                .unwrap_or(false)
+        })
+        .count();
+
+    LiveAtomicScanoutPreflightReport::from_primary_card_count(true, primary_card_nodes)
+}
+
+fn is_primary_card_node_name(name: &str) -> bool {
+    let Some(suffix) = name.strip_prefix("card") else {
+        return false;
+    };
+    !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+#[cfg(unix)]
+fn is_drm_card_node_file_type(file_type: &std::fs::FileType) -> bool {
+    use std::os::unix::fs::FileTypeExt;
+
+    file_type.is_char_device()
+}
+
+#[cfg(not(unix))]
+fn is_drm_card_node_file_type(_file_type: &std::fs::FileType) -> bool {
+    false
 }

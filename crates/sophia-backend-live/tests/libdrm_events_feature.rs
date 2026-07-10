@@ -4,7 +4,8 @@ use std::{io, sync::mpsc};
 
 use sophia_backend_live::{
     CompositorBackendTickInput, FakeLibdrmNativePageFlipReader, FakeLibdrmPageFlipEventPoller,
-    LibdrmBackendFdAuthority, LibdrmBackendFdAuthorityReport, LibdrmBackendFdAuthorityStatus,
+    LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS, LibdrmBackendFdAuthority,
+    LibdrmBackendFdAuthorityReport, LibdrmBackendFdAuthorityStatus,
     LibdrmDependencyAdmissionReport, LibdrmDependencyAdmissionStatus,
     LibdrmNativeAtomicCommitDevice, LibdrmNativeAtomicCommitFlagsReport,
     LibdrmNativeAtomicCommitRequest, LibdrmNativeAtomicCommitRequestScope,
@@ -26,7 +27,8 @@ use sophia_backend_live::{
     LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport, LibdrmNativeReadLoopReport,
     LibdrmNativeReadLoopStatus, LibdrmNativeRenderedScanoutContextStatus,
     LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller,
-    LibdrmRendererScanoutBuffer, LiveBackendConfig, LiveHardwareValidationGateReport,
+    LibdrmRendererScanoutBuffer, LiveAtomicScanoutPreflightReport,
+    LiveAtomicScanoutPreflightStatus, LiveBackendConfig, LiveHardwareValidationGateReport,
     LiveHardwareValidationGateStatus, LiveHardwareValidationSmokeReport,
     LiveHardwareValidationSmokeStatus, LiveHardwareValidationTarget, LiveKmsScanoutTargetStatus,
     LiveLibdrmPollerDiagnostics, LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
@@ -44,10 +46,10 @@ use sophia_backend_live::{
     decode_native_page_flip_batch, destroy_native_primary_plane_resources, discover_live_backend,
     discover_native_primary_plane_property_handles, libdrm_dependency_admission_report,
     libdrm_fd_authority_report, native_libdrm_event_adapter_report,
-    native_libdrm_event_adapter_report_for_authority, real_atomic_scanout_validation_gate,
-    real_atomic_scanout_validation_smoke_report, real_libdrm_events_validation_gate,
-    real_libdrm_events_validation_smoke_report, reduce_native_page_flip_event,
-    retire_native_primary_plane_scanout_after_page_flip,
+    native_libdrm_event_adapter_report_for_authority, real_atomic_scanout_preflight_report,
+    real_atomic_scanout_validation_gate, real_atomic_scanout_validation_smoke_report,
+    real_libdrm_events_validation_gate, real_libdrm_events_validation_smoke_report,
+    reduce_native_page_flip_event, retire_native_primary_plane_scanout_after_page_flip,
     retire_rendered_primary_plane_scanout_after_page_flip, select_native_primary_plane_target,
     submit_native_primary_plane_scanout_from_renderer_descriptor,
     submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor,
@@ -194,6 +196,48 @@ fn real_atomic_scanout_validation_gate_is_explicit_and_reduced() {
     assert_eq!(
         real_atomic_scanout_validation_smoke_report().target,
         LiveHardwareValidationTarget::AtomicScanout
+    );
+}
+
+#[test]
+fn atomic_scanout_preflight_reduces_host_readiness_without_identity() {
+    assert_eq!(
+        LiveAtomicScanoutPreflightReport::from_primary_card_count(false, 2),
+        LiveAtomicScanoutPreflightReport {
+            target: LiveHardwareValidationTarget::AtomicScanout,
+            status: LiveAtomicScanoutPreflightStatus::DeviceDirectoryUnavailable,
+            primary_card_nodes: 0,
+        }
+    );
+    assert_eq!(
+        LiveAtomicScanoutPreflightReport::from_primary_card_count(true, 0),
+        LiveAtomicScanoutPreflightReport {
+            target: LiveHardwareValidationTarget::AtomicScanout,
+            status: LiveAtomicScanoutPreflightStatus::NoPrimaryCardNodes,
+            primary_card_nodes: 0,
+        }
+    );
+    assert_eq!(
+        LiveAtomicScanoutPreflightReport::from_primary_card_count(true, 2),
+        LiveAtomicScanoutPreflightReport {
+            target: LiveHardwareValidationTarget::AtomicScanout,
+            status: LiveAtomicScanoutPreflightStatus::CandidatePrimaryCardsPresent,
+            primary_card_nodes: 2,
+        }
+    );
+    assert_eq!(
+        LiveAtomicScanoutPreflightReport::from_primary_card_count(true, usize::MAX)
+            .primary_card_nodes,
+        LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS
+    );
+
+    let real = real_atomic_scanout_preflight_report();
+    println!("{}", real.reduced_log_line());
+    assert_eq!(real.target, LiveHardwareValidationTarget::AtomicScanout);
+    assert!(real.primary_card_nodes <= LIVE_ATOMIC_SCANOUT_PREFLIGHT_MAX_PRIMARY_CARDS);
+    assert!(
+        real.reduced_log_line()
+            .starts_with("sophia_atomic_scanout_preflight schema=1 target=AtomicScanout status=")
     );
 }
 
