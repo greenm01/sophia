@@ -1500,6 +1500,10 @@ fn live_runtime_assembly_submits_rendered_primary_plane_scanout_through_reduced_
         Some(LiveRendererScanoutBufferExportStatus::Exported)
     );
     assert_eq!(
+        submitted.scanout_buffer,
+        Some(sophia_renderer_live::LiveRendererScanoutBufferStatus::Ready)
+    );
+    assert_eq!(
         submitted.submit,
         Some(LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip)
     );
@@ -1543,6 +1547,50 @@ fn live_runtime_assembly_submits_rendered_primary_plane_scanout_through_reduced_
         Some(LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed)
     );
     assert!(retired.submission.is_none());
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_runtime_assembly_reports_invalid_rendered_scanout_buffer_status() {
+    let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-invalid-buffer");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready backend should seed live assembly");
+    let device = full_primary_plane_scanout_device();
+    let mut exporter = FakeRenderedScanoutExporter {
+        status: LiveRendererScanoutBufferExportStatus::Exported,
+        descriptor: Some(sophia_renderer_live::LiveRendererScanoutBufferDescriptor {
+            status: sophia_renderer_live::LiveRendererScanoutBufferStatus::Ready,
+            size: Size {
+                width: -1,
+                height: 720,
+            },
+            pitch: 1280 * 4,
+            format: LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+            gem_handle: 17,
+        }),
+        owner: Some(FakeRenderedScanoutOwner { raw: 9 }),
+        export_attempts: 0,
+    };
+
+    let submitted = assembly.submit_rendered_primary_plane_scanout_with(&device, &mut exporter);
+
+    assert_eq!(
+        submitted.status,
+        LiveRenderedPrimaryPlaneScanoutSubmitStatus::PrimaryPlaneSubmitFailed
+    );
+    assert_eq!(
+        submitted.scanout_buffer,
+        Some(sophia_renderer_live::LiveRendererScanoutBufferStatus::Invalid)
+    );
+    assert_eq!(
+        submitted.submit,
+        Some(LibdrmNativePrimaryPlaneScanoutSubmitStatus::ScanoutBufferUnavailable)
+    );
+    assert!(submitted.submission.is_none());
+    assert!(submitted.cleanup.is_none());
 
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -1909,6 +1957,10 @@ fn live_runtime_assembly_retains_submit_failure_cleanup_for_retry() {
     assert_eq!(
         submitted.submit,
         Some(LibdrmNativePrimaryPlaneScanoutSubmitStatus::AtomicSubmitFailed)
+    );
+    assert_eq!(
+        submitted.scanout_buffer,
+        Some(sophia_renderer_live::LiveRendererScanoutBufferStatus::Ready)
     );
     assert_eq!(
         submitted.runtime_scanout_state,

@@ -83,6 +83,8 @@ DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Carried reduced scanout-buffer import status through rendered primary-plane
+  submit reports so runtime diagnostics match schema 5 hardware evidence.
 - [x] Centralized native primary-plane scanout submit result construction so
   reduced evidence fields default consistently across failure branches.
 - [x] Extended atomic scanout evidence to schema 5 so passing hardware captures
