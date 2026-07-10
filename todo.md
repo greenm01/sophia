@@ -93,6 +93,8 @@ smoke still needs a DRM-master-capable machine.
 
 - [x] Split backend-live startup probe reports into render-device discovery,
   GPU startup, EGL startup, and GBM smoke-evidence modules.
+- [x] Split runtime rendered-scanout tracked reports into submit, retire,
+  cleanup, and failure evidence modules.
 - [x] Corrected the runtime rendered-scanout proof harness so it reports native
   DMA-BUF renderer capability instead of CPU fallback when driving the GBM
   primary-plane path.
