@@ -52,7 +52,7 @@ use sophia_backend_live::{
 use sophia_renderer_live::{
     FakeRendererScanoutBufferExporter, LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
     LiveGbmEglFrameTargetRecord, LiveRendererScanoutBufferExportStatus,
-    LiveRendererScanoutBufferExporter,
+    LiveRendererScanoutBufferExporter, NativeGbmRenderedScanoutContext,
 };
 
 #[test]
@@ -2894,9 +2894,7 @@ mod atomic_scanout_hardware_smoke {
 
     use super::*;
     use sophia_backend_live::LivePageFlipCallbackIntake;
-    use sophia_renderer_live::{
-        LiveRendererScanoutBufferExportStatus, NativeGbmScanoutBufferExporter,
-    };
+    use sophia_renderer_live::LiveRendererScanoutBufferExportStatus;
 
     #[derive(Debug)]
     struct RealDrmCard(std::fs::File);
@@ -3004,10 +3002,36 @@ mod atomic_scanout_hardware_smoke {
         let output = OutputId::from_raw(1);
         let target = LiveGbmEglFrameTargetRecord::new(selected.size());
 
-        let export = NativeGbmScanoutBufferExporter::export_rendered_owned_scanout_buffer_from_backend_device_result(
-                card.try_clone_file(),
-                target,
+        let context_report =
+            NativeGbmRenderedScanoutContext::from_backend_device_result(card.try_clone_file());
+        let Some(context) = context_report.context else {
+            let export_status = match context_report.status {
+                NativeGbmRenderedScanoutContextStatus::Ready => {
+                    LiveRendererScanoutBufferExportStatus::Degraded
+                }
+                NativeGbmRenderedScanoutContextStatus::Unavailable => {
+                    LiveRendererScanoutBufferExportStatus::Unavailable
+                }
+                NativeGbmRenderedScanoutContextStatus::Degraded => {
+                    LiveRendererScanoutBufferExportStatus::Degraded
+                }
+            };
+            let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
+                export_status,
+                None,
+                None,
+                None,
+                None,
             );
+            println!("{evidence:?}");
+            assert_eq!(
+                evidence.status,
+                LibdrmNativeAtomicScanoutSmokeStatus::Passed
+            );
+            return;
+        };
+
+        let export = context.export_rendered_owned_scanout_buffer(target);
         if export.status != LiveRendererScanoutBufferExportStatus::Exported {
             let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
                 export.status,
