@@ -4303,6 +4303,10 @@ fn native_atomic_scanout_smoke_evidence_requires_destroyed_retire_resources() {
 #[test]
 fn native_atomic_scanout_smoke_evidence_records_reduced_early_failures() {
     assert_eq!(
+        LibdrmNativeAtomicScanoutSmokeEvidence::smoke_child_timeout().status,
+        LibdrmNativeAtomicScanoutSmokeStatus::SmokeChildTimeout
+    );
+    assert_eq!(
         LibdrmNativeAtomicScanoutSmokeEvidence::no_primary_card().status,
         LibdrmNativeAtomicScanoutSmokeStatus::NoPrimaryCard
     );
@@ -6034,6 +6038,11 @@ mod atomic_scanout_hardware_smoke {
             if Instant::now() >= deadline {
                 let _ = child.kill();
                 let _ = child.wait();
+                println!(
+                    "{}",
+                    LibdrmNativeAtomicScanoutSmokeEvidence::smoke_child_timeout()
+                        .reduced_log_line()
+                );
                 panic!("real atomic scanout smoke child timed out waiting for page-flip evidence");
             }
 

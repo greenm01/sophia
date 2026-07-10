@@ -83,6 +83,8 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Made the opt-in atomic hardware-smoke parent emit reduced
+  `SmokeChildTimeout` evidence before killing a hung child process.
 - [x] Added verifier coverage proving forged passing atomic evidence from a
   blocking commit or missing page-flip-event commit flag is rejected offline.
 - [x] Added verifier coverage proving forged passing atomic evidence from a
