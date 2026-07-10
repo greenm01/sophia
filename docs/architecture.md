@@ -678,6 +678,10 @@ exposing their native IDs outside backend-live.
 Renderer-live now exposes a reduced scanout-buffer descriptor for that path:
 size, pitch, XRGB8888 format, and GEM handle. Backend-live converts only ready
 descriptors into a private DRM buffer adapter before framebuffer registration.
+Behind the `gbm-probe` feature, renderer-native-egl can now allocate and own a
+GBM scanout buffer object while renderer-live exposes only the reduced
+descriptor. The owner object must be retained until backend-live retires the
+framebuffer resource derived from that descriptor.
 Property discovery for that path now uses the native DRM property APIs and
 collapses lookup problems to reduced missing-property groups. The property
 handles themselves stay backend-private.

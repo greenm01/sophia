@@ -167,6 +167,11 @@ Renderer-live may pass buffers to that seam through
 scanout facts: size, pitch, XRGB8888 format, and GEM handle. Backend-live
 accepts only ready descriptors and wraps them in a private `drm::buffer::Buffer`
 adapter before registering a framebuffer.
+`NativeGbmScanoutBufferExporter` is the feature-gated owner for actual GBM
+buffer objects. It delegates raw handle extraction to `sophia-renderer-native-egl`
+and returns an owned buffer object plus the reduced descriptor. The owner must
+outlive the backend-live framebuffer resource that was registered from the
+descriptor.
 `discover_native_primary_plane_property_handles` resolves the required atomic
 property names for that builder through the real `drm::control::Device`
 property APIs, but reduces failures to read-failed or missing connector, CRTC,

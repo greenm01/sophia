@@ -838,6 +838,10 @@ Renderer-live and backend-live now share a reduced scanout-buffer descriptor
 contract. Renderer-live exports only size, pitch, XRGB8888 format, and GEM
 handle facts; backend-live validates that descriptor and turns it into a private
 DRM buffer adapter for framebuffer registration.
+The native GBM scanout exporter now lives behind `gbm-probe`. Raw GBM handle
+extraction stays in `sophia-renderer-native-egl`, while renderer-live returns an
+owned buffer object and the reduced descriptor. This gives the future hardware
+smoke a concrete object to keep alive until framebuffer retirement.
 The matching property discovery seam can resolve the required connector, CRTC,
 and plane property handles through a real DRM device or a deterministic fake.
 Discovery failures are reduced to read failure or missing resource-property

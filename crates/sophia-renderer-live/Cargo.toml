@@ -14,7 +14,7 @@ sophia-renderer-native-egl = { path = "../sophia-renderer-native-egl", optional 
 
 [features]
 default = []
-gbm-probe = ["dep:gbm", "sophia-renderer-native-egl?/gbm-platform"]
+gbm-probe = ["dep:gbm", "dep:sophia-renderer-native-egl", "sophia-renderer-native-egl/gbm-platform"]
 egl-probe = ["dep:sophia-renderer-native-egl"]
 
 [lints]

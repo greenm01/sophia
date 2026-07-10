@@ -51,6 +51,56 @@ pub enum NativeGbmEglFrameTargetAllocationStatus {
     Degraded,
 }
 
+#[cfg(feature = "gbm-platform")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeGbmScanoutBufferExportStatus {
+    Exported,
+    InvalidTarget,
+    Unavailable,
+    Degraded,
+}
+
+#[cfg(feature = "gbm-platform")]
+#[derive(Debug)]
+pub struct NativeGbmOwnedScanoutBuffer {
+    width: u32,
+    height: u32,
+    pitch: u32,
+    format: u32,
+    gem_handle: u32,
+    _buffer: gbm::BufferObject<()>,
+}
+
+#[cfg(feature = "gbm-platform")]
+impl NativeGbmOwnedScanoutBuffer {
+    pub const fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub const fn height(&self) -> u32 {
+        self.height
+    }
+
+    pub const fn pitch(&self) -> u32 {
+        self.pitch
+    }
+
+    pub const fn format(&self) -> u32 {
+        self.format
+    }
+
+    pub const fn gem_handle(&self) -> u32 {
+        self.gem_handle
+    }
+}
+
+#[cfg(feature = "gbm-platform")]
+#[derive(Debug)]
+pub struct NativeGbmOwnedScanoutBufferExportReport {
+    pub status: NativeGbmScanoutBufferExportStatus,
+    pub buffer: Option<NativeGbmOwnedScanoutBuffer>,
+}
+
 pub fn probe_default_display_context() -> NativeEglProbeStatus {
     match probe_context() {
         Ok(()) => NativeEglProbeStatus::NativeDrawingCapable,
@@ -129,6 +179,66 @@ pub fn allocate_gbm_backed_frame_target_from_backend_device_result<T: std::os::f
             Err(_error) => NativeGbmEglFrameTargetAllocationStatus::Degraded,
         },
         Err(_error) => NativeGbmEglFrameTargetAllocationStatus::Unavailable,
+    }
+}
+
+#[cfg(feature = "gbm-platform")]
+pub fn export_gbm_scanout_buffer_from_backend_device_result<T: std::os::fd::AsFd>(
+    device: std::io::Result<T>,
+    width: u32,
+    height: u32,
+) -> NativeGbmOwnedScanoutBufferExportReport {
+    if width == 0 || height == 0 {
+        return NativeGbmOwnedScanoutBufferExportReport {
+            status: NativeGbmScanoutBufferExportStatus::InvalidTarget,
+            buffer: None,
+        };
+    }
+
+    let Ok(device) = device else {
+        return NativeGbmOwnedScanoutBufferExportReport {
+            status: NativeGbmScanoutBufferExportStatus::Unavailable,
+            buffer: None,
+        };
+    };
+    let Ok(device) = gbm::Device::new(device) else {
+        return NativeGbmOwnedScanoutBufferExportReport {
+            status: NativeGbmScanoutBufferExportStatus::Unavailable,
+            buffer: None,
+        };
+    };
+    let Ok(buffer) = device.create_buffer_object::<()>(
+        width,
+        height,
+        gbm::Format::Xrgb8888,
+        gbm::BufferObjectFlags::SCANOUT | gbm::BufferObjectFlags::RENDERING,
+    ) else {
+        return NativeGbmOwnedScanoutBufferExportReport {
+            status: NativeGbmScanoutBufferExportStatus::Unavailable,
+            buffer: None,
+        };
+    };
+
+    let pitch = buffer.stride();
+    let format = buffer.format() as u32;
+    let gem_handle = unsafe { buffer.handle().u32_ };
+    if pitch == 0 || gem_handle == 0 || format != gbm::Format::Xrgb8888 as u32 {
+        return NativeGbmOwnedScanoutBufferExportReport {
+            status: NativeGbmScanoutBufferExportStatus::Degraded,
+            buffer: None,
+        };
+    }
+
+    NativeGbmOwnedScanoutBufferExportReport {
+        status: NativeGbmScanoutBufferExportStatus::Exported,
+        buffer: Some(NativeGbmOwnedScanoutBuffer {
+            width,
+            height,
+            pitch,
+            format,
+            gem_handle,
+            _buffer: buffer,
+        }),
     }
 }
 

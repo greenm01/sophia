@@ -294,6 +294,86 @@ impl LiveRendererScanoutBufferExporter for FakeRendererScanoutBufferExporter {
     }
 }
 
+#[cfg(feature = "gbm-probe")]
+#[derive(Debug)]
+pub struct NativeGbmOwnedScanoutBuffer {
+    descriptor: LiveRendererScanoutBufferDescriptor,
+    _buffer: sophia_renderer_native_egl::NativeGbmOwnedScanoutBuffer,
+}
+
+#[cfg(feature = "gbm-probe")]
+impl NativeGbmOwnedScanoutBuffer {
+    pub const fn descriptor(&self) -> LiveRendererScanoutBufferDescriptor {
+        self.descriptor
+    }
+}
+
+#[cfg(feature = "gbm-probe")]
+#[derive(Debug)]
+pub struct NativeGbmOwnedScanoutBufferExportReport {
+    pub status: LiveRendererScanoutBufferExportStatus,
+    pub buffer: Option<NativeGbmOwnedScanoutBuffer>,
+}
+
+#[cfg(feature = "gbm-probe")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeGbmScanoutBufferExporter;
+
+#[cfg(feature = "gbm-probe")]
+impl NativeGbmScanoutBufferExporter {
+    pub fn export_owned_scanout_buffer_from_backend_device_result<T: std::os::fd::AsFd>(
+        device: std::io::Result<T>,
+        target: LiveGbmEglFrameTargetRecord,
+    ) -> NativeGbmOwnedScanoutBufferExportReport {
+        if target.status != LiveGbmEglFrameTargetStatus::Ready {
+            return NativeGbmOwnedScanoutBufferExportReport {
+                status: LiveRendererScanoutBufferExportStatus::InvalidTarget,
+                buffer: None,
+            };
+        }
+
+        let report =
+            sophia_renderer_native_egl::export_gbm_scanout_buffer_from_backend_device_result(
+                device,
+                target.size.width as u32,
+                target.size.height as u32,
+            );
+        let status = match report.status {
+            sophia_renderer_native_egl::NativeGbmScanoutBufferExportStatus::Exported => {
+                LiveRendererScanoutBufferExportStatus::Exported
+            }
+            sophia_renderer_native_egl::NativeGbmScanoutBufferExportStatus::InvalidTarget => {
+                LiveRendererScanoutBufferExportStatus::InvalidTarget
+            }
+            sophia_renderer_native_egl::NativeGbmScanoutBufferExportStatus::Unavailable => {
+                LiveRendererScanoutBufferExportStatus::Unavailable
+            }
+            sophia_renderer_native_egl::NativeGbmScanoutBufferExportStatus::Degraded => {
+                LiveRendererScanoutBufferExportStatus::Degraded
+            }
+        };
+
+        let buffer = report.buffer.and_then(|buffer| {
+            let descriptor = LiveRendererScanoutBufferDescriptor::new(
+                Size {
+                    width: buffer.width() as i32,
+                    height: buffer.height() as i32,
+                },
+                buffer.pitch(),
+                buffer.format(),
+                buffer.gem_handle(),
+            );
+            (descriptor.status == LiveRendererScanoutBufferStatus::Ready).then_some(
+                NativeGbmOwnedScanoutBuffer {
+                    descriptor,
+                    _buffer: buffer,
+                },
+            )
+        });
+        NativeGbmOwnedScanoutBufferExportReport { status, buffer }
+    }
+}
+
 pub trait LiveGbmEglFrameTargetAllocator {
     fn allocate_frame_target(
         &mut self,
