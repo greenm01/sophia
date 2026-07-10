@@ -14,6 +14,7 @@ pub struct LiveRenderedPrimaryPlaneScanoutSubmitResult<Owner> {
     pub request_scope: Option<LibdrmNativeAtomicCommitRequestScope>,
     pub commit_flags: Option<LibdrmNativeAtomicCommitFlagsReport>,
     pub submission: Option<LiveRenderedPrimaryPlaneScanoutSubmission<Owner>>,
+    pub cleanup: Option<LiveRenderedPrimaryPlaneScanoutCleanup<Owner>>,
 }
 
 #[cfg(feature = "libdrm-events")]

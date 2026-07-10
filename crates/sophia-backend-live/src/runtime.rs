@@ -159,10 +159,10 @@ where
 
         let target = self.gbm_egl_frame_target;
         let scanout_target = self.kms_scanout_target.status;
-        let rendered_primary_plane_scanout_cleanup_pending =
-            self.rendered_primary_plane_scanout_cleanup_pending();
         let rendered_primary_plane_scanout_submission =
             &mut self.rendered_primary_plane_scanout_submission;
+        let rendered_primary_plane_scanout_cleanup =
+            &mut self.rendered_primary_plane_scanout_cleanup;
         let rendered_primary_plane_runtime_scanout_state =
             &mut self.rendered_primary_plane_runtime_scanout_state;
         let rendered_primary_plane_scanout_in_flight_ticks =
@@ -179,9 +179,9 @@ where
                     scanout_target,
                     target,
                     rendered_primary_plane_scanout_submission,
+                    rendered_primary_plane_scanout_cleanup,
                     rendered_primary_plane_runtime_scanout_state,
                     rendered_primary_plane_scanout_in_flight_ticks,
-                    cleanup_pending: rendered_primary_plane_scanout_cleanup_pending,
                     submitted_after_page_flip_serial,
                     device,
                     exporter,

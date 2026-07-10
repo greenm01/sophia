@@ -276,11 +276,13 @@ sequence observed before submission. Backend-live may retire that owner only
 when accepted page-flip evidence is newer than the baseline; accepted-looking
 callbacks at or below the baseline must leave the owner in flight.
 Accepted page-flip evidence can end the in-flight scanout state, but failed
-framebuffer/blob cleanup must remain retryable. Backend-live stores the
-remaining native cleanup work with the rendered buffer owner and exposes only
-reduced cleanup-pending and cleanup-retry reports. Runtime tick reports and
-opt-in atomic smoke evidence may carry the reduced cleanup-pending bit and
-reduced retire-time destroy status, but no framebuffer, blob, or GBM identity.
+framebuffer/blob cleanup must remain retryable. Cleanup can also fail while
+tearing down resources after request-build or atomic-submit rejection.
+Backend-live stores the remaining native cleanup work with the rendered buffer
+owner and exposes only reduced cleanup-pending and cleanup-retry reports.
+Runtime tick reports and opt-in atomic smoke evidence may carry the reduced
+cleanup-pending bit and reduced retire-time destroy status, but no framebuffer,
+blob, or GBM identity.
 When `run_tick_with_rendered_primary_plane_scanout_with` has a native device, it
 may retry one pending cleanup before submitting the next rendered scanout. The
 tick report may expose only the reduced cleanup retry status and whether cleanup

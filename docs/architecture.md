@@ -625,11 +625,11 @@ Tracked rendered submissions also remember the last reduced page-flip sequence
 observed before submit. Retirement requires accepted page-flip evidence newer
 than that baseline, so replayed or pre-submit callbacks cannot retire the
 current GBM/KMS owner.
-If the page flip is accepted but framebuffer/blob cleanup fails, backend-live
-ends the in-flight scanout state but retains an opaque cleanup owner with the
-rendered buffer owner. The runtime may retry that cleanup later; it must not
-drop native handles or pretend cleanup succeeded. Runtime tick reports and
-atomic scanout smoke evidence expose only the reduced cleanup-pending bit.
+If framebuffer/blob cleanup fails during submit failure or after an accepted
+page flip, backend-live retains an opaque cleanup owner with the rendered
+buffer owner. The runtime may retry that cleanup later; it must not drop native
+handles or pretend cleanup succeeded. Runtime tick reports and atomic scanout
+smoke evidence expose only the reduced cleanup-pending bit.
 Device-backed rendered scanout ticks opportunistically retry pending cleanup
 once before processing new rendered scanout submission, and report the reduced
 cleanup-retry result on the tick.

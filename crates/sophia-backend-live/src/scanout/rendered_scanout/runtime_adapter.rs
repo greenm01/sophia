@@ -10,9 +10,10 @@ pub(crate) struct LiveRenderedPrimaryPlaneRuntimeAdapter<'a, D, E> {
     pub(crate) target: Option<LiveGbmEglFrameTargetRecord>,
     pub(crate) rendered_primary_plane_scanout_submission:
         &'a mut Option<BoxedRenderedPrimaryPlaneScanoutSubmission>,
+    pub(crate) rendered_primary_plane_scanout_cleanup:
+        &'a mut Option<BoxedRenderedPrimaryPlaneScanoutCleanup>,
     pub(crate) rendered_primary_plane_runtime_scanout_state: &'a mut Option<RuntimeScanoutState>,
     pub(crate) rendered_primary_plane_scanout_in_flight_ticks: &'a mut u64,
-    pub(crate) cleanup_pending: bool,
     pub(crate) submitted_after_page_flip_serial: Option<u64>,
     pub(crate) device: &'a D,
     pub(crate) exporter: &'a mut E,
@@ -71,9 +72,9 @@ where
             self.scanout_target,
             self.target,
             self.rendered_primary_plane_scanout_submission,
+            self.rendered_primary_plane_scanout_cleanup,
             self.rendered_primary_plane_runtime_scanout_state,
             self.rendered_primary_plane_scanout_in_flight_ticks,
-            self.cleanup_pending,
             self.submitted_after_page_flip_serial,
             None,
             self.device,

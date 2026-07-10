@@ -29,6 +29,7 @@ where
             request_scope: None,
             commit_flags: None,
             submission: None,
+            cleanup: None,
         };
     }
 
@@ -42,6 +43,7 @@ where
             request_scope: None,
             commit_flags: None,
             submission: None,
+            cleanup: None,
         };
     };
 
@@ -58,6 +60,7 @@ where
             request_scope: None,
             commit_flags: None,
             submission: None,
+            cleanup: None,
         };
     }
 
@@ -72,6 +75,7 @@ where
             request_scope: None,
             commit_flags: None,
             submission: None,
+            cleanup: None,
         };
     }
 
@@ -85,6 +89,7 @@ where
             request_scope: None,
             commit_flags: None,
             submission: None,
+            cleanup: None,
         };
     };
 
@@ -105,6 +110,12 @@ where
             request_scope: submit.request_scope,
             commit_flags: submit.commit_flags,
             submission: None,
+            cleanup: submit
+                .cleanup
+                .map(|primary_plane| LiveRenderedPrimaryPlaneScanoutCleanup {
+                    scanout_buffer: owner,
+                    primary_plane,
+                }),
         };
     }
 
@@ -118,6 +129,7 @@ where
             request_scope: submit.request_scope,
             commit_flags: submit.commit_flags,
             submission: None,
+            cleanup: None,
         };
     };
 
@@ -134,6 +146,7 @@ where
             primary_plane,
             submitted_after_page_flip_serial: None,
         }),
+        cleanup: None,
     }
 }
 
@@ -169,9 +182,9 @@ pub(crate) fn track_rendered_primary_plane_scanout_submit_from_target_with<D, E>
     rendered_primary_plane_scanout_submission: &mut Option<
         BoxedRenderedPrimaryPlaneScanoutSubmission,
     >,
+    rendered_primary_plane_scanout_cleanup: &mut Option<BoxedRenderedPrimaryPlaneScanoutCleanup>,
     rendered_primary_plane_runtime_scanout_state: &mut Option<RuntimeScanoutState>,
     rendered_primary_plane_scanout_in_flight_ticks: &mut u64,
-    cleanup_pending: bool,
     submitted_after_page_flip_serial: Option<u64>,
     pending_runtime_scanout_states: Option<&mut VecDeque<RuntimeScanoutState>>,
     device: &D,
@@ -200,7 +213,7 @@ where
         };
     }
 
-    if cleanup_pending {
+    if rendered_primary_plane_scanout_cleanup.is_some() {
         return LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
             status: LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::CleanupPending,
             scanout_target,
@@ -229,6 +242,10 @@ where
                 .with_submitted_after_page_flip_serial(submitted_after_page_flip_serial)
                 .map_scanout_buffer(|owner| Box::new(owner) as Box<dyn Any>),
         );
+    }
+    if let Some(cleanup) = result.cleanup.take() {
+        *rendered_primary_plane_scanout_cleanup =
+            Some(cleanup.map_scanout_buffer(|owner| Box::new(owner) as Box<dyn Any>));
     }
     *rendered_primary_plane_scanout_in_flight_ticks = 0;
     *rendered_primary_plane_runtime_scanout_state = runtime_scanout_state;

@@ -1247,6 +1247,46 @@ fn native_libdrm_primary_plane_scanout_submit_page_flip_policy_disallows_modeset
 }
 
 #[test]
+fn native_libdrm_primary_plane_scanout_submit_retains_cleanup_after_submit_failure() {
+    let device = FakeNativePrimaryPlaneScanoutDevice {
+        resources: FakeNativePrimaryPlaneResourceDevice {
+            destroy_framebuffer: Err(io::Error::other("test framebuffer destroy failed")),
+            ..full_primary_plane_resource_device()
+        },
+        submit: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+        ..full_primary_plane_scanout_device()
+    };
+    let selection = select_native_primary_plane_target(&device);
+    let result =
+        submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_policy(
+            &device,
+            selection,
+            scanout_descriptor(Size {
+                width: 1280,
+                height: 720,
+            }),
+            LibdrmNativePrimaryPlaneScanoutSubmitPolicy::page_flip(),
+        );
+
+    assert_eq!(
+        result.status,
+        LibdrmNativePrimaryPlaneScanoutSubmitStatus::AtomicSubmitFailed
+    );
+    assert_eq!(
+        result.submit,
+        Some(LibdrmNativeAtomicCommitSubmitStatus::Rejected)
+    );
+    assert!(result.submission.is_none());
+    let cleanup = result
+        .cleanup
+        .expect("submit failure must retain failed cleanup");
+    assert_eq!(
+        cleanup.retry(&full_primary_plane_scanout_device()).status,
+        LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed
+    );
+}
+
+#[test]
 fn native_libdrm_primary_plane_scanout_submit_uses_supplied_selection_snapshot() {
     let device = full_primary_plane_scanout_device();
     let result = submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor(
@@ -1767,6 +1807,71 @@ fn live_runtime_assembly_does_not_track_failed_rendered_scanout_submit() {
     assert_eq!(retired.runtime_scanout_state, None);
     assert_eq!(retired.in_flight, false);
     assert_eq!(retired.in_flight_ticks, 0);
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_runtime_assembly_retains_submit_failure_cleanup_for_retry() {
+    let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-submit-cleanup-retry");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready backend should seed live assembly");
+    let failing_device = FakeNativePrimaryPlaneScanoutDevice {
+        resources: FakeNativePrimaryPlaneResourceDevice {
+            destroy_framebuffer: Err(io::Error::other("test framebuffer destroy failed")),
+            ..full_primary_plane_resource_device()
+        },
+        submit: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+        ..full_primary_plane_scanout_device()
+    };
+    let retry_device = full_primary_plane_scanout_device();
+    let mut exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+
+    let submitted = assembly
+        .submit_and_track_rendered_primary_plane_scanout_with(&failing_device, &mut exporter);
+
+    assert_eq!(
+        submitted.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::PrimaryPlaneSubmitFailed
+    );
+    assert_eq!(
+        submitted.submit,
+        Some(LibdrmNativePrimaryPlaneScanoutSubmitStatus::AtomicSubmitFailed)
+    );
+    assert_eq!(
+        submitted.runtime_scanout_state,
+        Some(RuntimeScanoutState::Rejected)
+    );
+    assert_eq!(submitted.in_flight, false);
+    assert!(assembly.rendered_primary_plane_scanout_cleanup_pending());
+
+    let mut blocked_exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+    let blocked = assembly
+        .submit_and_track_rendered_primary_plane_scanout_with(&retry_device, &mut blocked_exporter);
+    assert_eq!(
+        blocked.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::CleanupPending
+    );
+    assert_eq!(
+        blocked.runtime_scanout_state,
+        Some(RuntimeScanoutState::Deferred)
+    );
+
+    let cleanup = assembly.retry_tracked_rendered_primary_plane_scanout_cleanup(&retry_device);
+    assert_eq!(
+        cleanup.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus::CleanedUp
+    );
+    assert_eq!(cleanup.cleanup_pending, false);
+    assert!(!assembly.rendered_primary_plane_scanout_cleanup_pending());
 
     std::fs::remove_dir_all(root).unwrap();
 }

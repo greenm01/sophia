@@ -28,6 +28,7 @@ pub struct LibdrmNativePrimaryPlaneScanoutSubmitResult {
     pub commit_flags: Option<LibdrmNativeAtomicCommitFlagsReport>,
     pub submit: Option<LibdrmNativeAtomicCommitSubmitStatus>,
     pub submission: Option<LibdrmNativePrimaryPlaneScanoutSubmission>,
+    pub cleanup: Option<LibdrmNativePrimaryPlaneResourceCleanup>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -132,6 +133,7 @@ where
             commit_flags: None,
             submit: None,
             submission: None,
+            cleanup: None,
         };
     };
 
@@ -147,6 +149,7 @@ where
             commit_flags: None,
             submit: None,
             submission: None,
+            cleanup: None,
         };
     };
 
@@ -168,6 +171,7 @@ where
             commit_flags: None,
             submit: None,
             submission: None,
+            cleanup: None,
         };
     };
 
@@ -188,6 +192,7 @@ where
             commit_flags: None,
             submit: None,
             submission: None,
+            cleanup: None,
         };
     };
 
@@ -198,7 +203,7 @@ where
         build_native_primary_plane_page_flip_atomic_request(objects, property_handles)
     };
     let Some(request) = request.request else {
-        let _ = destroy_native_primary_plane_resources(device, resource_bundle);
+        let destroy = destroy_native_primary_plane_resources(device, resource_bundle);
         return LibdrmNativePrimaryPlaneScanoutSubmitResult {
             status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::AtomicRequestBuildFailed,
             selection: selection.status,
@@ -210,6 +215,7 @@ where
             commit_flags: None,
             submit: None,
             submission: None,
+            cleanup: destroy.cleanup,
         };
     };
 
@@ -230,7 +236,7 @@ where
     };
 
     if submit != LibdrmNativeAtomicCommitSubmitStatus::Submitted {
-        let _ = destroy_native_primary_plane_resources(device, resource_bundle);
+        let destroy = destroy_native_primary_plane_resources(device, resource_bundle);
         return LibdrmNativePrimaryPlaneScanoutSubmitResult {
             status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::AtomicSubmitFailed,
             selection: selection.status,
@@ -242,6 +248,7 @@ where
             commit_flags: Some(commit_flags),
             submit: Some(submit),
             submission: None,
+            cleanup: destroy.cleanup,
         };
     }
 
@@ -258,6 +265,7 @@ where
         submission: Some(LibdrmNativePrimaryPlaneScanoutSubmission {
             resources: resource_bundle,
         }),
+        cleanup: None,
     }
 }
 

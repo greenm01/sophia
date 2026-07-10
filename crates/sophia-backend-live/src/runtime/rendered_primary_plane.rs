@@ -70,14 +70,13 @@ where
         E: LiveRenderedScanoutBufferExporter,
         E::Owner: 'static,
     {
-        let cleanup_pending = self.rendered_primary_plane_scanout_cleanup_pending();
         track_rendered_primary_plane_scanout_submit_from_target_with(
             self.kms_scanout_target.status,
             self.gbm_egl_frame_target,
             &mut self.rendered_primary_plane_scanout_submission,
+            &mut self.rendered_primary_plane_scanout_cleanup,
             &mut self.rendered_primary_plane_runtime_scanout_state,
             &mut self.rendered_primary_plane_scanout_in_flight_ticks,
-            cleanup_pending,
             self.page_flip_callback_intake.last_frame_serial(),
             Some(&mut self.pending_runtime_scanout_states),
             device,
