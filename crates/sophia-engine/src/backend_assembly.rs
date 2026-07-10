@@ -5,7 +5,7 @@ use crate::{
     HeadlessEngine, HeadlessOutput, HeadlessSessionDriver, HeadlessSessionDriverReport,
     ImportCapableRenderer, LibinputEventSource, LibinputPhysicalInputAdapter, LibinputPollReport,
     LiveRuntimeDriverAdapter, LiveRuntimeDriverIntake, NonBlockingInputPoller, QueuedInputPoller,
-    RenderFrameReport, WmTransactionUpdate,
+    RenderFrameReport, RuntimeDriverAdapter, WmTransactionUpdate,
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -237,6 +237,22 @@ where
         &mut self,
         input: CompositorBackendTickInput,
     ) -> Result<CompositorBackendTickReport, CompositorBackendAssemblyError> {
+        self.run_tick_with_live_runtime_adapter(
+            input,
+            LiveRuntimeDriverAdapter::from_authority_batches,
+            |adapter| adapter.renderer.committed_surfaces.clone(),
+        )
+    }
+
+    pub fn run_tick_with_live_runtime_adapter<A>(
+        &mut self,
+        input: CompositorBackendTickInput,
+        build_adapter: impl FnOnce(&HeadlessEngine, LiveRuntimeDriverIntake) -> A,
+        committed_surfaces: impl Fn(&A) -> Vec<CommittedSurfaceState>,
+    ) -> Result<CompositorBackendTickReport, CompositorBackendAssemblyError>
+    where
+        A: RuntimeDriverAdapter,
+    {
         let input_poll = self
             .input
             .poll_once()
@@ -248,7 +264,7 @@ where
             .as_ref()
             .map(|inbox| inbox.drain_ready(&mut authority_batches))
             .unwrap_or_default();
-        let mut adapter = LiveRuntimeDriverAdapter::from_authority_batches(
+        let mut adapter = build_adapter(
             &self.engine,
             LiveRuntimeDriverIntake {
                 x_event_count: input.x_event_count,
@@ -264,11 +280,11 @@ where
             },
         );
 
-        self.committed_surfaces = adapter.renderer.committed_surfaces.clone();
+        self.committed_surfaces = committed_surfaces(&adapter);
         let runtime = self
             .driver
             .run_with_adapter(tick.output, tick.frame_serial, &mut adapter)?;
-        self.committed_surfaces = adapter.renderer.committed_surfaces.clone();
+        self.committed_surfaces = committed_surfaces(&adapter);
         let render = runtime
             .session_tick
             .as_ref()

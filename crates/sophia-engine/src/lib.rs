@@ -64,4 +64,4 @@ pub use session::*;
 pub use visual_state::*;
 pub use wm::*;
 
-pub use sophia_runtime::RuntimeScanoutState;
+pub use sophia_runtime::{RuntimeScanoutState, SessionRuntimeObservation};

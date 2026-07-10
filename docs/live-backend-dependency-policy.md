@@ -205,6 +205,12 @@ state, while frame-target, export, or primary-plane submit failure becomes
 reduced rejected state. Accepted page-flip retirement maps to reduced retired
 state; stale page-flip evidence produces no runtime state change because the
 submission remains in flight.
+The live runtime tick can now use that submit chain at the actual
+`SubmitScanout` command boundary. The adapter delegates polling, layout,
+rendering, portals, and chrome to the shared live runtime adapter, but overrides
+only scanout submission. Native GBM/KMS work therefore happens only after a frame
+has rendered and the runtime has entered `SubmittingScanout`; Engine and runtime
+still observe only `RuntimeScanoutState`.
 The tracked rendered primary-plane path keeps the combined rendered buffer owner
 and KMS submission owner inside backend-live until page-flip evidence is strong
 enough to retire it. This is the resource-lifetime half of atomic rendering:

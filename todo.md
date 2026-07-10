@@ -62,11 +62,18 @@ active milestone to `docs/roadmap-history.md`.
   until Sophia X Authority has equivalent live coverage.
 - [ ] Revisit wgpu only after GBM/EGL startup, drawing, presentation,
   frame-target lifecycle, and scanout seams are validated.
+- [ ] Continue splitting `sophia-backend-live/src/lib.rs` by domain. Rendered
+  scanout is extracted; next candidates are libdrm page-flip/native scanout,
+  GBM/EGL probing, and runtime assembly wiring.
 
 ---
 
 ## Done Recently
 
+- [x] Extracted rendered primary-plane scanout types, helpers, and the
+  command-time runtime adapter from backend-live `lib.rs` into a domain module.
+- [x] Added a backend-live runtime tick path that answers active `SubmitScanout`
+  commands through rendered GBM/KMS primary-plane scanout.
 - [x] Threaded backend-live terminal scanout states into the shared runtime tick
   without exposing GBM or KMS ownership.
 - [x] Added backend-live tracked rendered scanout ownership so stale page-flip

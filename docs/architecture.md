@@ -572,6 +572,12 @@ later page-flip retirement/rejection observations.
 for that handoff. Backend-live maps rendered primary-plane submit status into
 `Submitted` or `Rejected`, then the live runtime adapter converts that fact into
 `ScanoutStateChanged` when the executor reaches `SubmitScanout`.
+Backend-live also has a command-time rendered scanout adapter for the live
+runtime tick. When the executor reaches `SubmitScanout`, that adapter exports
+the rendered GBM frame target, submits the primary-plane atomic request, retains
+the backend-owned scanout resources, and returns only the reduced runtime state.
+This keeps real scanout submission phase-aligned with the TEA loop instead of
+precomputing native KMS work before the runtime asks for it.
 For rendered primary-plane scanout, backend-live can also retain the combined
 rendered-buffer owner and KMS submission owner internally. Stale page-flip
 evidence keeps that owner in flight. Accepted presented page-flip evidence

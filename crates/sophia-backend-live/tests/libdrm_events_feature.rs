@@ -1229,6 +1229,83 @@ fn live_runtime_assembly_does_not_track_failed_rendered_scanout_submit() {
 }
 
 #[test]
+fn live_runtime_tick_submits_rendered_scanout_when_runtime_requests_scanout() {
+    let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-submit-command");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready backend should seed live assembly");
+    let device = full_primary_plane_scanout_device();
+    let mut exporter = FakeRenderedScanoutExporter::exported(Size {
+        width: 1280,
+        height: 720,
+    });
+
+    let tick = assembly
+        .run_tick_with_rendered_primary_plane_scanout_with(
+            CompositorBackendTickInput::default(),
+            &device,
+            &mut exporter,
+        )
+        .expect("runtime scanout command should use rendered primary-plane submit");
+
+    assert_eq!(
+        tick.rendered_primary_plane_scanout_submit
+            .expect("active scanout submit should be reported")
+            .status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+    );
+    assert_eq!(tick.engine.runtime.runtime_state.scanout_submissions, 1);
+    assert_eq!(
+        tick.engine.runtime.runtime_state.last_scanout_state,
+        Some(RuntimeScanoutState::Submitted)
+    );
+    assert_eq!(
+        tick.engine.runtime.runtime_state.last_scanout_frame_serial,
+        Some(tick.engine.tick.frame_serial)
+    );
+    assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), true);
+    assert_eq!(assembly.pending_runtime_scanout_state_count(), 0);
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn live_runtime_tick_rejects_active_rendered_scanout_without_queuing_lifecycle_duplicate() {
+    let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-submit-command-fail");
+    let report = discover_live_backend(&LiveBackendConfig::new(&root));
+    let mut assembly = report
+        .into_live_runtime_assembly(QueuedInputPoller::default())
+        .expect("ready backend should seed live assembly");
+    let device = full_primary_plane_scanout_device();
+    let mut exporter = FakeRenderedScanoutExporter::unavailable();
+
+    let tick = assembly
+        .run_tick_with_rendered_primary_plane_scanout_with(
+            CompositorBackendTickInput::default(),
+            &device,
+            &mut exporter,
+        )
+        .expect("runtime scanout command should fail closed through reduced state");
+
+    assert_eq!(
+        tick.rendered_primary_plane_scanout_submit
+            .expect("active scanout submit should be reported")
+            .status,
+        LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::ScanoutExportFailed
+    );
+    assert_eq!(tick.engine.runtime.runtime_state.scanout_rejections, 1);
+    assert_eq!(
+        tick.engine.runtime.runtime_state.last_scanout_state,
+        Some(RuntimeScanoutState::Rejected)
+    );
+    assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), false);
+    assert_eq!(assembly.pending_runtime_scanout_state_count(), 0);
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn live_runtime_assembly_keeps_rendered_scanout_owner_until_page_flip_is_accepted() {
     let root = ready_drm_sysfs_fixture("runtime-rendered-primary-plane-wait");
     let report = discover_live_backend(&LiveBackendConfig::new(&root));
