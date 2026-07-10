@@ -350,6 +350,7 @@ dependencies = [
 name = "sophia-cli"
 version = "0.1.0"
 dependencies = [
+ "sophia-backend-live",
  "sophia-engine",
  "sophia-portal",
  "sophia-protocol",
