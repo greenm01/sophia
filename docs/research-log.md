@@ -834,12 +834,13 @@ remain private.
 The native KMS target selector can now reduce connector, encoder, CRTC, mode
 size, and primary-plane discovery into selected or missing resource-group
 status. The selected native handles can feed the primary-plane request builder
-once a framebuffer and mode blob are supplied.
-The native resource lifecycle seam can now create the mode blob, register a
-scanout framebuffer from a DRM buffer, validate target/buffer size, and destroy
-the framebuffer/blob pair after use. The request-builder test path now runs
-target selection, resource creation, property discovery, and atomic request
-construction together.
+once submit-time resources are supplied.
+The native resource lifecycle seam can now create the initial modeset mode
+blob, register a scanout framebuffer from a DRM buffer, validate target/buffer
+size, and destroy owned resources after use. The steady page-flip resource path
+registers only the framebuffer and does not require a mode blob. The
+request-builder test path now runs target selection, resource creation,
+property discovery, and atomic request construction together.
 Renderer-live and backend-live now share a reduced scanout-buffer descriptor
 contract. Renderer-live exports only size, pitch, XRGB8888 format, and GEM
 handle facts; backend-live validates that descriptor and turns it into a private

@@ -43,7 +43,8 @@ use sophia_backend_live::{
     LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus, NativeLibdrmAtomicScanoutCommitter,
     NativeLibdrmPageFlipEventPoller, NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller,
     RuntimeScanoutState, Size, build_native_primary_plane_atomic_request,
-    build_native_primary_plane_page_flip_atomic_request, create_native_primary_plane_resources,
+    build_native_primary_plane_page_flip_atomic_request,
+    create_native_primary_plane_page_flip_resources, create_native_primary_plane_resources,
     decode_native_page_flip_batch, destroy_native_primary_plane_resources, discover_live_backend,
     discover_native_primary_plane_property_handles, libdrm_dependency_admission_report,
     libdrm_fd_authority_report, native_libdrm_event_adapter_report,
@@ -1207,6 +1208,39 @@ fn native_libdrm_primary_plane_scanout_submit_page_flip_policy_disallows_modeset
             .submission
             .expect("page-flip submit should retain resources")
             .retire(&device)
+            .status,
+        LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed
+    );
+
+    let mode_unavailable = FakeNativePrimaryPlaneScanoutDevice {
+        resources: FakeNativePrimaryPlaneResourceDevice {
+            mode_blob: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+            destroy_mode_blob: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+            ..full_primary_plane_resource_device()
+        },
+        ..full_primary_plane_scanout_device()
+    };
+    let selection = select_native_primary_plane_target(&mode_unavailable);
+    let result =
+        submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_policy(
+            &mode_unavailable,
+            selection,
+            scanout_descriptor(Size {
+                width: 1280,
+                height: 720,
+            }),
+            LibdrmNativePrimaryPlaneScanoutSubmitPolicy::page_flip(),
+        );
+
+    assert_eq!(
+        result.status,
+        LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+    );
+    assert_eq!(
+        result
+            .submission
+            .expect("page-flip submit should not retain a mode blob")
+            .retire(&mode_unavailable)
             .status,
         LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed
     );
@@ -3666,6 +3700,48 @@ fn native_libdrm_primary_plane_resources_validate_size_and_lifetime() {
 }
 
 #[test]
+fn native_libdrm_primary_plane_page_flip_resources_do_not_require_mode_blob() {
+    let selected = select_native_primary_plane_target(&full_kms_selection_device())
+        .selection
+        .expect("complete KMS path should select a target");
+    let mode_unavailable = FakeNativePrimaryPlaneResourceDevice {
+        mode_blob: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+        destroy_mode_blob: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+        ..full_primary_plane_resource_device()
+    };
+
+    let modeset = create_native_primary_plane_resources(
+        &mode_unavailable,
+        selected,
+        &scanout_buffer(selected.size()),
+    );
+    assert_eq!(
+        modeset.status,
+        LibdrmNativePrimaryPlaneResourceCreateStatus::ModeBlobCreateFailed
+    );
+
+    let page_flip = create_native_primary_plane_page_flip_resources(
+        &mode_unavailable,
+        selected,
+        &scanout_buffer(selected.size()),
+    );
+    assert_eq!(
+        page_flip.status,
+        LibdrmNativePrimaryPlaneResourceCreateStatus::Created
+    );
+    let destroyed = destroy_native_primary_plane_resources(
+        &mode_unavailable,
+        page_flip
+            .resources
+            .expect("page-flip resources should carry only a framebuffer"),
+    );
+    assert_eq!(
+        destroyed.status,
+        LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed
+    );
+}
+
+#[test]
 fn native_libdrm_renderer_scanout_buffer_rejects_invalid_renderer_descriptors() {
     let target = LiveGbmEglFrameTargetRecord::new(Size {
         width: 1280,
@@ -3900,6 +3976,36 @@ fn native_libdrm_primary_plane_page_flip_builder_creates_plane_only_request() {
             test_only: false,
         }
     );
+}
+
+#[test]
+fn native_libdrm_primary_plane_modeset_builder_requires_mode_blob() {
+    let objects = LibdrmNativePrimaryPlaneObjects::new_with_optional_mode_blob(
+        connector_handle(),
+        crtc_handle(),
+        plane_handle(),
+        framebuffer_handle(),
+        None,
+        Size {
+            width: 1280,
+            height: 720,
+        },
+    );
+
+    let modeset = build_native_primary_plane_atomic_request(objects, primary_plane_properties());
+    assert_eq!(
+        modeset.status,
+        LibdrmNativeAtomicRequestBuildStatus::MissingModeBlob
+    );
+    assert!(modeset.request.is_none());
+
+    let page_flip =
+        build_native_primary_plane_page_flip_atomic_request(objects, primary_plane_properties());
+    assert_eq!(
+        page_flip.status,
+        LibdrmNativeAtomicRequestBuildStatus::Built
+    );
+    assert!(page_flip.request.is_some());
 }
 
 #[test]

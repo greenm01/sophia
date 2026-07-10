@@ -78,6 +78,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Made steady-state primary-plane page flips create framebuffer-only
+  resources instead of requiring a modeset mode blob.
 - [x] Split native primary-plane scanout into buffer, resource-lifetime,
   object-handle, and atomic-request domains while keeping the DRM facade stable.
 - [x] Split `hardware_validation` into gate and atomic preflight domains while

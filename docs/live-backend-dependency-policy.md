@@ -167,12 +167,14 @@ shows the full submit, callback, and retirement chain.
 encoder/CRTC, display mode size, and compatible primary plane through real DRM
 resource APIs. It reduces failures to read-failed or missing resource groups;
 the selected connector, CRTC, and plane handles remain in a backend-private
-bundle until a framebuffer and mode blob are available.
-`create_native_primary_plane_resources` is the resource lifecycle seam for that
-bundle. It creates a mode blob, registers a scanout framebuffer from a
+bundle until submit-time resources are available.
+`create_native_primary_plane_resources` is the modeset resource lifecycle seam
+for that bundle. It creates a mode blob, registers a scanout framebuffer from a
 renderer-owned DRM buffer, validates buffer size against the selected target,
-and destroys framebuffer/blob resources on retirement. It reports only reduced
-create/destroy status.
+and destroys framebuffer/blob resources on retirement. The steady page-flip
+path uses `create_native_primary_plane_page_flip_resources`, which registers
+only the framebuffer and deliberately does not require or retire a mode blob.
+Both paths report only reduced create/destroy status.
 Renderer-live may pass buffers to that seam through
 `LiveRendererScanoutBufferDescriptor`. The descriptor carries only reduced
 scanout facts: size, pitch, XRGB8888 format, and GEM handle. Backend-live
@@ -314,7 +316,10 @@ When the snapshot is valid, runtime submit exports the rendered buffer and
 commits the same snapshot using page-flip policy, not modeset policy.
 Rendered scanout submit reports carry the reduced request scope from the native
 primary-plane submit, so runtime diagnostics prove the steady-state path used a
-plane-only page-flip request shape without exposing KMS identity.
+plane-only page-flip request shape without exposing KMS identity. That
+steady-state path also uses framebuffer-only resources, so a missing or
+failing mode-blob creator cannot break ordinary page flips after the initial
+modeset.
 `LibdrmNativeAtomicScanoutSmokeEvidence` is the reduced record for that smoke.
 It reports only where the chain stopped: no primary card, KMS selection failure,
 persistent rendered-context failure, KMS scanout target failure, GBM export

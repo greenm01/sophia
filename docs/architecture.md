@@ -761,15 +761,18 @@ only a deterministic test seam.
 may submit a backend-owned `AtomicModeReq` to DRM/KMS, but a successful ioctl
 only means the kernel accepted the request. Sophia still waits for the reduced
 page-flip callback before making the visual commit observable.
-The first native request builder covers the simple full-output primary-plane
-case. It packages connector, CRTC, plane, framebuffer, mode blob, and rectangle
-properties behind backend-live types and exports only reduced build status.
+The first native request builders cover the simple full-output primary-plane
+case. The modeset builder packages connector, CRTC, plane, framebuffer, mode
+blob, and rectangle properties behind backend-live types. The steady page-flip
+builder packages only the plane framebuffer and rectangle properties. Both
+export only reduced build status.
 The matching KMS selector can choose a connected connector, usable encoder/CRTC,
 display mode size, and compatible primary plane from real DRM resources while
 keeping those native handles backend-private.
-The resource lifecycle seam can then create a mode blob, register a scanout
-framebuffer from a renderer-owned buffer, and retire both resources without
-exposing their native IDs outside backend-live.
+The resource lifecycle seam can then create the initial modeset mode blob,
+register a scanout framebuffer from a renderer-owned buffer, and retire the
+owned resources without exposing native IDs outside backend-live. Steady
+page-flip resources are framebuffer-only and do not require a fresh mode blob.
 Renderer-live now exposes a reduced scanout-buffer descriptor for that path:
 size, pitch, XRGB8888 format, and GEM handle. Backend-live converts only ready
 descriptors into a private DRM buffer adapter before framebuffer registration.
@@ -787,10 +790,12 @@ Property discovery for that path now uses the native DRM property APIs and
 collapses lookup problems to reduced missing-property groups. The property
 handles themselves stay backend-private.
 The primary-plane scanout submit seam now chains those pieces together: select
-the KMS target, validate a renderer scanout descriptor, create the mode blob and
-framebuffer, build the atomic request, submit it, and retain an opaque
-submission owner. That owner is not visual truth. The runtime may retire it only
-after native page-flip evidence has passed the reduced callback checks.
+the KMS target, validate a renderer scanout descriptor, create the required
+native resources for the submit policy, build the atomic request, submit it,
+and retain an opaque submission owner. Initial modesets own a framebuffer and
+mode blob; steady page flips own only the framebuffer. That owner is not visual
+truth. The runtime may retire it only after native page-flip evidence has passed
+the reduced callback checks.
 Submitted scanout retirement follows the same rule: an accepted, presented
 page-flip callback retires the framebuffer resources; stale, wrong-output, or
 rejected callbacks return the owner to the caller so in-flight resources stay

@@ -76,7 +76,7 @@ where
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LibdrmNativePrimaryPlaneResourceBundle {
     framebuffer: drm::control::framebuffer::Handle,
-    mode_blob: u64,
+    mode_blob: Option<u64>,
     size: Size,
 }
 
@@ -161,7 +161,50 @@ where
         status: LibdrmNativePrimaryPlaneResourceCreateStatus::Created,
         resources: Some(LibdrmNativePrimaryPlaneResourceBundle {
             framebuffer,
-            mode_blob,
+            mode_blob: Some(mode_blob),
+            size: selection.size,
+        }),
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+pub fn create_native_primary_plane_page_flip_resources<D, B>(
+    device: &D,
+    selection: LibdrmNativePrimaryPlaneSelection,
+    buffer: &B,
+) -> LibdrmNativePrimaryPlaneResourceCreateResult
+where
+    D: LibdrmNativePrimaryPlaneResourceDevice,
+    B: drm::buffer::Buffer + ?Sized,
+{
+    if selection.size.width <= 0 || selection.size.height <= 0 {
+        return LibdrmNativePrimaryPlaneResourceCreateResult {
+            status: LibdrmNativePrimaryPlaneResourceCreateStatus::InvalidSelectionSize,
+            resources: None,
+        };
+    }
+
+    let (buffer_width, buffer_height) = buffer.size();
+    if buffer_width != selection.size.width as u32 || buffer_height != selection.size.height as u32
+    {
+        return LibdrmNativePrimaryPlaneResourceCreateResult {
+            status: LibdrmNativePrimaryPlaneResourceCreateStatus::BufferSizeMismatch,
+            resources: None,
+        };
+    }
+
+    let Ok(framebuffer) = device.add_scanout_framebuffer(buffer, 24, 32) else {
+        return LibdrmNativePrimaryPlaneResourceCreateResult {
+            status: LibdrmNativePrimaryPlaneResourceCreateStatus::FramebufferCreateFailed,
+            resources: None,
+        };
+    };
+
+    LibdrmNativePrimaryPlaneResourceCreateResult {
+        status: LibdrmNativePrimaryPlaneResourceCreateStatus::Created,
+        resources: Some(LibdrmNativePrimaryPlaneResourceBundle {
+            framebuffer,
+            mode_blob: None,
             size: selection.size,
         }),
     }
@@ -195,7 +238,7 @@ impl LibdrmNativePrimaryPlaneResourceCleanup {
     pub const fn from_bundle(resources: LibdrmNativePrimaryPlaneResourceBundle) -> Self {
         Self {
             framebuffer: Some(resources.framebuffer),
-            mode_blob: Some(resources.mode_blob),
+            mode_blob: resources.mode_blob,
             size: resources.size,
         }
     }

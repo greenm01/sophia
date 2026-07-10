@@ -12,6 +12,7 @@ pub struct LibdrmNativeAtomicRequestBuildResult {
 pub enum LibdrmNativeAtomicRequestBuildStatus {
     Built,
     InvalidSize,
+    MissingModeBlob,
 }
 
 #[cfg(feature = "libdrm-events")]
@@ -55,6 +56,12 @@ fn build_native_primary_plane_atomic_request_with_scope(
     let height = objects.size.height as u64;
     let mut request = drm::control::atomic::AtomicModeReq::new();
     if scope == LibdrmNativeAtomicCommitRequestScope::Modeset {
+        let Some(mode_blob) = objects.mode_blob else {
+            return LibdrmNativeAtomicRequestBuildResult {
+                status: LibdrmNativeAtomicRequestBuildStatus::MissingModeBlob,
+                request: None,
+            };
+        };
         request.add_property(
             objects.connector,
             properties.connector_crtc_id,
@@ -63,7 +70,7 @@ fn build_native_primary_plane_atomic_request_with_scope(
         request.add_property(
             objects.crtc,
             properties.crtc_mode_id,
-            drm::control::property::Value::Blob(objects.mode_blob),
+            drm::control::property::Value::Blob(mode_blob),
         );
         request.add_property(
             objects.crtc,

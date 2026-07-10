@@ -278,9 +278,9 @@ impl LibdrmNativePrimaryPlaneSelection {
     pub const fn into_objects(
         self,
         framebuffer: drm::control::framebuffer::Handle,
-        mode_blob: u64,
+        mode_blob: Option<u64>,
     ) -> LibdrmNativePrimaryPlaneObjects {
-        LibdrmNativePrimaryPlaneObjects::new(
+        LibdrmNativePrimaryPlaneObjects::new_with_optional_mode_blob(
             self.connector,
             self.crtc,
             self.plane,

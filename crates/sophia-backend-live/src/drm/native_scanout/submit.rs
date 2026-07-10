@@ -171,7 +171,11 @@ where
         };
     };
 
-    let resources = create_native_primary_plane_resources(device, selected, &buffer);
+    let resources = if policy.allow_modeset {
+        create_native_primary_plane_resources(device, selected, &buffer)
+    } else {
+        create_native_primary_plane_page_flip_resources(device, selected, &buffer)
+    };
     let Some(resource_bundle) = resources.resources else {
         return LibdrmNativePrimaryPlaneScanoutSubmitResult {
             status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::ResourceCreationUnavailable,
