@@ -1,4 +1,4 @@
-pub(super) fn is_primary_card_node_entry(entry: &std::fs::DirEntry) -> bool {
+pub(crate) fn is_primary_card_node_entry(entry: &std::fs::DirEntry) -> bool {
     let name = entry.file_name();
     let Some(name) = name.to_str() else {
         return false;

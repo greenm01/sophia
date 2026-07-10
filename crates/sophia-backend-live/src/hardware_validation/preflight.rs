@@ -1,5 +1,5 @@
 mod counts;
-mod nodes;
+pub(crate) mod nodes;
 mod probe;
 mod report;
 

@@ -83,6 +83,11 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Added a production `select_real_atomic_scanout_card` seam that returns an
+  opaque nonblocking DRM card owner only after reduced preflight-equivalent
+  atomic scanout readiness is proven.
+- [x] Switched the opt-in atomic hardware smoke away from test-local DRM card
+  scanning and onto the production atomic scanout card selector.
 - [x] Split native libdrm page-flip read, poll, decode, diagnostics, and fake
   poller runtime tests into their own `libdrm_events_feature` module.
 - [x] Split atomic scanout evidence contract tests into their own

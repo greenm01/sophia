@@ -701,6 +701,10 @@ fn native_atomic_scanout_smoke_evidence_records_reduced_early_failures() {
         LibdrmNativeAtomicScanoutSmokeStatus::KmsSelectionFailed
     );
     assert_eq!(
+        LibdrmNativeAtomicScanoutSmokeEvidence::property_discovery_failed().status,
+        LibdrmNativeAtomicScanoutSmokeStatus::PropertyDiscoveryFailed
+    );
+    assert_eq!(
         LibdrmNativeAtomicScanoutSmokeEvidence::from_pipeline_reports(
             LiveKmsScanoutTargetStatus::Ready,
             None,

@@ -1,43 +1,11 @@
-use std::os::fd::{AsFd, BorrowedFd};
-use std::os::unix::fs::OpenOptionsExt;
-use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use super::*;
-use sophia_backend_live::LivePageFlipCallbackIntake;
+use sophia_backend_live::{
+    LivePageFlipCallbackIntake, RealAtomicScanoutCard, RealAtomicScanoutCardSelectionStatus,
+    select_real_atomic_scanout_card,
+};
 use sophia_renderer_live::LiveRendererScanoutBufferExportStatus;
-
-#[derive(Debug)]
-struct RealDrmCard(std::fs::File);
-
-impl RealDrmCard {
-    fn open(path: &Path) -> io::Result<Self> {
-        Ok(Self(
-            std::fs::OpenOptions::new()
-                .read(true)
-                .write(true)
-                .custom_flags(rustix::fs::OFlags::NONBLOCK.bits() as i32)
-                .open(path)?,
-        ))
-    }
-
-    fn try_clone(&self) -> io::Result<Self> {
-        Ok(Self(self.0.try_clone()?))
-    }
-
-    fn try_clone_file(&self) -> io::Result<std::fs::File> {
-        self.0.try_clone()
-    }
-}
-
-impl AsFd for RealDrmCard {
-    fn as_fd(&self) -> BorrowedFd<'_> {
-        self.0.as_fd()
-    }
-}
-
-impl drm::Device for RealDrmCard {}
-impl drm::control::Device for RealDrmCard {}
 
 #[test]
 fn native_atomic_scanout_smokes_real_primary_card_when_enabled() {
@@ -86,34 +54,12 @@ fn native_atomic_scanout_real_primary_card_child() {
         return;
     }
 
-    let Some(card_path) = first_atomic_scanout_ready_primary_card_node() else {
-        let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::no_primary_card();
-        fail_atomic_scanout_smoke(evidence);
+    let mut card_selection = select_real_atomic_scanout_card();
+    let Some(card) = card_selection.card.take() else {
+        fail_atomic_scanout_smoke(evidence_from_card_selection_failure(card_selection.status));
     };
-    let card = match RealDrmCard::open(&card_path) {
-        Ok(card) => card,
-        Err(_) => {
-            let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::primary_card_open_failed();
-            fail_atomic_scanout_smoke(evidence);
-        }
-    };
-
-    if drm::Device::set_client_capability(&card, drm::ClientCapability::UniversalPlanes, true)
-        .is_err()
-        || drm::Device::set_client_capability(&card, drm::ClientCapability::Atomic, true).is_err()
-    {
-        let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::client_capability_failed();
-        fail_atomic_scanout_smoke(evidence);
-    }
-
-    let selection = select_native_primary_plane_target(&card);
-    if selection.status != LibdrmNativePrimaryPlaneSelectionStatus::Selected {
-        let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::kms_selection_failed();
-        fail_atomic_scanout_smoke(evidence);
-    }
-    let Some(selected) = selection.selection else {
-        let evidence = LibdrmNativeAtomicScanoutSmokeEvidence::kms_selection_failed();
-        fail_atomic_scanout_smoke(evidence);
+    let Some(selected) = card_selection.selection else {
+        fail_atomic_scanout_smoke(evidence_from_card_selection_failure(card_selection.status));
     };
     let slot = LibdrmNativeOutputSlot::new(1).expect("slot one should be valid");
     let output = OutputId::from_raw(1);
@@ -205,7 +151,7 @@ fn native_atomic_scanout_real_primary_card_child() {
     let mut submit = submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor(
         &card,
         LibdrmNativePrimaryPlaneSelectionResult {
-            status: selection.status,
+            status: LibdrmNativePrimaryPlaneSelectionStatus::Selected,
             selection: Some(selected),
         },
         owned_buffer.descriptor(),
@@ -306,7 +252,7 @@ fn native_atomic_scanout_real_primary_card_child() {
         submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_policy(
             &card,
             LibdrmNativePrimaryPlaneSelectionResult {
-                status: selection.status,
+                status: LibdrmNativePrimaryPlaneSelectionStatus::Selected,
                 selection: Some(selected),
             },
             steady_owned_buffer.descriptor(),
@@ -377,6 +323,32 @@ fn fail_atomic_scanout_smoke(evidence: LibdrmNativeAtomicScanoutSmokeEvidence) -
     );
 }
 
+fn evidence_from_card_selection_failure(
+    status: RealAtomicScanoutCardSelectionStatus,
+) -> LibdrmNativeAtomicScanoutSmokeEvidence {
+    match status {
+        RealAtomicScanoutCardSelectionStatus::Selected => {
+            LibdrmNativeAtomicScanoutSmokeEvidence::kms_selection_failed()
+        }
+        RealAtomicScanoutCardSelectionStatus::DeviceDirectoryUnavailable
+        | RealAtomicScanoutCardSelectionStatus::NoPrimaryCardNodes => {
+            LibdrmNativeAtomicScanoutSmokeEvidence::no_primary_card()
+        }
+        RealAtomicScanoutCardSelectionStatus::PrimaryCardOpenUnavailable => {
+            LibdrmNativeAtomicScanoutSmokeEvidence::primary_card_open_failed()
+        }
+        RealAtomicScanoutCardSelectionStatus::AtomicClientCapabilityUnavailable => {
+            LibdrmNativeAtomicScanoutSmokeEvidence::client_capability_failed()
+        }
+        RealAtomicScanoutCardSelectionStatus::KmsScanoutTargetUnavailable => {
+            LibdrmNativeAtomicScanoutSmokeEvidence::kms_selection_failed()
+        }
+        RealAtomicScanoutCardSelectionStatus::AtomicPropertyDiscoveryUnavailable => {
+            LibdrmNativeAtomicScanoutSmokeEvidence::property_discovery_failed()
+        }
+    }
+}
+
 struct RealAtomicPageFlipWaitReport {
     poll: LibdrmPageFlipEventPollReport,
     callback_report: Option<LivePageFlipCallbackReport>,
@@ -384,8 +356,8 @@ struct RealAtomicPageFlipWaitReport {
 }
 
 fn wait_for_page_flip_retirement(
-    card: &RealDrmCard,
-    reader: &mut NativeLibdrmPageFlipEventReader<RealDrmCard>,
+    card: &RealAtomicScanoutCard,
+    reader: &mut NativeLibdrmPageFlipEventReader<RealAtomicScanoutCard>,
     poller: &mut NativeLibdrmPageFlipEventPoller,
     intake: &mut LivePageFlipCallbackIntake,
     submission: LibdrmNativePrimaryPlaneScanoutSubmission,
@@ -434,39 +406,4 @@ fn wait_for_page_flip_retirement(
 
         std::thread::sleep(Duration::from_millis(5));
     }
-}
-
-fn first_atomic_scanout_ready_primary_card_node() -> Option<PathBuf> {
-    let entries = std::fs::read_dir("/dev/dri").ok()?;
-    let mut candidates = Vec::new();
-
-    for entry in entries.flatten() {
-        let file_name = entry.file_name();
-        let file_name = file_name.to_string_lossy();
-        if file_name.starts_with("card") {
-            candidates.push(entry.path());
-        }
-    }
-
-    candidates.sort();
-    candidates
-        .into_iter()
-        .find(|path| primary_card_node_is_atomic_scanout_ready(path))
-}
-
-fn primary_card_node_is_atomic_scanout_ready(path: &Path) -> bool {
-    let Ok(card) = RealDrmCard::open(path) else {
-        return false;
-    };
-
-    if drm::Device::set_client_capability(&card, drm::ClientCapability::UniversalPlanes, true)
-        .is_err()
-        || drm::Device::set_client_capability(&card, drm::ClientCapability::Atomic, true).is_err()
-    {
-        return false;
-    }
-
-    let selection = select_native_primary_plane_target(&card);
-    selection.status == LibdrmNativePrimaryPlaneSelectionStatus::Selected
-        && selection.selection.is_some()
 }

@@ -103,12 +103,13 @@ reduced KMS connector/CRTC/primary-plane target, and has the atomic property
 handles needed for the primary-plane request.
 
 Set `SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1` only from a session that may take
-DRM master on a primary `/dev/dri/card*` node. The smoke selects the first
-primary card that opens read/write, admits UniversalPlanes and Atomic client
-capabilities, and exposes a reduced KMS primary-plane scanout target. The child
-then reopens that card, repeats the capability and KMS target checks, duplicates
-the same fd namespace into a persistent GBM/EGL rendered-scanout context, clears
-a GBM surface, locks the rendered front buffer, submits a primary-plane atomic
+DRM master on a primary `/dev/dri/card*` node. Backend-live first uses the
+production `select_real_atomic_scanout_card` seam to choose an opaque card owner
+that opens read/write, admits UniversalPlanes and Atomic client capabilities,
+exposes a reduced KMS primary-plane scanout target, and has the atomic property
+handles needed for primary-plane commit. The smoke child then duplicates that fd
+namespace into a persistent GBM/EGL rendered-scanout context, clears a GBM
+surface, locks the rendered front buffer, submits a primary-plane atomic
 modeset, waits for reduced page-flip evidence, and retires the submitted
 framebuffer resources. It then exports a second rendered front buffer and
 submits it through the steady-state page-flip policy, proving the post-modeset

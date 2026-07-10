@@ -43,8 +43,8 @@ use sophia_backend_live::{
     LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus,
     LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus, NativeLibdrmAtomicScanoutCommitter,
     NativeLibdrmPageFlipEventPoller, NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller,
-    RuntimeScanoutState, Size, build_native_primary_plane_atomic_request,
-    build_native_primary_plane_page_flip_atomic_request,
+    RealAtomicScanoutCardSelectionStatus, RuntimeScanoutState, Size,
+    build_native_primary_plane_atomic_request, build_native_primary_plane_page_flip_atomic_request,
     create_native_primary_plane_page_flip_resources, create_native_primary_plane_resources,
     decode_native_page_flip_batch, destroy_native_primary_plane_resources, discover_live_backend,
     discover_native_primary_plane_property_handles, libdrm_dependency_admission_report,
@@ -54,6 +54,7 @@ use sophia_backend_live::{
     real_libdrm_events_validation_gate, real_libdrm_events_validation_smoke_report,
     reduce_native_page_flip_event, retire_native_primary_plane_scanout_after_page_flip,
     retire_rendered_primary_plane_scanout_after_page_flip, select_native_primary_plane_target,
+    select_real_atomic_scanout_card_from_dev_dri,
     submit_native_primary_plane_scanout_from_renderer_descriptor,
     submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor,
     submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_policy,
@@ -201,6 +202,31 @@ fn real_atomic_scanout_validation_gate_is_explicit_and_reduced() {
         real_atomic_scanout_validation_smoke_report().target,
         LiveHardwareValidationTarget::AtomicScanout
     );
+}
+
+#[test]
+fn real_atomic_scanout_card_selection_fails_closed_without_device_identity() {
+    let missing_root = std::env::temp_dir().join("sophia-missing-dri-card-selection");
+    let _ = std::fs::remove_dir_all(&missing_root);
+    let missing = select_real_atomic_scanout_card_from_dev_dri(&missing_root);
+    assert_eq!(
+        missing.status,
+        RealAtomicScanoutCardSelectionStatus::DeviceDirectoryUnavailable
+    );
+    assert!(missing.card.is_none());
+    assert!(missing.selection.is_none());
+
+    let empty_root = std::env::temp_dir().join("sophia-empty-dri-card-selection");
+    let _ = std::fs::remove_dir_all(&empty_root);
+    std::fs::create_dir_all(&empty_root).unwrap();
+    let empty = select_real_atomic_scanout_card_from_dev_dri(&empty_root);
+    assert_eq!(
+        empty.status,
+        RealAtomicScanoutCardSelectionStatus::NoPrimaryCardNodes
+    );
+    assert!(empty.card.is_none());
+    assert!(empty.selection.is_none());
+    std::fs::remove_dir_all(empty_root).unwrap();
 }
 
 #[test]

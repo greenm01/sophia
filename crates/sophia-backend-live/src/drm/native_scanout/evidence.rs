@@ -190,6 +190,28 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
         }
     }
 
+    pub const fn property_discovery_failed() -> Self {
+        Self {
+            phase: LibdrmNativeAtomicScanoutSmokePhase::InitialModeset,
+            status: LibdrmNativeAtomicScanoutSmokeStatus::PropertyDiscoveryFailed,
+            scanout_target: Some(LiveKmsScanoutTargetStatus::Ready),
+            rendered_context: None,
+            gbm_export: None,
+            scanout_buffer: None,
+            properties: None,
+            resources: None,
+            request: None,
+            submit: None,
+            request_scope: None,
+            commit_flags: None,
+            page_flip_poll: None,
+            page_flip: None,
+            retire: None,
+            retire_destroy: None,
+            retire_cleanup_pending: false,
+        }
+    }
+
     pub fn from_pipeline_reports(
         scanout_target: LiveKmsScanoutTargetStatus,
         rendered_context: Option<LibdrmNativeRenderedScanoutContextStatus>,
