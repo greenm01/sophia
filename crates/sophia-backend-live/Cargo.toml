@@ -13,6 +13,9 @@ sophia-renderer-live = { path = "../sophia-renderer-live" }
 drm = { version = "0.15", optional = true, default-features = false }
 input = { version = "0.10", optional = true, default-features = false, features = ["libinput_1_19"] }
 
+[dev-dependencies]
+rustix = { version = "1.1", default-features = false, features = ["fs"] }
+
 [features]
 default = []
 gbm-probe = ["sophia-renderer-live/gbm-probe"]

@@ -4810,6 +4810,7 @@ fn write_fixture_file(root: &std::path::Path, name: &str, contents: &str) {
 #[cfg(feature = "gbm-probe")]
 mod atomic_scanout_hardware_smoke {
     use std::os::fd::{AsFd, BorrowedFd};
+    use std::os::unix::fs::OpenOptionsExt;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
 
@@ -4826,6 +4827,7 @@ mod atomic_scanout_hardware_smoke {
                 std::fs::OpenOptions::new()
                     .read(true)
                     .write(true)
+                    .custom_flags(rustix::fs::OFlags::NONBLOCK.bits() as i32)
                     .open(path)?,
             ))
         }

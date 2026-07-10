@@ -105,6 +105,8 @@ framebuffer resources. It then exports a second rendered front buffer and
 submits it through the steady-state page-flip policy, proving the post-modeset
 path without `ALLOW_MODESET`. Each submitted phase waits within a bounded
 deadline for native page-flip evidence before reducing the final smoke record.
+The real card fd is opened nonblocking, so missing callbacks reduce as missing
+evidence instead of hanging inside the DRM event read.
 Without that environment variable, the test returns early and never opens or
 modesets hardware.
 The stable evidence shape for that run is the

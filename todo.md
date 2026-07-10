@@ -75,6 +75,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Opened the opt-in atomic hardware smoke card fd with `O_NONBLOCK` so the
+  bounded page-flip evidence wait cannot hang inside DRM event reads.
 - [x] Made the opt-in atomic hardware smoke wait within a bounded deadline for
   native page-flip evidence instead of sampling the nonblocking fd once.
 - [x] Extended atomic scanout evidence to schema 3 so a passing hardware capture

@@ -340,6 +340,7 @@ version = "0.1.0"
 dependencies = [
  "drm",
  "input",
+ "rustix",
  "sophia-engine",
  "sophia-protocol",
  "sophia-renderer-live",
