@@ -38,5 +38,6 @@ expect_fail tools/verify_atomic_scanout_evidence.sh atomic_scanout_evidence_unkn
 expect_fail tools/verify_atomic_scanout_evidence.sh atomic_scanout_evidence_duplicate_field.log
 expect_fail tools/verify_atomic_scanout_evidence.sh atomic_scanout_evidence_malformed_field.log
 expect_fail tools/verify_atomic_scanout_evidence.sh atomic_scanout_evidence_waiting_retire.log
+expect_fail tools/verify_atomic_scanout_evidence.sh atomic_scanout_evidence_cleanup_pending.log
 
 echo "atomic scanout verifier fixtures passed"

@@ -83,6 +83,8 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Added verifier coverage proving forged passing atomic evidence with
+  retire-time cleanup debt is rejected offline.
 - [x] Added verifier coverage proving forged passing atomic evidence with a
   `WaitingForAcceptedPageFlip` retire state is rejected offline.
 - [x] Made page-flip timeout evidence preserve a reduced
