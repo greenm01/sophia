@@ -2,6 +2,13 @@
 use crate::prelude::*;
 
 #[cfg(feature = "libdrm-events")]
+fn reduced_status<T: std::fmt::Debug>(status: Option<T>) -> String {
+    status
+        .map(|status| format!("{status:?}"))
+        .unwrap_or_else(|| "none".to_owned())
+}
+
+#[cfg(feature = "libdrm-events")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
     pub status: LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus,
@@ -24,12 +31,6 @@ pub struct LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
 #[cfg(feature = "libdrm-events")]
 impl LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
     pub fn reduced_log_line(&self) -> String {
-        fn status<T: std::fmt::Debug>(status: Option<T>) -> String {
-            status
-                .map(|status| format!("{status:?}"))
-                .unwrap_or_else(|| "none".to_owned())
-        }
-
         let (commit_page_flip_event, commit_nonblocking, commit_allow_modeset, commit_test_only) =
             self.commit_flags
                 .map(|flags| {
@@ -53,20 +54,20 @@ impl LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport {
             "sophia_runtime_rendered_scanout_submit schema=1 status={:?} scanout_target={:?} target={} export={} scanout_buffer={} properties={} resources={} request={} submit={} request_scope={} commit_page_flip_event={} commit_nonblocking={} commit_allow_modeset={} commit_test_only={} commit_submit={} runtime_scanout_state={} in_flight={} in_flight_ticks={}",
             self.status,
             self.scanout_target,
-            status(self.target),
-            status(self.export),
-            status(self.scanout_buffer),
-            status(self.properties),
-            status(self.resources),
-            status(self.request),
-            status(self.submit),
-            status(self.request_scope),
+            reduced_status(self.target),
+            reduced_status(self.export),
+            reduced_status(self.scanout_buffer),
+            reduced_status(self.properties),
+            reduced_status(self.resources),
+            reduced_status(self.request),
+            reduced_status(self.submit),
+            reduced_status(self.request_scope),
             commit_page_flip_event,
             commit_nonblocking,
             commit_allow_modeset,
             commit_test_only,
-            status(self.commit_submit),
-            status(self.runtime_scanout_state),
+            reduced_status(self.commit_submit),
+            reduced_status(self.runtime_scanout_state),
             self.in_flight,
             self.in_flight_ticks,
         )
@@ -122,6 +123,21 @@ pub struct LiveTrackedRenderedPrimaryPlaneScanoutRetireReport {
 }
 
 #[cfg(feature = "libdrm-events")]
+impl LiveTrackedRenderedPrimaryPlaneScanoutRetireReport {
+    pub fn reduced_log_line(&self) -> String {
+        format!(
+            "sophia_runtime_rendered_scanout_retire schema=1 status={:?} destroy={} runtime_scanout_state={} in_flight={} in_flight_ticks={} cleanup_pending={}",
+            self.status,
+            reduced_status(self.destroy),
+            reduced_status(self.runtime_scanout_state),
+            self.in_flight,
+            self.in_flight_ticks,
+            self.cleanup_pending,
+        )
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus {
     NoSubmission,
@@ -155,6 +171,18 @@ pub struct LiveTrackedRenderedPrimaryPlaneScanoutCleanupReport {
     pub status: LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus,
     pub destroy: Option<LibdrmNativePrimaryPlaneResourceDestroyStatus>,
     pub cleanup_pending: bool,
+}
+
+#[cfg(feature = "libdrm-events")]
+impl LiveTrackedRenderedPrimaryPlaneScanoutCleanupReport {
+    pub fn reduced_log_line(&self) -> String {
+        format!(
+            "sophia_runtime_rendered_scanout_cleanup schema=1 status={:?} destroy={} cleanup_pending={}",
+            self.status,
+            reduced_status(self.destroy),
+            self.cleanup_pending,
+        )
+    }
 }
 
 #[cfg(feature = "libdrm-events")]

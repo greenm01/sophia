@@ -1937,6 +1937,10 @@ fn live_runtime_assembly_tracks_rendered_scanout_until_accepted_page_flip() {
     assert_eq!(waiting.runtime_scanout_state, None);
     assert_eq!(waiting.in_flight, true);
     assert_eq!(waiting.in_flight_ticks, 2);
+    assert_eq!(
+        waiting.reduced_log_line(),
+        "sophia_runtime_rendered_scanout_retire schema=1 status=WaitingForAcceptedPageFlip destroy=none runtime_scanout_state=none in_flight=true in_flight_ticks=2 cleanup_pending=false"
+    );
     assert_eq!(assembly.rendered_primary_plane_scanout_in_flight(), true);
 
     let accepted = LivePageFlipCallbackReport {
@@ -1956,6 +1960,10 @@ fn live_runtime_assembly_tracks_rendered_scanout_until_accepted_page_flip() {
     assert_eq!(
         retired.runtime_scanout_state,
         Some(RuntimeScanoutState::Retired)
+    );
+    assert_eq!(
+        retired.reduced_log_line(),
+        "sophia_runtime_rendered_scanout_retire schema=1 status=RetiredAfterPageFlip destroy=Destroyed runtime_scanout_state=Retired in_flight=false in_flight_ticks=0 cleanup_pending=false"
     );
     assert_eq!(retired.in_flight, false);
     assert_eq!(retired.in_flight_ticks, 0);
@@ -2277,6 +2285,10 @@ fn live_runtime_assembly_retains_failed_rendered_scanout_cleanup_for_retry() {
     );
     assert_eq!(retired.in_flight, false);
     assert_eq!(retired.cleanup_pending, true);
+    assert_eq!(
+        retired.reduced_log_line(),
+        "sophia_runtime_rendered_scanout_retire schema=1 status=ResourceRetireFailed destroy=FramebufferDestroyFailed runtime_scanout_state=Rejected in_flight=false in_flight_ticks=0 cleanup_pending=true"
+    );
     assert!(assembly.rendered_primary_plane_scanout_cleanup_pending());
     assert_eq!(assembly.pending_runtime_scanout_state_count(), 1);
 
@@ -2316,6 +2328,10 @@ fn live_runtime_assembly_retains_failed_rendered_scanout_cleanup_for_retry() {
         cleanup.destroy,
         Some(LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed)
     );
+    assert_eq!(
+        cleanup.reduced_log_line(),
+        "sophia_runtime_rendered_scanout_cleanup schema=1 status=CleanedUp destroy=Destroyed cleanup_pending=false"
+    );
     assert_eq!(cleanup.cleanup_pending, false);
     assert!(!assembly.rendered_primary_plane_scanout_cleanup_pending());
 
@@ -2325,6 +2341,10 @@ fn live_runtime_assembly_retains_failed_rendered_scanout_cleanup_for_retry() {
         LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus::NoCleanupPending
     );
     assert_eq!(no_cleanup.destroy, None);
+    assert_eq!(
+        no_cleanup.reduced_log_line(),
+        "sophia_runtime_rendered_scanout_cleanup schema=1 status=NoCleanupPending destroy=none cleanup_pending=false"
+    );
     assert_eq!(no_cleanup.cleanup_pending, false);
 
     let clean_tick = assembly
@@ -2466,6 +2486,12 @@ fn live_runtime_tick_reports_failed_rendered_scanout_cleanup_retry() {
             .expect("pending cleanup should be retried")
             .status,
         LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus::CleanupFailed
+    );
+    assert_eq!(
+        tick.rendered_primary_plane_scanout_cleanup_retry
+            .expect("pending cleanup should be retried")
+            .reduced_log_line(),
+        "sophia_runtime_rendered_scanout_cleanup schema=1 status=CleanupFailed destroy=FramebufferDestroyFailed cleanup_pending=true"
     );
     assert_eq!(tick.rendered_primary_plane_scanout_cleanup_pending, true);
     assert!(assembly.rendered_primary_plane_scanout_cleanup_pending());

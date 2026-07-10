@@ -94,6 +94,9 @@ smoke still needs a DRM-master-capable machine.
 - [x] Added a schema-versioned
   `sophia_runtime_rendered_scanout_submit` reduced log line for runtime
   rendered-primary-plane submit reports.
+- [x] Added schema-versioned runtime rendered-scanout retirement and cleanup
+  reduced log lines, covering stale waits, clean retire, cleanup debt, and
+  cleanup retry outcomes.
 - [x] Added session-loop coverage proving pending decoded native page-flip
   callbacks drain under the bounded emit budget without requiring another
   reduced page-flip readiness token.

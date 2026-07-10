@@ -819,6 +819,12 @@ rejected without exposing DRM object IDs, GBM handles, or authority-bearing file
 descriptors. The report also has a schema-versioned reduced log line,
 `sophia_runtime_rendered_scanout_submit`, for capturing runtime submit evidence
 without depending on Rust debug formatting.
+Runtime retirement and cleanup reports expose matching reduced lines:
+`sophia_runtime_rendered_scanout_retire` records accepted, waiting, and
+retire-failed page-flip outcomes; `sophia_runtime_rendered_scanout_cleanup`
+records cleanup retry status and whether native cleanup debt remains. Together
+the three runtime lines describe the production submit-to-retire path without
+exposing native object identity.
 Native primary-plane submit can also consume a preselected KMS target snapshot.
 That path is required when the Engine has already sized a rendered frame target
 from a specific connector/CRTC/plane selection; readiness, buffer production,

@@ -166,6 +166,12 @@ running production loop: they include the reduced submit status, scanout target,
 frame target, GBM export, scanout-buffer validation, native submit stages,
 atomic commit flags, commit submit result, runtime scanout state, and in-flight
 age without exposing DRM object IDs or file descriptors.
+Runtime retirement and cleanup retries can be captured as
+`sophia_runtime_rendered_scanout_retire` and
+`sophia_runtime_rendered_scanout_cleanup` lines. They record reduced retirement
+status, destroy status, runtime scanout state, in-flight age, and cleanup debt,
+so a live loop can distinguish clean retirement, stale callback waits, and
+cleanup retry failures.
 The stable evidence shape for the GBM/EGL renderer smoke is
 `LiveRealGbmSmokeEvidence`: status, draw status, presentation status, and
 frame-target allocation status only.
