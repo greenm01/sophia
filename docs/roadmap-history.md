@@ -8,6 +8,19 @@ validation evidence in `docs/research-log.md`.
 
 ## Completed Real Backend Evidence and Runtime Seams
 
+- [x] Proved libinput-shaped input polling, native page-flip retirement, and
+  rendered scanout submit can share one runtime tick.
+- [x] Added a runtime-owned readiness gate so concrete libinput dispatch runs
+  only after the session loop observes reduced readiness.
+- [x] Kept physical input intake separate from routed-input transformation with
+  reduced `PhysicalIntakeOnly` runtime evidence.
+- [x] Preserved deterministic queued poller tests as the default validation
+  path while keeping native libinput behind optional feature tests.
+- [x] Collapsed one-shot helper calls into a reusable session loop owner.
+- [x] Fed reduced input, page-flip, and scanout facts through one bounded tick
+  budget.
+- [x] Kept real file-descriptor readiness outside Sophia Engine state via a
+  reduced readiness collector.
 - [x] Recorded opt-in real GBM/EGL validation with reduced draw, presentation,
   and frame-target allocation evidence.
 - [x] Defined renderer-private GBM/EGL frame-target lifecycle states: created,

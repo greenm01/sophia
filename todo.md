@@ -12,26 +12,19 @@ active milestone to `docs/roadmap-history.md`.
 
 ## Active Milestone
 
-### Real Input Loop
+### Atomic Hardware Evidence
 
-- [x] Prove libinput-shaped input polling, native page-flip retirement, and
-  rendered scanout submit can share one runtime tick.
-- [x] Add a runtime-owned readiness gate so concrete libinput dispatch runs only
-  after the session loop observes input fd readiness.
-- [x] Keep physical input and routed-input transformation separate.
-- [x] Preserve deterministic queued poller tests as the default validation path.
+- [ ] Run the opt-in atomic hardware smoke on a DRM-master-capable machine.
+- [ ] Capture `LibdrmNativeAtomicScanoutSmokeEvidence` with
+  `tools/atomic_scanout_smoke.sh`.
+- [ ] Verify rendered GBM front-buffer export, primary-plane atomic submit,
+  native page-flip callback, and resource retirement appear in reduced evidence.
 
 ---
 
 ## Next 3 Milestones
 
-### 1. Real Libdrm Event Reader
-
-- [x] Add a concrete page-flip reader only behind `libdrm-events`.
-- [x] Preserve reduced output-route decoding before runtime observation.
-- [x] Keep scanout object identity private to backend-live.
-
-### 2. Authority Probe Selection
+### 1. Authority Probe Selection
 
 - [ ] Choose the next real Sophia X Authority app probe after backend intake
   seams settle.
@@ -40,32 +33,26 @@ active milestone to `docs/roadmap-history.md`.
 - [ ] Keep Wayland Authority deferred until backend event intake and scanout
   timing are stable.
 
-### 3. Runtime Loop Assembly
+### 2. Sophia X Authority Coverage
 
-- [x] Collapse the one-shot helper calls into a reusable session loop owner.
-- [x] Feed reduced input, page-flip, and scanout facts through one bounded tick
-  budget.
-- [x] Keep real file-descriptor readiness outside Sophia Engine state.
+- [ ] Expand Sophia X Authority only where real app probes demand it.
+- [ ] Prioritize bounded drawing, upload, present, selection, and namespace
+  behavior over broad X11 completeness.
+- [ ] Keep XLibre prototype docs and bridge smokes as compatibility lessons
+  until Sophia X Authority has equivalent live coverage.
+
+### 3. Future Authority Substrate
+
+- [ ] Start Sophia Wayland Authority only after live backend frame targets and
+  scanout timing are stable.
+- [ ] Revisit wgpu only after GBM/EGL startup, drawing, presentation,
+  frame-target lifecycle, and scanout seams are validated.
 ---
 
 ## Later Backlog
 
-- [ ] Expand Sophia X Authority only where real app probes demand it,
-  prioritizing bounded drawing, upload, present, selection, and namespace
-  behavior over broad X11 completeness.
-- [ ] Start Sophia Wayland Authority only after live backend frame targets and
-  scanout timing are stable.
 - [x] Build the first real KMS atomic property-set shape from backend-private
   connector, CRTC, plane, framebuffer, and mode state.
-- [ ] Run the opt-in atomic hardware smoke on a DRM-master-capable machine and
-  capture `LibdrmNativeAtomicScanoutSmokeEvidence` with
-  `tools/atomic_scanout_smoke.sh`, proving rendered GBM front-buffer export,
-  primary-plane atomic submit, native page-flip callback, and resource
-  retirement.
-- [ ] Keep the XLibre prototype docs and bridge smokes as compatibility lessons
-  until Sophia X Authority has equivalent live coverage.
-- [ ] Revisit wgpu only after GBM/EGL startup, drawing, presentation,
-  frame-target lifecycle, and scanout seams are validated.
 - [ ] Continue splitting backend-live by domain. The root module is now wiring;
   next large candidates are rendered scanout, startup/GBM-EGL probing, runtime
   assembly, and native page-flip plumbing.
