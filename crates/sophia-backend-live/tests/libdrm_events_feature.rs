@@ -20,24 +20,26 @@ use sophia_backend_live::{
     LibdrmNativePageFlipCallback, LibdrmNativePageFlipDecodeReport,
     LibdrmNativePageFlipDecodeStatus, LibdrmNativePageFlipReadResult, LibdrmNativePageFlipReader,
     LibdrmNativePageFlipSource, LibdrmNativePageFlipSourceReport, LibdrmNativePageFlipSourceStatus,
-    LibdrmNativePlaneSnapshot, LibdrmNativePollerDiagnostics,
-    LibdrmNativePrimaryPlaneFormatTableStatus, LibdrmNativePrimaryPlaneFramebufferCreateDetail,
-    LibdrmNativePrimaryPlaneObjects, LibdrmNativePrimaryPlanePropertyDiscoveryStatus,
-    LibdrmNativePrimaryPlanePropertyHandles, LibdrmNativePrimaryPlaneResourceCreateStatus,
-    LibdrmNativePrimaryPlaneResourceDestroyStatus, LibdrmNativePrimaryPlaneResourceDevice,
-    LibdrmNativePrimaryPlaneScanoutRetireResult, LibdrmNativePrimaryPlaneScanoutRetireStatus,
-    LibdrmNativePrimaryPlaneScanoutSubmitPolicy, LibdrmNativePrimaryPlaneScanoutSubmitStatus,
-    LibdrmNativePrimaryPlaneSelectionResult, LibdrmNativePrimaryPlaneSelectionStatus,
-    LibdrmNativePropertyHandleSet, LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport,
-    LibdrmNativeReadLoopReport, LibdrmNativeReadLoopStatus,
-    LibdrmNativeRenderedScanoutContextStatus, LibdrmNativeScanoutBufferFormatDetail,
-    LibdrmNativeScanoutBufferModifierDetail, LibdrmNativeScanoutBufferPlaneDetail,
-    LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller,
-    LibdrmRendererScanoutBuffer, LiveAtomicScanoutPreflightReport,
-    LiveAtomicScanoutPreflightStatus, LiveBackendConfig, LiveHardwareValidationGateReport,
-    LiveHardwareValidationGateStatus, LiveHardwareValidationSmokeReport,
-    LiveHardwareValidationSmokeStatus, LiveHardwareValidationTarget, LiveKmsScanoutTargetStatus,
-    LiveLibdrmPollerDiagnostics, LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
+    LibdrmNativePlaneFormatModifierSupportStatus, LibdrmNativePlaneFormatModifierTable,
+    LibdrmNativePlaneFormatModifierTableParseStatus, LibdrmNativePlaneSnapshot,
+    LibdrmNativePollerDiagnostics, LibdrmNativePrimaryPlaneFormatTableStatus,
+    LibdrmNativePrimaryPlaneFramebufferCreateDetail, LibdrmNativePrimaryPlaneObjects,
+    LibdrmNativePrimaryPlanePropertyDiscoveryStatus, LibdrmNativePrimaryPlanePropertyHandles,
+    LibdrmNativePrimaryPlaneResourceCreateStatus, LibdrmNativePrimaryPlaneResourceDestroyStatus,
+    LibdrmNativePrimaryPlaneResourceDevice, LibdrmNativePrimaryPlaneScanoutRetireResult,
+    LibdrmNativePrimaryPlaneScanoutRetireStatus, LibdrmNativePrimaryPlaneScanoutSubmitPolicy,
+    LibdrmNativePrimaryPlaneScanoutSubmitStatus, LibdrmNativePrimaryPlaneSelectionResult,
+    LibdrmNativePrimaryPlaneSelectionStatus, LibdrmNativePropertyHandleSet,
+    LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport, LibdrmNativeReadLoopReport,
+    LibdrmNativeReadLoopStatus, LibdrmNativeRenderedScanoutContextStatus,
+    LibdrmNativeScanoutBufferFormatDetail, LibdrmNativeScanoutBufferModifierDetail,
+    LibdrmNativeScanoutBufferPlaneDetail, LibdrmPageFlipEventPollReport,
+    LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller, LibdrmRendererScanoutBuffer,
+    LiveAtomicScanoutPreflightReport, LiveAtomicScanoutPreflightStatus, LiveBackendConfig,
+    LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
+    LiveHardwareValidationSmokeReport, LiveHardwareValidationSmokeStatus,
+    LiveHardwareValidationTarget, LiveKmsScanoutTargetStatus, LiveLibdrmPollerDiagnostics,
+    LiveLibdrmPollerDiagnosticsStatus, LiveLibdrmPollerStartupReport,
     LiveLibdrmPollerStartupStatus, LivePageFlipCallback, LivePageFlipCallbackDecision,
     LivePageFlipCallbackQueue, LivePageFlipCallbackReport, LivePageFlipCallbackSourceReport,
     LivePageFlipEvent, LivePageFlipEventStatus, LiveRenderedPrimaryPlaneScanoutBackpressureReport,
@@ -1336,6 +1338,114 @@ fn native_libdrm_primary_plane_property_discovery_keeps_in_formats_optional() {
             .plane_in_formats(),
         None
     );
+}
+
+#[test]
+fn native_libdrm_plane_format_modifier_table_reduces_supported_modifiers() {
+    let blob = format_modifier_blob(
+        &[
+            drm::buffer::DrmFourcc::Xrgb8888 as u32,
+            drm::buffer::DrmFourcc::Argb8888 as u32,
+        ],
+        &[(0b01, 0, u64::from(drm::buffer::DrmModifier::Linear))],
+    );
+
+    let parsed = LibdrmNativePlaneFormatModifierTable::parse_for_format(
+        &blob,
+        drm::buffer::DrmFourcc::Xrgb8888,
+    );
+
+    assert_eq!(
+        parsed.status,
+        LibdrmNativePlaneFormatModifierTableParseStatus::Parsed
+    );
+    let table = parsed
+        .table
+        .expect("supported modifier blob should produce a table");
+    assert_eq!(table.modifiers(), &[drm::buffer::DrmModifier::Linear]);
+    assert_eq!(
+        table.reduced_status(),
+        LibdrmNativePlaneFormatModifierSupportStatus::Linear
+    );
+
+    let unsupported_format = LibdrmNativePlaneFormatModifierTable::parse_for_format(
+        &blob,
+        drm::buffer::DrmFourcc::Rgb565,
+    );
+    assert_eq!(
+        unsupported_format.status,
+        LibdrmNativePlaneFormatModifierTableParseStatus::FormatUnsupported
+    );
+
+    let unsupported_modifier = LibdrmNativePlaneFormatModifierTable::parse_for_format(
+        &blob,
+        drm::buffer::DrmFourcc::Argb8888,
+    );
+    assert_eq!(
+        unsupported_modifier.status,
+        LibdrmNativePlaneFormatModifierTableParseStatus::ModifierUnsupported
+    );
+}
+
+#[test]
+fn native_libdrm_plane_format_modifier_table_rejects_malformed_blobs() {
+    assert_eq!(
+        LibdrmNativePlaneFormatModifierTable::parse_for_format(
+            &[0; 8],
+            drm::buffer::DrmFourcc::Xrgb8888
+        )
+        .status,
+        LibdrmNativePlaneFormatModifierTableParseStatus::Malformed
+    );
+
+    let mut unsupported_version = format_modifier_blob(
+        &[drm::buffer::DrmFourcc::Xrgb8888 as u32],
+        &[(0b1, 0, u64::from(drm::buffer::DrmModifier::Linear))],
+    );
+    write_u32(&mut unsupported_version, 0, 2);
+    assert_eq!(
+        LibdrmNativePlaneFormatModifierTable::parse_for_format(
+            &unsupported_version,
+            drm::buffer::DrmFourcc::Xrgb8888
+        )
+        .status,
+        LibdrmNativePlaneFormatModifierTableParseStatus::UnsupportedVersion
+    );
+}
+
+fn format_modifier_blob(formats: &[u32], modifiers: &[(u64, u32, u64)]) -> Vec<u8> {
+    let formats_offset = 24usize;
+    let modifiers_offset = align_to(formats_offset + formats.len() * 4, 8);
+    let mut blob = vec![0; modifiers_offset + modifiers.len() * 24];
+    write_u32(&mut blob, 0, 1);
+    write_u32(&mut blob, 8, formats.len() as u32);
+    write_u32(&mut blob, 12, formats_offset as u32);
+    write_u32(&mut blob, 16, modifiers.len() as u32);
+    write_u32(&mut blob, 20, modifiers_offset as u32);
+
+    for (index, format) in formats.iter().enumerate() {
+        write_u32(&mut blob, formats_offset + index * 4, *format);
+    }
+    for (index, (format_mask, offset, modifier)) in modifiers.iter().enumerate() {
+        let base = modifiers_offset + index * 24;
+        write_u64(&mut blob, base, *format_mask);
+        write_u32(&mut blob, base + 8, *offset);
+        write_u64(&mut blob, base + 16, *modifier);
+    }
+
+    blob
+}
+
+fn align_to(value: usize, alignment: usize) -> usize {
+    (value + alignment - 1) & !(alignment - 1)
+}
+
+fn write_u32(bytes: &mut [u8], offset: usize, value: u32) {
+    bytes[offset..offset + 4].copy_from_slice(&value.to_ne_bytes());
+}
+
+fn write_u64(bytes: &mut [u8], offset: usize, value: u64) {
+    bytes[offset..offset + 8].copy_from_slice(&value.to_ne_bytes());
 }
 
 #[test]

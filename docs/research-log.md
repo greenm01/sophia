@@ -1104,6 +1104,16 @@ driver layout. This keeps the rendered path first while giving legacy AddFB2
 and AddFB a buffer layout they are more likely to register without explicit
 modifier metadata.
 
+That flag-only linear request still produced `buffer_modifier=Implicit` on the
+hardware proof. Backend-live now has a private, bounded parser for the DRM
+`IN_FORMATS` blob so Sophia can reduce primary-plane format/modifier capability
+without exposing property blob IDs or raw native tables. In parallel, the native
+GBM/EGL rendered scanout exporter now tries an explicit
+`DRM_FORMAT_MOD_LINEAR` surface before the flag-only linear and default
+surfaces. If the driver accepts it, the exported descriptor should report
+`buffer_modifier=Linear`, letting backend-live use modifier-aware AddFB2 instead
+of the implicit AddFB path.
+
 The primary-plane resource path now admits only one active plane for the packed
 XRGB8888/ARGB8888 scanout formats Sophia supports today. Multi-plane scanout
 descriptors fail closed as `InvalidBuffer` before mode-blob creation,

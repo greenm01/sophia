@@ -94,6 +94,9 @@ smoke still needs a DRM-master-capable machine.
 
 ## Done Recently
 
+- [x] Added a backend-private parser for DRM `IN_FORMATS` blobs and made the
+  native GBM/EGL rendered scanout exporter try explicit
+  `DRM_FORMAT_MOD_LINEAR` surfaces before implicit linear/default surfaces.
 - [x] Made rendered GBM/EGL scanout prefer linear GBM surfaces before the
   driver's default layout after hardware evidence reached
   `buffer_format=Xrgb8888`, `buffer_modifier=Implicit`, and still failed AddFB.

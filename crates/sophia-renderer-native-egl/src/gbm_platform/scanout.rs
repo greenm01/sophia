@@ -415,6 +415,7 @@ fn render_initialized_gbm_scanout_front_buffer<T: std::os::fd::AsFd>(
             height,
             config,
             candidate.format,
+            candidate.modifiers,
             candidate.usage,
         ) {
             Ok(buffer) => return Ok(buffer),
@@ -433,13 +434,19 @@ fn render_initialized_gbm_scanout_front_buffer_with_config<T: std::os::fd::AsFd>
     height: u32,
     config: khronos_egl::Config,
     surface_format: gbm::Format,
+    surface_modifiers: &'static [gbm::Modifier],
     surface_usage: gbm::BufferObjectFlags,
 ) -> Result<NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExportDetail> {
     use gbm::AsRaw as _;
 
-    let gbm_surface = gbm_device
-        .create_surface::<()>(width, height, surface_format, surface_usage)
-        .map_err(|_error| NativeGbmScanoutBufferExportDetail::GbmSurfaceUnavailable)?;
+    let gbm_surface = create_rendered_scanout_surface(
+        gbm_device,
+        width,
+        height,
+        surface_format,
+        surface_modifiers,
+        surface_usage,
+    )?;
     let native_window = gbm_surface.as_raw() as khronos_egl::NativeWindowType;
     let surface = unsafe { egl.create_window_surface(display, config, native_window, None) }
         .map_err(|_error| NativeGbmScanoutBufferExportDetail::EglSurfaceUnavailable)?;
@@ -483,8 +490,34 @@ fn render_initialized_gbm_scanout_front_buffer_with_config<T: std::os::fd::AsFd>
 #[derive(Clone, Copy)]
 struct RenderedScanoutCandidate {
     format: gbm::Format,
+    modifiers: &'static [gbm::Modifier],
     usage: gbm::BufferObjectFlags,
     config_attributes: [khronos_egl::Int; 13],
+}
+
+fn create_rendered_scanout_surface<T: std::os::fd::AsFd>(
+    gbm_device: &gbm::Device<T>,
+    width: u32,
+    height: u32,
+    format: gbm::Format,
+    modifiers: &'static [gbm::Modifier],
+    usage: gbm::BufferObjectFlags,
+) -> Result<gbm::Surface<()>, NativeGbmScanoutBufferExportDetail> {
+    if modifiers.is_empty() {
+        gbm_device
+            .create_surface::<()>(width, height, format, usage)
+            .map_err(|_error| NativeGbmScanoutBufferExportDetail::GbmSurfaceUnavailable)
+    } else {
+        gbm_device
+            .create_surface_with_modifiers2::<()>(
+                width,
+                height,
+                format,
+                modifiers.iter().copied(),
+                usage,
+            )
+            .map_err(|_error| NativeGbmScanoutBufferExportDetail::GbmSurfaceUnavailable)
+    }
 }
 
 fn choose_scanout_config_for_format(
@@ -506,30 +539,42 @@ fn choose_scanout_config_for_format(
     })
 }
 
-fn rendered_scanout_candidates() -> [RenderedScanoutCandidate; 4] {
+fn rendered_scanout_candidates() -> [RenderedScanoutCandidate; 5] {
     [
         RenderedScanoutCandidate {
             format: gbm::Format::Xrgb8888,
+            modifiers: &LINEAR_SCANOUT_MODIFIERS,
             usage: rendered_scanout_usage().union(gbm::BufferObjectFlags::LINEAR),
             config_attributes: xrgb_window_config_attributes(),
         },
         RenderedScanoutCandidate {
             format: gbm::Format::Xrgb8888,
+            modifiers: &[],
+            usage: rendered_scanout_usage().union(gbm::BufferObjectFlags::LINEAR),
+            config_attributes: xrgb_window_config_attributes(),
+        },
+        RenderedScanoutCandidate {
+            format: gbm::Format::Xrgb8888,
+            modifiers: &[],
             usage: rendered_scanout_usage(),
             config_attributes: xrgb_window_config_attributes(),
         },
         RenderedScanoutCandidate {
             format: gbm::Format::Argb8888,
+            modifiers: &LINEAR_SCANOUT_MODIFIERS,
             usage: rendered_scanout_usage().union(gbm::BufferObjectFlags::LINEAR),
             config_attributes: window_config_attributes(),
         },
         RenderedScanoutCandidate {
             format: gbm::Format::Argb8888,
+            modifiers: &[],
             usage: rendered_scanout_usage(),
             config_attributes: window_config_attributes(),
         },
     ]
 }
+
+const LINEAR_SCANOUT_MODIFIERS: [gbm::Modifier; 1] = [gbm::Modifier::Linear];
 
 fn rendered_scanout_usage() -> gbm::BufferObjectFlags {
     gbm::BufferObjectFlags::SCANOUT | gbm::BufferObjectFlags::RENDERING
