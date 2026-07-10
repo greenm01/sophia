@@ -805,12 +805,12 @@ objects. That makes the rendered primary-plane seam the future live answer to
 the runtime command rather than an ad hoc backend side path.
 The opt-in hardware smoke records that chain through
 `LibdrmNativeAtomicScanoutSmokeEvidence`: persistent rendered context startup,
-KMS scanout target readiness, GBM export, primary-plane submit, native page-flip
-polling, callback intake, retirement, and retire-time resource destroy collapse
-to reduced statuses only. A non-ready target fails the smoke evidence before a
-successful export or submit can pass. The report deliberately omits card paths,
-file descriptors, EGL displays, KMS object IDs, framebuffer IDs, and GEM
-handles.
+KMS scanout target readiness, GBM export, primary-plane submit, reduced commit
+flags, native page-flip polling, callback intake, retirement, and retire-time
+resource destroy collapse to reduced statuses only. A non-ready target fails the
+smoke evidence before a successful export or submit can pass. The report
+deliberately omits card paths, file descriptors, EGL displays, KMS object IDs,
+framebuffer IDs, and GEM handles.
 
 The XLibre prototype scheduler may still consume X Damage. In that path,
 `schedule_frame_from_damage` combines a frame-clock tick, an optional X-derived

@@ -2395,6 +2395,12 @@ fn native_atomic_scanout_smoke_evidence_passes_only_after_submit_page_flip_and_r
             rendered_context: Some(LibdrmNativeRenderedScanoutContextStatus::Ready),
             gbm_export: Some(LiveRendererScanoutBufferExportStatus::Exported),
             submit: Some(LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip),
+            commit_flags: Some(LibdrmNativeAtomicCommitFlagsReport {
+                page_flip_event: true,
+                nonblocking: true,
+                allow_modeset: true,
+                test_only: false,
+            }),
             page_flip_poll: Some(LibdrmPageFlipEventPollStatus::Emitted),
             page_flip: Some(LivePageFlipEventStatus::Presented),
             retire: Some(LibdrmNativePrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip),
@@ -2446,6 +2452,15 @@ fn native_atomic_scanout_smoke_evidence_fails_closed_before_page_flip() {
         Some(LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip)
     );
     assert_eq!(
+        evidence.commit_flags,
+        Some(LibdrmNativeAtomicCommitFlagsReport {
+            page_flip_event: true,
+            nonblocking: true,
+            allow_modeset: true,
+            test_only: false,
+        })
+    );
+    assert_eq!(
         evidence.page_flip_poll,
         Some(LibdrmPageFlipEventPollStatus::Idle)
     );
@@ -2478,6 +2493,7 @@ fn native_atomic_scanout_smoke_evidence_fails_before_submit_for_not_ready_target
         Some(LiveKmsScanoutTargetStatus::FrameTargetSizeMismatch)
     );
     assert!(evidence.submit.is_none());
+    assert!(evidence.commit_flags.is_none());
 }
 
 #[test]

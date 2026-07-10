@@ -133,6 +133,8 @@ active milestone to `docs/roadmap-history.md`.
   export so stale readiness cannot render into the wrong target.
 - [x] Split atomic submit policy so runtime rendered scanout uses page-flip
   commits without `ALLOW_MODESET`, while modeset permission stays explicit.
+- [x] Added reduced commit flags to atomic scanout smoke evidence so hardware
+  captures prove the submit policy used by the page-flip.
 - [x] Added reduced live scanout submit intake so backend-live rendered
   primary-plane submit results can drive runtime `SubmitScanout`.
 - [x] Added shared runtime scanout lifecycle state so rendered frames progress

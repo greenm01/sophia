@@ -178,6 +178,7 @@ pub struct LibdrmNativeAtomicScanoutSmokeEvidence {
     pub rendered_context: Option<LibdrmNativeRenderedScanoutContextStatus>,
     pub gbm_export: Option<LiveRendererScanoutBufferExportStatus>,
     pub submit: Option<LibdrmNativePrimaryPlaneScanoutSubmitStatus>,
+    pub commit_flags: Option<LibdrmNativeAtomicCommitFlagsReport>,
     pub page_flip_poll: Option<LibdrmPageFlipEventPollStatus>,
     pub page_flip: Option<LivePageFlipEventStatus>,
     pub retire: Option<LibdrmNativePrimaryPlaneScanoutRetireStatus>,
@@ -194,6 +195,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             rendered_context: None,
             gbm_export: None,
             submit: None,
+            commit_flags: None,
             page_flip_poll: None,
             page_flip: None,
             retire: None,
@@ -209,6 +211,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             rendered_context: None,
             gbm_export: None,
             submit: None,
+            commit_flags: None,
             page_flip_poll: None,
             page_flip: None,
             retire: None,
@@ -227,6 +230,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
         retire: Option<&LibdrmNativePrimaryPlaneScanoutRetireResult>,
     ) -> Self {
         let submit_status = submit.map(|report| report.status);
+        let commit_flags = submit.and_then(|report| report.commit_flags);
         let page_flip_poll = poll.map(|report| report.status);
         let page_flip = callback.map(|report| report.event.status);
         let accepted_page_flip =
@@ -270,6 +274,7 @@ impl LibdrmNativeAtomicScanoutSmokeEvidence {
             rendered_context,
             gbm_export: Some(gbm_export),
             submit: submit_status,
+            commit_flags,
             page_flip_poll,
             page_flip,
             retire: retire_status,

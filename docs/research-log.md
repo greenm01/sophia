@@ -936,6 +936,9 @@ still reports reduced commit flags with modeset permission, while runtime
 rendered-primary-plane submit uses page-flip policy and reports `ALLOW_MODESET`
 as false. This prevents the steady scanout loop from accidentally becoming a
 modeset loop.
+`LibdrmNativeAtomicScanoutSmokeEvidence` now includes those reduced commit
+flags, so captured opt-in hardware evidence can prove the commit policy used by
+the submit that generated the page-flip evidence.
 
 ## Open Questions
 
