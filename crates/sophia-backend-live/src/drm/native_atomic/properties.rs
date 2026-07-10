@@ -1,126 +1,5 @@
 use crate::prelude::*;
 
-#[derive(Debug)]
-pub struct LibdrmNativeAtomicCommitRequest {
-    request: drm::control::atomic::AtomicModeReq,
-    scope: LibdrmNativeAtomicCommitRequestScope,
-    page_flip_event: bool,
-    nonblocking: bool,
-    allow_modeset: bool,
-    test_only: bool,
-}
-
-#[cfg(feature = "libdrm-events")]
-impl LibdrmNativeAtomicCommitRequest {
-    pub const fn new(request: drm::control::atomic::AtomicModeReq) -> Self {
-        Self {
-            request,
-            scope: LibdrmNativeAtomicCommitRequestScope::PageFlip,
-            page_flip_event: true,
-            nonblocking: true,
-            allow_modeset: false,
-            test_only: false,
-        }
-    }
-
-    pub const fn modeset(request: drm::control::atomic::AtomicModeReq) -> Self {
-        Self {
-            request,
-            scope: LibdrmNativeAtomicCommitRequestScope::Modeset,
-            page_flip_event: true,
-            nonblocking: true,
-            allow_modeset: false,
-            test_only: false,
-        }
-    }
-
-    pub const fn without_page_flip_event(mut self) -> Self {
-        self.page_flip_event = false;
-        self
-    }
-
-    pub const fn blocking(mut self) -> Self {
-        self.nonblocking = false;
-        self
-    }
-
-    pub const fn allow_modeset(mut self) -> Self {
-        self.allow_modeset = true;
-        self
-    }
-
-    pub const fn test_only(mut self) -> Self {
-        self.test_only = true;
-        self
-    }
-
-    pub const fn reduced_flags(&self) -> LibdrmNativeAtomicCommitFlagsReport {
-        LibdrmNativeAtomicCommitFlagsReport {
-            page_flip_event: self.page_flip_event,
-            nonblocking: self.nonblocking,
-            allow_modeset: self.allow_modeset,
-            test_only: self.test_only,
-        }
-    }
-
-    pub const fn reduced_scope(&self) -> LibdrmNativeAtomicCommitRequestScope {
-        self.scope
-    }
-
-    pub(crate) fn into_native(
-        self,
-    ) -> (
-        drm::control::AtomicCommitFlags,
-        drm::control::atomic::AtomicModeReq,
-    ) {
-        let mut flags = drm::control::AtomicCommitFlags::empty();
-        if self.page_flip_event {
-            flags |= drm::control::AtomicCommitFlags::PAGE_FLIP_EVENT;
-        }
-        if self.nonblocking {
-            flags |= drm::control::AtomicCommitFlags::NONBLOCK;
-        }
-        if self.allow_modeset {
-            flags |= drm::control::AtomicCommitFlags::ALLOW_MODESET;
-        }
-        if self.test_only {
-            flags |= drm::control::AtomicCommitFlags::TEST_ONLY;
-        }
-        (flags, self.request)
-    }
-}
-
-#[cfg(feature = "libdrm-events")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LibdrmNativeAtomicCommitRequestScope {
-    PageFlip,
-    Modeset,
-}
-
-#[cfg(feature = "libdrm-events")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct LibdrmNativeAtomicCommitFlagsReport {
-    pub page_flip_event: bool,
-    pub nonblocking: bool,
-    pub allow_modeset: bool,
-    pub test_only: bool,
-}
-
-#[cfg(feature = "libdrm-events")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct LibdrmNativeAtomicCommitSubmitReport {
-    pub status: LibdrmNativeAtomicCommitSubmitStatus,
-}
-
-#[cfg(feature = "libdrm-events")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LibdrmNativeAtomicCommitSubmitStatus {
-    Submitted,
-    WouldBlock,
-    Rejected,
-}
-
-#[cfg(feature = "libdrm-events")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LibdrmNativePrimaryPlanePropertyHandles {
     pub(crate) connector_crtc_id: drm::control::property::Handle,
@@ -138,7 +17,6 @@ pub struct LibdrmNativePrimaryPlanePropertyHandles {
     pub(crate) plane_crtc_h: drm::control::property::Handle,
 }
 
-#[cfg(feature = "libdrm-events")]
 impl LibdrmNativePrimaryPlanePropertyHandles {
     #[allow(clippy::too_many_arguments)]
     pub const fn new(
@@ -174,13 +52,11 @@ impl LibdrmNativePrimaryPlanePropertyHandles {
     }
 }
 
-#[cfg(feature = "libdrm-events")]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct LibdrmNativePropertyHandleSet {
     handles: Vec<(String, drm::control::property::Handle)>,
 }
 
-#[cfg(feature = "libdrm-events")]
 impl LibdrmNativePropertyHandleSet {
     pub fn new(
         handles: impl IntoIterator<Item = (impl Into<String>, drm::control::property::Handle)>,
@@ -211,7 +87,6 @@ impl LibdrmNativePropertyHandleSet {
     }
 }
 
-#[cfg(feature = "libdrm-events")]
 pub trait LibdrmNativePropertyLookupDevice {
     fn connector_property_handles(
         &self,
@@ -229,7 +104,6 @@ pub trait LibdrmNativePropertyLookupDevice {
     ) -> io::Result<LibdrmNativePropertyHandleSet>;
 }
 
-#[cfg(feature = "libdrm-events")]
 impl<D> LibdrmNativePropertyLookupDevice for D
 where
     D: drm::control::Device,
@@ -262,14 +136,12 @@ where
     }
 }
 
-#[cfg(feature = "libdrm-events")]
 #[derive(Debug)]
 pub struct LibdrmNativePrimaryPlanePropertyDiscoveryResult {
     pub status: LibdrmNativePrimaryPlanePropertyDiscoveryStatus,
     pub properties: Option<LibdrmNativePrimaryPlanePropertyHandles>,
 }
 
-#[cfg(feature = "libdrm-events")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LibdrmNativePrimaryPlanePropertyDiscoveryStatus {
     Discovered,
@@ -279,7 +151,6 @@ pub enum LibdrmNativePrimaryPlanePropertyDiscoveryStatus {
     MissingPlaneProperty,
 }
 
-#[cfg(feature = "libdrm-events")]
 pub fn discover_native_primary_plane_property_handles<D>(
     device: &D,
     connector: drm::control::connector::Handle,

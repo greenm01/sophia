@@ -78,6 +78,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Split native atomic request flags/status from primary-plane property
+  discovery while keeping the public DRM facade stable.
 - [x] Split native KMS target selection into snapshot, device, and selection
   modules while keeping the public DRM facade stable.
 - [x] Split the libinput event adapter into report, gate, device-map, native
