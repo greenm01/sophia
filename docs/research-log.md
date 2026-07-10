@@ -846,6 +846,12 @@ The matching property discovery seam can resolve the required connector, CRTC,
 and plane property handles through a real DRM device or a deterministic fake.
 Discovery failures are reduced to read failure or missing resource-property
 groups before the builder can run.
+The native primary-plane scanout submit chain now exercises the whole reduced
+submit path with deterministic fakes: KMS target selection, renderer descriptor
+validation, mode blob/framebuffer creation, atomic request build, and atomic
+submit. The result intentionally stops at `SubmittedWaitingForPageFlip`; a
+future hardware smoke must wire the retained submission owner to native
+page-flip evidence before resources are retired.
 
 ## Open Questions
 

@@ -177,6 +177,13 @@ property names for that builder through the real `drm::control::Device`
 property APIs, but reduces failures to read-failed or missing connector, CRTC,
 or plane property groups. Property IDs remain in backend-private handle bundles
 and must not appear in runtime reports.
+`submit_native_primary_plane_scanout_from_renderer_descriptor` is the first
+reduced end-to-end submit chain. It selects a KMS target, validates the reduced
+renderer descriptor, creates framebuffer resources, builds the atomic request,
+and submits it with modeset permission. A successful return is only
+`SubmittedWaitingForPageFlip`; the opaque submission owner must remain alive
+until backend-live accepts native page-flip evidence and explicitly retires the
+resources.
 
 Backend-live runtime ticks carry the current reduced scanout readiness report,
 KMS scanout target report, and page-flip event beside renderer health. This

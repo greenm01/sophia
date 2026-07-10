@@ -18,11 +18,12 @@ use sophia_backend_live::{
     LibdrmNativePollerDiagnostics, LibdrmNativePrimaryPlaneObjects,
     LibdrmNativePrimaryPlanePropertyDiscoveryStatus, LibdrmNativePrimaryPlanePropertyHandles,
     LibdrmNativePrimaryPlaneResourceCreateStatus, LibdrmNativePrimaryPlaneResourceDestroyStatus,
-    LibdrmNativePrimaryPlaneResourceDevice, LibdrmNativePrimaryPlaneSelectionStatus,
-    LibdrmNativePropertyHandleSet, LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport,
-    LibdrmNativeReadLoopReport, LibdrmNativeReadLoopStatus, LibdrmPageFlipEventPollReport,
-    LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller, LibdrmRendererScanoutBuffer,
-    LiveBackendConfig, LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
+    LibdrmNativePrimaryPlaneResourceDevice, LibdrmNativePrimaryPlaneScanoutSubmitStatus,
+    LibdrmNativePrimaryPlaneSelectionStatus, LibdrmNativePropertyHandleSet,
+    LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport, LibdrmNativeReadLoopReport,
+    LibdrmNativeReadLoopStatus, LibdrmPageFlipEventPollReport, LibdrmPageFlipEventPollStatus,
+    LibdrmPageFlipEventPoller, LibdrmRendererScanoutBuffer, LiveBackendConfig,
+    LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
     LiveHardwareValidationSmokeReport, LiveHardwareValidationSmokeStatus,
     LiveHardwareValidationTarget, LiveLibdrmPollerDiagnostics, LiveLibdrmPollerDiagnosticsStatus,
     LiveLibdrmPollerStartupReport, LiveLibdrmPollerStartupStatus, LivePageFlipCallback,
@@ -33,9 +34,11 @@ use sophia_backend_live::{
     decode_native_page_flip_batch, destroy_native_primary_plane_resources, discover_live_backend,
     discover_native_primary_plane_property_handles, libdrm_dependency_admission_report,
     libdrm_fd_authority_report, native_libdrm_event_adapter_report,
-    native_libdrm_event_adapter_report_for_authority, real_libdrm_events_validation_gate,
+    native_libdrm_event_adapter_report_for_authority, real_atomic_scanout_validation_gate,
+    real_atomic_scanout_validation_smoke_report, real_libdrm_events_validation_gate,
     real_libdrm_events_validation_smoke_report, reduce_native_page_flip_event,
     select_native_primary_plane_target,
+    submit_native_primary_plane_scanout_from_renderer_descriptor,
 };
 use sophia_renderer_live::{
     FakeRendererScanoutBufferExporter, LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
@@ -121,6 +124,44 @@ fn real_libdrm_event_validation_smoke_fails_closed_without_device_opening_smoke(
     assert_eq!(
         real_libdrm_events_validation_smoke_report().target,
         LiveHardwareValidationTarget::LibdrmEvents
+    );
+}
+
+#[test]
+fn real_atomic_scanout_validation_gate_is_explicit_and_reduced() {
+    let skipped = LiveHardwareValidationGateReport::from_env_presence(
+        LiveHardwareValidationTarget::AtomicScanout,
+        false,
+    );
+    assert_eq!(
+        skipped,
+        LiveHardwareValidationGateReport {
+            target: LiveHardwareValidationTarget::AtomicScanout,
+            status: LiveHardwareValidationGateStatus::SkippedOptInRequired,
+        }
+    );
+    assert_eq!(
+        skipped.target.env_var(),
+        "SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE"
+    );
+
+    let requested = LiveHardwareValidationGateReport::from_env_presence(
+        LiveHardwareValidationTarget::AtomicScanout,
+        true,
+    );
+    assert_eq!(
+        requested.status,
+        LiveHardwareValidationGateStatus::Requested
+    );
+    assert!(requested.is_requested());
+
+    assert_eq!(
+        real_atomic_scanout_validation_gate().target,
+        LiveHardwareValidationTarget::AtomicScanout
+    );
+    assert_eq!(
+        real_atomic_scanout_validation_smoke_report().target,
+        LiveHardwareValidationTarget::AtomicScanout
     );
 }
 
@@ -317,6 +358,121 @@ impl LibdrmNativePrimaryPlaneResourceDevice for FakeNativePrimaryPlaneResourceDe
     }
 }
 
+#[derive(Debug)]
+struct FakeNativePrimaryPlaneScanoutDevice {
+    selection: FakeNativeKmsSelectionDevice,
+    properties: FakeNativePropertyLookupDevice,
+    resources: FakeNativePrimaryPlaneResourceDevice,
+    submit: io::Result<()>,
+}
+
+impl LibdrmNativeKmsSelectionDevice for FakeNativePrimaryPlaneScanoutDevice {
+    fn connector_handles(&self) -> io::Result<Vec<drm::control::connector::Handle>> {
+        self.selection.connector_handles()
+    }
+
+    fn crtc_handles(&self) -> io::Result<Vec<drm::control::crtc::Handle>> {
+        self.selection.crtc_handles()
+    }
+
+    fn connector_snapshot(
+        &self,
+        connector: drm::control::connector::Handle,
+    ) -> io::Result<LibdrmNativeConnectorSnapshot> {
+        self.selection.connector_snapshot(connector)
+    }
+
+    fn encoder_snapshot(
+        &self,
+        encoder: drm::control::encoder::Handle,
+    ) -> io::Result<LibdrmNativeEncoderSnapshot> {
+        self.selection.encoder_snapshot(encoder)
+    }
+
+    fn plane_handles(&self) -> io::Result<Vec<drm::control::plane::Handle>> {
+        self.selection.plane_handles()
+    }
+
+    fn plane_snapshot(
+        &self,
+        plane: drm::control::plane::Handle,
+    ) -> io::Result<LibdrmNativePlaneSnapshot> {
+        self.selection.plane_snapshot(plane)
+    }
+
+    fn plane_type(
+        &self,
+        plane: drm::control::plane::Handle,
+    ) -> io::Result<Option<drm::control::PlaneType>> {
+        self.selection.plane_type(plane)
+    }
+}
+
+impl LibdrmNativePropertyLookupDevice for FakeNativePrimaryPlaneScanoutDevice {
+    fn connector_property_handles(
+        &self,
+        connector: drm::control::connector::Handle,
+    ) -> io::Result<LibdrmNativePropertyHandleSet> {
+        self.properties.connector_property_handles(connector)
+    }
+
+    fn crtc_property_handles(
+        &self,
+        crtc: drm::control::crtc::Handle,
+    ) -> io::Result<LibdrmNativePropertyHandleSet> {
+        self.properties.crtc_property_handles(crtc)
+    }
+
+    fn plane_property_handles(
+        &self,
+        plane: drm::control::plane::Handle,
+    ) -> io::Result<LibdrmNativePropertyHandleSet> {
+        self.properties.plane_property_handles(plane)
+    }
+}
+
+impl LibdrmNativePrimaryPlaneResourceDevice for FakeNativePrimaryPlaneScanoutDevice {
+    fn create_mode_blob_for_selection(
+        &self,
+        selection: sophia_backend_live::LibdrmNativePrimaryPlaneSelection,
+    ) -> io::Result<u64> {
+        self.resources.create_mode_blob_for_selection(selection)
+    }
+
+    fn add_scanout_framebuffer<B>(
+        &self,
+        buffer: &B,
+        depth: u32,
+        bpp: u32,
+    ) -> io::Result<drm::control::framebuffer::Handle>
+    where
+        B: drm::buffer::Buffer + ?Sized,
+    {
+        self.resources.add_scanout_framebuffer(buffer, depth, bpp)
+    }
+
+    fn destroy_scanout_framebuffer(
+        &self,
+        framebuffer: drm::control::framebuffer::Handle,
+    ) -> io::Result<()> {
+        self.resources.destroy_scanout_framebuffer(framebuffer)
+    }
+
+    fn destroy_mode_blob(&self, mode_blob: u64) -> io::Result<()> {
+        self.resources.destroy_mode_blob(mode_blob)
+    }
+}
+
+impl LibdrmNativeAtomicCommitDevice for FakeNativePrimaryPlaneScanoutDevice {
+    fn submit_atomic_commit(
+        &self,
+        _flags: drm::control::AtomicCommitFlags,
+        _request: drm::control::atomic::AtomicModeReq,
+    ) -> io::Result<()> {
+        clone_io_result(&self.submit)
+    }
+}
+
 fn clone_io_result<T: Clone>(result: &io::Result<T>) -> io::Result<T> {
     result
         .as_ref()
@@ -434,7 +590,16 @@ fn full_primary_plane_resource_device() -> FakeNativePrimaryPlaneResourceDevice 
     }
 }
 
-fn scanout_buffer(size: Size) -> LibdrmRendererScanoutBuffer {
+fn full_primary_plane_scanout_device() -> FakeNativePrimaryPlaneScanoutDevice {
+    FakeNativePrimaryPlaneScanoutDevice {
+        selection: full_kms_selection_device(),
+        properties: full_property_lookup_device(),
+        resources: full_primary_plane_resource_device(),
+        submit: Ok(()),
+    }
+}
+
+fn scanout_descriptor(size: Size) -> sophia_renderer_live::LiveRendererScanoutBufferDescriptor {
     let mut exporter =
         FakeRendererScanoutBufferExporter::new(LiveRendererScanoutBufferExportStatus::Exported)
             .with_descriptor(
@@ -442,12 +607,15 @@ fn scanout_buffer(size: Size) -> LibdrmRendererScanoutBuffer {
                 LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
                 17,
             );
-    let descriptor = exporter
+
+    exporter
         .export_scanout_buffer(LiveGbmEglFrameTargetRecord::new(size))
         .descriptor
-        .expect("ready fake renderer export should include a scanout descriptor");
+        .expect("ready fake renderer export should include a scanout descriptor")
+}
 
-    LibdrmRendererScanoutBuffer::from_descriptor(descriptor)
+fn scanout_buffer(size: Size) -> LibdrmRendererScanoutBuffer {
+    LibdrmRendererScanoutBuffer::from_descriptor(scanout_descriptor(size))
         .expect("ready renderer descriptor should become a backend-private DRM buffer")
 }
 
@@ -630,6 +798,81 @@ fn native_libdrm_primary_plane_selection_feeds_request_builder() {
 
     assert_eq!(build.status, LibdrmNativeAtomicRequestBuildStatus::Built);
     assert!(build.request.is_some());
+}
+
+#[test]
+fn native_libdrm_primary_plane_scanout_submit_chains_renderer_descriptor_to_atomic_commit() {
+    let device = full_primary_plane_scanout_device();
+    let result = submit_native_primary_plane_scanout_from_renderer_descriptor(
+        &device,
+        scanout_descriptor(Size {
+            width: 1280,
+            height: 720,
+        }),
+    );
+
+    assert_eq!(
+        result.status,
+        LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip
+    );
+    assert_eq!(
+        result.selection,
+        LibdrmNativePrimaryPlaneSelectionStatus::Selected
+    );
+    assert_eq!(
+        result.properties,
+        Some(LibdrmNativePrimaryPlanePropertyDiscoveryStatus::Discovered)
+    );
+    assert_eq!(
+        result.resources,
+        Some(LibdrmNativePrimaryPlaneResourceCreateStatus::Created)
+    );
+    assert_eq!(
+        result.request,
+        Some(LibdrmNativeAtomicRequestBuildStatus::Built)
+    );
+    assert_eq!(
+        result.submit,
+        Some(LibdrmNativeAtomicCommitSubmitStatus::Submitted)
+    );
+
+    let retired = result
+        .submission
+        .expect("submitted scanout should retain resource ownership until page flip")
+        .retire(&device);
+    assert_eq!(
+        retired.status,
+        LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed
+    );
+}
+
+#[test]
+fn native_libdrm_primary_plane_scanout_submit_fails_closed_for_bad_descriptor() {
+    let device = full_primary_plane_scanout_device();
+    let descriptor = sophia_renderer_live::LiveRendererScanoutBufferDescriptor::new(
+        Size {
+            width: 1280,
+            height: 720,
+        },
+        0,
+        LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+        17,
+    );
+    let result = submit_native_primary_plane_scanout_from_renderer_descriptor(&device, descriptor);
+
+    assert_eq!(
+        result.status,
+        LibdrmNativePrimaryPlaneScanoutSubmitStatus::ScanoutBufferUnavailable
+    );
+    assert_eq!(
+        result.selection,
+        LibdrmNativePrimaryPlaneSelectionStatus::Selected
+    );
+    assert!(result.properties.is_none());
+    assert!(result.resources.is_none());
+    assert!(result.request.is_none());
+    assert!(result.submit.is_none());
+    assert!(result.submission.is_none());
 }
 
 #[test]

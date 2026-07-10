@@ -54,9 +54,9 @@ active milestone to `docs/roadmap-history.md`.
   scanout timing are stable.
 - [x] Build the first real KMS atomic property-set shape from backend-private
   connector, CRTC, plane, framebuffer, and mode state.
-- [ ] Add opt-in hardware smoke for selected KMS target -> property discovery ->
-  owned GBM scanout buffer -> framebuffer-backed atomic request -> submitted
-  commit -> page-flip evidence.
+- [ ] Wire submitted primary-plane scanout ownership to the native page-flip
+  reader so the opt-in atomic hardware smoke can prove page-flip evidence
+  before retiring framebuffer resources.
 - [ ] Keep the XLibre prototype docs and bridge smokes as compatibility lessons
   until Sophia X Authority has equivalent live coverage.
 - [ ] Revisit wgpu only after GBM/EGL startup, drawing, presentation,
@@ -86,6 +86,10 @@ active milestone to `docs/roadmap-history.md`.
   buffer adapter for framebuffer registration.
 - [x] Added feature-gated native GBM scanout buffer exporter that owns the
   buffer object behind the reduced descriptor.
+- [x] Added a reduced primary-plane scanout submit chain that selects KMS
+  target resources, validates a renderer scanout descriptor, creates
+  framebuffer resources, submits an atomic commit, and retains an opaque
+  submission owner until page-flip retirement.
 - [x] Added feature-gated DRM atomic property discovery for the primary-plane
   request builder.
 - [x] Defined opt-in environment gates for real libdrm and libinput validation.

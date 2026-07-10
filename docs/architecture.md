@@ -685,6 +685,11 @@ framebuffer resource derived from that descriptor.
 Property discovery for that path now uses the native DRM property APIs and
 collapses lookup problems to reduced missing-property groups. The property
 handles themselves stay backend-private.
+The primary-plane scanout submit seam now chains those pieces together: select
+the KMS target, validate a renderer scanout descriptor, create the mode blob and
+framebuffer, build the atomic request, submit it, and retain an opaque
+submission owner. That owner is not visual truth. The runtime may retire it only
+after native page-flip evidence has passed the reduced callback checks.
 
 The XLibre prototype scheduler may still consume X Damage. In that path,
 `schedule_frame_from_damage` combines a frame-clock tick, an optional X-derived

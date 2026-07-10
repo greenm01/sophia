@@ -66,6 +66,7 @@ use sophia_renderer_live::{
 pub const LIVE_PAGE_FLIP_CALLBACK_CHANNEL_CAPACITY: usize = 128;
 pub const SOPHIA_RUN_REAL_LIBDRM_EVENTS_SMOKE: &str = "SOPHIA_RUN_REAL_LIBDRM_EVENTS_SMOKE";
 pub const SOPHIA_RUN_REAL_LIBINPUT_EVENTS_SMOKE: &str = "SOPHIA_RUN_REAL_LIBINPUT_EVENTS_SMOKE";
+pub const SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE: &str = "SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LiveHardwareValidationGateReport {
@@ -94,6 +95,7 @@ impl LiveHardwareValidationGateReport {
 pub enum LiveHardwareValidationTarget {
     LibdrmEvents,
     LibinputEvents,
+    AtomicScanout,
 }
 
 impl LiveHardwareValidationTarget {
@@ -101,6 +103,7 @@ impl LiveHardwareValidationTarget {
         match self {
             Self::LibdrmEvents => SOPHIA_RUN_REAL_LIBDRM_EVENTS_SMOKE,
             Self::LibinputEvents => SOPHIA_RUN_REAL_LIBINPUT_EVENTS_SMOKE,
+            Self::AtomicScanout => SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE,
         }
     }
 }
@@ -154,12 +157,24 @@ pub fn real_libinput_events_validation_gate() -> LiveHardwareValidationGateRepor
     )
 }
 
+pub fn real_atomic_scanout_validation_gate() -> LiveHardwareValidationGateReport {
+    let target = LiveHardwareValidationTarget::AtomicScanout;
+    LiveHardwareValidationGateReport::from_env_presence(
+        target,
+        std::env::var_os(target.env_var()).is_some(),
+    )
+}
+
 pub fn real_libdrm_events_validation_smoke_report() -> LiveHardwareValidationSmokeReport {
     LiveHardwareValidationSmokeReport::fail_closed_from_gate(real_libdrm_events_validation_gate())
 }
 
 pub fn real_libinput_events_validation_smoke_report() -> LiveHardwareValidationSmokeReport {
     LiveHardwareValidationSmokeReport::fail_closed_from_gate(real_libinput_events_validation_gate())
+}
+
+pub fn real_atomic_scanout_validation_smoke_report() -> LiveHardwareValidationSmokeReport {
+    LiveHardwareValidationSmokeReport::fail_closed_from_gate(real_atomic_scanout_validation_gate())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1995,6 +2010,174 @@ where
                 }
             }
         }
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LibdrmNativePrimaryPlaneScanoutSubmission {
+    resources: LibdrmNativePrimaryPlaneResourceBundle,
+}
+
+#[cfg(feature = "libdrm-events")]
+impl LibdrmNativePrimaryPlaneScanoutSubmission {
+    pub fn retire<D>(self, device: &D) -> LibdrmNativePrimaryPlaneResourceDestroyReport
+    where
+        D: LibdrmNativePrimaryPlaneResourceDevice,
+    {
+        destroy_native_primary_plane_resources(device, self.resources)
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Debug)]
+pub struct LibdrmNativePrimaryPlaneScanoutSubmitResult {
+    pub status: LibdrmNativePrimaryPlaneScanoutSubmitStatus,
+    pub selection: LibdrmNativePrimaryPlaneSelectionStatus,
+    pub scanout_buffer: LiveRendererScanoutBufferStatus,
+    pub properties: Option<LibdrmNativePrimaryPlanePropertyDiscoveryStatus>,
+    pub resources: Option<LibdrmNativePrimaryPlaneResourceCreateStatus>,
+    pub request: Option<LibdrmNativeAtomicRequestBuildStatus>,
+    pub submit: Option<LibdrmNativeAtomicCommitSubmitStatus>,
+    pub submission: Option<LibdrmNativePrimaryPlaneScanoutSubmission>,
+}
+
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibdrmNativePrimaryPlaneScanoutSubmitStatus {
+    SubmittedWaitingForPageFlip,
+    KmsTargetUnavailable,
+    ScanoutBufferUnavailable,
+    PropertyDiscoveryUnavailable,
+    ResourceCreationUnavailable,
+    AtomicRequestBuildFailed,
+    AtomicSubmitFailed,
+}
+
+#[cfg(feature = "libdrm-events")]
+pub fn submit_native_primary_plane_scanout_from_renderer_descriptor<D>(
+    device: &D,
+    descriptor: LiveRendererScanoutBufferDescriptor,
+) -> LibdrmNativePrimaryPlaneScanoutSubmitResult
+where
+    D: LibdrmNativeKmsSelectionDevice
+        + LibdrmNativePropertyLookupDevice
+        + LibdrmNativePrimaryPlaneResourceDevice
+        + LibdrmNativeAtomicCommitDevice,
+{
+    let selection = select_native_primary_plane_target(device);
+    let Some(selected) = selection.selection else {
+        return LibdrmNativePrimaryPlaneScanoutSubmitResult {
+            status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::KmsTargetUnavailable,
+            selection: selection.status,
+            scanout_buffer: descriptor.status,
+            properties: None,
+            resources: None,
+            request: None,
+            submit: None,
+            submission: None,
+        };
+    };
+
+    let Some(buffer) = LibdrmRendererScanoutBuffer::from_descriptor(descriptor) else {
+        return LibdrmNativePrimaryPlaneScanoutSubmitResult {
+            status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::ScanoutBufferUnavailable,
+            selection: selection.status,
+            scanout_buffer: descriptor.status,
+            properties: None,
+            resources: None,
+            request: None,
+            submit: None,
+            submission: None,
+        };
+    };
+
+    let properties = discover_native_primary_plane_property_handles(
+        device,
+        selected.connector,
+        selected.crtc,
+        selected.plane,
+    );
+    let Some(property_handles) = properties.properties else {
+        return LibdrmNativePrimaryPlaneScanoutSubmitResult {
+            status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::PropertyDiscoveryUnavailable,
+            selection: selection.status,
+            scanout_buffer: descriptor.status,
+            properties: Some(properties.status),
+            resources: None,
+            request: None,
+            submit: None,
+            submission: None,
+        };
+    };
+
+    let resources = create_native_primary_plane_resources(device, selected, &buffer);
+    let Some(resource_bundle) = resources.resources else {
+        return LibdrmNativePrimaryPlaneScanoutSubmitResult {
+            status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::ResourceCreationUnavailable,
+            selection: selection.status,
+            scanout_buffer: descriptor.status,
+            properties: Some(properties.status),
+            resources: Some(resources.status),
+            request: None,
+            submit: None,
+            submission: None,
+        };
+    };
+
+    let request = build_native_primary_plane_atomic_request(
+        resource_bundle.into_objects(selected),
+        property_handles,
+    );
+    let Some(request) = request.request else {
+        let _ = destroy_native_primary_plane_resources(device, resource_bundle);
+        return LibdrmNativePrimaryPlaneScanoutSubmitResult {
+            status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::AtomicRequestBuildFailed,
+            selection: selection.status,
+            scanout_buffer: descriptor.status,
+            properties: Some(properties.status),
+            resources: Some(resources.status),
+            request: Some(request.status),
+            submit: None,
+            submission: None,
+        };
+    };
+
+    let request = request.allow_modeset();
+    let (flags, request) = request.into_native();
+    let submit = match device.submit_atomic_commit(flags, request) {
+        Ok(()) => LibdrmNativeAtomicCommitSubmitStatus::Submitted,
+        Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+            LibdrmNativeAtomicCommitSubmitStatus::WouldBlock
+        }
+        Err(_) => LibdrmNativeAtomicCommitSubmitStatus::Rejected,
+    };
+
+    if submit != LibdrmNativeAtomicCommitSubmitStatus::Submitted {
+        let _ = destroy_native_primary_plane_resources(device, resource_bundle);
+        return LibdrmNativePrimaryPlaneScanoutSubmitResult {
+            status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::AtomicSubmitFailed,
+            selection: selection.status,
+            scanout_buffer: descriptor.status,
+            properties: Some(properties.status),
+            resources: Some(resources.status),
+            request: Some(LibdrmNativeAtomicRequestBuildStatus::Built),
+            submit: Some(submit),
+            submission: None,
+        };
+    }
+
+    LibdrmNativePrimaryPlaneScanoutSubmitResult {
+        status: LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip,
+        selection: selection.status,
+        scanout_buffer: descriptor.status,
+        properties: Some(properties.status),
+        resources: Some(resources.status),
+        request: Some(LibdrmNativeAtomicRequestBuildStatus::Built),
+        submit: Some(submit),
+        submission: Some(LibdrmNativePrimaryPlaneScanoutSubmission {
+            resources: resource_bundle,
+        }),
     }
 }
 
