@@ -115,7 +115,10 @@ runs the feature-gated `sophia atomic-scanout-smoke` CLI command with
 for the destructive proof and emits reduced `SmokeChildTimeout` evidence if the
 child fails to produce page-flip evidence within the bounded deadline. The
 helper forwards optional CLI targeting arguments: `--slot`, `--output`,
-`--authority`, and `--page-flip-timeout-ms`.
+`--authority`, `--page-flip-timeout-ms`, and `--child-timeout-ms`. The page-flip
+timeout bounds native callback waiting inside the smoke child; the child timeout
+bounds the parent watchdog around the destructive child process and defaults to
+10 seconds.
 Backend-live first uses the production `select_real_atomic_scanout_card` seam to
 choose an opaque card owner that opens read/write, admits UniversalPlanes and
 Atomic client capabilities, exposes a reduced KMS primary-plane scanout target,
@@ -210,7 +213,7 @@ runs only the opt-in atomic scanout CLI smoke:
 ```sh
 tools/atomic_scanout_smoke.sh
 SOPHIA_ATOMIC_SCANOUT_EVIDENCE=/tmp/sophia-atomic-smoke.log tools/atomic_scanout_smoke.sh
-tools/atomic_scanout_smoke.sh --slot=1 --output=1 --authority=1 --page-flip-timeout-ms=2000
+tools/atomic_scanout_smoke.sh --slot=1 --output=1 --authority=1 --page-flip-timeout-ms=2000 --child-timeout-ms=10000
 ```
 
 The helper runs the verified preflight before the smoke and

@@ -27,7 +27,9 @@ Support now exists for that hardware proof:
 
 - `tools/atomic_scanout_smoke.sh` runs verified preflight before the opt-in
   modesetting smoke, records the smoke log, and verifies passing evidence
-  automatically.
+  automatically. The parent process has an explicit `--child-timeout-ms`
+  watchdog, separate from the child process `--page-flip-timeout-ms` native
+  callback wait.
 - `tools/atomic_scanout_preflight.sh` records reduced host readiness without
   requesting DRM master or modesetting hardware, and proves at least one primary
   card node can be opened read/write and admit the required DRM atomic client

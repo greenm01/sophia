@@ -924,11 +924,14 @@ The opt-in atomic scanout hardware smoke now has an operator-facing CLI path:
 `sophia atomic-scanout-smoke` command with
 `SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1`. The CLI parent spawns a child process
 for the destructive proof and emits reduced timeout evidence if the child hangs
-waiting for a page flip. Backend-live owns the actual proof phases: it opens a
-primary DRM card, enables the atomic KMS capabilities, allocates the GBM
-scanout buffer from a persistent GBM/EGL rendered-scanout context in the same
-handle namespace, submits primary-plane scanout, waits for a native page-flip
-callback, validates the reduced callback, and retires the submitted resources.
+waiting for a page flip. The parent watchdog is explicit and operator
+controlled through `--child-timeout-ms`, while the child still owns the native
+page-flip wait policy through `--page-flip-timeout-ms`. Backend-live owns the
+actual proof phases: it opens a primary DRM card, enables the atomic KMS
+capabilities, allocates the GBM scanout buffer from a persistent GBM/EGL
+rendered-scanout context in the same handle namespace, submits primary-plane
+scanout, waits for a native page-flip callback, validates the reduced callback,
+and retires the submitted resources.
 The reduced evidence records context startup separately from GBM export,
 includes the reduced KMS scanout target readiness status, and reports reduced
 retire-time resource destroy status when cleanup fails. Non-ready scanout

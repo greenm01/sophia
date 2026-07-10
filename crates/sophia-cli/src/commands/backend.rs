@@ -3,6 +3,9 @@ use std::time::{Duration, Instant};
 
 use super::prelude::{arg_value, parse_u64};
 
+#[cfg(feature = "atomic-scanout-smoke-live")]
+const ATOMIC_SCANOUT_SMOKE_CHILD_TIMEOUT_MS: u64 = 10_000;
+
 pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
     if args.iter().any(|arg| arg == "atomic-scanout-preflight") {
         let report = sophia_backend_live::real_atomic_scanout_preflight_report();
@@ -58,6 +61,7 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
 
 #[cfg(feature = "atomic-scanout-smoke-live")]
 fn run_atomic_scanout_smoke_parent(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let child_timeout = atomic_scanout_smoke_child_timeout(args)?;
     let mut command = std::process::Command::new(std::env::current_exe()?);
     command
         .arg("atomic-scanout-smoke-child")
@@ -66,7 +70,7 @@ fn run_atomic_scanout_smoke_parent(args: &[String]) -> Result<(), Box<dyn std::e
         command.arg(arg);
     }
     let mut child = command.spawn()?;
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + child_timeout;
 
     loop {
         if let Some(status) = child.try_wait()? {
@@ -106,6 +110,21 @@ fn atomic_scanout_smoke_child_args(args: &[String]) -> Vec<String> {
     .into_iter()
     .filter_map(|key| arg_value(args, key).map(|value| format!("{key}={value}")))
     .collect()
+}
+
+#[cfg(feature = "atomic-scanout-smoke-live")]
+fn atomic_scanout_smoke_child_timeout(
+    args: &[String],
+) -> Result<Duration, Box<dyn std::error::Error>> {
+    let timeout_ms = arg_value(args, "--child-timeout-ms")
+        .as_deref()
+        .map(parse_u64)
+        .transpose()?
+        .unwrap_or(ATOMIC_SCANOUT_SMOKE_CHILD_TIMEOUT_MS);
+    if timeout_ms == 0 {
+        return Err("atomic scanout smoke child timeout must be nonzero".into());
+    }
+    Ok(Duration::from_millis(timeout_ms))
 }
 
 #[cfg(feature = "atomic-scanout-smoke-live")]
@@ -151,4 +170,68 @@ fn atomic_scanout_smoke_cli_config(
         )
         .into()
     })
+}
+
+#[cfg(all(test, feature = "atomic-scanout-smoke-live"))]
+mod tests {
+    use super::*;
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_owned()).collect()
+    }
+
+    #[test]
+    fn atomic_scanout_smoke_child_timeout_defaults_to_bounded_watchdog() {
+        let timeout = atomic_scanout_smoke_child_timeout(&args(&["atomic-scanout-smoke"]))
+            .expect("default timeout should parse");
+
+        assert_eq!(
+            timeout,
+            Duration::from_millis(ATOMIC_SCANOUT_SMOKE_CHILD_TIMEOUT_MS)
+        );
+    }
+
+    #[test]
+    fn atomic_scanout_smoke_child_timeout_accepts_operator_override() {
+        let timeout = atomic_scanout_smoke_child_timeout(&args(&[
+            "atomic-scanout-smoke",
+            "--child-timeout-ms=25000",
+        ]))
+        .expect("override timeout should parse");
+
+        assert_eq!(timeout, Duration::from_millis(25_000));
+    }
+
+    #[test]
+    fn atomic_scanout_smoke_child_timeout_rejects_zero() {
+        let error = atomic_scanout_smoke_child_timeout(&args(&[
+            "atomic-scanout-smoke",
+            "--child-timeout-ms=0",
+        ]))
+        .expect_err("zero timeout should be rejected");
+
+        assert!(error.to_string().contains("must be nonzero"));
+    }
+
+    #[test]
+    fn atomic_scanout_smoke_child_args_do_not_forward_parent_watchdog() {
+        let child_args = atomic_scanout_smoke_child_args(&args(&[
+            "atomic-scanout-smoke",
+            "--slot=2",
+            "--output=3",
+            "--authority=4",
+            "--page-flip-timeout-ms=500",
+            "--child-timeout-ms=25000",
+        ]));
+
+        assert_eq!(
+            child_args,
+            vec![
+                "--slot=2",
+                "--output=3",
+                "--authority=4",
+                "--page-flip-timeout-ms=500"
+            ]
+        );
+    }
 }
