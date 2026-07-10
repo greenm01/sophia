@@ -879,13 +879,14 @@ page-flip sequence observed before submission. A replayed accepted callback at
 that baseline is treated as waiting, while a newer callback can retire the
 owner. This closes the lower-level replay seam without exposing native sequence
 identity outside backend-live.
-Resource cleanup after accepted page flip is now retryable. Submit-time cleanup
-after request-build or atomic-submit failure is retryable as well. If
-framebuffer or mode-blob destruction fails, backend-live clears the in-flight
-scanout owner when one exists, but keeps an opaque cleanup owner with the
-rendered buffer owner. A later retry can finish cleanup without leaking native
-IDs into runtime state. Runtime ticks and atomic smoke evidence now expose only
-a reduced cleanup-pending bit for this case.
+Resource cleanup after accepted page flip is now retryable. Resource-creation
+cleanup after framebuffer registration failure and submit-time cleanup after
+request-build or atomic-submit failure are retryable as well. If framebuffer or
+mode-blob destruction fails, backend-live clears the in-flight scanout owner
+when one exists, but keeps an opaque cleanup owner with the rendered buffer
+owner. A later retry can finish cleanup without leaking native IDs into runtime
+state. Runtime ticks and atomic smoke evidence now expose only a reduced
+cleanup-pending bit for this case.
 The device-backed rendered scanout tick now retries one pending cleanup before
 new scanout submission and records the reduced retry result. This gives the live
 backend a forward-progress path for cleanup debt without adding native identity

@@ -78,6 +78,8 @@ Support now exists for that hardware proof:
 
 ## Done Recently
 
+- [x] Made modeset resource-creation cleanup retryable when framebuffer
+  registration fails after mode-blob creation.
 - [x] Made submit-time framebuffer/blob cleanup failures retryable instead of
   dropping cleanup debt after atomic request-build or submit failure.
 - [x] Made steady-state primary-plane page flips create framebuffer-only

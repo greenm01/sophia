@@ -174,7 +174,10 @@ renderer-owned DRM buffer, validates buffer size against the selected target,
 and destroys framebuffer/blob resources on retirement. The steady page-flip
 path uses `create_native_primary_plane_page_flip_resources`, which registers
 only the framebuffer and deliberately does not require or retire a mode blob.
-Both paths report only reduced create/destroy status.
+Both paths report only reduced create/destroy status. If modeset framebuffer
+registration fails after mode-blob creation and immediate blob cleanup also
+fails, backend-live must return an opaque retryable cleanup owner instead of
+dropping that native debt.
 Renderer-live may pass buffers to that seam through
 `LiveRendererScanoutBufferDescriptor`. The descriptor carries only reduced
 scanout facts: size, pitch, XRGB8888 format, and GEM handle. Backend-live

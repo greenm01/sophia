@@ -1287,6 +1287,48 @@ fn native_libdrm_primary_plane_scanout_submit_retains_cleanup_after_submit_failu
 }
 
 #[test]
+fn native_libdrm_primary_plane_scanout_submit_retains_resource_creation_cleanup() {
+    let device = FakeNativePrimaryPlaneScanoutDevice {
+        resources: FakeNativePrimaryPlaneResourceDevice {
+            framebuffer: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+            destroy_mode_blob: Err(io::Error::other("test mode blob destroy failed")),
+            ..full_primary_plane_resource_device()
+        },
+        ..full_primary_plane_scanout_device()
+    };
+    let selection = select_native_primary_plane_target(&device);
+    let result =
+        submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_policy(
+            &device,
+            selection,
+            scanout_descriptor(Size {
+                width: 1280,
+                height: 720,
+            }),
+            LibdrmNativePrimaryPlaneScanoutSubmitPolicy::modeset(),
+        );
+
+    assert_eq!(
+        result.status,
+        LibdrmNativePrimaryPlaneScanoutSubmitStatus::ResourceCreationUnavailable
+    );
+    assert_eq!(
+        result.resources,
+        Some(LibdrmNativePrimaryPlaneResourceCreateStatus::FramebufferCreateFailed)
+    );
+    assert!(result.request.is_none());
+    assert!(result.submit.is_none());
+    assert!(result.submission.is_none());
+    let cleanup = result
+        .cleanup
+        .expect("resource creation failure must retain failed mode blob cleanup");
+    assert_eq!(
+        cleanup.retry(&full_primary_plane_scanout_device()).status,
+        LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed
+    );
+}
+
+#[test]
 fn native_libdrm_primary_plane_scanout_submit_uses_supplied_selection_snapshot() {
     let device = full_primary_plane_scanout_device();
     let result = submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor(
@@ -3920,6 +3962,30 @@ fn native_libdrm_primary_plane_resource_creation_fails_closed() {
         LibdrmNativePrimaryPlaneResourceCreateStatus::FramebufferCreateFailed
     );
     assert!(created.resources.is_none());
+    assert!(created.cleanup.is_none());
+
+    let framebuffer_failed_and_cleanup_failed = FakeNativePrimaryPlaneResourceDevice {
+        framebuffer: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+        destroy_mode_blob: Err(io::Error::other("test mode blob destroy failed")),
+        ..full_primary_plane_resource_device()
+    };
+    let created = create_native_primary_plane_resources(
+        &framebuffer_failed_and_cleanup_failed,
+        selected,
+        &scanout_buffer(selected.size()),
+    );
+    assert_eq!(
+        created.status,
+        LibdrmNativePrimaryPlaneResourceCreateStatus::FramebufferCreateFailed
+    );
+    assert!(created.resources.is_none());
+    let cleanup = created
+        .cleanup
+        .expect("failed framebuffer registration must retain failed mode blob cleanup");
+    assert_eq!(
+        cleanup.retry(&full_primary_plane_resource_device()).status,
+        LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed
+    );
 }
 
 #[test]

@@ -192,7 +192,7 @@ where
             commit_flags: None,
             submit: None,
             submission: None,
-            cleanup: None,
+            cleanup: resources.cleanup,
         };
     };
 

@@ -95,6 +95,7 @@ impl LibdrmNativePrimaryPlaneResourceBundle {
 pub struct LibdrmNativePrimaryPlaneResourceCreateResult {
     pub status: LibdrmNativePrimaryPlaneResourceCreateStatus,
     pub resources: Option<LibdrmNativePrimaryPlaneResourceBundle>,
+    pub cleanup: Option<LibdrmNativePrimaryPlaneResourceCleanup>,
 }
 
 #[cfg(feature = "libdrm-events")]
@@ -122,6 +123,7 @@ where
         return LibdrmNativePrimaryPlaneResourceCreateResult {
             status: LibdrmNativePrimaryPlaneResourceCreateStatus::InvalidSelectionSize,
             resources: None,
+            cleanup: None,
         };
     }
 
@@ -131,6 +133,7 @@ where
         return LibdrmNativePrimaryPlaneResourceCreateResult {
             status: LibdrmNativePrimaryPlaneResourceCreateStatus::BufferSizeMismatch,
             resources: None,
+            cleanup: None,
         };
     }
 
@@ -140,20 +143,25 @@ where
             return LibdrmNativePrimaryPlaneResourceCreateResult {
                 status: LibdrmNativePrimaryPlaneResourceCreateStatus::MissingMode,
                 resources: None,
+                cleanup: None,
             };
         }
         Err(_) => {
             return LibdrmNativePrimaryPlaneResourceCreateResult {
                 status: LibdrmNativePrimaryPlaneResourceCreateStatus::ModeBlobCreateFailed,
                 resources: None,
+                cleanup: None,
             };
         }
     };
     let Ok(framebuffer) = device.add_scanout_framebuffer(buffer, 24, 32) else {
-        let _ = device.destroy_mode_blob(mode_blob);
+        let cleanup = device.destroy_mode_blob(mode_blob).is_err().then(|| {
+            LibdrmNativePrimaryPlaneResourceCleanup::from_mode_blob(mode_blob, selection.size)
+        });
         return LibdrmNativePrimaryPlaneResourceCreateResult {
             status: LibdrmNativePrimaryPlaneResourceCreateStatus::FramebufferCreateFailed,
             resources: None,
+            cleanup,
         };
     };
 
@@ -164,6 +172,7 @@ where
             mode_blob: Some(mode_blob),
             size: selection.size,
         }),
+        cleanup: None,
     }
 }
 
@@ -181,6 +190,7 @@ where
         return LibdrmNativePrimaryPlaneResourceCreateResult {
             status: LibdrmNativePrimaryPlaneResourceCreateStatus::InvalidSelectionSize,
             resources: None,
+            cleanup: None,
         };
     }
 
@@ -190,6 +200,7 @@ where
         return LibdrmNativePrimaryPlaneResourceCreateResult {
             status: LibdrmNativePrimaryPlaneResourceCreateStatus::BufferSizeMismatch,
             resources: None,
+            cleanup: None,
         };
     }
 
@@ -197,6 +208,7 @@ where
         return LibdrmNativePrimaryPlaneResourceCreateResult {
             status: LibdrmNativePrimaryPlaneResourceCreateStatus::FramebufferCreateFailed,
             resources: None,
+            cleanup: None,
         };
     };
 
@@ -207,6 +219,7 @@ where
             mode_blob: None,
             size: selection.size,
         }),
+        cleanup: None,
     }
 }
 
@@ -240,6 +253,14 @@ impl LibdrmNativePrimaryPlaneResourceCleanup {
             framebuffer: Some(resources.framebuffer),
             mode_blob: resources.mode_blob,
             size: resources.size,
+        }
+    }
+
+    pub const fn from_mode_blob(mode_blob: u64, size: Size) -> Self {
+        Self {
+            framebuffer: None,
+            mode_blob: Some(mode_blob),
+            size,
         }
     }
 
