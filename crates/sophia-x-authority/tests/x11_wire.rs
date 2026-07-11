@@ -4397,7 +4397,7 @@ fn present_dispatch_result(transaction: TransactionId) -> XDispatchResult {
                     width: 64,
                     height: 48,
                 }),
-                previous_committed_generation: 3,
+                previous_committed_generation: 1,
                 timeout_msec: 250,
             },
         }),

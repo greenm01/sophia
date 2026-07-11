@@ -1,6 +1,8 @@
 #[cfg(feature = "atomic-scanout-live")]
 mod backend;
 mod help;
+#[cfg(feature = "atomic-scanout-live")]
+mod live_session;
 mod portal;
 mod routed_input;
 mod runtime;

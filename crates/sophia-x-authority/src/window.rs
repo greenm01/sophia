@@ -165,6 +165,25 @@ impl XWindowTable {
         self.windows.get(&id)
     }
 
+    pub fn advance_generation(
+        &mut self,
+        id: XResourceId,
+        expected: u64,
+    ) -> Result<u64, XAuthorityAccessError> {
+        let record = self
+            .windows
+            .get_mut(&id)
+            .ok_or(XAuthorityAccessError::UnknownResource)?;
+        if record.generation != expected {
+            return Err(XAuthorityAccessError::StaleGeneration);
+        }
+        let next = expected
+            .checked_add(1)
+            .ok_or(XAuthorityAccessError::InvalidResource)?;
+        record.generation = next;
+        Ok(next)
+    }
+
     pub fn ids_for_namespace(&self, namespace: NamespaceId) -> Vec<XResourceId> {
         self.windows
             .values()

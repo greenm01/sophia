@@ -214,6 +214,50 @@ fn shm_and_core_draw_updates_become_ready_cpu_buffer_transactions() {
 }
 
 #[test]
+fn repeated_runtime_draws_advance_surface_generations() {
+    let namespace = NamespaceId::from_raw(8);
+    let window = XResourceId::new(0x61, 1);
+    let mut runtime = XAuthorityRuntime::new();
+    let created = runtime.apply(XAuthorityRequestPacket {
+        transaction: TransactionId::from_raw(12),
+        namespace,
+        kind: XAuthorityRequestKind::CreateWindow {
+            window,
+            surface: SurfaceId::new(12, 1),
+            geometry: Rect {
+                x: 0,
+                y: 0,
+                width: 80,
+                height: 40,
+            },
+            constraints: SurfaceConstraints {
+                min_size: None,
+                max_size: None,
+            },
+            generation: 5,
+        },
+    });
+    assert_eq!(created.outcome, XAuthorityResponseOutcome::Accepted);
+
+    let damage = Region::single(Rect {
+        x: 1,
+        y: 2,
+        width: 8,
+        height: 12,
+    });
+    let first = runtime.apply_core_draw(
+        TransactionId::from_raw(13),
+        namespace,
+        window,
+        damage.clone(),
+    );
+    let second = runtime.apply_core_draw(TransactionId::from_raw(14), namespace, window, damage);
+
+    assert_eq!(first.transactions[0].previous_committed_generation, 5);
+    assert_eq!(second.transactions[0].previous_committed_generation, 6);
+}
+
+#[test]
 fn drawing_updates_fail_closed_for_cross_namespace_or_unknown_windows() {
     let owner = NamespaceId::from_raw(1);
     let other = NamespaceId::from_raw(2);

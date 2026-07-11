@@ -31,7 +31,7 @@ impl<P> LiveBackendRuntimeAssembly<P>
 where
     P: NonBlockingInputPoller,
 {
-    pub(crate) fn from_ready_headless_scanout(
+    pub fn from_ready_headless_scanout(
         assembly: HeadlessCompositorBackendAssembly<P>,
         output: HeadlessOutput,
         renderer_observation: LiveRendererRuntimeObservation,

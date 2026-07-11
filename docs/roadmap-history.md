@@ -93,6 +93,13 @@ validation evidence in `docs/research-log.md`.
 
 ## Completed X Authority Milestones
 
+- [x] Advanced X window generations after every emitted drawing transaction so
+  persistent clients commit contiguous visual updates instead of replaying one
+  stale `previous_committed_generation`.
+- [x] Added persistent `sophia-live-session` display/xterm ownership with one
+  live backend runtime, repeated CPU composition, bounded shutdown, and a real
+  injected-input pixel-change regression.
+
 - [x] Expand X11 atom/property tables for ICCCM names and metadata-broker
   candidates.
 - [x] Add minimal bounded `GetProperty` replies and socket smoke coverage.

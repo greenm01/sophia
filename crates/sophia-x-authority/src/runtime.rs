@@ -123,6 +123,8 @@ impl XAuthorityRuntime {
                         *timeout_msec,
                     ),
                 )?;
+                self.windows
+                    .advance_generation(*window, *previous_committed_generation)?;
                 response.transactions.push(transaction);
             }
             XAuthorityRequestKind::SetSelectionOwner {
@@ -428,23 +430,15 @@ impl XAuthorityRuntime {
         };
         let handle = buffer.handle;
         self.last_cpu_buffer_update = Some(buffer);
-        let mut response = XAuthorityResponsePacket::accepted(transaction);
-        match surface_transaction_from_drawing_update(
-            &self.windows,
-            XDrawingUpdate::core_draw(
-                transaction,
-                namespace,
-                window,
-                handle,
-                damage,
-                record.generation,
-                250,
-            ),
-        ) {
-            Ok(transaction) => response.transactions.push(transaction),
-            Err(error) => return XAuthorityResponsePacket::rejected(transaction, error.into()),
-        }
-        response
+        self.finish_drawing_update(XDrawingUpdate::core_draw(
+            transaction,
+            namespace,
+            window,
+            handle,
+            damage,
+            record.generation,
+            250,
+        ))
     }
 
     pub fn apply_copy_area(
@@ -501,23 +495,15 @@ impl XAuthorityRuntime {
         };
         let handle = buffer.handle;
         self.last_cpu_buffer_update = Some(buffer);
-        let mut response = XAuthorityResponsePacket::accepted(transaction);
-        match surface_transaction_from_drawing_update(
-            &self.windows,
-            XDrawingUpdate::shm_put_image(
-                transaction,
-                namespace,
-                window,
-                handle,
-                damage,
-                record.generation,
-                250,
-            ),
-        ) {
-            Ok(transaction) => response.transactions.push(transaction),
-            Err(error) => return XAuthorityResponsePacket::rejected(transaction, error.into()),
-        }
-        response
+        self.finish_drawing_update(XDrawingUpdate::shm_put_image(
+            transaction,
+            namespace,
+            window,
+            handle,
+            damage,
+            record.generation,
+            250,
+        ))
     }
 
     pub fn apply_text_draw(
@@ -562,23 +548,15 @@ impl XAuthorityRuntime {
         };
         let handle = buffer.handle;
         self.last_cpu_buffer_update = Some(buffer);
-        let mut response = XAuthorityResponsePacket::accepted(transaction);
-        match surface_transaction_from_drawing_update(
-            &self.windows,
-            XDrawingUpdate::core_draw(
-                transaction,
-                namespace,
-                window,
-                handle,
-                damage,
-                record.generation,
-                250,
-            ),
-        ) {
-            Ok(transaction) => response.transactions.push(transaction),
-            Err(error) => return XAuthorityResponsePacket::rejected(transaction, error.into()),
-        }
-        response
+        self.finish_drawing_update(XDrawingUpdate::core_draw(
+            transaction,
+            namespace,
+            window,
+            handle,
+            damage,
+            record.generation,
+            250,
+        ))
     }
 
     pub fn apply_clear(
@@ -612,22 +590,32 @@ impl XAuthorityRuntime {
         };
         let handle = buffer.handle;
         self.last_cpu_buffer_update = Some(buffer);
-        let mut response = XAuthorityResponsePacket::accepted(transaction);
-        match surface_transaction_from_drawing_update(
-            &self.windows,
-            XDrawingUpdate::core_draw(
-                transaction,
-                namespace,
-                window,
-                handle,
-                damage,
-                record.generation,
-                250,
-            ),
-        ) {
-            Ok(transaction) => response.transactions.push(transaction),
-            Err(error) => return XAuthorityResponsePacket::rejected(transaction, error.into()),
+        self.finish_drawing_update(XDrawingUpdate::core_draw(
+            transaction,
+            namespace,
+            window,
+            handle,
+            damage,
+            record.generation,
+            250,
+        ))
+    }
+
+    fn finish_drawing_update(&mut self, update: XDrawingUpdate) -> XAuthorityResponsePacket {
+        let transaction_id = update.transaction;
+        let window = update.target_window;
+        let previous_generation = update.previous_committed_generation;
+        let transaction = match surface_transaction_from_drawing_update(&self.windows, update) {
+            Ok(transaction) => transaction,
+            Err(error) => {
+                return XAuthorityResponsePacket::rejected(transaction_id, error.into());
+            }
+        };
+        if let Err(error) = self.windows.advance_generation(window, previous_generation) {
+            return XAuthorityResponsePacket::rejected(transaction_id, error.into());
         }
+        let mut response = XAuthorityResponsePacket::accepted(transaction_id);
+        response.transactions.push(transaction);
         response
     }
 }

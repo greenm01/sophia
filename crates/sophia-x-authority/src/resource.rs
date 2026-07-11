@@ -56,6 +56,7 @@ pub enum XAuthorityAccessError {
     UnknownResource,
     WrongResourceKind,
     CrossNamespaceDenied,
+    StaleGeneration,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

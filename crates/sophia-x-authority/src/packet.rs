@@ -104,6 +104,7 @@ pub enum XAuthorityRuntimeError {
     UnknownResource,
     WrongResourceKind,
     CrossNamespaceDenied,
+    StaleGeneration,
     UnknownRequestorNamespace,
     UnknownSourceOwner,
     MissingSourceNamespace,
@@ -120,6 +121,7 @@ impl From<XAuthorityAccessError> for XAuthorityRuntimeError {
             XAuthorityAccessError::UnknownResource => Self::UnknownResource,
             XAuthorityAccessError::WrongResourceKind => Self::WrongResourceKind,
             XAuthorityAccessError::CrossNamespaceDenied => Self::CrossNamespaceDenied,
+            XAuthorityAccessError::StaleGeneration => Self::StaleGeneration,
         }
     }
 }

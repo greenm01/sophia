@@ -66,6 +66,7 @@ backend-live rendered scanout reporting, run:
 cargo test --offline -q -p sophia-backend-live --features libdrm-events live_session_composition
 cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- live-session-composition-smoke
 cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- sophia-live-session --proof --terminal=xterm
+cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- sophia-live-session --display=:177 --max-runtime-ms=2500 --inject-text=sophia
 ```
 
 `live-session-composition-smoke` is non-destructive. Its reduced output must

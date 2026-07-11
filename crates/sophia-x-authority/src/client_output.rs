@@ -918,6 +918,7 @@ pub fn x_error_from_runtime(
         | XAuthorityRuntimeError::InvalidSurface => XErrorCode::BadWindow,
         XAuthorityRuntimeError::InvalidNamespace
         | XAuthorityRuntimeError::CrossNamespaceDenied
+        | XAuthorityRuntimeError::StaleGeneration
         | XAuthorityRuntimeError::UnknownRequestorNamespace
         | XAuthorityRuntimeError::MissingSourceNamespace
         | XAuthorityRuntimeError::SameNamespace

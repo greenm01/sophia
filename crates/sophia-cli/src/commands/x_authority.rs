@@ -866,7 +866,7 @@ pub(crate) fn collect_x_authority_xterm_render_authority_batches(
     })
 }
 
-fn resolve_external_probe_binary(
+pub(crate) fn resolve_external_probe_binary(
     label: &str,
     binary: &str,
 ) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
@@ -1056,7 +1056,7 @@ fn wait_for_xterm_cpu_state(
     Err("timed out waiting for xterm input to change CPU pixels".into())
 }
 
-fn x11_keycode_for_ascii(byte: u8) -> Option<u8> {
+pub(crate) fn x11_keycode_for_ascii(byte: u8) -> Option<u8> {
     b"qwertyuiop"
         .iter()
         .position(|candidate| *candidate == byte)
@@ -1536,19 +1536,22 @@ fn runtime_state_from_observed_transactions(
 fn seed_committed_states_for_transactions(
     transactions: &[SurfaceTransaction],
 ) -> Vec<CommittedSurfaceState> {
-    transactions
-        .iter()
-        .map(|transaction| CommittedSurfaceState {
-            surface: transaction.surface,
-            committed_generation: transaction.previous_committed_generation,
-            geometry: transaction.target_geometry,
-            buffer: transaction.target_buffer,
-            damage: Region::empty(),
-        })
-        .collect()
+    let mut surfaces = std::collections::BTreeMap::new();
+    for transaction in transactions {
+        surfaces
+            .entry(transaction.surface)
+            .or_insert(CommittedSurfaceState {
+                surface: transaction.surface,
+                committed_generation: transaction.previous_committed_generation,
+                geometry: transaction.target_geometry,
+                buffer: transaction.target_buffer,
+                damage: Region::empty(),
+            });
+    }
+    surfaces.into_values().collect()
 }
 
-fn layer_templates_from_surface_transactions(
+pub(crate) fn layer_templates_from_surface_transactions(
     transactions: &[SurfaceTransaction],
 ) -> Vec<LayerSnapshot> {
     transactions
@@ -1981,7 +1984,9 @@ fn xlib_smoke_field(stdout: &str, name: &str) -> Option<usize> {
         .and_then(|value| value.parse().ok())
 }
 
-fn wait_for_socket_path(path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn wait_for_socket_path(
+    path: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     while std::time::Instant::now() < deadline {
         if path.exists() {

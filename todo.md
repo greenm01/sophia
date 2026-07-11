@@ -27,6 +27,9 @@ Current truth:
 - The native renderer can upload a composed XRGB8888 frame into its GL/GBM
   front buffer, but terminal-content scanout has not yet been hardware-proven.
 - `sophia-live-session --proof` remains a one-shot composition/input proof.
+- Default `sophia-live-session` now binds an explicit display, owns one xterm
+  and X Authority server, and drains repeated authority batches through one
+  live backend runtime and CPU scene until bounded or externally stopped.
 
 Exit criteria:
 
@@ -36,6 +39,8 @@ Exit criteria:
   frame contains terminal content rather than an allocated blank buffer.
 - [ ] Keep X Authority, live backend ticks, scanout ownership, and xterm alive
   under one persistent session owner until the outside control plane stops it.
+  Authority, backend ticks, and xterm are persistent; native scanout ownership
+  is the remaining part of this item.
 - [ ] Route focused keyboard press/release events from physical libinput into
   xterm and prove typed text changes composed terminal pixels. The injected
   X11-event proof already passes.

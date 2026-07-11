@@ -17,6 +17,14 @@ terminal-content presentation, and physical keyboard delivery. Injected core
 key events already produce changed pixels in a real xterm. Pixel bytes remain
 outside Sophia Engine and the blind WM protocol.
 
+The persistent launcher now owns an explicit local display, one xterm, the X
+Authority server, one live backend runtime, and the latest composed CPU scene.
+A bounded real-xterm run passes repeated authority/runtime ticks and injected
+pixel change. Building it exposed and fixed static drawing generations: X
+Authority now advances a window generation after each emitted visual
+transaction, so long-running Engine commits remain contiguous. Native scanout
+and physical libinput are still outside this owner.
+
 Wayland is gated behind the operator-grade X session. Before Wayland, Sophia
 will run xmonad through the documented X11 WM bridge. The first bridge is an
 embedded minimal X server with synthetic windows; xmonad is layout policy only

@@ -26,8 +26,25 @@ The first bootstrap live session launcher is now a single command:
 cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- sophia-live-session --terminal=xterm
 ```
 
-The current `--proof` implementation assembles a one-shot proof from boundaries Sophia
-already owns:
+This default mode binds `:77` unless `--display=:NUMBER` is supplied, launches
+one xterm, and keeps the X Authority server, live backend runtime, and composed
+CPU scene alive until xterm exits or the outside control plane stops Sophia.
+It refuses an active display socket rather than replacing it. Native scanout
+and physical input remain pending, so keep the outside TTY control plane.
+
+A bounded persistence/input regression is:
+
+```sh
+cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- \
+  sophia-live-session --display=:177 --max-runtime-ms=2500 --inject-text=sophia
+```
+
+Passing evidence reports `status=bounded_complete`, matching authority batch,
+backend tick, and runtime commit counts, nonzero composed pixels, and
+`input_pixel_change=true`.
+
+The separate `--proof` implementation assembles a one-shot proof from
+boundaries Sophia already owns:
 
 - bind a generated Sophia X Authority display for one terminal proof;
 - launch one terminal client against that display;
@@ -38,16 +55,13 @@ already owns:
 - emit reduced status for authority, runtime, composition, keyboard, and known
   native-presentation/physical-input/persistence work.
 
-It is not a persistent interactive session or hardware-visible proof yet. It
-reports
+It is not a hardware-visible proof. It reports
 `status=bootstrap_cpu_pixels_x11_keyboard_ready_native_presentation_pending`
 when the terminal authority/runtime/composition and injected-keyboard pixel
 proofs pass.
 
-Explicit display binding, such as `--display=:77`, is still a target for the
-persistent live session. The current proof-mode launcher intentionally uses the
-same generated display path as the X Authority real-client smokes because low
-display numbers can still stall in xterm palette/setup before text damage.
+Proof mode intentionally uses a generated display and rejects `--display`.
+Explicit display ownership belongs to persistent mode.
 
 ## First Terminal Milestone
 
@@ -83,8 +97,7 @@ resource behavior the real xterm stream demands.
 Next live-session blockers:
 
 - hardware-prove the composed terminal frame through native GL/GBM scanout;
-- extend `sophia-live-session` from one-shot proof mode to a persistent X
-  Authority and live backend loop;
+- join the persistent CPU/backend loop to native GBM/KMS presentation;
 - route physical keyboard input into the focused X terminal surface;
 - prove typed text reaches the terminal before running Codex inside Sophia.
 

@@ -52,7 +52,11 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
 
     #[cfg(feature = "atomic-scanout-live")]
     if args.iter().any(|arg| arg == "sophia-live-session") {
-        run_sophia_live_session_bootstrap(args)?;
+        if args.iter().any(|arg| arg == "--proof") {
+            run_sophia_live_session_bootstrap(args)?;
+        } else {
+            super::live_session::run_persistent_xterm_session(args)?;
+        }
         return Ok(true);
     }
 

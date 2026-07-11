@@ -43,10 +43,13 @@ pub(crate) fn print(verbose: bool) {
     println!("commands: x-authority-xcalc-smoke");
     println!("commands: x-authority-xterm-smoke");
     println!("commands: x-authority-xterm-render-smoke");
+    println!("commands: x-authority-xterm-input-smoke");
     println!("commands: x-authority-zenity-smoke");
     println!("commands: x-authority-present-pixmap-smoke");
     #[cfg(feature = "atomic-scanout-live")]
-    println!("commands: sophia-live-session [--terminal=xterm]");
+    println!(
+        "commands: sophia-live-session [--display=:77] [--terminal=xterm] [--max-runtime-ms=N] [--inject-text=lowercase] [--proof]"
+    );
     #[cfg(feature = "atomic-scanout-live")]
     println!("commands: live-session-composition-smoke");
     #[cfg(feature = "atomic-scanout-live")]

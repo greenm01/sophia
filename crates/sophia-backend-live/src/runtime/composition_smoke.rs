@@ -214,16 +214,19 @@ pub fn run_live_session_composition_smoke(
 fn seed_committed_states_for_transactions(
     transactions: &[SurfaceTransaction],
 ) -> Vec<CommittedSurfaceState> {
-    transactions
-        .iter()
-        .map(|transaction| CommittedSurfaceState {
-            surface: transaction.surface,
-            committed_generation: transaction.previous_committed_generation,
-            geometry: transaction.target_geometry,
-            buffer: transaction.target_buffer,
-            damage: Region::empty(),
-        })
-        .collect()
+    let mut surfaces = std::collections::BTreeMap::new();
+    for transaction in transactions {
+        surfaces
+            .entry(transaction.surface)
+            .or_insert(CommittedSurfaceState {
+                surface: transaction.surface,
+                committed_generation: transaction.previous_committed_generation,
+                geometry: transaction.target_geometry,
+                buffer: transaction.target_buffer,
+                damage: Region::empty(),
+            });
+    }
+    surfaces.into_values().collect()
 }
 
 fn layer_templates_from_surface_transactions(
