@@ -231,7 +231,9 @@ TTY3 evidence now proves the exact composed xterm checksum is exported through
 native GL/GBM, submitted to KMS, and retired after page flip. The next operator
 milestone is closing the physical typed-text proof. An isolated headless QEMU
 virtio-gpu harness now passes 300 persistent native-session ticks without host
-DRM or VT ownership. The xmonad bridge translation core exists; its
+DRM or VT ownership, including two independently owned outputs, distinct
+extended-desktop content, page-flip-paced fixed refresh, and routed keyboard
+and mouse input. The xmonad bridge translation core exists; its
 embedded X server and real xmonad smoke remain ahead of Wayland.
 
 ## License

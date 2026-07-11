@@ -8,7 +8,8 @@ use crate::prelude::*;
 #[derive(Debug)]
 pub struct RealAtomicScanoutPageFlipSession {
     pub(super) card: RealAtomicScanoutCard,
-    selection: LibdrmNativePrimaryPlaneSelection,
+    selections: Vec<LibdrmNativePrimaryPlaneSelection>,
+    outputs: Vec<OutputId>,
     pub(super) reader: NativeLibdrmPageFlipEventReader<RealAtomicScanoutCard>,
     pub(super) poller: NativeLibdrmPageFlipEventPoller,
 }
@@ -18,8 +19,16 @@ impl RealAtomicScanoutPageFlipSession {
         &self.card
     }
 
-    pub const fn selection(&self) -> LibdrmNativePrimaryPlaneSelection {
-        self.selection
+    pub fn selection(&self) -> LibdrmNativePrimaryPlaneSelection {
+        self.selections[0]
+    }
+
+    pub fn selections(&self) -> &[LibdrmNativePrimaryPlaneSelection] {
+        &self.selections
+    }
+
+    pub fn outputs(&self) -> &[OutputId] {
+        &self.outputs
     }
 
     #[cfg(feature = "gbm-probe")]
@@ -31,9 +40,9 @@ impl RealAtomicScanoutPageFlipSession {
     pub fn preferred_xrgb8888_scanout_modifiers(&self) -> Vec<u64> {
         let discovery = discover_native_primary_plane_property_handles(
             &self.card,
-            self.selection.connector,
-            self.selection.crtc,
-            self.selection.plane,
+            self.selection().connector,
+            self.selection().crtc,
+            self.selection().plane,
         );
         let Some(properties) = discovery.properties else {
             return Vec::new();
@@ -43,7 +52,7 @@ impl RealAtomicScanoutPageFlipSession {
         };
 
         let Ok(plane_properties) =
-            drm::control::Device::get_properties(&self.card, self.selection.plane)
+            drm::control::Device::get_properties(&self.card, self.selection().plane)
         else {
             return Vec::new();
         };
@@ -215,10 +224,90 @@ impl RealAtomicScanoutCardSelection {
             card_selection_status: self.status,
             session: Some(RealAtomicScanoutPageFlipSession {
                 card,
-                selection,
+                selections: vec![selection],
+                outputs: vec![output],
                 reader,
                 poller,
             }),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct RealAtomicScanoutPageFlipSessionSetResult {
+    pub status: RealAtomicScanoutPageFlipSessionSetStatus,
+    pub sessions: Vec<RealAtomicScanoutPageFlipSession>,
+    pub output_count: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RealAtomicScanoutPageFlipSessionSetStatus {
+    Ready,
+    SelectionFailed,
+    CardCloneFailed,
+    CapacityExceeded,
+}
+
+impl RealAtomicScanoutSelectionSet {
+    pub fn into_page_flip_sessions(
+        self,
+        authority: LibdrmBackendFdAuthority,
+    ) -> RealAtomicScanoutPageFlipSessionSetResult {
+        if self.status != RealAtomicScanoutSelectionSetStatus::SelectedAll {
+            return RealAtomicScanoutPageFlipSessionSetResult {
+                status: RealAtomicScanoutPageFlipSessionSetStatus::SelectionFailed,
+                sessions: Vec::new(),
+                output_count: 0,
+            };
+        }
+        let mut sessions = Vec::new();
+        let mut next_output = 1u64;
+        let mut next_slot = 1u16;
+        for target_set in self.cards {
+            let Ok(reader_card) = target_set.card.try_clone() else {
+                return RealAtomicScanoutPageFlipSessionSetResult {
+                    status: RealAtomicScanoutPageFlipSessionSetStatus::CardCloneFailed,
+                    sessions: Vec::new(),
+                    output_count: 0,
+                };
+            };
+            let mut crtc_routes = Vec::new();
+            let mut output_routes = Vec::new();
+            let mut outputs = Vec::new();
+            for selection in target_set.selections.iter().copied() {
+                let Some(slot) = LibdrmNativeOutputSlot::new(next_slot) else {
+                    return RealAtomicScanoutPageFlipSessionSetResult {
+                        status: RealAtomicScanoutPageFlipSessionSetStatus::CapacityExceeded,
+                        sessions: Vec::new(),
+                        output_count: 0,
+                    };
+                };
+                let output = OutputId::from_raw(next_output);
+                crtc_routes.push(selection.crtc_route(slot));
+                output_routes.push(LibdrmNativeOutputRoute { slot, output });
+                outputs.push(output);
+                next_output = next_output.saturating_add(1);
+                next_slot = next_slot.saturating_add(1);
+            }
+            let reader =
+                NativeLibdrmPageFlipEventReader::new(reader_card).with_crtc_routes(crtc_routes);
+            let poller = NativeLibdrmPageFlipEventPoller::new(
+                LibdrmNativePageFlipSource::from_authority(authority),
+            )
+            .with_routes(output_routes);
+            sessions.push(RealAtomicScanoutPageFlipSession {
+                card: target_set.card,
+                selections: target_set.selections,
+                outputs,
+                reader,
+                poller,
+            });
+        }
+        let output_count = usize::try_from(next_output.saturating_sub(1)).unwrap_or(usize::MAX);
+        RealAtomicScanoutPageFlipSessionSetResult {
+            status: RealAtomicScanoutPageFlipSessionSetStatus::Ready,
+            sessions,
+            output_count,
         }
     }
 }

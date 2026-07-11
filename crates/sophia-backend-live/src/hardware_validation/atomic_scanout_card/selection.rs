@@ -1,6 +1,9 @@
 use std::path::Path;
 
-use super::{RealAtomicScanoutCard, inspect_opened_real_atomic_scanout_card};
+use super::{
+    RealAtomicScanoutCard, admit_atomic_scanout_client_capabilities,
+    inspect_opened_real_atomic_scanout_card,
+};
 use crate::hardware_validation::preflight::nodes::is_primary_card_node_entry;
 use crate::prelude::*;
 
@@ -43,6 +46,29 @@ pub enum RealAtomicScanoutCardSelectionStatus {
     AtomicPropertyDiscoveryUnavailable,
 }
 
+#[derive(Debug)]
+pub struct RealAtomicScanoutCardTargetSet {
+    pub card: RealAtomicScanoutCard,
+    pub selections: Vec<LibdrmNativePrimaryPlaneSelection>,
+}
+
+#[derive(Debug)]
+pub struct RealAtomicScanoutSelectionSet {
+    pub status: RealAtomicScanoutSelectionSetStatus,
+    pub cards: Vec<RealAtomicScanoutCardTargetSet>,
+    pub connected_connectors: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RealAtomicScanoutSelectionSetStatus {
+    SelectedAll,
+    DeviceDirectoryUnavailable,
+    NoPrimaryCardNodes,
+    NoCompleteTargets,
+    Partial,
+    CapacityExceeded,
+}
+
 impl RealAtomicScanoutCardSelectionStatus {
     pub const fn failure_evidence(self) -> LibdrmNativeAtomicScanoutSmokeEvidence {
         match self {
@@ -71,6 +97,94 @@ impl RealAtomicScanoutCardSelectionStatus {
 
 pub fn select_real_atomic_scanout_card() -> RealAtomicScanoutCardSelection {
     select_real_atomic_scanout_card_from_dev_dri(Path::new("/dev/dri"))
+}
+
+pub fn select_real_atomic_scanout_cards() -> RealAtomicScanoutSelectionSet {
+    select_real_atomic_scanout_cards_from_dev_dri(Path::new("/dev/dri"))
+}
+
+pub fn select_real_atomic_scanout_cards_from_dev_dri(
+    dev_dri: &Path,
+) -> RealAtomicScanoutSelectionSet {
+    let Ok(entries) = std::fs::read_dir(dev_dri) else {
+        return RealAtomicScanoutSelectionSet {
+            status: RealAtomicScanoutSelectionSetStatus::DeviceDirectoryUnavailable,
+            cards: Vec::new(),
+            connected_connectors: 0,
+        };
+    };
+    let mut candidates = entries
+        .filter_map(Result::ok)
+        .filter(is_primary_card_node_entry)
+        .map(|entry| entry.path())
+        .collect::<Vec<_>>();
+    candidates.sort();
+    if candidates.is_empty() {
+        return RealAtomicScanoutSelectionSet {
+            status: RealAtomicScanoutSelectionSetStatus::NoPrimaryCardNodes,
+            cards: Vec::new(),
+            connected_connectors: 0,
+        };
+    }
+
+    let mut cards = Vec::new();
+    let mut connected_connectors = 0usize;
+    let mut incomplete = false;
+    for path in candidates {
+        let Ok(card) = RealAtomicScanoutCard::open_nonblocking(&path) else {
+            continue;
+        };
+        if !admit_atomic_scanout_client_capabilities(&card) {
+            incomplete = true;
+            continue;
+        }
+        let selected = select_native_primary_plane_targets(&card);
+        connected_connectors = connected_connectors.saturating_add(selected.connected_connectors);
+        if connected_connectors > LIVE_RENDERED_OUTPUT_CAPACITY {
+            return RealAtomicScanoutSelectionSet {
+                status: RealAtomicScanoutSelectionSetStatus::CapacityExceeded,
+                cards,
+                connected_connectors,
+            };
+        }
+        if selected.status != LibdrmNativePrimaryPlaneSelectionSetStatus::SelectedAll {
+            incomplete |= selected.connected_connectors > 0;
+        }
+        let selections = selected
+            .selections
+            .into_iter()
+            .filter(|selection| {
+                discover_native_primary_plane_property_handles(
+                    &card,
+                    selection.connector,
+                    selection.crtc,
+                    selection.plane,
+                )
+                .status
+                    == LibdrmNativePrimaryPlanePropertyDiscoveryStatus::Discovered
+            })
+            .collect::<Vec<_>>();
+        incomplete |= selections.len() < selected.connected_connectors;
+        if !selections.is_empty() {
+            cards.push(RealAtomicScanoutCardTargetSet { card, selections });
+        }
+    }
+    let selected_count = cards
+        .iter()
+        .map(|card| card.selections.len())
+        .sum::<usize>();
+    let status = if selected_count == 0 {
+        RealAtomicScanoutSelectionSetStatus::NoCompleteTargets
+    } else if incomplete || selected_count != connected_connectors {
+        RealAtomicScanoutSelectionSetStatus::Partial
+    } else {
+        RealAtomicScanoutSelectionSetStatus::SelectedAll
+    };
+    RealAtomicScanoutSelectionSet {
+        status,
+        cards,
+        connected_connectors,
+    }
 }
 
 pub fn select_real_atomic_scanout_card_from_dev_dri(

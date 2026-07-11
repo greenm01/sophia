@@ -822,6 +822,11 @@ both safely. The opt-in hardware smoke follows the same lifetime rule: its
 rendered front-buffer owner is wrapped with the primary-plane submission before
 waiting for page-flip evidence, so the proof does not validate a framebuffer
 whose renderer-owned backing storage has already been released.
+The persistent runtime stores this lifecycle in a bounded table keyed by
+`OutputId`. Frame targets, page-flip intake, submitted/displayed owners, cleanup
+debt, and retirement cannot cross output entries. Native discovery assigns
+disjoint connector/CRTC/primary-plane chains deterministically and page-flip
+routes carry only the reduced `OutputId` into Engine-facing state.
 Runtime rendered-primary-plane submit reports preserve the reduced native submit
 stages as well: property discovery, resource creation, atomic request build, and
 atomic commit submit. This lets the production loop explain why a scanout was

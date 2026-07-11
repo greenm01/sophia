@@ -1,5 +1,4 @@
 use super::*;
-use crate::prelude::*;
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -43,24 +42,20 @@ impl LivePageFlipCallbackQueue {
         }
     }
 
-    pub(crate) fn drain_ready(
+    pub(crate) fn drain_ready_with(
         &self,
-        intake: &mut LivePageFlipCallbackIntake,
-        page_flip_event: &mut LivePageFlipEvent,
+        mut observe: impl FnMut(LivePageFlipCallback) -> LivePageFlipCallbackReport,
     ) -> LivePageFlipCallbackQueueReport {
         let mut report = LivePageFlipCallbackQueueReport::default();
-        let mut last_rejected_event = None;
 
         for _ in 0..self.max_drain_per_tick {
             match self.receiver.try_recv() {
                 Ok(callback) => {
-                    let callback_report = intake.observe(callback);
+                    let callback_report = observe(callback);
                     report.drained = report.drained.saturating_add(1);
                     report.record_decision(callback_report.decision);
                     if callback_report.decision == LivePageFlipCallbackDecision::Accepted {
                         report.last_accepted = Some(callback_report);
-                    } else {
-                        last_rejected_event = Some(callback_report.event);
                     }
                 }
                 Err(TryRecvError::Empty) => break,
@@ -72,11 +67,6 @@ impl LivePageFlipCallbackQueue {
         }
 
         report.max_reached = report.drained == self.max_drain_per_tick;
-        if let Some(accepted) = report.last_accepted {
-            *page_flip_event = accepted.event;
-        } else if let Some(rejected) = last_rejected_event {
-            *page_flip_event = rejected;
-        }
         report
     }
 }

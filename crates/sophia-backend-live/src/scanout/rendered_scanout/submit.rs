@@ -4,15 +4,16 @@ use super::*;
 use crate::prelude::*;
 
 #[cfg(feature = "libdrm-events")]
-pub(crate) fn submit_rendered_primary_plane_scanout_from_scanout_target_with<D, E>(
+pub(crate) fn submit_rendered_primary_plane_scanout_from_scanout_target_and_selection_with<D, E>(
     scanout_target: LiveKmsScanoutTargetStatus,
     target: Option<LiveGbmEglFrameTargetRecord>,
+    selection: LibdrmNativePrimaryPlaneSelectionResult,
+    vrr_enabled: Option<bool>,
     device: &D,
     exporter: &mut E,
 ) -> LiveRenderedPrimaryPlaneScanoutSubmitResult<E::Owner>
 where
-    D: LibdrmNativeKmsSelectionDevice
-        + LibdrmNativePropertyLookupDevice
+    D: LibdrmNativePropertyLookupDevice
         + LibdrmNativePrimaryPlaneResourceDevice
         + LibdrmNativeAtomicCommitDevice,
     E: LiveRenderedScanoutBufferExporter,
@@ -36,7 +37,6 @@ where
         );
     };
 
-    let selection = select_native_primary_plane_target(device);
     let scanout_target =
         reduced_scanout_target_status_from_native_selection(scanout_target, target, &selection);
     if scanout_target != LiveKmsScanoutTargetStatus::Ready {
@@ -74,14 +74,14 @@ where
             selection,
             descriptor,
             prime_fds.into_plane_fds(),
-            LibdrmNativePrimaryPlaneScanoutSubmitPolicy::page_flip(),
+            rendered_page_flip_policy(vrr_enabled),
         )
     } else {
         submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_policy(
             device,
             selection,
             descriptor,
-            LibdrmNativePrimaryPlaneScanoutSubmitPolicy::page_flip(),
+            rendered_page_flip_policy(vrr_enabled),
         )
     };
     if submit.status != LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip {
@@ -162,4 +162,16 @@ where
         }),
         cleanup: None,
     }
+}
+
+#[cfg(feature = "libdrm-events")]
+fn rendered_page_flip_policy(
+    vrr_enabled: Option<bool>,
+) -> LibdrmNativePrimaryPlaneScanoutSubmitPolicy {
+    vrr_enabled.map_or_else(
+        LibdrmNativePrimaryPlaneScanoutSubmitPolicy::page_flip,
+        |enabled| {
+            LibdrmNativePrimaryPlaneScanoutSubmitPolicy::page_flip().with_vrr_enabled(enabled)
+        },
+    )
 }

@@ -22,8 +22,33 @@ if [[ "$(grep -c '^sophia_qemu_topology schema=1 status=observed requested_heads
     echo "QEMU evidence is missing two connected virtual outputs" >&2
     exit 1
 fi
-if [[ "$(grep -c '^sophia_live_outputs schema=1 status=ready discovered=2 presentation=2 native_owned=1 multi_output_scanout=pending$' "$EVIDENCE_FILE" || true)" -ne 1 ]]; then
-    echo "QEMU evidence is missing bounded two-output Engine presentation discovery" >&2
+if [[ "$(grep -c '^sophia_live_outputs schema=2 status=ready discovered=2 presentation=2 native_owned=2 multi_output_scanout=enabled layout=extended_horizontal$' "$EVIDENCE_FILE" || true)" -ne 1 ]]; then
+    echo "QEMU evidence is missing complete two-output native ownership" >&2
+    exit 1
+fi
+mapfile -t output_lines < <(grep '^sophia_live_output schema=1 status=complete ' "$EVIDENCE_FILE" || true)
+if [[ "${#output_lines[@]}" -ne 2 ]]; then
+    echo "QEMU evidence must contain exactly two per-output completion records" >&2
+    exit 1
+fi
+declare -A output_checksums=()
+for output_line in "${output_lines[@]}"; do
+    for field in submissions retirements callbacks nonzero_exports; do
+        value="$(sed -n "s/.* ${field}=\([0-9][0-9]*\).*/\1/p" <<< "$output_line")"
+        if [[ -z "$value" ]] || (( value == 0 )); then
+            echo "QEMU output evidence has no $field: $output_line" >&2
+            exit 1
+        fi
+    done
+    checksum="$(sed -n 's/.* checksum=\([0-9][0-9]*\) .*/\1/p' <<< "$output_line")"
+    if [[ -z "$checksum" ]] || [[ -n "${output_checksums[$checksum]:-}" ]]; then
+        echo "QEMU output evidence does not contain distinct checksums" >&2
+        exit 1
+    fi
+    output_checksums[$checksum]=1
+done
+if [[ "$(grep -c '^sophia_live_vsync schema=1 status=complete outputs=2 overlap_rejections=0 phase_rejections=0 policy=page_flip_paced$' "$EVIDENCE_FILE" || true)" -ne 1 ]]; then
+    echo "QEMU evidence is missing the per-output fixed-refresh vsync gate" >&2
     exit 1
 fi
 if grep -q '^sophia_qemu_.* status=failed' "$EVIDENCE_FILE"; then
@@ -75,4 +100,4 @@ if [[ -z "$physical_pointer" ]] || (( physical_pointer == 0 )); then
     exit 1
 fi
 
-echo "QEMU two-output topology/single-native-output/QMP-input 300-tick evidence passed: $EVIDENCE_FILE"
+echo "QEMU dual-output native presentation/QMP-input 300-tick evidence passed: $EVIDENCE_FILE"

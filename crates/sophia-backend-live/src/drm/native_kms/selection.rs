@@ -31,6 +31,18 @@ impl LibdrmNativePrimaryPlaneSelection {
         self.size
     }
 
+    pub fn connector_id(self) -> u32 {
+        self.connector.into()
+    }
+
+    pub fn crtc_id(self) -> u32 {
+        self.crtc.into()
+    }
+
+    pub fn plane_id(self) -> u32 {
+        self.plane.into()
+    }
+
     pub const fn crtc_route(self, slot: LibdrmNativeOutputSlot) -> LibdrmNativeCrtcRoute {
         LibdrmNativeCrtcRoute::new(self.crtc, slot)
     }
@@ -48,6 +60,153 @@ impl LibdrmNativePrimaryPlaneSelection {
             mode_blob,
             self.size,
         )
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LibdrmNativePrimaryPlaneSelectionSetResult {
+    pub status: LibdrmNativePrimaryPlaneSelectionSetStatus,
+    pub connected_connectors: usize,
+    pub selections: Vec<LibdrmNativePrimaryPlaneSelection>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibdrmNativePrimaryPlaneSelectionSetStatus {
+    SelectedAll,
+    Partial,
+    ReadFailed,
+    NoConnectedConnector,
+    CapacityExceeded,
+    NoDisjointAssignment,
+}
+
+pub fn select_native_primary_plane_targets<D>(
+    device: &D,
+) -> LibdrmNativePrimaryPlaneSelectionSetResult
+where
+    D: LibdrmNativeKmsSelectionDevice,
+{
+    let (Ok(mut connectors), Ok(mut crtcs), Ok(mut planes)) = (
+        device.connector_handles(),
+        device.crtc_handles(),
+        device.plane_handles(),
+    ) else {
+        return selection_set_failure(LibdrmNativePrimaryPlaneSelectionSetStatus::ReadFailed, 0);
+    };
+    connectors.sort_by_key(|handle| u32::from(*handle));
+    crtcs.sort_by_key(|handle| u32::from(*handle));
+    planes.sort_by_key(|handle| u32::from(*handle));
+
+    let mut connected_connectors = 0usize;
+    let mut selections = Vec::new();
+    let mut used_crtcs = Vec::new();
+    let mut used_planes = Vec::new();
+    for connector in connectors {
+        let Ok(snapshot) = device.connector_snapshot(connector) else {
+            return selection_set_failure(
+                LibdrmNativePrimaryPlaneSelectionSetStatus::ReadFailed,
+                connected_connectors,
+            );
+        };
+        if !snapshot.connected {
+            continue;
+        }
+        connected_connectors = connected_connectors.saturating_add(1);
+        if connected_connectors > crate::runtime::LIVE_RENDERED_OUTPUT_CAPACITY {
+            return LibdrmNativePrimaryPlaneSelectionSetResult {
+                status: LibdrmNativePrimaryPlaneSelectionSetStatus::CapacityExceeded,
+                connected_connectors,
+                selections,
+            };
+        }
+        let Some(size) = snapshot
+            .mode_size
+            .filter(|size| size.width > 0 && size.height > 0)
+        else {
+            continue;
+        };
+
+        let mut selected = None;
+        for encoder in snapshot.ordered_encoders() {
+            let Ok(encoder) = device.encoder_snapshot(encoder) else {
+                return selection_set_failure(
+                    LibdrmNativePrimaryPlaneSelectionSetStatus::ReadFailed,
+                    connected_connectors,
+                );
+            };
+            for crtc in encoder.ordered_crtcs() {
+                if !crtcs.contains(&crtc) || used_crtcs.contains(&crtc) {
+                    continue;
+                }
+                for plane in planes.iter().copied() {
+                    if used_planes.contains(&plane) {
+                        continue;
+                    }
+                    let Ok(plane_snapshot) = device.plane_snapshot(plane) else {
+                        return selection_set_failure(
+                            LibdrmNativePrimaryPlaneSelectionSetStatus::ReadFailed,
+                            connected_connectors,
+                        );
+                    };
+                    if !plane_snapshot.supports_crtc(crtc) {
+                        continue;
+                    }
+                    let Ok(plane_type) = device.plane_type(plane) else {
+                        return selection_set_failure(
+                            LibdrmNativePrimaryPlaneSelectionSetStatus::ReadFailed,
+                            connected_connectors,
+                        );
+                    };
+                    if plane_type == Some(drm::control::PlaneType::Primary) {
+                        selected = Some(LibdrmNativePrimaryPlaneSelection {
+                            connector,
+                            crtc,
+                            plane,
+                            size,
+                            mode: snapshot.native_mode,
+                        });
+                        break;
+                    }
+                }
+                if selected.is_some() {
+                    break;
+                }
+            }
+            if selected.is_some() {
+                break;
+            }
+        }
+        if let Some(selection) = selected {
+            used_crtcs.push(selection.crtc);
+            used_planes.push(selection.plane);
+            selections.push(selection);
+        }
+    }
+
+    let status = if connected_connectors == 0 {
+        LibdrmNativePrimaryPlaneSelectionSetStatus::NoConnectedConnector
+    } else if selections.len() == connected_connectors {
+        LibdrmNativePrimaryPlaneSelectionSetStatus::SelectedAll
+    } else if selections.is_empty() {
+        LibdrmNativePrimaryPlaneSelectionSetStatus::NoDisjointAssignment
+    } else {
+        LibdrmNativePrimaryPlaneSelectionSetStatus::Partial
+    };
+    LibdrmNativePrimaryPlaneSelectionSetResult {
+        status,
+        connected_connectors,
+        selections,
+    }
+}
+
+fn selection_set_failure(
+    status: LibdrmNativePrimaryPlaneSelectionSetStatus,
+    connected_connectors: usize,
+) -> LibdrmNativePrimaryPlaneSelectionSetResult {
+    LibdrmNativePrimaryPlaneSelectionSetResult {
+        status,
+        connected_connectors,
+        selections: Vec::new(),
     }
 }
 

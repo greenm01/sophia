@@ -15,13 +15,58 @@ use sophia_backend_live::{
     LiveLibdrmPollerDiagnosticsStatus, LivePageFlipCallback, LivePageFlipCallbackDecision,
     LivePageFlipCallbackIntake, LivePageFlipCallbackQueue, LivePageFlipCallbackQueueReport,
     LivePageFlipCallbackReport, LivePageFlipCallbackSourceReport, LivePageFlipEvent,
-    LivePageFlipEventStatus, LiveRendererImportBoundary, LiveRendererImportHealth,
+    LivePageFlipEventStatus, LiveRenderedOutputState, LiveRenderedOutputTable,
+    LiveRenderedOutputTableUpdate, LiveRendererImportBoundary, LiveRendererImportHealth,
     LiveRendererImportPathStatus, LiveRendererImportStartupStatus, LiveRendererPreference,
     LiveRendererPresentationReport, LiveRendererPresentationStatus, LiveRendererRuntimeObservation,
     LiveRendererSelectionObservation, LiveScanoutReadinessReport, LiveScanoutReadinessStatus,
     OutputId, PageFlipCommitOutcome, PhysicalInputRoutingStage, QueuedInputPoller,
     RendererSelection, SeatId, Size, discover_live_backend, live_backend_dependency_decision,
 };
+
+#[test]
+fn rendered_output_table_is_bounded_and_keeps_output_state_independent() {
+    let mut table = LiveRenderedOutputTable::new();
+    for raw in 1..=16 {
+        assert_eq!(
+            table.insert(LiveRenderedOutputState::ready(HeadlessOutput {
+                id: OutputId::from_raw(raw),
+                size: Size {
+                    width: 640 + i32::try_from(raw).unwrap(),
+                    height: 480,
+                },
+                scale: 1,
+            })),
+            LiveRenderedOutputTableUpdate::Inserted
+        );
+    }
+    assert_eq!(table.len(), 16);
+    assert_eq!(
+        table.insert(LiveRenderedOutputState::ready(HeadlessOutput {
+            id: OutputId::from_raw(17),
+            size: Size {
+                width: 800,
+                height: 600,
+            },
+            scale: 1,
+        })),
+        LiveRenderedOutputTableUpdate::CapacityExceeded
+    );
+    assert_eq!(
+        table.get(OutputId::from_raw(1)).unwrap().output_size(),
+        Some(Size {
+            width: 641,
+            height: 480,
+        })
+    );
+    assert_eq!(
+        table.get(OutputId::from_raw(16)).unwrap().output_size(),
+        Some(Size {
+            width: 656,
+            height: 480,
+        })
+    );
+}
 use sophia_engine::AuthorityTransactionIntake;
 use sophia_protocol::{
     AuthorityKind, InputEventKind, InputEventPacket, LayerSnapshot, NamespaceId, Point, Rect,

@@ -181,6 +181,12 @@ where
     let objects = resource_bundle.into_objects(selected);
     let request = if policy.allow_modeset {
         build_native_primary_plane_atomic_request(objects, property_handles)
+    } else if let Some(vrr_enabled) = policy.vrr_enabled {
+        build_native_primary_plane_page_flip_atomic_request_with_vrr(
+            objects,
+            property_handles,
+            vrr_enabled,
+        )
     } else {
         build_native_primary_plane_page_flip_atomic_request(objects, property_handles)
     };

@@ -1,5 +1,6 @@
 #![allow(unused_imports)]
 
+pub(crate) use std::collections::BTreeMap;
 #[cfg(any(feature = "libdrm-events", feature = "libinput-events"))]
 pub(crate) use std::collections::VecDeque;
 #[cfg(any(

@@ -17,7 +17,10 @@ where
 
     #[cfg(feature = "libdrm-events")]
     fn drain_pending_runtime_scanout_states(&mut self) -> Vec<RuntimeScanoutState> {
-        self.pending_runtime_scanout_states.drain(..).collect()
+        self.primary_output_state_mut()
+            .pending_runtime_scanout_states
+            .drain(..)
+            .collect()
     }
 
     #[cfg(not(feature = "libdrm-events"))]

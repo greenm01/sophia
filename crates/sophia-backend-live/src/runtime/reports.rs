@@ -70,16 +70,17 @@ where
         &self,
         input: LiveBackendRuntimeTickReportInput,
     ) -> LiveBackendRuntimeTickReport {
+        let state = self.primary_output_state();
         LiveBackendRuntimeTickReport {
             engine: input.engine,
             renderer: self.renderer_observation,
-            scanout: self.scanout_readiness,
-            output_size: self.output_size,
-            kms_scanout_target: self.kms_scanout_target,
-            gbm_egl_frame_target: self.gbm_egl_frame_target,
-            gbm_egl_frame_target_lifecycle: self.gbm_egl_frame_target_lifecycle,
-            gbm_egl_frame_target_allocation: self.gbm_egl_frame_target_allocation,
-            page_flip: self.page_flip_event,
+            scanout: state.scanout_readiness,
+            output_size: state.output_size,
+            kms_scanout_target: state.kms_scanout_target,
+            gbm_egl_frame_target: state.gbm_egl_frame_target,
+            gbm_egl_frame_target_lifecycle: state.gbm_egl_frame_target_lifecycle,
+            gbm_egl_frame_target_allocation: state.gbm_egl_frame_target_allocation,
+            page_flip: state.page_flip_event,
             page_flip_callbacks: input.page_flip_callbacks,
             runtime_scanout_states: input.runtime_scanout_states,
             #[cfg(feature = "libdrm-events")]
@@ -89,7 +90,7 @@ where
             rendered_primary_plane_scanout_cleanup_retry: input
                 .rendered_primary_plane_scanout_cleanup_retry,
             #[cfg(feature = "libdrm-events")]
-            rendered_primary_plane_scanout_in_flight_ticks: self
+            rendered_primary_plane_scanout_in_flight_ticks: state
                 .rendered_primary_plane_scanout_in_flight_ticks,
             #[cfg(feature = "libdrm-events")]
             rendered_primary_plane_scanout_backpressure: self

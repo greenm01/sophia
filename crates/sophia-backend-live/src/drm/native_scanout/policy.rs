@@ -5,6 +5,7 @@ pub struct LibdrmNativePrimaryPlaneScanoutSubmitPolicy {
     pub allow_modeset: bool,
     pub page_flip_event: bool,
     pub nonblocking: bool,
+    pub vrr_enabled: Option<bool>,
 }
 
 impl LibdrmNativePrimaryPlaneScanoutSubmitPolicy {
@@ -13,6 +14,7 @@ impl LibdrmNativePrimaryPlaneScanoutSubmitPolicy {
             allow_modeset: false,
             page_flip_event: true,
             nonblocking: true,
+            vrr_enabled: None,
         }
     }
 
@@ -21,6 +23,7 @@ impl LibdrmNativePrimaryPlaneScanoutSubmitPolicy {
             allow_modeset: true,
             page_flip_event: true,
             nonblocking: true,
+            vrr_enabled: None,
         }
     }
 
@@ -29,7 +32,13 @@ impl LibdrmNativePrimaryPlaneScanoutSubmitPolicy {
             allow_modeset: true,
             page_flip_event: false,
             nonblocking: false,
+            vrr_enabled: None,
         }
+    }
+
+    pub const fn with_vrr_enabled(mut self, enabled: bool) -> Self {
+        self.vrr_enabled = Some(enabled);
+        self
     }
 
     pub const fn expected_request_scope(self) -> LibdrmNativeAtomicCommitRequestScope {

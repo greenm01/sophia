@@ -39,11 +39,12 @@ Current truth:
   five virtio-mouse motion/button events through libinput, Engine surface-only
   hit-testing, and X Authority; all route and change later xterm pixels without
   exposing X window identity to Engine.
-- The isolated guest now has two separate virtio GPU devices and reports two
-  connected KMS connectors. Engine bounds discovery to 16 outputs and creates
-  independent refresh-derived clocks plus damage/in-flight/retirement state for
-  both. Persistent native KMS still owns only one output, which is recorded as
-  `multi_output_scanout=pending`; dual-head presentation is not yet claimed.
+- The isolated guest has two separate virtio GPU devices and two connected KMS
+  connectors. Engine bounds discovery to 16 outputs, lays them out as an
+  extended horizontal desktop, and tracks independent damage, frame clocks,
+  scanout ownership, callbacks, retirement, and cleanup. The strict 300-tick
+  proof owns and retires both outputs with distinguishable content and no
+  overlapping page-flip-paced submission.
 - Default `sophia-live-session` now binds an explicit display, owns one xterm
   and X Authority server, and drains repeated authority batches through one
   live backend runtime and CPU scene until bounded or externally stopped. Its
@@ -78,20 +79,20 @@ Exit criteria:
 - [x] Bound Engine output discovery and add independent per-output clocks,
   pending damage, in-flight ownership, and exact retirement validation. Pass a
   QEMU topology gate with two connected virtio KMS outputs.
-- [ ] Replace the persistent native session's single selected output with a
+- [x] Replace the persistent native session's single selected output with a
   bounded output table whose scanout owner, damage, in-flight frame, retirement,
   and frame clock are tracked independently per output.
-- [ ] Present independent content/damage and observe clean native retirement on
+- [x] Present independent content/damage and observe clean native retirement on
   both connected QEMU outputs, then retain an AMD multi-connector run as the
   physical-driver gate.
-- [ ] Pace fixed-refresh presentation from each output's vblank/page-flip
+- [x] Pace fixed-refresh presentation from each output's vblank/page-flip
   timeline and prove no unsynchronized or overlapping submission is accepted;
   this is the per-output vsync gate.
-- [ ] Discover DRM VRR capability/properties, keep VRR disabled by default,
-  enable it only for Engine-approved eligible presentation, and prove both VRR
-  activation and fixed-refresh fallback on capable hardware. QEMU is not
-  treated as VRR evidence unless its virtual display exposes the real property
-  contract.
+- [ ] Complete the hardware gate for the implemented DRM VRR capability/property
+  discovery and Engine fullscreen-eligibility policy. VRR remains disabled by
+  default; prove both VRR activation and fixed-refresh fallback on capable AMD
+  hardware. QEMU is not treated as VRR evidence unless its virtual display
+  exposes the real property contract.
 
 ### 2. xmonad X11 WM Bridge
 

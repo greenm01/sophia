@@ -130,14 +130,13 @@ Sophia surface, and X Authority resolves that surface through its internal
 surface/window table. This preserves the authority boundary: Engine never
 receives or interprets the client XID.
 
-Likewise, current native presentation is a single-output, page-flip-retired
-fixed-refresh path. Multi-monitor support requires independent per-output
-scanout ownership, damage, frame clocks, in-flight state, and retirement, first
-proved with two QEMU heads and then on physical connectors. Vsync evidence must
-show each fixed-refresh output is paced from its own vblank/page-flip timeline.
-VRR remains a hardware capability/policy gate: discover the DRM property
-contract, default it off, enable it only for eligible Engine-approved content,
-and prove fixed-refresh fallback when VRR is unavailable or ineligible.
+Native presentation now has independent per-output scanout ownership, damage,
+frame clocks, in-flight state, and retirement, proved with two QEMU heads. The
+physical multi-connector AMD gate remains. Fixed-refresh evidence requires each
+output to follow its own page-flip timeline without overlapping submission. VRR
+remains a hardware proof gate: the property contract and Engine eligibility
+policy exist, default off, but activation and fixed-refresh fallback still need
+capable hardware evidence.
 
 ## 2026-07-11: Bounded Per-Output Timelines And Two-Connector QEMU Topology
 
@@ -154,9 +153,28 @@ A single virtio-gpu device configured with two scanouts exposed two connector
 objects but only one connected connector, so it was rejected as multi-monitor
 evidence. The accepted harness uses two isolated virtio GPU devices with one
 scanout each. The guest reports two connectors and both connected; Engine
-discovers two and creates two presentation timelines. The persistent native
-session still selects and owns one connector/CRTC/primary-plane chain, so the
-reduced output marker deliberately records `native_owned=1` and
-`multi_output_scanout=pending`. The next slice must make rendered-scanout
-tracking, exporters, callback routes, and cleanup ownership per output before
-the second connector can receive independent content and page-flip retirement.
+discovers two and creates two presentation timelines. That topology was the
+prerequisite for native multi-output ownership, which is recorded below.
+
+## 2026-07-11: Dual-Output Native Presentation And Fixed-Refresh Vsync
+
+The persistent runtime now owns a bounded table of output-scoped frame targets,
+callback intake, scanout submissions, displayed buffers, cleanup debt, and
+retirement state. Native selection deterministically assigns disjoint
+connector/CRTC/primary-plane chains, groups page-flip routes by DRM card, and
+supports explicit selections so one card cannot silently resubmit its first
+connector for every output.
+
+The isolated QEMU session owns both virtio GPU outputs. Output 1 presents the
+terminal while output 2 presents a deterministic Engine proof marker in the
+extended desktop region; their checksums must differ. The 300-tick gate requires
+nonzero per-output exports, submissions, callbacks, and retirements, plus zero
+callback rejection, cleanup debt, overlapping submission, or non-monotonic
+page-flip phase. Keyboard and pointer proofs remain mandatory in the same run.
+
+VRR property discovery recognizes connector `VRR_CAPABLE` and CRTC
+`VRR_ENABLED`. The Engine decision defaults off and permits enable only for one
+opaque, unoccluded fullscreen surface without overlays or required composition.
+Atomic page-flip request construction fails closed if VRR is requested without
+the enable property. Activation and fallback remain an AMD hardware gate;
+virtio-gpu is not accepted as VRR evidence.

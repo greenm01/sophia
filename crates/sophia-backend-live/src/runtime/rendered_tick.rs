@@ -32,18 +32,30 @@ where
         self.advance_rendered_primary_plane_scanout_age_if_in_flight();
         let runtime_scanout_states = self.drain_pending_runtime_scanout_states_into(&mut input);
 
-        let target = self.gbm_egl_frame_target;
-        let output_size = self.output_size;
-        let scanout_target = self.kms_scanout_target.status;
+        let state = self
+            .outputs
+            .get_mut(self.primary_output)
+            .expect("live runtime primary output must remain registered");
+        let target = state.gbm_egl_frame_target;
+        let output_size = state.output_size;
+        let scanout_target = state.kms_scanout_target.status;
         let rendered_primary_plane_scanout_submission =
-            &mut self.rendered_primary_plane_scanout_submission;
+            &mut state.rendered_primary_plane_scanout_submission;
         let rendered_primary_plane_scanout_cleanup =
-            &mut self.rendered_primary_plane_scanout_cleanup;
+            &mut state.rendered_primary_plane_scanout_cleanup;
         let rendered_primary_plane_runtime_scanout_state =
-            &mut self.rendered_primary_plane_runtime_scanout_state;
+            &mut state.rendered_primary_plane_runtime_scanout_state;
         let rendered_primary_plane_scanout_in_flight_ticks =
-            &mut self.rendered_primary_plane_scanout_in_flight_ticks;
-        let submitted_after_page_flip_serial = self.page_flip_callback_intake.last_frame_serial();
+            &mut state.rendered_primary_plane_scanout_in_flight_ticks;
+        let submitted_after_page_flip_serial = state.page_flip_callback_intake.last_frame_serial();
+        let selection = state.native_selection.map_or_else(
+            || select_native_primary_plane_target(device),
+            |selection| LibdrmNativePrimaryPlaneSelectionResult {
+                status: LibdrmNativePrimaryPlaneSelectionStatus::Selected,
+                selection: Some(selection),
+            },
+        );
+        let vrr_enabled = state.vrr_property_request;
         let mut rendered_primary_plane_scanout_submit = None;
 
         let engine = self.assembly.run_tick_with_live_runtime_adapter(
@@ -60,6 +72,8 @@ where
                     rendered_primary_plane_runtime_scanout_state,
                     rendered_primary_plane_scanout_in_flight_ticks,
                     submitted_after_page_flip_serial,
+                    selection,
+                    vrr_enabled,
                     device,
                     exporter,
                     submit_report: &mut rendered_primary_plane_scanout_submit,

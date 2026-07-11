@@ -6,7 +6,8 @@ use crate::prelude::*;
 use std::{any::Any, collections::VecDeque};
 
 #[cfg(feature = "libdrm-events")]
-pub(crate) fn track_rendered_primary_plane_scanout_submit_from_target_with<D, E>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn track_rendered_primary_plane_scanout_submit_from_target_and_selection_with<D, E>(
     scanout_target: LiveKmsScanoutTargetStatus,
     output_size: Option<Size>,
     target: Option<LiveGbmEglFrameTargetRecord>,
@@ -18,12 +19,13 @@ pub(crate) fn track_rendered_primary_plane_scanout_submit_from_target_with<D, E>
     rendered_primary_plane_scanout_in_flight_ticks: &mut u64,
     submitted_after_page_flip_serial: Option<u64>,
     pending_runtime_scanout_states: Option<&mut VecDeque<RuntimeScanoutState>>,
+    selection: LibdrmNativePrimaryPlaneSelectionResult,
+    vrr_enabled: Option<bool>,
     device: &D,
     exporter: &mut E,
 ) -> LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport
 where
-    D: LibdrmNativeKmsSelectionDevice
-        + LibdrmNativePropertyLookupDevice
+    D: LibdrmNativePropertyLookupDevice
         + LibdrmNativePrimaryPlaneResourceDevice
         + LibdrmNativeAtomicCommitDevice,
     E: LiveRenderedScanoutBufferExporter,
@@ -95,9 +97,11 @@ where
         };
     }
 
-    let mut result = submit_rendered_primary_plane_scanout_from_scanout_target_with(
+    let mut result = submit_rendered_primary_plane_scanout_from_scanout_target_and_selection_with(
         scanout_target,
         target,
+        selection,
+        vrr_enabled,
         device,
         exporter,
     );

@@ -87,20 +87,19 @@ The harness waits for the guest's physical-input readiness marker, types
 `sophia` through QMP and virtio-keyboard, and requires all press/release events
 to pass through libinput and Engine focus before changed xterm pixels count as
 input proof. QMP also performs a bounded virtio-mouse double-click selection,
-and the verifier requires
-nonzero routed pointer events plus a second xterm pixel change. The current
-verifier does not claim multi-head presentation, per-output vsync, or VRR
-coverage.
-The guest does require two connected virtual KMS outputs. Engine discovers both
-and seeds bounded independent presentation timelines, while the reduced marker
-states `native_owned=1 multi_output_scanout=pending`. This topology gate must
-not be interpreted as content or page-flip retirement on the second output.
+and the verifier requires nonzero routed pointer events plus a second xterm
+pixel change. The guest requires two connected virtual KMS outputs. Engine
+discovers both, owns both connector/CRTC/primary-plane chains, and presents an
+extended horizontal desktop. The verifier requires per-output nonzero
+submissions, callbacks, retirements, exports, distinct checksums, and a
+page-flip-paced vsync record with zero overlap or phase rejection.
 It boots an isolated direct-kernel initramfs with virtio-gpu and verifies
 exactly 300 session ticks without host DRM, input-device, VT, disk, or guest
 network access. The QEMU evidence verifier also rejects native submit/retire
 failure, rejected callbacks, in-flight ownership, cleanup debt, and a tick
-count other than 300. Keep the physical TTY proof for final AMD driver and
-operator-typed input evidence.
+count other than 300. QEMU does not claim VRR because virtio-gpu does not expose
+the physical property contract. Keep the physical TTY proof for the AMD
+multi-connector/VRR gates and operator-typed input evidence.
 
 The optional renderer-native features have extra local checks:
 

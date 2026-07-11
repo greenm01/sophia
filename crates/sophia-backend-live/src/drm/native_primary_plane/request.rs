@@ -13,6 +13,7 @@ pub enum LibdrmNativeAtomicRequestBuildStatus {
     Built,
     InvalidSize,
     MissingModeBlob,
+    MissingVrrProperty,
 }
 
 #[cfg(feature = "libdrm-events")]
@@ -31,6 +32,7 @@ pub fn build_native_primary_plane_atomic_request(
         objects,
         properties,
         LibdrmNativeAtomicCommitRequestScope::Modeset,
+        None,
     )
 }
 
@@ -43,6 +45,21 @@ pub fn build_native_primary_plane_page_flip_atomic_request(
         objects,
         properties,
         LibdrmNativeAtomicCommitRequestScope::PageFlip,
+        None,
+    )
+}
+
+#[cfg(feature = "libdrm-events")]
+pub fn build_native_primary_plane_page_flip_atomic_request_with_vrr(
+    objects: LibdrmNativePrimaryPlaneObjects,
+    properties: LibdrmNativePrimaryPlanePropertyHandles,
+    enabled: bool,
+) -> LibdrmNativeAtomicRequestBuildResult {
+    build_native_primary_plane_atomic_request_with_scope(
+        objects,
+        properties,
+        LibdrmNativeAtomicCommitRequestScope::PageFlip,
+        Some(enabled),
     )
 }
 
@@ -51,6 +68,7 @@ fn build_native_primary_plane_atomic_request_with_scope(
     objects: LibdrmNativePrimaryPlaneObjects,
     properties: LibdrmNativePrimaryPlanePropertyHandles,
     scope: LibdrmNativeAtomicCommitRequestScope,
+    vrr_enabled: Option<bool>,
 ) -> LibdrmNativeAtomicRequestBuildResult {
     if !is_valid_native_primary_plane_scanout_size(objects.size) {
         return LibdrmNativeAtomicRequestBuildResult {
@@ -62,6 +80,12 @@ fn build_native_primary_plane_atomic_request_with_scope(
     let width = objects.size.width as u64;
     let height = objects.size.height as u64;
     let mut request = drm::control::atomic::AtomicModeReq::new();
+    if vrr_enabled.is_some() && properties.crtc_vrr_enabled().is_none() {
+        return LibdrmNativeAtomicRequestBuildResult {
+            status: LibdrmNativeAtomicRequestBuildStatus::MissingVrrProperty,
+            request: None,
+        };
+    }
     if scope == LibdrmNativeAtomicCommitRequestScope::Modeset {
         let Some(mode_blob) = objects.mode_blob else {
             return LibdrmNativeAtomicRequestBuildResult {
@@ -92,6 +116,13 @@ fn build_native_primary_plane_atomic_request_with_scope(
         );
     }
     add_primary_plane_properties(&mut request, objects, properties, width, height);
+    if let (Some(enabled), Some(property)) = (vrr_enabled, properties.crtc_vrr_enabled()) {
+        request.add_property(
+            objects.crtc,
+            property,
+            drm::control::property::Value::Boolean(enabled),
+        );
+    }
 
     LibdrmNativeAtomicRequestBuildResult {
         status: LibdrmNativeAtomicRequestBuildStatus::Built,

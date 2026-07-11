@@ -16,6 +16,8 @@ pub(crate) struct LiveRenderedPrimaryPlaneRuntimeAdapter<'a, D, E> {
     pub(crate) rendered_primary_plane_runtime_scanout_state: &'a mut Option<RuntimeScanoutState>,
     pub(crate) rendered_primary_plane_scanout_in_flight_ticks: &'a mut u64,
     pub(crate) submitted_after_page_flip_serial: Option<u64>,
+    pub(crate) selection: LibdrmNativePrimaryPlaneSelectionResult,
+    pub(crate) vrr_enabled: Option<bool>,
     pub(crate) device: &'a D,
     pub(crate) exporter: &'a mut E,
     pub(crate) submit_report: &'a mut Option<LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport>,
@@ -69,7 +71,7 @@ where
         &mut self,
         frame_serial: u64,
     ) -> Result<SessionRuntimeObservation, sophia_engine::EngineError> {
-        let report = track_rendered_primary_plane_scanout_submit_from_target_with(
+        let report = track_rendered_primary_plane_scanout_submit_from_target_and_selection_with(
             self.scanout_target,
             self.output_size,
             self.target,
@@ -79,6 +81,8 @@ where
             self.rendered_primary_plane_scanout_in_flight_ticks,
             self.submitted_after_page_flip_serial,
             None,
+            self.selection,
+            self.vrr_enabled,
             self.device,
             self.exporter,
         );

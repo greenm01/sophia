@@ -33,11 +33,12 @@ use sophia_backend_live::{
     LibdrmNativePrimaryPlaneResourceDevice, LibdrmNativePrimaryPlaneScanoutRetireResult,
     LibdrmNativePrimaryPlaneScanoutRetireStatus, LibdrmNativePrimaryPlaneScanoutSubmitPolicy,
     LibdrmNativePrimaryPlaneScanoutSubmitStatus, LibdrmNativePrimaryPlaneSelectionResult,
-    LibdrmNativePrimaryPlaneSelectionStatus, LibdrmNativePropertyHandleSet,
-    LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport, LibdrmNativeReadLoopReport,
-    LibdrmNativeReadLoopStatus, LibdrmNativeRenderedScanoutContextStatus,
-    LibdrmNativeScanoutBufferFormatDetail, LibdrmNativeScanoutBufferModifierDetail,
-    LibdrmNativeScanoutBufferPlaneDetail, LibdrmPageFlipEventPollReport,
+    LibdrmNativePrimaryPlaneSelectionSetStatus, LibdrmNativePrimaryPlaneSelectionStatus,
+    LibdrmNativePropertyHandleSet, LibdrmNativePropertyLookupDevice, LibdrmNativeReadAndPollReport,
+    LibdrmNativeReadLoopReport, LibdrmNativeReadLoopStatus,
+    LibdrmNativeRenderedScanoutContextStatus, LibdrmNativeScanoutBufferFormatDetail,
+    LibdrmNativeScanoutBufferModifierDetail, LibdrmNativeScanoutBufferPlaneDetail,
+    LibdrmNativeVrrPropertyDiscoveryStatus, LibdrmPageFlipEventPollReport,
     LibdrmPageFlipEventPollStatus, LibdrmPageFlipEventPoller, LibdrmRendererScanoutBuffer,
     LiveAtomicScanoutPreflightReport, LiveAtomicScanoutPreflightStatus, LiveBackendConfig,
     LiveHardwareValidationGateReport, LiveHardwareValidationGateStatus,
@@ -59,18 +60,21 @@ use sophia_backend_live::{
     RealAtomicScanoutCardSelectionStatus, RealAtomicScanoutPageFlipSessionStatus,
     RealAtomicScanoutPageFlipWaitPolicy, RuntimeScanoutState, Size,
     build_native_primary_plane_atomic_request, build_native_primary_plane_page_flip_atomic_request,
+    build_native_primary_plane_page_flip_atomic_request_with_vrr,
     create_native_primary_plane_page_flip_resources,
     create_native_primary_plane_page_flip_resources_from_dma_bufs,
     create_native_primary_plane_resources, create_native_primary_plane_resources_from_dma_bufs,
     decode_native_page_flip_batch, destroy_native_primary_plane_resources, discover_live_backend,
-    discover_native_primary_plane_property_handles, libdrm_dependency_admission_report,
-    libdrm_fd_authority_report, native_libdrm_event_adapter_report,
-    native_libdrm_event_adapter_report_for_authority, real_atomic_scanout_preflight_report,
-    real_atomic_scanout_validation_gate, real_atomic_scanout_validation_smoke_report,
-    real_libdrm_events_validation_gate, real_libdrm_events_validation_smoke_report,
-    reduce_native_page_flip_event, retire_native_primary_plane_scanout_after_page_flip,
+    discover_native_primary_plane_property_handles, discover_native_vrr_properties,
+    libdrm_dependency_admission_report, libdrm_fd_authority_report,
+    native_libdrm_event_adapter_report, native_libdrm_event_adapter_report_for_authority,
+    real_atomic_scanout_preflight_report, real_atomic_scanout_validation_gate,
+    real_atomic_scanout_validation_smoke_report, real_libdrm_events_validation_gate,
+    real_libdrm_events_validation_smoke_report, reduce_native_page_flip_event,
+    retire_native_primary_plane_scanout_after_page_flip,
     retire_rendered_primary_plane_scanout_after_page_flip, run_live_session_composition_smoke,
-    select_native_primary_plane_target, select_real_atomic_scanout_card_from_dev_dri,
+    select_native_primary_plane_target, select_native_primary_plane_targets,
+    select_real_atomic_scanout_card_from_dev_dri,
     submit_native_primary_plane_scanout_from_renderer_descriptor,
     submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor,
     submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_policy,
@@ -720,6 +724,7 @@ struct FakeNativePropertyLookupDevice {
     connector: io::Result<LibdrmNativePropertyHandleSet>,
     crtc: io::Result<LibdrmNativePropertyHandleSet>,
     plane: io::Result<LibdrmNativePropertyHandleSet>,
+    connector_value: io::Result<Option<u64>>,
 }
 
 impl LibdrmNativePropertyLookupDevice for FakeNativePropertyLookupDevice {
@@ -742,6 +747,14 @@ impl LibdrmNativePropertyLookupDevice for FakeNativePropertyLookupDevice {
         _plane: drm::control::plane::Handle,
     ) -> io::Result<LibdrmNativePropertyHandleSet> {
         clone_io_result(&self.plane)
+    }
+
+    fn connector_property_value(
+        &self,
+        _connector: drm::control::connector::Handle,
+        _property: drm::control::property::Handle,
+    ) -> io::Result<Option<u64>> {
+        clone_io_result(&self.connector_value)
     }
 }
 
@@ -795,6 +808,72 @@ impl LibdrmNativeKmsSelectionDevice for FakeNativeKmsSelectionDevice {
         _plane: drm::control::plane::Handle,
     ) -> io::Result<Option<drm::control::PlaneType>> {
         clone_io_result(&self.plane_type)
+    }
+}
+
+#[derive(Debug)]
+struct FakeMultiNativeKmsSelectionDevice {
+    connectors: Vec<(
+        drm::control::connector::Handle,
+        LibdrmNativeConnectorSnapshot,
+    )>,
+    crtcs: Vec<drm::control::crtc::Handle>,
+    encoders: Vec<(drm::control::encoder::Handle, LibdrmNativeEncoderSnapshot)>,
+    planes: Vec<(drm::control::plane::Handle, LibdrmNativePlaneSnapshot)>,
+}
+
+impl LibdrmNativeKmsSelectionDevice for FakeMultiNativeKmsSelectionDevice {
+    fn connector_handles(&self) -> io::Result<Vec<drm::control::connector::Handle>> {
+        Ok(self.connectors.iter().map(|(handle, _)| *handle).collect())
+    }
+
+    fn crtc_handles(&self) -> io::Result<Vec<drm::control::crtc::Handle>> {
+        Ok(self.crtcs.clone())
+    }
+
+    fn connector_snapshot(
+        &self,
+        connector: drm::control::connector::Handle,
+    ) -> io::Result<LibdrmNativeConnectorSnapshot> {
+        self.connectors
+            .iter()
+            .find_map(|(handle, snapshot)| (*handle == connector).then_some(snapshot.clone()))
+            .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
+    }
+
+    fn encoder_snapshot(
+        &self,
+        encoder: drm::control::encoder::Handle,
+    ) -> io::Result<LibdrmNativeEncoderSnapshot> {
+        self.encoders
+            .iter()
+            .find_map(|(handle, snapshot)| (*handle == encoder).then_some(snapshot.clone()))
+            .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
+    }
+
+    fn plane_handles(&self) -> io::Result<Vec<drm::control::plane::Handle>> {
+        Ok(self.planes.iter().map(|(handle, _)| *handle).collect())
+    }
+
+    fn plane_snapshot(
+        &self,
+        plane: drm::control::plane::Handle,
+    ) -> io::Result<LibdrmNativePlaneSnapshot> {
+        self.planes
+            .iter()
+            .find_map(|(handle, snapshot)| (*handle == plane).then_some(snapshot.clone()))
+            .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
+    }
+
+    fn plane_type(
+        &self,
+        plane: drm::control::plane::Handle,
+    ) -> io::Result<Option<drm::control::PlaneType>> {
+        Ok(self
+            .planes
+            .iter()
+            .any(|(handle, _)| *handle == plane)
+            .then_some(drm::control::PlaneType::Primary))
     }
 }
 
@@ -1230,6 +1309,7 @@ fn full_property_lookup_device() -> FakeNativePropertyLookupDevice {
             ("CRTC_H", property_handle(113)),
             ("IN_FORMATS", property_handle(114)),
         ])),
+        connector_value: Ok(None),
     }
 }
 
@@ -1798,6 +1878,39 @@ fn native_libdrm_primary_plane_property_discovery_fails_closed_on_read_error() {
 }
 
 #[test]
+fn native_vrr_discovery_requires_capability_value_and_enable_property() {
+    let capable = FakeNativePropertyLookupDevice {
+        connector: Ok(LibdrmNativePropertyHandleSet::new([
+            ("CRTC_ID", property_handle(101)),
+            ("VRR_CAPABLE", property_handle(115)),
+        ])),
+        crtc: Ok(LibdrmNativePropertyHandleSet::new([
+            ("MODE_ID", property_handle(102)),
+            ("ACTIVE", property_handle(103)),
+            ("VRR_ENABLED", property_handle(116)),
+        ])),
+        connector_value: Ok(Some(1)),
+        ..full_property_lookup_device()
+    };
+    let discovered = discover_native_vrr_properties(&capable, connector_handle(), crtc_handle());
+    assert_eq!(
+        discovered.status,
+        LibdrmNativeVrrPropertyDiscoveryStatus::Discovered
+    );
+    assert!(discovered.capable);
+    assert_eq!(discovered.enable_property, Some(property_handle(116)));
+
+    let unsupported = FakeNativePropertyLookupDevice {
+        connector_value: Ok(Some(0)),
+        ..capable
+    };
+    assert_eq!(
+        discover_native_vrr_properties(&unsupported, connector_handle(), crtc_handle()).status,
+        LibdrmNativeVrrPropertyDiscoveryStatus::Unsupported
+    );
+}
+
+#[test]
 fn native_libdrm_primary_plane_selection_feeds_request_builder() {
     let selection = select_native_primary_plane_target(&full_kms_selection_device());
 
@@ -1840,6 +1953,75 @@ fn native_libdrm_primary_plane_selection_feeds_request_builder() {
 
     assert_eq!(build.status, LibdrmNativeAtomicRequestBuildStatus::Built);
     assert!(build.request.is_some());
+}
+
+#[test]
+fn native_multi_output_selection_is_deterministic_and_disjoint() {
+    let connector_a = drm::control::from_u32::<drm::control::connector::Handle>(21).unwrap();
+    let connector_b = drm::control::from_u32::<drm::control::connector::Handle>(22).unwrap();
+    let encoder_a = drm::control::from_u32::<drm::control::encoder::Handle>(31).unwrap();
+    let encoder_b = drm::control::from_u32::<drm::control::encoder::Handle>(32).unwrap();
+    let crtc_a = drm::control::from_u32::<drm::control::crtc::Handle>(41).unwrap();
+    let crtc_b = drm::control::from_u32::<drm::control::crtc::Handle>(42).unwrap();
+    let plane_a = drm::control::from_u32::<drm::control::plane::Handle>(51).unwrap();
+    let plane_b = drm::control::from_u32::<drm::control::plane::Handle>(52).unwrap();
+    let device = FakeMultiNativeKmsSelectionDevice {
+        connectors: vec![
+            (
+                connector_b,
+                LibdrmNativeConnectorSnapshot::new(
+                    true,
+                    Some(encoder_b),
+                    [encoder_b],
+                    Some(Size {
+                        width: 1920,
+                        height: 1080,
+                    }),
+                ),
+            ),
+            (
+                connector_a,
+                LibdrmNativeConnectorSnapshot::new(
+                    true,
+                    Some(encoder_a),
+                    [encoder_a],
+                    Some(Size {
+                        width: 1280,
+                        height: 720,
+                    }),
+                ),
+            ),
+        ],
+        crtcs: vec![crtc_b, crtc_a],
+        encoders: vec![
+            (
+                encoder_a,
+                LibdrmNativeEncoderSnapshot::new(Some(crtc_a), [crtc_a]),
+            ),
+            (
+                encoder_b,
+                LibdrmNativeEncoderSnapshot::new(Some(crtc_b), [crtc_b]),
+            ),
+        ],
+        planes: vec![
+            (plane_b, LibdrmNativePlaneSnapshot::new([crtc_b])),
+            (plane_a, LibdrmNativePlaneSnapshot::new([crtc_a])),
+        ],
+    };
+
+    let selected = select_native_primary_plane_targets(&device);
+    assert_eq!(
+        selected.status,
+        LibdrmNativePrimaryPlaneSelectionSetStatus::SelectedAll
+    );
+    assert_eq!(selected.connected_connectors, 2);
+    assert_eq!(selected.selections.len(), 2);
+    assert_eq!(selected.selections[0].connector_id(), 21);
+    assert_eq!(selected.selections[0].crtc_id(), 41);
+    assert_eq!(selected.selections[0].plane_id(), 51);
+    assert_eq!(selected.selections[1].connector_id(), 22);
+    assert_eq!(selected.selections[1].crtc_id(), 42);
+    assert_eq!(selected.selections[1].plane_id(), 52);
 }
 
 #[test]
@@ -5431,6 +5613,34 @@ fn native_libdrm_primary_plane_page_flip_builder_creates_plane_only_request() {
             test_only: false,
         }
     );
+}
+
+#[test]
+fn native_vrr_page_flip_builder_fails_closed_without_enable_property() {
+    let missing = build_native_primary_plane_page_flip_atomic_request_with_vrr(
+        primary_plane_objects(Size {
+            width: 1280,
+            height: 720,
+        }),
+        primary_plane_properties(),
+        true,
+    );
+    assert_eq!(
+        missing.status,
+        LibdrmNativeAtomicRequestBuildStatus::MissingVrrProperty
+    );
+    assert!(missing.request.is_none());
+
+    let built = build_native_primary_plane_page_flip_atomic_request_with_vrr(
+        primary_plane_objects(Size {
+            width: 1280,
+            height: 720,
+        }),
+        primary_plane_properties().with_crtc_vrr_enabled(Some(property_handle(116))),
+        true,
+    );
+    assert_eq!(built.status, LibdrmNativeAtomicRequestBuildStatus::Built);
+    assert!(built.request.is_some());
 }
 
 #[test]

@@ -17,6 +17,14 @@ pub trait LibdrmNativePropertyLookupDevice {
         &self,
         plane: drm::control::plane::Handle,
     ) -> io::Result<LibdrmNativePropertyHandleSet>;
+
+    fn connector_property_value(
+        &self,
+        _connector: drm::control::connector::Handle,
+        _property: drm::control::property::Handle,
+    ) -> io::Result<Option<u64>> {
+        Ok(None)
+    }
 }
 
 impl<D> LibdrmNativePropertyLookupDevice for D
@@ -48,5 +56,16 @@ where
         Ok(LibdrmNativePropertyHandleSet::from_property_info_map(
             self.get_properties(plane)?.as_hashmap(self)?,
         ))
+    }
+
+    fn connector_property_value(
+        &self,
+        connector: drm::control::connector::Handle,
+        property: drm::control::property::Handle,
+    ) -> io::Result<Option<u64>> {
+        Ok(self
+            .get_properties(connector)?
+            .iter()
+            .find_map(|(candidate, value)| (*candidate == property).then_some(*value)))
     }
 }

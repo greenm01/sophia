@@ -98,6 +98,159 @@ fn per_output_presentation_keeps_damage_and_retirement_independent() {
 }
 
 #[test]
+fn extended_desktop_projects_damage_into_output_local_coordinates() {
+    let output_a = OutputId::from_raw(1);
+    let output_b = OutputId::from_raw(2);
+    let mut outputs = DrmKmsOutputRegistry::new();
+    for (output, connector, crtc) in [(output_a, 11, 21), (output_b, 12, 22)] {
+        outputs.upsert(DrmKmsOutputDescriptor {
+            output,
+            connector_id: connector,
+            crtc_id: crtc,
+            mode: DrmKmsMode::new(100, 80, 60_000),
+            scale: 1,
+        });
+    }
+    let topology = ExtendedDesktopTopology::from_drm_outputs(&outputs);
+    assert_eq!(
+        topology.logical_size(),
+        Size {
+            width: 200,
+            height: 80
+        }
+    );
+    assert_eq!(topology.get(output_b).unwrap().logical.x, 100);
+
+    let spanning = Region::single(Rect {
+        x: 90,
+        y: 10,
+        width: 20,
+        height: 30,
+    });
+    assert_eq!(
+        topology.get(output_a).unwrap().project_damage(&spanning),
+        Region::single(Rect {
+            x: 90,
+            y: 10,
+            width: 10,
+            height: 30,
+        })
+    );
+    assert_eq!(
+        topology.get(output_b).unwrap().project_damage(&spanning),
+        Region::single(Rect {
+            x: 0,
+            y: 10,
+            width: 10,
+            height: 30,
+        })
+    );
+}
+
+#[test]
+fn extended_desktop_projects_scaled_damage_into_output_pixels() {
+    let output = OutputId::from_raw(1);
+    let mut outputs = DrmKmsOutputRegistry::new();
+    outputs.upsert(DrmKmsOutputDescriptor {
+        output,
+        connector_id: 11,
+        crtc_id: 21,
+        mode: DrmKmsMode::new(200, 160, 60_000),
+        scale: 2,
+    });
+    let topology = ExtendedDesktopTopology::from_drm_outputs(&outputs);
+    assert_eq!(
+        topology
+            .get(output)
+            .unwrap()
+            .project_damage_pixels(&Region::single(Rect {
+                x: 10,
+                y: 5,
+                width: 20,
+                height: 10,
+            })),
+        Region::single(Rect {
+            x: 20,
+            y: 10,
+            width: 40,
+            height: 20,
+        })
+    );
+}
+
+#[test]
+fn page_flip_feedback_phases_the_next_fixed_refresh_frame() {
+    let output = OutputId::from_raw(1);
+    let mut outputs = DrmKmsOutputRegistry::new();
+    outputs.upsert(DrmKmsOutputDescriptor {
+        output,
+        connector_id: 11,
+        crtc_id: 21,
+        mode: DrmKmsMode::new(1920, 1080, 60_000),
+        scale: 1,
+    });
+    let mut presentation = OutputPresentationRegistry::from_outputs(&outputs);
+    assert_eq!(
+        presentation.observe_page_flip(output, 7, 1_000),
+        OutputPresentationFeedback::Accepted {
+            sequence: 7,
+            presentation_msec: 1_000,
+        }
+    );
+    assert!(presentation.mark_damage(output));
+    let OutputPresentationSchedule::Scheduled(tick) = presentation.schedule(output) else {
+        panic!("output should schedule");
+    };
+    assert_eq!(tick.target_msec, 1_016);
+    assert_eq!(
+        presentation.observe_page_flip(output, 7, 1_016),
+        OutputPresentationFeedback::NonMonotonicSequence {
+            previous: 7,
+            actual: 7,
+        }
+    );
+    assert_eq!(
+        presentation.schedule(output),
+        OutputPresentationSchedule::WaitingForRetirement { frame_serial: 1 }
+    );
+    assert_eq!(presentation.get(output).unwrap().submit_deferrals, 1);
+}
+
+#[test]
+fn vrr_is_opt_in_and_requires_one_unoccluded_fullscreen_surface() {
+    let capability = OutputVrrCapability { capable: true };
+    let eligible = OutputVrrEligibility {
+        opaque_fullscreen_surface_count: 1,
+        unoccluded: true,
+        overlays_present: false,
+        composition_required: false,
+    };
+    assert_eq!(
+        decide_output_vrr(false, capability, eligible),
+        OutputVrrDecision::DisabledByPolicy
+    );
+    assert_eq!(
+        decide_output_vrr(true, capability, eligible),
+        OutputVrrDecision::Enabled
+    );
+    assert_eq!(
+        decide_output_vrr(
+            true,
+            capability,
+            OutputVrrEligibility {
+                overlays_present: true,
+                ..eligible
+            }
+        ),
+        OutputVrrDecision::Ineligible
+    );
+    assert_eq!(
+        decide_output_vrr(true, OutputVrrCapability { capable: false }, eligible),
+        OutputVrrDecision::Unsupported
+    );
+}
+
+#[test]
 fn clocked_session_tick_uses_clock_serial_and_updates_cache() {
     let engine = HeadlessEngine::default();
     let layers = vec![test_layer(0, 0, 0, Region::empty())];

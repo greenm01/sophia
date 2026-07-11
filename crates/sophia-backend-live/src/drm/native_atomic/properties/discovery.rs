@@ -107,7 +107,77 @@ where
                 plane_crtc_w,
                 plane_crtc_h,
             )
+            .with_crtc_vrr_enabled(crtc_properties.get("VRR_ENABLED"))
             .with_plane_in_formats(plane_properties.get("IN_FORMATS")),
         ),
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LibdrmNativeVrrPropertyDiscoveryResult {
+    pub status: LibdrmNativeVrrPropertyDiscoveryStatus,
+    pub capable: bool,
+    pub enable_property: Option<drm::control::property::Handle>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LibdrmNativeVrrPropertyDiscoveryStatus {
+    Discovered,
+    Unsupported,
+    MissingEnableProperty,
+    ReadFailed,
+}
+
+pub fn discover_native_vrr_properties<D>(
+    device: &D,
+    connector: drm::control::connector::Handle,
+    crtc: drm::control::crtc::Handle,
+) -> LibdrmNativeVrrPropertyDiscoveryResult
+where
+    D: LibdrmNativePropertyLookupDevice,
+{
+    let (Ok(connector_properties), Ok(crtc_properties)) = (
+        device.connector_property_handles(connector),
+        device.crtc_property_handles(crtc),
+    ) else {
+        return LibdrmNativeVrrPropertyDiscoveryResult {
+            status: LibdrmNativeVrrPropertyDiscoveryStatus::ReadFailed,
+            capable: false,
+            enable_property: None,
+        };
+    };
+    let Some(capable_property) = connector_properties.get("VRR_CAPABLE") else {
+        return LibdrmNativeVrrPropertyDiscoveryResult {
+            status: LibdrmNativeVrrPropertyDiscoveryStatus::Unsupported,
+            capable: false,
+            enable_property: None,
+        };
+    };
+    let Ok(Some(capable_value)) = device.connector_property_value(connector, capable_property)
+    else {
+        return LibdrmNativeVrrPropertyDiscoveryResult {
+            status: LibdrmNativeVrrPropertyDiscoveryStatus::ReadFailed,
+            capable: false,
+            enable_property: None,
+        };
+    };
+    if capable_value == 0 {
+        return LibdrmNativeVrrPropertyDiscoveryResult {
+            status: LibdrmNativeVrrPropertyDiscoveryStatus::Unsupported,
+            capable: false,
+            enable_property: crtc_properties.get("VRR_ENABLED"),
+        };
+    }
+    let Some(enable_property) = crtc_properties.get("VRR_ENABLED") else {
+        return LibdrmNativeVrrPropertyDiscoveryResult {
+            status: LibdrmNativeVrrPropertyDiscoveryStatus::MissingEnableProperty,
+            capable: true,
+            enable_property: None,
+        };
+    };
+    LibdrmNativeVrrPropertyDiscoveryResult {
+        status: LibdrmNativeVrrPropertyDiscoveryStatus::Discovered,
+        capable: true,
+        enable_property: Some(enable_property),
     }
 }
