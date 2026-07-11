@@ -25,6 +25,8 @@ const X_LIST_PROPERTIES: u8 = 21;
 const X_SET_SELECTION_OWNER: u8 = 22;
 const X_GET_SELECTION_OWNER: u8 = 23;
 const X_CONVERT_SELECTION: u8 = 24;
+const X_GRAB_BUTTON: u8 = 28;
+const X_UNGRAB_BUTTON: u8 = 29;
 const X_GRAB_SERVER: u8 = 36;
 const X_UNGRAB_SERVER: u8 = 37;
 const X_TRANSLATE_COORDINATES: u8 = 40;
@@ -48,14 +50,19 @@ const X_POLY_FILL_RECTANGLE: u8 = 70;
 const X_POLY_FILL_ARC: u8 = 71;
 const X_PUT_IMAGE: u8 = 72;
 const X_POLY_TEXT8: u8 = 74;
+const X_IMAGE_TEXT8: u8 = 76;
 const X_CREATE_COLORMAP: u8 = 78;
+const X_ALLOC_COLOR: u8 = 84;
 const X_ALLOC_NAMED_COLOR: u8 = 85;
 const X_QUERY_COLORS: u8 = 91;
 const X_CREATE_GLYPH_CURSOR: u8 = 94;
 const X_FREE_CURSOR: u8 = 95;
+const X_RECOLOR_CURSOR: u8 = 96;
 const X_QUERY_EXTENSION: u8 = 98;
 const X_LIST_EXTENSIONS: u8 = 99;
+const X_GET_KEYBOARD_MAPPING: u8 = 101;
 const X_QUERY_BEST_SIZE: u8 = 97;
+const X_GET_MODIFIER_MAPPING: u8 = 119;
 
 pub const X_SOPHIA_PRESENT_EXTENSION_NAME: &str = "SOPHIA-PRESENT";
 pub const X_SOPHIA_PRESENT_MAJOR_OPCODE: u8 = 130;
@@ -100,6 +107,8 @@ const X_LIST_PROPERTIES_REQ_LEN: usize = 8;
 const X_SET_SELECTION_OWNER_REQ_LEN: usize = 16;
 const X_GET_SELECTION_OWNER_REQ_LEN: usize = 8;
 const X_CONVERT_SELECTION_REQ_LEN: usize = 24;
+const X_GRAB_BUTTON_REQ_LEN: usize = 24;
+const X_UNGRAB_BUTTON_REQ_LEN: usize = 12;
 const X_GRAB_SERVER_REQ_LEN: usize = 4;
 const X_UNGRAB_SERVER_REQ_LEN: usize = 4;
 const X_TRANSLATE_COORDINATES_REQ_LEN: usize = 16;
@@ -123,14 +132,19 @@ const X_POLY_FILL_RECTANGLE_REQ_LEN: usize = 12;
 const X_POLY_FILL_ARC_REQ_LEN: usize = 12;
 const X_PUT_IMAGE_REQ_LEN: usize = 24;
 const X_POLY_TEXT8_REQ_LEN: usize = 16;
+const X_IMAGE_TEXT8_REQ_LEN: usize = 16;
 const X_CREATE_COLORMAP_REQ_LEN: usize = 16;
+const X_ALLOC_COLOR_REQ_LEN: usize = 16;
 const X_ALLOC_NAMED_COLOR_REQ_LEN: usize = 12;
 const X_QUERY_COLORS_REQ_LEN: usize = 8;
 const X_CREATE_GLYPH_CURSOR_REQ_LEN: usize = 32;
 const X_FREE_CURSOR_REQ_LEN: usize = 8;
+const X_RECOLOR_CURSOR_REQ_LEN: usize = 20;
 const X_QUERY_EXTENSION_REQ_LEN: usize = 8;
 const X_LIST_EXTENSIONS_REQ_LEN: usize = 4;
+const X_GET_KEYBOARD_MAPPING_REQ_LEN: usize = 8;
 const X_QUERY_BEST_SIZE_REQ_LEN: usize = 12;
+const X_GET_MODIFIER_MAPPING_REQ_LEN: usize = 4;
 const X_SOPHIA_PRESENT_PIXMAP_REQ_LEN: usize = 32;
 const X_MIT_SHM_QUERY_VERSION_REQ_LEN: usize = 4;
 const X_MIT_SHM_ATTACH_REQ_LEN: usize = 16;
@@ -148,6 +162,7 @@ const X_BIG_REQUESTS_ENABLE_REQ_LEN: usize = 4;
 pub const X_PUT_IMAGE_MAX_DATA_BYTES: usize = crate::X_PROPERTY_MAX_VALUE_BYTES;
 pub const X_QUERY_COLORS_MAX_PIXELS: usize = 256;
 pub const X_POLY_TEXT8_MAX_BYTES: usize = crate::X_PROPERTY_MAX_VALUE_BYTES;
+pub const X_IMAGE_TEXT8_MAX_BYTES: usize = crate::X_PROPERTY_MAX_VALUE_BYTES;
 pub const X_ALLOC_NAMED_COLOR_MAX_NAME_BYTES: usize = 256;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -178,6 +193,10 @@ pub enum XWireRequest {
     ConfigureWindow {
         window: XResourceId,
         value_mask: u16,
+        x: Option<i16>,
+        y: Option<i16>,
+        width: Option<u16>,
+        height: Option<u16>,
     },
     GetGeometry {
         drawable: XResourceId,
@@ -199,6 +218,18 @@ pub enum XWireRequest {
     },
     GetSelectionOwner {
         selection: XAtom,
+    },
+    GrabButton {
+        window: XResourceId,
+        event_mask: u16,
+        button: u8,
+        modifiers: u16,
+        owner_events: bool,
+    },
+    UngrabButton {
+        window: XResourceId,
+        button: u8,
+        modifiers: u16,
     },
     GrabServer,
     UngrabServer,
@@ -245,10 +276,23 @@ pub enum XWireRequest {
         y: i16,
         glyph_count: usize,
     },
+    ImageText8 {
+        drawable: XResourceId,
+        gc: XResourceId,
+        x: i16,
+        y: i16,
+        glyph_count: usize,
+    },
     CreateColormap {
         colormap: XResourceId,
         window: XResourceId,
         visual: u32,
+    },
+    AllocColor {
+        colormap: XResourceId,
+        red: u16,
+        green: u16,
+        blue: u16,
     },
     AllocNamedColor {
         colormap: XResourceId,
@@ -389,6 +433,14 @@ pub enum XWireRequest {
     FreeCursor {
         cursor: XResourceId,
     },
+    RecolorCursor {
+        cursor: XResourceId,
+    },
+    GetModifierMapping,
+    GetKeyboardMapping {
+        first_keycode: u8,
+        count: u8,
+    },
     TranslateCoordinates {
         source: XResourceId,
         destination: XResourceId,
@@ -475,6 +527,8 @@ pub fn decode_x11_core_request(
         X_SET_SELECTION_OWNER => decode_set_selection_owner(context, bytes),
         X_GET_SELECTION_OWNER => decode_get_selection_owner(context, bytes),
         X_CONVERT_SELECTION => decode_convert_selection(context, bytes),
+        X_GRAB_BUTTON => decode_grab_button(context, bytes),
+        X_UNGRAB_BUTTON => decode_ungrab_button(context, bytes),
         X_GRAB_SERVER => decode_grab_server(bytes),
         X_UNGRAB_SERVER => decode_ungrab_server(bytes),
         X_TRANSLATE_COORDINATES => decode_translate_coordinates(context, bytes),
@@ -498,14 +552,19 @@ pub fn decode_x11_core_request(
         X_POLY_FILL_ARC => decode_poly_fill_arc(context, bytes),
         X_PUT_IMAGE => decode_put_image(context, bytes),
         X_POLY_TEXT8 => decode_poly_text8(context, bytes),
+        X_IMAGE_TEXT8 => decode_image_text8(context, bytes),
         X_CREATE_COLORMAP => decode_create_colormap(context, bytes),
+        X_ALLOC_COLOR => decode_alloc_color(context, bytes),
         X_ALLOC_NAMED_COLOR => decode_alloc_named_color(context, bytes),
         X_QUERY_COLORS => decode_query_colors(context, bytes),
         X_CREATE_GLYPH_CURSOR => decode_create_glyph_cursor(context, bytes),
         X_FREE_CURSOR => decode_free_cursor(context, bytes),
+        X_RECOLOR_CURSOR => decode_recolor_cursor(context, bytes),
         X_QUERY_BEST_SIZE => decode_query_best_size(context, bytes),
         X_QUERY_EXTENSION => decode_query_extension(context, bytes),
         X_LIST_EXTENSIONS => decode_list_extensions(bytes),
+        X_GET_KEYBOARD_MAPPING => decode_get_keyboard_mapping(bytes),
+        X_GET_MODIFIER_MAPPING => decode_get_modifier_mapping(bytes),
         X_SOPHIA_PRESENT_MAJOR_OPCODE => decode_sophia_present(context, bytes),
         X_MIT_SHM_MAJOR_OPCODE => decode_mit_shm(context, bytes),
         X_RANDR_MAJOR_OPCODE => decode_randr(context, bytes),
@@ -811,6 +870,36 @@ fn decode_poly_text8(
     })
 }
 
+fn decode_image_text8(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_len(X_IMAGE_TEXT8, X_IMAGE_TEXT8_REQ_LEN, bytes.len())?;
+    let text_len = usize::from(bytes[1]);
+    if text_len > X_IMAGE_TEXT8_MAX_BYTES {
+        return Err(XWireParseError::PropertyValueTooLarge {
+            len: text_len,
+            max: X_IMAGE_TEXT8_MAX_BYTES,
+        });
+    }
+    let expected_len = X_IMAGE_TEXT8_REQ_LEN + padded_len(text_len);
+    if bytes.len() != expected_len {
+        return Err(XWireParseError::InvalidLength {
+            opcode: X_IMAGE_TEXT8,
+            expected_at_least: expected_len,
+            actual: bytes.len(),
+        });
+    }
+
+    Ok(XWireRequest::ImageText8 {
+        drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        gc: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
+        x: context.byte_order.i16(&bytes[12..14]),
+        y: context.byte_order.i16(&bytes[14..16]),
+        glyph_count: text_len,
+    })
+}
+
 fn decode_copy_area(
     context: XWireClientContext,
     bytes: &[u8],
@@ -864,9 +953,33 @@ fn decode_configure_window(
             actual: bytes.len(),
         });
     }
+    let mut cursor = X_CONFIGURE_WINDOW_REQ_LEN;
+    let mut next_value = || {
+        let value = context.byte_order.u32(&bytes[cursor..cursor + 4]);
+        cursor += 4;
+        value
+    };
+    let x = (value_mask & 0x0001 != 0).then(|| next_value() as i16);
+    let y = (value_mask & 0x0002 != 0).then(|| next_value() as i16);
+    let width = (value_mask & 0x0004 != 0).then(|| next_value() as u16);
+    let height = (value_mask & 0x0008 != 0).then(|| next_value() as u16);
+    if value_mask & 0x0010 != 0 {
+        let _ = next_value();
+    }
+    if value_mask & 0x0020 != 0 {
+        let _ = next_value();
+    }
+    if value_mask & 0x0040 != 0 {
+        let _ = next_value();
+    }
+
     Ok(XWireRequest::ConfigureWindow {
         window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
         value_mask,
+        x,
+        y,
+        width,
+        height,
     })
 }
 
@@ -1140,6 +1253,19 @@ fn decode_alloc_named_color(
     })
 }
 
+fn decode_alloc_color(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_ALLOC_COLOR, X_ALLOC_COLOR_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::AllocColor {
+        colormap: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        red: context.byte_order.u16(&bytes[8..10]),
+        green: context.byte_order.u16(&bytes[10..12]),
+        blue: context.byte_order.u16(&bytes[12..14]),
+    })
+}
+
 fn decode_create_glyph_cursor(
     context: XWireClientContext,
     bytes: &[u8],
@@ -1163,6 +1289,16 @@ fn decode_free_cursor(
 ) -> Result<XWireRequest, XWireParseError> {
     require_exact_len(X_FREE_CURSOR, X_FREE_CURSOR_REQ_LEN, bytes.len())?;
     Ok(XWireRequest::FreeCursor {
+        cursor: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+    })
+}
+
+fn decode_recolor_cursor(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_RECOLOR_CURSOR, X_RECOLOR_CURSOR_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::RecolorCursor {
         cursor: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
     })
 }
@@ -1524,6 +1660,27 @@ fn decode_get_input_focus(bytes: &[u8]) -> Result<XWireRequest, XWireParseError>
     Ok(XWireRequest::GetInputFocus)
 }
 
+fn decode_get_modifier_mapping(bytes: &[u8]) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(
+        X_GET_MODIFIER_MAPPING,
+        X_GET_MODIFIER_MAPPING_REQ_LEN,
+        bytes.len(),
+    )?;
+    Ok(XWireRequest::GetModifierMapping)
+}
+
+fn decode_get_keyboard_mapping(bytes: &[u8]) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(
+        X_GET_KEYBOARD_MAPPING,
+        X_GET_KEYBOARD_MAPPING_REQ_LEN,
+        bytes.len(),
+    )?;
+    Ok(XWireRequest::GetKeyboardMapping {
+        first_keycode: bytes[1],
+        count: bytes[4],
+    })
+}
+
 fn decode_create_window(
     context: XWireClientContext,
     bytes: &[u8],
@@ -1667,6 +1824,32 @@ fn decode_get_selection_owner(
     )?;
     Ok(XWireRequest::GetSelectionOwner {
         selection: context.byte_order.u32(&bytes[4..8]),
+    })
+}
+
+fn decode_grab_button(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_GRAB_BUTTON, X_GRAB_BUTTON_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::GrabButton {
+        window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        event_mask: context.byte_order.u16(&bytes[8..10]),
+        button: bytes[20],
+        modifiers: context.byte_order.u16(&bytes[22..24]),
+        owner_events: bytes[1] != 0,
+    })
+}
+
+fn decode_ungrab_button(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_UNGRAB_BUTTON, X_UNGRAB_BUTTON_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::UngrabButton {
+        window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        button: bytes[1],
+        modifiers: context.byte_order.u16(&bytes[8..10]),
     })
 }
 

@@ -327,11 +327,165 @@ fn serve_x11_core_socket_client_with_trace_observer(
 #[cfg(unix)]
 fn x11_core_request_trace_detail(request: &crate::XWireRequest) -> Option<String> {
     match request {
+        crate::XWireRequest::Authority(packet) => match &packet.kind {
+            crate::XAuthorityRequestKind::CreateWindow {
+                window, geometry, ..
+            } => Some(format!(
+                "CreateWindow:window={:#x}:{}x{}+{}+{}",
+                window.local.raw(),
+                geometry.width,
+                geometry.height,
+                geometry.x,
+                geometry.y
+            )),
+            crate::XAuthorityRequestKind::MapWindow { window, .. } => {
+                Some(format!("MapWindow:window={:#x}", window.local.raw()))
+            }
+            crate::XAuthorityRequestKind::PresentPixmap { window, pixmap, .. } => Some(format!(
+                "SOPHIA-PRESENT:PresentPixmap:window={:#x}:pixmap={pixmap:#x}",
+                window.local.raw()
+            )),
+            crate::XAuthorityRequestKind::SetSelectionOwner { selection, .. } => {
+                Some(format!("SetSelectionOwner:{selection}"))
+            }
+            crate::XAuthorityRequestKind::RequestSelection {
+                requestor,
+                target_name,
+                ..
+            } => Some(format!(
+                "RequestSelection:requestor={:#x}:target={target_name}",
+                requestor.local.raw()
+            )),
+        },
         crate::XWireRequest::QueryExtension { name } => Some(format!("QueryExtension:{name}")),
         crate::XWireRequest::InternAtom { name, .. } => Some(format!("InternAtom:{name}")),
+        crate::XWireRequest::ChangeWindowAttributes { window } => Some(format!(
+            "ChangeWindowAttributes:window={:#x}",
+            window.local.raw()
+        )),
+        crate::XWireRequest::ConfigureWindow {
+            window,
+            value_mask,
+            x,
+            y,
+            width,
+            height,
+        } => Some(format!(
+            "ConfigureWindow:window={:#x}:mask={value_mask:#x}:x={x:?}:y={y:?}:width={width:?}:height={height:?}",
+            window.local.raw()
+        )),
+        crate::XWireRequest::ChangeProperty(change) => Some(format!(
+            "ChangeProperty:window={:#x}:property={}",
+            change.window.local.raw(),
+            change.property
+        )),
+        crate::XWireRequest::GetProperty(read) => Some(format!(
+            "GetProperty:window={:#x}:property={}",
+            read.window.local.raw(),
+            read.property
+        )),
+        crate::XWireRequest::CreateGraphicsContext { gc, drawable } => Some(format!(
+            "CreateGC:gc={:#x}:drawable={:#x}",
+            gc.local.raw(),
+            drawable.local.raw()
+        )),
+        crate::XWireRequest::CreatePixmap {
+            pixmap,
+            drawable,
+            width,
+            height,
+            ..
+        } => Some(format!(
+            "CreatePixmap:pixmap={:#x}:drawable={:#x}:{}x{}",
+            pixmap.local.raw(),
+            drawable.local.raw(),
+            width,
+            height
+        )),
+        crate::XWireRequest::PutImage {
+            drawable,
+            width,
+            height,
+            dst_x,
+            dst_y,
+            ..
+        } => Some(format!(
+            "PutImage:drawable={:#x}:{}x{}+{}+{}",
+            drawable.local.raw(),
+            width,
+            height,
+            dst_x,
+            dst_y
+        )),
+        crate::XWireRequest::ImageText8 {
+            drawable,
+            x,
+            y,
+            glyph_count,
+            ..
+        } => Some(format!(
+            "ImageText8:drawable={:#x}:glyphs={glyph_count}+{x}+{y}",
+            drawable.local.raw()
+        )),
+        crate::XWireRequest::CopyArea {
+            source,
+            destination,
+            width,
+            height,
+            dst_x,
+            dst_y,
+            ..
+        } => Some(format!(
+            "CopyArea:source={:#x}:destination={:#x}:{}x{}+{}+{}",
+            source.local.raw(),
+            destination.local.raw(),
+            width,
+            height,
+            dst_x,
+            dst_y
+        )),
+        crate::XWireRequest::OpenFont { name, .. } => Some(format!("OpenFont:{name}")),
+        crate::XWireRequest::QueryFont { font } => {
+            Some(format!("QueryFont:font={:#x}", font.local.raw()))
+        }
+        crate::XWireRequest::CloseFont { font } => {
+            Some(format!("CloseFont:font={:#x}", font.local.raw()))
+        }
+        crate::XWireRequest::CreateGlyphCursor { cursor, .. } => Some(format!(
+            "CreateGlyphCursor:cursor={:#x}",
+            cursor.local.raw()
+        )),
+        crate::XWireRequest::RecolorCursor { cursor } => {
+            Some(format!("RecolorCursor:cursor={:#x}", cursor.local.raw()))
+        }
+        crate::XWireRequest::GetModifierMapping => Some("GetModifierMapping".to_owned()),
+        crate::XWireRequest::GetKeyboardMapping {
+            first_keycode,
+            count,
+        } => Some(format!(
+            "GetKeyboardMapping:first_keycode={first_keycode}:count={count}"
+        )),
         crate::XWireRequest::GetSelectionOwner { selection } => {
             Some(format!("GetSelectionOwner:{selection}"))
         }
+        crate::XWireRequest::GrabButton {
+            window,
+            event_mask,
+            button,
+            modifiers,
+            owner_events,
+        } => Some(format!(
+            "GrabButton:window={:#x}:button={button}:modifiers={modifiers:#x}:event_mask={event_mask:#x}:owner_events={owner_events}",
+            window.local.raw()
+        )),
+        crate::XWireRequest::UngrabButton {
+            window,
+            button,
+            modifiers,
+        } => Some(format!(
+            "UngrabButton:window={:#x}:button={button}:modifiers={modifiers:#x}",
+            window.local.raw()
+        )),
         crate::XWireRequest::CreateColormap {
             colormap,
             window,
@@ -341,6 +495,15 @@ fn x11_core_request_trace_detail(request: &crate::XWireRequest) -> Option<String
             "CreateColormap:colormap={:#x}:window={:#x}:visual={visual:#x}",
             colormap.local.raw(),
             window.local.raw()
+        )),
+        crate::XWireRequest::AllocColor {
+            colormap,
+            red,
+            green,
+            blue,
+        } => Some(format!(
+            "AllocColor:colormap={:#x}:rgb={red:#06x},{green:#06x},{blue:#06x}",
+            colormap.local.raw()
         )),
         crate::XWireRequest::ShmQueryVersion => Some("MIT-SHM:QueryVersion".to_string()),
         crate::XWireRequest::ShmAttach { segment, .. } => {

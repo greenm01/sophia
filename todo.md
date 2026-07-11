@@ -12,7 +12,7 @@ active milestone to `docs/roadmap-history.md`.
 
 ## Active Milestone
 
-### Authority Coverage From Real Probe Failures
+### Live Session Terminal Bootstrap
 
 Current architecture read:
 
@@ -26,36 +26,36 @@ Current architecture read:
 
 Current milestone target:
 
-- [ ] Expand Sophia X Authority only where real probes demand
-  it.
-- [ ] Prefer bounded drawing, upload, present, selection, event, and namespace
-  behavior over broad X11 completeness.
-- [ ] Keep XLibre bridge smokes as prototype references until Sophia X Authority
-  has equivalent live coverage.
+- [ ] Keep Codex on an outside TTY/SSH control plane while Sophia owns a
+  separate live-session TTY.
+- [x] Turn xterm from setup/lifecycle coverage into a rendered terminal
+  transaction proof.
+- [ ] Bootstrap a persistent Sophia live session launcher from the passing
+  terminal render proof and report reduced health.
 
 Next logical steps:
 
-- [ ] Add the next probe-driven GTK slice for XInput2 startup, then turn zenity
-  from startup protocol coverage into a mapped/rendered dialog proof under a
-  host session with working DBus/portal state.
-- [ ] Convert one long-running external smoke into a stricter rendered-output
-  assertion once Authority-to-Engine transactions can be observed through the
-  live composition path.
-- [ ] Start the Wayland Authority skeleton only after the X Authority probe set
-  includes one toolkit client beyond Athena/Xaw-style programs.
+- [ ] Implement a `sophia-live-session` CLI command that starts persistent X
+  Authority, one terminal client, runtime intake, and live scanout with reduced
+  status lines.
+- [ ] Reuse the passing `x-authority-xterm-render-smoke` profile as the terminal
+  client baseline for the launcher.
+- [ ] Route keyboard input to the focused xterm surface, then test launching
+  Codex inside that terminal.
+- [ ] Return to GTK/XInput2/zenity rendered dialog proof after the terminal
+  control loop is usable.
 
 ---
 
 ## Next 3 Milestones
 
-### 1. Authority Coverage From Real Probe Failures
+### 1. Live Session Terminal Bootstrap
 
-- [ ] Expand Sophia X Authority only where real probes demand
-  it.
-- [ ] Prefer bounded drawing, upload, present, selection, event, and namespace
-  behavior over broad X11 completeness.
-- [ ] Keep XLibre bridge smokes as prototype references until Sophia X Authority
-  has equivalent live coverage.
+- [ ] Keep the operator control plane outside Sophia until xterm rendering and
+  keyboard routing are proven.
+- [x] Convert xterm into the first rendered terminal proof.
+- [ ] Add a persistent `sophia-live-session` launcher around X Authority,
+  runtime intake, and live scanout.
 
 ### 2. Wayland Authority Skeleton
 
@@ -79,6 +79,9 @@ Next logical steps:
 
 - [ ] Continue splitting backend-live by domain where modules still mix
   unrelated authority, renderer, runtime, or scanout ownership.
+- [ ] Add the next probe-driven GTK slice for XInput2 startup, then turn zenity
+  from startup protocol coverage into a mapped/rendered dialog proof under a
+  host session with working DBus/portal state.
 - [ ] Retire XLibre prototype smokes only after Sophia X Authority has
   equivalent live transaction, namespace, selection, and routed-input coverage.
 
@@ -86,6 +89,14 @@ Next logical steps:
 
 ## Done Recently
 
+- [x] Documented the live-session bootstrap path in
+  `docs/live-session-bootstrap.md`: keep Codex on an outside TTY/SSH control
+  plane, make xterm the first rendered terminal proof, then add keyboard routing
+  before trying to run Codex inside Sophia.
+- [x] Added the strict `x-authority-xterm-render-smoke` milestone probe. It
+  now reaches xterm text drawing with `first_error=none`, commits four terminal
+  `SurfaceTransaction` values, and uses `-cm -dc` to avoid spending the proof
+  window on 256-color palette setup.
 - [x] `x-authority-zenity-smoke` launches `zenity` through PATH/env-resolved
   probe configuration, keeps `first_error=none` under `dbus-run-session`, and
   adds only the demanded bounded `GetSelectionOwner`, `GrabServer`,

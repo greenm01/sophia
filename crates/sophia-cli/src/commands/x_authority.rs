@@ -369,6 +369,30 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         allow_client_failure_without_x_error: true,
     },
     ExternalProbeSmokeSpec {
+        command_name: "x-authority-xterm-render-smoke",
+        label: "xterm_render",
+        binary: "xterm",
+        display_mode: ExternalProbeDisplayMode::Argument("-display"),
+        args: &[
+            "-geometry",
+            "80x24",
+            "-title",
+            "Sophia xterm",
+            "-cm",
+            "-dc",
+            "-hold",
+            "-e",
+            "sh",
+            "-c",
+            "printf 'Sophia terminal proof\\n'; sleep 5",
+        ],
+        display_base: 7650,
+        namespace: 59,
+        require_transactions: true,
+        allow_proof_kill_without_transactions: false,
+        allow_client_failure_without_x_error: false,
+    },
+    ExternalProbeSmokeSpec {
         command_name: "x-authority-zenity-smoke",
         label: "zenity",
         binary: "zenity",
@@ -833,7 +857,7 @@ fn run_x_authority_external_probe_smoke(
         run_x11_core_socket_server_once_traced_with_idle_timeout(
             &server_path,
             namespace,
-            Duration::from_secs(2),
+            Duration::from_secs(8),
             |trace| {
                 let _ = sender.try_send(ExternalProbeObservation::Opcode(trace.major_opcode));
                 if let Some(detail) = &trace.request_detail {

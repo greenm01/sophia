@@ -191,18 +191,51 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
-        XWireRequest::ConfigureWindow { window, .. } => {
-            let outputs =
-                if let Err(error) = runtime.validate_window_access(context.namespace, window) {
-                    vec![XClientOutput::Error(x_error_from_runtime(
+        XWireRequest::ConfigureWindow {
+            window,
+            x,
+            y,
+            width,
+            height,
+            ..
+        } => {
+            let outputs = if let Err(error) = runtime.configure_window_geometry(
+                context.namespace,
+                window,
+                x,
+                y,
+                width,
+                height,
+                u64::from(context.sequence),
+            ) {
+                vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(window.local.raw()).unwrap_or(0),
+                ))]
+            } else {
+                match runtime.window_geometry(context.namespace, window) {
+                    Ok(geometry) => vec![XClientOutput::Event(XClientEvent::ConfigureNotify {
+                        sequence: context.sequence,
+                        event: window,
+                        window,
+                        above_sibling: None,
+                        x: clamp_i16(geometry.x),
+                        y: clamp_i16(geometry.y),
+                        width: clamp_u16(geometry.width),
+                        height: clamp_u16(geometry.height),
+                        border_width: 0,
+                        override_redirect: false,
+                    })],
+                    Err(error) => vec![XClientOutput::Error(x_error_from_runtime(
                         error,
                         context.sequence,
                         context.major_opcode,
                         u32::try_from(window.local.raw()).unwrap_or(0),
-                    ))]
-                } else {
-                    Vec::new()
-                };
+                    ))],
+                }
+            };
             XDispatchResult {
                 response: None,
                 outputs,
@@ -422,6 +455,25 @@ pub fn dispatch_x11_wire_request(
             })],
             metadata_candidates: Vec::new(),
         },
+        XWireRequest::GrabButton { window, .. } | XWireRequest::UngrabButton { window, .. } => {
+            let outputs = if window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
+                Vec::new()
+            } else if let Err(error) = runtime.validate_window_access(context.namespace, window) {
+                vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(window.local.raw()).unwrap_or(0),
+                ))]
+            } else {
+                Vec::new()
+            };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::GrabServer | XWireRequest::UngrabServer => XDispatchResult {
             response: None,
             outputs: Vec::new(),
@@ -612,6 +664,22 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
+        XWireRequest::RecolorCursor { cursor } => {
+            let outputs = match runtime.validate_cursor_access(context.namespace, cursor) {
+                Ok(()) => Vec::new(),
+                Err(error) => vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(cursor.local.raw()).unwrap_or(0),
+                ))],
+            };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::ListFonts { max_names, .. } => XDispatchResult {
             response: None,
             outputs: vec![XClientOutput::Reply(XClientReply::ListFonts {
@@ -687,6 +755,24 @@ pub fn dispatch_x11_wire_request(
                 sequence: context.sequence,
                 focus: XResourceId::new(u64::from(crate::X_SETUP_DEFAULT_ROOT), 1),
                 revert_to: 1,
+            })],
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::GetModifierMapping => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::GetModifierMapping {
+                sequence: context.sequence,
+                keycodes_per_modifier: 0,
+                keycodes: Vec::new(),
+            })],
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::GetKeyboardMapping { count, .. } => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::GetKeyboardMapping {
+                sequence: context.sequence,
+                keysyms_per_keycode: 1,
+                keysyms: vec![0; usize::from(count)],
             })],
             metadata_candidates: Vec::new(),
         },
@@ -796,6 +882,22 @@ pub fn dispatch_x11_wire_request(
                     red: intensity,
                     green: intensity,
                     blue: intensity,
+                })],
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::AllocColor {
+            red, green, blue, ..
+        } => {
+            let black = red == 0 && green == 0 && blue == 0;
+            XDispatchResult {
+                response: None,
+                outputs: vec![XClientOutput::Reply(XClientReply::AllocColor {
+                    sequence: context.sequence,
+                    pixel: if black { 0 } else { 1 },
+                    red,
+                    green,
+                    blue,
                 })],
                 metadata_candidates: Vec::new(),
             }
@@ -1260,6 +1362,13 @@ pub fn dispatch_x11_wire_request(
             }
         }
         XWireRequest::PolyText8 {
+            drawable,
+            x,
+            y,
+            glyph_count,
+            ..
+        }
+        | XWireRequest::ImageText8 {
             drawable,
             x,
             y,

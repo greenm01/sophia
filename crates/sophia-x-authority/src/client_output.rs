@@ -193,6 +193,16 @@ pub enum XClientReply {
         focus: XResourceId,
         revert_to: u8,
     },
+    GetModifierMapping {
+        sequence: u16,
+        keycodes_per_modifier: u8,
+        keycodes: Vec<u8>,
+    },
+    GetKeyboardMapping {
+        sequence: u16,
+        keysyms_per_keycode: u8,
+        keysyms: Vec<u32>,
+    },
     TranslateCoordinates {
         sequence: u16,
         same_screen: bool,
@@ -218,6 +228,13 @@ pub enum XClientReply {
         owner: Option<XResourceId>,
     },
     AllocNamedColor {
+        sequence: u16,
+        pixel: u32,
+        red: u16,
+        green: u16,
+        blue: u16,
+    },
+    AllocColor {
         sequence: u16,
         pixel: u32,
         red: u16,
@@ -539,6 +556,45 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             put_resource(byte_order, &mut out[8..12], focus);
             out
         }
+        XClientReply::GetModifierMapping {
+            sequence,
+            keycodes_per_modifier,
+            keycodes,
+        } => {
+            let padded_keycodes_len = padded_len(keycodes.len());
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN + padded_keycodes_len];
+            write_reply_header(
+                byte_order,
+                &mut out[..X_CLIENT_OUTPUT_RECORD_LEN],
+                sequence,
+                u32::try_from(padded_keycodes_len / 4).unwrap_or(0),
+            );
+            out[1] = keycodes_per_modifier;
+            out[X_CLIENT_OUTPUT_RECORD_LEN..X_CLIENT_OUTPUT_RECORD_LEN + keycodes.len()]
+                .copy_from_slice(&keycodes);
+            out
+        }
+        XClientReply::GetKeyboardMapping {
+            sequence,
+            keysyms_per_keycode,
+            keysyms,
+        } => {
+            let keysyms_len = keysyms.len().saturating_mul(4);
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN + keysyms_len];
+            write_reply_header(
+                byte_order,
+                &mut out[..X_CLIENT_OUTPUT_RECORD_LEN],
+                sequence,
+                u32::try_from(keysyms_len / 4).unwrap_or(0),
+            );
+            out[1] = keysyms_per_keycode;
+            let mut offset = X_CLIENT_OUTPUT_RECORD_LEN;
+            for keysym in keysyms {
+                put_u32(byte_order, &mut out[offset..offset + 4], keysym);
+                offset += 4;
+            }
+            out
+        }
         XClientReply::TranslateCoordinates {
             sequence,
             same_screen,
@@ -615,6 +671,21 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             put_u16(byte_order, &mut out[18..20], red);
             put_u16(byte_order, &mut out[20..22], green);
             put_u16(byte_order, &mut out[22..24], blue);
+            out
+        }
+        XClientReply::AllocColor {
+            sequence,
+            pixel,
+            red,
+            green,
+            blue,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            put_u16(byte_order, &mut out[8..10], red);
+            put_u16(byte_order, &mut out[10..12], green);
+            put_u16(byte_order, &mut out[12..14], blue);
+            put_u32(byte_order, &mut out[16..20], pixel);
             out
         }
         XClientReply::ListProperties { sequence, atoms } => {
@@ -861,14 +932,14 @@ fn encode_font_info_reply(
     out[1] = u8::try_from(name.len()).unwrap_or(0);
     // min_bounds charinfo
     put_i16(byte_order, &mut out[8..10], 0);
-    put_i16(byte_order, &mut out[10..12], 0);
+    put_i16(byte_order, &mut out[10..12], 8);
     put_i16(byte_order, &mut out[12..14], 8);
     put_i16(byte_order, &mut out[14..16], 8);
     put_i16(byte_order, &mut out[16..18], 2);
     put_u16(byte_order, &mut out[18..20], 0);
     // max_bounds charinfo
     put_i16(byte_order, &mut out[24..26], 0);
-    put_i16(byte_order, &mut out[26..28], 0);
+    put_i16(byte_order, &mut out[26..28], 8);
     put_i16(byte_order, &mut out[28..30], 8);
     put_i16(byte_order, &mut out[30..32], 8);
     put_i16(byte_order, &mut out[32..34], 2);

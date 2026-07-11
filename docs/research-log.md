@@ -3,6 +3,35 @@
 This file records early decisions, assumptions, and open questions. Keep it
 short and chronological.
 
+## 2026-07-10: Live Session Terminal Bootstrap Path
+
+`docs/live-session-bootstrap.md` now records the operator path for working on a
+Sophia live session without losing the development control plane: keep Codex on
+an outside TTY/SSH/tmux session, run Sophia experiments on a separate TTY, and
+only move Codex inside Sophia after xterm rendering and keyboard routing are
+proven.
+
+The first terminal milestone is now a separate strict probe:
+`x-authority-xterm-render-smoke`. The existing `x-authority-xterm-smoke` remains
+a setup/lifecycle regression. The strict render probe launches a held xterm with
+text and requires at least one committed `SurfaceTransaction`.
+
+The strict render probe now passes as the first terminal transaction proof.
+The compatibility work stayed xterm-driven: it preserves `ConfigureWindow`
+geometry and emits `ConfigureNotify`, accepts bounded cursor recolor, keyboard
+mapping, modifier mapping, passive button grab, and RGB color allocation setup,
+then reduces `ImageText8` to conservative text damage. The probe disables
+xterm ANSI/dynamic color setup with `-cm -dc` so it exercises terminal drawing
+rather than spending the proof window on 256-color palette initialization.
+
+The passing reduced evidence is `outcome=proof_window_killed`, `status=-1`,
+`requests=232`, `opcode_count=28`,
+`opcodes=1,2,3,12,14,16,18,20,43,45,46,47,53,54,55,60,65,72,76,84,91,94,96,98,101,119,133,134`,
+`transactions=4`, `runtime_committed=4`, `runtime_surfaces=4`, and
+`first_error=none`. The next live-session slice should wrap this into a
+persistent `sophia-live-session` launcher and route keyboard input to the
+focused terminal surface.
+
 ## 2026-07-10: zenity as GTK Startup Probe
 
 `x-authority-zenity-smoke` now launches `zenity` through the CLI external-probe
@@ -32,21 +61,22 @@ regression, not a rendered GTK proof: `outcome=client_exited_failure`,
 `x-authority-xterm-smoke` now launches `xterm` against Sophia X
 Authority and runs through terminal setup/lifecycle requests with no X protocol
 error. The compatibility work stayed probe-driven: xterm added bounded
-`ConfigureWindow` decoding and namespace-checked dispatch. It does not yet
-prove rendered terminal contents because the observed request stream reaches
-pixmap/image setup but produces no Sophia `SurfaceTransaction`.
+`ConfigureWindow` decoding and namespace-checked dispatch, then accumulated the
+same setup-only query/resource coverage used by the stricter render proof. This
+smoke remains a no-transaction lifecycle regression; rendered terminal contents
+are covered by `x-authority-xterm-render-smoke`.
 
 The external-probe harness now passes `-display` before client-specific
 arguments so X Toolkit clients that use `-e` still receive the intended test
 display, and no-transaction failure messages include request/opcode counters.
 
-The current reduced evidence is `outcome=client_exited_failure`, `status=1`,
-`requests=84`, `opcode_count=18`,
-`opcodes=1,12,16,18,20,43,45,46,47,53,54,55,60,72,94,98,133,134`,
+The current reduced evidence is `outcome=client_exited_success`, `status=0`,
+`requests=228`, `opcode_count=26`,
+`opcodes=1,2,3,12,14,16,18,20,43,45,46,47,53,54,55,60,72,84,91,94,96,98,101,119,133,134`,
 `transactions=0`, `runtime_committed=0`, `runtime_surfaces=0`, and
-`first_error=none`. The client exit is accepted here because this smoke's
-invariant is setup/lifecycle compatibility without a client-visible X protocol
-error, not rendered terminal output.
+`first_error=none`. The zero-transaction result is accepted here because this
+smoke's invariant is setup/lifecycle compatibility without a client-visible X
+protocol error, not rendered terminal output.
 
 ## 2026-07-10: xcalc as Athena Widget Probe
 

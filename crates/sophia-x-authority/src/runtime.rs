@@ -237,6 +237,29 @@ impl XAuthorityRuntime {
             .ok_or(XAuthorityRuntimeError::UnknownResource)
     }
 
+    pub fn configure_window_geometry(
+        &mut self,
+        namespace: NamespaceId,
+        window: crate::XResourceId,
+        x: Option<i16>,
+        y: Option<i16>,
+        width: Option<u16>,
+        height: Option<u16>,
+        generation: u64,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        self.resources
+            .lookup(namespace, window, XResourceKind::Window)?;
+        self.windows.apply(XWindowLifecycleEvent::Configured {
+            id: window,
+            x,
+            y,
+            width,
+            height,
+            generation,
+        })?;
+        Ok(())
+    }
+
     pub fn map_namespace_windows(
         &mut self,
         namespace: NamespaceId,
@@ -340,6 +363,17 @@ impl XAuthorityRuntime {
             .lookup(namespace, cursor, XResourceKind::Cursor)?;
         self.resources.remove(cursor);
         Ok(())
+    }
+
+    pub fn validate_cursor_access(
+        &self,
+        namespace: NamespaceId,
+        cursor: crate::XResourceId,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        self.resources
+            .lookup(namespace, cursor, XResourceKind::Cursor)
+            .map(|_| ())
+            .map_err(Into::into)
     }
 
     pub fn validate_drawable_access(

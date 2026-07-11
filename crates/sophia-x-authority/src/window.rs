@@ -50,6 +50,14 @@ pub enum XWindowLifecycleEvent {
         id: XResourceId,
         generation: u64,
     },
+    Configured {
+        id: XResourceId,
+        x: Option<i16>,
+        y: Option<i16>,
+        width: Option<u16>,
+        height: Option<u16>,
+        generation: u64,
+    },
     Destroyed {
         id: XResourceId,
     },
@@ -116,6 +124,33 @@ impl XWindowTable {
                     .get_mut(&id)
                     .ok_or(XAuthorityAccessError::UnknownResource)?;
                 record.map_state = XMapState::Unmapped;
+                record.generation = generation;
+                Ok(Some(record.authority_surface()))
+            }
+            XWindowLifecycleEvent::Configured {
+                id,
+                x,
+                y,
+                width,
+                height,
+                generation,
+            } => {
+                let record = self
+                    .windows
+                    .get_mut(&id)
+                    .ok_or(XAuthorityAccessError::UnknownResource)?;
+                if let Some(x) = x {
+                    record.geometry.x = i32::from(x);
+                }
+                if let Some(y) = y {
+                    record.geometry.y = i32::from(y);
+                }
+                if let Some(width) = width {
+                    record.geometry.width = i32::from(width);
+                }
+                if let Some(height) = height {
+                    record.geometry.height = i32::from(height);
+                }
                 record.generation = generation;
                 Ok(Some(record.authority_surface()))
             }

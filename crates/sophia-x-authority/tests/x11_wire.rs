@@ -234,6 +234,10 @@ fn x11_core_decoder_maps_create_and_map_to_authority_packets() {
         XWireRequest::ConfigureWindow {
             window: XResourceId::new(0x220001, 1),
             value_mask: 0x000c,
+            x: None,
+            y: None,
+            width: Some(12),
+            height: Some(14),
         }
     );
     let geometry = decode_x11_core_request(
@@ -301,6 +305,24 @@ fn x11_core_decoder_maps_create_and_map_to_authority_packets() {
             window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
         }
     );
+    let modifier_mapping = decode_x11_core_request(
+        context(namespace, 512, XByteOrder::LittleEndian),
+        &[119, 0, 1, 0],
+    )
+    .unwrap();
+    assert_eq!(modifier_mapping, XWireRequest::GetModifierMapping);
+    let keyboard_mapping = decode_x11_core_request(
+        context(namespace, 513, XByteOrder::LittleEndian),
+        &[101, 8, 2, 0, 4, 0, 0, 0],
+    )
+    .unwrap();
+    assert_eq!(
+        keyboard_mapping,
+        XWireRequest::GetKeyboardMapping {
+            first_keycode: 8,
+            count: 4,
+        }
+    );
 }
 
 #[test]
@@ -338,13 +360,29 @@ fn x11_core_decoder_maps_selection_requests_to_authority_packets() {
         &resource_request(XByteOrder::BigEndian, 23, 1),
     )
     .unwrap();
-    let grab = decode_x11_core_request(
+    let grab_button = decode_x11_core_request(
         context(namespace, 506, XByteOrder::BigEndian),
+        &grab_button_request(
+            XByteOrder::BigEndian,
+            X_SETUP_DEFAULT_ROOT,
+            0x001c,
+            1,
+            0x0040,
+        ),
+    )
+    .unwrap();
+    let ungrab_button = decode_x11_core_request(
+        context(namespace, 507, XByteOrder::BigEndian),
+        &ungrab_button_request(XByteOrder::BigEndian, X_SETUP_DEFAULT_ROOT, 1, 0x0040),
+    )
+    .unwrap();
+    let grab = decode_x11_core_request(
+        context(namespace, 508, XByteOrder::BigEndian),
         &[36, 0, 0, 1],
     )
     .unwrap();
     let ungrab = decode_x11_core_request(
-        context(namespace, 507, XByteOrder::BigEndian),
+        context(namespace, 509, XByteOrder::BigEndian),
         &[37, 0, 0, 1],
     )
     .unwrap();
@@ -379,6 +417,24 @@ fn x11_core_decoder_maps_selection_requests_to_authority_packets() {
         }
     );
     assert_eq!(get_owner, XWireRequest::GetSelectionOwner { selection: 1 });
+    assert_eq!(
+        grab_button,
+        XWireRequest::GrabButton {
+            window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+            event_mask: 0x001c,
+            button: 1,
+            modifiers: 0x0040,
+            owner_events: true,
+        }
+    );
+    assert_eq!(
+        ungrab_button,
+        XWireRequest::UngrabButton {
+            window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+            button: 1,
+            modifiers: 0x0040,
+        }
+    );
     assert_eq!(grab, XWireRequest::GrabServer);
     assert_eq!(ungrab, XWireRequest::UngrabServer);
 }
@@ -801,6 +857,23 @@ fn x11_core_decoder_captures_poly_fill_rectangle_requests() {
             glyph_count: 2,
         }
     );
+
+    let image_text = decode_x11_core_request(
+        context(namespace, 515, XByteOrder::LittleEndian),
+        &image_text8_request(XByteOrder::LittleEndian, 0x220010, 0x220011, 5, 16, b"Hi"),
+    )
+    .unwrap();
+
+    assert_eq!(
+        image_text,
+        XWireRequest::ImageText8 {
+            drawable: XResourceId::new(0x220010, 1),
+            gc: XResourceId::new(0x220011, 1),
+            x: 5,
+            y: 16,
+            glyph_count: 2,
+        }
+    );
 }
 
 #[test]
@@ -980,6 +1053,18 @@ fn x11_core_decoder_captures_font_requests() {
             cursor: XResourceId::new(0x220050, 1),
         }
     );
+
+    let recolor_cursor = decode_x11_core_request(
+        context(namespace, 580, XByteOrder::LittleEndian),
+        &recolor_cursor_request(XByteOrder::LittleEndian, 0x220050),
+    )
+    .unwrap();
+    assert_eq!(
+        recolor_cursor,
+        XWireRequest::RecolorCursor {
+            cursor: XResourceId::new(0x220050, 1),
+        }
+    );
 }
 
 #[test]
@@ -1114,6 +1199,63 @@ fn x11_dispatch_reports_root_input_focus_for_minimal_server() {
         read_u32(XByteOrder::LittleEndian, &encoded[0][8..12]),
         X_SETUP_DEFAULT_ROOT
     );
+}
+
+#[test]
+fn x11_dispatch_reports_empty_modifier_mapping_for_minimal_server() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let request = decode_x11_core_request(
+        context(namespace, 523, XByteOrder::LittleEndian),
+        &[119, 0, 1, 0],
+    )
+    .unwrap();
+
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 2, XByteOrder::LittleEndian, 119),
+        request,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded.len(), 1);
+    assert_eq!(encoded[0].len(), 32);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(encoded[0][1], 0);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][2..4]), 2);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][4..8]), 0);
+}
+
+#[test]
+fn x11_dispatch_reports_placeholder_keyboard_mapping_for_minimal_server() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let request = decode_x11_core_request(
+        context(namespace, 524, XByteOrder::LittleEndian),
+        &[101, 8, 2, 0, 4, 0, 0, 0],
+    )
+    .unwrap();
+
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 3, XByteOrder::LittleEndian, 101),
+        request,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded.len(), 1);
+    assert_eq!(encoded[0].len(), 48);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(encoded[0][1], 1);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][2..4]), 3);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][4..8]), 4);
+    assert_eq!(&encoded[0][32..48], &[0; 16]);
 }
 
 #[test]
@@ -2124,6 +2266,52 @@ fn x11_dispatch_alloc_named_color_returns_reduced_black_white_pixels() {
 }
 
 #[test]
+fn x11_dispatch_alloc_color_echoes_reduced_rgb_pixel() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let request = decode_x11_core_request(
+        context(namespace, 544, XByteOrder::LittleEndian),
+        &alloc_color_request(
+            XByteOrder::LittleEndian,
+            X_SETUP_DEFAULT_COLORMAP,
+            0xff00,
+            0,
+            0,
+        ),
+    )
+    .unwrap();
+
+    assert_eq!(
+        request,
+        XWireRequest::AllocColor {
+            colormap: XResourceId::new(u64::from(X_SETUP_DEFAULT_COLORMAP), 1),
+            red: 0xff00,
+            green: 0,
+            blue: 0,
+        }
+    );
+
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 3, XByteOrder::LittleEndian, 84),
+        request,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(
+        read_u16(XByteOrder::LittleEndian, &encoded[0][8..10]),
+        0xff00
+    );
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][10..12]), 0);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][12..14]), 0);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][16..20]), 1);
+}
+
+#[test]
 fn x11_dispatch_reads_bounded_property_slices() {
     let namespace = NamespaceId::from_raw(45);
     let mut runtime = XAuthorityRuntime::new();
@@ -2231,6 +2419,48 @@ fn x11_dispatch_get_selection_owner_reports_no_owner() {
     assert_eq!(encoded.len(), 1);
     assert_eq!(encoded[0][0], 1);
     assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][8..12]), 0);
+}
+
+#[test]
+fn x11_dispatch_accepts_root_button_grab_lifecycle() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+
+    let grab = decode_x11_core_request(
+        context(namespace, 545, XByteOrder::LittleEndian),
+        &grab_button_request(
+            XByteOrder::LittleEndian,
+            X_SETUP_DEFAULT_ROOT,
+            0x001c,
+            1,
+            0x0040,
+        ),
+    )
+    .unwrap();
+    let grab = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 28),
+        grab,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert!(grab.outputs.is_empty());
+
+    let ungrab = decode_x11_core_request(
+        context(namespace, 546, XByteOrder::LittleEndian),
+        &ungrab_button_request(XByteOrder::LittleEndian, X_SETUP_DEFAULT_ROOT, 1, 0x0040),
+    )
+    .unwrap();
+    let ungrab = dispatch_x11_wire_request(
+        dispatch_context(namespace, 2, XByteOrder::LittleEndian, 29),
+        ungrab,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert!(ungrab.outputs.is_empty());
 }
 
 #[test]
@@ -2623,7 +2853,33 @@ fn x11_dispatch_emits_configure_map_property_and_selection_failure_outputs() {
         &mut atoms,
         &mut properties,
     );
-    assert!(configure.outputs.is_empty());
+    assert_eq!(configure.outputs.len(), 1);
+    assert_eq!(
+        configure.outputs[0],
+        XClientOutput::Event(XClientEvent::ConfigureNotify {
+            sequence: 4,
+            event: XResourceId::new(0x220101, 1),
+            window: XResourceId::new(0x220101, 1),
+            above_sibling: None,
+            x: 10,
+            y: 20,
+            width: 12,
+            height: 14,
+            border_width: 0,
+            override_redirect: false,
+        })
+    );
+    assert_eq!(
+        runtime
+            .window_geometry(namespace, XResourceId::new(0x220101, 1))
+            .unwrap(),
+        Rect {
+            x: 10,
+            y: 20,
+            width: 12,
+            height: 14,
+        }
+    );
 
     let map_subwindows = decode_x11_core_request(
         context(namespace, 605, XByteOrder::LittleEndian),
@@ -3162,6 +3418,10 @@ fn x11_dispatch_accepts_open_and_close_font_resources() {
     assert_eq!(encoded.len(), 1);
     assert_eq!(encoded[0][0], 1);
     assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][4..8]), 7);
+    assert_eq!(read_i16(XByteOrder::LittleEndian, &encoded[0][10..12]), 8);
+    assert_eq!(read_i16(XByteOrder::LittleEndian, &encoded[0][12..14]), 8);
+    assert_eq!(read_i16(XByteOrder::LittleEndian, &encoded[0][26..28]), 8);
+    assert_eq!(read_i16(XByteOrder::LittleEndian, &encoded[0][28..30]), 8);
     assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][56..60]), 0);
 
     let list = decode_x11_core_request(
@@ -3261,13 +3521,27 @@ fn x11_dispatch_accepts_glyph_cursor_lifecycle() {
     );
     assert!(cursor.outputs.is_empty());
 
-    let free = decode_x11_core_request(
+    let recolor = decode_x11_core_request(
         context(namespace, 644, XByteOrder::LittleEndian),
+        &recolor_cursor_request(XByteOrder::LittleEndian, 0x220143),
+    )
+    .unwrap();
+    let recolor = dispatch_x11_wire_request(
+        dispatch_context(namespace, 4, XByteOrder::LittleEndian, 96),
+        recolor,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert!(recolor.outputs.is_empty());
+
+    let free = decode_x11_core_request(
+        context(namespace, 645, XByteOrder::LittleEndian),
         &resource_request(XByteOrder::LittleEndian, 95, 0x220143),
     )
     .unwrap();
     let free = dispatch_x11_wire_request(
-        dispatch_context(namespace, 4, XByteOrder::LittleEndian, 95),
+        dispatch_context(namespace, 5, XByteOrder::LittleEndian, 95),
         free,
         &mut runtime,
         &mut atoms,
@@ -3317,6 +3591,31 @@ fn x11_dispatch_poly_text8_emits_conservative_text_damage() {
         Region::single(Rect {
             x: 5,
             y: 6,
+            width: 16,
+            height: 12,
+        })
+    );
+
+    let image_text = decode_x11_core_request(
+        context(namespace, 648, XByteOrder::LittleEndian),
+        &image_text8_request(XByteOrder::LittleEndian, window, 0x220152, 9, 20, b"OK"),
+    )
+    .unwrap();
+    let image_text = dispatch_x11_wire_request(
+        dispatch_context(namespace, 3, XByteOrder::LittleEndian, 76),
+        image_text,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    let response = image_text.response.unwrap();
+    assert_eq!(response.transactions.len(), 1);
+    assert_eq!(
+        response.transactions[0].damage,
+        Region::single(Rect {
+            x: 9,
+            y: 10,
             width: 16,
             height: 12,
         })
@@ -4081,6 +4380,41 @@ fn convert_selection_request(
     out
 }
 
+fn grab_button_request(
+    byte_order: XByteOrder,
+    window: u32,
+    event_mask: u16,
+    button: u8,
+    modifiers: u16,
+) -> Vec<u8> {
+    let mut out = vec![28, 1];
+    push_u16(&mut out, byte_order, 6);
+    push_u32(&mut out, byte_order, window);
+    push_u16(&mut out, byte_order, event_mask);
+    out.push(1);
+    out.push(1);
+    push_u32(&mut out, byte_order, 0);
+    push_u32(&mut out, byte_order, 0);
+    out.push(button);
+    out.push(0);
+    push_u16(&mut out, byte_order, modifiers);
+    out
+}
+
+fn ungrab_button_request(
+    byte_order: XByteOrder,
+    window: u32,
+    button: u8,
+    modifiers: u16,
+) -> Vec<u8> {
+    let mut out = vec![29, button];
+    push_u16(&mut out, byte_order, 3);
+    push_u32(&mut out, byte_order, window);
+    push_u16(&mut out, byte_order, modifiers);
+    push_u16(&mut out, byte_order, 0);
+    out
+}
+
 fn change_property_request(
     byte_order: XByteOrder,
     mode: XPropertyMode,
@@ -4248,6 +4582,16 @@ fn create_glyph_cursor_request(
     out
 }
 
+fn recolor_cursor_request(byte_order: XByteOrder, cursor: u32) -> Vec<u8> {
+    let mut out = vec![96, 0];
+    push_u16(&mut out, byte_order, 5);
+    push_u32(&mut out, byte_order, cursor);
+    for value in [u16::MAX, u16::MAX, u16::MAX, 0, 0, 0] {
+        push_u16(&mut out, byte_order, value);
+    }
+    out
+}
+
 #[allow(clippy::too_many_arguments)]
 fn copy_area_request(
     byte_order: XByteOrder,
@@ -4312,6 +4656,26 @@ fn poly_text8_request(
     push_i16(&mut out, byte_order, y);
     out.push(u8::try_from(text.len()).unwrap());
     out.push(0);
+    out.extend_from_slice(text);
+    pad_to_four(&mut out);
+    out
+}
+
+fn image_text8_request(
+    byte_order: XByteOrder,
+    drawable: u32,
+    gc: u32,
+    x: i16,
+    y: i16,
+    text: &[u8],
+) -> Vec<u8> {
+    let mut out = vec![76, u8::try_from(text.len()).unwrap()];
+    let len_units = (16 + padded_len_for_test(text.len())) / 4;
+    push_u16(&mut out, byte_order, len_units as u16);
+    push_u32(&mut out, byte_order, drawable);
+    push_u32(&mut out, byte_order, gc);
+    push_i16(&mut out, byte_order, x);
+    push_i16(&mut out, byte_order, y);
     out.extend_from_slice(text);
     pad_to_four(&mut out);
     out
@@ -4623,6 +4987,23 @@ fn create_colormap_request(
     push_u32(&mut out, byte_order, colormap);
     push_u32(&mut out, byte_order, window);
     push_u32(&mut out, byte_order, visual);
+    out
+}
+
+fn alloc_color_request(
+    byte_order: XByteOrder,
+    colormap: u32,
+    red: u16,
+    green: u16,
+    blue: u16,
+) -> Vec<u8> {
+    let mut out = vec![84, 0];
+    push_u16(&mut out, byte_order, 4);
+    push_u32(&mut out, byte_order, colormap);
+    push_u16(&mut out, byte_order, red);
+    push_u16(&mut out, byte_order, green);
+    push_u16(&mut out, byte_order, blue);
+    push_u16(&mut out, byte_order, 0);
     out
 }
 
