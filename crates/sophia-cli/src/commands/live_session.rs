@@ -874,6 +874,7 @@ fn compositor_tick_input(
 }
 
 struct PersistentNativeScanout {
+    groups: Vec<PersistentNativeGroup>,
     heads: Vec<PersistentNativeHead>,
     discovered_outputs: usize,
     presentation_outputs: usize,
@@ -894,8 +895,15 @@ struct PersistentNativeScanout {
     page_flip_phase_rejections: usize,
 }
 
-struct PersistentNativeHead {
+struct PersistentNativeGroup {
     session: sophia_backend_live::RealAtomicScanoutPageFlipSession,
+    sender: SyncSender<sophia_backend_live::LivePageFlipCallback>,
+    receiver: Receiver<sophia_backend_live::LivePageFlipCallback>,
+}
+
+struct PersistentNativeHead {
+    group: usize,
+    selection: sophia_backend_live::LibdrmNativePrimaryPlaneSelection,
     exporter: sophia_backend_live::NativeGbmRenderedScanoutBufferDiscoveryExporter<
         sophia_backend_live::RealAtomicScanoutRenderDeviceDiscovery,
     >,
@@ -937,42 +945,57 @@ impl PersistentNativeScanout {
             .into());
         }
         let presentation = sophia_engine::OutputPresentationRegistry::from_outputs(&outputs);
+        let mut groups = Vec::new();
         let mut heads = Vec::new();
         for session in sessions.sessions.drain(..) {
-            if session.selections().len() != 1 || session.outputs().len() != 1 {
-                return Err("same-card multi-connector submission is not yet split into per-output exporters".into());
+            let group = groups.len();
+            for (selection, output_id) in session
+                .selections()
+                .iter()
+                .copied()
+                .zip(session.outputs().iter().copied())
+            {
+                let size = selection.size();
+                let discovery = session.render_device_discovery()?;
+                let exporter =
+                    sophia_backend_live::NativeGbmRenderedScanoutBufferDiscoveryExporter::new(
+                        discovery,
+                    )
+                    .with_preferred_modifiers(
+                        session.preferred_xrgb8888_scanout_modifiers_for_selection(selection),
+                    );
+                let (sender, receiver) = sync_channel(64);
+                heads.push(PersistentNativeHead {
+                    group,
+                    selection,
+                    exporter,
+                    sender,
+                    receiver: Some(receiver),
+                    output: sophia_engine::HeadlessOutput {
+                        id: output_id,
+                        size,
+                        scale: 1,
+                    },
+                    submitted_at: None,
+                    pending_nonzero_pixel_bytes: 0,
+                    last_checksum: 0,
+                    submissions: 0,
+                    retirements: 0,
+                    callback_accepted: 0,
+                    nonzero_exports: 0,
+                    scheduled_frame: None,
+                });
             }
-            let output_id = session.outputs()[0];
-            let size = session.selection().size();
-            let discovery = session.render_device_discovery()?;
-            let exporter =
-                sophia_backend_live::NativeGbmRenderedScanoutBufferDiscoveryExporter::new(
-                    discovery,
-                )
-                .with_preferred_modifiers(session.preferred_xrgb8888_scanout_modifiers());
             let (sender, receiver) = sync_channel(64);
-            heads.push(PersistentNativeHead {
+            groups.push(PersistentNativeGroup {
                 session,
-                exporter,
                 sender,
-                receiver: Some(receiver),
-                output: sophia_engine::HeadlessOutput {
-                    id: output_id,
-                    size,
-                    scale: 1,
-                },
-                submitted_at: None,
-                pending_nonzero_pixel_bytes: 0,
-                last_checksum: 0,
-                submissions: 0,
-                retirements: 0,
-                callback_accepted: 0,
-                nonzero_exports: 0,
-                scheduled_frame: None,
+                receiver,
             });
         }
         heads.sort_by_key(|head| head.output.id);
         Ok(Self {
+            groups,
             heads,
             discovered_outputs: outputs.len(),
             presentation_outputs: presentation.outputs().count(),
@@ -999,11 +1022,11 @@ impl PersistentNativeScanout {
     }
 
     fn selection(&self, index: usize) -> sophia_backend_live::LibdrmNativePrimaryPlaneSelection {
-        self.heads[index].session.selection()
+        self.heads[index].selection
     }
 
     fn card(&self, index: usize) -> &sophia_backend_live::RealAtomicScanoutCard {
-        self.heads[index].session.card()
+        self.groups[self.heads[index].group].session.card()
     }
 
     fn take_receiver(
@@ -1022,17 +1045,18 @@ impl PersistentNativeScanout {
         runtime: &mut sophia_backend_live::LiveBackendRuntimeAssembly,
         input: CompositorBackendTickInput,
     ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
+        let group = self.heads[index].group;
+        self.poll_group_callbacks(group)?;
         let (report, exported_nonzero) = {
+            let groups = &mut self.groups;
             let head = &mut self.heads[index];
             let export_attempts_before = head.exporter.cpu_frame_export_attempts();
-            let report = head.session.run_native_gbm_runtime_tick(
-                runtime,
-                input,
-                &mut head.exporter,
-                &head.sender,
-                64,
-                64,
-            )?;
+            let report = runtime
+                .run_tick_with_native_gbm_rendered_primary_plane_scanout_exporter_with(
+                    input,
+                    groups[group].session.card(),
+                    &mut head.exporter,
+                )?;
             let exported_nonzero = head.exporter.cpu_frame_export_attempts()
                 > export_attempts_before
                 && head.pending_nonzero_pixel_bytes > 0;
@@ -1045,11 +1069,11 @@ impl PersistentNativeScanout {
             self.nonzero_exports = self.nonzero_exports.saturating_add(1);
             self.heads[index].nonzero_exports = self.heads[index].nonzero_exports.saturating_add(1);
         }
-        if let Some(retire) = report.tick.rendered_primary_plane_scanout_retire {
+        if let Some(retire) = report.rendered_primary_plane_scanout_retire {
             self.observe_retire(index, retire);
         }
-        self.observe_callbacks(index, report.tick.page_flip_callbacks);
-        if let Some(submit) = report.tick.rendered_primary_plane_scanout_submit {
+        self.observe_callbacks(index, report.page_flip_callbacks);
+        if let Some(submit) = report.rendered_primary_plane_scanout_submit {
             use sophia_backend_live::LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus as Status;
             match submit.status {
                 Status::SubmittedWaitingForPageFlip => {
@@ -1076,8 +1100,8 @@ impl PersistentNativeScanout {
         }
         self.max_in_flight_ticks = self
             .max_in_flight_ticks
-            .max(report.tick.rendered_primary_plane_scanout_in_flight_ticks);
-        Ok(report.tick)
+            .max(report.rendered_primary_plane_scanout_in_flight_ticks);
+        Ok(report)
     }
 
     fn retire_ready(
@@ -1085,12 +1109,11 @@ impl PersistentNativeScanout {
         index: usize,
         runtime: &mut sophia_backend_live::LiveBackendRuntimeAssembly,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let head = &mut self.heads[index];
-        let _ = head
-            .session
-            .poll_native_page_flip_events(&head.sender, 64, 64);
-        let report =
-            runtime.drain_rendered_primary_plane_page_flip_callbacks_with(head.session.card());
+        let group = self.heads[index].group;
+        self.poll_group_callbacks(group)?;
+        let report = runtime.drain_rendered_primary_plane_page_flip_callbacks_with(
+            self.groups[group].session.card(),
+        );
         self.observe_callbacks(index, report.page_flip_callbacks);
         if let Some(retire) = report.rendered_primary_plane_scanout_retire {
             self.observe_retire(index, retire);
@@ -1171,10 +1194,17 @@ impl PersistentNativeScanout {
         frame: sophia_backend_live::LiveCpuComposedFrame,
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.queue_frame(index, frame);
+        let group = self.heads[index].group;
+        let groups = &mut self.groups;
         let head = &mut self.heads[index];
         let export_attempts_before = head.exporter.cpu_frame_export_attempts();
-        head.session
-            .initialize_persistent_native_gbm_scanout(runtime, &mut head.exporter)
+        groups[group]
+            .session
+            .initialize_persistent_native_gbm_scanout_for_selection(
+                runtime,
+                &mut head.exporter,
+                head.selection,
+            )
             .map_err(|evidence| {
                 format!("persistent native initial modeset failed: {evidence:?}")
             })?;
@@ -1213,6 +1243,42 @@ impl PersistentNativeScanout {
             .iter()
             .map(|head| head.exporter.cpu_frame_export_attempts())
             .sum()
+    }
+
+    fn poll_group_callbacks(&mut self, group: usize) -> Result<(), Box<dyn std::error::Error>> {
+        let callbacks = {
+            let group = &mut self.groups[group];
+            let _ = group
+                .session
+                .poll_native_page_flip_events(&group.sender, 64, 64);
+            let mut callbacks = Vec::new();
+            loop {
+                match group.receiver.try_recv() {
+                    Ok(callback) => callbacks.push(callback),
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        return Err("native card callback router disconnected".into());
+                    }
+                }
+            }
+            callbacks
+        };
+        for callback in callbacks {
+            let Some(head) = self
+                .heads
+                .iter()
+                .find(|head| head.output.id == callback.output)
+            else {
+                return Err("native callback referenced an unknown output".into());
+            };
+            head.sender
+                .try_send(callback)
+                .map_err(|error| match error {
+                    TrySendError::Full(_) => "native output callback queue is full",
+                    TrySendError::Disconnected(_) => "native output callback queue is disconnected",
+                })?;
+        }
+        Ok(())
     }
 }
 

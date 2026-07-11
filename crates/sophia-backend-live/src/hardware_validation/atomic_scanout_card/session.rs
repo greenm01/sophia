@@ -38,11 +38,19 @@ impl RealAtomicScanoutPageFlipSession {
 
     #[cfg(all(feature = "gbm-probe", feature = "libdrm-events"))]
     pub fn preferred_xrgb8888_scanout_modifiers(&self) -> Vec<u64> {
+        self.preferred_xrgb8888_scanout_modifiers_for_selection(self.selection())
+    }
+
+    #[cfg(all(feature = "gbm-probe", feature = "libdrm-events"))]
+    pub fn preferred_xrgb8888_scanout_modifiers_for_selection(
+        &self,
+        selection: LibdrmNativePrimaryPlaneSelection,
+    ) -> Vec<u64> {
         let discovery = discover_native_primary_plane_property_handles(
             &self.card,
-            self.selection().connector,
-            self.selection().crtc,
-            self.selection().plane,
+            selection.connector,
+            selection.crtc,
+            selection.plane,
         );
         let Some(properties) = discovery.properties else {
             return Vec::new();
@@ -52,7 +60,7 @@ impl RealAtomicScanoutPageFlipSession {
         };
 
         let Ok(plane_properties) =
-            drm::control::Device::get_properties(&self.card, self.selection().plane)
+            drm::control::Device::get_properties(&self.card, selection.plane)
         else {
             return Vec::new();
         };

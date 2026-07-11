@@ -53,10 +53,28 @@ impl RealAtomicScanoutPageFlipSession {
         P: NonBlockingInputPoller,
         R: RenderDeviceDiscoveryBackend,
     {
+        self.initialize_persistent_native_gbm_scanout_for_selection(
+            runtime,
+            exporter,
+            self.selection(),
+        )
+    }
+
+    pub fn initialize_persistent_native_gbm_scanout_for_selection<P, R>(
+        &mut self,
+        runtime: &mut LiveBackendRuntimeAssembly<P>,
+        exporter: &mut NativeGbmRenderedScanoutBufferDiscoveryExporter<R>,
+        selection: LibdrmNativePrimaryPlaneSelection,
+    ) -> Result<(), LibdrmNativeAtomicScanoutSmokeEvidence>
+    where
+        P: NonBlockingInputPoller,
+        R: RenderDeviceDiscoveryBackend,
+    {
         let mut submitted = self.submit_native_gbm_rendered_primary_plane_smoke_phase_with_policy(
             LibdrmNativeAtomicScanoutSmokePhase::InitialModeset,
             exporter,
             LibdrmNativePrimaryPlaneScanoutSubmitPolicy::blocking_modeset(),
+            selection,
         )?;
         let Some(submission) = submitted.submission.take() else {
             let mut evidence = submitted.evidence(None, None, None);
@@ -113,6 +131,7 @@ impl RealAtomicScanoutPageFlipSession {
             phase,
             exporter,
             submit_policy_for_smoke_phase(phase),
+            self.selection(),
         )
     }
 
@@ -121,11 +140,11 @@ impl RealAtomicScanoutPageFlipSession {
         phase: LibdrmNativeAtomicScanoutSmokePhase,
         exporter: &mut NativeGbmRenderedScanoutBufferDiscoveryExporter<R>,
         submit_policy: LibdrmNativePrimaryPlaneScanoutSubmitPolicy,
+        selected: LibdrmNativePrimaryPlaneSelection,
     ) -> Result<RealAtomicScanoutSubmittedSmokePhase, LibdrmNativeAtomicScanoutSmokeEvidence>
     where
         R: RenderDeviceDiscoveryBackend,
     {
-        let selected = self.selection();
         let target = LiveGbmEglFrameTargetRecord::new(selected.size());
         let scanout_target = reduced_scanout_target_status_from_native_selection(
             LiveKmsScanoutTargetStatus::Ready,
