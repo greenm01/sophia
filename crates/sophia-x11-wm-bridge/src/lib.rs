@@ -10,7 +10,13 @@ use sophia_protocol::{
     Transform, WmCommand, WmRequestKind, WmRequestPacket, WmResponsePacket,
 };
 
-pub const SYNTHETIC_ROOT_XID: u32 = 0x100;
+#[cfg(unix)]
+mod runtime;
+
+#[cfg(unix)]
+pub use runtime::*;
+
+pub const SYNTHETIC_ROOT_XID: u32 = sophia_x_authority::X_SETUP_DEFAULT_ROOT;
 pub const FIRST_SYNTHETIC_WINDOW_XID: u32 = 0x1_0000;
 pub const MAX_SYNTHETIC_WINDOWS: usize = 4_096;
 pub const MAX_LEGACY_WM_REQUESTS: usize = 8_192;
@@ -100,6 +106,10 @@ impl X11WmBridgeState {
 
     pub fn synthetic_window_count(&self) -> usize {
         self.surface_to_window.len()
+    }
+
+    pub fn synthetic_geometry(&self, window: SyntheticXWindowId) -> Option<Rect> {
+        self.window_to_node.get(&window).map(|node| node.geometry)
     }
 
     pub fn apply_engine_request(

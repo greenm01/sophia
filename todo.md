@@ -96,13 +96,13 @@ Exit criteria:
 
 ### 2. xmonad X11 WM Bridge
 
-- [ ] Add the isolated `sophia-x11-wm-bridge` binary with an embedded minimal
+- [x] Add the isolated `sophia-x11-wm-bridge` binary with an embedded minimal
   X server and synthetic windows only.
 - [x] Add bounded synthetic XID/lifecycle state and translate configure/focus
   requests into metadata-blind Sophia WM commands.
-- [ ] Run xmonad as blind layout policy: no physical input, real metadata,
+- [x] Run xmonad as blind layout policy: no physical input, real metadata,
   namespaces, client buffers, rendering, or scanout.
-- [ ] Translate xmonad configure/focus requests into bounded Sophia WM response
+- [x] Translate xmonad configure/focus requests into bounded Sophia WM response
   packets and pass a real two-window tiling smoke.
 
 ### 3. Live Session Stability Evidence

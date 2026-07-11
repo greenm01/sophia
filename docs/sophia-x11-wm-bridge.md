@@ -1,7 +1,6 @@
 # Sophia X11 WM Bridge
 
-Status: translation core implemented; embedded X server and real xmonad smoke
-remain after the interactive xterm milestone.
+Status: embedded policy-only server and real xmonad two-window smoke implemented.
 
 The Sophia X11 WM Bridge is a legacy window-manager translation daemon. It sits
 in the Sophia WM policy slot and lets existing X11 window managers such as i3,
@@ -125,11 +124,43 @@ as a compatibility reference. It is not vendored, linked, or required at
 Sophia runtime. The real smoke resolves the xmonad executable through `PATH`
 with an explicit environment override for local builds.
 
-The reference checkout is currently at commit `a9a8b5c`. The workspace crate
-owns bounded synthetic XID allocation, lifecycle event reduction, and
-metadata-blind configure/focus translation. The host currently has no `ghc`,
-`cabal`, `stack`, or `xmonad` executable, so real startup protocol capture is
-gated on installing a Haskell toolchain or xmonad package.
+The reference checkout used for the first real proof is at commit `a9a8b5c`.
+The workspace crate owns bounded synthetic XID allocation, lifecycle event
+reduction, and metadata-blind configure/focus translation. The proof builds the
+reference checkout through its Nix flake, so it does not require a host GHC,
+Cabal, Stack, or distro xmonad installation.
+
+## Running The Bridge
+
+The production-facing process speaks the standard framed Sophia WM protocol on
+a Unix socket and supervises exactly one xmonad process:
+
+```sh
+cargo run --offline -p sophia-x11-wm-bridge -- \
+  serve-socket --socket=/tmp/sophia-wm.sock --xmonad=/path/to/xmonad
+```
+
+`SOPHIA_XMONAD_BIN` provides the executable path when `--xmonad` is omitted.
+The bridge creates a private local `DISPLAY`, stages xmonad under a private
+empty home, clears its inherited environment, and exposes one synthetic root
+plus bounded synthetic top-level windows. It supplies empty property data and
+reports rendering/input extensions absent. It accepts no X client application
+connections and never forwards a physical key or pointer event.
+
+Run the real policy proof with:
+
+```sh
+tools/xmonad_wm_bridge_smoke.sh
+```
+
+The script uses `SOPHIA_XMONAD_BIN`, an installed `xmonad`, or the pinned
+`~/src/xmonad` Nix flake in that order. It requires two distinct rectangles from
+real xmonad `ConfigureWindow` requests and translates them into two bounded
+Sophia `RenderSurface` commands in the matching transaction. On the reference
+checkout, the baseline result is two 640 by 720 tiles within a 1280 by 720
+synthetic root. Set `SOPHIA_X11_WM_TRACE=1` to print core request opcodes during
+compatibility work; the trace contains no client metadata because none is
+served.
 
 ## Inbound Translation: Engine To Legacy WM
 

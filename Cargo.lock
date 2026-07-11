@@ -440,6 +440,7 @@ name = "sophia-x11-wm-bridge"
 version = "0.1.0"
 dependencies = [
  "sophia-protocol",
+ "sophia-x-authority",
 ]
 
 [[package]]
