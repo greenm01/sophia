@@ -57,7 +57,7 @@ done
 
 [[ "${observed[schema]}" == "5" ]]
 [[ "${observed[status]}" == "bounded_complete" ]]
-[[ "${observed[injected_input]}" == "true" ]]
+[[ "${observed[injected_input]}" == "true" || "${observed[injected_input]}" == "false" ]]
 [[ "${observed[input_pixel_change]}" == "true" ]]
 [[ "${observed[native_presentation]}" == "enabled" ]]
 [[ "${observed[native_in_flight]}" == "false" ]]
@@ -80,6 +80,13 @@ for key in "${numeric_keys[@]}"; do
         exit 1
     fi
 done
+
+if [[ "${observed[injected_input]}" == "false" ]]; then
+    if [[ "${observed[physical_input]}" != "enabled" ]] || (( observed[physical_keys_routed] == 0 )); then
+        echo "persistent live-session physical proof has no routed physical keys" >&2
+        exit 1
+    fi
+fi
 
 positive_keys=(
     elapsed_msec session_ticks authority_batches authority_transactions authority_queue_capacity

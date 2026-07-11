@@ -4,6 +4,7 @@ use sophia_engine::{FocusedInputRoute, InputFocusState, NonBlockingInputPoller};
 use sophia_protocol::{DeviceId, SeatId};
 use sophia_x_authority::XCoreKeyboardMapper;
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::process::{Child, Stdio};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
 use std::time::{Duration, Instant};
@@ -11,8 +12,10 @@ use std::time::{Duration, Instant};
 const SESSION_AUTHORITY_CAPACITY: usize = 256;
 const SESSION_KEY_CAPACITY: usize = 64;
 const SESSION_INPUT_QUIET_MSEC: u64 = 100;
+const SESSION_PHYSICAL_INPUT_TIMEOUT_MSEC: u64 = 5_000;
 const SESSION_SEAT_RAW: u64 = 1;
 const SESSION_KEYBOARD_DEVICE_RAW: u64 = 1;
+const SESSION_POINTER_DEVICE_RAW: u64 = 2;
 
 pub(crate) fn run_persistent_xterm_session(
     args: &[String],
@@ -30,7 +33,8 @@ pub(crate) fn run_persistent_xterm_session(
         Some(sophia_backend_live::open_native_libinput_path_poller(
             &config.input_devices,
             sophia_backend_live::NativeLibinputDeviceMap::new(SeatId::from_raw(SESSION_SEAT_RAW))
-                .with_keyboard_device(DeviceId::from_raw(SESSION_KEYBOARD_DEVICE_RAW)),
+                .with_keyboard_device(DeviceId::from_raw(SESSION_KEYBOARD_DEVICE_RAW))
+                .with_pointer_device(DeviceId::from_raw(SESSION_POINTER_DEVICE_RAW)),
             64,
         )?)
     };
@@ -62,7 +66,7 @@ pub(crate) fn run_persistent_xterm_session(
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
-    if config.inject_text.is_some() {
+    if config.input_proof_requested() {
         terminal_command.args([
             "-e",
             "sh",
@@ -115,6 +119,7 @@ struct PersistentXtermSessionConfig {
     max_runtime: Option<Duration>,
     max_ticks: Option<usize>,
     inject_text: Option<String>,
+    expect_physical_text: Option<String>,
     input_devices: Vec<std::path::PathBuf>,
     native_scanout: bool,
 }
@@ -136,6 +141,7 @@ impl PersistentXtermSessionConfig {
             return Err("--max-ticks accepts a value from 1 through 1000000".into());
         }
         let inject_text = arg_value(args, "--inject-text");
+        let expect_physical_text = arg_value(args, "--expect-physical-text");
         let native_scanout = args.iter().any(|arg| arg == "--native-scanout");
         if native_scanout && std::env::var_os("SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE").is_none() {
             return Err(
@@ -158,17 +164,27 @@ impl PersistentXtermSessionConfig {
         {
             return Err("--input-devices accepts 1-16 comma-separated absolute paths".into());
         }
-        if inject_text.is_some() && max_runtime.is_none() && max_ticks.is_none() {
+        if inject_text.is_some() && expect_physical_text.is_some() {
+            return Err("--inject-text and --expect-physical-text are mutually exclusive".into());
+        }
+        if (inject_text.is_some() || expect_physical_text.is_some())
+            && max_runtime.is_none()
+            && max_ticks.is_none()
+        {
             return Err(
-                "--inject-text requires --max-runtime-ms or --max-ticks for a bounded proof".into(),
+                "input proof flags require --max-runtime-ms or --max-ticks for a bounded proof"
+                    .into(),
             );
         }
-        if let Some(text) = &inject_text
+        if expect_physical_text.is_some() && input_devices.is_empty() {
+            return Err("--expect-physical-text requires --input-devices".into());
+        }
+        if let Some(text) = inject_text.as_ref().or(expect_physical_text.as_ref())
             && (text.is_empty()
                 || text.len() > 24
                 || !text.bytes().all(|byte| byte.is_ascii_lowercase()))
         {
-            return Err("--inject-text accepts 1-24 lowercase ASCII letters".into());
+            return Err("input proof text accepts 1-24 lowercase ASCII letters".into());
         }
         Ok(Self {
             display,
@@ -177,9 +193,14 @@ impl PersistentXtermSessionConfig {
             max_runtime,
             max_ticks,
             inject_text,
+            expect_physical_text,
             input_devices,
             native_scanout,
         })
+    }
+
+    fn input_proof_requested(&self) -> bool {
+        self.inject_text.is_some() || self.expect_physical_text.is_some()
     }
 }
 
@@ -229,6 +250,7 @@ fn run_session_loop(
     let mut runtime = None;
     let mut last_authority_update = started;
     let mut injection_checksum = None;
+    let mut physical_input_ready_at = None;
     let mut input_pixel_change = false;
     let mut batches = 0usize;
     let mut transactions = 0usize;
@@ -249,13 +271,24 @@ fn run_session_loop(
         if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             break;
         }
-        if config
-            .max_ticks
-            .is_some_and(|max_ticks| session_ticks >= max_ticks)
-        {
-            break;
+        let waiting_for_physical_pixels = physical_input_ready_at.is_some() && !input_pixel_change;
+        if waiting_for_physical_pixels {
+            if physical_input_ready_at.is_some_and(|ready_at: Instant| {
+                ready_at.elapsed() >= Duration::from_millis(SESSION_PHYSICAL_INPUT_TIMEOUT_MSEC)
+            }) {
+                return Err(
+                    "persistent live session timed out waiting for physical input pixels".into(),
+                );
+            }
+        } else {
+            if config
+                .max_ticks
+                .is_some_and(|max_ticks| session_ticks >= max_ticks)
+            {
+                break;
+            }
+            session_ticks = session_ticks.saturating_add(1);
         }
-        session_ticks = session_ticks.saturating_add(1);
 
         match authority_receiver.recv_timeout(Duration::from_millis(25)) {
             Ok(batch) => {
@@ -267,6 +300,7 @@ fn run_session_loop(
                 let native_frame = native_scanout.as_ref().map(|_| report.frame.clone());
                 if let Some((before_frame, _)) = injection_checksum
                     && report.checksum != before_frame
+                    && (config.expect_physical_text.is_none() || physical_keys_routed > 0)
                 {
                     input_pixel_change = true;
                 }
@@ -337,7 +371,7 @@ fn run_session_loop(
         }
 
         if injection_checksum.is_none()
-            && config.inject_text.is_some()
+            && config.input_proof_requested()
             && scene.last_report.is_some()
             && last_authority_update.elapsed() >= Duration::from_millis(SESSION_INPUT_QUIET_MSEC)
         {
@@ -345,10 +379,19 @@ fn run_session_loop(
                 .last_report
                 .as_ref()
                 .map(|report| (report.checksum, scene.buffer_checksum()));
-            send_test_text(
-                key_sender,
-                config.inject_text.as_deref().expect("checked above"),
-            )?;
+            if let Some(text) = config.inject_text.as_deref() {
+                send_test_text(key_sender, text)?;
+            } else {
+                physical_input_ready_at = Some(Instant::now());
+                println!(
+                    "sophia_live_session_input schema=1 status=ready source=physical text={}",
+                    config
+                        .expect_physical_text
+                        .as_deref()
+                        .expect("checked above")
+                );
+                std::io::stdout().flush()?;
+            }
         }
     }
 
@@ -360,13 +403,16 @@ fn run_session_loop(
         .last_report
         .as_ref()
         .ok_or("persistent live session received no composable X pixels")?;
-    if config.inject_text.is_some() && !input_pixel_change {
+    if config.input_proof_requested() && !input_pixel_change {
         return Err(format!(
             "persistent live session input did not change composed terminal pixels: baseline={injection_checksum:?} final_frame={} final_buffers={} batches={batches} transactions={transactions}",
             report.checksum,
             scene.buffer_checksum(),
         )
         .into());
+    }
+    if config.expect_physical_text.is_some() && physical_keys_routed == 0 {
+        return Err("persistent live session received no routed physical keys".into());
     }
     println!(
         "sophia_live_session schema=5 status=bounded_complete display={} elapsed_msec={} session_ticks={} authority_batches={} authority_transactions={} authority_queue_capacity={} authority_batches_dropped=0 backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_max_nonzero_pixel_bytes={} cpu_nonzero_frames={} cpu_checksum={} injected_input={} input_pixel_change={} physical_events={} physical_keys_routed={} native_presentation={} native_submissions={} native_submit_deferred={} native_submit_failures={} native_retirements={} native_retire_failures={} native_max_in_flight_ticks={} native_max_submit_to_page_flip_msec={} native_callback_accepted={} native_callback_rejected={} native_callback_queue_saturated={} native_nonzero_exports={} native_export_attempts={} native_in_flight={} native_cleanup_pending={} physical_input={}",

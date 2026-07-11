@@ -51,6 +51,12 @@ cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- \
   sophia-live-session --display=:177 --max-runtime-ms=2500 --inject-text=sophia
 ```
 
+For an external libinput proof, replace `--inject-text` with
+`--expect-physical-text=sophia` and pass `--input-devices=`. The session emits a
+`sophia_live_session_input ... status=ready` marker after pixels and focus are
+stable, pauses bounded tick accounting for at most five seconds, and succeeds
+only after routed physical keys change later terminal pixels.
+
 Passing evidence reports `status=bounded_complete`, matching authority batch,
 backend tick, and runtime commit counts, nonzero composed pixels, and
 `input_pixel_change=true`.

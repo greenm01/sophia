@@ -105,3 +105,31 @@ remain open because no Haskell/xmonad executable is installed.
 
 These questions remain probe-driven: implement the first observed missing path,
 then rerun the relevant real-client smoke.
+
+## 2026-07-11: QMP Keyboard Proof And Presentation Boundaries
+
+The isolated session no longer uses Sophia's internal core-X key injector for
+its input claim. The guest announces readiness only after xterm pixels and
+Engine-owned focus are stable. The host then sends `sophia` and Return through
+QMP `input-send-event`, virtio-keyboard, the kernel input path, libinput, Engine
+focus validation, and X Authority. The passing run observed and routed all 14
+press/release events, changed later xterm pixels, completed exactly 300 session
+ticks, submitted 46 native frames, retired 45 steady page flips, and drained
+without rejected callbacks, failed transitions, or cleanup debt. Tick counting
+pauses for a bounded five-second physical-input window so readiness at the last
+scheduled tick cannot race QMP delivery.
+
+The guest now also exposes virtio-mouse and libinput maps pointer events to a
+separate Engine device ID. This is admission plumbing only: the persistent X
+Authority path still lacks pointer motion/button delivery, so no mouse proof is
+claimed. The next input slice must combine QMP mouse events, Engine hit-testing
+and focus, core X pointer delivery, and visible client response.
+
+Likewise, current native presentation is a single-output, page-flip-retired
+fixed-refresh path. Multi-monitor support requires independent per-output
+scanout ownership, damage, frame clocks, in-flight state, and retirement, first
+proved with two QEMU heads and then on physical connectors. Vsync evidence must
+show each fixed-refresh output is paced from its own vblank/page-flip timeline.
+VRR remains a hardware capability/policy gate: discover the DRM property
+contract, default it off, enable it only for eligible Engine-approved content,
+and prove fixed-refresh fallback when VRR is unavailable or ineligible.

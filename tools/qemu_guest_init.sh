@@ -40,7 +40,7 @@ if [ ! -e /dev/dri/card0 ]; then
 fi
 
 set -- sophia-live-session --display=:181 --native-scanout --max-ticks=300 \
-    --inject-text=sophia
+    --expect-physical-text=sophia
 
 input_devices=""
 for device in /dev/input/event*; do
