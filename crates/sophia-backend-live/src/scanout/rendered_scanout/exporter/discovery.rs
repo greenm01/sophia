@@ -5,9 +5,9 @@ use crate::api::*;
 
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
 use sophia_renderer_live::{
-    LiveRendererScanoutBufferExportDetail, LiveRendererScanoutBufferExportStatus,
-    NativeGbmOwnedScanoutBuffer, NativeGbmRenderedScanoutContext,
-    NativeGbmRenderedScanoutContextStatus,
+    LiveCpuComposedFrame, LiveRendererScanoutBufferExportDetail,
+    LiveRendererScanoutBufferExportStatus, NativeGbmOwnedScanoutBuffer,
+    NativeGbmRenderedScanoutContext, NativeGbmRenderedScanoutContextStatus,
 };
 
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
@@ -24,6 +24,7 @@ where
     last_target: Option<LiveGbmEglFrameTargetRecord>,
     last_target_lifecycle: Option<LiveGbmEglFrameTargetLifecycleReport>,
     last_export_status: Option<LiveRendererScanoutBufferExportStatus>,
+    pending_cpu_frame: Option<LiveCpuComposedFrame>,
 }
 
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
@@ -42,6 +43,7 @@ where
             last_target: None,
             last_target_lifecycle: None,
             last_export_status: None,
+            pending_cpu_frame: None,
         }
     }
 
@@ -84,6 +86,10 @@ where
 
     pub fn discovery_mut(&mut self) -> &mut R {
         &mut self.discovery
+    }
+
+    pub fn set_pending_cpu_frame(&mut self, frame: LiveCpuComposedFrame) {
+        self.pending_cpu_frame = Some(frame);
     }
 }
 
@@ -144,8 +150,17 @@ where
             );
         };
 
-        let report = context
-            .export_rendered_owned_scanout_buffer_with_modifiers(target, &self.preferred_modifiers);
+        let report = match self.pending_cpu_frame.take() {
+            Some(frame) => context.export_xrgb8888_owned_scanout_buffer_with_modifiers(
+                target,
+                &frame,
+                &self.preferred_modifiers,
+            ),
+            None => context.export_rendered_owned_scanout_buffer_with_modifiers(
+                target,
+                &self.preferred_modifiers,
+            ),
+        };
         let descriptor = report.buffer.as_ref().map(|buffer| buffer.descriptor());
         self.last_export_status = Some(report.status);
         LiveRenderedScanoutBufferExport::new(

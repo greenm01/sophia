@@ -70,20 +70,27 @@ request, reply, lifecycle, or error path. Current real-client smokes cover
 root/window introspection (`xwininfo`, `xprop`), root property mutation
 (`xsetroot`), drawing clients (`xclock`, `xeyes`, `xlogo`, `xmessage`), output
 introspection (`xrandr --query`), Athena widget behavior (`xcalc`), and
-terminal setup/lifecycle behavior (`xterm`), and GTK startup behavior
-(`zenity`).
+terminal setup/lifecycle and drawing-transaction behavior (`xterm`), and GTK
+startup behavior (`zenity`).
 
 Each external smoke must keep `first_error=none`. New compatibility code should
 remain bounded and narrow: for example, xcalc admitted `AllocNamedColor`,
 `UnmapWindow`, padded one-character `PolyText8`, and normal client-disconnect
 teardown without turning Sophia X Authority into a broad X11 conformance
-project. xterm admitted `ConfigureWindow` as a namespace-checked lifecycle
-request, but it is not yet treated as rendered-output coverage because the
-current proof has zero committed `SurfaceTransaction` values. zenity admitted
-selection-owner lookup, server grab/ungrab, root colormap creation, reduced
-`MIT-SHM`, additional `RANDR`, `XKEYBOARD`, and `BIG-REQUESTS` startup paths,
+project. xterm admitted `ConfigureWindow` and the bounded setup/drawing paths
+needed to reach committed `ImageText8` transactions. Core drawing now updates
+bounded XRGB8888 software buffers, including a compact fixed-cell text raster,
+and the real xterm proof observes nonzero pixels. A separate key-channel smoke
+injects `sophia` plus Return and proves later xterm buffer generations change.
+zenity admitted selection-owner lookup, server grab/ungrab, root colormap
+creation, reduced `MIT-SHM`, additional `RANDR`, and `BIG-REQUESTS` startup paths,
 but the current TTY/DBus environment and missing XInput2 support still prevent a
 rendered GTK dialog proof.
+
+`XKEYBOARD` reports `present=false`. Advertising only its version handshake
+caused real xterm to advance into unsupported XKB map requests once the core
+keyboard map became useful. The supported keyboard baseline is core
+`GetKeyboardMapping`, `GetModifierMapping`, `KeyPress`, and `KeyRelease`.
 
 ## Namespace Model
 
@@ -312,8 +319,9 @@ interns `_NET_WM_NAME` and `UTF8_STRING`, creates a window, writes and reads a
 bounded title property, maps the window, and observes `ConfigureNotify` and
 `MapNotify`.
 
-The next milestone is a broader X client probe. Its first failure should drive
-the next opcode or reply implementation rather than guessing ahead.
+Subsequent external probes remain compatibility drivers. Their first failure
+should drive the next bounded opcode or reply implementation rather than
+guessing ahead.
 
 `xdpyinfo` now passes as the first broader probe. It forced a minimal root
 screen in setup, empty extension discovery replies, root property reads for

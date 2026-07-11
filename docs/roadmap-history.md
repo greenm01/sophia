@@ -91,7 +91,7 @@ validation evidence in `docs/research-log.md`.
 
 ---
 
-## Next Architecture Milestones
+## Completed X Authority Milestones
 
 - [x] Expand X11 atom/property tables for ICCCM names and metadata-broker
   candidates.
@@ -396,8 +396,8 @@ validation evidence in `docs/research-log.md`.
 These items are useful evidence from the XLibre-centered prototype, but they are
 not the long-term target architecture.
 
-- [x] Keep SHM routed input deferred unless repeated routed-input stress
-  measurements exceed the documented threshold.
+- [x] Kept SHM routed input deferred because repeated routed-input stress did
+  not exceed the documented optimization threshold.
 - [x] Keep XLibre routed-input extension docs as a compatibility lesson.
 - [x] Keep XComposite/Damage bridge smokes as reference tests until Sophia X
   Authority has equivalent transaction tests.
@@ -409,6 +409,15 @@ not the long-term target architecture.
 ---
 
 ## Completed Milestones
+
+- [x] Added the first `sophia-live-session --terminal=xterm` one-shot bootstrap
+  around xterm authority transactions and deterministic composition lifecycle.
+- [x] Split X11 Authority socket binding and serving into reusable one-client
+  and persistent sequential entry points with authority state shared across
+  accepted connections.
+- [x] Proved the xterm request stream reaches committed drawing transactions;
+  this evidence is now classified accurately as a transaction proof rather
+  than an inspectable-pixel proof.
 
 - [x] Engine-centered authority reframe: README, architecture docs, atomic
   rendering invariant, and XLibre prototype/reference status.

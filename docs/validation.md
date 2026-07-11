@@ -31,6 +31,8 @@ cargo run --offline -q -p sophia-cli -- x-authority-xmessage-smoke
 cargo run --offline -q -p sophia-cli -- x-authority-xrandr-query-smoke
 cargo run --offline -q -p sophia-cli -- x-authority-xcalc-smoke
 cargo run --offline -q -p sophia-cli -- x-authority-xterm-smoke
+cargo run --offline -q -p sophia-cli -- x-authority-xterm-render-smoke
+cargo run --offline -q -p sophia-cli -- x-authority-xterm-input-smoke
 dbus-run-session -- cargo run --offline -q -p sophia-cli -- x-authority-zenity-smoke
 ```
 
@@ -44,7 +46,9 @@ External probe binaries are resolved from `PATH`; set
 `SOPHIA_XAUTHORITY_<LABEL>` to override a probe binary path for a local host.
 `x-authority-xterm-smoke` is a setup/lifecycle regression, not a rendered
 transaction proof; its reduced output is expected to report zero committed
-runtime transactions until xterm exposes a visible drawing handoff.
+runtime transactions. `x-authority-xterm-render-smoke` is the separate drawing
+transaction proof. Until the CPU-buffer registry and compositor path land, it
+does not prove visible glyph pixels.
 `x-authority-zenity-smoke` is a GTK startup protocol regression. Prefer running
 it under `dbus-run-session --` on TTY hosts so GTK reaches its DBus startup path.
 The smoke still fails on zero X requests or any `first_error`; a nonzero client
@@ -61,6 +65,7 @@ backend-live rendered scanout reporting, run:
 ```sh
 cargo test --offline -q -p sophia-backend-live --features libdrm-events live_session_composition
 cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- live-session-composition-smoke
+cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- sophia-live-session --proof --terminal=xterm
 ```
 
 `live-session-composition-smoke` is non-destructive. Its reduced output must

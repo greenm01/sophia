@@ -4,7 +4,10 @@ use crate::gbm_platform::{
     EGL_PLATFORM_GBM_KHR,
     config::{window_config_attributes, xrgb_window_config_attributes},
 };
-use crate::gl::{context_attributes, smoke_current_gl_context_with_loader};
+use crate::gl::{
+    context_attributes, draw_xrgb8888_current_gl_context_with_loader,
+    smoke_current_gl_context_with_loader,
+};
 use crate::{
     NativeGbmRenderedScanoutContextStatus, NativeGbmScanoutBufferExportDetail,
     NativeGbmScanoutBufferExportStatus,
@@ -210,6 +213,37 @@ where
             width,
             height,
             preferred_modifiers,
+            None,
+        ) {
+            Ok(buffer) => exported_scanout_buffer_report(buffer),
+            Err(detail) => failed_scanout_buffer_report(detail),
+        }
+    }
+
+    pub fn export_xrgb8888_owned_scanout_buffer_with_modifiers(
+        &self,
+        width: u32,
+        height: u32,
+        stride: u32,
+        pixels: &[u8],
+        preferred_modifiers: &[u64],
+    ) -> NativeGbmOwnedScanoutBufferExportReport {
+        if width == 0 || height == 0 {
+            return NativeGbmOwnedScanoutBufferExportReport {
+                status: NativeGbmScanoutBufferExportStatus::InvalidTarget,
+                detail: NativeGbmScanoutBufferExportDetail::InvalidTarget,
+                buffer: None,
+            };
+        }
+
+        match render_initialized_gbm_scanout_front_buffer(
+            &self.egl,
+            self.display,
+            &self.gbm_device,
+            width,
+            height,
+            preferred_modifiers,
+            Some(NativeXrgb8888Frame { stride, pixels }),
         ) {
             Ok(buffer) => exported_scanout_buffer_report(buffer),
             Err(detail) => failed_scanout_buffer_report(detail),
@@ -479,6 +513,7 @@ fn render_gbm_scanout_front_buffer<T: std::os::fd::AsFd>(
         width,
         height,
         preferred_modifiers,
+        None,
     );
     let _ = egl.terminate(display);
     result
@@ -491,6 +526,7 @@ fn render_initialized_gbm_scanout_front_buffer<T: std::os::fd::AsFd>(
     width: u32,
     height: u32,
     preferred_modifiers: &[u64],
+    frame: Option<NativeXrgb8888Frame<'_>>,
 ) -> Result<NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExportDetail> {
     egl.bind_api(khronos_egl::OPENGL_API)
         .map_err(|_error| NativeGbmScanoutBufferExportDetail::EglBindApiFailed)?;
@@ -517,6 +553,7 @@ fn render_initialized_gbm_scanout_front_buffer<T: std::os::fd::AsFd>(
             candidate.format,
             &candidate.modifiers,
             candidate.usage,
+            frame,
         ) {
             Ok(buffer) if is_supported_rendered_scanout_candidate_buffer(&buffer) => {
                 return Ok(buffer);
@@ -544,6 +581,7 @@ fn render_initialized_gbm_scanout_front_buffer_with_config<T: std::os::fd::AsFd>
     surface_format: gbm::Format,
     surface_modifiers: &[gbm::Modifier],
     surface_usage: gbm::BufferObjectFlags,
+    frame: Option<NativeXrgb8888Frame<'_>>,
 ) -> Result<NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExportDetail> {
     use gbm::AsRaw as _;
 
@@ -570,10 +608,20 @@ fn render_initialized_gbm_scanout_front_buffer_with_config<T: std::os::fd::AsFd>
         .make_current(display, Some(surface), Some(surface), Some(context))
         .map_err(|_error| NativeGbmScanoutBufferExportDetail::EglMakeCurrentFailed)
         .and_then(|()| {
-            smoke_current_gl_context_with_loader(|name| {
+            let loader = |name: &str| {
                 egl.get_proc_address(name)
                     .map_or(ptr::null(), |proc| proc as *const c_void)
-            })
+            };
+            match frame {
+                Some(frame) => draw_xrgb8888_current_gl_context_with_loader(
+                    loader,
+                    width,
+                    height,
+                    frame.stride,
+                    frame.pixels,
+                ),
+                None => smoke_current_gl_context_with_loader(loader),
+            }
             .map_err(|_error| NativeGbmScanoutBufferExportDetail::GlSmokeFailed)
         })
         .and_then(|()| {
@@ -593,6 +641,12 @@ fn render_initialized_gbm_scanout_front_buffer_with_config<T: std::os::fd::AsFd>
     let _ = egl.destroy_surface(display, surface);
 
     result
+}
+
+#[derive(Clone, Copy)]
+struct NativeXrgb8888Frame<'a> {
+    stride: u32,
+    pixels: &'a [u8],
 }
 
 #[derive(Clone)]

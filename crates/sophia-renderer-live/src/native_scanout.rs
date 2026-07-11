@@ -148,6 +148,35 @@ where
         )
     }
 
+    pub fn export_xrgb8888_owned_scanout_buffer_with_modifiers(
+        &self,
+        target: LiveGbmEglFrameTargetRecord,
+        frame: &crate::LiveCpuComposedFrame,
+        preferred_modifiers: &[u64],
+    ) -> NativeGbmOwnedScanoutBufferExportReport {
+        if !target.is_valid_scanout_target()
+            || frame.size != target.size
+            || frame.format != crate::LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888
+        {
+            return NativeGbmOwnedScanoutBufferExportReport::new(
+                LiveRendererScanoutBufferExportStatus::InvalidTarget,
+                LiveRendererScanoutBufferExportDetail::InvalidTarget,
+                None,
+            );
+        }
+
+        reduced_native_owned_scanout_buffer_export_report(
+            self.inner
+                .export_xrgb8888_owned_scanout_buffer_with_modifiers(
+                    target.size.width as u32,
+                    target.size.height as u32,
+                    frame.stride,
+                    &frame.bytes,
+                    preferred_modifiers,
+                ),
+        )
+    }
+
     pub fn export_rendered_owned_scanout_buffer_with_modifiers_from_backend_device_result<
         Device: AsFd,
     >(

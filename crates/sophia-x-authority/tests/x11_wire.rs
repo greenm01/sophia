@@ -1,5 +1,5 @@
 use sophia_protocol::{
-    BufferSource, NamespaceId, Rect, Region, SurfaceConstraints, SurfaceId, TransactionId,
+    BufferSource, NamespaceId, Rect, Region, Size, SurfaceConstraints, SurfaceId, TransactionId,
 };
 use sophia_x_authority::*;
 
@@ -813,7 +813,7 @@ fn x11_core_decoder_captures_poly_fill_rectangle_requests() {
             gc: XResourceId::new(0x220011, 1),
             x: 5,
             y: 16,
-            glyph_count: 2,
+            text: b"Hi".to_vec(),
         }
     );
 
@@ -830,7 +830,7 @@ fn x11_core_decoder_captures_poly_fill_rectangle_requests() {
             gc: XResourceId::new(0x220011, 1),
             x: 5,
             y: 16,
-            glyph_count: 1,
+            text: b"=".to_vec(),
         }
     );
 
@@ -854,7 +854,7 @@ fn x11_core_decoder_captures_poly_fill_rectangle_requests() {
             gc: XResourceId::new(0x220011, 1),
             x: 5,
             y: 16,
-            glyph_count: 2,
+            text: b"Hi".to_vec(),
         }
     );
 
@@ -871,7 +871,7 @@ fn x11_core_decoder_captures_poly_fill_rectangle_requests() {
             gc: XResourceId::new(0x220011, 1),
             x: 5,
             y: 16,
-            glyph_count: 2,
+            text: b"Hi".to_vec(),
         }
     );
 }
@@ -906,7 +906,7 @@ fn x11_core_decoder_captures_put_image_requests() {
             dst_y: 5,
             left_pad: 0,
             depth: 24,
-            data_len: 128,
+            data: vec![0xaa; 128],
         }
     );
 }
@@ -1202,7 +1202,7 @@ fn x11_dispatch_reports_root_input_focus_for_minimal_server() {
 }
 
 #[test]
-fn x11_dispatch_reports_empty_modifier_mapping_for_minimal_server() {
+fn x11_dispatch_reports_core_modifier_mapping() {
     let namespace = NamespaceId::from_raw(45);
     let mut runtime = XAuthorityRuntime::new();
     let mut atoms = XAtomTable::new();
@@ -1222,15 +1222,16 @@ fn x11_dispatch_reports_empty_modifier_mapping_for_minimal_server() {
     );
     let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
     assert_eq!(encoded.len(), 1);
-    assert_eq!(encoded[0].len(), 32);
+    assert_eq!(encoded[0].len(), 48);
     assert_eq!(encoded[0][0], 1);
-    assert_eq!(encoded[0][1], 0);
+    assert_eq!(encoded[0][1], 2);
     assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][2..4]), 2);
-    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][4..8]), 0);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][4..8]), 4);
+    assert_eq!(&encoded[0][32..36], &[50, 62, 66, 0]);
 }
 
 #[test]
-fn x11_dispatch_reports_placeholder_keyboard_mapping_for_minimal_server() {
+fn x11_dispatch_reports_us_keyboard_mapping_for_minimal_server() {
     let namespace = NamespaceId::from_raw(45);
     let mut runtime = XAuthorityRuntime::new();
     let mut atoms = XAtomTable::new();
@@ -1250,12 +1251,28 @@ fn x11_dispatch_reports_placeholder_keyboard_mapping_for_minimal_server() {
     );
     let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
     assert_eq!(encoded.len(), 1);
-    assert_eq!(encoded[0].len(), 48);
+    assert_eq!(encoded[0].len(), 64);
     assert_eq!(encoded[0][0], 1);
-    assert_eq!(encoded[0][1], 1);
+    assert_eq!(encoded[0][1], 2);
     assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][2..4]), 3);
-    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][4..8]), 4);
-    assert_eq!(&encoded[0][32..48], &[0; 16]);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][4..8]), 8);
+    let keysyms = encoded[0][32..64]
+        .chunks_exact(4)
+        .map(|bytes| read_u32(XByteOrder::LittleEndian, bytes))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        keysyms,
+        vec![
+            0,
+            0,
+            0xff1b,
+            0xff1b,
+            b'1' as u32,
+            b'!' as u32,
+            b'2' as u32,
+            b'@' as u32
+        ]
+    );
 }
 
 #[test]
@@ -1552,7 +1569,7 @@ fn x11_dispatch_advertises_randr_and_replies_to_query_version() {
 }
 
 #[test]
-fn x11_dispatch_advertises_xkeyboard_and_replies_to_use_extension() {
+fn x11_dispatch_does_not_advertise_incomplete_xkeyboard_extension() {
     let namespace = NamespaceId::from_raw(45);
     let mut runtime = XAuthorityRuntime::new();
     let mut atoms = XAtomTable::new();
@@ -1572,8 +1589,8 @@ fn x11_dispatch_advertises_xkeyboard_and_replies_to_use_extension() {
     );
     let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
     assert_eq!(encoded[0][0], 1);
-    assert_eq!(encoded[0][8], 1);
-    assert_eq!(encoded[0][9], X_KEYBOARD_MAJOR_OPCODE);
+    assert_eq!(encoded[0][8], 0);
+    assert_eq!(encoded[0][9], 0);
 
     let use_extension = decode_x11_core_request(
         context(namespace, 546, XByteOrder::LittleEndian),
@@ -1806,6 +1823,74 @@ fn x11_dispatch_mit_shm_put_image_emits_bounded_surface_transaction() {
             width: 32,
             height: 24,
         })
+    );
+}
+
+#[test]
+fn x11_image_text_updates_bounded_xrgb_cpu_pixels() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let create = decode_x11_core_request(
+        context(namespace, 532, XByteOrder::LittleEndian),
+        &create_window_request(XByteOrder::LittleEndian, 0x220801, 0, 0, 160, 40),
+    )
+    .unwrap();
+    dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 1),
+        create,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    let text = decode_x11_core_request(
+        context(namespace, 533, XByteOrder::LittleEndian),
+        &image_text8_request(
+            XByteOrder::LittleEndian,
+            0x220801,
+            0x220802,
+            4,
+            16,
+            b"Sophia",
+        ),
+    )
+    .unwrap();
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 2, XByteOrder::LittleEndian, 76),
+        text,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    let response = result.response.unwrap();
+    assert_eq!(response.outcome, XAuthorityResponseOutcome::Accepted);
+    assert_eq!(response.transactions.len(), 1);
+    let snapshot = runtime.take_cpu_buffer_update().unwrap();
+    assert_eq!(snapshot.drawable, XResourceId::new(0x220801, 1));
+    assert_eq!(
+        snapshot.size,
+        Size {
+            width: 160,
+            height: 40
+        }
+    );
+    assert_eq!(snapshot.stride, 640);
+    assert_eq!(snapshot.format, X_AUTHORITY_CPU_BUFFER_FORMAT_XRGB8888);
+    assert_eq!(snapshot.generation, 1);
+    assert!(
+        snapshot
+            .bytes
+            .chunks_exact(4)
+            .any(|pixel| pixel != [0, 0, 0, 0])
+    );
+    assert_eq!(
+        response.transactions[0].target_buffer,
+        BufferSource::CpuBuffer {
+            handle: snapshot.handle
+        }
     );
 }
 
@@ -2757,6 +2842,27 @@ fn x11_client_event_encoders_emit_32_byte_records() {
     assert_eq!(read_u32(XByteOrder::BigEndian, &configure[8..12]), 0x220002);
     assert_eq!(read_u16(XByteOrder::BigEndian, &configure[20..22]), 640);
     assert_eq!(read_u16(XByteOrder::BigEndian, &configure[22..24]), 480);
+
+    let key = encode_x_client_output(
+        XByteOrder::LittleEndian,
+        XClientOutput::Event(XClientEvent::Key {
+            sequence: 11,
+            pressed: true,
+            keycode: 38,
+            time: 123,
+            root: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+            event: XResourceId::new(0x220003, 1),
+            state: 1,
+        }),
+    );
+    assert_eq!(key.len(), 32);
+    assert_eq!(key[0], 2);
+    assert_eq!(key[1], 38);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &key[2..4]), 11);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &key[4..8]), 123);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &key[12..16]), 0x220003);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &key[28..30]), 1);
+    assert_eq!(key[30], 1);
 }
 
 #[test]

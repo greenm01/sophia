@@ -8,6 +8,7 @@
 pub use sophia_engine::BufferImportPath;
 pub use sophia_protocol::{BufferSource, Size};
 
+mod cpu_composition;
 mod frame_target;
 mod import;
 mod presentation;
@@ -20,6 +21,7 @@ mod gbm_probe;
 #[cfg(feature = "gbm-probe")]
 mod native_scanout;
 
+pub use cpu_composition::*;
 pub use frame_target::*;
 pub use import::*;
 pub use presentation::*;

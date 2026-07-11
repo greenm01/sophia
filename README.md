@@ -213,15 +213,22 @@ Sophia is split by authority, not by convenience.
 - `docs/sophia-x-authority.md` defines the long-term modern X authority.
 - `docs/style-guide.md` records implementation discipline.
 - `docs/research-log.md` captures early decisions and open research questions.
+- `docs/research-log-archive.md` preserves completed research and validation
+  evidence.
 - `docs/xlibre-prototype-regression-map.md` classifies XLibre prototype checks.
 - `todo.md` tracks build phases and research milestones.
 
 ## Status
 
-Sophia is a research prototype. The current codebase is mostly headless and
-test-driven. That is deliberate. The project is first making the data model,
-transaction rules, IPC boundaries, portal policy, and authority seams hard to
-misuse. Real backend work comes after those contracts hold.
+Sophia is a research prototype. Its deterministic tests still protect the data
+model and authority boundaries, while opt-in TTY3 evidence now proves native
+GBM/KMS allocation, atomic submit, page-flip retirement, and cleanup. The active
+gap is integration: core X drawing now produces bounded XRGB8888 pixels, the
+CPU compositor consumes them, and injected core keys change real xterm pixels.
+The next operator milestone is hardware-proving that content through native
+GL/GBM scanout, then connecting persistent session and physical-input
+ownership. The xmonad bridge translation core exists; its embedded X server and
+real xmonad smoke remain ahead of Wayland.
 
 ## License
 

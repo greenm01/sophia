@@ -1,6 +1,7 @@
 # Sophia X11 WM Bridge
 
-Status: prototype/stopgap.
+Status: translation core implemented; embedded X server and real xmonad smoke
+remain after the interactive xterm milestone.
 
 The Sophia X11 WM Bridge is a legacy window-manager translation daemon. It sits
 in the Sophia WM policy slot and lets existing X11 window managers such as i3,
@@ -36,7 +37,8 @@ The bridge resolves the conflict with a two-faced facade:
 
 ## Boundary And Ownership
 
-The bridge should be an isolated binary crate named `sophia-x11-wm-bridge`.
+The bridge is an isolated binary/library crate named
+`sophia-x11-wm-bridge`. Its first compatibility target is xmonad.
 
 It owns:
 
@@ -46,6 +48,7 @@ It owns:
 - a bidirectional table mapping Sophia `SurfaceId` values to synthetic
   `XWindowId` values;
 - fake X event queues, event masks, and property replies needed by the WM.
+- supervision of one xmonad process attached to the private bridge display.
 
 It must not own:
 
@@ -110,6 +113,23 @@ Ignored by design:
 
 The fake server serves policy objects, not application windows. A synthetic
 window is only a handle that lets a legacy WM calculate rectangles.
+
+The first xmonad milestone is policy-only. Sophia retains physical input,
+global keybindings, workspace commands, and focus validation. The bridge does
+not forward raw keyboard events into xmonad, so native xmonad Mod-key bindings
+are outside the first milestone. The server is embedded in the bridge; Xvfb is
+not used.
+
+The official xmonad source may be checked out under `~/src/xmonad` and inspected
+as a compatibility reference. It is not vendored, linked, or required at
+Sophia runtime. The real smoke resolves the xmonad executable through `PATH`
+with an explicit environment override for local builds.
+
+The reference checkout is currently at commit `a9a8b5c`. The workspace crate
+owns bounded synthetic XID allocation, lifecycle event reduction, and
+metadata-blind configure/focus translation. The host currently has no `ghc`,
+`cabal`, `stack`, or `xmonad` executable, so real startup protocol capture is
+gated on installing a Haskell toolchain or xmonad package.
 
 ## Inbound Translation: Engine To Legacy WM
 

@@ -7,6 +7,8 @@ use sophia_protocol::Rect;
 pub const X_CLIENT_OUTPUT_RECORD_LEN: usize = 32;
 
 const X_ERROR: u8 = 0;
+const X_KEY_PRESS: u8 = 2;
+const X_KEY_RELEASE: u8 = 3;
 const X_EXPOSE: u8 = 12;
 const X_MAP_NOTIFY: u8 = 19;
 const X_CONFIGURE_NOTIFY: u8 = 22;
@@ -51,6 +53,15 @@ pub struct XClientError {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum XClientEvent {
+    Key {
+        sequence: u16,
+        pressed: bool,
+        keycode: u8,
+        time: XTimestamp,
+        root: XResourceId,
+        event: XResourceId,
+        state: u16,
+    },
     Expose {
         sequence: u16,
         window: XResourceId,
@@ -756,6 +767,33 @@ pub fn encode_x_client_event(
 ) -> [u8; X_CLIENT_OUTPUT_RECORD_LEN] {
     let mut out = [0; X_CLIENT_OUTPUT_RECORD_LEN];
     match event {
+        XClientEvent::Key {
+            sequence,
+            pressed,
+            keycode,
+            time,
+            root,
+            event,
+            state,
+        } => {
+            write_event_header(
+                byte_order,
+                &mut out,
+                if pressed { X_KEY_PRESS } else { X_KEY_RELEASE },
+                keycode,
+                sequence,
+            );
+            put_u32(byte_order, &mut out[4..8], time);
+            put_resource(byte_order, &mut out[8..12], root);
+            put_resource(byte_order, &mut out[12..16], event);
+            put_resource(byte_order, &mut out[16..20], XResourceId::NONE);
+            put_i16(byte_order, &mut out[20..22], 0);
+            put_i16(byte_order, &mut out[22..24], 0);
+            put_i16(byte_order, &mut out[24..26], 0);
+            put_i16(byte_order, &mut out[26..28], 0);
+            put_u16(byte_order, &mut out[28..30], state);
+            out[30] = 1;
+        }
         XClientEvent::Expose {
             sequence,
             window,

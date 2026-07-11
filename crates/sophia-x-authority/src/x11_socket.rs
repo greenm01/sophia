@@ -1,21 +1,27 @@
 #[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 #[cfg(unix)]
-use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
 #[cfg(unix)]
 use std::{
     io::{ErrorKind, Read, Write},
     path::Path,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering},
+    },
     time::Duration,
 };
 
 #[cfg(unix)]
 use crate::{
-    X_SETUP_CLIENT_PREFIX_LEN, X_SETUP_MAX_AUTH_FIELD_LEN, XAtomTable,
-    XAuthorityObservedTransactionBatch, XAuthorityRuntime, XDispatchContext, XDispatchResult,
-    XPropertyTable, XSetupRequest, XSetupSuccess, XWireClientContext, decode_x11_core_request,
-    dispatch_x11_parse_error, dispatch_x11_wire_request, encode_x11_setup_success,
-    parse_x11_setup_request, try_emit_x_authority_transactions, x11_setup_request_total_len,
+    X_SETUP_CLIENT_PREFIX_LEN, X_SETUP_DEFAULT_ROOT, X_SETUP_MAX_AUTH_FIELD_LEN, XAtomTable,
+    XAuthorityCpuBufferSnapshot, XAuthorityObservedTransactionBatch, XAuthorityRuntime, XByteOrder,
+    XClientEvent, XDispatchContext, XDispatchResult, XPropertyTable, XResourceId, XSetupRequest,
+    XSetupSuccess, XWireClientContext, decode_x11_core_request, dispatch_x11_parse_error,
+    dispatch_x11_wire_request, encode_x_client_event, encode_x11_setup_success,
+    parse_x11_setup_request, try_emit_x_authority_trace, try_emit_x_authority_transactions,
+    x11_setup_request_total_len,
 };
 #[cfg(unix)]
 use sophia_protocol::{NamespaceId, TransactionId};
@@ -49,6 +55,16 @@ pub struct X11CoreDispatchTrace<'a> {
     pub request_detail: Option<String>,
     pub parse_error: Option<String>,
     pub result: &'a XDispatchResult,
+    pub cpu_buffer_update: Option<&'a XAuthorityCpuBufferSnapshot>,
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XAuthorityKeyEvent {
+    pub keycode: u8,
+    pub pressed: bool,
+    pub state: u16,
+    pub time_msec: u32,
 }
 
 /// Authority-owned state shared by every client accepted by one X11 socket
@@ -148,7 +164,7 @@ pub fn run_x11_core_socket_server_channel(
     sender: SyncSender<XAuthorityObservedTransactionBatch>,
 ) -> Result<(), X11SetupSocketError> {
     run_x11_core_socket_server_traced(path, namespace, move |trace| {
-        try_emit_x_authority_transactions(&sender, trace.result)
+        try_emit_x_authority_trace(&sender, &trace)
             .map_err(|error| X11SetupSocketError::new(error.to_string()))?;
         Ok(())
     })
@@ -200,6 +216,31 @@ pub fn run_x11_core_socket_server_once_channel(
     run_x11_core_socket_server_once_with_observer(path, namespace, move |result| {
         Ok(try_emit_x_authority_transactions(&sender, result).map(|_| ())?)
     })
+}
+
+#[cfg(unix)]
+pub fn run_x11_core_socket_server_once_channels(
+    path: impl AsRef<Path>,
+    namespace: NamespaceId,
+    transaction_sender: SyncSender<XAuthorityObservedTransactionBatch>,
+    key_receiver: Receiver<XAuthorityKeyEvent>,
+) -> Result<(), X11SetupSocketError> {
+    let listener = bind_x11_core_socket_server(path)?;
+    let (mut stream, _) = listener.accept().map_err(|error| {
+        X11SetupSocketError::new(format!("failed to accept X11 core client: {error}"))
+    })?;
+    let mut state = X11CoreSocketServerState::new();
+    serve_x11_core_socket_client_with_trace_observer_and_input(
+        &mut stream,
+        namespace,
+        &mut state,
+        Some(key_receiver),
+        move |trace| {
+            try_emit_x_authority_trace(&transaction_sender, &trace)
+                .map_err(|error| X11SetupSocketError::new(error.to_string()))?;
+            Ok(())
+        },
+    )
 }
 
 #[cfg(unix)]
@@ -390,59 +431,111 @@ fn serve_x11_core_socket_client_with_trace_observer(
     stream: &mut UnixStream,
     namespace: NamespaceId,
     state: &mut X11CoreSocketServerState,
+    observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
+) -> Result<(), X11SetupSocketError> {
+    serve_x11_core_socket_client_with_trace_observer_and_input(
+        stream, namespace, state, None, observer,
+    )
+}
+
+#[cfg(unix)]
+fn serve_x11_core_socket_client_with_trace_observer_and_input(
+    stream: &mut UnixStream,
+    namespace: NamespaceId,
+    state: &mut X11CoreSocketServerState,
+    key_receiver: Option<Receiver<XAuthorityKeyEvent>>,
     mut observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
     let setup = serve_x11_setup_socket_client(stream)?;
     let mut sequence = 0u16;
+    let event_sequence = Arc::new(AtomicU16::new(0));
+    let focused_window = Arc::new(AtomicU64::new(u64::from(X_SETUP_DEFAULT_ROOT)));
+    let output_stream = Arc::new(Mutex::new(stream.try_clone().map_err(|error| {
+        X11SetupSocketError::new(format!("failed to clone X11 output socket: {error}"))
+    })?));
+    let input_writer = key_receiver
+        .map(|receiver| {
+            spawn_x11_key_event_writer(
+                output_stream.clone(),
+                setup.byte_order,
+                event_sequence.clone(),
+                focused_window.clone(),
+                receiver,
+            )
+        })
+        .transpose()?;
 
-    while let Some((major_opcode, request)) = read_x11_core_request(stream, setup.byte_order)? {
-        sequence = sequence.wrapping_add(1);
-        let dispatch_context = XDispatchContext {
-            byte_order: setup.byte_order,
-            namespace,
-            sequence,
-            major_opcode,
-        };
-        let mut parse_error = None;
-        let mut request_detail = None;
-        let output = match decode_x11_core_request(
-            XWireClientContext {
+    let result = (|| {
+        while let Some((major_opcode, request)) = read_x11_core_request(stream, setup.byte_order)? {
+            sequence = sequence.wrapping_add(1);
+            event_sequence.store(sequence, Ordering::Release);
+            let dispatch_context = XDispatchContext {
                 byte_order: setup.byte_order,
                 namespace,
-                transaction: TransactionId::from_raw(u64::from(sequence)),
-            },
-            &request,
-        ) {
-            Ok(request) => {
-                request_detail = x11_core_request_trace_detail(&request);
-                dispatch_x11_wire_request(
-                    dispatch_context,
-                    request,
-                    &mut state.runtime,
-                    &mut state.atoms,
-                    &mut state.properties,
-                )
+                sequence,
+                major_opcode,
+            };
+            let mut parse_error = None;
+            let mut request_detail = None;
+            let output = match decode_x11_core_request(
+                XWireClientContext {
+                    byte_order: setup.byte_order,
+                    namespace,
+                    transaction: TransactionId::from_raw(u64::from(sequence)),
+                },
+                &request,
+            ) {
+                Ok(request) => {
+                    if let crate::XWireRequest::Authority(crate::XAuthorityRequestPacket {
+                        kind: crate::XAuthorityRequestKind::MapWindow { window, .. },
+                        ..
+                    }) = &request
+                    {
+                        focused_window.store(window.local.raw(), Ordering::Release);
+                    }
+                    request_detail = x11_core_request_trace_detail(&request);
+                    dispatch_x11_wire_request(
+                        dispatch_context,
+                        request,
+                        &mut state.runtime,
+                        &mut state.atoms,
+                        &mut state.properties,
+                    )
+                }
+                Err(error) => {
+                    let head = request
+                        .iter()
+                        .take(24)
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect::<Vec<_>>()
+                        .join("");
+                    parse_error = Some(format!("{error:?}:len={}:head={head}", request.len()));
+                    dispatch_x11_parse_error(dispatch_context, error)
+                }
+            };
+            let cpu_buffer_update = state.runtime.take_cpu_buffer_update();
+            observer(X11CoreDispatchTrace {
+                sequence,
+                major_opcode,
+                request_detail,
+                parse_error,
+                result: &output,
+                cpu_buffer_update: cpu_buffer_update.as_ref(),
+            })?;
+            let mut output_stream = output_stream
+                .lock()
+                .map_err(|_| X11SetupSocketError::new("X11 output socket lock poisoned"))?;
+            for record in output.encoded_outputs(setup.byte_order) {
+                if let Err(error) = output_stream.write_all(&record) {
+                    if is_x11_client_disconnect(&error) {
+                        return Ok(());
+                    }
+                    return Err(X11SetupSocketError::new(format!(
+                        "failed to write X11 output: {error}"
+                    )));
+                }
             }
-            Err(error) => {
-                let head = request
-                    .iter()
-                    .take(24)
-                    .map(|byte| format!("{byte:02x}"))
-                    .collect::<Vec<_>>()
-                    .join("");
-                parse_error = Some(format!("{error:?}:len={}:head={head}", request.len()));
-                dispatch_x11_parse_error(dispatch_context, error)
-            }
-        };
-        observer(X11CoreDispatchTrace {
-            sequence,
-            major_opcode,
-            request_detail,
-            parse_error,
-            result: &output,
-        })?;
-        for record in output.encoded_outputs(setup.byte_order) {
-            if let Err(error) = stream.write_all(&record) {
+            if let Err(error) = output_stream.flush() {
                 if matches!(
                     error.kind(),
                     ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::UnexpectedEof
@@ -450,24 +543,88 @@ fn serve_x11_core_socket_client_with_trace_observer(
                     return Ok(());
                 }
                 return Err(X11SetupSocketError::new(format!(
-                    "failed to write X11 output: {error}"
+                    "failed to flush X11 output: {error}"
                 )));
             }
         }
-        if let Err(error) = stream.flush() {
-            if matches!(
-                error.kind(),
-                ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::UnexpectedEof
-            ) {
-                return Ok(());
-            }
-            return Err(X11SetupSocketError::new(format!(
-                "failed to flush X11 output: {error}"
-            )));
-        }
-    }
+        Ok(())
+    })();
 
-    Ok(())
+    if let Some(writer) = input_writer {
+        writer.stop.store(true, Ordering::Release);
+        let writer_result = writer
+            .thread
+            .join()
+            .map_err(|_| X11SetupSocketError::new("X11 key event writer thread panicked"))?;
+        result?;
+        writer_result
+    } else {
+        result
+    }
+}
+
+#[cfg(unix)]
+struct X11KeyEventWriter {
+    stop: Arc<AtomicBool>,
+    thread: std::thread::JoinHandle<Result<(), X11SetupSocketError>>,
+}
+
+#[cfg(unix)]
+fn spawn_x11_key_event_writer(
+    stream: Arc<Mutex<UnixStream>>,
+    byte_order: XByteOrder,
+    sequence: Arc<AtomicU16>,
+    focused_window: Arc<AtomicU64>,
+    receiver: Receiver<XAuthorityKeyEvent>,
+) -> Result<X11KeyEventWriter, X11SetupSocketError> {
+    let stop = Arc::new(AtomicBool::new(false));
+    let writer_stop = stop.clone();
+    let thread = std::thread::spawn(move || {
+        while !writer_stop.load(Ordering::Acquire) {
+            let event = match receiver.recv_timeout(Duration::from_millis(10)) {
+                Ok(event) => event,
+                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Disconnected) => return Ok(()),
+            };
+            let event_window = XResourceId::new(focused_window.load(Ordering::Acquire), 1);
+            let record = encode_x_client_event(
+                byte_order,
+                XClientEvent::Key {
+                    sequence: sequence.load(Ordering::Acquire),
+                    pressed: event.pressed,
+                    keycode: event.keycode,
+                    time: event.time_msec,
+                    root: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+                    event: event_window,
+                    state: event.state,
+                },
+            );
+            let mut stream = stream
+                .lock()
+                .map_err(|_| X11SetupSocketError::new("X11 output socket lock poisoned"))?;
+            if let Err(error) = stream.write_all(&record) {
+                if is_x11_client_disconnect(&error) {
+                    return Ok(());
+                }
+                return Err(X11SetupSocketError::new(format!(
+                    "failed to write X11 key event: {error}"
+                )));
+            }
+            stream.flush().map_err(|error| {
+                X11SetupSocketError::new(format!("failed to flush X11 key event: {error}"))
+            })?;
+        }
+        Ok(())
+    });
+    Ok(X11KeyEventWriter { stop, thread })
+}
+
+#[cfg(unix)]
+fn is_x11_client_disconnect(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::UnexpectedEof
+    )
 }
 
 #[cfg(unix)]
@@ -567,11 +724,12 @@ fn x11_core_request_trace_detail(request: &crate::XWireRequest) -> Option<String
             drawable,
             x,
             y,
-            glyph_count,
+            text,
             ..
         } => Some(format!(
-            "ImageText8:drawable={:#x}:glyphs={glyph_count}+{x}+{y}",
-            drawable.local.raw()
+            "ImageText8:drawable={:#x}:glyphs={}+{x}+{y}",
+            drawable.local.raw(),
+            text.len()
         )),
         crate::XWireRequest::CopyArea {
             source,

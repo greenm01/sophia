@@ -1,6 +1,24 @@
 use super::prelude::*;
 
 pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
+    if args
+        .iter()
+        .any(|arg| arg == "x-authority-xterm-input-smoke")
+    {
+        let report = run_x_authority_xterm_input_smoke()?;
+        println!(
+            "x-authority-xterm-input-smoke display={} keys={} initial_generation={} final_generation={} initial_checksum={} final_checksum={} pixel_change={}",
+            report.display,
+            report.keys,
+            report.initial_generation,
+            report.final_generation,
+            report.initial_checksum,
+            report.final_checksum,
+            report.initial_checksum != report.final_checksum,
+        );
+        return Ok(true);
+    }
+
     if let Some(spec) = EXTERNAL_PROBE_SMOKES
         .iter()
         .find(|spec| args.iter().any(|arg| arg == spec.command_name))
@@ -206,9 +224,14 @@ struct XAuthorityExternalProbeSmokeReport {
     transactions: usize,
     runtime_committed: u64,
     runtime_surfaces: u64,
+    cpu_buffers: usize,
+    cpu_buffer_bytes: usize,
+    nonzero_pixel_bytes: usize,
     first_error: Option<String>,
     #[cfg_attr(not(feature = "atomic-scanout-live"), allow(dead_code))]
     observed_transactions: Vec<SurfaceTransaction>,
+    #[cfg_attr(not(feature = "atomic-scanout-live"), allow(dead_code))]
+    observed_cpu_buffers: Vec<XAuthorityCpuBufferSnapshot>,
 }
 
 #[cfg(feature = "atomic-scanout-live")]
@@ -219,6 +242,7 @@ pub(crate) struct XAuthorityTerminalRenderProof {
     pub transactions: usize,
     pub runtime_committed: u64,
     pub runtime_surfaces: u64,
+    pub cpu_buffers: Vec<XAuthorityCpuBufferSnapshot>,
     pub authority_batches: Vec<AuthorityTransactionIntake>,
 }
 
@@ -238,6 +262,16 @@ struct XAuthorityRuntimeSmokeReport {
     transactions: usize,
     portal_prompts: usize,
     selection_artifacts: usize,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct XAuthorityXtermInputSmokeReport {
+    pub display: String,
+    pub keys: usize,
+    pub initial_generation: u64,
+    pub final_generation: u64,
+    pub initial_checksum: u64,
+    pub final_checksum: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -827,6 +861,7 @@ pub(crate) fn collect_x_authority_xterm_render_authority_batches(
         transactions: report.transactions,
         runtime_committed: report.runtime_committed,
         runtime_surfaces: report.runtime_surfaces,
+        cpu_buffers: report.observed_cpu_buffers,
         authority_batches,
     })
 }
@@ -870,12 +905,182 @@ fn resolve_external_probe_binary(
     .into())
 }
 
+pub(crate) fn run_x_authority_xterm_input_smoke()
+-> Result<XAuthorityXtermInputSmokeReport, Box<dyn std::error::Error>> {
+    let command = resolve_external_probe_binary("xterm", "xterm")?;
+    let (display, socket_path) = temp_xauthority_display(150)?;
+    let server_path = socket_path.clone();
+    let (transaction_sender, transaction_receiver) = sync_channel(256);
+    let (key_sender, key_receiver) = sync_channel(32);
+    let server = std::thread::spawn(move || {
+        run_x11_core_socket_server_once_channels(
+            &server_path,
+            NamespaceId::from_raw(49),
+            transaction_sender,
+            key_receiver,
+        )
+    });
+    wait_for_socket_path(&socket_path)?;
+
+    let mut child = std::process::Command::new(command)
+        .env("DISPLAY", &display)
+        .args([
+            "-cm",
+            "-dc",
+            "-geometry",
+            "40x8",
+            "-e",
+            "sh",
+            "-c",
+            "read line; printf 'received:%s\\n' \"$line\"; sleep 3",
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+
+    let mut cpu_buffers = std::collections::BTreeMap::new();
+    let initial = wait_for_xterm_cpu_state(
+        &transaction_receiver,
+        &mut child,
+        std::time::Instant::now() + Duration::from_secs(6),
+        None,
+        &mut cpu_buffers,
+    )?;
+    let mut time_msec = 1u32;
+    for keycode in b"sophia"
+        .iter()
+        .copied()
+        .map(x11_keycode_for_ascii)
+        .chain(std::iter::once(Some(36)))
+    {
+        let keycode = keycode.ok_or("input smoke character has no X keycode")?;
+        for pressed in [true, false] {
+            key_sender.send(XAuthorityKeyEvent {
+                keycode,
+                pressed,
+                state: 0,
+                time_msec,
+            })?;
+            time_msec = time_msec.saturating_add(1);
+        }
+    }
+    let final_state = wait_for_xterm_cpu_state(
+        &transaction_receiver,
+        &mut child,
+        std::time::Instant::now() + Duration::from_secs(4),
+        Some(initial),
+        &mut cpu_buffers,
+    );
+
+    if child.try_wait()?.is_none() {
+        let _ = child.kill();
+    }
+    let output = child.wait_with_output()?;
+    drop(key_sender);
+    let server_result = server
+        .join()
+        .map_err(|_| "X authority xterm input server thread panicked")?;
+    let _ = std::fs::remove_file(&socket_path);
+    server_result.map_err(|error| format!("X authority xterm input server failed: {error}"))?;
+    let final_state = final_state.map_err(|error| {
+        format!(
+            "{error}; xterm_status={} stderr={}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )
+    })?;
+
+    Ok(XAuthorityXtermInputSmokeReport {
+        display,
+        keys: 7,
+        initial_generation: initial.0,
+        final_generation: final_state.0,
+        initial_checksum: initial.1,
+        final_checksum: final_state.1,
+    })
+}
+
+fn wait_for_xterm_cpu_state(
+    receiver: &std::sync::mpsc::Receiver<XAuthorityObservedTransactionBatch>,
+    child: &mut std::process::Child,
+    deadline: std::time::Instant,
+    previous: Option<(u64, u64)>,
+    latest: &mut std::collections::BTreeMap<u64, XAuthorityCpuBufferSnapshot>,
+) -> Result<(u64, u64), Box<dyn std::error::Error>> {
+    let mut candidate = None;
+    while std::time::Instant::now() < deadline {
+        match receiver.recv_timeout(Duration::from_millis(100)) {
+            Ok(batch) => {
+                for buffer in batch.cpu_buffers {
+                    latest.insert(buffer.handle, buffer);
+                }
+                let generation = latest
+                    .values()
+                    .map(|buffer| buffer.generation)
+                    .max()
+                    .unwrap_or(0);
+                let checksum = latest
+                    .values()
+                    .fold(0xcbf2_9ce4_8422_2325u64, |hash, buffer| {
+                        buffer.bytes.iter().fold(hash, |hash, byte| {
+                            (hash ^ u64::from(*byte)).wrapping_mul(0x100_0000_01b3)
+                        })
+                    });
+                let has_pixels = latest
+                    .values()
+                    .any(|buffer| buffer.bytes.iter().any(|byte| *byte != 0));
+                if has_pixels {
+                    candidate = Some((generation, checksum));
+                    if previous.is_some_and(|(old_generation, old_checksum)| {
+                        generation > old_generation && checksum != old_checksum
+                    }) {
+                        return Ok((generation, checksum));
+                    }
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if previous.is_none()
+                    && let Some(candidate) = candidate
+                {
+                    return Ok(candidate);
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("X authority xterm input transaction channel disconnected".into());
+            }
+        }
+        if let Some(status) = child.try_wait()? {
+            return Err(format!("xterm input client exited before pixel proof: {status}").into());
+        }
+    }
+    Err("timed out waiting for xterm input to change CPU pixels".into())
+}
+
+fn x11_keycode_for_ascii(byte: u8) -> Option<u8> {
+    b"qwertyuiop"
+        .iter()
+        .position(|candidate| *candidate == byte)
+        .map(|index| 24 + index as u8)
+        .or_else(|| {
+            b"asdfghjkl"
+                .iter()
+                .position(|candidate| *candidate == byte)
+                .map(|index| 38 + index as u8)
+        })
+        .or_else(|| {
+            b"zxcvbnm"
+                .iter()
+                .position(|candidate| *candidate == byte)
+                .map(|index| 52 + index as u8)
+        })
+}
+
 fn print_external_probe_smoke_report(
     command_name: &str,
     report: &XAuthorityExternalProbeSmokeReport,
 ) {
     println!(
-        "{} display={} outcome={} status={} stdout_bytes={} stderr_bytes={} requests={} opcode_count={} opcodes={} transactions={} runtime_committed={} runtime_surfaces={} first_error={}",
+        "{} display={} outcome={} status={} stdout_bytes={} stderr_bytes={} requests={} opcode_count={} opcodes={} transactions={} runtime_committed={} runtime_surfaces={} cpu_buffers={} cpu_buffer_bytes={} nonzero_pixel_bytes={} first_error={}",
         command_name,
         report.display,
         report.outcome,
@@ -888,6 +1093,9 @@ fn print_external_probe_smoke_report(
         report.transactions,
         report.runtime_committed,
         report.runtime_surfaces,
+        report.cpu_buffers,
+        report.cpu_buffer_bytes,
+        report.nonzero_pixel_bytes,
         report.first_error.as_deref().unwrap_or("none")
     );
 }
@@ -937,6 +1145,9 @@ fn run_x_authority_external_probe_smoke(
                         ));
                     }
                 }
+                if let Some(buffer) = trace.cpu_buffer_update {
+                    let _ = sender.try_send(ExternalProbeObservation::CpuBuffer(buffer.clone()));
+                }
                 Ok(())
             },
         )
@@ -963,6 +1174,7 @@ fn run_x_authority_external_probe_smoke(
 
     let deadline = std::time::Instant::now() + Duration::from_secs(8);
     let mut transactions = Vec::new();
+    let mut cpu_buffers = Vec::new();
     let mut first_error = None;
     let mut opcodes = std::collections::BTreeSet::new();
     let mut details = std::collections::BTreeSet::new();
@@ -976,6 +1188,7 @@ fn run_x_authority_external_probe_smoke(
                     opcodes.insert(opcode);
                 }
                 ExternalProbeObservation::Transactions(batch) => transactions.extend(batch),
+                ExternalProbeObservation::CpuBuffer(buffer) => cpu_buffers.push(buffer),
                 ExternalProbeObservation::Detail(detail) => {
                     details.insert(detail);
                 }
@@ -1023,6 +1236,7 @@ fn run_x_authority_external_probe_smoke(
                 opcodes.insert(opcode);
             }
             ExternalProbeObservation::Transactions(batch) => transactions.extend(batch),
+            ExternalProbeObservation::CpuBuffer(buffer) => cpu_buffers.push(buffer),
             ExternalProbeObservation::Detail(detail) => {
                 details.insert(detail);
             }
@@ -1083,6 +1297,12 @@ fn run_x_authority_external_probe_smoke(
         .as_ref()
         .map(|state| state.authority_surfaces_applied)
         .unwrap_or(0);
+    let cpu_buffer_bytes = cpu_buffers.iter().map(|buffer| buffer.bytes.len()).sum();
+    let nonzero_pixel_bytes = cpu_buffers
+        .iter()
+        .flat_map(|buffer| buffer.bytes.iter())
+        .filter(|byte| **byte != 0)
+        .count();
     if require_transactions && (runtime_committed == 0 || runtime_surfaces == 0) {
         return Err(format!(
             "{label} transactions did not commit through runtime for {display}: transactions={} committed={} surfaces={}",
@@ -1113,8 +1333,12 @@ fn run_x_authority_external_probe_smoke(
         transactions: transactions.len(),
         runtime_committed,
         runtime_surfaces,
+        cpu_buffers: cpu_buffers.len(),
+        cpu_buffer_bytes,
+        nonzero_pixel_bytes,
         first_error,
         observed_transactions: transactions,
+        observed_cpu_buffers: cpu_buffers,
     })
 }
 
@@ -1122,6 +1346,7 @@ fn run_x_authority_external_probe_smoke(
 enum ExternalProbeObservation {
     Opcode(u8),
     Transactions(Vec<SurfaceTransaction>),
+    CpuBuffer(XAuthorityCpuBufferSnapshot),
     Detail(String),
     Error(String),
 }

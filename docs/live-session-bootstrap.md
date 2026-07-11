@@ -26,19 +26,23 @@ The first bootstrap live session launcher is now a single command:
 cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- sophia-live-session --terminal=xterm
 ```
 
-The current implementation assembles only the boundaries Sophia already owns:
+The current `--proof` implementation assembles a one-shot proof from boundaries Sophia
+already owns:
 
 - bind a generated Sophia X Authority display for one terminal proof;
 - launch one terminal client against that display;
 - drain X Authority transaction batches into runtime;
 - run the deterministic live composition/scanout path;
-- emit reduced status lines for authority, runtime, composition, and known
-  pending input/persistence work;
-- shut down cleanly from the outside control plane.
+- run a second real xterm with bounded core key events and require changed
+  terminal pixels;
+- emit reduced status for authority, runtime, composition, keyboard, and known
+  native-presentation/physical-input/persistence work.
 
-It is not a persistent interactive session yet. It reports
-`status=bootstrap_ready_keyboard_pending` when the terminal authority/runtime
-composition proof passes.
+It is not a persistent interactive session or hardware-visible proof yet. It
+reports
+`status=bootstrap_cpu_pixels_x11_keyboard_ready_native_presentation_pending`
+when the terminal authority/runtime/composition and injected-keyboard pixel
+proofs pass.
 
 Explicit display binding, such as `--display=:77`, is still a target for the
 persistent live session. The current proof-mode launcher intentionally uses the
@@ -54,10 +58,13 @@ Current evidence:
 
 - `x-authority-xterm-smoke` reaches setup/lifecycle protocol with
   `first_error=none`;
-- `x-authority-xterm-render-smoke` reaches text drawing with
-  `first_error=none` and commits terminal `SurfaceTransaction` values;
+- `x-authority-xterm-render-smoke` reaches text drawing requests with
+  `first_error=none`, commits terminal `SurfaceTransaction` values, and emits
+  inspectable XRGB8888 glyph pixels;
 - the render proof uses `xterm -cm -dc` so the smoke tests terminal drawing
   instead of spending the proof window on 256-color palette setup;
+- `x-authority-xterm-input-smoke` proves bounded core key events change a later
+  real xterm buffer generation;
 - physical keyboard routing to a focused X client is not yet operator-grade.
 
 Current terminal proof:
@@ -66,17 +73,18 @@ Current terminal proof:
 cargo run --offline -q -p sophia-cli -- x-authority-xterm-render-smoke
 ```
 
-The passing reduced evidence is `outcome=proof_window_killed`, `requests=232`,
-`opcode_count=28`, `transactions=4`, `runtime_committed=4`,
-`runtime_surfaces=4`, and `first_error=none`.
+Request and transaction counts vary with xterm startup timing. Passing evidence
+requires `first_error=none`, committed authority transactions, at least one CPU
+buffer, and nonzero pixel bytes.
 
 Keep this path probe-driven: add only the opcode, reply, event, drawing, or
 resource behavior the real xterm stream demands.
 
-Next live-session blocker:
+Next live-session blockers:
 
-- extend `sophia-live-session` from single-client proof mode to a persistent
-  X Authority and live backend loop;
+- hardware-prove the composed terminal frame through native GL/GBM scanout;
+- extend `sophia-live-session` from one-shot proof mode to a persistent X
+  Authority and live backend loop;
 - route physical keyboard input into the focused X terminal surface;
 - prove typed text reaches the terminal before running Codex inside Sophia.
 

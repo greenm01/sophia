@@ -11,6 +11,7 @@ members = [
     "crates/sophia-wm-demo",
     "crates/sophia-x-authority",
     "crates/sophia-x-bridge",
+    "crates/sophia-x11-wm-bridge",
 ]
 resolver = "3"
 

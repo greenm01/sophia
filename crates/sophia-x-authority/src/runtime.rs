@@ -1,13 +1,13 @@
 use sophia_portal::ClipboardPortal;
-use sophia_protocol::{AuthoritySurface, NamespaceId, Rect, Region, TransactionId};
+use sophia_protocol::{AuthoritySurface, NamespaceId, Rect, Region, Size, TransactionId};
 
 use crate::{
-    ClipboardSelectionFailureRequest, XAuthorityPortalCommand, XAuthorityRequestKind,
-    XAuthorityRequestPacket, XAuthorityResponsePacket, XAuthorityRuntimeError,
-    XAuthoritySelectionArtifact, XDrawingUpdate, XResourceKind, XResourceTable, XSelectionEvent,
-    XSelectionMonitor, XShmSegmentTable, XWindowLifecycleEvent, XWindowTable,
-    clipboard_selection_failure_notify, dispatch_clipboard_selection_request,
-    surface_transaction_from_drawing_update,
+    ClipboardSelectionFailureRequest, XAuthorityCpuBufferSnapshot, XAuthorityPortalCommand,
+    XAuthorityRequestKind, XAuthorityRequestPacket, XAuthorityResponsePacket,
+    XAuthorityRuntimeError, XAuthoritySelectionArtifact, XDrawingUpdate, XResourceKind,
+    XResourceTable, XSelectionEvent, XSelectionMonitor, XShmSegmentTable, XSoftwareBufferStore,
+    XWindowLifecycleEvent, XWindowTable, clipboard_selection_failure_notify,
+    dispatch_clipboard_selection_request, surface_transaction_from_drawing_update,
 };
 
 #[derive(Debug, Default)]
@@ -17,11 +17,21 @@ pub struct XAuthorityRuntime {
     shm_segments: XShmSegmentTable,
     selections: XSelectionMonitor,
     clipboard: ClipboardPortal,
+    software_buffers: XSoftwareBufferStore,
+    last_cpu_buffer_update: Option<XAuthorityCpuBufferSnapshot>,
 }
 
 impl XAuthorityRuntime {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn begin_dispatch(&mut self) {
+        self.last_cpu_buffer_update = None;
+    }
+
+    pub fn take_cpu_buffer_update(&mut self) -> Option<XAuthorityCpuBufferSnapshot> {
+        self.last_cpu_buffer_update.take()
     }
 
     pub fn apply(&mut self, request: XAuthorityRequestPacket) -> XAuthorityResponsePacket {
@@ -391,7 +401,7 @@ impl XAuthorityRuntime {
     }
 
     pub fn apply_core_draw(
-        &self,
+        &mut self,
         transaction: TransactionId,
         namespace: NamespaceId,
         window: crate::XResourceId,
@@ -403,7 +413,21 @@ impl XAuthorityRuntime {
                 XAuthorityRuntimeError::UnknownResource,
             );
         };
-        let handle = core_draw_buffer_handle(window, transaction);
+        let Some(buffer) = self.software_buffers.paint_damage(
+            window,
+            Size {
+                width: record.geometry.width,
+                height: record.geometry.height,
+            },
+            &damage.rects,
+        ) else {
+            return XAuthorityResponsePacket::rejected(
+                transaction,
+                XAuthorityRuntimeError::InvalidResource,
+            );
+        };
+        let handle = buffer.handle;
+        self.last_cpu_buffer_update = Some(buffer);
         let mut response = XAuthorityResponsePacket::accepted(transaction);
         match surface_transaction_from_drawing_update(
             &self.windows,
@@ -424,7 +448,7 @@ impl XAuthorityRuntime {
     }
 
     pub fn apply_copy_area(
-        &self,
+        &mut self,
         transaction: TransactionId,
         namespace: NamespaceId,
         source: crate::XResourceId,
@@ -441,12 +465,12 @@ impl XAuthorityRuntime {
     }
 
     pub fn apply_put_image(
-        &self,
+        &mut self,
         transaction: TransactionId,
         namespace: NamespaceId,
         window: crate::XResourceId,
         damage: Region,
-        data_len: usize,
+        data: Option<&[u8]>,
     ) -> XAuthorityResponsePacket {
         let Some(record) = self.windows.get(window) else {
             return XAuthorityResponsePacket::rejected(
@@ -454,7 +478,29 @@ impl XAuthorityRuntime {
                 XAuthorityRuntimeError::UnknownResource,
             );
         };
-        let handle = put_image_buffer_handle(window, transaction, data_len);
+        let size = Size {
+            width: record.geometry.width,
+            height: record.geometry.height,
+        };
+        let Some(buffer) = data
+            .and_then(|data| {
+                damage
+                    .rects
+                    .first()
+                    .and_then(|rect| self.software_buffers.put_image(window, size, *rect, data))
+            })
+            .or_else(|| {
+                self.software_buffers
+                    .paint_damage(window, size, &damage.rects)
+            })
+        else {
+            return XAuthorityResponsePacket::rejected(
+                transaction,
+                XAuthorityRuntimeError::InvalidResource,
+            );
+        };
+        let handle = buffer.handle;
+        self.last_cpu_buffer_update = Some(buffer);
         let mut response = XAuthorityResponsePacket::accepted(transaction);
         match surface_transaction_from_drawing_update(
             &self.windows,
@@ -473,16 +519,115 @@ impl XAuthorityRuntime {
         }
         response
     }
-}
 
-fn core_draw_buffer_handle(window: crate::XResourceId, transaction: TransactionId) -> u64 {
-    window.local.raw().rotate_left(32) ^ transaction.raw()
-}
+    pub fn apply_text_draw(
+        &mut self,
+        transaction: TransactionId,
+        namespace: NamespaceId,
+        window: crate::XResourceId,
+        x: i16,
+        baseline: i16,
+        text: &[u8],
+        opaque: bool,
+    ) -> XAuthorityResponsePacket {
+        let Some(record) = self.windows.get(window) else {
+            return XAuthorityResponsePacket::rejected(
+                transaction,
+                XAuthorityRuntimeError::UnknownResource,
+            );
+        };
+        let damage = Region::single(Rect {
+            x: i32::from(x),
+            y: i32::from(baseline).saturating_sub(10),
+            width: i32::try_from(text.len().saturating_mul(8))
+                .unwrap_or(i32::MAX)
+                .max(1),
+            height: 12,
+        });
+        let Some(buffer) = self.software_buffers.draw_text(
+            window,
+            Size {
+                width: record.geometry.width,
+                height: record.geometry.height,
+            },
+            x,
+            baseline,
+            text,
+            opaque,
+        ) else {
+            return XAuthorityResponsePacket::rejected(
+                transaction,
+                XAuthorityRuntimeError::InvalidResource,
+            );
+        };
+        let handle = buffer.handle;
+        self.last_cpu_buffer_update = Some(buffer);
+        let mut response = XAuthorityResponsePacket::accepted(transaction);
+        match surface_transaction_from_drawing_update(
+            &self.windows,
+            XDrawingUpdate::core_draw(
+                transaction,
+                namespace,
+                window,
+                handle,
+                damage,
+                record.generation,
+                250,
+            ),
+        ) {
+            Ok(transaction) => response.transactions.push(transaction),
+            Err(error) => return XAuthorityResponsePacket::rejected(transaction, error.into()),
+        }
+        response
+    }
 
-fn put_image_buffer_handle(
-    window: crate::XResourceId,
-    transaction: TransactionId,
-    data_len: usize,
-) -> u64 {
-    core_draw_buffer_handle(window, transaction) ^ (data_len as u64).rotate_left(17)
+    pub fn apply_clear(
+        &mut self,
+        transaction: TransactionId,
+        namespace: NamespaceId,
+        window: crate::XResourceId,
+        damage: Region,
+    ) -> XAuthorityResponsePacket {
+        let Some(record) = self.windows.get(window) else {
+            return XAuthorityResponsePacket::rejected(
+                transaction,
+                XAuthorityRuntimeError::UnknownResource,
+            );
+        };
+        let Some(rect) = damage.rects.first().copied() else {
+            return XAuthorityResponsePacket::accepted(transaction);
+        };
+        let Some(buffer) = self.software_buffers.clear(
+            window,
+            Size {
+                width: record.geometry.width,
+                height: record.geometry.height,
+            },
+            rect,
+        ) else {
+            return XAuthorityResponsePacket::rejected(
+                transaction,
+                XAuthorityRuntimeError::InvalidResource,
+            );
+        };
+        let handle = buffer.handle;
+        self.last_cpu_buffer_update = Some(buffer);
+        let mut response = XAuthorityResponsePacket::accepted(transaction);
+        match surface_transaction_from_drawing_update(
+            &self.windows,
+            XDrawingUpdate::core_draw(
+                transaction,
+                namespace,
+                window,
+                handle,
+                damage,
+                record.generation,
+                250,
+            ),
+        ) {
+            Ok(transaction) => response.transactions.push(transaction),
+            Err(error) => return XAuthorityResponsePacket::rejected(transaction, error.into()),
+        }
+        response
+    }
 }

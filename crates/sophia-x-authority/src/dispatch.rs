@@ -1,8 +1,7 @@
 use crate::{
-    X_BIG_REQUESTS_EXTENSION_NAME, X_BIG_REQUESTS_MAJOR_OPCODE, X_KEYBOARD_EXTENSION_NAME,
-    X_KEYBOARD_MAJOR_OPCODE, X_MIT_SHM_EXTENSION_NAME, X_MIT_SHM_MAJOR_OPCODE,
-    X_RANDR_EXTENSION_NAME, X_RANDR_MAJOR_OPCODE, X_SETUP_DEFAULT_COLORMAP, X_SETUP_DEFAULT_ROOT,
-    X_SETUP_DEFAULT_VISUAL, X_SETUP_ROOT_HEIGHT, X_SETUP_ROOT_WIDTH,
+    X_BIG_REQUESTS_EXTENSION_NAME, X_BIG_REQUESTS_MAJOR_OPCODE, X_MIT_SHM_EXTENSION_NAME,
+    X_MIT_SHM_MAJOR_OPCODE, X_RANDR_EXTENSION_NAME, X_RANDR_MAJOR_OPCODE, X_SETUP_DEFAULT_COLORMAP,
+    X_SETUP_DEFAULT_ROOT, X_SETUP_DEFAULT_VISUAL, X_SETUP_ROOT_HEIGHT, X_SETUP_ROOT_WIDTH,
     X_SOPHIA_PRESENT_EXTENSION_NAME, X_SOPHIA_PRESENT_MAJOR_OPCODE, XAtomTable,
     XAuthorityRequestKind, XAuthorityResponseOutcome, XAuthorityResponsePacket, XAuthorityRuntime,
     XAuthorityRuntimeError, XByteOrder, XClientEvent, XClientOutput, XClientReply, XErrorCode,
@@ -43,6 +42,7 @@ pub fn dispatch_x11_wire_request(
     atoms: &mut XAtomTable,
     properties: &mut XPropertyTable,
 ) -> XDispatchResult {
+    runtime.begin_dispatch();
     match request {
         XWireRequest::Authority(packet) => {
             let kind = packet.kind.clone();
@@ -513,7 +513,7 @@ pub fn dispatch_x11_wire_request(
                     metadata_candidates: Vec::new(),
                 };
             }
-            let response = runtime.apply_core_draw(
+            let response = runtime.apply_clear(
                 transaction,
                 context.namespace,
                 window,
@@ -762,17 +762,20 @@ pub fn dispatch_x11_wire_request(
             response: None,
             outputs: vec![XClientOutput::Reply(XClientReply::GetModifierMapping {
                 sequence: context.sequence,
-                keycodes_per_modifier: 0,
-                keycodes: Vec::new(),
+                keycodes_per_modifier: 2,
+                keycodes: vec![50, 62, 66, 0, 37, 105, 64, 108, 77, 0, 0, 0, 133, 134, 0, 0],
             })],
             metadata_candidates: Vec::new(),
         },
-        XWireRequest::GetKeyboardMapping { count, .. } => XDispatchResult {
+        XWireRequest::GetKeyboardMapping {
+            first_keycode,
+            count,
+        } => XDispatchResult {
             response: None,
             outputs: vec![XClientOutput::Reply(XClientReply::GetKeyboardMapping {
                 sequence: context.sequence,
-                keysyms_per_keycode: 1,
-                keysyms: vec![0; usize::from(count)],
+                keysyms_per_keycode: 2,
+                keysyms: x11_us_keyboard_mapping(first_keycode, count),
             })],
             metadata_candidates: Vec::new(),
         },
@@ -1116,7 +1119,7 @@ pub fn dispatch_x11_wire_request(
             src_height,
             dst_x,
             dst_y,
-            offset,
+            offset: _,
             ..
         } => {
             let transaction = TransactionId::from_raw(u64::from(context.sequence));
@@ -1152,13 +1155,8 @@ pub fn dispatch_x11_wire_request(
                 width: i32::from(src_width),
                 height: i32::from(src_height),
             });
-            let response = runtime.apply_put_image(
-                transaction,
-                context.namespace,
-                drawable,
-                damage,
-                usize::try_from(offset).unwrap_or(0),
-            );
+            let response =
+                runtime.apply_put_image(transaction, context.namespace, drawable, damage, None);
             let outputs = if let XAuthorityResponseOutcome::Rejected(error) = response.outcome {
                 vec![XClientOutput::Error(x_error_from_runtime(
                     error,
@@ -1365,57 +1363,16 @@ pub fn dispatch_x11_wire_request(
             drawable,
             x,
             y,
-            glyph_count,
+            text,
             ..
-        }
-        | XWireRequest::ImageText8 {
+        } => dispatch_text_draw(context, runtime, drawable, x, y, text, false),
+        XWireRequest::ImageText8 {
             drawable,
             x,
             y,
-            glyph_count,
+            text,
             ..
-        } => {
-            let transaction = TransactionId::from_raw(u64::from(context.sequence));
-            if runtime
-                .validate_pixmap_access(context.namespace, drawable)
-                .is_ok()
-            {
-                return XDispatchResult {
-                    response: Some(XAuthorityResponsePacket::accepted(transaction)),
-                    outputs: Vec::new(),
-                    metadata_candidates: Vec::new(),
-                };
-            }
-            let width = i32::try_from(glyph_count.saturating_mul(8))
-                .unwrap_or(i32::MAX)
-                .max(1);
-            let response = runtime.apply_core_draw(
-                transaction,
-                context.namespace,
-                drawable,
-                Region::single(Rect {
-                    x: i32::from(x),
-                    y: i32::from(y).saturating_sub(10),
-                    width,
-                    height: 12,
-                }),
-            );
-            let outputs = if let XAuthorityResponseOutcome::Rejected(error) = response.outcome {
-                vec![XClientOutput::Error(x_error_from_runtime(
-                    error,
-                    context.sequence,
-                    context.major_opcode,
-                    u32::try_from(drawable.local.raw()).unwrap_or(0),
-                ))]
-            } else {
-                Vec::new()
-            };
-            XDispatchResult {
-                response: Some(response),
-                outputs,
-                metadata_candidates: Vec::new(),
-            }
-        }
+        } => dispatch_text_draw(context, runtime, drawable, x, y, text, true),
         XWireRequest::FillPoly {
             drawable, damage, ..
         } => {
@@ -1459,7 +1416,7 @@ pub fn dispatch_x11_wire_request(
             height,
             dst_x,
             dst_y,
-            data_len,
+            data,
             ..
         } => {
             let transaction = TransactionId::from_raw(u64::from(context.sequence));
@@ -1479,8 +1436,13 @@ pub fn dispatch_x11_wire_request(
                 width: i32::from(width),
                 height: i32::from(height),
             });
-            let response =
-                runtime.apply_put_image(transaction, context.namespace, drawable, damage, data_len);
+            let response = runtime.apply_put_image(
+                transaction,
+                context.namespace,
+                drawable,
+                damage,
+                Some(&data),
+            );
             let outputs = if let XAuthorityResponseOutcome::Rejected(error) = response.outcome {
                 vec![XClientOutput::Error(x_error_from_runtime(
                     error,
@@ -1497,6 +1459,103 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
+    }
+}
+
+fn x11_us_keyboard_mapping(first_keycode: u8, count: u8) -> Vec<u32> {
+    let mut keysyms = Vec::with_capacity(usize::from(count) * 2);
+    for offset in 0..count {
+        let keycode = first_keycode.saturating_add(offset);
+        let (base, shifted) = x11_us_keysyms(keycode);
+        keysyms.push(base);
+        keysyms.push(shifted);
+    }
+    keysyms
+}
+
+fn x11_us_keysyms(keycode: u8) -> (u32, u32) {
+    match keycode {
+        9 => (0xff1b, 0xff1b),
+        10..=18 => {
+            const BASE: &[u8; 9] = b"123456789";
+            const SHIFTED: &[u8; 9] = b"!@#$%^&*(";
+            let index = usize::from(keycode - 10);
+            (u32::from(BASE[index]), u32::from(SHIFTED[index]))
+        }
+        19 => (u32::from(b'0'), u32::from(b')')),
+        20 => (u32::from(b'-'), u32::from(b'_')),
+        21 => (u32::from(b'='), u32::from(b'+')),
+        22 => (0xff08, 0xff08),
+        23 => (0xff09, 0xfe20),
+        24..=33 => letter_keysyms(keycode, 24, b"qwertyuiop"),
+        34 => (u32::from(b'['), u32::from(b'{')),
+        35 => (u32::from(b']'), u32::from(b'}')),
+        36 => (0xff0d, 0xff0d),
+        37 => (0xffe3, 0xffe3),
+        38..=46 => letter_keysyms(keycode, 38, b"asdfghjkl"),
+        47 => (u32::from(b';'), u32::from(b':')),
+        48 => (u32::from(b'\''), u32::from(b'\"')),
+        49 => (u32::from(b'`'), u32::from(b'~')),
+        50 | 62 => (0xffe1, 0xffe2),
+        51 => (u32::from(b'\\'), u32::from(b'|')),
+        52..=58 => letter_keysyms(keycode, 52, b"zxcvbnm"),
+        59 => (u32::from(b','), u32::from(b'<')),
+        60 => (u32::from(b'.'), u32::from(b'>')),
+        61 => (u32::from(b'/'), u32::from(b'?')),
+        65 => (u32::from(b' '), u32::from(b' ')),
+        66 => (0xffe5, 0xffe5),
+        _ => (0, 0),
+    }
+}
+
+fn letter_keysyms(keycode: u8, first: u8, letters: &[u8]) -> (u32, u32) {
+    let letter = letters[usize::from(keycode - first)];
+    (u32::from(letter), u32::from(letter.to_ascii_uppercase()))
+}
+
+fn dispatch_text_draw(
+    context: XDispatchContext,
+    runtime: &mut XAuthorityRuntime,
+    drawable: XResourceId,
+    x: i16,
+    y: i16,
+    text: Vec<u8>,
+    opaque: bool,
+) -> XDispatchResult {
+    let transaction = TransactionId::from_raw(u64::from(context.sequence));
+    if runtime
+        .validate_pixmap_access(context.namespace, drawable)
+        .is_ok()
+    {
+        return XDispatchResult {
+            response: Some(XAuthorityResponsePacket::accepted(transaction)),
+            outputs: Vec::new(),
+            metadata_candidates: Vec::new(),
+        };
+    }
+    let response = runtime.apply_text_draw(
+        transaction,
+        context.namespace,
+        drawable,
+        x,
+        y,
+        &text,
+        opaque,
+    );
+    let outputs = if let XAuthorityResponseOutcome::Rejected(error) = response.outcome {
+        vec![XClientOutput::Error(x_error_from_runtime(
+            error,
+            context.sequence,
+            context.major_opcode,
+            u32::try_from(drawable.local.raw()).unwrap_or(0),
+        ))]
+    } else {
+        Vec::new()
+    };
+    XDispatchResult {
+        response: Some(response),
+        outputs,
+        metadata_candidates: Vec::new(),
     }
 }
 
@@ -1525,12 +1584,6 @@ fn extension_query_result(name: &str) -> XExtensionQueryResult {
         X_RANDR_EXTENSION_NAME => XExtensionQueryResult {
             present: true,
             major_opcode: X_RANDR_MAJOR_OPCODE,
-            first_event: 0,
-            first_error: 0,
-        },
-        X_KEYBOARD_EXTENSION_NAME => XExtensionQueryResult {
-            present: true,
-            major_opcode: X_KEYBOARD_MAJOR_OPCODE,
             first_event: 0,
             first_error: 0,
         },

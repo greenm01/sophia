@@ -267,21 +267,21 @@ pub enum XWireRequest {
         dst_y: i16,
         left_pad: u8,
         depth: u8,
-        data_len: usize,
+        data: Vec<u8>,
     },
     PolyText8 {
         drawable: XResourceId,
         gc: XResourceId,
         x: i16,
         y: i16,
-        glyph_count: usize,
+        text: Vec<u8>,
     },
     ImageText8 {
         drawable: XResourceId,
         gc: XResourceId,
         x: i16,
         y: i16,
-        glyph_count: usize,
+        text: Vec<u8>,
     },
     CreateColormap {
         colormap: XResourceId,
@@ -802,7 +802,7 @@ fn decode_put_image(
         dst_y: context.byte_order.i16(&bytes[18..20]),
         left_pad: bytes[20],
         depth: bytes[21],
-        data_len,
+        data: bytes[X_PUT_IMAGE_REQ_LEN..].to_vec(),
     })
 }
 
@@ -820,7 +820,7 @@ fn decode_poly_text8(
     }
 
     let mut offset = 0usize;
-    let mut glyph_count = 0usize;
+    let mut text = Vec::new();
     while offset < item_bytes.len() {
         let len = item_bytes[offset];
         offset += 1;
@@ -842,13 +842,15 @@ fn decode_poly_text8(
         let remaining = item_bytes.len().saturating_sub(offset);
         let glyph_len = usize::from(len);
         if remaining >= 1 + glyph_len {
-            offset += 1 + glyph_len;
-            glyph_count = glyph_count.saturating_add(glyph_len);
+            offset += 1;
+            text.extend_from_slice(&item_bytes[offset..offset + glyph_len]);
+            offset += glyph_len;
             continue;
         }
         if remaining == glyph_len && glyph_len > 0 {
-            offset += glyph_len;
-            glyph_count = glyph_count.saturating_add(glyph_len - 1);
+            offset += 1;
+            text.extend_from_slice(&item_bytes[offset..offset + glyph_len - 1]);
+            offset += glyph_len - 1;
             continue;
         }
         let item_len = 1usize + glyph_len;
@@ -866,7 +868,7 @@ fn decode_poly_text8(
         gc: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
         x: context.byte_order.i16(&bytes[12..14]),
         y: context.byte_order.i16(&bytes[14..16]),
-        glyph_count,
+        text,
     })
 }
 
@@ -896,7 +898,7 @@ fn decode_image_text8(
         gc: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
         x: context.byte_order.i16(&bytes[12..14]),
         y: context.byte_order.i16(&bytes[14..16]),
-        glyph_count: text_len,
+        text: bytes[X_IMAGE_TEXT8_REQ_LEN..X_IMAGE_TEXT8_REQ_LEN + text_len].to_vec(),
     })
 }
 

@@ -1,10 +1,10 @@
 #[cfg(feature = "atomic-scanout-smoke-live")]
 use std::time::{Duration, Instant};
 
-#[cfg(feature = "atomic-scanout-live")]
-use super::prelude::arg_value;
 #[cfg(feature = "atomic-scanout-smoke-live")]
 use super::prelude::parse_u64;
+#[cfg(feature = "atomic-scanout-live")]
+use super::prelude::{BufferSource, Size, XAuthorityCpuBufferSnapshot, arg_value};
 #[cfg(feature = "atomic-scanout-smoke-live")]
 use sophia_cli::backend_args::{
     atomic_scanout_smoke_child_args, atomic_scanout_smoke_child_timeout,
@@ -137,6 +137,8 @@ fn run_sophia_live_session_bootstrap(args: &[String]) -> Result<(), Box<dyn std:
 
     let terminal_proof =
         super::x_authority::collect_x_authority_xterm_render_authority_batches(&terminal)?;
+    let pixel_composition = compose_terminal_cpu_buffers(&terminal_proof)?;
+    let keyboard_proof = super::x_authority::run_x_authority_xterm_input_smoke()?;
     let proof_display = terminal_proof.display.clone();
     let proof_requests = terminal_proof.requests;
     let proof_transactions = terminal_proof.transactions;
@@ -147,12 +149,12 @@ fn run_sophia_live_session_bootstrap(args: &[String]) -> Result<(), Box<dyn std:
 
     let status =
         if composition.status == sophia_backend_live::LiveSessionCompositionSmokeStatus::Passed {
-            "bootstrap_ready_keyboard_pending"
+            "bootstrap_cpu_pixels_x11_keyboard_ready_native_presentation_pending"
         } else {
             "composition_failed"
         };
     println!(
-        "sophia_live_session_bootstrap schema=1 status={} proof_display={} terminal={} authority_requests={} authority_transactions={} authority_runtime_committed={} authority_runtime_surfaces={} composition_status={:?} composition_batches={} composition_committed={} composition_surfaces={} keyboard=pending persistence=single_client_probe explicit_display=pending",
+        "sophia_live_session_bootstrap schema=3 status={} proof_display={} terminal={} authority_requests={} authority_transactions={} authority_runtime_committed={} authority_runtime_surfaces={} cpu_buffers={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_checksum={} composition_status={:?} composition_batches={} composition_committed={} composition_surfaces={} keyboard=x11_event_pixel_change_passed keyboard_initial_generation={} keyboard_final_generation={} keyboard_initial_checksum={} keyboard_final_checksum={} physical_input=pending native_presentation=pending persistence=single_client_probe explicit_display=pending",
         status,
         proof_display,
         terminal_name,
@@ -160,10 +162,18 @@ fn run_sophia_live_session_bootstrap(args: &[String]) -> Result<(), Box<dyn std:
         proof_transactions,
         proof_runtime_committed,
         proof_runtime_surfaces,
+        terminal_proof.cpu_buffers.len(),
+        pixel_composition.layers_composed,
+        pixel_composition.nonzero_pixel_bytes,
+        pixel_composition.checksum,
         composition.status,
         composition.authority_batches_input,
         composition.authority_transactions_committed,
         composition.authority_surfaces_applied,
+        keyboard_proof.initial_generation,
+        keyboard_proof.final_generation,
+        keyboard_proof.initial_checksum,
+        keyboard_proof.final_checksum,
     );
 
     if composition.status != sophia_backend_live::LiveSessionCompositionSmokeStatus::Passed {
@@ -173,7 +183,63 @@ fn run_sophia_live_session_bootstrap(args: &[String]) -> Result<(), Box<dyn std:
         )
         .into());
     }
+    if pixel_composition.layers_composed == 0 || pixel_composition.nonzero_pixel_bytes == 0 {
+        return Err("sophia live session bootstrap did not compose terminal CPU pixels".into());
+    }
     Ok(())
+}
+
+#[cfg(feature = "atomic-scanout-live")]
+fn compose_terminal_cpu_buffers(
+    proof: &super::x_authority::XAuthorityTerminalRenderProof,
+) -> Result<sophia_backend_live::LiveCpuCompositionReport, Box<dyn std::error::Error>> {
+    let mut buffers = std::collections::BTreeMap::new();
+    for buffer in &proof.cpu_buffers {
+        let replace =
+            buffers
+                .get(&buffer.handle)
+                .is_none_or(|current: &&XAuthorityCpuBufferSnapshot| {
+                    buffer.generation >= current.generation
+                });
+        if replace {
+            buffers.insert(buffer.handle, buffer);
+        }
+    }
+
+    let mut surfaces = std::collections::BTreeMap::new();
+    for batch in &proof.authority_batches {
+        for transaction in &batch.transactions {
+            let BufferSource::CpuBuffer { handle } = transaction.target_buffer else {
+                continue;
+            };
+            surfaces.insert(transaction.surface, (transaction.target_geometry, handle));
+        }
+    }
+    let layers = surfaces
+        .into_values()
+        .filter_map(|(geometry, handle)| {
+            let buffer = buffers.get(&handle)?;
+            Some(sophia_backend_live::LiveCpuCompositionLayer {
+                geometry,
+                buffer: sophia_backend_live::LiveCpuBufferSource {
+                    handle: buffer.handle,
+                    size: buffer.size,
+                    stride: buffer.stride,
+                    format: buffer.format,
+                    generation: buffer.generation,
+                    bytes: buffer.bytes.clone(),
+                },
+            })
+        })
+        .collect::<Vec<_>>();
+    sophia_backend_live::compose_live_cpu_frame(
+        Size {
+            width: 1280,
+            height: 720,
+        },
+        &layers,
+    )
+    .map_err(|error| format!("failed to compose terminal CPU pixels: {error:?}").into())
 }
 
 #[cfg(feature = "atomic-scanout-smoke-live")]

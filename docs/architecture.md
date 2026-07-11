@@ -71,13 +71,20 @@ and returns command packets.
 
 ## Current Architecture Focus
 
-The internal Sophia X Authority runtime is now executable over a Sophia-owned
-IPC frame protocol. That socket protocol is a harness, not the X11 wire
-protocol. The first real X11 wire layer now parses connection setup and decodes
-early core requests into existing internal authority requests. Wire parsing
-feeds `XAuthorityRuntime`; it must not grow a second resource table or a
-parallel authority path. The next architecture step is atom and property naming
-for ICCCM/EWMH-compatible metadata without weakening the blind WM boundary.
+Sophia X Authority now serves a bounded real X11 subset, runs real-client
+compatibility probes, and emits drawing transactions through a persistent
+sequential listener. Native backend evidence also reaches rendered GBM/KMS
+submit and page-flip retirement. Core X drawing now updates bounded XRGB8888
+buffers, renderer-live composes them, and the native EGL adapter can upload the
+composed frame to a GBM front buffer. The remaining visibility gate is hardware
+evidence that terminal-content pixels, rather than the old clear color, reach
+scanout.
+
+The active architecture step is a persistent owner joining X Authority, native
+scanout, and focused physical keyboard routing. The injected core-X event path
+already changes real xterm pixels. xmonad then enters through the isolated
+blind X11 WM bridge, whose bounded ID and configure/focus translation model now
+exists, never through the client-facing X Authority display.
 
 ## Load-Bearing Boundaries
 
@@ -1084,19 +1091,21 @@ visual state.
 
 ## Next Research Thread
 
-The next useful proof is not a full desktop. It is a design-to-code transition
-from XLibre prototype seams into a Sophia-owned authority:
+The next proof is one visible, interactive X terminal rather than a broad
+desktop. The implementation order is:
 
-1. Define the minimum X protocol subset for real applications.
-2. Define the namespace-aware X resource model.
-3. Define `SurfaceTransaction` and `CommittedSurfaceState` semantics.
-4. Translate X Present/DRI3/SHM/Render paths into pending buffer readiness.
-5. Translate X selections and drag-and-drop through protocol-neutral portals.
-6. Keep the blind WM protocol unchanged.
-7. Verify that slow clients preserve the last committed visual state.
+1. Back the xterm-driven core drawing subset with bounded XRGB8888 pixels.
+2. Resolve and compose those pixels into a renderer-owned scanout frame.
+3. Run X Authority, backend ticks, scanout, and xterm under one persistent
+   session owner.
+4. Deliver focused keyboard events through X Authority semantics.
+5. Run xmonad as blind layout policy through a separate synthetic X11 WM
+   bridge.
+6. Measure repeated-tick latency, queue pressure, frame age, and cleanup debt.
+7. Start Wayland Authority only after those X-session gates pass.
 
-The XLibre/Xvfb smokes remain valuable regression evidence for compatibility
-ideas, but they are no longer the destination architecture.
+XLibre/Xvfb smokes remain regression evidence for compatibility ideas, but they
+are not the destination architecture and are not part of the xmonad bridge.
 
 ## Reference Boundaries
 
