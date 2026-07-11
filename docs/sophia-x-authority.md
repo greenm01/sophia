@@ -425,3 +425,17 @@ The passing proof exits successfully with no Engine transactions because the
 client does not draw. Its reduced report still records request count, opcode
 set, zero runtime counters, and `first_error=none`, so introspection regressions
 remain visible without requiring visual transaction evidence.
+
+## External xprop Probe
+
+`x-authority-xprop-root-smoke` launches `/usr/bin/xprop -root` against a
+temporary Sophia X Authority socket and treats root property discovery as a
+read-only compatibility surface. The probe added only the request surface xprop
+actually exercised after xwininfo: bounded `ListProperties` decoding and replies
+for namespace-local property atom sets.
+
+The passing proof exits successfully with no Engine transactions because the
+client only introspects root properties. The reduced report records request
+count, opcode set, zero runtime counters, and `first_error=none`. Sophia X
+Authority does not synthesize a broad global root-property catalog here; it
+reports the properties the namespace-local table actually owns.

@@ -177,6 +177,15 @@ impl XPropertyTable {
         self.records.get(&(namespace, window, property))
     }
 
+    pub fn properties_for_window(&self, namespace: NamespaceId, window: XResourceId) -> Vec<XAtom> {
+        self.records
+            .keys()
+            .filter_map(|(record_namespace, record_window, property)| {
+                (*record_namespace == namespace && *record_window == window).then_some(*property)
+            })
+            .collect()
+    }
+
     pub fn len(&self) -> usize {
         self.records.len()
     }

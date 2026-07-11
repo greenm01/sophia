@@ -26,7 +26,7 @@ Current architecture read:
 
 Current milestone target:
 
-- [ ] Expand Sophia X Authority only where `xclock` and later real probes demand
+- [ ] Expand Sophia X Authority only where real probes demand
   it.
 - [ ] Prefer bounded drawing, upload, present, selection, event, and namespace
   behavior over broad X11 completeness.
@@ -39,7 +39,7 @@ Current milestone target:
 
 ### 1. Authority Coverage From Real Probe Failures
 
-- [ ] Expand Sophia X Authority only where `xclock` and later real probes demand
+- [ ] Expand Sophia X Authority only where real probes demand
   it.
 - [ ] Prefer bounded drawing, upload, present, selection, event, and namespace
   behavior over broad X11 completeness.
@@ -75,6 +75,9 @@ Current milestone target:
 
 ## Done Recently
 
+- [x] `x-authority-xprop-root-smoke` launches `/usr/bin/xprop -root`, exits
+  successfully with `first_error=none`, and adds only the demanded bounded
+  `ListProperties` root/window property atom reply path.
 - [x] `x-authority-xwininfo-root-smoke` launches `/usr/bin/xwininfo -root`,
   exits successfully with `first_error=none`, and adds only the demanded
   `GetWindowAttributes`, `GetGeometry`, `QueryTree`, and

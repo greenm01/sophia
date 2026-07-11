@@ -1,66 +1,12 @@
 use super::prelude::*;
 
 pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
-    if args.iter().any(|arg| arg == "x-authority-xclock-smoke") {
-        let report = run_x_authority_xclock_smoke()?;
-        println!(
-            "x-authority-xclock-smoke display={} outcome={} status={} stdout_bytes={} stderr_bytes={} requests={} opcode_count={} opcodes={} transactions={} runtime_committed={} runtime_surfaces={} first_error={}",
-            report.display,
-            report.outcome,
-            report.status,
-            report.stdout_bytes,
-            report.stderr_bytes,
-            report.requests,
-            report.opcode_count,
-            report.opcodes,
-            report.transactions,
-            report.runtime_committed,
-            report.runtime_surfaces,
-            report.first_error.as_deref().unwrap_or("none")
-        );
-        return Ok(true);
-    }
-
-    if args.iter().any(|arg| arg == "x-authority-xeyes-smoke") {
-        let report = run_x_authority_xeyes_smoke()?;
-        println!(
-            "x-authority-xeyes-smoke display={} outcome={} status={} stdout_bytes={} stderr_bytes={} requests={} opcode_count={} opcodes={} transactions={} runtime_committed={} runtime_surfaces={} first_error={}",
-            report.display,
-            report.outcome,
-            report.status,
-            report.stdout_bytes,
-            report.stderr_bytes,
-            report.requests,
-            report.opcode_count,
-            report.opcodes,
-            report.transactions,
-            report.runtime_committed,
-            report.runtime_surfaces,
-            report.first_error.as_deref().unwrap_or("none")
-        );
-        return Ok(true);
-    }
-
-    if args
+    if let Some(spec) = EXTERNAL_PROBE_SMOKES
         .iter()
-        .any(|arg| arg == "x-authority-xwininfo-root-smoke")
+        .find(|spec| args.iter().any(|arg| arg == spec.command_name))
     {
-        let report = run_x_authority_xwininfo_root_smoke()?;
-        println!(
-            "x-authority-xwininfo-root-smoke display={} outcome={} status={} stdout_bytes={} stderr_bytes={} requests={} opcode_count={} opcodes={} transactions={} runtime_committed={} runtime_surfaces={} first_error={}",
-            report.display,
-            report.outcome,
-            report.status,
-            report.stdout_bytes,
-            report.stderr_bytes,
-            report.requests,
-            report.opcode_count,
-            report.opcodes,
-            report.transactions,
-            report.runtime_committed,
-            report.runtime_surfaces,
-            report.first_error.as_deref().unwrap_or("none")
-        );
+        let report = run_x_authority_external_probe_smoke_spec(spec)?;
+        print_external_probe_smoke_report(spec.command_name, &report);
         return Ok(true);
     }
 
@@ -263,10 +209,6 @@ struct XAuthorityExternalProbeSmokeReport {
     first_error: Option<String>,
 }
 
-type XAuthorityXclockSmokeReport = XAuthorityExternalProbeSmokeReport;
-type XAuthorityXeyesSmokeReport = XAuthorityExternalProbeSmokeReport;
-type XAuthorityXwininfoRootSmokeReport = XAuthorityExternalProbeSmokeReport;
-
 #[derive(Clone, Debug)]
 struct XAuthorityPresentPixmapSmokeReport {
     display: String,
@@ -284,6 +226,56 @@ struct XAuthorityRuntimeSmokeReport {
     portal_prompts: usize,
     selection_artifacts: usize,
 }
+
+#[derive(Clone, Copy, Debug)]
+struct ExternalProbeSmokeSpec {
+    command_name: &'static str,
+    label: &'static str,
+    binary: &'static str,
+    args: &'static [&'static str],
+    display_base: u32,
+    namespace: u64,
+    require_transactions: bool,
+}
+
+const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
+    ExternalProbeSmokeSpec {
+        command_name: "x-authority-xclock-smoke",
+        label: "xclock",
+        binary: "/usr/bin/xclock",
+        args: &["-analog", "-norender", "-update", "1"],
+        display_base: 6600,
+        namespace: 48,
+        require_transactions: true,
+    },
+    ExternalProbeSmokeSpec {
+        command_name: "x-authority-xeyes-smoke",
+        label: "xeyes",
+        binary: "/usr/bin/xeyes",
+        args: &[],
+        display_base: 6800,
+        namespace: 49,
+        require_transactions: true,
+    },
+    ExternalProbeSmokeSpec {
+        command_name: "x-authority-xwininfo-root-smoke",
+        label: "xwininfo",
+        binary: "/usr/bin/xwininfo",
+        args: &["-root"],
+        display_base: 6900,
+        namespace: 50,
+        require_transactions: false,
+    },
+    ExternalProbeSmokeSpec {
+        command_name: "x-authority-xprop-root-smoke",
+        label: "xprop",
+        binary: "/usr/bin/xprop",
+        args: &["-root"],
+        display_base: 7000,
+        namespace: 51,
+        require_transactions: false,
+    },
+];
 
 fn run_x_authority_x11_smoke() -> Result<XAuthorityX11SmokeReport, Box<dyn std::error::Error>> {
     use std::io::Write;
@@ -634,39 +626,39 @@ fn run_x_authority_xlib_put_image_smoke()
     })
 }
 
-fn run_x_authority_xclock_smoke() -> Result<XAuthorityXclockSmokeReport, Box<dyn std::error::Error>>
-{
+fn run_x_authority_external_probe_smoke_spec(
+    spec: &ExternalProbeSmokeSpec,
+) -> Result<XAuthorityExternalProbeSmokeReport, Box<dyn std::error::Error>> {
     run_x_authority_external_probe_smoke(
-        "xclock",
-        "/usr/bin/xclock",
-        &["-analog", "-norender", "-update", "1"],
-        6600,
-        NamespaceId::from_raw(48),
-        true,
+        spec.label,
+        spec.binary,
+        spec.args,
+        spec.display_base,
+        NamespaceId::from_raw(spec.namespace),
+        spec.require_transactions,
     )
 }
 
-fn run_x_authority_xeyes_smoke() -> Result<XAuthorityXeyesSmokeReport, Box<dyn std::error::Error>> {
-    run_x_authority_external_probe_smoke(
-        "xeyes",
-        "/usr/bin/xeyes",
-        &[],
-        6800,
-        NamespaceId::from_raw(49),
-        true,
-    )
-}
-
-fn run_x_authority_xwininfo_root_smoke()
--> Result<XAuthorityXwininfoRootSmokeReport, Box<dyn std::error::Error>> {
-    run_x_authority_external_probe_smoke(
-        "xwininfo",
-        "/usr/bin/xwininfo",
-        &["-root"],
-        6900,
-        NamespaceId::from_raw(50),
-        false,
-    )
+fn print_external_probe_smoke_report(
+    command_name: &str,
+    report: &XAuthorityExternalProbeSmokeReport,
+) {
+    println!(
+        "{} display={} outcome={} status={} stdout_bytes={} stderr_bytes={} requests={} opcode_count={} opcodes={} transactions={} runtime_committed={} runtime_surfaces={} first_error={}",
+        command_name,
+        report.display,
+        report.outcome,
+        report.status,
+        report.stdout_bytes,
+        report.stderr_bytes,
+        report.requests,
+        report.opcode_count,
+        report.opcodes,
+        report.transactions,
+        report.runtime_committed,
+        report.runtime_surfaces,
+        report.first_error.as_deref().unwrap_or("none")
+    );
 }
 
 fn run_x_authority_external_probe_smoke(

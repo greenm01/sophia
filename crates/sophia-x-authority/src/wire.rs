@@ -19,6 +19,7 @@ const X_INTERN_ATOM: u8 = 16;
 const X_GET_ATOM_NAME: u8 = 17;
 const X_CHANGE_PROPERTY: u8 = 18;
 const X_GET_PROPERTY: u8 = 20;
+const X_LIST_PROPERTIES: u8 = 21;
 const X_SET_SELECTION_OWNER: u8 = 22;
 const X_CONVERT_SELECTION: u8 = 24;
 const X_TRANSLATE_COORDINATES: u8 = 40;
@@ -67,6 +68,7 @@ const X_INTERN_ATOM_REQ_LEN: usize = 8;
 const X_GET_ATOM_NAME_REQ_LEN: usize = 8;
 const X_CHANGE_PROPERTY_REQ_LEN: usize = 24;
 const X_GET_PROPERTY_REQ_LEN: usize = 24;
+const X_LIST_PROPERTIES_REQ_LEN: usize = 8;
 const X_SET_SELECTION_OWNER_REQ_LEN: usize = 16;
 const X_CONVERT_SELECTION_REQ_LEN: usize = 24;
 const X_TRANSLATE_COORDINATES_REQ_LEN: usize = 16;
@@ -138,6 +140,9 @@ pub enum XWireRequest {
     },
     ChangeProperty(XPropertyChange),
     GetProperty(XPropertyRead),
+    ListProperties {
+        window: XResourceId,
+    },
     CreateGraphicsContext {
         gc: XResourceId,
         drawable: XResourceId,
@@ -350,6 +355,7 @@ pub fn decode_x11_core_request(
         X_GET_ATOM_NAME => decode_get_atom_name(context, bytes),
         X_CHANGE_PROPERTY => decode_change_property(context, bytes),
         X_GET_PROPERTY => decode_get_property(context, bytes),
+        X_LIST_PROPERTIES => decode_list_properties(context, bytes),
         X_SET_SELECTION_OWNER => decode_set_selection_owner(context, bytes),
         X_CONVERT_SELECTION => decode_convert_selection(context, bytes),
         X_TRANSLATE_COORDINATES => decode_translate_coordinates(context, bytes),
@@ -957,6 +963,16 @@ fn decode_get_property(
         long_offset: context.byte_order.u32(&bytes[16..20]),
         long_length: context.byte_order.u32(&bytes[20..24]),
     }))
+}
+
+fn decode_list_properties(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_LIST_PROPERTIES, X_LIST_PROPERTIES_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::ListProperties {
+        window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+    })
 }
 
 fn decode_create_gc(

@@ -351,6 +351,31 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
+        XWireRequest::ListProperties { window } => {
+            let output = if window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
+                XClientOutput::Reply(XClientReply::ListProperties {
+                    sequence: context.sequence,
+                    atoms: properties.properties_for_window(context.namespace, window),
+                })
+            } else if let Err(error) = runtime.validate_window_access(context.namespace, window) {
+                XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(window.local.raw()).unwrap_or(0),
+                ))
+            } else {
+                XClientOutput::Reply(XClientReply::ListProperties {
+                    sequence: context.sequence,
+                    atoms: properties.properties_for_window(context.namespace, window),
+                })
+            };
+            XDispatchResult {
+                response: None,
+                outputs: vec![output],
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::CreateGraphicsContext { .. } | XWireRequest::FreeGraphicsContext { .. } => {
             XDispatchResult {
                 response: None,

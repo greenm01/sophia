@@ -223,6 +223,11 @@ fn x11_core_decoder_maps_create_and_map_to_authority_packets() {
         &resource_request(XByteOrder::LittleEndian, 15, X_SETUP_DEFAULT_ROOT),
     )
     .unwrap();
+    let list_properties = decode_x11_core_request(
+        context(namespace, 507, XByteOrder::LittleEndian),
+        &resource_request(XByteOrder::LittleEndian, 21, X_SETUP_DEFAULT_ROOT),
+    )
+    .unwrap();
     assert_eq!(
         geometry,
         XWireRequest::GetGeometry {
@@ -235,8 +240,14 @@ fn x11_core_decoder_maps_create_and_map_to_authority_packets() {
             window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
         }
     );
+    assert_eq!(
+        list_properties,
+        XWireRequest::ListProperties {
+            window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+        }
+    );
     let translate = decode_x11_core_request(
-        context(namespace, 507, XByteOrder::LittleEndian),
+        context(namespace, 508, XByteOrder::LittleEndian),
         &translate_coordinates_request(
             XByteOrder::LittleEndian,
             X_SETUP_DEFAULT_ROOT,
@@ -1397,6 +1408,56 @@ fn x11_dispatch_query_tree_reports_root_without_children() {
     );
     assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][12..16]), 0);
     assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][16..18]), 0);
+}
+
+#[test]
+fn x11_dispatch_list_properties_reports_window_property_atoms() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let utf8 = atoms
+        .intern(X_ATOM_NAME_UTF8_STRING, false)
+        .unwrap()
+        .unwrap();
+    let net_wm_name = atoms
+        .intern(X_ATOM_NAME_NET_WM_NAME, false)
+        .unwrap()
+        .unwrap();
+    properties
+        .apply_change(
+            namespace,
+            XPropertyChange {
+                mode: XPropertyMode::Replace,
+                window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+                property: net_wm_name,
+                property_type: utf8,
+                format: 8,
+                bytes: b"Sophia root".to_vec(),
+            },
+        )
+        .unwrap();
+    let request = decode_x11_core_request(
+        context(namespace, 529, XByteOrder::LittleEndian),
+        &resource_request(XByteOrder::LittleEndian, 21, X_SETUP_DEFAULT_ROOT),
+    )
+    .unwrap();
+
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 21),
+        request,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][4..8]), 1);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][8..10]), 1);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &encoded[0][32..36]),
+        net_wm_name
+    );
 }
 
 #[test]
