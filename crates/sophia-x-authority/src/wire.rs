@@ -23,7 +23,10 @@ const X_CHANGE_PROPERTY: u8 = 18;
 const X_GET_PROPERTY: u8 = 20;
 const X_LIST_PROPERTIES: u8 = 21;
 const X_SET_SELECTION_OWNER: u8 = 22;
+const X_GET_SELECTION_OWNER: u8 = 23;
 const X_CONVERT_SELECTION: u8 = 24;
+const X_GRAB_SERVER: u8 = 36;
+const X_UNGRAB_SERVER: u8 = 37;
 const X_TRANSLATE_COORDINATES: u8 = 40;
 const X_GET_INPUT_FOCUS: u8 = 43;
 const X_OPEN_FONT: u8 = 45;
@@ -45,6 +48,7 @@ const X_POLY_FILL_RECTANGLE: u8 = 70;
 const X_POLY_FILL_ARC: u8 = 71;
 const X_PUT_IMAGE: u8 = 72;
 const X_POLY_TEXT8: u8 = 74;
+const X_CREATE_COLORMAP: u8 = 78;
 const X_ALLOC_NAMED_COLOR: u8 = 85;
 const X_QUERY_COLORS: u8 = 91;
 const X_CREATE_GLYPH_CURSOR: u8 = 94;
@@ -65,9 +69,18 @@ pub const X_MIT_SHM_PUT_IMAGE_MINOR_OPCODE: u8 = 3;
 pub const X_RANDR_EXTENSION_NAME: &str = "RANDR";
 pub const X_RANDR_MAJOR_OPCODE: u8 = 132;
 pub const X_RANDR_QUERY_VERSION_MINOR_OPCODE: u8 = 0;
+pub const X_RANDR_SELECT_INPUT_MINOR_OPCODE: u8 = 4;
 pub const X_RANDR_GET_SCREEN_SIZE_RANGE_MINOR_OPCODE: u8 = 6;
 pub const X_RANDR_GET_SCREEN_RESOURCES_MINOR_OPCODE: u8 = 8;
 pub const X_RANDR_GET_SCREEN_RESOURCES_CURRENT_MINOR_OPCODE: u8 = 25;
+pub const X_RANDR_GET_OUTPUT_PRIMARY_MINOR_OPCODE: u8 = 31;
+pub const X_RANDR_GET_MONITORS_MINOR_OPCODE: u8 = 42;
+pub const X_KEYBOARD_EXTENSION_NAME: &str = "XKEYBOARD";
+pub const X_KEYBOARD_MAJOR_OPCODE: u8 = 133;
+pub const X_KEYBOARD_USE_EXTENSION_MINOR_OPCODE: u8 = 0;
+pub const X_BIG_REQUESTS_EXTENSION_NAME: &str = "BIG-REQUESTS";
+pub const X_BIG_REQUESTS_MAJOR_OPCODE: u8 = 134;
+pub const X_BIG_REQUESTS_ENABLE_MINOR_OPCODE: u8 = 0;
 
 const X_CREATE_WINDOW_REQ_LEN: usize = 32;
 const X_CHANGE_WINDOW_ATTRIBUTES_REQ_LEN: usize = 12;
@@ -85,7 +98,10 @@ const X_CHANGE_PROPERTY_REQ_LEN: usize = 24;
 const X_GET_PROPERTY_REQ_LEN: usize = 24;
 const X_LIST_PROPERTIES_REQ_LEN: usize = 8;
 const X_SET_SELECTION_OWNER_REQ_LEN: usize = 16;
+const X_GET_SELECTION_OWNER_REQ_LEN: usize = 8;
 const X_CONVERT_SELECTION_REQ_LEN: usize = 24;
+const X_GRAB_SERVER_REQ_LEN: usize = 4;
+const X_UNGRAB_SERVER_REQ_LEN: usize = 4;
 const X_TRANSLATE_COORDINATES_REQ_LEN: usize = 16;
 const X_GET_INPUT_FOCUS_REQ_LEN: usize = 4;
 const X_OPEN_FONT_REQ_LEN: usize = 12;
@@ -107,6 +123,7 @@ const X_POLY_FILL_RECTANGLE_REQ_LEN: usize = 12;
 const X_POLY_FILL_ARC_REQ_LEN: usize = 12;
 const X_PUT_IMAGE_REQ_LEN: usize = 24;
 const X_POLY_TEXT8_REQ_LEN: usize = 16;
+const X_CREATE_COLORMAP_REQ_LEN: usize = 16;
 const X_ALLOC_NAMED_COLOR_REQ_LEN: usize = 12;
 const X_QUERY_COLORS_REQ_LEN: usize = 8;
 const X_CREATE_GLYPH_CURSOR_REQ_LEN: usize = 32;
@@ -120,8 +137,13 @@ const X_MIT_SHM_ATTACH_REQ_LEN: usize = 16;
 const X_MIT_SHM_DETACH_REQ_LEN: usize = 8;
 const X_MIT_SHM_PUT_IMAGE_REQ_LEN: usize = 40;
 const X_RANDR_QUERY_VERSION_REQ_LEN: usize = 12;
+const X_RANDR_SELECT_INPUT_REQ_LEN: usize = 12;
 const X_RANDR_GET_SCREEN_SIZE_RANGE_REQ_LEN: usize = 8;
 const X_RANDR_GET_SCREEN_RESOURCES_REQ_LEN: usize = 8;
+const X_RANDR_GET_OUTPUT_PRIMARY_REQ_LEN: usize = 8;
+const X_RANDR_GET_MONITORS_REQ_LEN: usize = 12;
+const X_KEYBOARD_USE_EXTENSION_REQ_LEN: usize = 8;
+const X_BIG_REQUESTS_ENABLE_REQ_LEN: usize = 4;
 
 pub const X_PUT_IMAGE_MAX_DATA_BYTES: usize = crate::X_PROPERTY_MAX_VALUE_BYTES;
 pub const X_QUERY_COLORS_MAX_PIXELS: usize = 256;
@@ -175,6 +197,11 @@ pub enum XWireRequest {
     ListProperties {
         window: XResourceId,
     },
+    GetSelectionOwner {
+        selection: XAtom,
+    },
+    GrabServer,
+    UngrabServer,
     CreateGraphicsContext {
         gc: XResourceId,
         drawable: XResourceId,
@@ -217,6 +244,11 @@ pub enum XWireRequest {
         x: i16,
         y: i16,
         glyph_count: usize,
+    },
+    CreateColormap {
+        colormap: XResourceId,
+        window: XResourceId,
+        visual: u32,
     },
     AllocNamedColor {
         colormap: XResourceId,
@@ -322,6 +354,10 @@ pub enum XWireRequest {
         major_version: u32,
         minor_version: u32,
     },
+    RandrSelectInput {
+        window: XResourceId,
+        enable: u16,
+    },
     RandrGetScreenSizeRange {
         window: XResourceId,
     },
@@ -329,6 +365,18 @@ pub enum XWireRequest {
         window: XResourceId,
         current: bool,
     },
+    RandrGetOutputPrimary {
+        window: XResourceId,
+    },
+    RandrGetMonitors {
+        window: XResourceId,
+        get_active: bool,
+    },
+    XkbUseExtension {
+        wanted_major: u16,
+        wanted_minor: u16,
+    },
+    BigRequestsEnable,
     QueryColors {
         colormap: XResourceId,
         pixels: Vec<u32>,
@@ -425,7 +473,10 @@ pub fn decode_x11_core_request(
         X_GET_PROPERTY => decode_get_property(context, bytes),
         X_LIST_PROPERTIES => decode_list_properties(context, bytes),
         X_SET_SELECTION_OWNER => decode_set_selection_owner(context, bytes),
+        X_GET_SELECTION_OWNER => decode_get_selection_owner(context, bytes),
         X_CONVERT_SELECTION => decode_convert_selection(context, bytes),
+        X_GRAB_SERVER => decode_grab_server(bytes),
+        X_UNGRAB_SERVER => decode_ungrab_server(bytes),
         X_TRANSLATE_COORDINATES => decode_translate_coordinates(context, bytes),
         X_GET_INPUT_FOCUS => decode_get_input_focus(bytes),
         X_OPEN_FONT => decode_open_font(context, bytes),
@@ -447,6 +498,7 @@ pub fn decode_x11_core_request(
         X_POLY_FILL_ARC => decode_poly_fill_arc(context, bytes),
         X_PUT_IMAGE => decode_put_image(context, bytes),
         X_POLY_TEXT8 => decode_poly_text8(context, bytes),
+        X_CREATE_COLORMAP => decode_create_colormap(context, bytes),
         X_ALLOC_NAMED_COLOR => decode_alloc_named_color(context, bytes),
         X_QUERY_COLORS => decode_query_colors(context, bytes),
         X_CREATE_GLYPH_CURSOR => decode_create_glyph_cursor(context, bytes),
@@ -457,7 +509,43 @@ pub fn decode_x11_core_request(
         X_SOPHIA_PRESENT_MAJOR_OPCODE => decode_sophia_present(context, bytes),
         X_MIT_SHM_MAJOR_OPCODE => decode_mit_shm(context, bytes),
         X_RANDR_MAJOR_OPCODE => decode_randr(context, bytes),
+        X_KEYBOARD_MAJOR_OPCODE => decode_x_keyboard(context, bytes),
+        X_BIG_REQUESTS_MAJOR_OPCODE => decode_big_requests(bytes),
         other => Err(XWireParseError::UnknownOpcode(other)),
+    }
+}
+
+fn decode_big_requests(bytes: &[u8]) -> Result<XWireRequest, XWireParseError> {
+    match bytes[1] {
+        X_BIG_REQUESTS_ENABLE_MINOR_OPCODE => {
+            require_exact_len(
+                X_BIG_REQUESTS_MAJOR_OPCODE,
+                X_BIG_REQUESTS_ENABLE_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::BigRequestsEnable)
+        }
+        _ => Err(XWireParseError::UnknownOpcode(bytes[0])),
+    }
+}
+
+fn decode_x_keyboard(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    match bytes[1] {
+        X_KEYBOARD_USE_EXTENSION_MINOR_OPCODE => {
+            require_exact_len(
+                X_KEYBOARD_MAJOR_OPCODE,
+                X_KEYBOARD_USE_EXTENSION_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::XkbUseExtension {
+                wanted_major: context.byte_order.u16(&bytes[4..6]),
+                wanted_minor: context.byte_order.u16(&bytes[6..8]),
+            })
+        }
+        _ => Err(XWireParseError::UnknownOpcode(bytes[0])),
     }
 }
 
@@ -475,6 +563,17 @@ fn decode_randr(
             Ok(XWireRequest::RandrQueryVersion {
                 major_version: context.byte_order.u32(&bytes[4..8]),
                 minor_version: context.byte_order.u32(&bytes[8..12]),
+            })
+        }
+        X_RANDR_SELECT_INPUT_MINOR_OPCODE => {
+            require_exact_len(
+                X_RANDR_MAJOR_OPCODE,
+                X_RANDR_SELECT_INPUT_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::RandrSelectInput {
+                window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+                enable: context.byte_order.u16(&bytes[8..10]),
             })
         }
         X_RANDR_GET_SCREEN_SIZE_RANGE_MINOR_OPCODE => {
@@ -497,6 +596,27 @@ fn decode_randr(
             Ok(XWireRequest::RandrGetScreenResources {
                 window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
                 current: bytes[1] == X_RANDR_GET_SCREEN_RESOURCES_CURRENT_MINOR_OPCODE,
+            })
+        }
+        X_RANDR_GET_OUTPUT_PRIMARY_MINOR_OPCODE => {
+            require_exact_len(
+                X_RANDR_MAJOR_OPCODE,
+                X_RANDR_GET_OUTPUT_PRIMARY_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::RandrGetOutputPrimary {
+                window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+            })
+        }
+        X_RANDR_GET_MONITORS_MINOR_OPCODE => {
+            require_exact_len(
+                X_RANDR_MAJOR_OPCODE,
+                X_RANDR_GET_MONITORS_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::RandrGetMonitors {
+                window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+                get_active: bytes[8] != 0,
             })
         }
         _ => Err(XWireParseError::UnknownOpcode(bytes[0])),
@@ -832,6 +952,18 @@ fn decode_query_colors(
             .chunks_exact(4)
             .map(|pixel| context.byte_order.u32(pixel))
             .collect(),
+    })
+}
+
+fn decode_create_colormap(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_CREATE_COLORMAP, X_CREATE_COLORMAP_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::CreateColormap {
+        colormap: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
+        visual: context.byte_order.u32(&bytes[12..16]),
     })
 }
 
@@ -1522,6 +1654,30 @@ fn decode_set_selection_owner(
             },
         },
     }))
+}
+
+fn decode_get_selection_owner(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(
+        X_GET_SELECTION_OWNER,
+        X_GET_SELECTION_OWNER_REQ_LEN,
+        bytes.len(),
+    )?;
+    Ok(XWireRequest::GetSelectionOwner {
+        selection: context.byte_order.u32(&bytes[4..8]),
+    })
+}
+
+fn decode_grab_server(bytes: &[u8]) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_GRAB_SERVER, X_GRAB_SERVER_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::GrabServer)
+}
+
+fn decode_ungrab_server(bytes: &[u8]) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_UNGRAB_SERVER, X_UNGRAB_SERVER_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::UngrabServer)
 }
 
 fn decode_convert_selection(

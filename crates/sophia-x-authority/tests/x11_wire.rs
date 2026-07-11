@@ -333,6 +333,21 @@ fn x11_core_decoder_maps_selection_requests_to_authority_packets() {
         &convert_selection_request(XByteOrder::BigEndian, 0x220002, 1, 2, 3, 11),
     )
     .unwrap();
+    let get_owner = decode_x11_core_request(
+        context(namespace, 505, XByteOrder::BigEndian),
+        &resource_request(XByteOrder::BigEndian, 23, 1),
+    )
+    .unwrap();
+    let grab = decode_x11_core_request(
+        context(namespace, 506, XByteOrder::BigEndian),
+        &[36, 0, 0, 1],
+    )
+    .unwrap();
+    let ungrab = decode_x11_core_request(
+        context(namespace, 507, XByteOrder::BigEndian),
+        &[37, 0, 0, 1],
+    )
+    .unwrap();
 
     let XWireRequest::Authority(set_owner) = set_owner else {
         panic!("expected authority request");
@@ -363,6 +378,9 @@ fn x11_core_decoder_maps_selection_requests_to_authority_packets() {
             transfer: sophia_protocol::PortalTransferId::from_raw(504),
         }
     );
+    assert_eq!(get_owner, XWireRequest::GetSelectionOwner { selection: 1 });
+    assert_eq!(grab, XWireRequest::GrabServer);
+    assert_eq!(ungrab, XWireRequest::UngrabServer);
 }
 
 #[test]
@@ -1179,7 +1197,7 @@ fn x11_dispatch_reports_extensions_absent_until_explicitly_supported() {
     let mut properties = XPropertyTable::new();
     let query = decode_x11_core_request(
         context(namespace, 521, XByteOrder::LittleEndian),
-        &query_extension_request(XByteOrder::LittleEndian, "BIG-REQUESTS"),
+        &query_extension_request(XByteOrder::LittleEndian, "SOPHIA-UNKNOWN"),
     )
     .unwrap();
 
@@ -1318,6 +1336,184 @@ fn x11_dispatch_advertises_randr_and_replies_to_query_version() {
     assert_eq!(encoded[0][0], 1);
     assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][8..12]), 1);
     assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][12..16]), 5);
+
+    let select = decode_x11_core_request(
+        context(namespace, 540, XByteOrder::LittleEndian),
+        &randr_select_input_request(XByteOrder::LittleEndian, X_SETUP_DEFAULT_ROOT, 0x000b),
+    )
+    .unwrap();
+    assert_eq!(
+        select,
+        XWireRequest::RandrSelectInput {
+            window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+            enable: 0x000b,
+        }
+    );
+    let select = dispatch_x11_wire_request(
+        dispatch_context(namespace, 3, XByteOrder::LittleEndian, X_RANDR_MAJOR_OPCODE),
+        select,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert!(select.outputs.is_empty());
+
+    let primary = decode_x11_core_request(
+        context(namespace, 541, XByteOrder::LittleEndian),
+        &randr_window_request(
+            XByteOrder::LittleEndian,
+            X_RANDR_GET_OUTPUT_PRIMARY_MINOR_OPCODE,
+            X_SETUP_DEFAULT_ROOT,
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        primary,
+        XWireRequest::RandrGetOutputPrimary {
+            window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+        }
+    );
+    let primary = dispatch_x11_wire_request(
+        dispatch_context(namespace, 4, XByteOrder::LittleEndian, X_RANDR_MAJOR_OPCODE),
+        primary,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = primary.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][8..12]), 0);
+
+    let monitors = decode_x11_core_request(
+        context(namespace, 542, XByteOrder::LittleEndian),
+        &randr_get_monitors_request(XByteOrder::LittleEndian, X_SETUP_DEFAULT_ROOT, true),
+    )
+    .unwrap();
+    assert_eq!(
+        monitors,
+        XWireRequest::RandrGetMonitors {
+            window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+            get_active: true,
+        }
+    );
+    let monitors = dispatch_x11_wire_request(
+        dispatch_context(namespace, 5, XByteOrder::LittleEndian, X_RANDR_MAJOR_OPCODE),
+        monitors,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = monitors.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][12..16]), 0);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][16..20]), 0);
+}
+
+#[test]
+fn x11_dispatch_advertises_xkeyboard_and_replies_to_use_extension() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let query = decode_x11_core_request(
+        context(namespace, 545, XByteOrder::LittleEndian),
+        &query_extension_request(XByteOrder::LittleEndian, X_KEYBOARD_EXTENSION_NAME),
+    )
+    .unwrap();
+
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 98),
+        query,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(encoded[0][8], 1);
+    assert_eq!(encoded[0][9], X_KEYBOARD_MAJOR_OPCODE);
+
+    let use_extension = decode_x11_core_request(
+        context(namespace, 546, XByteOrder::LittleEndian),
+        &xkb_use_extension_request(XByteOrder::LittleEndian, 1, 0),
+    )
+    .unwrap();
+    assert_eq!(
+        use_extension,
+        XWireRequest::XkbUseExtension {
+            wanted_major: 1,
+            wanted_minor: 0,
+        }
+    );
+    let use_extension = dispatch_x11_wire_request(
+        dispatch_context(
+            namespace,
+            2,
+            XByteOrder::LittleEndian,
+            X_KEYBOARD_MAJOR_OPCODE,
+        ),
+        use_extension,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = use_extension.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(encoded[0][1], 1);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][8..10]), 1);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][10..12]), 0);
+}
+
+#[test]
+fn x11_dispatch_advertises_big_requests_and_replies_to_enable() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let query = decode_x11_core_request(
+        context(namespace, 547, XByteOrder::LittleEndian),
+        &query_extension_request(XByteOrder::LittleEndian, X_BIG_REQUESTS_EXTENSION_NAME),
+    )
+    .unwrap();
+
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 98),
+        query,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(encoded[0][8], 1);
+    assert_eq!(encoded[0][9], X_BIG_REQUESTS_MAJOR_OPCODE);
+
+    let enable = decode_x11_core_request(
+        context(namespace, 548, XByteOrder::LittleEndian),
+        &[
+            X_BIG_REQUESTS_MAJOR_OPCODE,
+            X_BIG_REQUESTS_ENABLE_MINOR_OPCODE,
+            1,
+            0,
+        ],
+    )
+    .unwrap();
+    assert_eq!(enable, XWireRequest::BigRequestsEnable);
+    let enable = dispatch_x11_wire_request(
+        dispatch_context(
+            namespace,
+            2,
+            XByteOrder::LittleEndian,
+            X_BIG_REQUESTS_MAJOR_OPCODE,
+        ),
+        enable,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = enable.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][8..12]), 4096);
 }
 
 #[test]
@@ -1357,10 +1553,30 @@ fn x11_dispatch_mit_shm_attach_is_namespace_local_metadata() {
             .validate_shm_segment_access(NamespaceId::from_raw(46), XResourceId::new(0x440010, 1))
             .is_err()
     );
+
+    let null_detach = decode_x11_core_request(
+        context(namespace, 529, XByteOrder::LittleEndian),
+        &mit_shm_detach_request(XByteOrder::LittleEndian, 0),
+    )
+    .unwrap();
+    let null_detach = dispatch_x11_wire_request(
+        dispatch_context(
+            namespace,
+            2,
+            XByteOrder::LittleEndian,
+            X_MIT_SHM_MAJOR_OPCODE,
+        ),
+        null_detach,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert!(null_detach.outputs.is_empty());
+    assert_eq!(runtime.shm_segment_count(), 1);
 }
 
 #[test]
-fn x11_dispatch_mit_shm_put_image_fails_closed_without_mapping_memory() {
+fn x11_dispatch_mit_shm_put_image_emits_bounded_surface_transaction() {
     let namespace = NamespaceId::from_raw(45);
     let mut runtime = XAuthorityRuntime::new();
     let mut atoms = XAtomTable::new();
@@ -1384,7 +1600,10 @@ fn x11_dispatch_mit_shm_put_image_fails_closed_without_mapping_memory() {
         &mut properties,
     );
     let encoded = missing.encoded_outputs(XByteOrder::LittleEndian);
-    assert_eq!(missing.response, None);
+    assert_eq!(
+        missing.response.unwrap().outcome,
+        XAuthorityResponseOutcome::Accepted
+    );
     assert_eq!(encoded[0][0], 0);
     assert_eq!(encoded[0][1], XErrorCode::BadAccess.wire_code());
     assert_eq!(
@@ -1424,10 +1643,28 @@ fn x11_dispatch_mit_shm_put_image_fails_closed_without_mapping_memory() {
         &mut atoms,
         &mut properties,
     );
-    let encoded = attached.encoded_outputs(XByteOrder::LittleEndian);
-    assert_eq!(attached.response, None);
-    assert_eq!(encoded[0][0], 0);
-    assert_eq!(encoded[0][1], XErrorCode::BadImplementation.wire_code());
+
+    assert!(attached.outputs.is_empty());
+    let response = attached.response.unwrap();
+    assert_eq!(response.outcome, XAuthorityResponseOutcome::Accepted);
+    assert_eq!(response.transactions.len(), 1);
+    assert_eq!(
+        response.transactions[0].surface,
+        SurfaceId::new(0x220701, 1)
+    );
+    assert!(matches!(
+        response.transactions[0].target_buffer,
+        BufferSource::CpuBuffer { .. }
+    ));
+    assert_eq!(
+        response.transactions[0].damage,
+        Region::single(Rect {
+            x: 3,
+            y: 5,
+            width: 32,
+            height: 24,
+        })
+    );
 }
 
 #[test]
@@ -1794,6 +2031,42 @@ fn x11_dispatch_query_colors_returns_bounded_color_records() {
 }
 
 #[test]
+fn x11_dispatch_create_colormap_accepts_root_visual() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let request = decode_x11_core_request(
+        context(namespace, 526, XByteOrder::LittleEndian),
+        &create_colormap_request(
+            XByteOrder::LittleEndian,
+            0x200001,
+            X_SETUP_DEFAULT_ROOT,
+            X_SETUP_DEFAULT_VISUAL,
+        ),
+    )
+    .unwrap();
+
+    assert_eq!(
+        request,
+        XWireRequest::CreateColormap {
+            colormap: XResourceId::new(0x200001, 1),
+            window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+            visual: X_SETUP_DEFAULT_VISUAL,
+        }
+    );
+
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 78),
+        request,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert!(result.outputs.is_empty());
+}
+
+#[test]
 fn x11_dispatch_alloc_named_color_returns_reduced_black_white_pixels() {
     let namespace = NamespaceId::from_raw(45);
     let mut runtime = XAuthorityRuntime::new();
@@ -1932,6 +2205,32 @@ fn x11_dispatch_reads_bounded_property_slices() {
     );
     assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][16..20]), 8);
     assert_eq!(&encoded[0][32..40], &title[4..12]);
+}
+
+#[test]
+fn x11_dispatch_get_selection_owner_reports_no_owner() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let request = decode_x11_core_request(
+        context(namespace, 544, XByteOrder::LittleEndian),
+        &resource_request(XByteOrder::LittleEndian, 23, 7),
+    )
+    .unwrap();
+
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 23),
+        request,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
+
+    assert_eq!(encoded.len(), 1);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][8..12]), 0);
 }
 
 #[test]
@@ -4191,6 +4490,13 @@ fn mit_shm_attach_request(
     out
 }
 
+fn mit_shm_detach_request(byte_order: XByteOrder, segment: u32) -> Vec<u8> {
+    let mut out = vec![X_MIT_SHM_MAJOR_OPCODE, X_MIT_SHM_DETACH_MINOR_OPCODE];
+    push_u16(&mut out, byte_order, 2);
+    push_u32(&mut out, byte_order, segment);
+    out
+}
+
 fn mit_shm_put_image_request(
     byte_order: XByteOrder,
     drawable: u32,
@@ -4228,6 +4534,24 @@ fn randr_query_version_request(
     push_u16(&mut out, byte_order, 3);
     push_u32(&mut out, byte_order, major_version);
     push_u32(&mut out, byte_order, minor_version);
+    out
+}
+
+fn randr_select_input_request(byte_order: XByteOrder, window: u32, enable: u16) -> Vec<u8> {
+    let mut out = vec![X_RANDR_MAJOR_OPCODE, X_RANDR_SELECT_INPUT_MINOR_OPCODE];
+    push_u16(&mut out, byte_order, 3);
+    push_u32(&mut out, byte_order, window);
+    push_u16(&mut out, byte_order, enable);
+    push_u16(&mut out, byte_order, 0);
+    out
+}
+
+fn randr_get_monitors_request(byte_order: XByteOrder, window: u32, get_active: bool) -> Vec<u8> {
+    let mut out = vec![X_RANDR_MAJOR_OPCODE, X_RANDR_GET_MONITORS_MINOR_OPCODE];
+    push_u16(&mut out, byte_order, 3);
+    push_u32(&mut out, byte_order, window);
+    out.push(u8::from(get_active));
+    out.extend_from_slice(&[0, 0, 0]);
     out
 }
 
@@ -4288,6 +4612,20 @@ fn query_colors_request(byte_order: XByteOrder, colormap: u32, pixels: &[u32]) -
     out
 }
 
+fn create_colormap_request(
+    byte_order: XByteOrder,
+    colormap: u32,
+    window: u32,
+    visual: u32,
+) -> Vec<u8> {
+    let mut out = vec![78, 0];
+    push_u16(&mut out, byte_order, 4);
+    push_u32(&mut out, byte_order, colormap);
+    push_u32(&mut out, byte_order, window);
+    push_u32(&mut out, byte_order, visual);
+    out
+}
+
 fn alloc_named_color_request(byte_order: XByteOrder, colormap: u32, name: &str) -> Vec<u8> {
     let mut out = vec![85, 0];
     let len_units = (12 + padded_len_for_test(name.len())) / 4;
@@ -4297,6 +4635,21 @@ fn alloc_named_color_request(byte_order: XByteOrder, colormap: u32, name: &str) 
     push_u16(&mut out, byte_order, 0);
     out.extend_from_slice(name.as_bytes());
     pad_to_four(&mut out);
+    out
+}
+
+fn xkb_use_extension_request(
+    byte_order: XByteOrder,
+    wanted_major: u16,
+    wanted_minor: u16,
+) -> Vec<u8> {
+    let mut out = vec![
+        X_KEYBOARD_MAJOR_OPCODE,
+        X_KEYBOARD_USE_EXTENSION_MINOR_OPCODE,
+    ];
+    push_u16(&mut out, byte_order, 2);
+    push_u16(&mut out, byte_order, wanted_major);
+    push_u16(&mut out, byte_order, wanted_minor);
     out
 }
 

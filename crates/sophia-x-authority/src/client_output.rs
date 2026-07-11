@@ -170,6 +170,24 @@ pub enum XClientReply {
     RandrGetScreenResources {
         sequence: u16,
     },
+    RandrGetOutputPrimary {
+        sequence: u16,
+        output: u32,
+    },
+    RandrGetMonitors {
+        sequence: u16,
+        timestamp: u32,
+    },
+    XkbUseExtension {
+        sequence: u16,
+        supported: bool,
+        server_major: u16,
+        server_minor: u16,
+    },
+    BigRequestsEnable {
+        sequence: u16,
+        maximum_request_length: u32,
+    },
     GetInputFocus {
         sequence: u16,
         focus: XResourceId,
@@ -194,6 +212,10 @@ pub enum XClientReply {
         bytes_after: u32,
         item_count: u32,
         bytes: Vec<u8>,
+    },
+    GetSelectionOwner {
+        sequence: u16,
+        owner: Option<XResourceId>,
     },
     AllocNamedColor {
         sequence: u16,
@@ -467,6 +489,45 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             put_u16(byte_order, &mut out[22..24], 0);
             out
         }
+        XClientReply::RandrGetOutputPrimary { sequence, output } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            put_u32(byte_order, &mut out[8..12], output);
+            out
+        }
+        XClientReply::RandrGetMonitors {
+            sequence,
+            timestamp,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            put_u32(byte_order, &mut out[8..12], timestamp);
+            put_u32(byte_order, &mut out[12..16], 0);
+            put_u32(byte_order, &mut out[16..20], 0);
+            out
+        }
+        XClientReply::XkbUseExtension {
+            sequence,
+            supported,
+            server_major,
+            server_minor,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            out[1] = u8::from(supported);
+            put_u16(byte_order, &mut out[8..10], server_major);
+            put_u16(byte_order, &mut out[10..12], server_minor);
+            out
+        }
+        XClientReply::BigRequestsEnable {
+            sequence,
+            maximum_request_length,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            put_u32(byte_order, &mut out[8..12], maximum_request_length);
+            out
+        }
         XClientReply::GetInputFocus {
             sequence,
             focus,
@@ -524,6 +585,18 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             put_u32(byte_order, &mut out[16..20], item_count);
             out[X_CLIENT_OUTPUT_RECORD_LEN..X_CLIENT_OUTPUT_RECORD_LEN + bytes.len()]
                 .copy_from_slice(&bytes);
+            out
+        }
+        XClientReply::GetSelectionOwner { sequence, owner } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            put_u32(
+                byte_order,
+                &mut out[8..12],
+                owner
+                    .map(|resource| u32::try_from(resource.local.raw()).unwrap_or(0))
+                    .unwrap_or(0),
+            );
             out
         }
         XClientReply::AllocNamedColor {

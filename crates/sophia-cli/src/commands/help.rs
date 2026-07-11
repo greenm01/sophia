@@ -42,6 +42,7 @@ pub(crate) fn print(verbose: bool) {
     println!("commands: x-authority-xrandr-query-smoke");
     println!("commands: x-authority-xcalc-smoke");
     println!("commands: x-authority-xterm-smoke");
+    println!("commands: x-authority-zenity-smoke");
     println!("commands: x-authority-present-pixmap-smoke");
     #[cfg(feature = "atomic-scanout-live")]
     println!("commands: live-session-composition-smoke");

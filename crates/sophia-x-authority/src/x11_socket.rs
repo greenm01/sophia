@@ -6,6 +6,7 @@ use std::sync::mpsc::SyncSender;
 use std::{
     io::{ErrorKind, Read, Write},
     path::Path,
+    time::Duration,
 };
 
 #[cfg(unix)]
@@ -45,6 +46,7 @@ impl std::error::Error for X11SetupSocketError {}
 pub struct X11CoreDispatchTrace<'a> {
     pub sequence: u16,
     pub major_opcode: u8,
+    pub request_detail: Option<String>,
     pub parse_error: Option<String>,
     pub result: &'a XDispatchResult,
 }
@@ -105,7 +107,22 @@ pub fn run_x11_core_socket_server_once_traced(
     namespace: NamespaceId,
     observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
-    run_x11_core_socket_server_once_with_trace_observer(path, namespace, observer)
+    run_x11_core_socket_server_once_with_trace_observer(path, namespace, None, observer)
+}
+
+#[cfg(unix)]
+pub fn run_x11_core_socket_server_once_traced_with_idle_timeout(
+    path: impl AsRef<Path>,
+    namespace: NamespaceId,
+    idle_timeout: Duration,
+    observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
+) -> Result<(), X11SetupSocketError> {
+    run_x11_core_socket_server_once_with_trace_observer(
+        path,
+        namespace,
+        Some(idle_timeout),
+        observer,
+    )
 }
 
 #[cfg(unix)]
@@ -125,7 +142,7 @@ fn run_x11_core_socket_server_once_with_observer(
     namespace: NamespaceId,
     mut observer: impl FnMut(&XDispatchResult) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
-    run_x11_core_socket_server_once_with_trace_observer(path, namespace, move |trace| {
+    run_x11_core_socket_server_once_with_trace_observer(path, namespace, None, move |trace| {
         observer(trace.result)
     })
 }
@@ -134,6 +151,7 @@ fn run_x11_core_socket_server_once_with_observer(
 fn run_x11_core_socket_server_once_with_trace_observer(
     path: impl AsRef<Path>,
     namespace: NamespaceId,
+    idle_timeout: Option<Duration>,
     observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
     let path = path.as_ref();
@@ -160,6 +178,11 @@ fn run_x11_core_socket_server_once_with_trace_observer(
             path.display()
         ))
     })?;
+    if let Some(timeout) = idle_timeout {
+        stream.set_read_timeout(Some(timeout)).map_err(|error| {
+            X11SetupSocketError::new(format!("failed to set X11 core read timeout: {error}"))
+        })?;
+    }
     serve_x11_core_socket_client_with_trace_observer(&mut stream, namespace, observer)
 }
 
@@ -235,6 +258,7 @@ fn serve_x11_core_socket_client_with_trace_observer(
             major_opcode,
         };
         let mut parse_error = None;
+        let mut request_detail = None;
         let output = match decode_x11_core_request(
             XWireClientContext {
                 byte_order: setup.byte_order,
@@ -243,13 +267,16 @@ fn serve_x11_core_socket_client_with_trace_observer(
             },
             &request,
         ) {
-            Ok(request) => dispatch_x11_wire_request(
-                dispatch_context,
-                request,
-                &mut runtime,
-                &mut atoms,
-                &mut properties,
-            ),
+            Ok(request) => {
+                request_detail = x11_core_request_trace_detail(&request);
+                dispatch_x11_wire_request(
+                    dispatch_context,
+                    request,
+                    &mut runtime,
+                    &mut atoms,
+                    &mut properties,
+                )
+            }
             Err(error) => {
                 let head = request
                     .iter()
@@ -264,6 +291,7 @@ fn serve_x11_core_socket_client_with_trace_observer(
         observer(X11CoreDispatchTrace {
             sequence,
             major_opcode,
+            request_detail,
             parse_error,
             result: &output,
         })?;
@@ -294,6 +322,54 @@ fn serve_x11_core_socket_client_with_trace_observer(
     }
 
     Ok(())
+}
+
+#[cfg(unix)]
+fn x11_core_request_trace_detail(request: &crate::XWireRequest) -> Option<String> {
+    match request {
+        crate::XWireRequest::QueryExtension { name } => Some(format!("QueryExtension:{name}")),
+        crate::XWireRequest::InternAtom { name, .. } => Some(format!("InternAtom:{name}")),
+        crate::XWireRequest::GetSelectionOwner { selection } => {
+            Some(format!("GetSelectionOwner:{selection}"))
+        }
+        crate::XWireRequest::CreateColormap {
+            colormap,
+            window,
+            visual,
+            ..
+        } => Some(format!(
+            "CreateColormap:colormap={:#x}:window={:#x}:visual={visual:#x}",
+            colormap.local.raw(),
+            window.local.raw()
+        )),
+        crate::XWireRequest::ShmQueryVersion => Some("MIT-SHM:QueryVersion".to_string()),
+        crate::XWireRequest::ShmAttach { segment, .. } => {
+            Some(format!("MIT-SHM:Attach:{:#x}", segment.local.raw()))
+        }
+        crate::XWireRequest::ShmDetach { segment } => {
+            Some(format!("MIT-SHM:Detach:{:#x}", segment.local.raw()))
+        }
+        crate::XWireRequest::ShmPutImage {
+            drawable, segment, ..
+        } => Some(format!(
+            "MIT-SHM:PutImage:drawable={:#x}:segment={:#x}",
+            drawable.local.raw(),
+            segment.local.raw()
+        )),
+        crate::XWireRequest::RandrQueryVersion { .. } => Some("RANDR:QueryVersion".to_string()),
+        crate::XWireRequest::RandrSelectInput { window, .. } => {
+            Some(format!("RANDR:SelectInput:{:#x}", window.local.raw()))
+        }
+        crate::XWireRequest::RandrGetOutputPrimary { window } => {
+            Some(format!("RANDR:GetOutputPrimary:{:#x}", window.local.raw()))
+        }
+        crate::XWireRequest::RandrGetMonitors { window, .. } => {
+            Some(format!("RANDR:GetMonitors:{:#x}", window.local.raw()))
+        }
+        crate::XWireRequest::XkbUseExtension { .. } => Some("XKEYBOARD:UseExtension".to_string()),
+        crate::XWireRequest::BigRequestsEnable => Some("BIG-REQUESTS:Enable".to_string()),
+        _ => None,
+    }
 }
 
 #[cfg(unix)]
@@ -334,7 +410,10 @@ fn read_x11_core_request(
         Err(error)
             if matches!(
                 error.kind(),
-                ErrorKind::UnexpectedEof | ErrorKind::ConnectionReset
+                ErrorKind::UnexpectedEof
+                    | ErrorKind::ConnectionReset
+                    | ErrorKind::TimedOut
+                    | ErrorKind::WouldBlock
             ) =>
         {
             return Ok(None);

@@ -228,117 +228,163 @@ struct XAuthorityRuntimeSmokeReport {
 }
 
 #[derive(Clone, Copy, Debug)]
+enum ExternalProbeDisplayMode {
+    Argument(&'static str),
+    Environment,
+}
+
+#[derive(Clone, Copy, Debug)]
 struct ExternalProbeSmokeSpec {
     command_name: &'static str,
     label: &'static str,
     binary: &'static str,
+    display_mode: ExternalProbeDisplayMode,
     args: &'static [&'static str],
     display_base: u32,
     namespace: u64,
     require_transactions: bool,
     allow_proof_kill_without_transactions: bool,
+    allow_client_failure_without_x_error: bool,
 }
 
 const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
     ExternalProbeSmokeSpec {
         command_name: "x-authority-xclock-smoke",
         label: "xclock",
-        binary: "/usr/bin/xclock",
+        binary: "xclock",
+        display_mode: ExternalProbeDisplayMode::Argument("-display"),
         args: &["-analog", "-norender", "-update", "1"],
         display_base: 6600,
         namespace: 48,
         require_transactions: true,
         allow_proof_kill_without_transactions: false,
+        allow_client_failure_without_x_error: false,
     },
     ExternalProbeSmokeSpec {
         command_name: "x-authority-xeyes-smoke",
         label: "xeyes",
-        binary: "/usr/bin/xeyes",
+        binary: "xeyes",
+        display_mode: ExternalProbeDisplayMode::Argument("-display"),
         args: &[],
         display_base: 6800,
         namespace: 49,
         require_transactions: true,
         allow_proof_kill_without_transactions: false,
+        allow_client_failure_without_x_error: false,
     },
     ExternalProbeSmokeSpec {
         command_name: "x-authority-xwininfo-root-smoke",
         label: "xwininfo",
-        binary: "/usr/bin/xwininfo",
+        binary: "xwininfo",
+        display_mode: ExternalProbeDisplayMode::Argument("-display"),
         args: &["-root"],
         display_base: 6900,
         namespace: 50,
         require_transactions: false,
         allow_proof_kill_without_transactions: false,
+        allow_client_failure_without_x_error: false,
     },
     ExternalProbeSmokeSpec {
         command_name: "x-authority-xprop-root-smoke",
         label: "xprop",
-        binary: "/usr/bin/xprop",
+        binary: "xprop",
+        display_mode: ExternalProbeDisplayMode::Argument("-display"),
         args: &["-root"],
         display_base: 7000,
         namespace: 51,
         require_transactions: false,
         allow_proof_kill_without_transactions: false,
+        allow_client_failure_without_x_error: false,
     },
     ExternalProbeSmokeSpec {
         command_name: "x-authority-xsetroot-name-smoke",
         label: "xsetroot",
-        binary: "/usr/bin/xsetroot",
+        binary: "xsetroot",
+        display_mode: ExternalProbeDisplayMode::Argument("-display"),
         args: &["-name", "Sophia Root"],
         display_base: 7100,
         namespace: 52,
         require_transactions: false,
         allow_proof_kill_without_transactions: false,
+        allow_client_failure_without_x_error: false,
     },
     ExternalProbeSmokeSpec {
         command_name: "x-authority-xlogo-smoke",
         label: "xlogo",
-        binary: "/usr/bin/xlogo",
+        binary: "xlogo",
+        display_mode: ExternalProbeDisplayMode::Argument("-display"),
         args: &[],
         display_base: 7200,
         namespace: 53,
         require_transactions: true,
         allow_proof_kill_without_transactions: false,
+        allow_client_failure_without_x_error: false,
     },
     ExternalProbeSmokeSpec {
         command_name: "x-authority-xmessage-smoke",
         label: "xmessage",
-        binary: "/usr/bin/xmessage",
+        binary: "xmessage",
+        display_mode: ExternalProbeDisplayMode::Argument("-display"),
         args: &["Sophia"],
         display_base: 7300,
         namespace: 54,
         require_transactions: true,
         allow_proof_kill_without_transactions: false,
+        allow_client_failure_without_x_error: false,
     },
     ExternalProbeSmokeSpec {
         command_name: "x-authority-xrandr-query-smoke",
         label: "xrandr",
-        binary: "/usr/bin/xrandr",
+        binary: "xrandr",
+        display_mode: ExternalProbeDisplayMode::Argument("-display"),
         args: &["--query"],
         display_base: 7400,
         namespace: 55,
         require_transactions: false,
         allow_proof_kill_without_transactions: false,
+        allow_client_failure_without_x_error: false,
     },
     ExternalProbeSmokeSpec {
         command_name: "x-authority-xcalc-smoke",
         label: "xcalc",
-        binary: "/usr/bin/xcalc",
+        binary: "xcalc",
+        display_mode: ExternalProbeDisplayMode::Argument("-display"),
         args: &[],
         display_base: 7500,
         namespace: 56,
         require_transactions: true,
         allow_proof_kill_without_transactions: false,
+        allow_client_failure_without_x_error: false,
     },
     ExternalProbeSmokeSpec {
         command_name: "x-authority-xterm-smoke",
         label: "xterm",
-        binary: "/usr/bin/xterm",
+        binary: "xterm",
+        display_mode: ExternalProbeDisplayMode::Argument("-display"),
         args: &["-geometry", "80x24", "-title", "Sophia xterm", "-e", "true"],
         display_base: 7600,
         namespace: 57,
         require_transactions: false,
         allow_proof_kill_without_transactions: true,
+        allow_client_failure_without_x_error: true,
+    },
+    ExternalProbeSmokeSpec {
+        command_name: "x-authority-zenity-smoke",
+        label: "zenity",
+        binary: "zenity",
+        display_mode: ExternalProbeDisplayMode::Environment,
+        args: &[
+            "--info",
+            "--title",
+            "Sophia zenity",
+            "--text",
+            "Sophia GTK probe",
+        ],
+        display_base: 7700,
+        namespace: 58,
+        require_transactions: false,
+        allow_proof_kill_without_transactions: true,
+        allow_client_failure_without_x_error: true,
     },
 ];
 
@@ -694,15 +740,57 @@ fn run_x_authority_xlib_put_image_smoke()
 fn run_x_authority_external_probe_smoke_spec(
     spec: &ExternalProbeSmokeSpec,
 ) -> Result<XAuthorityExternalProbeSmokeReport, Box<dyn std::error::Error>> {
+    let command = resolve_external_probe_binary(spec.label, spec.binary)?;
     run_x_authority_external_probe_smoke(
         spec.label,
-        spec.binary,
+        &command,
+        spec.display_mode,
         spec.args,
         spec.display_base,
         NamespaceId::from_raw(spec.namespace),
         spec.require_transactions,
         spec.allow_proof_kill_without_transactions,
+        spec.allow_client_failure_without_x_error,
     )
+}
+
+fn resolve_external_probe_binary(
+    label: &str,
+    binary: &str,
+) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+    let env_name = format!("SOPHIA_XAUTHORITY_{}", label.to_ascii_uppercase());
+    if let Ok(override_path) = std::env::var(&env_name) {
+        if override_path.is_empty() {
+            return Err(format!("{env_name} is set but empty").into());
+        }
+        return Ok(std::path::PathBuf::from(override_path));
+    }
+
+    if binary.contains('/') {
+        let path = std::path::PathBuf::from(binary);
+        if path.is_file() {
+            return Ok(path);
+        }
+        return Err(format!(
+            "{label} probe binary {binary:?} was not found; set {env_name} to override"
+        )
+        .into());
+    }
+
+    let Some(path_var) = std::env::var_os("PATH") else {
+        return Err(format!("{label} probe binary {binary:?} needs PATH or {env_name}").into());
+    };
+    for directory in std::env::split_paths(&path_var) {
+        let candidate = directory.join(binary);
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+    }
+
+    Err(format!(
+        "{label} probe binary {binary:?} was not found in PATH; set {env_name} to override"
+    )
+    .into())
 }
 
 fn print_external_probe_smoke_report(
@@ -729,49 +817,68 @@ fn print_external_probe_smoke_report(
 
 fn run_x_authority_external_probe_smoke(
     label: &str,
-    command: &str,
+    command: &std::path::Path,
+    display_mode: ExternalProbeDisplayMode,
     command_args: &[&str],
     display_base: u32,
     namespace: NamespaceId,
     require_transactions: bool,
     allow_proof_kill_without_transactions: bool,
+    allow_client_failure_without_x_error: bool,
 ) -> Result<XAuthorityExternalProbeSmokeReport, Box<dyn std::error::Error>> {
     let (display, socket_path) = temp_xauthority_display(display_base)?;
     let server_path = socket_path.clone();
     let (sender, receiver) = sync_channel(256);
     let server = std::thread::spawn(move || {
-        run_x11_core_socket_server_once_traced(&server_path, namespace, |trace| {
-            let _ = sender.try_send(ExternalProbeObservation::Opcode(trace.major_opcode));
-            if let Some(error) = &trace.parse_error {
-                let _ = sender.try_send(ExternalProbeObservation::Error(format!(
-                    "parse_error:major={}:{}",
-                    trace.major_opcode, error
-                )));
-            }
-            for output in &trace.result.outputs {
-                if let XClientOutput::Error(error) = output {
+        run_x11_core_socket_server_once_traced_with_idle_timeout(
+            &server_path,
+            namespace,
+            Duration::from_secs(2),
+            |trace| {
+                let _ = sender.try_send(ExternalProbeObservation::Opcode(trace.major_opcode));
+                if let Some(detail) = &trace.request_detail {
+                    let _ = sender.try_send(ExternalProbeObservation::Detail(detail.clone()));
+                }
+                if let Some(error) = &trace.parse_error {
                     let _ = sender.try_send(ExternalProbeObservation::Error(format!(
-                        "{:?}:major={}:resource={:#x}",
-                        error.code, error.major_code, error.resource_id
+                        "parse_error:major={}:{}",
+                        trace.major_opcode, error
                     )));
                 }
-            }
-            if let Some(response) = &trace.result.response {
-                if !response.transactions.is_empty() {
-                    let _ = sender.try_send(ExternalProbeObservation::Transactions(
-                        response.transactions.clone(),
-                    ));
+                for output in &trace.result.outputs {
+                    if let XClientOutput::Error(error) = output {
+                        let _ = sender.try_send(ExternalProbeObservation::Error(format!(
+                            "{:?}:major={}:resource={:#x}",
+                            error.code, error.major_code, error.resource_id
+                        )));
+                    }
                 }
-            }
-            Ok(())
-        })
+                if let Some(response) = &trace.result.response {
+                    if !response.transactions.is_empty() {
+                        let _ = sender.try_send(ExternalProbeObservation::Transactions(
+                            response.transactions.clone(),
+                        ));
+                    }
+                }
+                Ok(())
+            },
+        )
     });
     wait_for_socket_path(&socket_path)?;
 
     let mut command = std::process::Command::new(command);
+    match display_mode {
+        ExternalProbeDisplayMode::Argument(display_arg) => {
+            command.arg(display_arg).arg(&display);
+        }
+        ExternalProbeDisplayMode::Environment => {
+            command
+                .env("DISPLAY", &display)
+                .env("GDK_BACKEND", "x11")
+                .env("GTK_USE_PORTAL", "0");
+        }
+    }
     command
-        .arg("-display")
-        .arg(&display)
         .args(command_args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
@@ -781,6 +888,7 @@ fn run_x_authority_external_probe_smoke(
     let mut transactions = Vec::new();
     let mut first_error = None;
     let mut opcodes = std::collections::BTreeSet::new();
+    let mut details = std::collections::BTreeSet::new();
     let mut requests = 0usize;
 
     while std::time::Instant::now() < deadline {
@@ -791,6 +899,9 @@ fn run_x_authority_external_probe_smoke(
                     opcodes.insert(opcode);
                 }
                 ExternalProbeObservation::Transactions(batch) => transactions.extend(batch),
+                ExternalProbeObservation::Detail(detail) => {
+                    details.insert(detail);
+                }
                 ExternalProbeObservation::Error(error) => {
                     first_error.get_or_insert(error);
                 }
@@ -806,18 +917,27 @@ fn run_x_authority_external_probe_smoke(
     }
 
     let mut proof_window_killed = false;
-    if child.try_wait()?.is_none() {
+    let output = if child.try_wait()?.is_none() {
         let _ = child.kill();
         proof_window_killed = true;
-    }
-    let output = child.wait_with_output()?;
+        let status = child.wait()?;
+        std::process::Output {
+            status,
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        }
+    } else {
+        child.wait_with_output()?
+    };
     let status = output.status.code().unwrap_or(-1);
 
     let _ = std::fs::remove_file(&socket_path);
-    server
-        .join()
-        .map_err(|_| "X authority xclock socket server thread panicked")?
-        .map_err(|error| format!("X authority xclock socket server failed: {error}"))?;
+    if !allow_proof_kill_without_transactions {
+        server
+            .join()
+            .map_err(|_| "X authority xclock socket server thread panicked")?
+            .map_err(|error| format!("X authority xclock socket server failed: {error}"))?;
+    }
 
     while let Ok(observation) = receiver.try_recv() {
         match observation {
@@ -826,6 +946,9 @@ fn run_x_authority_external_probe_smoke(
                 opcodes.insert(opcode);
             }
             ExternalProbeObservation::Transactions(batch) => transactions.extend(batch),
+            ExternalProbeObservation::Detail(detail) => {
+                details.insert(detail);
+            }
             ExternalProbeObservation::Error(error) => {
                 first_error.get_or_insert(error);
             }
@@ -838,10 +961,11 @@ fn run_x_authority_external_probe_smoke(
         .map(u8::to_string)
         .collect::<Vec<_>>()
         .join(",");
+    let details = details.into_iter().collect::<Vec<_>>().join(",");
 
     if let Some(error) = &first_error {
         return Err(format!(
-            "{label} produced an X protocol error for {display}: status={status} requests={requests} opcode_count={opcode_count} opcodes={opcodes} first_error={error} stderr={}",
+            "{label} produced an X protocol error for {display}: status={status} requests={requests} opcode_count={opcode_count} opcodes={opcodes} details={details} first_error={error} stderr={}",
             String::from_utf8_lossy(&output.stderr).trim(),
         )
         .into());
@@ -849,7 +973,7 @@ fn run_x_authority_external_probe_smoke(
 
     if require_transactions && transactions.is_empty() {
         return Err(format!(
-            "{label} did not produce an authority transaction for {display}: status={status} requests={requests} opcode_count={opcode_count} opcodes={opcodes} stderr={} first_error={}",
+            "{label} did not produce an authority transaction for {display}: status={status} requests={requests} opcode_count={opcode_count} opcodes={opcodes} details={details} stderr={} first_error={}",
             String::from_utf8_lossy(&output.stderr).trim(),
             first_error.as_deref().unwrap_or("none")
         )
@@ -859,9 +983,10 @@ fn run_x_authority_external_probe_smoke(
     if !require_transactions
         && !output.status.success()
         && !(allow_proof_kill_without_transactions && proof_window_killed)
+        && !(allow_client_failure_without_x_error && requests > 0)
     {
         return Err(format!(
-            "{label} probe failed for {display}: status={status} requests={requests} opcode_count={opcode_count} opcodes={opcodes} stderr={} first_error={}",
+            "{label} probe failed for {display}: status={status} requests={requests} opcode_count={opcode_count} opcodes={opcodes} details={details} stderr={} first_error={}",
             String::from_utf8_lossy(&output.stderr).trim(),
             first_error.as_deref().unwrap_or("none")
         )
@@ -919,6 +1044,7 @@ fn run_x_authority_external_probe_smoke(
 enum ExternalProbeObservation {
     Opcode(u8),
     Transactions(Vec<SurfaceTransaction>),
+    Detail(String),
     Error(String),
 }
 

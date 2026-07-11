@@ -3,9 +3,33 @@
 This file records early decisions, assumptions, and open questions. Keep it
 short and chronological.
 
+## 2026-07-10: zenity as GTK Startup Probe
+
+`x-authority-zenity-smoke` now launches `zenity` through the CLI external-probe
+harness and reaches GTK X11 startup requests with no X protocol error. The
+compatibility work stayed probe-driven: zenity added bounded
+`GetSelectionOwner`, `GrabServer`, `UngrabServer`, `CreateColormap`,
+namespace-local `MIT-SHM` attach/detach and put-image admission, additional
+minimal `RANDR` replies, minimal `XKEYBOARD` advertisement plus `UseExtension`,
+and minimal `BIG-REQUESTS` advertisement plus `Enable`.
+
+The external-probe harness no longer hard-codes host binary paths. Probe
+binaries resolve through `PATH`, with `SOPHIA_XAUTHORITY_<LABEL>` overrides for
+non-standard installs. GTK probes use `DISPLAY` and `GDK_BACKEND=x11` instead
+of X Toolkit-style `-display` arguments.
+
+Under `dbus-run-session`, the current TTY host reaches GTK startup with no
+client-visible X protocol error. Zenity still exits before a rendered dialog
+because the host session lacks working portal display state and Sophia does not
+yet advertise XInput2. The reduced evidence is therefore a protocol-startup
+regression, not a rendered GTK proof: `outcome=client_exited_failure`,
+`requests=103`, `opcode_count=14`,
+`opcodes=2,16,20,23,36,37,43,55,78,98,131,132,133,134`, `transactions=0`,
+`runtime_committed=0`, `runtime_surfaces=0`, and `first_error=none`.
+
 ## 2026-07-10: xterm as Terminal Setup Probe
 
-`x-authority-xterm-smoke` now launches `/usr/bin/xterm` against Sophia X
+`x-authority-xterm-smoke` now launches `xterm` against Sophia X
 Authority and runs through terminal setup/lifecycle requests with no X protocol
 error. The compatibility work stayed probe-driven: xterm added bounded
 `ConfigureWindow` decoding and namespace-checked dispatch. It does not yet
@@ -16,15 +40,17 @@ The external-probe harness now passes `-display` before client-specific
 arguments so X Toolkit clients that use `-e` still receive the intended test
 display, and no-transaction failure messages include request/opcode counters.
 
-The passing reduced evidence was `outcome=proof_window_killed`,
-`requests=82`, `opcode_count=16`,
-`opcodes=1,12,16,18,20,43,45,46,47,53,54,55,60,72,94,98`,
+The current reduced evidence is `outcome=client_exited_failure`, `status=1`,
+`requests=84`, `opcode_count=18`,
+`opcodes=1,12,16,18,20,43,45,46,47,53,54,55,60,72,94,98,133,134`,
 `transactions=0`, `runtime_committed=0`, `runtime_surfaces=0`, and
-`first_error=none`.
+`first_error=none`. The client exit is accepted here because this smoke's
+invariant is setup/lifecycle compatibility without a client-visible X protocol
+error, not rendered terminal output.
 
 ## 2026-07-10: xcalc as Athena Widget Probe
 
-`x-authority-xcalc-smoke` now launches `/usr/bin/xcalc` against Sophia X
+`x-authority-xcalc-smoke` now launches `xcalc` against Sophia X
 Authority and reaches Engine/Runtime committed authority transactions with no X
 protocol error. The compatibility work stayed probe-driven: xcalc added bounded
 `AllocNamedColor`, `UnmapWindow`, and padded one-character `PolyText8` handling.
@@ -39,7 +65,7 @@ The passing reduced evidence was `outcome=proof_window_killed`,
 
 ## 2026-07-10: xrandr as Output Introspection Probe
 
-`x-authority-xrandr-query-smoke` now launches `/usr/bin/xrandr --query`
+`x-authority-xrandr-query-smoke` now launches `xrandr --query`
 against Sophia X Authority and exits successfully with no X protocol error.
 The compatibility work stayed output-introspection only: xrandr added a minimal
 `RANDR` extension advertisement, bounded `RRGetScreenSizeRange`, and empty
@@ -57,7 +83,7 @@ The passing reduced evidence was `outcome=client_exited_success`, `requests=10`,
 
 ## 2026-07-10: xmessage as Text And Cursor Probe
 
-`x-authority-xmessage-smoke` now launches `/usr/bin/xmessage Sophia` against
+`x-authority-xmessage-smoke` now launches `xmessage Sophia` against
 Sophia X Authority and reaches Engine/Runtime committed authority transactions
 with no X protocol error. The compatibility work stayed probe-driven: xmessage
 added bounded `CreateGlyphCursor`, `FreeCursor`, `SetClipRectangles`, and
@@ -77,14 +103,14 @@ The passing reduced evidence was `outcome=proof_window_killed`, `requests=136`,
 
 ## 2026-07-10: xsetroot And xlogo Coverage Probes
 
-`x-authority-xsetroot-name-smoke` now launches `/usr/bin/xsetroot -name
+`x-authority-xsetroot-name-smoke` now launches `xsetroot -name
 "Sophia Root"` and exits successfully with no X protocol error, proving root
 property mutation through existing bounded property and GC paths. Its reduced
 evidence was `outcome=client_exited_success`, `requests=7`, `opcode_count=6`,
 `opcodes=18,20,43,55,60,98`, `transactions=0`, `runtime_committed=0`,
 `runtime_surfaces=0`, and `first_error=none`.
 
-`x-authority-xlogo-smoke` now launches `/usr/bin/xlogo` and reaches
+`x-authority-xlogo-smoke` now launches `xlogo` and reaches
 Engine/Runtime committed authority transactions without adding new X protocol
 surface. Its reduced evidence was `outcome=proof_window_killed`, `requests=34`,
 `opcode_count=11`, `opcodes=1,2,8,9,16,18,20,55,69,70,98`, `transactions=6`,
@@ -92,7 +118,7 @@ surface. Its reduced evidence was `outcome=proof_window_killed`, `requests=34`,
 
 ## 2026-07-10: xprop as Root Property Probe
 
-`x-authority-xprop-root-smoke` now launches `/usr/bin/xprop -root` against
+`x-authority-xprop-root-smoke` now launches `xprop -root` against
 Sophia X Authority and exits successfully with no X protocol error. The
 compatibility work stayed property-introspection only: xprop added bounded
 `ListProperties` decoding and replies for namespace-local window property atom
@@ -109,7 +135,7 @@ The passing reduced evidence was `outcome=client_exited_success`, `requests=10`,
 
 ## 2026-07-10: xwininfo as Root Introspection Probe
 
-`x-authority-xwininfo-root-smoke` now launches `/usr/bin/xwininfo -root`
+`x-authority-xwininfo-root-smoke` now launches `xwininfo -root`
 against Sophia X Authority and exits successfully with no X protocol error. The
 compatibility work stayed introspection-only: xwininfo added bounded
 `GetWindowAttributes`, `GetGeometry`, `QueryTree`, and `TranslateCoordinates`
@@ -121,7 +147,7 @@ The passing reduced evidence was `outcome=client_exited_success`, `requests=9`,
 
 ## 2026-07-10: xeyes as Arc Drawing Probe
 
-`x-authority-xeyes-smoke` now launches `/usr/bin/xeyes` against Sophia X
+`x-authority-xeyes-smoke` now launches `xeyes` against Sophia X
 Authority and reaches Engine/Runtime committed authority transactions with no X
 protocol error. The compatibility work stayed probe-driven: xeyes added bounded
 `QueryColors`, `ClearArea`, and `PolyFillArc` handling without broad colormap or
@@ -150,7 +176,7 @@ The passing reduced evidence was `status=Passed`,
 
 ## 2026-07-10: xclock as External X Authority Probe
 
-`x-authority-xclock-smoke` now launches `/usr/bin/xclock` against Sophia X
+`x-authority-xclock-smoke` now launches `xclock` against Sophia X
 Authority and reaches mapped exposure plus Engine/Runtime committed authority
 transactions. The compatibility work stayed probe-driven: xclock added bounded
 font replies, pixmap/copy handling, subwindow mapping exposure, and core draw

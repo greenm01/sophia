@@ -31,6 +31,7 @@ cargo run --offline -q -p sophia-cli -- x-authority-xmessage-smoke
 cargo run --offline -q -p sophia-cli -- x-authority-xrandr-query-smoke
 cargo run --offline -q -p sophia-cli -- x-authority-xcalc-smoke
 cargo run --offline -q -p sophia-cli -- x-authority-xterm-smoke
+dbus-run-session -- cargo run --offline -q -p sophia-cli -- x-authority-zenity-smoke
 ```
 
 The real-client smokes are regression smokes, not full X server conformance
@@ -39,9 +40,18 @@ proof-window outcome explicitly, and include request/opcode counters so future
 client-driven regressions show which compatibility surface changed. The
 external probe harness fails if it observes any client-visible X protocol
 error, even after a drawing client has already produced authority transactions.
+External probe binaries are resolved from `PATH`; set
+`SOPHIA_XAUTHORITY_<LABEL>` to override a probe binary path for a local host.
 `x-authority-xterm-smoke` is a setup/lifecycle regression, not a rendered
 transaction proof; its reduced output is expected to report zero committed
 runtime transactions until xterm exposes a visible drawing handoff.
+`x-authority-zenity-smoke` is a GTK startup protocol regression. Prefer running
+it under `dbus-run-session --` on TTY hosts so GTK reaches its DBus startup path.
+The smoke still fails on zero X requests or any `first_error`; a nonzero client
+exit is acceptable only after GTK has reached Sophia X Authority without a
+client-visible X protocol error. The current reduced proof is not a rendered GTK
+dialog because the host portal backend cannot open a display and Sophia does not
+yet advertise XInput2.
 Parse-error details include a bounded request head so extension decode failures
 show the concrete minor opcode that drove the next compatibility slice.
 

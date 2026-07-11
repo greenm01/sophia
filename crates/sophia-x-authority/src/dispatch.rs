@@ -1,11 +1,13 @@
 use crate::{
-    X_MIT_SHM_EXTENSION_NAME, X_MIT_SHM_MAJOR_OPCODE, X_RANDR_EXTENSION_NAME, X_RANDR_MAJOR_OPCODE,
-    X_SETUP_DEFAULT_COLORMAP, X_SETUP_DEFAULT_ROOT, X_SETUP_DEFAULT_VISUAL, X_SETUP_ROOT_HEIGHT,
-    X_SETUP_ROOT_WIDTH, X_SOPHIA_PRESENT_EXTENSION_NAME, X_SOPHIA_PRESENT_MAJOR_OPCODE, XAtomTable,
+    X_BIG_REQUESTS_EXTENSION_NAME, X_BIG_REQUESTS_MAJOR_OPCODE, X_KEYBOARD_EXTENSION_NAME,
+    X_KEYBOARD_MAJOR_OPCODE, X_MIT_SHM_EXTENSION_NAME, X_MIT_SHM_MAJOR_OPCODE,
+    X_RANDR_EXTENSION_NAME, X_RANDR_MAJOR_OPCODE, X_SETUP_DEFAULT_COLORMAP, X_SETUP_DEFAULT_ROOT,
+    X_SETUP_DEFAULT_VISUAL, X_SETUP_ROOT_HEIGHT, X_SETUP_ROOT_WIDTH,
+    X_SOPHIA_PRESENT_EXTENSION_NAME, X_SOPHIA_PRESENT_MAJOR_OPCODE, XAtomTable,
     XAuthorityRequestKind, XAuthorityResponseOutcome, XAuthorityResponsePacket, XAuthorityRuntime,
-    XByteOrder, XClientEvent, XClientOutput, XClientReply, XErrorCode, XMetadataPropertyCandidate,
-    XPropertyError, XPropertyTable, XResourceId, XWireParseError, XWireRequest,
-    encode_x_client_output, metadata_property_candidate, x_error_from_runtime,
+    XAuthorityRuntimeError, XByteOrder, XClientEvent, XClientOutput, XClientReply, XErrorCode,
+    XMetadataPropertyCandidate, XPropertyError, XPropertyTable, XResourceId, XWireParseError,
+    XWireRequest, encode_x_client_output, metadata_property_candidate, x_error_from_runtime,
     x_error_from_wire_parse, x_selection_failure_event,
 };
 use sophia_protocol::{NamespaceId, Rect, Region, TransactionId};
@@ -412,6 +414,19 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
+        XWireRequest::GetSelectionOwner { .. } => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::GetSelectionOwner {
+                sequence: context.sequence,
+                owner: None,
+            })],
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::GrabServer | XWireRequest::UngrabServer => XDispatchResult {
+            response: None,
+            outputs: Vec::new(),
+            metadata_candidates: Vec::new(),
+        },
         XWireRequest::CreateGraphicsContext { .. }
         | XWireRequest::SetClipRectangles { .. }
         | XWireRequest::FreeGraphicsContext { .. } => XDispatchResult {
@@ -751,6 +766,25 @@ pub fn dispatch_x11_wire_request(
             })],
             metadata_candidates: Vec::new(),
         },
+        XWireRequest::CreateColormap { window, .. } => {
+            let outputs = if window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
+                Vec::new()
+            } else if let Err(error) = runtime.validate_window_access(context.namespace, window) {
+                vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(window.local.raw()).unwrap_or(0),
+                ))]
+            } else {
+                Vec::new()
+            };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::AllocNamedColor { name, .. } => {
             let black = name.eq_ignore_ascii_case("black");
             let intensity = if black { 0 } else { u16::MAX };
@@ -786,6 +820,25 @@ pub fn dispatch_x11_wire_request(
             })],
             metadata_candidates: Vec::new(),
         },
+        XWireRequest::RandrSelectInput { window, .. } => {
+            let outputs = if window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
+                Vec::new()
+            } else if let Err(error) = runtime.validate_window_access(context.namespace, window) {
+                vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(window.local.raw()).unwrap_or(0),
+                ))]
+            } else {
+                Vec::new()
+            };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::RandrGetScreenSizeRange { window } => {
             let output = if window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
                 XClientOutput::Reply(XClientReply::RandrGetScreenSizeRange {
@@ -840,6 +893,74 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
+        XWireRequest::RandrGetOutputPrimary { window } => {
+            let output = if window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
+                XClientOutput::Reply(XClientReply::RandrGetOutputPrimary {
+                    sequence: context.sequence,
+                    output: 0,
+                })
+            } else if let Err(error) = runtime.validate_window_access(context.namespace, window) {
+                XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(window.local.raw()).unwrap_or(0),
+                ))
+            } else {
+                XClientOutput::Reply(XClientReply::RandrGetOutputPrimary {
+                    sequence: context.sequence,
+                    output: 0,
+                })
+            };
+            XDispatchResult {
+                response: None,
+                outputs: vec![output],
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::RandrGetMonitors { window, .. } => {
+            let output = if window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
+                XClientOutput::Reply(XClientReply::RandrGetMonitors {
+                    sequence: context.sequence,
+                    timestamp: 0,
+                })
+            } else if let Err(error) = runtime.validate_window_access(context.namespace, window) {
+                XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(window.local.raw()).unwrap_or(0),
+                ))
+            } else {
+                XClientOutput::Reply(XClientReply::RandrGetMonitors {
+                    sequence: context.sequence,
+                    timestamp: 0,
+                })
+            };
+            XDispatchResult {
+                response: None,
+                outputs: vec![output],
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::XkbUseExtension { .. } => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::XkbUseExtension {
+                sequence: context.sequence,
+                supported: true,
+                server_major: 1,
+                server_minor: 0,
+            })],
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::BigRequestsEnable => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::BigRequestsEnable {
+                sequence: context.sequence,
+                maximum_request_length: 4096,
+            })],
+            metadata_candidates: Vec::new(),
+        },
         XWireRequest::ShmAttach {
             segment,
             shmid,
@@ -869,6 +990,10 @@ pub fn dispatch_x11_wire_request(
         XWireRequest::ShmDetach { segment } => {
             let outputs = match runtime.detach_shm_segment(context.namespace, segment) {
                 Ok(()) => Vec::new(),
+                Err(
+                    XAuthorityRuntimeError::InvalidResource
+                    | XAuthorityRuntimeError::UnknownResource,
+                ) => Vec::new(),
                 Err(error) => vec![XClientOutput::Error(x_error_from_runtime(
                     error,
                     context.sequence,
@@ -883,38 +1008,68 @@ pub fn dispatch_x11_wire_request(
             }
         }
         XWireRequest::ShmPutImage {
-            drawable, segment, ..
+            drawable,
+            segment,
+            src_width,
+            src_height,
+            dst_x,
+            dst_y,
+            offset,
+            ..
         } => {
-            let output = if runtime
+            let transaction = TransactionId::from_raw(u64::from(context.sequence));
+            if runtime
                 .validate_shm_segment_access(context.namespace, segment)
                 .is_err()
             {
-                XClientOutput::Error(crate::XClientError {
-                    code: XErrorCode::BadAccess,
-                    sequence: context.sequence,
-                    resource_id: u32::try_from(segment.local.raw()).unwrap_or(0),
-                    minor_code: 3,
-                    major_code: context.major_opcode,
-                })
-            } else if let Err(error) = runtime.validate_window_access(context.namespace, drawable) {
-                XClientOutput::Error(x_error_from_runtime(
+                return XDispatchResult {
+                    response: Some(XAuthorityResponsePacket::accepted(transaction)),
+                    outputs: vec![XClientOutput::Error(crate::XClientError {
+                        code: XErrorCode::BadAccess,
+                        sequence: context.sequence,
+                        resource_id: u32::try_from(segment.local.raw()).unwrap_or(0),
+                        minor_code: 3,
+                        major_code: context.major_opcode,
+                    })],
+                    metadata_candidates: Vec::new(),
+                };
+            }
+            if runtime
+                .validate_pixmap_access(context.namespace, drawable)
+                .is_ok()
+            {
+                return XDispatchResult {
+                    response: Some(XAuthorityResponsePacket::accepted(transaction)),
+                    outputs: Vec::new(),
+                    metadata_candidates: Vec::new(),
+                };
+            }
+            let damage = Region::single(Rect {
+                x: i32::from(dst_x),
+                y: i32::from(dst_y),
+                width: i32::from(src_width),
+                height: i32::from(src_height),
+            });
+            let response = runtime.apply_put_image(
+                transaction,
+                context.namespace,
+                drawable,
+                damage,
+                usize::try_from(offset).unwrap_or(0),
+            );
+            let outputs = if let XAuthorityResponseOutcome::Rejected(error) = response.outcome {
+                vec![XClientOutput::Error(x_error_from_runtime(
                     error,
                     context.sequence,
                     context.major_opcode,
                     u32::try_from(drawable.local.raw()).unwrap_or(0),
-                ))
+                ))]
             } else {
-                XClientOutput::Error(crate::XClientError {
-                    code: XErrorCode::BadImplementation,
-                    sequence: context.sequence,
-                    resource_id: u32::try_from(segment.local.raw()).unwrap_or(0),
-                    minor_code: 3,
-                    major_code: context.major_opcode,
-                })
+                Vec::new()
             };
             XDispatchResult {
-                response: None,
-                outputs: vec![output],
+                response: Some(response),
+                outputs,
                 metadata_candidates: Vec::new(),
             }
         }
@@ -1261,6 +1416,18 @@ fn extension_query_result(name: &str) -> XExtensionQueryResult {
         X_RANDR_EXTENSION_NAME => XExtensionQueryResult {
             present: true,
             major_opcode: X_RANDR_MAJOR_OPCODE,
+            first_event: 0,
+            first_error: 0,
+        },
+        X_KEYBOARD_EXTENSION_NAME => XExtensionQueryResult {
+            present: true,
+            major_opcode: X_KEYBOARD_MAJOR_OPCODE,
+            first_event: 0,
+            first_error: 0,
+        },
+        X_BIG_REQUESTS_EXTENSION_NAME => XExtensionQueryResult {
+            present: true,
+            major_opcode: X_BIG_REQUESTS_MAJOR_OPCODE,
             first_event: 0,
             first_error: 0,
         },

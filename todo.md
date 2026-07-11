@@ -35,9 +35,9 @@ Current milestone target:
 
 Next logical steps:
 
-- [ ] Add the next GTK or GIMP-adjacent external client probe once a suitable
-  host binary is available, and implement only the first demanded opcode/reply
-  surface.
+- [ ] Add the next probe-driven GTK slice for XInput2 startup, then turn zenity
+  from startup protocol coverage into a mapped/rendered dialog proof under a
+  host session with working DBus/portal state.
 - [ ] Convert one long-running external smoke into a stricter rendered-output
   assertion once Authority-to-Engine transactions can be observed through the
   live composition path.
@@ -86,36 +86,45 @@ Next logical steps:
 
 ## Done Recently
 
-- [x] `x-authority-xterm-smoke` launches `/usr/bin/xterm`, keeps
+- [x] `x-authority-zenity-smoke` launches `zenity` through PATH/env-resolved
+  probe configuration, keeps `first_error=none` under `dbus-run-session`, and
+  adds only the demanded bounded `GetSelectionOwner`, `GrabServer`,
+  `UngrabServer`, `CreateColormap`, reduced `MIT-SHM`, additional `RANDR`,
+  `XKEYBOARD` `UseExtension`, and `BIG-REQUESTS` `Enable` startup paths. Current
+  TTY evidence is GTK startup protocol coverage, not a rendered dialog proof;
+  the remaining blocker is XInput2 plus working host portal/display state.
+- [x] External X Authority probe binaries now resolve through `PATH` with
+  `SOPHIA_XAUTHORITY_<LABEL>` overrides instead of hard-coded `/usr/bin` paths.
+- [x] `x-authority-xterm-smoke` launches `xterm`, keeps
   `first_error=none`, and adds only the demanded bounded `ConfigureWindow`
   decode/dispatch path. This is a terminal setup/lifecycle regression with no
   rendered transaction proof yet.
-- [x] `x-authority-xcalc-smoke` launches `/usr/bin/xcalc`, keeps
+- [x] `x-authority-xcalc-smoke` launches `xcalc`, keeps
   `first_error=none`, and adds only the demanded bounded `AllocNamedColor`,
   `UnmapWindow`, one-character padded `PolyText8`, and client-disconnect
   handling needed by this Athena widget probe.
-- [x] `x-authority-xrandr-query-smoke` launches `/usr/bin/xrandr --query`,
+- [x] `x-authority-xrandr-query-smoke` launches `xrandr --query`,
   keeps `first_error=none`, and adds only the demanded minimal `RANDR`
   extension advertisement, fixed root screen-size range, and empty screen
   resource replies.
-- [x] `x-authority-xmessage-smoke` launches `/usr/bin/xmessage Sophia`, keeps
+- [x] `x-authority-xmessage-smoke` launches `xmessage Sophia`, keeps
   `first_error=none`, and adds only the demanded bounded `CreateGlyphCursor`,
   `FreeCursor`, `SetClipRectangles`, and `PolyText8` paths with reduced
   Engine/Runtime transaction evidence.
-- [x] `x-authority-xlogo-smoke` launches `/usr/bin/xlogo`, keeps
+- [x] `x-authority-xlogo-smoke` launches `xlogo`, keeps
   `first_error=none`, and reaches committed drawing transactions through the
   existing polygon/rectangle paths without new protocol expansion.
-- [x] `x-authority-xsetroot-name-smoke` launches `/usr/bin/xsetroot -name`,
+- [x] `x-authority-xsetroot-name-smoke` launches `xsetroot -name`,
   keeps `first_error=none`, and proves root property mutation through existing
   bounded property paths.
-- [x] `x-authority-xprop-root-smoke` launches `/usr/bin/xprop -root`, exits
+- [x] `x-authority-xprop-root-smoke` launches `xprop -root`, exits
   successfully with `first_error=none`, and adds only the demanded bounded
   `ListProperties` root/window property atom reply path.
-- [x] `x-authority-xwininfo-root-smoke` launches `/usr/bin/xwininfo -root`,
+- [x] `x-authority-xwininfo-root-smoke` launches `xwininfo -root`,
   exits successfully with `first_error=none`, and adds only the demanded
   `GetWindowAttributes`, `GetGeometry`, `QueryTree`, and
   `TranslateCoordinates` root/window introspection replies.
-- [x] `x-authority-xeyes-smoke` launches `/usr/bin/xeyes`, keeps
+- [x] `x-authority-xeyes-smoke` launches `xeyes`, keeps
   compatibility expansion probe-driven, and adds only the demanded
   `QueryColors`, `ClearArea`, and `PolyFillArc` paths with reduced
   Engine/Runtime transaction evidence.
@@ -124,7 +133,7 @@ Next logical steps:
   intake, commits one authority transaction, submits a rendered primary plane
   scanout, retires it after a deterministic accepted page flip, and reports
   cleanup drained with reduced evidence.
-- [x] `x-authority-xclock-smoke` launches `/usr/bin/xclock`, reaches mapped
+- [x] `x-authority-xclock-smoke` launches `xclock`, reaches mapped
   surface exposure, decodes the xclock-driven font, pixmap, window, and drawing
   requests, and commits observed authority transactions through Engine/Runtime
   counters without X protocol errors.

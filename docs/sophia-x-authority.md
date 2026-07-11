@@ -70,7 +70,8 @@ request, reply, lifecycle, or error path. Current real-client smokes cover
 root/window introspection (`xwininfo`, `xprop`), root property mutation
 (`xsetroot`), drawing clients (`xclock`, `xeyes`, `xlogo`, `xmessage`), output
 introspection (`xrandr --query`), Athena widget behavior (`xcalc`), and
-terminal setup/lifecycle behavior (`xterm`).
+terminal setup/lifecycle behavior (`xterm`), and GTK startup behavior
+(`zenity`).
 
 Each external smoke must keep `first_error=none`. New compatibility code should
 remain bounded and narrow: for example, xcalc admitted `AllocNamedColor`,
@@ -78,7 +79,11 @@ remain bounded and narrow: for example, xcalc admitted `AllocNamedColor`,
 teardown without turning Sophia X Authority into a broad X11 conformance
 project. xterm admitted `ConfigureWindow` as a namespace-checked lifecycle
 request, but it is not yet treated as rendered-output coverage because the
-current proof has zero committed `SurfaceTransaction` values.
+current proof has zero committed `SurfaceTransaction` values. zenity admitted
+selection-owner lookup, server grab/ungrab, root colormap creation, reduced
+`MIT-SHM`, additional `RANDR`, `XKEYBOARD`, and `BIG-REQUESTS` startup paths,
+but the current TTY/DBus environment and missing XInput2 support still prevent a
+rendered GTK dialog proof.
 
 ## Namespace Model
 
@@ -384,22 +389,26 @@ XID, the client-provided `shmid`, the read-only bit, and a generation. The
 authority does not call `shmat`, map host memory, or expose the segment to
 Sophia Engine in this first pass.
 
-`XShmPutImage` is decoded, but it does not emit a surface transaction yet. A
-missing or cross-namespace segment returns a bounded `BadAccess` error. An
-attached segment with a valid target window currently returns
-`BadImplementation`, preserving the fail-closed rule until the authority owns a
-real bounded SHM import path.
+`XShmPutImage` is decoded and admitted as a bounded draw transaction when the
+segment is namespace-local and the target is a known window. The transaction uses
+the requested destination rectangle as damage and a reduced CPU-buffer handle; it
+does not map or trust the client-provided shared-memory bytes. A missing or
+cross-namespace segment returns a bounded `BadAccess` error. Pixmap targets are
+accepted as local resource activity without emitting a surface transaction.
+Invalid or already-gone detach requests are ignored as cleanup no-ops, while
+cross-namespace detach remains rejected.
 
 Real MIT-SHM import is deferred until Sophia has a compositor backend that can
 consume the mapped bytes through a bounded renderer import path. Mapping
 client-provided shared memory with `shmat` would add host-memory lifetime,
 detach, namespace cleanup, and crash-recovery obligations before the engine can
-use the data. Until that backend exists, core `PutImage` and private
-`SOPHIA-PRESENT` remain the supported pixel handoff seams.
+use the data. Until that backend exists, core `PutImage`, reduced `ShmPutImage`
+transactions, and private `SOPHIA-PRESENT` remain the supported pixel handoff
+seams.
 
 ## External xclock Probe
 
-`x-authority-xclock-smoke` launches `/usr/bin/xclock` against a temporary Sophia
+`x-authority-xclock-smoke` launches `xclock` against a temporary Sophia
 X Authority socket and treats the client as the compatibility driver. The probe
 added only the request surface xclock actually exercised: printable atom names,
 pixmap resources, copy-area flow, basic font replies, list-font replies,
@@ -417,7 +426,7 @@ reduced transaction facts cross into runtime.
 
 ## External xeyes Probe
 
-`x-authority-xeyes-smoke` launches `/usr/bin/xeyes` against a temporary Sophia X
+`x-authority-xeyes-smoke` launches `xeyes` against a temporary Sophia X
 Authority socket and keeps authority coverage probe-driven. The probe added the
 request surface xeyes actually exercised after xclock: bounded `QueryColors`,
 `ClearArea`, and `PolyFillArc` handling. Arc and clear operations reduce to core
@@ -432,7 +441,7 @@ identify the next compatibility gap directly.
 
 ## External xwininfo Probe
 
-`x-authority-xwininfo-root-smoke` launches `/usr/bin/xwininfo -root` against a
+`x-authority-xwininfo-root-smoke` launches `xwininfo -root` against a
 temporary Sophia X Authority socket and treats root-window introspection as a
 separate non-drawing compatibility surface. The probe added only the request
 surface xwininfo actually exercised: bounded `GetWindowAttributes`,
@@ -445,7 +454,7 @@ remain visible without requiring visual transaction evidence.
 
 ## External xprop Probe
 
-`x-authority-xprop-root-smoke` launches `/usr/bin/xprop -root` against a
+`x-authority-xprop-root-smoke` launches `xprop -root` against a
 temporary Sophia X Authority socket and treats root property discovery as a
 read-only compatibility surface. The probe added only the request surface xprop
 actually exercised after xwininfo: bounded `ListProperties` decoding and replies
@@ -459,12 +468,12 @@ reports the properties the namespace-local table actually owns.
 
 ## External xsetroot And xlogo Probes
 
-`x-authority-xsetroot-name-smoke` launches `/usr/bin/xsetroot -name "Sophia
+`x-authority-xsetroot-name-smoke` launches `xsetroot -name "Sophia
 Root"` against a temporary Sophia X Authority socket. It exits successfully
 through existing property, input-focus, GC lifecycle, and extension-query paths,
 proving a small root-property mutation case without Engine transactions.
 
-`x-authority-xlogo-smoke` launches `/usr/bin/xlogo` and reaches committed
+`x-authority-xlogo-smoke` launches `xlogo` and reaches committed
 Engine/Runtime authority transactions through the existing create/map/property
 and polygon/rectangle drawing surface. It did not require new X protocol
 coverage, which makes it a useful regression probe for the bounded drawing
@@ -472,7 +481,7 @@ paths already admitted by xclock and xeyes.
 
 ## External xmessage Probe
 
-`x-authority-xmessage-smoke` launches `/usr/bin/xmessage Sophia` and treats
+`x-authority-xmessage-smoke` launches `xmessage Sophia` and treats
 legacy text UI behavior as the next compatibility driver. The probe added only
 the request surface xmessage actually exercised after xlogo: bounded
 `CreateGlyphCursor`, `FreeCursor`, `SetClipRectangles`, and `PolyText8`.
@@ -489,7 +498,7 @@ keeps `first_error=none` as an enforced compatibility invariant.
 
 ## External xrandr Probe
 
-`x-authority-xrandr-query-smoke` launches `/usr/bin/xrandr --query` against a
+`x-authority-xrandr-query-smoke` launches `xrandr --query` against a
 temporary Sophia X Authority socket and treats output-size discovery as a
 read-only compatibility surface. The probe added only the request surface xrandr
 actually exercised: minimal `RANDR` extension advertisement,
