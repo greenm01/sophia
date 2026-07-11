@@ -55,6 +55,17 @@ Passing evidence reports `status=bounded_complete`, matching authority batch,
 backend tick, and runtime commit counts, nonzero composed pixels, and
 `input_pixel_change=true`.
 
+The destructive TTY3 terminal-content presentation proof is:
+
+```sh
+tools/live_session_content_hardware_proof.sh
+```
+
+It composes real xterm pixels at the selected KMS mode, queues that exact frame
+for native GL/GBM export, and requires matching requested/exported checksums plus
+the existing submit-to-page-flip-retire verifier. Current evidence passes at
+1920x1200 with nonzero terminal pixels and no cleanup debt.
+
 The separate `--proof` implementation assembles a one-shot proof from
 boundaries Sophia already owns:
 
@@ -108,7 +119,6 @@ resource behavior the real xterm stream demands.
 
 Next live-session blockers:
 
-- hardware-prove the composed terminal frame through native GL/GBM scanout;
 - join the persistent CPU/backend loop to native GBM/KMS presentation;
 - route physical keyboard input into the focused X terminal surface;
 - prove operator-typed text reaches terminal pixels before running Codex inside

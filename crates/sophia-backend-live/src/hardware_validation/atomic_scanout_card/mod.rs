@@ -22,8 +22,9 @@ pub use rendered_smoke::{
 };
 #[cfg(feature = "gbm-probe")]
 pub use runtime_evidence::{
-    real_atomic_runtime_rendered_scanout_renderer_observation,
+    RealAtomicCpuFrameScanoutEvidence, real_atomic_runtime_rendered_scanout_renderer_observation,
     run_real_atomic_runtime_rendered_scanout_evidence_with,
+    run_real_atomic_runtime_rendered_scanout_evidence_with_cpu_frame,
 };
 pub use selection::*;
 pub use session::*;

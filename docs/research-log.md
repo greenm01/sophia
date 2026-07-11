@@ -10,7 +10,11 @@ ready `SurfaceTransaction` values, commits them through runtime, and passes the
 deterministic composition/scanout lifecycle proof. Core drawing now updates
 bounded XRGB8888 software buffers, renderer-live composes those bytes, and the
 native EGL adapter can upload the composed frame into a GBM front buffer.
-Hardware proof that terminal content reaches scanout remains open.
+The TTY3 content proof now exports an exact composed xterm checksum through the
+native GL/GBM path, submits that buffer to KMS, observes accepted page-flip
+retirement, and drains cleanup. Requested and exported checksum evidence match;
+the remaining presentation work is persistent-session ownership, not pixel
+upload correctness.
 
 The active milestone is therefore persistent session ownership, hardware
 terminal-content presentation, and physical keyboard delivery. Injected core

@@ -43,6 +43,10 @@ validation evidence in `docs/research-log.md`.
 
 ## Completed GBM/EGL Frame Target Milestones
 
+- [x] Proved a real composed xterm frame, identified by matching requested and
+  exported checksums, reaches native GBM/KMS submit and accepted page-flip
+  retirement on TTY3 without cleanup debt.
+
 - [x] Defined the opt-in real-device evidence shape for native GBM/EGL
   frame-target allocation.
 - [x] Extended real GBM/EGL smoke evidence with reduced frame-target allocation

@@ -56,6 +56,10 @@ pub(crate) fn print(verbose: bool) {
     println!("commands: atomic-scanout-preflight");
     #[cfg(feature = "atomic-scanout-smoke-live")]
     println!(
+        "commands: sophia-live-session-content-hardware-proof [--terminal=xterm] [--slot=1] [--output=1] [--authority=1] [--page-flip-timeout-ms=8000]"
+    );
+    #[cfg(feature = "atomic-scanout-smoke-live")]
+    println!(
         "commands: atomic-scanout-smoke [--slot=1] [--output=1] [--authority=1] [--page-flip-timeout-ms=8000] [--child-timeout-ms=30000]"
     );
     #[cfg(feature = "atomic-scanout-smoke-live")]

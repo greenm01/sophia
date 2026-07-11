@@ -61,6 +61,15 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
     }
 
     #[cfg(feature = "atomic-scanout-smoke-live")]
+    if args
+        .iter()
+        .any(|arg| arg == "sophia-live-session-content-hardware-proof")
+    {
+        run_sophia_live_session_content_hardware_proof(args)?;
+        return Ok(true);
+    }
+
+    #[cfg(feature = "atomic-scanout-smoke-live")]
     if args.iter().any(|arg| arg == "atomic-scanout-smoke") {
         if std::env::var_os("SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE").is_none() {
             return Err("set SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 to run destructive atomic scanout smoke".into());
@@ -141,7 +150,13 @@ fn run_sophia_live_session_bootstrap(args: &[String]) -> Result<(), Box<dyn std:
 
     let terminal_proof =
         super::x_authority::collect_x_authority_xterm_render_authority_batches(&terminal)?;
-    let pixel_composition = compose_terminal_cpu_buffers(&terminal_proof)?;
+    let pixel_composition = compose_terminal_cpu_buffers(
+        &terminal_proof,
+        Size {
+            width: 1280,
+            height: 720,
+        },
+    )?;
     let keyboard_proof = super::x_authority::run_x_authority_xterm_input_smoke()?;
     let proof_display = terminal_proof.display.clone();
     let proof_requests = terminal_proof.requests;
@@ -196,6 +211,7 @@ fn run_sophia_live_session_bootstrap(args: &[String]) -> Result<(), Box<dyn std:
 #[cfg(feature = "atomic-scanout-live")]
 fn compose_terminal_cpu_buffers(
     proof: &super::x_authority::XAuthorityTerminalRenderProof,
+    output_size: Size,
 ) -> Result<sophia_backend_live::LiveCpuCompositionReport, Box<dyn std::error::Error>> {
     let mut buffers = std::collections::BTreeMap::new();
     for buffer in &proof.cpu_buffers {
@@ -236,14 +252,64 @@ fn compose_terminal_cpu_buffers(
             })
         })
         .collect::<Vec<_>>();
-    sophia_backend_live::compose_live_cpu_frame(
-        Size {
-            width: 1280,
-            height: 720,
-        },
-        &layers,
-    )
-    .map_err(|error| format!("failed to compose terminal CPU pixels: {error:?}").into())
+    sophia_backend_live::compose_live_cpu_frame(output_size, &layers)
+        .map_err(|error| format!("failed to compose terminal CPU pixels: {error:?}").into())
+}
+
+#[cfg(feature = "atomic-scanout-smoke-live")]
+fn run_sophia_live_session_content_hardware_proof(
+    args: &[String],
+) -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::var_os("SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE").is_none() {
+        return Err("set SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 to run destructive terminal-content scanout proof".into());
+    }
+    let terminal = arg_value(args, "--terminal").unwrap_or_else(|| "xterm".to_owned());
+    let output_size = {
+        let selection = sophia_backend_live::select_real_atomic_scanout_card();
+        selection
+            .selection
+            .map(|selection| selection.size())
+            .ok_or("terminal-content scanout proof could not select a KMS output")?
+    };
+    let terminal_proof =
+        super::x_authority::collect_x_authority_xterm_render_authority_batches(&terminal)?;
+    let composition = compose_terminal_cpu_buffers(&terminal_proof, output_size)?;
+    if composition.layers_composed == 0 || composition.nonzero_pixel_bytes == 0 {
+        return Err("terminal-content scanout proof did not compose nonzero xterm pixels".into());
+    }
+    let config = atomic_scanout_smoke_cli_config(args)?;
+    let evidence =
+        sophia_backend_live::run_real_atomic_runtime_rendered_scanout_evidence_with_cpu_frame(
+            config,
+            composition.frame,
+        );
+    for line in &evidence.lines {
+        println!("{line}");
+    }
+    let scanout_clean = runtime_rendered_scanout_evidence_is_clean(&evidence.lines);
+    let frame_exported = evidence.frame_exported();
+    let passed = scanout_clean && frame_exported;
+    println!(
+        "sophia_live_session_content_scanout schema=1 status={} width={} height={} layers={} nonzero_pixel_bytes={} requested_checksum={} exported_checksum={} export_attempts={} export_status={:?} frame_pending={} scanout_clean={}",
+        if passed { "Passed" } else { "Failed" },
+        output_size.width,
+        output_size.height,
+        composition.layers_composed,
+        evidence.requested_nonzero_pixel_bytes,
+        evidence.requested_checksum,
+        evidence.exported_checksum.unwrap_or(0),
+        evidence.export_attempts,
+        evidence.export_status,
+        evidence.frame_pending,
+        scanout_clean,
+    );
+    if !passed {
+        return Err(
+            "terminal-content scanout proof did not export and retire the composed xterm frame"
+                .into(),
+        );
+    }
+    Ok(())
 }
 
 #[cfg(feature = "atomic-scanout-smoke-live")]

@@ -225,10 +225,11 @@ model and authority boundaries, while opt-in TTY3 evidence now proves native
 GBM/KMS allocation, atomic submit, page-flip retirement, and cleanup. The active
 gap is integration: core X drawing now produces bounded XRGB8888 pixels, the
 CPU compositor consumes them, and injected core keys change real xterm pixels.
-The next operator milestone is hardware-proving that content through native
-GL/GBM scanout, then connecting persistent session and physical-input
-ownership. The xmonad bridge translation core exists; its embedded X server and
-real xmonad smoke remain ahead of Wayland.
+TTY3 evidence now proves the exact composed xterm checksum is exported through
+native GL/GBM, submitted to KMS, and retired after page flip. The next operator
+milestone is joining that native owner to the persistent session and closing
+the physical typed-text proof. The xmonad bridge translation core exists; its
+embedded X server and real xmonad smoke remain ahead of Wayland.
 
 ## License
 

@@ -27,7 +27,8 @@ Current truth:
   typed-text pixel proof is still required.
 - TTY3 native GBM/KMS submit, page-flip retirement, and cleanup evidence pass.
 - The native renderer can upload a composed XRGB8888 frame into its GL/GBM
-  front buffer, but terminal-content scanout has not yet been hardware-proven.
+  front buffer. The TTY3 content proof exports the exact composed xterm
+  checksum, submits it to KMS, observes page-flip retirement, and drains cleanup.
 - `sophia-live-session --proof` remains a one-shot composition/input proof.
 - Default `sophia-live-session` now binds an explicit display, owns one xterm
   and X Authority server, and drains repeated authority batches through one
@@ -37,7 +38,7 @@ Exit criteria:
 
 - [x] Back core X drawing with bounded XRGB8888 CPU buffers, including the
   fixed-font text path demanded by xterm.
-- [ ] Compose those pixels into a renderer-owned frame and prove the scanned-out
+- [x] Compose those pixels into a renderer-owned frame and prove the scanned-out
   frame contains terminal content rather than an allocated blank buffer.
 - [ ] Keep X Authority, live backend ticks, scanout ownership, and xterm alive
   under one persistent session owner until the outside control plane stops it.

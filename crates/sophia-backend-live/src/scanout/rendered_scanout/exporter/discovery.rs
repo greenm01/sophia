@@ -25,6 +25,10 @@ where
     last_target_lifecycle: Option<LiveGbmEglFrameTargetLifecycleReport>,
     last_export_status: Option<LiveRendererScanoutBufferExportStatus>,
     pending_cpu_frame: Option<LiveCpuComposedFrame>,
+    pending_cpu_frame_checksum: Option<u64>,
+    cpu_frame_export_attempts: usize,
+    last_cpu_frame_checksum: Option<u64>,
+    last_cpu_frame_export_status: Option<LiveRendererScanoutBufferExportStatus>,
 }
 
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
@@ -44,6 +48,10 @@ where
             last_target_lifecycle: None,
             last_export_status: None,
             pending_cpu_frame: None,
+            pending_cpu_frame_checksum: None,
+            cpu_frame_export_attempts: 0,
+            last_cpu_frame_checksum: None,
+            last_cpu_frame_export_status: None,
         }
     }
 
@@ -89,7 +97,26 @@ where
     }
 
     pub fn set_pending_cpu_frame(&mut self, frame: LiveCpuComposedFrame) {
+        self.pending_cpu_frame_checksum = Some(cpu_frame_checksum(&frame));
         self.pending_cpu_frame = Some(frame);
+    }
+
+    pub const fn pending_cpu_frame(&self) -> bool {
+        self.pending_cpu_frame.is_some()
+    }
+
+    pub const fn cpu_frame_export_attempts(&self) -> usize {
+        self.cpu_frame_export_attempts
+    }
+
+    pub const fn last_cpu_frame_checksum(&self) -> Option<u64> {
+        self.last_cpu_frame_checksum
+    }
+
+    pub const fn last_cpu_frame_export_status(
+        &self,
+    ) -> Option<LiveRendererScanoutBufferExportStatus> {
+        self.last_cpu_frame_export_status
     }
 }
 
@@ -151,11 +178,17 @@ where
         };
 
         let report = match self.pending_cpu_frame.take() {
-            Some(frame) => context.export_xrgb8888_owned_scanout_buffer_with_modifiers(
-                target,
-                &frame,
-                &self.preferred_modifiers,
-            ),
+            Some(frame) => {
+                self.cpu_frame_export_attempts = self.cpu_frame_export_attempts.saturating_add(1);
+                self.last_cpu_frame_checksum = self.pending_cpu_frame_checksum.take();
+                let report = context.export_xrgb8888_owned_scanout_buffer_with_modifiers(
+                    target,
+                    &frame,
+                    &self.preferred_modifiers,
+                );
+                self.last_cpu_frame_export_status = Some(report.status);
+                report
+            }
             None => context.export_rendered_owned_scanout_buffer_with_modifiers(
                 target,
                 &self.preferred_modifiers,
@@ -189,3 +222,13 @@ fn reduced_preferred_scanout_modifiers(mut modifiers: Vec<u64>) -> Vec<u64> {
 
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
 const MAX_PREFERRED_SCANOUT_MODIFIERS: usize = 16;
+
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+fn cpu_frame_checksum(frame: &LiveCpuComposedFrame) -> u64 {
+    frame
+        .bytes
+        .iter()
+        .fold(0xcbf2_9ce4_8422_2325u64, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x100_0000_01b3)
+        })
+}

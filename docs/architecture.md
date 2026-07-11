@@ -76,12 +76,13 @@ compatibility probes, and emits drawing transactions through a persistent
 sequential listener. Native backend evidence also reaches rendered GBM/KMS
 submit and page-flip retirement. Core X drawing now updates bounded XRGB8888
 buffers, renderer-live composes them, and the native EGL adapter can upload the
-composed frame to a GBM front buffer. The remaining visibility gate is hardware
-evidence that terminal-content pixels, rather than the old clear color, reach
-scanout.
+composed frame to a GBM front buffer. TTY3 evidence now matches the requested
+and exported xterm-frame checksum through KMS submit and accepted page-flip
+retirement, proving terminal content replaces the old clear color.
 
-The active architecture step is a persistent owner joining X Authority, native
-scanout, and focused physical keyboard routing. Explicit libinput devices now
+The active architecture step is joining native scanout ownership to the
+persistent X Authority/backend loop and closing focused physical keyboard
+evidence. Explicit libinput devices now
 reduce into Engine-owned seat focus and then core X events; operator typed-text
 evidence remains. The injected core-X event path already changes real xterm
 pixels. xmonad then enters through the isolated

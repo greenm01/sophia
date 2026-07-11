@@ -84,9 +84,9 @@ use sophia_backend_live::{
 };
 #[cfg(feature = "gbm-probe")]
 use sophia_backend_live::{
-    LiveGbmEglFrameTargetStatus, NativeGbmRenderedScanoutBufferDiscoveryExporter,
-    NativeGbmRenderedScanoutContextStatus, RealAtomicScanoutSmokeConfig,
-    RenderDeviceDiscoveryBackend,
+    LiveCpuComposedFrame, LiveGbmEglFrameTargetStatus,
+    NativeGbmRenderedScanoutBufferDiscoveryExporter, NativeGbmRenderedScanoutContextStatus,
+    RealAtomicScanoutSmokeConfig, RenderDeviceDiscoveryBackend,
 };
 #[cfg(feature = "gbm-probe")]
 use sophia_backend_live::{
@@ -4176,6 +4176,17 @@ fn live_runtime_tick_native_gbm_rendered_scanout_fails_closed_when_render_device
         .expect("ready backend should seed live assembly");
     let device = full_primary_plane_scanout_device();
     let mut exporter = NativeGbmRenderedScanoutBufferDiscoveryExporter::new(MissingRenderDevice);
+    let frame = LiveCpuComposedFrame {
+        size: Size {
+            width: 1920,
+            height: 1080,
+        },
+        stride: 1920 * 4,
+        format: LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+        bytes: vec![7; 1920 * 1080 * 4],
+    };
+    exporter.set_pending_cpu_frame(frame);
+    assert!(exporter.pending_cpu_frame());
 
     let tick = assembly
         .run_tick_with_native_gbm_rendered_primary_plane_scanout_exporter_with(
@@ -4204,6 +4215,9 @@ fn live_runtime_tick_native_gbm_rendered_scanout_fails_closed_when_render_device
         Some(NativeGbmRenderedScanoutContextStatus::Unavailable)
     );
     assert!(!exporter.context_ready());
+    assert_eq!(exporter.cpu_frame_export_attempts(), 0);
+    assert_eq!(exporter.last_cpu_frame_checksum(), None);
+    assert!(exporter.pending_cpu_frame());
     assert_eq!(
         exporter.last_export_status(),
         Some(LiveRendererScanoutBufferExportStatus::Unavailable)
