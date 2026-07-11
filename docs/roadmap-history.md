@@ -8,6 +8,11 @@ validation evidence in `docs/research-log.md`.
 
 ## Completed Real Backend Evidence and Runtime Seams
 
+- [x] Added `live-session-composition-smoke`, composing the Sophia X Authority
+  Present-pixmap socket path, bounded authority batch intake, runtime commit
+  projection, renderer-live frame-target observation, rendered primary-plane
+  scanout submit, deterministic page-flip retire, and cleanup-drained reporting
+  into one non-destructive reduced evidence line.
 - [x] Proved libinput-shaped input polling, native page-flip retirement, and
   rendered scanout submit can share one runtime tick.
 - [x] Added a runtime-owned readiness gate so concrete libinput dispatch runs

@@ -40,7 +40,9 @@ cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- live-sess
 `live-session-composition-smoke` is non-destructive. Its reduced output must
 report `status=Passed`, one or more drained authority batches, committed runtime
 transactions, applied runtime surfaces, and
-`rendered_scanout_submit=SubmittedWaitingForPageFlip`.
+`rendered_scanout_submit=SubmittedWaitingForPageFlip`,
+`rendered_scanout_retire=RetiredAfterPageFlip`,
+`runtime_scanout_state=Retired`, and `cleanup_pending=false`.
 
 The optional renderer-native features have extra local checks:
 

@@ -13,6 +13,8 @@ pub enum LiveSessionCompositionSmokeStatus {
     RenderedScanoutSubmitMissing,
     AuthorityBatchNotCommitted,
     RenderedScanoutNotSubmitted,
+    RenderedScanoutNotRetired,
+    RenderedScanoutCleanupPending,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -23,6 +25,8 @@ pub struct LiveSessionCompositionSmokeReport {
     pub authority_transactions_committed: u64,
     pub authority_surfaces_applied: u64,
     pub rendered_scanout_submit: Option<LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus>,
+    pub rendered_scanout_retire: Option<LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus>,
+    pub rendered_scanout_cleanup: Option<LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus>,
     pub runtime_scanout_state: Option<RuntimeScanoutState>,
     pub rendered_scanout_in_flight: bool,
     pub cleanup_pending: bool,
@@ -31,13 +35,15 @@ pub struct LiveSessionCompositionSmokeReport {
 impl LiveSessionCompositionSmokeReport {
     pub fn reduced_log_line(&self) -> String {
         format!(
-            "sophia_live_session_composition schema=1 status={:?} authority_batches_input={} authority_batches_drained={} authority_transactions_committed={} authority_surfaces_applied={} rendered_scanout_submit={} runtime_scanout_state={} rendered_scanout_in_flight={} cleanup_pending={}",
+            "sophia_live_session_composition schema=2 status={:?} authority_batches_input={} authority_batches_drained={} authority_transactions_committed={} authority_surfaces_applied={} rendered_scanout_submit={} rendered_scanout_retire={} rendered_scanout_cleanup={} runtime_scanout_state={} rendered_scanout_in_flight={} cleanup_pending={}",
             self.status,
             self.authority_batches_input,
             self.authority_batches_drained,
             self.authority_transactions_committed,
             self.authority_surfaces_applied,
             reduced_status(self.rendered_scanout_submit),
+            reduced_status(self.rendered_scanout_retire),
+            reduced_status(self.rendered_scanout_cleanup),
             reduced_status(self.runtime_scanout_state),
             self.rendered_scanout_in_flight,
             self.cleanup_pending,
@@ -57,6 +63,8 @@ pub fn run_live_session_composition_smoke(
             authority_transactions_committed: 0,
             authority_surfaces_applied: 0,
             rendered_scanout_submit: None,
+            rendered_scanout_retire: None,
+            rendered_scanout_cleanup: None,
             runtime_scanout_state: None,
             rendered_scanout_in_flight: false,
             cleanup_pending: false,
@@ -119,6 +127,8 @@ pub fn run_live_session_composition_smoke(
                 authority_transactions_committed: 0,
                 authority_surfaces_applied: 0,
                 rendered_scanout_submit: None,
+                rendered_scanout_retire: None,
+                rendered_scanout_cleanup: None,
                 runtime_scanout_state: None,
                 rendered_scanout_in_flight: false,
                 cleanup_pending: false,
@@ -137,12 +147,28 @@ pub fn run_live_session_composition_smoke(
         .rendered_primary_plane_scanout_submit
         .as_ref()
         .map(|submit| submit.status);
-    let runtime_scanout_state = tick
+    let submit_runtime_scanout_state = tick
         .rendered_primary_plane_scanout_submit
         .as_ref()
         .and_then(|submit| submit.runtime_scanout_state);
+
+    let page_flip = LivePageFlipCallbackReport {
+        decision: LivePageFlipCallbackDecision::Accepted,
+        event: LivePageFlipEvent {
+            status: LivePageFlipEventStatus::Presented,
+            frame_serial: Some(1),
+        },
+    };
+    let retire =
+        runtime.retire_tracked_rendered_primary_plane_scanout_after_page_flip(&device, &page_flip);
+    let cleanup = runtime.retry_tracked_rendered_primary_plane_scanout_cleanup(&device);
+    let rendered_scanout_retire = Some(retire.status);
+    let rendered_scanout_cleanup = Some(cleanup.status);
+    let runtime_scanout_state = retire
+        .runtime_scanout_state
+        .or(submit_runtime_scanout_state);
     let rendered_scanout_in_flight = runtime.rendered_primary_plane_scanout_in_flight();
-    let cleanup_pending = tick.rendered_primary_plane_scanout_cleanup_pending;
+    let cleanup_pending = runtime.rendered_primary_plane_scanout_cleanup_pending();
 
     let status = if authority_transactions_committed == 0 || authority_surfaces_applied == 0 {
         LiveSessionCompositionSmokeStatus::AuthorityBatchNotCommitted
@@ -152,6 +178,20 @@ pub fn run_live_session_composition_smoke(
         != Some(LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip)
     {
         LiveSessionCompositionSmokeStatus::RenderedScanoutNotSubmitted
+    } else if rendered_scanout_retire
+        != Some(LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip)
+    {
+        LiveSessionCompositionSmokeStatus::RenderedScanoutNotRetired
+    } else if cleanup_pending
+        || !matches!(
+            rendered_scanout_cleanup,
+            Some(
+                LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus::CleanedUp
+                    | LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus::NoCleanupPending
+            )
+        )
+    {
+        LiveSessionCompositionSmokeStatus::RenderedScanoutCleanupPending
     } else {
         LiveSessionCompositionSmokeStatus::Passed
     };
@@ -163,6 +203,8 @@ pub fn run_live_session_composition_smoke(
         authority_transactions_committed,
         authority_surfaces_applied,
         rendered_scanout_submit,
+        rendered_scanout_retire,
+        rendered_scanout_cleanup,
         runtime_scanout_state,
         rendered_scanout_in_flight,
         cleanup_pending,

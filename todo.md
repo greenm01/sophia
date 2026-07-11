@@ -12,7 +12,7 @@ active milestone to `docs/roadmap-history.md`.
 
 ## Active Milestone
 
-### Live Session Composition
+### Authority Coverage From Real Probe Failures
 
 Current architecture read:
 
@@ -26,29 +26,18 @@ Current architecture read:
 
 Current milestone target:
 
-- [x] Compose Sophia X Authority's bounded transaction queue, runtime intake,
-  renderer-live frame targets, and backend-live rendered scanout submit into one
-  non-destructive operator smoke.
-- [ ] Extend the same reduced evidence surface through deterministic page-flip
-  retire and cleanup reporting.
-- [ ] Keep Wayland Authority and wgpu deferred until the X Authority plus live
-  scanout path is stable.
+- [ ] Expand Sophia X Authority only where `xclock` and later real probes demand
+  it.
+- [ ] Prefer bounded drawing, upload, present, selection, event, and namespace
+  behavior over broad X11 completeness.
+- [ ] Keep XLibre bridge smokes as prototype references until Sophia X Authority
+  has equivalent live coverage.
 
 ---
 
 ## Next 3 Milestones
 
-### 1. Live Session Composition
-
-- [x] Compose Sophia X Authority's bounded transaction queue, runtime intake,
-  renderer-live frame targets, and backend-live rendered scanout submit into one
-  non-destructive operator smoke.
-- [ ] Extend the same reduced evidence surface through deterministic page-flip
-  retire and cleanup reporting.
-- [ ] Keep Wayland Authority and wgpu deferred until the X Authority plus live
-  scanout path is stable.
-
-### 2. Authority Coverage From Real Probe Failures
+### 1. Authority Coverage From Real Probe Failures
 
 - [ ] Expand Sophia X Authority only where `xclock` and later real probes demand
   it.
@@ -57,7 +46,7 @@ Current milestone target:
 - [ ] Keep XLibre bridge smokes as prototype references until Sophia X Authority
   has equivalent live coverage.
 
-### 3. Wayland Authority Skeleton
+### 2. Wayland Authority Skeleton
 
 - [ ] Define the first minimal Wayland Authority socket/setup boundary without
   committing to wgpu or broad compositor-framework adoption.
@@ -65,6 +54,13 @@ Current milestone target:
   visual truth and commit readiness in Sophia Engine.
 - [ ] Start only after live X Authority transaction intake and rendered scanout
   composition have one operator-grade smoke.
+
+### 3. Live Session Throughput Instrumentation
+
+- [ ] Track submit-to-page-flip latency, in-flight frame age, cleanup debt, and
+  backpressure over repeated non-destructive composition ticks.
+- [ ] Keep optimization decisions behind measured reduced evidence rather than
+  speculative buffering or batching changes.
 
 ---
 
@@ -81,8 +77,9 @@ Current milestone target:
 
 - [x] `live-session-composition-smoke` now reuses the X Authority
   Present-pixmap socket path, drains the bounded authority queue into runtime
-  intake, commits one authority transaction, and submits a rendered primary
-  plane scanout with reduced evidence.
+  intake, commits one authority transaction, submits a rendered primary plane
+  scanout, retires it after a deterministic accepted page flip, and reports
+  cleanup drained with reduced evidence.
 - [x] `x-authority-xclock-smoke` launches `/usr/bin/xclock`, reaches mapped
   surface exposure, decodes the xclock-driven font, pixmap, window, and drawing
   requests, and commits observed authority transactions through Engine/Runtime

@@ -134,7 +134,7 @@ fn live_session_composition_smoke_rejects_empty_authority_batches() {
     );
     assert_eq!(
         report.reduced_log_line(),
-        "sophia_live_session_composition schema=1 status=NoAuthorityBatches authority_batches_input=0 authority_batches_drained=0 authority_transactions_committed=0 authority_surfaces_applied=0 rendered_scanout_submit=none runtime_scanout_state=none rendered_scanout_in_flight=false cleanup_pending=false"
+        "sophia_live_session_composition schema=2 status=NoAuthorityBatches authority_batches_input=0 authority_batches_drained=0 authority_transactions_committed=0 authority_surfaces_applied=0 rendered_scanout_submit=none rendered_scanout_retire=none rendered_scanout_cleanup=none runtime_scanout_state=none rendered_scanout_in_flight=false cleanup_pending=false"
     );
 }
 
@@ -155,11 +155,23 @@ fn live_session_composition_smoke_commits_authority_batch_and_submits_rendered_s
         report.rendered_scanout_submit,
         Some(LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip)
     );
-    assert!(report.rendered_scanout_in_flight);
+    assert_eq!(
+        report.rendered_scanout_retire,
+        Some(LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip)
+    );
+    assert_eq!(
+        report.rendered_scanout_cleanup,
+        Some(LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus::NoCleanupPending)
+    );
+    assert_eq!(
+        report.runtime_scanout_state,
+        Some(RuntimeScanoutState::Retired)
+    );
+    assert!(!report.rendered_scanout_in_flight);
     assert!(!report.cleanup_pending);
     assert_eq!(
         report.reduced_log_line(),
-        "sophia_live_session_composition schema=1 status=Passed authority_batches_input=1 authority_batches_drained=1 authority_transactions_committed=1 authority_surfaces_applied=1 rendered_scanout_submit=SubmittedWaitingForPageFlip runtime_scanout_state=Submitted rendered_scanout_in_flight=true cleanup_pending=false"
+        "sophia_live_session_composition schema=2 status=Passed authority_batches_input=1 authority_batches_drained=1 authority_transactions_committed=1 authority_surfaces_applied=1 rendered_scanout_submit=SubmittedWaitingForPageFlip rendered_scanout_retire=RetiredAfterPageFlip rendered_scanout_cleanup=NoCleanupPending runtime_scanout_state=Retired rendered_scanout_in_flight=false cleanup_pending=false"
     );
 }
 
