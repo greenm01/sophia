@@ -6,7 +6,7 @@ EVIDENCE_FILE="${1:-${SOPHIA_QEMU_EVIDENCE:-/tmp/sophia-qemu-session.log}}"
 
 "$ROOT_DIR/tools/verify_live_session_persistent_evidence.sh" "$EVIDENCE_FILE"
 
-if [[ "$(grep -c '^sophia_qemu_session schema=2 status=starting isolation=headless display_sink=vnc-unix control=qmp-unix host_drm=none host_vt=none guest_network=none storage=none gpu=virtio-gpu keyboard=virtio mouse=virtio ticks=300$' "$EVIDENCE_FILE" || true)" -ne 1 ]]; then
+if [[ "$(grep -c '^sophia_qemu_session schema=3 status=starting isolation=headless display_sink=vnc-unix control=qmp-unix host_drm=none host_vt=none guest_network=none storage=none gpu=virtio-gpu gpu_devices=2 gpu_heads=2 keyboard=virtio mouse=virtio ticks=300$' "$EVIDENCE_FILE" || true)" -ne 1 ]]; then
     echo "QEMU evidence is missing the isolated start marker" >&2
     exit 1
 fi
@@ -14,8 +14,16 @@ if [[ "$(grep -c '^sophia_qemu_guest schema=1 status=complete ticks=300$' "$EVID
     echo "QEMU evidence is missing the 300-tick guest completion marker" >&2
     exit 1
 fi
-if [[ "$(grep -c '^sophia_qemu_session schema=2 status=complete qemu_exit=0$' "$EVIDENCE_FILE" || true)" -ne 1 ]]; then
+if [[ "$(grep -c '^sophia_qemu_session schema=3 status=complete qemu_exit=0$' "$EVIDENCE_FILE" || true)" -ne 1 ]]; then
     echo "QEMU evidence is missing the clean host completion marker" >&2
+    exit 1
+fi
+if [[ "$(grep -c '^sophia_qemu_topology schema=1 status=observed requested_heads=2 connectors=2 connected=2$' "$EVIDENCE_FILE" || true)" -ne 1 ]]; then
+    echo "QEMU evidence is missing two connected virtual outputs" >&2
+    exit 1
+fi
+if [[ "$(grep -c '^sophia_live_outputs schema=1 status=ready discovered=2 presentation=2 native_owned=1 multi_output_scanout=pending$' "$EVIDENCE_FILE" || true)" -ne 1 ]]; then
+    echo "QEMU evidence is missing bounded two-output Engine presentation discovery" >&2
     exit 1
 fi
 if grep -q '^sophia_qemu_.* status=failed' "$EVIDENCE_FILE"; then
@@ -67,4 +75,4 @@ if [[ -z "$physical_pointer" ]] || (( physical_pointer == 0 )); then
     exit 1
 fi
 
-echo "QEMU virtio-gpu/QMP keyboard+pointer 300-tick session evidence passed: $EVIDENCE_FILE"
+echo "QEMU two-output topology/single-native-output/QMP-input 300-tick evidence passed: $EVIDENCE_FILE"

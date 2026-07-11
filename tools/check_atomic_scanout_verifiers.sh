@@ -65,5 +65,6 @@ expect_pass tools/verify_qemu_session_evidence.sh qemu_session_evidence_pass.log
 expect_fail tools/verify_qemu_session_evidence.sh qemu_session_evidence_wrong_ticks.log
 expect_fail tools/verify_qemu_session_evidence.sh qemu_session_evidence_internal_input.log
 expect_fail tools/verify_qemu_session_evidence.sh qemu_session_evidence_no_pointer_pixels.log
+expect_fail tools/verify_qemu_session_evidence.sh qemu_session_evidence_one_connected_output.log
 
 echo "atomic scanout verifier fixtures passed"

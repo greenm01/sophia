@@ -49,6 +49,36 @@ fn drm_kms_output_registry_tracks_connector_mode_and_scale() {
 }
 
 #[test]
+fn drm_kms_output_registry_rejects_unbounded_output_growth() {
+    let mut registry = DrmKmsOutputRegistry::new();
+    for index in 0..sophia_engine::MAX_DRM_KMS_OUTPUTS {
+        let raw = u64::try_from(index + 1).unwrap();
+        assert_eq!(
+            registry.upsert(DrmKmsOutputDescriptor {
+                output: OutputId::from_raw(raw),
+                connector_id: u32::try_from(raw).unwrap(),
+                crtc_id: u32::try_from(raw + 100).unwrap(),
+                mode: DrmKmsMode::new(1920, 1080, 60_000),
+                scale: 1,
+            }),
+            DrmKmsOutputRegistryUpdate::Inserted
+        );
+    }
+
+    assert_eq!(registry.len(), sophia_engine::MAX_DRM_KMS_OUTPUTS);
+    assert_eq!(
+        registry.upsert(DrmKmsOutputDescriptor {
+            output: OutputId::from_raw(99),
+            connector_id: 99,
+            crtc_id: 199,
+            mode: DrmKmsMode::new(1920, 1080, 60_000),
+            scale: 1,
+        }),
+        DrmKmsOutputRegistryUpdate::CapacityExceeded
+    );
+}
+
+#[test]
 fn drm_kms_descriptor_can_seed_engine_output() {
     let descriptor = DrmKmsOutputDescriptor {
         output: OutputId::from_raw(8),

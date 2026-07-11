@@ -57,7 +57,7 @@ mkdir -p "$(dirname "$EVIDENCE_FILE")"
 rm -f "$VNC_SOCKET" "$QMP_SOCKET" "$SERIAL_FIFO"
 mkfifo "$SERIAL_FIFO"
 
-echo "sophia_qemu_session schema=2 status=starting isolation=headless display_sink=vnc-unix control=qmp-unix host_drm=none host_vt=none guest_network=none storage=none gpu=virtio-gpu keyboard=virtio mouse=virtio ticks=300" | tee -a "$EVIDENCE_FILE"
+echo "sophia_qemu_session schema=3 status=starting isolation=headless display_sink=vnc-unix control=qmp-unix host_drm=none host_vt=none guest_network=none storage=none gpu=virtio-gpu gpu_devices=2 gpu_heads=2 keyboard=virtio mouse=virtio ticks=300" | tee -a "$EVIDENCE_FILE"
 
 while IFS= read -r line || [[ -n "$line" ]]; do
     printf '%s\n' "${line%$'\r'}"
@@ -75,7 +75,8 @@ LOGGER_PID=$!
     -monitor none \
     -qmp "unix:$QMP_SOCKET,server=on,wait=off" \
     -serial stdio \
-    -device virtio-vga \
+    -device virtio-vga,max_outputs=1 \
+    -device virtio-gpu-pci,max_outputs=1 \
     -device virtio-keyboard-pci \
     -device virtio-mouse-pci \
     -kernel "$KERNEL_IMAGE" \
@@ -96,12 +97,12 @@ for _ in $(seq 1 600); do
     sleep 0.05
 done
 if [[ "$input_ready" != true ]]; then
-    echo "sophia_qemu_session schema=2 status=failed reason=input_readiness_timeout" | tee -a "$EVIDENCE_FILE"
+    echo "sophia_qemu_session schema=3 status=failed reason=input_readiness_timeout" | tee -a "$EVIDENCE_FILE"
     exit 1
 fi
 
 if ! "$ROOT_DIR/tools/qemu_qmp_type.py" "$QMP_SOCKET" sophia; then
-    echo "sophia_qemu_session schema=2 status=failed reason=qmp_input_send" | tee -a "$EVIDENCE_FILE"
+    echo "sophia_qemu_session schema=3 status=failed reason=qmp_input_send" | tee -a "$EVIDENCE_FILE"
     exit 1
 fi
 echo "sophia_qemu_input schema=1 status=sent source=qmp device=virtio-keyboard text=sophia events=14" | tee -a "$EVIDENCE_FILE"
@@ -118,12 +119,12 @@ for _ in $(seq 1 100); do
     sleep 0.05
 done
 if [[ "$pointer_ready" != true ]]; then
-    echo "sophia_qemu_session schema=2 status=failed reason=pointer_readiness_timeout" | tee -a "$EVIDENCE_FILE"
+    echo "sophia_qemu_session schema=3 status=failed reason=pointer_readiness_timeout" | tee -a "$EVIDENCE_FILE"
     exit 1
 fi
 
 if ! "$ROOT_DIR/tools/qemu_qmp_pointer.py" "$QMP_SOCKET"; then
-    echo "sophia_qemu_session schema=2 status=failed reason=qmp_pointer_send" | tee -a "$EVIDENCE_FILE"
+    echo "sophia_qemu_session schema=3 status=failed reason=qmp_pointer_send" | tee -a "$EVIDENCE_FILE"
     exit 1
 fi
 echo "sophia_qemu_pointer schema=1 status=sent source=qmp device=virtio-mouse action=select commands=5" | tee -a "$EVIDENCE_FILE"
@@ -139,13 +140,13 @@ set -e
 cleanup
 
 if [[ "$qemu_status" -ne 0 ]]; then
-    echo "sophia_qemu_session schema=2 status=failed qemu_exit=$qemu_status" | tee -a "$EVIDENCE_FILE"
+    echo "sophia_qemu_session schema=3 status=failed qemu_exit=$qemu_status" | tee -a "$EVIDENCE_FILE"
     exit "$qemu_status"
 fi
 if [[ "$logger_status" -ne 0 ]]; then
-    echo "sophia_qemu_session schema=2 status=failed serial_logger_exit=$logger_status" | tee -a "$EVIDENCE_FILE"
+    echo "sophia_qemu_session schema=3 status=failed serial_logger_exit=$logger_status" | tee -a "$EVIDENCE_FILE"
     exit "$logger_status"
 fi
 
-echo "sophia_qemu_session schema=2 status=complete qemu_exit=0" | tee -a "$EVIDENCE_FILE"
+echo "sophia_qemu_session schema=3 status=complete qemu_exit=0" | tee -a "$EVIDENCE_FILE"
 "$ROOT_DIR/tools/verify_qemu_session_evidence.sh" "$EVIDENCE_FILE"

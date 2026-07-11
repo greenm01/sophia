@@ -1,6 +1,6 @@
 sophia_qemu_session schema=3 status=starting isolation=headless display_sink=vnc-unix control=qmp-unix host_drm=none host_vt=none guest_network=none storage=none gpu=virtio-gpu gpu_devices=2 gpu_heads=2 keyboard=virtio mouse=virtio ticks=300
 sophia_qemu_guest schema=1 status=booting gpu=virtio-gpu ticks=300
-sophia_qemu_topology schema=1 status=observed requested_heads=2 connectors=2 connected=2
+sophia_qemu_topology schema=1 status=observed requested_heads=2 connectors=2 connected=1
 sophia_live_outputs schema=1 status=ready discovered=2 presentation=2 native_owned=1 multi_output_scanout=pending
 sophia_live_session_input schema=1 status=ready source=physical text=sophia
 sophia_qemu_input schema=1 status=sent source=qmp device=virtio-keyboard text=sophia events=14

@@ -20,6 +20,84 @@ fn deterministic_frame_clock_advances_serials_predictably() {
 }
 
 #[test]
+fn per_output_frame_clocks_advance_independently_at_each_refresh_rate() {
+    let output_60 = OutputId::from_raw(1);
+    let output_120 = OutputId::from_raw(2);
+    let mut outputs = DrmKmsOutputRegistry::new();
+    outputs.upsert(DrmKmsOutputDescriptor {
+        output: output_60,
+        connector_id: 11,
+        crtc_id: 21,
+        mode: DrmKmsMode::new(1920, 1080, 60_000),
+        scale: 1,
+    });
+    outputs.upsert(DrmKmsOutputDescriptor {
+        output: output_120,
+        connector_id: 12,
+        crtc_id: 22,
+        mode: DrmKmsMode::new(1920, 1080, 120_000),
+        scale: 1,
+    });
+    let mut clocks =
+        PerOutputFrameClock::from_outputs(&outputs, DeterministicFrameClock::default());
+
+    let first_60 = clocks.next_frame(output_60);
+    let first_120 = clocks.next_frame(output_120);
+    let second_120 = clocks.next_frame(output_120);
+
+    assert_eq!((first_60.frame_serial, first_60.target_msec), (1, 16));
+    assert_eq!((first_120.frame_serial, first_120.target_msec), (1, 8));
+    assert_eq!((second_120.frame_serial, second_120.target_msec), (2, 16));
+    assert_eq!(clocks.get(output_60).unwrap().next_serial(), 2);
+    assert_eq!(clocks.get(output_120).unwrap().next_serial(), 3);
+}
+
+#[test]
+fn per_output_presentation_keeps_damage_and_retirement_independent() {
+    let output_a = OutputId::from_raw(1);
+    let output_b = OutputId::from_raw(2);
+    let mut outputs = DrmKmsOutputRegistry::new();
+    for (output, connector, crtc) in [(output_a, 11, 21), (output_b, 12, 22)] {
+        outputs.upsert(DrmKmsOutputDescriptor {
+            output,
+            connector_id: connector,
+            crtc_id: crtc,
+            mode: DrmKmsMode::new(1280, 720, 60_000),
+            scale: 1,
+        });
+    }
+    let mut presentation = OutputPresentationRegistry::from_outputs(&outputs);
+
+    assert!(presentation.mark_damage(output_a));
+    assert!(presentation.mark_damage(output_b));
+    let OutputPresentationSchedule::Scheduled(frame_a) = presentation.schedule(output_a) else {
+        panic!("output A should schedule");
+    };
+    let OutputPresentationSchedule::Scheduled(frame_b) = presentation.schedule(output_b) else {
+        panic!("output B should schedule independently");
+    };
+    assert_eq!(frame_a.frame_serial, 1);
+    assert_eq!(frame_b.frame_serial, 1);
+    assert_eq!(
+        presentation.schedule(output_a),
+        OutputPresentationSchedule::WaitingForRetirement { frame_serial: 1 }
+    );
+    assert_eq!(
+        presentation.retire(output_a, 2),
+        OutputPresentationRetire::UnexpectedFrame {
+            expected: 1,
+            actual: 2
+        }
+    );
+    assert_eq!(
+        presentation.retire(output_b, 1),
+        OutputPresentationRetire::Retired { frame_serial: 1 }
+    );
+    assert_eq!(presentation.get(output_a).unwrap().in_flight_frame, Some(1));
+    assert_eq!(presentation.get(output_b).unwrap().in_flight_frame, None);
+}
+
+#[test]
 fn clocked_session_tick_uses_clock_serial_and_updates_cache() {
     let engine = HeadlessEngine::default();
     let layers = vec![test_layer(0, 0, 0, Region::empty())];

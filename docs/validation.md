@@ -91,6 +91,10 @@ and the verifier requires
 nonzero routed pointer events plus a second xterm pixel change. The current
 verifier does not claim multi-head presentation, per-output vsync, or VRR
 coverage.
+The guest does require two connected virtual KMS outputs. Engine discovers both
+and seeds bounded independent presentation timelines, while the reduced marker
+states `native_owned=1 multi_output_scanout=pending`. This topology gate must
+not be interpreted as content or page-flip retirement on the second output.
 It boots an isolated direct-kernel initramfs with virtio-gpu and verifies
 exactly 300 session ticks without host DRM, input-device, VT, disk, or guest
 network access. The QEMU evidence verifier also rejects native submit/retire

@@ -39,6 +39,21 @@ if [ ! -e /dev/dri/card0 ]; then
     poweroff -f
 fi
 
+connector_count=0
+connected_count=0
+for connector in /sys/class/drm/card[0-9]-*; do
+    if [ ! -f "$connector/status" ]; then
+        continue
+    fi
+    connector_count=$((connector_count + 1))
+    status=""
+    IFS= read -r status < "$connector/status" || true
+    if [ "$status" = "connected" ]; then
+        connected_count=$((connected_count + 1))
+    fi
+done
+echo "sophia_qemu_topology schema=1 status=observed requested_heads=2 connectors=$connector_count connected=$connected_count"
+
 set -- sophia-live-session --display=:181 --native-scanout --max-ticks=300 \
     --expect-physical-text=sophia --expect-physical-pointer
 

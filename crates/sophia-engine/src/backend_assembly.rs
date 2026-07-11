@@ -4,8 +4,8 @@ use crate::{
     DrmKmsOutputDescriptor, DrmKmsOutputRegistry, EngineError, FrameClock, FrameClockTick,
     HeadlessEngine, HeadlessOutput, HeadlessSessionDriver, HeadlessSessionDriverReport,
     ImportCapableRenderer, LibinputEventSource, LibinputPhysicalInputAdapter, LibinputPollReport,
-    LiveRuntimeDriverAdapter, LiveRuntimeDriverIntake, NonBlockingInputPoller, QueuedInputPoller,
-    RenderFrameReport, RuntimeDriverAdapter, WmTransactionUpdate,
+    LiveRuntimeDriverAdapter, LiveRuntimeDriverIntake, NonBlockingInputPoller, PerOutputFrameClock,
+    QueuedInputPoller, RenderFrameReport, RuntimeDriverAdapter, WmTransactionUpdate,
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -163,7 +163,7 @@ pub type QueuedHeadlessCompositorBackendAssembly =
 pub struct HeadlessCompositorBackendAssembly<P = QueuedInputPoller> {
     engine: HeadlessEngine,
     driver: HeadlessSessionDriver,
-    clock: DeterministicFrameClock,
+    clock: PerOutputFrameClock,
     outputs: DrmKmsOutputRegistry,
     input: LibinputPhysicalInputAdapter<P>,
     authority_inbox: Option<AuthorityTransactionInbox>,
@@ -206,7 +206,7 @@ where
         Self {
             engine,
             driver,
-            clock,
+            clock: PerOutputFrameClock::from_outputs(&outputs, clock),
             outputs,
             input,
             authority_inbox: None,

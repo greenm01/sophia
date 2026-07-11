@@ -98,6 +98,12 @@ pub(crate) fn run_persistent_xterm_session(
             "disabled"
         },
     );
+    if let Some(native_scanout) = native_scanout.as_ref() {
+        println!(
+            "sophia_live_outputs schema=1 status=ready discovered={} presentation={} native_owned=1 multi_output_scanout=pending",
+            native_scanout.discovered_outputs, native_scanout.presentation_outputs,
+        );
+    }
 
     let result = run_session_loop(
         &config,
@@ -756,6 +762,8 @@ struct PersistentNativeScanout {
     sender: SyncSender<sophia_backend_live::LivePageFlipCallback>,
     receiver: Option<Receiver<sophia_backend_live::LivePageFlipCallback>>,
     output: sophia_engine::HeadlessOutput,
+    discovered_outputs: usize,
+    presentation_outputs: usize,
     submissions: usize,
     submit_deferred: usize,
     submit_failures: usize,
@@ -791,6 +799,11 @@ impl PersistentNativeScanout {
             sophia_backend_live::NativeGbmRenderedScanoutBufferDiscoveryExporter::new(discovery)
                 .with_preferred_modifiers(session.preferred_xrgb8888_scanout_modifiers());
         let (sender, receiver) = sync_channel(64);
+        let outputs = sophia_engine::discover_drm_kms_outputs_from_sysfs("/sys/class/drm")?;
+        if outputs.get(config.output).is_none() {
+            return Err("persistent native output is absent from Engine output discovery".into());
+        }
+        let presentation = sophia_engine::OutputPresentationRegistry::from_outputs(&outputs);
         Ok(Self {
             session,
             exporter,
@@ -801,6 +814,8 @@ impl PersistentNativeScanout {
                 size,
                 scale: 1,
             },
+            discovered_outputs: outputs.len(),
+            presentation_outputs: presentation.outputs().count(),
             submissions: 0,
             submit_deferred: 0,
             submit_failures: 0,

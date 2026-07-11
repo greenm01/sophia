@@ -1,9 +1,11 @@
-sophia_qemu_session schema=2 status=starting isolation=headless display_sink=vnc-unix control=qmp-unix host_drm=none host_vt=none guest_network=none storage=none gpu=virtio-gpu keyboard=virtio mouse=virtio ticks=300
+sophia_qemu_session schema=3 status=starting isolation=headless display_sink=vnc-unix control=qmp-unix host_drm=none host_vt=none guest_network=none storage=none gpu=virtio-gpu gpu_devices=2 gpu_heads=2 keyboard=virtio mouse=virtio ticks=300
 sophia_qemu_guest schema=1 status=booting gpu=virtio-gpu ticks=300
+sophia_qemu_topology schema=1 status=observed requested_heads=2 connectors=2 connected=2
+sophia_live_outputs schema=1 status=ready discovered=2 presentation=2 native_owned=1 multi_output_scanout=pending
 sophia_live_session_input schema=1 status=ready source=physical text=sophia
 sophia_qemu_input schema=1 status=sent source=qmp device=virtio-keyboard text=sophia events=14
 sophia_live_session_pointer schema=1 status=ready source=physical action=select
 sophia_qemu_pointer schema=1 status=sent source=qmp device=virtio-mouse action=select commands=5
 sophia_live_session schema=6 status=bounded_complete display=:181 elapsed_msec=9471 session_ticks=300 authority_batches=41 authority_transactions=41 authority_queue_capacity=256 authority_batches_dropped=0 backend_ticks=41 runtime_committed=41 runtime_surfaces=41 cpu_layers=1 cpu_nonzero_pixel_bytes=240 cpu_max_nonzero_pixel_bytes=240 cpu_nonzero_frames=2 cpu_checksum=8957873632062205093 injected_input=false input_pixel_change=true physical_events=19 physical_keys_routed=14 pointer_pixel_change=false physical_pointer_events=5 physical_pointer_routed=5 pointer_proof=enabled native_presentation=enabled native_submissions=42 native_submit_deferred=0 native_submit_failures=0 native_retirements=41 native_retire_failures=0 native_max_in_flight_ticks=0 native_max_submit_to_page_flip_msec=73 native_callback_accepted=41 native_callback_rejected=0 native_callback_queue_saturated=0 native_nonzero_exports=2 native_export_attempts=42 native_in_flight=false native_cleanup_pending=false physical_input=enabled
 sophia_qemu_guest schema=1 status=complete ticks=300
-sophia_qemu_session schema=2 status=complete qemu_exit=0
+sophia_qemu_session schema=3 status=complete qemu_exit=0

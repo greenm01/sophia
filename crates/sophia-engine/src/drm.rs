@@ -1,6 +1,8 @@
 use crate::HeadlessOutput;
 use crate::prelude::*;
 
+pub const MAX_DRM_KMS_OUTPUTS: usize = 16;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DrmKmsMode {
     pub size: Size,
@@ -40,13 +42,28 @@ pub struct DrmKmsOutputRegistry {
     outputs: BTreeMap<OutputId, DrmKmsOutputDescriptor>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DrmKmsOutputRegistryUpdate {
+    Inserted,
+    Replaced,
+    CapacityExceeded,
+}
+
 impl DrmKmsOutputRegistry {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn upsert(&mut self, output: DrmKmsOutputDescriptor) {
+    pub fn upsert(&mut self, output: DrmKmsOutputDescriptor) -> DrmKmsOutputRegistryUpdate {
+        if self.outputs.contains_key(&output.output) {
+            self.outputs.insert(output.output, output);
+            return DrmKmsOutputRegistryUpdate::Replaced;
+        }
+        if self.outputs.len() >= MAX_DRM_KMS_OUTPUTS {
+            return DrmKmsOutputRegistryUpdate::CapacityExceeded;
+        }
         self.outputs.insert(output.output, output);
+        DrmKmsOutputRegistryUpdate::Inserted
     }
 
     pub fn remove(&mut self, output: OutputId) -> Option<DrmKmsOutputDescriptor> {
@@ -59,6 +76,14 @@ impl DrmKmsOutputRegistry {
 
     pub fn outputs(&self) -> impl Iterator<Item = &DrmKmsOutputDescriptor> {
         self.outputs.values()
+    }
+
+    pub fn len(&self) -> usize {
+        self.outputs.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.outputs.is_empty()
     }
 
     pub fn primary_engine_output(&self) -> Option<HeadlessOutput> {

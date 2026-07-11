@@ -138,3 +138,25 @@ show each fixed-refresh output is paced from its own vblank/page-flip timeline.
 VRR remains a hardware capability/policy gate: discover the DRM property
 contract, default it off, enable it only for eligible Engine-approved content,
 and prove fixed-refresh fallback when VRR is unavailable or ineligible.
+
+## 2026-07-11: Bounded Per-Output Timelines And Two-Connector QEMU Topology
+
+Engine output discovery is now bounded to 16 descriptors. Backend assembly no
+longer advances one global deterministic clock: it seeds an independent clock
+for each discovered output using that output's fixed refresh rate. A separate
+presentation registry tracks pending damage, one in-flight frame, exact
+retirement, and the last retired serial per output. Two-output regressions prove
+that 60 Hz and 120 Hz timelines advance independently, one output cannot submit
+over an unretired frame, and a mismatched retirement cannot clear ownership.
+These are scheduling invariants; the clock is not yet driven by DRM vblank.
+
+A single virtio-gpu device configured with two scanouts exposed two connector
+objects but only one connected connector, so it was rejected as multi-monitor
+evidence. The accepted harness uses two isolated virtio GPU devices with one
+scanout each. The guest reports two connectors and both connected; Engine
+discovers two and creates two presentation timelines. The persistent native
+session still selects and owns one connector/CRTC/primary-plane chain, so the
+reduced output marker deliberately records `native_owned=1` and
+`multi_output_scanout=pending`. The next slice must make rendered-scanout
+tracking, exporters, callback routes, and cleanup ownership per output before
+the second connector can receive independent content and page-flip retirement.

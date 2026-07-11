@@ -1,3 +1,4 @@
+use crate::DrmKmsOutputRegistry;
 use crate::prelude::*;
 
 #[derive(Clone, Copy, Debug)]
@@ -56,5 +57,48 @@ impl FrameClock for DeterministicFrameClock {
             frame_serial,
             target_msec: frame_serial.saturating_mul(self.frame_interval_msec),
         }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PerOutputFrameClock {
+    clocks: BTreeMap<OutputId, DeterministicFrameClock>,
+    fallback: DeterministicFrameClock,
+}
+
+impl PerOutputFrameClock {
+    pub fn from_outputs(outputs: &DrmKmsOutputRegistry, fallback: DeterministicFrameClock) -> Self {
+        let clocks = outputs
+            .outputs()
+            .map(|output| {
+                let interval_msec = if output.mode.refresh_millihz == 0 {
+                    fallback.frame_interval_msec()
+                } else {
+                    (1_000_000u64 / u64::from(output.mode.refresh_millihz)).max(1)
+                };
+                (
+                    output.output,
+                    DeterministicFrameClock::new(fallback.next_serial(), interval_msec),
+                )
+            })
+            .collect();
+        Self { clocks, fallback }
+    }
+
+    pub fn get(&self, output: OutputId) -> Option<&DeterministicFrameClock> {
+        self.clocks.get(&output)
+    }
+
+    pub fn outputs(&self) -> impl Iterator<Item = OutputId> + '_ {
+        self.clocks.keys().copied()
+    }
+}
+
+impl FrameClock for PerOutputFrameClock {
+    fn next_frame(&mut self, output: OutputId) -> FrameClockTick {
+        self.clocks
+            .get_mut(&output)
+            .unwrap_or(&mut self.fallback)
+            .next_frame(output)
     }
 }
