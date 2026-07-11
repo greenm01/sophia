@@ -41,10 +41,11 @@ impl core::fmt::Display for X11SetupSocketError {
 impl std::error::Error for X11SetupSocketError {}
 
 #[cfg(unix)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct X11CoreDispatchTrace<'a> {
     pub sequence: u16,
     pub major_opcode: u8,
+    pub parse_error: Option<String>,
     pub result: &'a XDispatchResult,
 }
 
@@ -233,6 +234,7 @@ fn serve_x11_core_socket_client_with_trace_observer(
             sequence,
             major_opcode,
         };
+        let mut parse_error = None;
         let output = match decode_x11_core_request(
             XWireClientContext {
                 byte_order: setup.byte_order,
@@ -248,11 +250,21 @@ fn serve_x11_core_socket_client_with_trace_observer(
                 &mut atoms,
                 &mut properties,
             ),
-            Err(error) => dispatch_x11_parse_error(dispatch_context, error),
+            Err(error) => {
+                let head = request
+                    .iter()
+                    .take(8)
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<Vec<_>>()
+                    .join("");
+                parse_error = Some(format!("{error:?}:len={}:head={head}", request.len()));
+                dispatch_x11_parse_error(dispatch_context, error)
+            }
         };
         observer(X11CoreDispatchTrace {
             sequence,
             major_opcode,
+            parse_error,
             result: &output,
         })?;
         for record in output.encoded_outputs(setup.byte_order) {

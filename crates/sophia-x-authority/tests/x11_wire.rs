@@ -1208,6 +1208,55 @@ fn x11_dispatch_advertises_mit_shm_and_replies_to_query_version() {
 }
 
 #[test]
+fn x11_dispatch_advertises_randr_and_replies_to_query_version() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let query = decode_x11_core_request(
+        context(namespace, 538, XByteOrder::LittleEndian),
+        &query_extension_request(XByteOrder::LittleEndian, X_RANDR_EXTENSION_NAME),
+    )
+    .unwrap();
+
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 98),
+        query,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(encoded[0][8], 1);
+    assert_eq!(encoded[0][9], X_RANDR_MAJOR_OPCODE);
+
+    let version = decode_x11_core_request(
+        context(namespace, 539, XByteOrder::LittleEndian),
+        &randr_query_version_request(XByteOrder::LittleEndian, 1, 5),
+    )
+    .unwrap();
+    assert_eq!(
+        version,
+        XWireRequest::RandrQueryVersion {
+            major_version: 1,
+            minor_version: 5,
+        }
+    );
+    let version = dispatch_x11_wire_request(
+        dispatch_context(namespace, 2, XByteOrder::LittleEndian, X_RANDR_MAJOR_OPCODE),
+        version,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = version.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][8..12]), 1);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][12..16]), 5);
+}
+
+#[test]
 fn x11_dispatch_mit_shm_attach_is_namespace_local_metadata() {
     let namespace = NamespaceId::from_raw(45);
     let mut runtime = XAuthorityRuntime::new();
@@ -1469,6 +1518,86 @@ fn x11_dispatch_query_tree_reports_root_without_children() {
     );
     assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][12..16]), 0);
     assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][16..18]), 0);
+}
+
+#[test]
+fn x11_dispatch_randr_reports_root_screen_size_and_empty_resources() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let range = decode_x11_core_request(
+        context(namespace, 540, XByteOrder::LittleEndian),
+        &randr_window_request(
+            XByteOrder::LittleEndian,
+            X_RANDR_GET_SCREEN_SIZE_RANGE_MINOR_OPCODE,
+            X_SETUP_DEFAULT_ROOT,
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        range,
+        XWireRequest::RandrGetScreenSizeRange {
+            window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+        }
+    );
+
+    let range = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, X_RANDR_MAJOR_OPCODE),
+        range,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = range.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(
+        read_u16(XByteOrder::LittleEndian, &encoded[0][8..10]),
+        X_SETUP_ROOT_WIDTH
+    );
+    assert_eq!(
+        read_u16(XByteOrder::LittleEndian, &encoded[0][10..12]),
+        X_SETUP_ROOT_HEIGHT
+    );
+    assert_eq!(
+        read_u16(XByteOrder::LittleEndian, &encoded[0][12..14]),
+        X_SETUP_ROOT_WIDTH
+    );
+    assert_eq!(
+        read_u16(XByteOrder::LittleEndian, &encoded[0][14..16]),
+        X_SETUP_ROOT_HEIGHT
+    );
+
+    let resources = decode_x11_core_request(
+        context(namespace, 541, XByteOrder::LittleEndian),
+        &randr_window_request(
+            XByteOrder::LittleEndian,
+            X_RANDR_GET_SCREEN_RESOURCES_MINOR_OPCODE,
+            X_SETUP_DEFAULT_ROOT,
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        resources,
+        XWireRequest::RandrGetScreenResources {
+            window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+            current: false,
+        }
+    );
+    let resources = dispatch_x11_wire_request(
+        dispatch_context(namespace, 2, XByteOrder::LittleEndian, X_RANDR_MAJOR_OPCODE),
+        resources,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = resources.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][4..8]), 0);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][16..18]), 0);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][18..20]), 0);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][20..22]), 0);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][22..24]), 0);
 }
 
 #[test]
@@ -3915,6 +4044,25 @@ fn mit_shm_put_image_request(
     out.push(0);
     push_u32(&mut out, byte_order, segment);
     push_u32(&mut out, byte_order, offset);
+    out
+}
+
+fn randr_query_version_request(
+    byte_order: XByteOrder,
+    major_version: u32,
+    minor_version: u32,
+) -> Vec<u8> {
+    let mut out = vec![X_RANDR_MAJOR_OPCODE, X_RANDR_QUERY_VERSION_MINOR_OPCODE];
+    push_u16(&mut out, byte_order, 3);
+    push_u32(&mut out, byte_order, major_version);
+    push_u32(&mut out, byte_order, minor_version);
+    out
+}
+
+fn randr_window_request(byte_order: XByteOrder, minor_opcode: u8, window: u32) -> Vec<u8> {
+    let mut out = vec![X_RANDR_MAJOR_OPCODE, minor_opcode];
+    push_u16(&mut out, byte_order, 2);
+    push_u32(&mut out, byte_order, window);
     out
 }
 

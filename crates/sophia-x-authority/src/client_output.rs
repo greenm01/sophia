@@ -155,6 +155,21 @@ pub enum XClientReply {
         shared_pixmaps: bool,
         pixmap_format: u8,
     },
+    RandrQueryVersion {
+        sequence: u16,
+        major_version: u32,
+        minor_version: u32,
+    },
+    RandrGetScreenSizeRange {
+        sequence: u16,
+        min_width: u16,
+        min_height: u16,
+        max_width: u16,
+        max_height: u16,
+    },
+    RandrGetScreenResources {
+        sequence: u16,
+    },
     GetInputFocus {
         sequence: u16,
         focus: XResourceId,
@@ -406,6 +421,43 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             put_u16(byte_order, &mut out[8..10], major_version);
             put_u16(byte_order, &mut out[10..12], minor_version);
             out[16] = pixmap_format;
+            out
+        }
+        XClientReply::RandrQueryVersion {
+            sequence,
+            major_version,
+            minor_version,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            put_u32(byte_order, &mut out[8..12], major_version);
+            put_u32(byte_order, &mut out[12..16], minor_version);
+            out
+        }
+        XClientReply::RandrGetScreenSizeRange {
+            sequence,
+            min_width,
+            min_height,
+            max_width,
+            max_height,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            put_u16(byte_order, &mut out[8..10], min_width);
+            put_u16(byte_order, &mut out[10..12], min_height);
+            put_u16(byte_order, &mut out[12..14], max_width);
+            put_u16(byte_order, &mut out[14..16], max_height);
+            out
+        }
+        XClientReply::RandrGetScreenResources { sequence } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            put_u32(byte_order, &mut out[8..12], 0);
+            put_u32(byte_order, &mut out[12..16], 0);
+            put_u16(byte_order, &mut out[16..18], 0);
+            put_u16(byte_order, &mut out[18..20], 0);
+            put_u16(byte_order, &mut out[20..22], 0);
+            put_u16(byte_order, &mut out[22..24], 0);
             out
         }
         XClientReply::GetInputFocus {

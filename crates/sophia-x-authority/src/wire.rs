@@ -59,6 +59,12 @@ pub const X_MIT_SHM_QUERY_VERSION_MINOR_OPCODE: u8 = 0;
 pub const X_MIT_SHM_ATTACH_MINOR_OPCODE: u8 = 1;
 pub const X_MIT_SHM_DETACH_MINOR_OPCODE: u8 = 2;
 pub const X_MIT_SHM_PUT_IMAGE_MINOR_OPCODE: u8 = 3;
+pub const X_RANDR_EXTENSION_NAME: &str = "RANDR";
+pub const X_RANDR_MAJOR_OPCODE: u8 = 132;
+pub const X_RANDR_QUERY_VERSION_MINOR_OPCODE: u8 = 0;
+pub const X_RANDR_GET_SCREEN_SIZE_RANGE_MINOR_OPCODE: u8 = 6;
+pub const X_RANDR_GET_SCREEN_RESOURCES_MINOR_OPCODE: u8 = 8;
+pub const X_RANDR_GET_SCREEN_RESOURCES_CURRENT_MINOR_OPCODE: u8 = 25;
 
 const X_CREATE_WINDOW_REQ_LEN: usize = 32;
 const X_CHANGE_WINDOW_ATTRIBUTES_REQ_LEN: usize = 12;
@@ -107,6 +113,9 @@ const X_MIT_SHM_QUERY_VERSION_REQ_LEN: usize = 4;
 const X_MIT_SHM_ATTACH_REQ_LEN: usize = 16;
 const X_MIT_SHM_DETACH_REQ_LEN: usize = 8;
 const X_MIT_SHM_PUT_IMAGE_REQ_LEN: usize = 40;
+const X_RANDR_QUERY_VERSION_REQ_LEN: usize = 12;
+const X_RANDR_GET_SCREEN_SIZE_RANGE_REQ_LEN: usize = 8;
+const X_RANDR_GET_SCREEN_RESOURCES_REQ_LEN: usize = 8;
 
 pub const X_PUT_IMAGE_MAX_DATA_BYTES: usize = crate::X_PROPERTY_MAX_VALUE_BYTES;
 pub const X_QUERY_COLORS_MAX_PIXELS: usize = 256;
@@ -291,6 +300,17 @@ pub enum XWireRequest {
         segment: XResourceId,
         offset: u32,
     },
+    RandrQueryVersion {
+        major_version: u32,
+        minor_version: u32,
+    },
+    RandrGetScreenSizeRange {
+        window: XResourceId,
+    },
+    RandrGetScreenResources {
+        window: XResourceId,
+        current: bool,
+    },
     QueryColors {
         colormap: XResourceId,
         pixels: Vec<u32>,
@@ -415,7 +435,50 @@ pub fn decode_x11_core_request(
         X_LIST_EXTENSIONS => decode_list_extensions(bytes),
         X_SOPHIA_PRESENT_MAJOR_OPCODE => decode_sophia_present(context, bytes),
         X_MIT_SHM_MAJOR_OPCODE => decode_mit_shm(context, bytes),
+        X_RANDR_MAJOR_OPCODE => decode_randr(context, bytes),
         other => Err(XWireParseError::UnknownOpcode(other)),
+    }
+}
+
+fn decode_randr(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    match bytes[1] {
+        X_RANDR_QUERY_VERSION_MINOR_OPCODE => {
+            require_len(
+                X_RANDR_MAJOR_OPCODE,
+                X_RANDR_QUERY_VERSION_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::RandrQueryVersion {
+                major_version: context.byte_order.u32(&bytes[4..8]),
+                minor_version: context.byte_order.u32(&bytes[8..12]),
+            })
+        }
+        X_RANDR_GET_SCREEN_SIZE_RANGE_MINOR_OPCODE => {
+            require_exact_len(
+                X_RANDR_MAJOR_OPCODE,
+                X_RANDR_GET_SCREEN_SIZE_RANGE_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::RandrGetScreenSizeRange {
+                window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+            })
+        }
+        X_RANDR_GET_SCREEN_RESOURCES_MINOR_OPCODE
+        | X_RANDR_GET_SCREEN_RESOURCES_CURRENT_MINOR_OPCODE => {
+            require_exact_len(
+                X_RANDR_MAJOR_OPCODE,
+                X_RANDR_GET_SCREEN_RESOURCES_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::RandrGetScreenResources {
+                window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+                current: bytes[1] == X_RANDR_GET_SCREEN_RESOURCES_CURRENT_MINOR_OPCODE,
+            })
+        }
+        _ => Err(XWireParseError::UnknownOpcode(bytes[0])),
     }
 }
 

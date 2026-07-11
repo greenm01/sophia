@@ -302,6 +302,15 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         namespace: 54,
         require_transactions: true,
     },
+    ExternalProbeSmokeSpec {
+        command_name: "x-authority-xrandr-query-smoke",
+        label: "xrandr",
+        binary: "/usr/bin/xrandr",
+        args: &["--query"],
+        display_base: 7400,
+        namespace: 55,
+        require_transactions: false,
+    },
 ];
 
 fn run_x_authority_x11_smoke() -> Result<XAuthorityX11SmokeReport, Box<dyn std::error::Error>> {
@@ -702,6 +711,12 @@ fn run_x_authority_external_probe_smoke(
     let server = std::thread::spawn(move || {
         run_x11_core_socket_server_once_traced(&server_path, namespace, |trace| {
             let _ = sender.try_send(ExternalProbeObservation::Opcode(trace.major_opcode));
+            if let Some(error) = &trace.parse_error {
+                let _ = sender.try_send(ExternalProbeObservation::Error(format!(
+                    "parse_error:major={}:{}",
+                    trace.major_opcode, error
+                )));
+            }
             for output in &trace.result.outputs {
                 if let XClientOutput::Error(error) = output {
                     let _ = sender.try_send(ExternalProbeObservation::Error(format!(

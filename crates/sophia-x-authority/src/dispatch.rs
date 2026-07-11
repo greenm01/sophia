@@ -1,7 +1,7 @@
 use crate::{
-    X_MIT_SHM_EXTENSION_NAME, X_MIT_SHM_MAJOR_OPCODE, X_SETUP_DEFAULT_COLORMAP,
-    X_SETUP_DEFAULT_ROOT, X_SETUP_DEFAULT_VISUAL, X_SETUP_ROOT_HEIGHT, X_SETUP_ROOT_WIDTH,
-    X_SOPHIA_PRESENT_EXTENSION_NAME, X_SOPHIA_PRESENT_MAJOR_OPCODE, XAtomTable,
+    X_MIT_SHM_EXTENSION_NAME, X_MIT_SHM_MAJOR_OPCODE, X_RANDR_EXTENSION_NAME, X_RANDR_MAJOR_OPCODE,
+    X_SETUP_DEFAULT_COLORMAP, X_SETUP_DEFAULT_ROOT, X_SETUP_DEFAULT_VISUAL, X_SETUP_ROOT_HEIGHT,
+    X_SETUP_ROOT_WIDTH, X_SOPHIA_PRESENT_EXTENSION_NAME, X_SOPHIA_PRESENT_MAJOR_OPCODE, XAtomTable,
     XAuthorityRequestKind, XAuthorityResponseOutcome, XAuthorityResponsePacket, XAuthorityRuntime,
     XByteOrder, XClientEvent, XClientOutput, XClientReply, XErrorCode, XMetadataPropertyCandidate,
     XPropertyError, XPropertyTable, XResourceId, XWireParseError, XWireRequest,
@@ -726,6 +726,69 @@ pub fn dispatch_x11_wire_request(
             })],
             metadata_candidates: Vec::new(),
         },
+        XWireRequest::RandrQueryVersion { .. } => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::RandrQueryVersion {
+                sequence: context.sequence,
+                major_version: 1,
+                minor_version: 5,
+            })],
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::RandrGetScreenSizeRange { window } => {
+            let output = if window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
+                XClientOutput::Reply(XClientReply::RandrGetScreenSizeRange {
+                    sequence: context.sequence,
+                    min_width: X_SETUP_ROOT_WIDTH,
+                    min_height: X_SETUP_ROOT_HEIGHT,
+                    max_width: X_SETUP_ROOT_WIDTH,
+                    max_height: X_SETUP_ROOT_HEIGHT,
+                })
+            } else if let Err(error) = runtime.validate_window_access(context.namespace, window) {
+                XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(window.local.raw()).unwrap_or(0),
+                ))
+            } else {
+                XClientOutput::Reply(XClientReply::RandrGetScreenSizeRange {
+                    sequence: context.sequence,
+                    min_width: X_SETUP_ROOT_WIDTH,
+                    min_height: X_SETUP_ROOT_HEIGHT,
+                    max_width: X_SETUP_ROOT_WIDTH,
+                    max_height: X_SETUP_ROOT_HEIGHT,
+                })
+            };
+            XDispatchResult {
+                response: None,
+                outputs: vec![output],
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::RandrGetScreenResources { window, .. } => {
+            let output = if window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
+                XClientOutput::Reply(XClientReply::RandrGetScreenResources {
+                    sequence: context.sequence,
+                })
+            } else if let Err(error) = runtime.validate_window_access(context.namespace, window) {
+                XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(window.local.raw()).unwrap_or(0),
+                ))
+            } else {
+                XClientOutput::Reply(XClientReply::RandrGetScreenResources {
+                    sequence: context.sequence,
+                })
+            };
+            XDispatchResult {
+                response: None,
+                outputs: vec![output],
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::ShmAttach {
             segment,
             shmid,
@@ -1141,6 +1204,12 @@ fn extension_query_result(name: &str) -> XExtensionQueryResult {
         X_MIT_SHM_EXTENSION_NAME => XExtensionQueryResult {
             present: true,
             major_opcode: X_MIT_SHM_MAJOR_OPCODE,
+            first_event: 0,
+            first_error: 0,
+        },
+        X_RANDR_EXTENSION_NAME => XExtensionQueryResult {
+            present: true,
+            major_opcode: X_RANDR_MAJOR_OPCODE,
             first_event: 0,
             first_error: 0,
         },

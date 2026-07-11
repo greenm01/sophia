@@ -3,6 +3,24 @@
 This file records early decisions, assumptions, and open questions. Keep it
 short and chronological.
 
+## 2026-07-10: xrandr as Output Introspection Probe
+
+`x-authority-xrandr-query-smoke` now launches `/usr/bin/xrandr --query`
+against Sophia X Authority and exits successfully with no X protocol error.
+The compatibility work stayed output-introspection only: xrandr added a minimal
+`RANDR` extension advertisement, bounded `RRGetScreenSizeRange`, and empty
+`RRGetScreenResources` replies. It does not synthesize connectors, CRTCs,
+modes, providers, leases, or monitor objects yet.
+
+The external-probe trace now carries bounded parse-error detail with the first
+request bytes. That exposed the real RandR minor opcodes (`6` and `8`) after
+the client-facing error string incorrectly labelled the failed request as
+`RRQueryVersion`.
+
+The passing reduced evidence was `outcome=client_exited_success`, `requests=10`,
+`opcode_count=4`, `opcodes=20,55,98,132`, `transactions=0`,
+`runtime_committed=0`, `runtime_surfaces=0`, and `first_error=none`.
+
 ## 2026-07-10: xmessage as Text And Cursor Probe
 
 `x-authority-xmessage-smoke` now launches `/usr/bin/xmessage Sophia` against

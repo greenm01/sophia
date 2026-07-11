@@ -469,3 +469,21 @@ drawn glyph bounds; it does not implement full X font rasterization.
 The external real-client harness now treats any observed X protocol error as a
 smoke failure even if the client already produced authority transactions. This
 keeps `first_error=none` as an enforced compatibility invariant.
+
+## External xrandr Probe
+
+`x-authority-xrandr-query-smoke` launches `/usr/bin/xrandr --query` against a
+temporary Sophia X Authority socket and treats output-size discovery as a
+read-only compatibility surface. The probe added only the request surface xrandr
+actually exercised: minimal `RANDR` extension advertisement,
+`RRGetScreenSizeRange`, and `RRGetScreenResources`.
+
+The first admitted RandR replies are deliberately sparse. Size range reports
+the setup root dimensions as the fixed admitted range, and screen resources
+returns empty CRTC/output/mode/name lists. This is enough for `xrandr --query`
+to observe a bounded screen without giving Sophia X Authority ownership of
+native connector, CRTC, provider, lease, monitor, or modeset state.
+
+The external probe trace now includes bounded parse-error request heads. That
+keeps future extension work probe-driven when Xlib labels an extension failure
+imprecisely in client stderr.

@@ -75,6 +75,10 @@ Current milestone target:
 
 ## Done Recently
 
+- [x] `x-authority-xrandr-query-smoke` launches `/usr/bin/xrandr --query`,
+  keeps `first_error=none`, and adds only the demanded minimal `RANDR`
+  extension advertisement, fixed root screen-size range, and empty screen
+  resource replies.
 - [x] `x-authority-xmessage-smoke` launches `/usr/bin/xmessage Sophia`, keeps
   `first_error=none`, and adds only the demanded bounded `CreateGlyphCursor`,
   `FreeCursor`, `SetClipRectangles`, and `PolyText8` paths with reduced
