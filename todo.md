@@ -75,6 +75,16 @@ Current milestone target:
 
 ## Done Recently
 
+- [x] `x-authority-xmessage-smoke` launches `/usr/bin/xmessage Sophia`, keeps
+  `first_error=none`, and adds only the demanded bounded `CreateGlyphCursor`,
+  `FreeCursor`, `SetClipRectangles`, and `PolyText8` paths with reduced
+  Engine/Runtime transaction evidence.
+- [x] `x-authority-xlogo-smoke` launches `/usr/bin/xlogo`, keeps
+  `first_error=none`, and reaches committed drawing transactions through the
+  existing polygon/rectangle paths without new protocol expansion.
+- [x] `x-authority-xsetroot-name-smoke` launches `/usr/bin/xsetroot -name`,
+  keeps `first_error=none`, and proves root property mutation through existing
+  bounded property paths.
 - [x] `x-authority-xprop-root-smoke` launches `/usr/bin/xprop -root`, exits
   successfully with `first_error=none`, and adds only the demanded bounded
   `ListProperties` root/window property atom reply path.

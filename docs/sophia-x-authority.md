@@ -439,3 +439,33 @@ client only introspects root properties. The reduced report records request
 count, opcode set, zero runtime counters, and `first_error=none`. Sophia X
 Authority does not synthesize a broad global root-property catalog here; it
 reports the properties the namespace-local table actually owns.
+
+## External xsetroot And xlogo Probes
+
+`x-authority-xsetroot-name-smoke` launches `/usr/bin/xsetroot -name "Sophia
+Root"` against a temporary Sophia X Authority socket. It exits successfully
+through existing property, input-focus, GC lifecycle, and extension-query paths,
+proving a small root-property mutation case without Engine transactions.
+
+`x-authority-xlogo-smoke` launches `/usr/bin/xlogo` and reaches committed
+Engine/Runtime authority transactions through the existing create/map/property
+and polygon/rectangle drawing surface. It did not require new X protocol
+coverage, which makes it a useful regression probe for the bounded drawing
+paths already admitted by xclock and xeyes.
+
+## External xmessage Probe
+
+`x-authority-xmessage-smoke` launches `/usr/bin/xmessage Sophia` and treats
+legacy text UI behavior as the next compatibility driver. The probe added only
+the request surface xmessage actually exercised after xlogo: bounded
+`CreateGlyphCursor`, `FreeCursor`, `SetClipRectangles`, and `PolyText8`.
+
+Cursor support is currently resource lifecycle only. Sophia X Authority accepts
+the font-backed cursor resource so legacy clients can proceed, but compositor
+cursor presentation remains future Engine/session policy work. `PolyText8`
+parses the text item stream and emits conservative core-draw damage for the
+drawn glyph bounds; it does not implement full X font rasterization.
+
+The external real-client harness now treats any observed X protocol error as a
+smoke failure even if the client already produced authority transactions. This
+keeps `first_error=none` as an enforced compatibility invariant.

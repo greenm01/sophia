@@ -25,12 +25,17 @@ cargo run --offline -q -p sophia-cli -- x-authority-xclock-smoke
 cargo run --offline -q -p sophia-cli -- x-authority-xeyes-smoke
 cargo run --offline -q -p sophia-cli -- x-authority-xwininfo-root-smoke
 cargo run --offline -q -p sophia-cli -- x-authority-xprop-root-smoke
+cargo run --offline -q -p sophia-cli -- x-authority-xsetroot-name-smoke
+cargo run --offline -q -p sophia-cli -- x-authority-xlogo-smoke
+cargo run --offline -q -p sophia-cli -- x-authority-xmessage-smoke
 ```
 
 The real-client smokes are regression smokes, not full X server conformance
 tests. Their reduced output must keep `first_error=none`, report the
 proof-window outcome explicitly, and include request/opcode counters so future
-client-driven regressions show which compatibility surface changed.
+client-driven regressions show which compatibility surface changed. The
+external probe harness fails if it observes any client-visible X protocol
+error, even after a drawing client has already produced authority transactions.
 
 For live composition changes that connect X Authority transaction intake to
 backend-live rendered scanout reporting, run:

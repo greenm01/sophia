@@ -320,6 +320,28 @@ impl XAuthorityRuntime {
             .map_err(Into::into)
     }
 
+    pub fn create_cursor(
+        &mut self,
+        namespace: NamespaceId,
+        cursor: crate::XResourceId,
+        generation: u64,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        self.resources
+            .insert(cursor, XResourceKind::Cursor, namespace, generation)
+            .map_err(Into::into)
+    }
+
+    pub fn free_cursor(
+        &mut self,
+        namespace: NamespaceId,
+        cursor: crate::XResourceId,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        self.resources
+            .lookup(namespace, cursor, XResourceKind::Cursor)?;
+        self.resources.remove(cursor);
+        Ok(())
+    }
+
     pub fn validate_drawable_access(
         &self,
         namespace: NamespaceId,

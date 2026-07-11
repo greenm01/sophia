@@ -32,6 +32,7 @@ const X_LIST_FONTS_WITH_INFO: u8 = 50;
 const X_CREATE_PIXMAP: u8 = 53;
 const X_FREE_PIXMAP: u8 = 54;
 const X_CREATE_GC: u8 = 55;
+const X_SET_CLIP_RECTANGLES: u8 = 59;
 const X_FREE_GC: u8 = 60;
 const X_CLEAR_AREA: u8 = 61;
 const X_COPY_AREA: u8 = 62;
@@ -41,7 +42,10 @@ const X_FILL_POLY: u8 = 69;
 const X_POLY_FILL_RECTANGLE: u8 = 70;
 const X_POLY_FILL_ARC: u8 = 71;
 const X_PUT_IMAGE: u8 = 72;
+const X_POLY_TEXT8: u8 = 74;
 const X_QUERY_COLORS: u8 = 91;
+const X_CREATE_GLYPH_CURSOR: u8 = 94;
+const X_FREE_CURSOR: u8 = 95;
 const X_QUERY_EXTENSION: u8 = 98;
 const X_LIST_EXTENSIONS: u8 = 99;
 const X_QUERY_BEST_SIZE: u8 = 97;
@@ -81,6 +85,7 @@ const X_LIST_FONTS_WITH_INFO_REQ_LEN: usize = 8;
 const X_CREATE_PIXMAP_REQ_LEN: usize = 16;
 const X_FREE_PIXMAP_REQ_LEN: usize = 8;
 const X_CREATE_GC_REQ_LEN: usize = 16;
+const X_SET_CLIP_RECTANGLES_REQ_LEN: usize = 12;
 const X_FREE_GC_REQ_LEN: usize = 8;
 const X_CLEAR_AREA_REQ_LEN: usize = 16;
 const X_COPY_AREA_REQ_LEN: usize = 28;
@@ -90,7 +95,10 @@ const X_FILL_POLY_REQ_LEN: usize = 16;
 const X_POLY_FILL_RECTANGLE_REQ_LEN: usize = 12;
 const X_POLY_FILL_ARC_REQ_LEN: usize = 12;
 const X_PUT_IMAGE_REQ_LEN: usize = 24;
+const X_POLY_TEXT8_REQ_LEN: usize = 16;
 const X_QUERY_COLORS_REQ_LEN: usize = 8;
+const X_CREATE_GLYPH_CURSOR_REQ_LEN: usize = 32;
+const X_FREE_CURSOR_REQ_LEN: usize = 8;
 const X_QUERY_EXTENSION_REQ_LEN: usize = 8;
 const X_LIST_EXTENSIONS_REQ_LEN: usize = 4;
 const X_QUERY_BEST_SIZE_REQ_LEN: usize = 12;
@@ -102,6 +110,7 @@ const X_MIT_SHM_PUT_IMAGE_REQ_LEN: usize = 40;
 
 pub const X_PUT_IMAGE_MAX_DATA_BYTES: usize = crate::X_PROPERTY_MAX_VALUE_BYTES;
 pub const X_QUERY_COLORS_MAX_PIXELS: usize = 256;
+pub const X_POLY_TEXT8_MAX_BYTES: usize = crate::X_PROPERTY_MAX_VALUE_BYTES;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct XWireClientContext {
@@ -147,6 +156,10 @@ pub enum XWireRequest {
         gc: XResourceId,
         drawable: XResourceId,
     },
+    SetClipRectangles {
+        gc: XResourceId,
+        rectangles: Vec<Rect>,
+    },
     FreeGraphicsContext {
         gc: XResourceId,
     },
@@ -174,6 +187,13 @@ pub enum XWireRequest {
         left_pad: u8,
         depth: u8,
         data_len: usize,
+    },
+    PolyText8 {
+        drawable: XResourceId,
+        gc: XResourceId,
+        x: i16,
+        y: i16,
+        glyph_count: usize,
     },
     GetInputFocus,
     OpenFont {
@@ -275,6 +295,14 @@ pub enum XWireRequest {
         colormap: XResourceId,
         pixels: Vec<u32>,
     },
+    CreateGlyphCursor {
+        cursor: XResourceId,
+        source_font: XResourceId,
+        mask_font: Option<XResourceId>,
+    },
+    FreeCursor {
+        cursor: XResourceId,
+    },
     TranslateCoordinates {
         source: XResourceId,
         destination: XResourceId,
@@ -368,6 +396,7 @@ pub fn decode_x11_core_request(
         X_CREATE_PIXMAP => decode_create_pixmap(context, bytes),
         X_FREE_PIXMAP => decode_free_pixmap(context, bytes),
         X_CREATE_GC => decode_create_gc(context, bytes),
+        X_SET_CLIP_RECTANGLES => decode_set_clip_rectangles(context, bytes),
         X_FREE_GC => decode_free_gc(context, bytes),
         X_CLEAR_AREA => decode_clear_area(context, bytes),
         X_COPY_AREA => decode_copy_area(context, bytes),
@@ -377,7 +406,10 @@ pub fn decode_x11_core_request(
         X_POLY_FILL_RECTANGLE => decode_poly_fill_rectangle(context, bytes),
         X_POLY_FILL_ARC => decode_poly_fill_arc(context, bytes),
         X_PUT_IMAGE => decode_put_image(context, bytes),
+        X_POLY_TEXT8 => decode_poly_text8(context, bytes),
         X_QUERY_COLORS => decode_query_colors(context, bytes),
+        X_CREATE_GLYPH_CURSOR => decode_create_glyph_cursor(context, bytes),
+        X_FREE_CURSOR => decode_free_cursor(context, bytes),
         X_QUERY_BEST_SIZE => decode_query_best_size(context, bytes),
         X_QUERY_EXTENSION => decode_query_extension(context, bytes),
         X_LIST_EXTENSIONS => decode_list_extensions(bytes),
@@ -508,6 +540,57 @@ fn decode_put_image(
         left_pad: bytes[20],
         depth: bytes[21],
         data_len,
+    })
+}
+
+fn decode_poly_text8(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_len(X_POLY_TEXT8, X_POLY_TEXT8_REQ_LEN, bytes.len())?;
+    let item_bytes = &bytes[X_POLY_TEXT8_REQ_LEN..];
+    if item_bytes.len() > X_POLY_TEXT8_MAX_BYTES {
+        return Err(XWireParseError::PropertyValueTooLarge {
+            len: item_bytes.len(),
+            max: X_POLY_TEXT8_MAX_BYTES,
+        });
+    }
+
+    let mut offset = 0usize;
+    let mut glyph_count = 0usize;
+    while offset < item_bytes.len() {
+        let len = item_bytes[offset];
+        offset += 1;
+        if len == u8::MAX {
+            if item_bytes.len().saturating_sub(offset) < 4 {
+                return Err(XWireParseError::InvalidLength {
+                    opcode: X_POLY_TEXT8,
+                    expected_at_least: X_POLY_TEXT8_REQ_LEN + offset + 4,
+                    actual: bytes.len(),
+                });
+            }
+            offset += 4;
+            continue;
+        }
+
+        let item_len = 1usize + usize::from(len);
+        if item_bytes.len().saturating_sub(offset) < item_len {
+            return Err(XWireParseError::InvalidLength {
+                opcode: X_POLY_TEXT8,
+                expected_at_least: X_POLY_TEXT8_REQ_LEN + offset + item_len,
+                actual: bytes.len(),
+            });
+        }
+        offset += item_len;
+        glyph_count = glyph_count.saturating_add(usize::from(len));
+    }
+
+    Ok(XWireRequest::PolyText8 {
+        drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        gc: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
+        x: context.byte_order.i16(&bytes[12..14]),
+        y: context.byte_order.i16(&bytes[14..16]),
+        glyph_count,
     })
 }
 
@@ -755,6 +838,65 @@ fn decode_poly_fill_rectangle(
     Ok(XWireRequest::PolyFillRectangle {
         drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
         gc: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
+        rectangles,
+    })
+}
+
+fn decode_create_glyph_cursor(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(
+        X_CREATE_GLYPH_CURSOR,
+        X_CREATE_GLYPH_CURSOR_REQ_LEN,
+        bytes.len(),
+    )?;
+    let mask_font = context.byte_order.u32(&bytes[12..16]);
+    Ok(XWireRequest::CreateGlyphCursor {
+        cursor: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        source_font: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
+        mask_font: (mask_font != 0).then(|| XResourceId::new(u64::from(mask_font), 1)),
+    })
+}
+
+fn decode_free_cursor(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_FREE_CURSOR, X_FREE_CURSOR_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::FreeCursor {
+        cursor: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+    })
+}
+
+fn decode_set_clip_rectangles(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_len(
+        X_SET_CLIP_RECTANGLES,
+        X_SET_CLIP_RECTANGLES_REQ_LEN,
+        bytes.len(),
+    )?;
+    let rectangle_bytes = &bytes[X_SET_CLIP_RECTANGLES_REQ_LEN..];
+    if rectangle_bytes.len() % 8 != 0 {
+        return Err(XWireParseError::InvalidLength {
+            opcode: X_SET_CLIP_RECTANGLES,
+            expected_at_least: X_SET_CLIP_RECTANGLES_REQ_LEN + ((rectangle_bytes.len() + 7) & !7),
+            actual: bytes.len(),
+        });
+    }
+    let mut rectangles = Vec::with_capacity(rectangle_bytes.len() / 8);
+    for rectangle in rectangle_bytes.chunks_exact(8) {
+        rectangles.push(Rect {
+            x: i32::from(context.byte_order.i16(&rectangle[0..2])),
+            y: i32::from(context.byte_order.i16(&rectangle[2..4])),
+            width: i32::from(context.byte_order.u16(&rectangle[4..6])),
+            height: i32::from(context.byte_order.u16(&rectangle[6..8])),
+        });
+    }
+    Ok(XWireRequest::SetClipRectangles {
+        gc: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
         rectangles,
     })
 }

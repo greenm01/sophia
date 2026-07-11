@@ -522,8 +522,26 @@ fn x11_core_decoder_captures_create_gc_requests() {
         }
     );
 
-    let clear = decode_x11_core_request(
+    let clip = decode_x11_core_request(
         context(namespace, 508, XByteOrder::LittleEndian),
+        &set_clip_rectangles_request(XByteOrder::LittleEndian, 0x220010, &[(2, 3, 20, 10)]),
+    )
+    .unwrap();
+    assert_eq!(
+        clip,
+        XWireRequest::SetClipRectangles {
+            gc: XResourceId::new(0x220010, 1),
+            rectangles: vec![Rect {
+                x: 2,
+                y: 3,
+                width: 20,
+                height: 10,
+            }],
+        }
+    );
+
+    let clear = decode_x11_core_request(
+        context(namespace, 509, XByteOrder::LittleEndian),
         &clear_area_request(XByteOrder::LittleEndian, true, 0x220010, 3, 4, 40, 30),
     )
     .unwrap();
@@ -684,6 +702,23 @@ fn x11_core_decoder_captures_poly_fill_rectangle_requests() {
             }],
         }
     );
+
+    let text = decode_x11_core_request(
+        context(namespace, 512, XByteOrder::LittleEndian),
+        &poly_text8_request(XByteOrder::LittleEndian, 0x220010, 0x220011, 5, 16, b"Hi"),
+    )
+    .unwrap();
+
+    assert_eq!(
+        text,
+        XWireRequest::PolyText8 {
+            drawable: XResourceId::new(0x220010, 1),
+            gc: XResourceId::new(0x220011, 1),
+            x: 5,
+            y: 16,
+            glyph_count: 2,
+        }
+    );
 }
 
 #[test]
@@ -835,6 +870,32 @@ fn x11_core_decoder_captures_font_requests() {
         XWireRequest::ListFontsWithInfo {
             max_names: 5,
             pattern: "*".to_owned(),
+        }
+    );
+
+    let cursor = decode_x11_core_request(
+        context(namespace, 578, XByteOrder::LittleEndian),
+        &create_glyph_cursor_request(XByteOrder::LittleEndian, 0x220050, 0x220040, 0x220041),
+    )
+    .unwrap();
+    assert_eq!(
+        cursor,
+        XWireRequest::CreateGlyphCursor {
+            cursor: XResourceId::new(0x220050, 1),
+            source_font: XResourceId::new(0x220040, 1),
+            mask_font: Some(XResourceId::new(0x220041, 1)),
+        }
+    );
+
+    let free_cursor = decode_x11_core_request(
+        context(namespace, 579, XByteOrder::LittleEndian),
+        &resource_request(XByteOrder::LittleEndian, 95, 0x220050),
+    )
+    .unwrap();
+    assert_eq!(
+        free_cursor,
+        XWireRequest::FreeCursor {
+            cursor: XResourceId::new(0x220050, 1),
         }
     );
 }
@@ -2583,6 +2644,109 @@ fn x11_dispatch_accepts_open_and_close_font_resources() {
 }
 
 #[test]
+fn x11_dispatch_accepts_glyph_cursor_lifecycle() {
+    let namespace = NamespaceId::from_raw(46);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+
+    for (sequence, font) in [(1u16, 0x220141), (2u16, 0x220142)] {
+        let open = decode_x11_core_request(
+            context(
+                namespace,
+                640 + u64::from(sequence),
+                XByteOrder::LittleEndian,
+            ),
+            &open_font_request(XByteOrder::LittleEndian, font, "cursor"),
+        )
+        .unwrap();
+        let open = dispatch_x11_wire_request(
+            dispatch_context(namespace, sequence, XByteOrder::LittleEndian, 45),
+            open,
+            &mut runtime,
+            &mut atoms,
+            &mut properties,
+        );
+        assert!(open.outputs.is_empty());
+    }
+
+    let cursor = decode_x11_core_request(
+        context(namespace, 643, XByteOrder::LittleEndian),
+        &create_glyph_cursor_request(XByteOrder::LittleEndian, 0x220143, 0x220141, 0x220142),
+    )
+    .unwrap();
+    let cursor = dispatch_x11_wire_request(
+        dispatch_context(namespace, 3, XByteOrder::LittleEndian, 94),
+        cursor,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert!(cursor.outputs.is_empty());
+
+    let free = decode_x11_core_request(
+        context(namespace, 644, XByteOrder::LittleEndian),
+        &resource_request(XByteOrder::LittleEndian, 95, 0x220143),
+    )
+    .unwrap();
+    let free = dispatch_x11_wire_request(
+        dispatch_context(namespace, 4, XByteOrder::LittleEndian, 95),
+        free,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert!(free.outputs.is_empty());
+}
+
+#[test]
+fn x11_dispatch_poly_text8_emits_conservative_text_damage() {
+    let namespace = NamespaceId::from_raw(46);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let window = 0x220151;
+
+    let create = decode_x11_core_request(
+        context(namespace, 646, XByteOrder::LittleEndian),
+        &create_window_request(XByteOrder::LittleEndian, window, 0, 0, 300, 200),
+    )
+    .unwrap();
+    dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 1),
+        create,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    let text = decode_x11_core_request(
+        context(namespace, 647, XByteOrder::LittleEndian),
+        &poly_text8_request(XByteOrder::LittleEndian, window, 0x220152, 5, 16, b"Hi"),
+    )
+    .unwrap();
+    let text = dispatch_x11_wire_request(
+        dispatch_context(namespace, 2, XByteOrder::LittleEndian, 74),
+        text,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    let response = text.response.unwrap();
+    assert_eq!(response.transactions.len(), 1);
+    assert_eq!(
+        response.transactions[0].damage,
+        Region::single(Rect {
+            x: 5,
+            y: 6,
+            width: 16,
+            height: 12,
+        })
+    );
+}
+
+#[test]
 fn x11_dispatch_sophia_present_emits_xpixmap_surface_transaction() {
     let namespace = NamespaceId::from_raw(46);
     let mut runtime = XAuthorityRuntime::new();
@@ -3396,6 +3560,25 @@ fn create_gc_request(byte_order: XByteOrder, gc: u32, drawable: u32) -> Vec<u8> 
     out
 }
 
+fn set_clip_rectangles_request(
+    byte_order: XByteOrder,
+    gc: u32,
+    rectangles: &[(i16, i16, u16, u16)],
+) -> Vec<u8> {
+    let mut out = vec![59, 0];
+    push_u16(&mut out, byte_order, 3 + (rectangles.len() as u16 * 2));
+    push_u32(&mut out, byte_order, gc);
+    push_i16(&mut out, byte_order, 0);
+    push_i16(&mut out, byte_order, 0);
+    for &(x, y, width, height) in rectangles {
+        push_i16(&mut out, byte_order, x);
+        push_i16(&mut out, byte_order, y);
+        push_u16(&mut out, byte_order, width);
+        push_u16(&mut out, byte_order, height);
+    }
+    out
+}
+
 fn create_pixmap_request(
     byte_order: XByteOrder,
     depth: u8,
@@ -3466,6 +3649,28 @@ fn list_fonts_with_info_request(byte_order: XByteOrder, max_names: u16, pattern:
     out
 }
 
+fn create_glyph_cursor_request(
+    byte_order: XByteOrder,
+    cursor: u32,
+    source_font: u32,
+    mask_font: u32,
+) -> Vec<u8> {
+    let mut out = vec![94, 0];
+    push_u16(&mut out, byte_order, 8);
+    push_u32(&mut out, byte_order, cursor);
+    push_u32(&mut out, byte_order, source_font);
+    push_u32(&mut out, byte_order, mask_font);
+    push_u16(&mut out, byte_order, 1);
+    push_u16(&mut out, byte_order, 2);
+    push_u16(&mut out, byte_order, u16::MAX);
+    push_u16(&mut out, byte_order, u16::MAX);
+    push_u16(&mut out, byte_order, u16::MAX);
+    push_u16(&mut out, byte_order, 0);
+    push_u16(&mut out, byte_order, 0);
+    push_u16(&mut out, byte_order, 0);
+    out
+}
+
 #[allow(clippy::too_many_arguments)]
 fn copy_area_request(
     byte_order: XByteOrder,
@@ -3510,6 +3715,27 @@ fn poly_fill_rectangle_request(
         push_u16(&mut out, byte_order, *width);
         push_u16(&mut out, byte_order, *height);
     }
+    out
+}
+
+fn poly_text8_request(
+    byte_order: XByteOrder,
+    drawable: u32,
+    gc: u32,
+    x: i16,
+    y: i16,
+    text: &[u8],
+) -> Vec<u8> {
+    let mut out = vec![74, 0];
+    let len_units = (18 + text.len()) / 4;
+    push_u16(&mut out, byte_order, len_units as u16);
+    push_u32(&mut out, byte_order, drawable);
+    push_u32(&mut out, byte_order, gc);
+    push_i16(&mut out, byte_order, x);
+    push_i16(&mut out, byte_order, y);
+    out.push(u8::try_from(text.len()).unwrap());
+    out.push(0);
+    out.extend_from_slice(text);
     out
 }
 

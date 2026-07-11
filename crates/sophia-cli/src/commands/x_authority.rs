@@ -275,6 +275,33 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         namespace: 51,
         require_transactions: false,
     },
+    ExternalProbeSmokeSpec {
+        command_name: "x-authority-xsetroot-name-smoke",
+        label: "xsetroot",
+        binary: "/usr/bin/xsetroot",
+        args: &["-name", "Sophia Root"],
+        display_base: 7100,
+        namespace: 52,
+        require_transactions: false,
+    },
+    ExternalProbeSmokeSpec {
+        command_name: "x-authority-xlogo-smoke",
+        label: "xlogo",
+        binary: "/usr/bin/xlogo",
+        args: &[],
+        display_base: 7200,
+        namespace: 53,
+        require_transactions: true,
+    },
+    ExternalProbeSmokeSpec {
+        command_name: "x-authority-xmessage-smoke",
+        label: "xmessage",
+        binary: "/usr/bin/xmessage",
+        args: &["Sophia"],
+        display_base: 7300,
+        namespace: 54,
+        require_transactions: true,
+    },
 ];
 
 fn run_x_authority_x11_smoke() -> Result<XAuthorityX11SmokeReport, Box<dyn std::error::Error>> {
@@ -757,6 +784,14 @@ fn run_x_authority_external_probe_smoke(
                 first_error.get_or_insert(error);
             }
         }
+    }
+
+    if let Some(error) = &first_error {
+        return Err(format!(
+            "{label} produced an X protocol error for {display}: status={status} first_error={error} stderr={}",
+            String::from_utf8_lossy(&output.stderr).trim(),
+        )
+        .into());
     }
 
     if require_transactions && transactions.is_empty() {

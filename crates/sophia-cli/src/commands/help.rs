@@ -36,6 +36,9 @@ pub(crate) fn print(verbose: bool) {
     println!("commands: x-authority-xeyes-smoke");
     println!("commands: x-authority-xwininfo-root-smoke");
     println!("commands: x-authority-xprop-root-smoke");
+    println!("commands: x-authority-xsetroot-name-smoke");
+    println!("commands: x-authority-xlogo-smoke");
+    println!("commands: x-authority-xmessage-smoke");
     println!("commands: x-authority-present-pixmap-smoke");
     #[cfg(feature = "atomic-scanout-live")]
     println!("commands: live-session-composition-smoke");
