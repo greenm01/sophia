@@ -1,5 +1,7 @@
 #[cfg(feature = "libdrm-events")]
 use super::*;
+#[cfg(feature = "libdrm-events")]
+use std::any::Any;
 
 #[cfg(feature = "libdrm-events")]
 impl<P> LiveBackendRuntimeAssembly<P>
@@ -12,6 +14,34 @@ where
 
     pub fn rendered_primary_plane_scanout_cleanup_pending(&self) -> bool {
         self.rendered_primary_plane_scanout_cleanup.is_some()
+    }
+
+    pub fn rendered_primary_plane_scanout_displayed(&self) -> bool {
+        self.rendered_primary_plane_displayed_submission.is_some()
+    }
+
+    pub fn with_persistent_rendered_primary_plane_scanout(mut self) -> Self {
+        self.retain_rendered_primary_plane_displayed_submission = true;
+        self
+    }
+
+    pub(crate) fn adopt_presented_rendered_primary_plane_scanout<Owner>(
+        &mut self,
+        submission: LiveRenderedPrimaryPlaneScanoutSubmission<Owner>,
+    ) -> bool
+    where
+        Owner: 'static,
+    {
+        if !self.retain_rendered_primary_plane_displayed_submission
+            || self.rendered_primary_plane_displayed_submission.is_some()
+            || self.rendered_primary_plane_scanout_submission.is_some()
+            || self.rendered_primary_plane_scanout_cleanup.is_some()
+        {
+            return false;
+        }
+        self.rendered_primary_plane_displayed_submission =
+            Some(submission.map_scanout_buffer(|owner| Box::new(owner) as Box<dyn Any>));
+        true
     }
 
     pub const fn rendered_primary_plane_scanout_in_flight_ticks(&self) -> u64 {
@@ -105,17 +135,104 @@ where
             };
         };
 
-        let retired =
-            retire_rendered_primary_plane_scanout_after_page_flip(device, submission, callback);
-        let runtime_scanout_state = retired.runtime_scanout_state();
-        if let Some(submission) = retired.submission {
+        if !self.retain_rendered_primary_plane_displayed_submission {
+            let retired =
+                retire_rendered_primary_plane_scanout_after_page_flip(device, submission, callback);
+            let runtime_scanout_state = retired.runtime_scanout_state();
+            if let Some(submission) = retired.submission {
+                self.rendered_primary_plane_scanout_submission = Some(submission);
+            } else {
+                self.rendered_primary_plane_scanout_in_flight_ticks = 0;
+            }
+            if let Some(cleanup) = retired.cleanup {
+                self.rendered_primary_plane_scanout_cleanup = Some(cleanup);
+            }
+            if let Some(runtime_scanout_state) = runtime_scanout_state {
+                self.rendered_primary_plane_runtime_scanout_state = Some(runtime_scanout_state);
+                self.pending_runtime_scanout_states
+                    .push_back(runtime_scanout_state);
+            }
+
+            return LiveTrackedRenderedPrimaryPlaneScanoutRetireReport {
+                status: retired.status.into(),
+                destroy: retired.destroy,
+                runtime_scanout_state,
+                in_flight: self.rendered_primary_plane_scanout_in_flight(),
+                in_flight_ticks: self.rendered_primary_plane_scanout_in_flight_ticks,
+                cleanup_pending: self.rendered_primary_plane_scanout_cleanup_pending(),
+            };
+        }
+
+        let waiting_for_newer_page_flip = callback.decision
+            != LivePageFlipCallbackDecision::Accepted
+            || callback.event.status != LivePageFlipEventStatus::Presented
+            || submission
+                .submitted_after_page_flip_serial
+                .is_some_and(|baseline| match callback.event.frame_serial {
+                    Some(serial) => serial <= baseline,
+                    None => true,
+                });
+        if waiting_for_newer_page_flip {
             self.rendered_primary_plane_scanout_submission = Some(submission);
-        } else {
-            self.rendered_primary_plane_scanout_in_flight_ticks = 0;
+            return LiveTrackedRenderedPrimaryPlaneScanoutRetireReport {
+                status:
+                    LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::WaitingForAcceptedPageFlip,
+                destroy: None,
+                runtime_scanout_state: None,
+                in_flight: true,
+                in_flight_ticks: self.rendered_primary_plane_scanout_in_flight_ticks,
+                cleanup_pending: self.rendered_primary_plane_scanout_cleanup_pending(),
+            };
         }
-        if let Some(cleanup) = retired.cleanup {
-            self.rendered_primary_plane_scanout_cleanup = Some(cleanup);
-        }
+
+        self.rendered_primary_plane_scanout_in_flight_ticks = 0;
+        let previous = self
+            .rendered_primary_plane_displayed_submission
+            .replace(submission);
+        let (status, destroy) = match previous {
+            None => (
+                LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip,
+                None,
+            ),
+            Some(previous) => {
+                let LiveRenderedPrimaryPlaneScanoutSubmission {
+                    scanout_buffer,
+                    primary_plane,
+                    ..
+                } = previous;
+                let retired = primary_plane.retire(device);
+                if retired.status == LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed {
+                    (
+                        LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip,
+                        Some(retired.status),
+                    )
+                } else {
+                    if let Some(primary_plane) = retired.cleanup {
+                        self.rendered_primary_plane_scanout_cleanup =
+                            Some(LiveRenderedPrimaryPlaneScanoutCleanup {
+                                scanout_buffer,
+                                primary_plane,
+                            });
+                    }
+                    (
+                        LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::ResourceRetireFailed,
+                        Some(retired.status),
+                    )
+                }
+            }
+        };
+        let runtime_scanout_state = Some(match status {
+            LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::RetiredAfterPageFlip => {
+                RuntimeScanoutState::Retired
+            }
+            LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::ResourceRetireFailed => {
+                RuntimeScanoutState::Rejected
+            }
+            LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::NoSubmission
+            | LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus::WaitingForAcceptedPageFlip => {
+                unreachable!("terminal retire statuses are constructed above")
+            }
+        });
         if let Some(runtime_scanout_state) = runtime_scanout_state {
             self.rendered_primary_plane_runtime_scanout_state = Some(runtime_scanout_state);
             self.pending_runtime_scanout_states
@@ -123,8 +240,8 @@ where
         }
 
         LiveTrackedRenderedPrimaryPlaneScanoutRetireReport {
-            status: retired.status.into(),
-            destroy: retired.destroy,
+            status,
+            destroy,
             runtime_scanout_state,
             in_flight: self.rendered_primary_plane_scanout_in_flight(),
             in_flight_ticks: self.rendered_primary_plane_scanout_in_flight_ticks,
@@ -161,6 +278,26 @@ where
             status,
             destroy: Some(retried.destroy),
             cleanup_pending: self.rendered_primary_plane_scanout_cleanup_pending(),
+        }
+    }
+
+    pub fn drain_rendered_primary_plane_page_flip_callbacks_with<D>(
+        &mut self,
+        device: &D,
+    ) -> LiveRenderedPrimaryPlanePageFlipDrainReport
+    where
+        D: LibdrmNativePrimaryPlaneResourceDevice,
+    {
+        let page_flip_callbacks = self.drain_page_flip_callback_queue();
+        let rendered_primary_plane_scanout_retire =
+            page_flip_callbacks.last_accepted.map(|callback| {
+                self.retire_tracked_rendered_primary_plane_scanout_after_page_flip(
+                    device, &callback,
+                )
+            });
+        LiveRenderedPrimaryPlanePageFlipDrainReport {
+            page_flip_callbacks,
+            rendered_primary_plane_scanout_retire,
         }
     }
 

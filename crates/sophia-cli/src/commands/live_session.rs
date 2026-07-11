@@ -257,7 +257,8 @@ fn run_session_loop(
                         output,
                         &batch.transactions,
                         native_scanout.as_mut(),
-                    ));
+                        native_frame.clone(),
+                    )?);
                 }
                 let runtime = runtime
                     .as_mut()
@@ -280,17 +281,23 @@ fn run_session_loop(
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 if let (Some(runtime), Some(native_scanout)) =
                     (runtime.as_mut(), native_scanout.as_mut())
-                    && (runtime.runtime.rendered_primary_plane_scanout_in_flight()
-                        || native_scanout.exporter.pending_cpu_frame())
                 {
-                    let tick = runtime.run_native_idle(native_scanout)?;
-                    backend_ticks = backend_ticks.saturating_add(1);
-                    runtime_committed = tick
-                        .engine
-                        .runtime
-                        .runtime_state
-                        .authority_transactions_committed;
-                    runtime_surfaces = tick.engine.runtime.runtime_state.authority_surfaces_applied;
+                    if runtime.runtime.rendered_primary_plane_scanout_in_flight() {
+                        runtime.retire_native_scanout(native_scanout)?;
+                    }
+                    if !runtime.runtime.rendered_primary_plane_scanout_in_flight()
+                        && native_scanout.exporter.pending_cpu_frame()
+                    {
+                        let tick = runtime.run_native_idle(native_scanout)?;
+                        backend_ticks = backend_ticks.saturating_add(1);
+                        runtime_committed = tick
+                            .engine
+                            .runtime
+                            .runtime_state
+                            .authority_transactions_committed;
+                        runtime_surfaces =
+                            tick.engine.runtime.runtime_state.authority_surfaces_applied;
+                    }
                 }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
@@ -445,7 +452,8 @@ impl PersistentBackendRuntime {
         output: sophia_engine::HeadlessOutput,
         first_transactions: &[SurfaceTransaction],
         native_scanout: Option<&mut PersistentNativeScanout>,
-    ) -> Self {
+        initial_native_frame: Option<sophia_backend_live::LiveCpuComposedFrame>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let (authority_sender, authority_receiver) = sync_channel(SESSION_AUTHORITY_CAPACITY);
         let assembly = HeadlessCompositorBackendAssembly::new(output)
             .with_committed_surfaces(seed_committed_surfaces(first_transactions))
@@ -463,7 +471,8 @@ impl PersistentBackendRuntime {
         let mut runtime =
             sophia_backend_live::LiveBackendRuntimeAssembly::from_ready_headless_scanout(
                 assembly, output, renderer,
-            );
+            )
+            .with_persistent_rendered_primary_plane_scanout();
         if let Some(native_scanout) = native_scanout {
             runtime = runtime.with_page_flip_callback_queue(
                 sophia_backend_live::LivePageFlipCallbackQueue::new(
@@ -471,12 +480,16 @@ impl PersistentBackendRuntime {
                     64,
                 ),
             );
+            native_scanout.initialize(
+                &mut runtime,
+                initial_native_frame.ok_or("persistent native scanout has no initial CPU frame")?,
+            )?;
         }
-        Self {
+        Ok(Self {
             runtime,
             authority_sender,
             layers: BTreeMap::new(),
-        }
+        })
     }
 
     fn run_batch(
@@ -520,9 +533,8 @@ impl PersistentBackendRuntime {
         timeout: Duration,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let deadline = Instant::now() + timeout;
-        let transactions = self.layers.values().cloned().collect::<Vec<_>>();
         while self.runtime.rendered_primary_plane_scanout_in_flight() && Instant::now() < deadline {
-            native_scanout.run_tick(&mut self.runtime, compositor_tick_input(&transactions, 0))?;
+            self.retire_native_scanout(native_scanout)?;
             std::thread::sleep(Duration::from_millis(5));
         }
         if self
@@ -544,6 +556,13 @@ impl PersistentBackendRuntime {
     ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
         let transactions = self.layers.values().cloned().collect::<Vec<_>>();
         native_scanout.run_tick(&mut self.runtime, compositor_tick_input(&transactions, 0))
+    }
+
+    fn retire_native_scanout(
+        &mut self,
+        native_scanout: &mut PersistentNativeScanout,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        native_scanout.retire_ready(&mut self.runtime)
     }
 }
 
@@ -666,6 +685,9 @@ impl PersistentNativeScanout {
         if !self.exporter.pending_cpu_frame() {
             self.pending_nonzero_pixel_bytes = 0;
         }
+        if let Some(retire) = report.tick.rendered_primary_plane_scanout_retire {
+            self.observe_retire(retire);
+        }
         if let Some(submit) = report.tick.rendered_primary_plane_scanout_submit {
             use sophia_backend_live::LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus as Status;
             match submit.status {
@@ -679,36 +701,81 @@ impl PersistentNativeScanout {
                 _ => self.submit_failures = self.submit_failures.saturating_add(1),
             }
         }
-        if let Some(retire) = report.tick.rendered_primary_plane_scanout_retire {
-            use sophia_backend_live::LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus as Status;
-            match retire.status {
-                Status::RetiredAfterPageFlip => {
-                    self.retirements = self.retirements.saturating_add(1);
-                    if let Some(submitted_at) = self.submitted_at.take() {
-                        self.max_submit_to_page_flip =
-                            self.max_submit_to_page_flip.max(submitted_at.elapsed());
-                    }
-                }
-                Status::NoSubmission | Status::WaitingForAcceptedPageFlip => {}
-                Status::ResourceRetireFailed => {
-                    self.retire_failures = self.retire_failures.saturating_add(1);
-                }
-            }
-        }
         self.max_in_flight_ticks = self
             .max_in_flight_ticks
             .max(report.tick.rendered_primary_plane_scanout_in_flight_ticks);
-        self.callback_accepted = self
-            .callback_accepted
-            .saturating_add(report.tick.page_flip_callbacks.accepted);
-        self.callback_rejected = self.callback_rejected.saturating_add(
-            report.tick.page_flip_callbacks.rejected_unexpected_output
-                + report.tick.page_flip_callbacks.rejected_stale_frame_serial,
-        );
+        self.observe_callbacks(report.tick.page_flip_callbacks);
+        Ok(report.tick)
+    }
+
+    fn retire_ready(
+        &mut self,
+        runtime: &mut sophia_backend_live::LiveBackendRuntimeAssembly,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let _ = self
+            .session
+            .poll_native_page_flip_events(&self.sender, 64, 64);
+        let report =
+            runtime.drain_rendered_primary_plane_page_flip_callbacks_with(self.session.card());
+        self.observe_callbacks(report.page_flip_callbacks);
+        if let Some(retire) = report.rendered_primary_plane_scanout_retire {
+            self.observe_retire(retire);
+        }
+        Ok(())
+    }
+
+    fn observe_retire(
+        &mut self,
+        retire: sophia_backend_live::LiveTrackedRenderedPrimaryPlaneScanoutRetireReport,
+    ) {
+        use sophia_backend_live::LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus as Status;
+        match retire.status {
+            Status::RetiredAfterPageFlip => {
+                self.retirements = self.retirements.saturating_add(1);
+                if let Some(submitted_at) = self.submitted_at.take() {
+                    self.max_submit_to_page_flip =
+                        self.max_submit_to_page_flip.max(submitted_at.elapsed());
+                }
+            }
+            Status::NoSubmission | Status::WaitingForAcceptedPageFlip => {}
+            Status::ResourceRetireFailed => {
+                self.retire_failures = self.retire_failures.saturating_add(1);
+            }
+        }
+    }
+
+    fn observe_callbacks(&mut self, report: sophia_backend_live::LivePageFlipCallbackQueueReport) {
+        self.callback_accepted = self.callback_accepted.saturating_add(report.accepted);
+        self.callback_rejected = self
+            .callback_rejected
+            .saturating_add(report.rejected_unexpected_output + report.rejected_stale_frame_serial);
         self.callback_queue_saturated = self
             .callback_queue_saturated
-            .saturating_add(usize::from(report.tick.page_flip_callbacks.max_reached));
-        Ok(report.tick)
+            .saturating_add(usize::from(report.max_reached));
+    }
+
+    fn initialize(
+        &mut self,
+        runtime: &mut sophia_backend_live::LiveBackendRuntimeAssembly,
+        frame: sophia_backend_live::LiveCpuComposedFrame,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.queue_frame(frame);
+        let export_attempts_before = self.exporter.cpu_frame_export_attempts();
+        self.session
+            .initialize_persistent_native_gbm_scanout(runtime, &mut self.exporter)
+            .map_err(|evidence| {
+                format!("persistent native initial modeset failed: {evidence:?}")
+            })?;
+        if self.exporter.cpu_frame_export_attempts() > export_attempts_before
+            && self.pending_nonzero_pixel_bytes > 0
+        {
+            self.nonzero_exports = self.nonzero_exports.saturating_add(1);
+        }
+        if !self.exporter.pending_cpu_frame() {
+            self.pending_nonzero_pixel_bytes = 0;
+        }
+        self.submissions = self.submissions.saturating_add(1);
+        Ok(())
     }
 
     fn queue_frame(&mut self, frame: sophia_backend_live::LiveCpuComposedFrame) {

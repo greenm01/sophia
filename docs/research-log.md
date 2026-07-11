@@ -34,13 +34,23 @@ submits, deferrals and failures, submit-to-page-flip latency, maximum in-flight
 age, callback pressure, nonzero exports, authority drops, and cleanup debt.
 The non-native repeated-xterm regression and strict verifier fixtures pass.
 
-The strict persistent hardware rerun is open. The corrected counters exposed
-that the current TTY attempt had exported frames but no accepted KMS commit.
-The established one-shot content proof failed at the same atomic commit, while
-River and Xwayland were active on the only DRM card. This isolates the current
-failure to DRM ownership/session state rather than the persistent coordinator;
-rerun `tools/live_session_persistent_hardware_proof.sh` after the supervised
-River session has intentionally released DRM master.
+The strict persistent hardware proof now passes. Corrected counters first
+exposed River ownership and then two real lifetime defects: the runtime retired
+the newly displayed framebuffer instead of the previously displayed one, and
+the shutdown loop retired a frame while immediately submitting another. The
+persistent mode now performs a blocking initial modeset without waiting for an
+event, retains the displayed owner until a later accepted page flip replaces
+it, and has a retire-only idle/shutdown path. A 30-second TTY3 run completed 46
+submissions with 45 steady retirements, six nonzero exports, zero dropped
+authority batches, zero rejected callbacks, zero transition failures, and no
+in-flight or cleanup debt. A subsequent bounded run also reports nonzero
+submit-to-page-flip latency after fixing timestamp association.
+
+Host iteration remains unnecessarily disruptive because River must release the
+only DRM card. The next stability harness should boot Sophia in a headless QEMU
+guest with `virtio-gpu`, serial control, virtual keyboard input, and no guest
+compositor. Use that guest for the 300-tick and repeated-session proofs; retain
+the AMD TTY run for final driver and modifier evidence.
 
 Physical keyboard plumbing now enters the persistent owner through explicit
 libinput event nodes. `InputFocusState` in Sophia Engine validates a seat's
@@ -63,8 +73,8 @@ remain open because no Haskell/xmonad executable is installed.
 
 - Which xmonad startup request is the first unsupported request after setup,
   root event-mask selection, atom/property access, and synthetic lifecycle?
-- Does the exclusive-TTY persistent hardware proof remain clean for 300 ticks
-  and 30 seconds once River releases DRM master?
+- Does the isolated QEMU `virtio-gpu` session remain clean for 300 deterministic
+  ticks and repeated process restarts?
 - Can an operator-typed run produce nonzero physical key routing and changed
   xterm pixels through the existing Engine focus path?
 

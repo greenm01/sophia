@@ -67,7 +67,12 @@ tools/live_session_persistent_hardware_proof.sh
 The verifier requires at least one nonzero terminal frame export, successful
 submit and retirement, no rejected page-flip callbacks, no dropped authority
 batches, and no in-flight frame or cleanup debt at shutdown. A running River or
-other compositor owns DRM master and must be stopped before this proof.
+other compositor owns DRM master and must be stopped before this proof. The
+persistent path performs a blocking initial modeset, retains the displayed
+framebuffer until a later frame replaces it, and uses event-driven nonblocking
+page flips for steady updates. Both the bounded proof and a 30-second TTY3 run
+pass. Use an isolated QEMU `virtio-gpu` guest for repeated development and keep
+the physical TTY proof for final driver evidence.
 
 The destructive TTY3 terminal-content presentation proof is:
 
@@ -133,10 +138,10 @@ resource behavior the real xterm stream demands.
 
 Next live-session blockers:
 
-- pass the strict persistent GBM/KMS proof from an exclusive TTY;
 - route physical keyboard input into the focused X terminal surface;
 - prove operator-typed text reaches terminal pixels before running Codex inside
-  Sophia.
+  Sophia;
+- add the QEMU session harness and pass 300 deterministic ticks.
 
 ## Input Milestone
 

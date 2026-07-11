@@ -17,6 +17,11 @@ pub struct LiveBackendRuntimeAssembly<P = QueuedInputPoller> {
     pub(crate) rendered_primary_plane_scanout_submission:
         Option<BoxedRenderedPrimaryPlaneScanoutSubmission>,
     #[cfg(feature = "libdrm-events")]
+    pub(crate) rendered_primary_plane_displayed_submission:
+        Option<BoxedRenderedPrimaryPlaneScanoutSubmission>,
+    #[cfg(feature = "libdrm-events")]
+    pub(crate) retain_rendered_primary_plane_displayed_submission: bool,
+    #[cfg(feature = "libdrm-events")]
     pub(crate) rendered_primary_plane_scanout_cleanup:
         Option<BoxedRenderedPrimaryPlaneScanoutCleanup>,
     #[cfg(feature = "libdrm-events")]
@@ -67,6 +72,10 @@ where
             libdrm_poller_diagnostics: LiveLibdrmPollerDiagnostics::not_configured(),
             #[cfg(feature = "libdrm-events")]
             rendered_primary_plane_scanout_submission: None,
+            #[cfg(feature = "libdrm-events")]
+            rendered_primary_plane_displayed_submission: None,
+            #[cfg(feature = "libdrm-events")]
+            retain_rendered_primary_plane_displayed_submission: false,
             #[cfg(feature = "libdrm-events")]
             rendered_primary_plane_scanout_cleanup: None,
             #[cfg(feature = "libdrm-events")]

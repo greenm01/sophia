@@ -39,6 +39,14 @@ pub struct LiveBackendRuntimeNativePageFlipTickReport {
     pub tick: LiveBackendRuntimeTickReport,
 }
 
+#[cfg(feature = "libdrm-events")]
+#[derive(Clone, Debug, PartialEq)]
+pub struct LiveRenderedPrimaryPlanePageFlipDrainReport {
+    pub page_flip_callbacks: LivePageFlipCallbackQueueReport,
+    pub rendered_primary_plane_scanout_retire:
+        Option<LiveTrackedRenderedPrimaryPlaneScanoutRetireReport>,
+}
+
 pub(crate) struct LiveBackendRuntimeTickReportInput {
     pub engine: CompositorBackendTickReport,
     pub page_flip_callbacks: LivePageFlipCallbackQueueReport,

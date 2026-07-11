@@ -35,7 +35,8 @@ Current truth:
   live backend runtime and CPU scene until bounded or externally stopped. Its
   gated `--native-scanout` mode owns GBM/KMS export, submit, page-flip intake,
   retirement, and cleanup in that same loop. The strict persistent hardware
-  proof still needs an exclusive TTY rerun without River holding DRM master.
+  proof and a 30-second TTY3 run pass without dropped batches, callback
+  rejection, submit/retire failure, or cleanup debt.
 
 Exit criteria:
 
@@ -43,10 +44,8 @@ Exit criteria:
   fixed-font text path demanded by xterm.
 - [x] Compose those pixels into a renderer-owned frame and prove the scanned-out
   frame contains terminal content rather than an allocated blank buffer.
-- [ ] Keep X Authority, live backend ticks, scanout ownership, and xterm alive
+- [x] Keep X Authority, live backend ticks, scanout ownership, and xterm alive
   under one persistent session owner until the outside control plane stops it.
-  The ownership path is implemented; the new bounded verifier must pass after
-  the supervised River session releases DRM master.
 - [ ] Route focused keyboard press/release events from physical libinput into
   xterm and prove typed text changes composed terminal pixels. The route and
   real device open pass; the injected X11-event proof passes; TTY typing
@@ -72,8 +71,10 @@ Exit criteria:
 - [x] Record submit-to-page-flip latency, maximum in-flight frame age, authority
   queue capacity, rejected/dropped batches, page-flip callback pressure, and
   cleanup debt over repeated ticks.
-- [ ] Pass 300 deterministic ticks and a 30-second TTY hardware session with no
-  dropped authority batches or unresolved cleanup debt.
+- [x] Pass a 30-second TTY hardware session with no dropped authority batches,
+  rejected callbacks, failed scanout transitions, or unresolved cleanup debt.
+- [ ] Add an isolated QEMU `virtio-gpu` session harness and pass 300
+  deterministic ticks without depending on host DRM or VT ownership.
 
 ### 3. Wayland Authority Skeleton
 

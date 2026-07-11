@@ -124,6 +124,17 @@ impl RealAtomicScanoutPageFlipSession {
                 max_emit,
             )
     }
+
+    #[cfg(feature = "libdrm-events")]
+    pub fn poll_native_page_flip_events(
+        &mut self,
+        sender: &std::sync::mpsc::SyncSender<LivePageFlipCallback>,
+        max_read: usize,
+        max_emit: usize,
+    ) -> LibdrmNativeReadAndPollReport {
+        self.poller
+            .read_and_poll_page_flip_events(&mut self.reader, sender, max_read, max_emit)
+    }
 }
 
 #[derive(Debug)]

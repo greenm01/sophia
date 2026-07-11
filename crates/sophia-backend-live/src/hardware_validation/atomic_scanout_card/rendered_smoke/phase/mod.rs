@@ -44,6 +44,33 @@ impl RealAtomicScanoutSubmittedSmokePhase {
 }
 
 impl RealAtomicScanoutPageFlipSession {
+    pub fn initialize_persistent_native_gbm_scanout<P, R>(
+        &mut self,
+        runtime: &mut LiveBackendRuntimeAssembly<P>,
+        exporter: &mut NativeGbmRenderedScanoutBufferDiscoveryExporter<R>,
+    ) -> Result<(), LibdrmNativeAtomicScanoutSmokeEvidence>
+    where
+        P: NonBlockingInputPoller,
+        R: RenderDeviceDiscoveryBackend,
+    {
+        let mut submitted = self.submit_native_gbm_rendered_primary_plane_smoke_phase_with_policy(
+            LibdrmNativeAtomicScanoutSmokePhase::InitialModeset,
+            exporter,
+            LibdrmNativePrimaryPlaneScanoutSubmitPolicy::blocking_modeset(),
+        )?;
+        let Some(submission) = submitted.submission.take() else {
+            let mut evidence = submitted.evidence(None, None, None);
+            evidence.status = LibdrmNativeAtomicScanoutSmokeStatus::RetainedResourceMissing;
+            return Err(evidence);
+        };
+        if !runtime.adopt_presented_rendered_primary_plane_scanout(submission) {
+            let mut evidence = submitted.evidence(None, None, None);
+            evidence.status = LibdrmNativeAtomicScanoutSmokeStatus::RetainedResourceMissing;
+            return Err(evidence);
+        }
+        Ok(())
+    }
+
     pub fn run_native_gbm_rendered_primary_plane_smoke_phase<R>(
         &mut self,
         phase: LibdrmNativeAtomicScanoutSmokePhase,
@@ -78,6 +105,22 @@ impl RealAtomicScanoutPageFlipSession {
         &mut self,
         phase: LibdrmNativeAtomicScanoutSmokePhase,
         exporter: &mut NativeGbmRenderedScanoutBufferDiscoveryExporter<R>,
+    ) -> Result<RealAtomicScanoutSubmittedSmokePhase, LibdrmNativeAtomicScanoutSmokeEvidence>
+    where
+        R: RenderDeviceDiscoveryBackend,
+    {
+        self.submit_native_gbm_rendered_primary_plane_smoke_phase_with_policy(
+            phase,
+            exporter,
+            submit_policy_for_smoke_phase(phase),
+        )
+    }
+
+    fn submit_native_gbm_rendered_primary_plane_smoke_phase_with_policy<R>(
+        &mut self,
+        phase: LibdrmNativeAtomicScanoutSmokePhase,
+        exporter: &mut NativeGbmRenderedScanoutBufferDiscoveryExporter<R>,
+        submit_policy: LibdrmNativePrimaryPlaneScanoutSubmitPolicy,
     ) -> Result<RealAtomicScanoutSubmittedSmokePhase, LibdrmNativeAtomicScanoutSmokeEvidence>
     where
         R: RenderDeviceDiscoveryBackend,
@@ -149,7 +192,7 @@ impl RealAtomicScanoutPageFlipSession {
                 },
                 descriptor,
                 prime_fds.into_plane_fds(),
-                submit_policy_for_smoke_phase(phase),
+                submit_policy,
             )
         } else {
             submit_native_primary_plane_scanout_from_selection_and_renderer_descriptor_with_policy(
@@ -159,7 +202,7 @@ impl RealAtomicScanoutPageFlipSession {
                     selection: Some(selected),
                 },
                 descriptor,
-                submit_policy_for_smoke_phase(phase),
+                submit_policy,
             )
         };
         if submit.status != LibdrmNativePrimaryPlaneScanoutSubmitStatus::SubmittedWaitingForPageFlip

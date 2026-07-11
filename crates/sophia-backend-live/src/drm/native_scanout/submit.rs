@@ -206,6 +206,16 @@ where
     } else {
         request
     };
+    let request = if policy.page_flip_event {
+        request
+    } else {
+        request.without_page_flip_event()
+    };
+    let request = if policy.nonblocking {
+        request
+    } else {
+        request.blocking()
+    };
     let request_scope = request.reduced_scope();
     if request_scope != policy.expected_request_scope() {
         let destroy = destroy_native_primary_plane_resources(device, resource_bundle);
