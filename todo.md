@@ -21,8 +21,10 @@ Current truth:
   proof produces inspectable text pixels, and the CPU compositor produces a
   deterministic terminal frame.
 - A bounded core-keyboard channel, US keymap, and real xterm smoke prove that
-  injected `sophia` plus Return changes later terminal pixels. Physical
-  libinput-to-focused-client routing is not connected yet.
+  injected `sophia` plus Return changes later terminal pixels. Persistent mode
+  can now open explicit libinput device paths, route keys through Engine-owned
+  seat focus, and translate evdev modifiers into core X events. An operator
+  typed-text pixel proof is still required.
 - TTY3 native GBM/KMS submit, page-flip retirement, and cleanup evidence pass.
 - The native renderer can upload a composed XRGB8888 frame into its GL/GBM
   front buffer, but terminal-content scanout has not yet been hardware-proven.
@@ -42,8 +44,9 @@ Exit criteria:
   Authority, backend ticks, and xterm are persistent; native scanout ownership
   is the remaining part of this item.
 - [ ] Route focused keyboard press/release events from physical libinput into
-  xterm and prove typed text changes composed terminal pixels. The injected
-  X11-event proof already passes.
+  xterm and prove typed text changes composed terminal pixels. The route and
+  real device open pass; the injected X11-event proof passes; TTY typing
+  evidence remains.
 
 ---
 

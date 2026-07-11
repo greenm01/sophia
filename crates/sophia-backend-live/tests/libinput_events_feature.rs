@@ -13,9 +13,9 @@ use sophia_backend_live::{
     LiveHardwareValidationSmokeReport, LiveHardwareValidationSmokeStatus,
     LiveHardwareValidationTarget, LiveInputReadinessGateReport, LiveInputReadinessGateStatus,
     LiveInputReadinessGatedPoller, NativeLibinputDeviceMap, NativeLibinputEventPoller,
-    NativeLibinputEventReader, NonBlockingInputPoller, SeatId, discover_live_backend,
-    native_libinput_event_adapter_report, real_libinput_events_validation_gate,
-    real_libinput_events_validation_smoke_report,
+    NativeLibinputEventReader, NativeLibinputOpenError, NonBlockingInputPoller, SeatId,
+    discover_live_backend, native_libinput_event_adapter_report, open_native_libinput_path_poller,
+    real_libinput_events_validation_gate, real_libinput_events_validation_smoke_report,
 };
 use sophia_protocol::{InputEventKind, Point};
 
@@ -26,6 +26,29 @@ fn native_libinput_event_adapter_skeleton_reports_ready_without_opening_devices(
         LibinputNativeEventAdapterReport {
             status: LibinputNativeEventAdapterStatus::SkeletonReady,
         }
+    );
+}
+
+#[test]
+fn native_libinput_path_poller_fails_closed_without_exposing_paths() {
+    let devices = NativeLibinputDeviceMap::new(SeatId::from_raw(1));
+    assert_eq!(
+        open_native_libinput_path_poller(&[], devices, 64).unwrap_err(),
+        NativeLibinputOpenError::NoDevices
+    );
+    assert_eq!(
+        open_native_libinput_path_poller(&[PathBuf::from("relative-event")], devices, 64)
+            .unwrap_err(),
+        NativeLibinputOpenError::InvalidDevicePath
+    );
+    assert_eq!(
+        open_native_libinput_path_poller(
+            &[PathBuf::from("/definitely/missing/sophia-input-event")],
+            devices,
+            64,
+        )
+        .unwrap_err(),
+        NativeLibinputOpenError::DeviceUnavailable
     );
 }
 

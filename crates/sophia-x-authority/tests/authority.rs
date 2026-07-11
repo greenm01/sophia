@@ -258,6 +258,21 @@ fn repeated_runtime_draws_advance_surface_generations() {
 }
 
 #[test]
+fn evdev_keyboard_mapping_preserves_x_modifier_event_order() {
+    let mut keyboard = XCoreKeyboardMapper::new();
+    assert_eq!(keyboard.map_evdev_key(42, true), Some((50, 0)));
+    assert_eq!(keyboard.modifier_mask(), 1);
+    assert_eq!(keyboard.map_evdev_key(30, true), Some((38, 1)));
+    assert_eq!(keyboard.map_evdev_key(30, false), Some((38, 1)));
+    assert_eq!(keyboard.map_evdev_key(42, false), Some((50, 1)));
+    assert_eq!(keyboard.modifier_mask(), 0);
+
+    assert_eq!(keyboard.map_evdev_key(58, true), Some((66, 0)));
+    assert_eq!(keyboard.modifier_mask(), 2);
+    assert_eq!(keyboard.map_evdev_key(u32::MAX, true), None);
+}
+
+#[test]
 fn drawing_updates_fail_closed_for_cross_namespace_or_unknown_windows() {
     let owner = NamespaceId::from_raw(1);
     let other = NamespaceId::from_raw(2);

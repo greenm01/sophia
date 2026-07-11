@@ -1,5 +1,8 @@
 use super::prelude::*;
 
+use sophia_engine::{FocusedInputRoute, InputFocusState, NonBlockingInputPoller};
+use sophia_protocol::{DeviceId, SeatId};
+use sophia_x_authority::XCoreKeyboardMapper;
 use std::collections::BTreeMap;
 use std::process::{Child, Stdio};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
@@ -8,6 +11,8 @@ use std::time::{Duration, Instant};
 const SESSION_AUTHORITY_CAPACITY: usize = 256;
 const SESSION_KEY_CAPACITY: usize = 64;
 const SESSION_INPUT_QUIET_MSEC: u64 = 100;
+const SESSION_SEAT_RAW: u64 = 1;
+const SESSION_KEYBOARD_DEVICE_RAW: u64 = 1;
 
 pub(crate) fn run_persistent_xterm_session(
     args: &[String],
@@ -15,6 +20,16 @@ pub(crate) fn run_persistent_xterm_session(
     let config = PersistentXtermSessionConfig::from_args(args)?;
     let terminal = super::x_authority::resolve_external_probe_binary("xterm", &config.terminal)?;
     prepare_display_socket(&config.socket_path)?;
+    let mut physical_input = if config.input_devices.is_empty() {
+        None
+    } else {
+        Some(sophia_backend_live::open_native_libinput_path_poller(
+            &config.input_devices,
+            sophia_backend_live::NativeLibinputDeviceMap::new(SeatId::from_raw(SESSION_SEAT_RAW))
+                .with_keyboard_device(DeviceId::from_raw(SESSION_KEYBOARD_DEVICE_RAW)),
+            64,
+        )?)
+    };
 
     let server_path = config.socket_path.clone();
     let (authority_sender, authority_receiver) = sync_channel(SESSION_AUTHORITY_CAPACITY);
@@ -55,8 +70,15 @@ pub(crate) fn run_persistent_xterm_session(
     let mut process = SessionProcessGuard::new(child, config.socket_path.clone());
 
     println!(
-        "sophia_live_session schema=1 status=running display={} terminal=xterm runtime=persistent authority_capacity={} key_capacity={} native_presentation=pending physical_input=pending",
-        config.display, SESSION_AUTHORITY_CAPACITY, SESSION_KEY_CAPACITY,
+        "sophia_live_session schema=2 status=running display={} terminal=xterm runtime=persistent authority_capacity={} key_capacity={} native_presentation=pending physical_input={}",
+        config.display,
+        SESSION_AUTHORITY_CAPACITY,
+        SESSION_KEY_CAPACITY,
+        if physical_input.is_some() {
+            "enabled"
+        } else {
+            "disabled"
+        },
     );
 
     let result = run_session_loop(
@@ -64,6 +86,7 @@ pub(crate) fn run_persistent_xterm_session(
         &authority_receiver,
         &key_sender,
         process.child_mut()?,
+        &mut physical_input,
     );
     process.terminate()?;
     drop(key_sender);
@@ -81,6 +104,7 @@ struct PersistentXtermSessionConfig {
     terminal: String,
     max_runtime: Option<Duration>,
     inject_text: Option<String>,
+    input_devices: Vec<std::path::PathBuf>,
 }
 
 impl PersistentXtermSessionConfig {
@@ -93,6 +117,21 @@ impl PersistentXtermSessionConfig {
             .transpose()?
             .map(Duration::from_millis);
         let inject_text = arg_value(args, "--inject-text");
+        let input_devices = arg_value(args, "--input-devices")
+            .map(|paths| {
+                paths
+                    .split(',')
+                    .map(std::path::PathBuf::from)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if input_devices.len() > 16
+            || input_devices
+                .iter()
+                .any(|path| !path.is_absolute() || path.as_os_str().is_empty())
+        {
+            return Err("--input-devices accepts 1-16 comma-separated absolute paths".into());
+        }
         if inject_text.is_some() && max_runtime.is_none() {
             return Err("--inject-text requires --max-runtime-ms for a bounded proof".into());
         }
@@ -109,6 +148,7 @@ impl PersistentXtermSessionConfig {
             terminal: arg_value(args, "--terminal").unwrap_or_else(|| "xterm".to_owned()),
             max_runtime,
             inject_text,
+            input_devices,
         })
     }
 }
@@ -142,6 +182,11 @@ fn run_session_loop(
     authority_receiver: &Receiver<XAuthorityObservedTransactionBatch>,
     key_sender: &SyncSender<XAuthorityKeyEvent>,
     child: &mut Child,
+    physical_input: &mut Option<
+        sophia_backend_live::NativeLibinputEventPoller<
+            sophia_backend_live::NativeLibinputEventReader,
+        >,
+    >,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let started = Instant::now();
     let deadline = config.max_runtime.map(|duration| started + duration);
@@ -156,6 +201,11 @@ fn run_session_loop(
     let mut backend_ticks = 0usize;
     let mut runtime_committed = 0u64;
     let mut runtime_surfaces = 0u64;
+    let mut focus = InputFocusState::new();
+    let mut modifiers = XCoreKeyboardMapper::new();
+    let mut physical_events = 0usize;
+    let mut physical_keys_routed = 0usize;
+    let seat = SeatId::from_raw(SESSION_SEAT_RAW);
 
     loop {
         if let Some(status) = child.try_wait()? {
@@ -189,11 +239,29 @@ fn run_session_loop(
                     .runtime_state
                     .authority_transactions_committed;
                 runtime_surfaces = tick.engine.runtime.runtime_state.authority_surfaces_applied;
+                if focus.focused_surface(seat).is_none()
+                    && let Some(surface) = runtime.committed_surfaces().first()
+                {
+                    let _ =
+                        focus.focus_surface(seat, surface.surface, runtime.committed_surfaces());
+                }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                 return Err("persistent X authority transaction channel disconnected".into());
             }
+        }
+
+        if let (Some(poller), Some(runtime)) = (physical_input.as_mut(), runtime.as_ref()) {
+            let report = route_physical_keyboard(
+                poller,
+                &focus,
+                runtime.committed_surfaces(),
+                key_sender,
+                &mut modifiers,
+            )?;
+            physical_events = physical_events.saturating_add(report.events);
+            physical_keys_routed = physical_keys_routed.saturating_add(report.keys_routed);
         }
 
         if injection_checksum.is_none()
@@ -225,7 +293,7 @@ fn run_session_loop(
         .into());
     }
     println!(
-        "sophia_live_session schema=1 status=bounded_complete display={} elapsed_msec={} authority_batches={} authority_transactions={} backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_checksum={} injected_input={} input_pixel_change={} native_presentation=pending physical_input=pending",
+        "sophia_live_session schema=2 status=bounded_complete display={} elapsed_msec={} authority_batches={} authority_transactions={} backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_checksum={} injected_input={} input_pixel_change={} physical_events={} physical_keys_routed={} native_presentation=pending physical_input={}",
         config.display,
         started.elapsed().as_millis(),
         batches,
@@ -238,6 +306,13 @@ fn run_session_loop(
         report.checksum,
         config.inject_text.is_some(),
         input_pixel_change,
+        physical_events,
+        physical_keys_routed,
+        if physical_input.is_some() {
+            "enabled"
+        } else {
+            "disabled"
+        },
     );
     Ok(())
 }
@@ -307,6 +382,10 @@ impl PersistentBackendRuntime {
                 scanout_lifecycle_states: Vec::new(),
             })
             .map_err(Into::into)
+    }
+
+    fn committed_surfaces(&self) -> &[CommittedSurfaceState] {
+        self.runtime.assembly().committed_surfaces()
     }
 }
 
@@ -422,6 +501,49 @@ fn send_test_text(
         }
     }
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct PhysicalKeyboardRouteReport {
+    events: usize,
+    keys_routed: usize,
+}
+
+fn route_physical_keyboard(
+    poller: &mut sophia_backend_live::NativeLibinputEventPoller<
+        sophia_backend_live::NativeLibinputEventReader,
+    >,
+    focus: &InputFocusState,
+    committed_surfaces: &[CommittedSurfaceState],
+    key_sender: &SyncSender<XAuthorityKeyEvent>,
+    modifiers: &mut XCoreKeyboardMapper,
+) -> Result<PhysicalKeyboardRouteReport, Box<dyn std::error::Error>> {
+    let events = poller.poll_ready()?;
+    let mut report = PhysicalKeyboardRouteReport {
+        events: events.len(),
+        keys_routed: 0,
+    };
+    for event in events {
+        let FocusedInputRoute::Routed(event) =
+            focus.route_keyboard_event(event, committed_surfaces)
+        else {
+            continue;
+        };
+        let sophia_protocol::InputEventKind::Key { keycode, pressed } = event.kind else {
+            continue;
+        };
+        let Some((keycode, state)) = modifiers.map_evdev_key(keycode, pressed) else {
+            continue;
+        };
+        key_sender.try_send(XAuthorityKeyEvent {
+            keycode,
+            pressed,
+            state,
+            time_msec: u32::try_from(event.time_msec).unwrap_or(u32::MAX),
+        })?;
+        report.keys_routed = report.keys_routed.saturating_add(1);
+    }
+    Ok(report)
 }
 
 struct SessionProcessGuard {

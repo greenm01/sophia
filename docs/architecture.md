@@ -81,8 +81,10 @@ evidence that terminal-content pixels, rather than the old clear color, reach
 scanout.
 
 The active architecture step is a persistent owner joining X Authority, native
-scanout, and focused physical keyboard routing. The injected core-X event path
-already changes real xterm pixels. xmonad then enters through the isolated
+scanout, and focused physical keyboard routing. Explicit libinput devices now
+reduce into Engine-owned seat focus and then core X events; operator typed-text
+evidence remains. The injected core-X event path already changes real xterm
+pixels. xmonad then enters through the isolated
 blind X11 WM bridge, whose bounded ID and configure/focus translation model now
 exists, never through the client-facing X Authority display.
 

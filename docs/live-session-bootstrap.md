@@ -30,7 +30,19 @@ This default mode binds `:77` unless `--display=:NUMBER` is supplied, launches
 one xterm, and keeps the X Authority server, live backend runtime, and composed
 CPU scene alive until xterm exits or the outside control plane stops Sophia.
 It refuses an active display socket rather than replacing it. Native scanout
-and physical input remain pending, so keep the outside TTY control plane.
+remains pending, so keep the outside TTY control plane. Physical keyboard input
+can be enabled with one or more explicit comma-separated event nodes:
+
+```sh
+cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- \
+  sophia-live-session --display=:77 \
+  --input-devices=/dev/input/by-path/platform-i8042-serio-0-event-kbd
+```
+
+The backend opens those nodes through libinput, reduces events to protocol-
+neutral packets, asks Engine's seat focus state for a committed surface, then
+maps accepted evdev keys to core X events. Reduced status reports only event and
+routed-key counts, never device paths.
 
 A bounded persistence/input regression is:
 
@@ -99,7 +111,8 @@ Next live-session blockers:
 - hardware-prove the composed terminal frame through native GL/GBM scanout;
 - join the persistent CPU/backend loop to native GBM/KMS presentation;
 - route physical keyboard input into the focused X terminal surface;
-- prove typed text reaches the terminal before running Codex inside Sophia.
+- prove operator-typed text reaches terminal pixels before running Codex inside
+  Sophia.
 
 ## Input Milestone
 

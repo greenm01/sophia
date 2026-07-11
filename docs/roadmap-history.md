@@ -99,6 +99,8 @@ validation evidence in `docs/research-log.md`.
 - [x] Added persistent `sophia-live-session` display/xterm ownership with one
   live backend runtime, repeated CPU composition, bounded shutdown, and a real
   injected-input pixel-change regression.
+- [x] Added Engine-owned seat focus validation and an explicit libinput-device
+  route from reduced physical key packets to X Authority core keyboard events.
 
 - [x] Expand X11 atom/property tables for ICCCM names and metadata-broker
   candidates.

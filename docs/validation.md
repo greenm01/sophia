@@ -67,6 +67,8 @@ cargo test --offline -q -p sophia-backend-live --features libdrm-events live_ses
 cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- live-session-composition-smoke
 cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- sophia-live-session --proof --terminal=xterm
 cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- sophia-live-session --display=:177 --max-runtime-ms=2500 --inject-text=sophia
+# Operator TTY proof: add --input-devices=/dev/input/by-path/...-event-kbd,
+# type into xterm, and require physical_keys_routed>0 plus changed pixels.
 ```
 
 `live-session-composition-smoke` is non-destructive. Its reduced output must

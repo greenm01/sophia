@@ -1,6 +1,8 @@
 use crate::prelude::*;
 
-use super::{LibinputNativeEventReadReport, LibinputNativeEventReadResult};
+use super::{
+    LibinputNativeEventReadReport, LibinputNativeEventReadResult, NativeLibinputEventPoller,
+};
 
 use input::event::{
     Event as NativeLibinputEvent,
@@ -8,6 +10,9 @@ use input::event::{
     pointer::{ButtonState, PointerEvent, PointerEventTrait},
 };
 use sophia_protocol::{InputEventKind, Point};
+use std::os::fd::OwnedFd;
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
 pub struct NativeLibinputEventReader {
@@ -138,4 +143,65 @@ impl LiveLibinputEventReader for NativeLibinputEventReader {
             events,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct DirectLibinputInterface;
+
+impl input::LibinputInterface for DirectLibinputInterface {
+    fn open_restricted(&mut self, path: &Path, flags: i32) -> Result<OwnedFd, i32> {
+        std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(flags)
+            .open(path)
+            .map(Into::into)
+            .map_err(|error| error.raw_os_error().unwrap_or(1))
+    }
+
+    fn close_restricted(&mut self, fd: OwnedFd) {
+        drop(fd);
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeLibinputOpenError {
+    NoDevices,
+    TooManyDevices,
+    InvalidDevicePath,
+    DeviceUnavailable,
+}
+
+impl core::fmt::Display for NativeLibinputOpenError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(formatter, "native libinput open failed: {self:?}")
+    }
+}
+
+impl std::error::Error for NativeLibinputOpenError {}
+
+pub fn open_native_libinput_path_poller(
+    paths: &[PathBuf],
+    devices: NativeLibinputDeviceMap,
+    max_read_per_poll: usize,
+) -> Result<NativeLibinputEventPoller<NativeLibinputEventReader>, NativeLibinputOpenError> {
+    if paths.is_empty() {
+        return Err(NativeLibinputOpenError::NoDevices);
+    }
+    if paths.len() > 16 {
+        return Err(NativeLibinputOpenError::TooManyDevices);
+    }
+    let mut libinput = input::Libinput::new_from_path(DirectLibinputInterface);
+    for path in paths {
+        let path = path
+            .to_str()
+            .filter(|path| path.starts_with('/'))
+            .ok_or(NativeLibinputOpenError::InvalidDevicePath)?;
+        libinput
+            .path_add_device(path)
+            .ok_or(NativeLibinputOpenError::DeviceUnavailable)?;
+    }
+    Ok(NativeLibinputEventPoller::new(
+        NativeLibinputEventReader::new(libinput, devices),
+        max_read_per_poll.clamp(1, 256),
+    ))
 }
