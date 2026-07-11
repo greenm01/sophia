@@ -273,6 +273,17 @@ fn evdev_keyboard_mapping_preserves_x_modifier_event_order() {
 }
 
 #[test]
+fn evdev_pointer_mapping_preserves_core_button_state_order() {
+    let mut pointer = XCorePointerMapper::new();
+
+    assert_eq!(pointer.map_evdev_button(272, true), Some((1, 0)));
+    assert_eq!(pointer.state(), 1 << 8);
+    assert_eq!(pointer.map_evdev_button(272, false), Some((1, 1 << 8)));
+    assert_eq!(pointer.state(), 0);
+    assert_eq!(pointer.map_evdev_button(999, true), None);
+}
+
+#[test]
 fn drawing_updates_fail_closed_for_cross_namespace_or_unknown_windows() {
     let owner = NamespaceId::from_raw(1);
     let other = NamespaceId::from_raw(2);

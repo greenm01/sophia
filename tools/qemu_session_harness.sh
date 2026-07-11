@@ -106,6 +106,28 @@ if ! "$ROOT_DIR/tools/qemu_qmp_type.py" "$QMP_SOCKET" sophia; then
 fi
 echo "sophia_qemu_input schema=1 status=sent source=qmp device=virtio-keyboard text=sophia events=14" | tee -a "$EVIDENCE_FILE"
 
+pointer_ready=false
+for _ in $(seq 1 100); do
+    if grep -q '^sophia_live_session_pointer schema=1 status=ready source=physical action=select$' "$EVIDENCE_FILE"; then
+        pointer_ready=true
+        break
+    fi
+    if ! kill -0 "$QEMU_PID" 2>/dev/null; then
+        break
+    fi
+    sleep 0.05
+done
+if [[ "$pointer_ready" != true ]]; then
+    echo "sophia_qemu_session schema=2 status=failed reason=pointer_readiness_timeout" | tee -a "$EVIDENCE_FILE"
+    exit 1
+fi
+
+if ! "$ROOT_DIR/tools/qemu_qmp_pointer.py" "$QMP_SOCKET"; then
+    echo "sophia_qemu_session schema=2 status=failed reason=qmp_pointer_send" | tee -a "$EVIDENCE_FILE"
+    exit 1
+fi
+echo "sophia_qemu_pointer schema=1 status=sent source=qmp device=virtio-mouse action=select commands=5" | tee -a "$EVIDENCE_FILE"
+
 set +e
 wait "$QEMU_PID"
 qemu_status=$?

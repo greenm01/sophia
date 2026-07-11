@@ -37,6 +37,7 @@ expected_keys=(
     runtime_committed runtime_surfaces cpu_layers cpu_nonzero_pixel_bytes
     cpu_max_nonzero_pixel_bytes cpu_nonzero_frames cpu_checksum injected_input
     input_pixel_change physical_events physical_keys_routed native_presentation
+    pointer_pixel_change physical_pointer_events physical_pointer_routed pointer_proof
     native_submissions native_submit_deferred native_submit_failures
     native_retirements native_retire_failures native_max_in_flight_ticks
     native_max_submit_to_page_flip_msec native_callback_accepted
@@ -55,19 +56,22 @@ for key in "${expected_keys[@]}"; do
     fi
 done
 
-[[ "${observed[schema]}" == "5" ]]
+[[ "${observed[schema]}" == "6" ]]
 [[ "${observed[status]}" == "bounded_complete" ]]
 [[ "${observed[injected_input]}" == "true" || "${observed[injected_input]}" == "false" ]]
 [[ "${observed[input_pixel_change]}" == "true" ]]
 [[ "${observed[native_presentation]}" == "enabled" ]]
 [[ "${observed[native_in_flight]}" == "false" ]]
 [[ "${observed[native_cleanup_pending]}" == "false" ]]
+[[ "${observed[pointer_proof]}" == "enabled" || "${observed[pointer_proof]}" == "disabled" ]]
+[[ "${observed[pointer_pixel_change]}" == "true" || "${observed[pointer_pixel_change]}" == "false" ]]
 
 numeric_keys=(
     elapsed_msec session_ticks authority_batches authority_transactions authority_queue_capacity
     authority_batches_dropped backend_ticks runtime_committed runtime_surfaces
     cpu_layers cpu_nonzero_pixel_bytes cpu_max_nonzero_pixel_bytes
     cpu_nonzero_frames cpu_checksum physical_events physical_keys_routed
+    physical_pointer_events physical_pointer_routed
     native_submissions native_submit_deferred native_submit_failures
     native_retirements native_retire_failures native_max_in_flight_ticks
     native_max_submit_to_page_flip_msec native_callback_accepted
@@ -86,6 +90,15 @@ if [[ "${observed[injected_input]}" == "false" ]]; then
         echo "persistent live-session physical proof has no routed physical keys" >&2
         exit 1
     fi
+fi
+if [[ "${observed[pointer_proof]}" == "enabled" ]]; then
+    if [[ "${observed[pointer_pixel_change]}" != "true" ]] || (( observed[physical_pointer_routed] == 0 )); then
+        echo "persistent live-session pointer proof has no routed pixel change" >&2
+        exit 1
+    fi
+elif [[ "${observed[pointer_pixel_change]}" != "false" ]]; then
+    echo "persistent live-session evidence claims pointer pixels without a pointer proof" >&2
+    exit 1
 fi
 
 positive_keys=(
@@ -127,6 +140,10 @@ if (( observed[native_retirements] > observed[native_submissions] )); then
 fi
 if (( observed[native_nonzero_exports] > observed[native_export_attempts] )); then
     echo "persistent live-session evidence has impossible nonzero export count" >&2
+    exit 1
+fi
+if (( observed[physical_pointer_routed] > observed[physical_pointer_events] )); then
+    echo "persistent live-session evidence routed more pointer events than it observed" >&2
     exit 1
 fi
 

@@ -10,25 +10,46 @@ def fail(message: str) -> "NoReturn":
     raise SystemExit(message)
 
 
-def read_reply(stream):
-    while True:
-        line = stream.readline()
-        if not line:
-            fail("QMP connection closed before a reply")
-        message = json.loads(line)
-        if "error" in message:
-            fail(f"QMP command failed: {message['error']}")
-        if "return" in message:
-            return message["return"]
+class QmpClient:
+    def __init__(self, socket_path: str):
+        self.socket_path = socket_path
+        self.connection = None
+        self.stream = None
 
+    def __enter__(self):
+        self.connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.connection.settimeout(5)
+        self.connection.connect(self.socket_path)
+        self.stream = self.connection.makefile("rwb", buffering=0)
+        greeting = json.loads(self.stream.readline())
+        if "QMP" not in greeting:
+            fail("QMP greeting was missing")
+        self.execute("qmp_capabilities")
+        return self
 
-def execute(stream, command: str, arguments=None):
-    request = {"execute": command}
-    if arguments is not None:
-        request["arguments"] = arguments
-    stream.write((json.dumps(request, separators=(",", ":")) + "\n").encode())
-    stream.flush()
-    return read_reply(stream)
+    def __exit__(self, _kind, _value, _traceback):
+        if self.stream is not None:
+            self.stream.close()
+        if self.connection is not None:
+            self.connection.close()
+
+    def execute(self, command: str, arguments=None):
+        request = {"execute": command}
+        if arguments is not None:
+            request["arguments"] = arguments
+        self.stream.write(
+            (json.dumps(request, separators=(",", ":")) + "\n").encode()
+        )
+        self.stream.flush()
+        while True:
+            line = self.stream.readline()
+            if not line:
+                fail("QMP connection closed before a reply")
+            message = json.loads(line)
+            if "error" in message:
+                fail(f"QMP command failed: {message['error']}")
+            if "return" in message:
+                return message["return"]
 
 
 def key_event(qcode: str, down: bool):
@@ -48,17 +69,9 @@ def main():
     if not 1 <= len(text) <= 24 or not text.isascii() or not text.islower() or not text.isalpha():
         fail("text must contain 1-24 lowercase ASCII letters")
 
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-        connection.settimeout(5)
-        connection.connect(socket_path)
-        stream = connection.makefile("rwb", buffering=0)
-        greeting = json.loads(stream.readline())
-        if "QMP" not in greeting:
-            fail("QMP greeting was missing")
-        execute(stream, "qmp_capabilities")
+    with QmpClient(socket_path) as qmp:
         for qcode in [*text, "ret"]:
-            execute(
-                stream,
+            qmp.execute(
                 "input-send-event",
                 {"events": [key_event(qcode, True), key_event(qcode, False)]},
             )

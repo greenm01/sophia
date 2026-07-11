@@ -30,6 +30,14 @@ if [[ "$(grep -c '^sophia_qemu_input schema=1 status=sent source=qmp device=virt
     echo "QEMU evidence is missing QMP keyboard delivery" >&2
     exit 1
 fi
+if [[ "$(grep -c '^sophia_live_session_pointer schema=1 status=ready source=physical action=select$' "$EVIDENCE_FILE" || true)" -ne 1 ]]; then
+    echo "QEMU evidence is missing physical-pointer readiness" >&2
+    exit 1
+fi
+if [[ "$(grep -c '^sophia_qemu_pointer schema=1 status=sent source=qmp device=virtio-mouse action=select commands=5$' "$EVIDENCE_FILE" || true)" -ne 1 ]]; then
+    echo "QEMU evidence is missing QMP pointer delivery" >&2
+    exit 1
+fi
 
 completion_line="$(grep -E '^sophia_live_session .*status=bounded_complete ' "$EVIDENCE_FILE")"
 if [[ ! " $completion_line " =~ " session_ticks=300 " ]]; then
@@ -49,5 +57,14 @@ if [[ -z "$physical_keys" ]] || (( physical_keys == 0 )); then
     echo "QEMU evidence has no routed virtio keyboard events" >&2
     exit 1
 fi
+if [[ ! " $completion_line " =~ " pointer_proof=enabled " ]] || [[ ! " $completion_line " =~ " pointer_pixel_change=true " ]]; then
+    echo "QEMU evidence did not prove visible pointer input" >&2
+    exit 1
+fi
+physical_pointer="$(sed -n 's/.* physical_pointer_routed=\([0-9][0-9]*\) .*/\1/p' <<< "$completion_line")"
+if [[ -z "$physical_pointer" ]] || (( physical_pointer == 0 )); then
+    echo "QEMU evidence has no routed virtio mouse events" >&2
+    exit 1
+fi
 
-echo "QEMU virtio-gpu/QMP-input 300-tick session evidence passed: $EVIDENCE_FILE"
+echo "QEMU virtio-gpu/QMP keyboard+pointer 300-tick session evidence passed: $EVIDENCE_FILE"

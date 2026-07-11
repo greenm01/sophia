@@ -2863,6 +2863,46 @@ fn x11_client_event_encoders_emit_32_byte_records() {
     assert_eq!(read_u32(XByteOrder::LittleEndian, &key[12..16]), 0x220003);
     assert_eq!(read_u16(XByteOrder::LittleEndian, &key[28..30]), 1);
     assert_eq!(key[30], 1);
+
+    let motion = encode_x_client_output(
+        XByteOrder::LittleEndian,
+        XClientOutput::Event(XClientEvent::PointerMotion {
+            sequence: 12,
+            time: 124,
+            root: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+            event: XResourceId::new(0x220003, 1),
+            root_x: 50,
+            root_y: 60,
+            event_x: 10,
+            event_y: 20,
+            state: 1 << 8,
+        }),
+    );
+    assert_eq!(motion[0], 6);
+    assert_eq!(motion[1], 0);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &motion[2..4]), 12);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &motion[24..26]), 10);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &motion[28..30]), 1 << 8);
+
+    let button = encode_x_client_output(
+        XByteOrder::LittleEndian,
+        XClientOutput::Event(XClientEvent::PointerButton {
+            sequence: 13,
+            pressed: true,
+            button: 1,
+            time: 125,
+            root: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+            event: XResourceId::new(0x220003, 1),
+            root_x: 50,
+            root_y: 60,
+            event_x: 10,
+            event_y: 20,
+            state: 0,
+        }),
+    );
+    assert_eq!(button[0], 4);
+    assert_eq!(button[1], 1);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &button[2..4]), 13);
 }
 
 #[test]

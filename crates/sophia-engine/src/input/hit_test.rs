@@ -2,6 +2,23 @@ use crate::prelude::*;
 use crate::render::should_render;
 
 pub fn hit_test_scene_for_input(event: &InputEventPacket, layers: &[LayerSnapshot]) -> InputRoute {
+    hit_test_layers(event, layers, true)
+}
+
+/// Hit-tests Engine visual truth when the authority must retain protocol-native
+/// window identity. A routed result names only the committed Sophia surface.
+pub fn hit_test_scene_surface_for_input(
+    event: &InputEventPacket,
+    layers: &[LayerSnapshot],
+) -> InputRoute {
+    hit_test_layers(event, layers, false)
+}
+
+fn hit_test_layers(
+    event: &InputEventPacket,
+    layers: &[LayerSnapshot],
+    require_window: bool,
+) -> InputRoute {
     let Some(global_position) = event.global_position else {
         return missed_input_route(event, Point::default());
     };
@@ -23,14 +40,15 @@ pub fn hit_test_scene_for_input(event: &InputEventPacket, layers: &[LayerSnapsho
             continue;
         }
 
-        let Some(target_window) = layer.window.filter(|window| window.is_valid()) else {
+        let target_window = layer.window.filter(|window| window.is_valid());
+        if require_window && target_window.is_none() {
             continue;
-        };
+        }
 
         return InputRoute {
             input_serial: event.serial,
             target_surface: Some(layer.surface),
-            target_window: Some(target_window),
+            target_window,
             global_position,
             local_position: Some(Point {
                 x: untransformed_position.x - f64::from(layer.geometry.x),

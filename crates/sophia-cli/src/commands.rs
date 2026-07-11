@@ -39,13 +39,13 @@ mod prelude {
     pub(crate) use sophia_wm_demo::{ExternalWmClient, tile_workspace};
     pub(crate) use sophia_x_authority::{
         X_SOPHIA_PRESENT_EXTENSION_NAME, X_SOPHIA_PRESENT_MAJOR_OPCODE,
-        X_SOPHIA_PRESENT_PIXMAP_MINOR_OPCODE, XAuthorityCpuBufferSnapshot, XAuthorityKeyEvent,
-        XAuthorityObservedTransactionBatch, XAuthorityRequestKind, XAuthorityRequestPacket,
-        XByteOrder, XClientOutput, XResourceId,
-        XSelectionChangeKind as XAuthoritySelectionChangeKind, read_x_authority_response,
-        run_x_authority_socket_server_once, run_x11_core_socket_server_once,
-        run_x11_core_socket_server_once_channel, run_x11_core_socket_server_once_channels,
-        run_x11_core_socket_server_once_observed,
+        X_SOPHIA_PRESENT_PIXMAP_MINOR_OPCODE, XAuthorityCpuBufferSnapshot, XAuthorityInputEvent,
+        XAuthorityKeyEvent, XAuthorityObservedTransactionBatch, XAuthorityPointerEvent,
+        XAuthorityPointerEventKind, XAuthorityRequestKind, XAuthorityRequestPacket, XByteOrder,
+        XClientOutput, XResourceId, XSelectionChangeKind as XAuthoritySelectionChangeKind,
+        read_x_authority_response, run_x_authority_socket_server_once,
+        run_x11_core_socket_server_once, run_x11_core_socket_server_once_channel,
+        run_x11_core_socket_server_once_channels, run_x11_core_socket_server_once_observed,
         run_x11_core_socket_server_once_traced_with_idle_timeout, write_x_authority_request,
     };
     pub(crate) use sophia_x_bridge::{

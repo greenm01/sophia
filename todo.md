@@ -35,8 +35,10 @@ Current truth:
 - The isolated headless QEMU harness boots a direct-kernel initramfs with
   virtio-gpu, virtual keyboard and mouse devices, QMP/serial control, no guest
   network or storage, and no host DRM/VT access. Its strict 300-tick native
-  session and external-keyboard proof passes. Pointer hardware intake has a
-  distinct Engine device ID; pointer hit-testing and X delivery remain open.
+  session and external keyboard/pointer proof passes. QMP word selection sends
+  five virtio-mouse motion/button events through libinput, Engine surface-only
+  hit-testing, and X Authority; all route and change later xterm pixels without
+  exposing X window identity to Engine.
 - Default `sophia-live-session` now binds an explicit display, owns one xterm
   and X Authority server, and drains repeated authority batches through one
   live backend runtime and CPU scene until bounded or externally stopped. Its
@@ -65,9 +67,9 @@ Exit criteria:
 
 ### 1. Pointer And Multi-Output Presentation
 
-- [ ] Drive virtio-mouse motion and buttons through QMP, reduce them through
+- [x] Drive virtio-mouse motion and buttons through QMP, reduce them through
   libinput, apply Engine-owned hit-testing/focus, deliver core X pointer events,
-  and prove a real client changes pixels. Attaching a mouse alone is not proof.
+  and prove a real xterm changes pixels through word selection.
 - [ ] Replace the persistent native session's single selected output with a
   bounded output table whose scanout owner, damage, in-flight frame, retirement,
   and frame clock are tracked independently per output.

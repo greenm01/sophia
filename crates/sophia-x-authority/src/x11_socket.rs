@@ -4,6 +4,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
 #[cfg(unix)]
 use std::{
+    collections::BTreeMap,
     io::{ErrorKind, Read, Write},
     path::Path,
     sync::{
@@ -24,7 +25,7 @@ use crate::{
     x11_setup_request_total_len,
 };
 #[cfg(unix)]
-use sophia_protocol::{NamespaceId, TransactionId};
+use sophia_protocol::{NamespaceId, SurfaceId, TransactionId};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct X11SetupSocketError {
@@ -65,6 +66,40 @@ pub struct XAuthorityKeyEvent {
     pub pressed: bool,
     pub state: u16,
     pub time_msec: u32,
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum XAuthorityPointerEventKind {
+    Motion,
+    Button { button: u8, pressed: bool },
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XAuthorityPointerEvent {
+    pub kind: XAuthorityPointerEventKind,
+    pub surface: SurfaceId,
+    pub root_x: i16,
+    pub root_y: i16,
+    pub event_x: i16,
+    pub event_y: i16,
+    pub state: u16,
+    pub time_msec: u32,
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum XAuthorityInputEvent {
+    Key(XAuthorityKeyEvent),
+    Pointer(XAuthorityPointerEvent),
+}
+
+#[cfg(unix)]
+impl From<XAuthorityKeyEvent> for XAuthorityInputEvent {
+    fn from(event: XAuthorityKeyEvent) -> Self {
+        Self::Key(event)
+    }
 }
 
 /// Authority-owned state shared by every client accepted by one X11 socket
@@ -223,7 +258,7 @@ pub fn run_x11_core_socket_server_once_channels(
     path: impl AsRef<Path>,
     namespace: NamespaceId,
     transaction_sender: SyncSender<XAuthorityObservedTransactionBatch>,
-    key_receiver: Receiver<XAuthorityKeyEvent>,
+    input_receiver: Receiver<XAuthorityInputEvent>,
 ) -> Result<(), X11SetupSocketError> {
     let listener = bind_x11_core_socket_server(path)?;
     let (mut stream, _) = listener.accept().map_err(|error| {
@@ -234,7 +269,7 @@ pub fn run_x11_core_socket_server_once_channels(
         &mut stream,
         namespace,
         &mut state,
-        Some(key_receiver),
+        Some(input_receiver),
         move |trace| {
             try_emit_x_authority_trace(&transaction_sender, &trace)
                 .map_err(|error| X11SetupSocketError::new(error.to_string()))?;
@@ -443,23 +478,25 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
     stream: &mut UnixStream,
     namespace: NamespaceId,
     state: &mut X11CoreSocketServerState,
-    key_receiver: Option<Receiver<XAuthorityKeyEvent>>,
+    input_receiver: Option<Receiver<XAuthorityInputEvent>>,
     mut observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
     let setup = serve_x11_setup_socket_client(stream)?;
     let mut sequence = 0u16;
     let event_sequence = Arc::new(AtomicU16::new(0));
     let focused_window = Arc::new(AtomicU64::new(u64::from(X_SETUP_DEFAULT_ROOT)));
+    let surface_windows = Arc::new(Mutex::new(BTreeMap::new()));
     let output_stream = Arc::new(Mutex::new(stream.try_clone().map_err(|error| {
         X11SetupSocketError::new(format!("failed to clone X11 output socket: {error}"))
     })?));
-    let input_writer = key_receiver
+    let input_writer = input_receiver
         .map(|receiver| {
-            spawn_x11_key_event_writer(
+            spawn_x11_input_event_writer(
                 output_stream.clone(),
                 setup.byte_order,
                 event_sequence.clone(),
                 focused_window.clone(),
+                surface_windows.clone(),
                 receiver,
             )
         })
@@ -486,6 +523,21 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 &request,
             ) {
                 Ok(request) => {
+                    if let crate::XWireRequest::Authority(crate::XAuthorityRequestPacket {
+                        kind:
+                            crate::XAuthorityRequestKind::CreateWindow {
+                                window, surface, ..
+                            },
+                        ..
+                    }) = &request
+                    {
+                        surface_windows
+                            .lock()
+                            .map_err(|_| {
+                                X11SetupSocketError::new("X11 surface/window map lock poisoned")
+                            })?
+                            .insert(*surface, *window);
+                    }
                     if let crate::XWireRequest::Authority(crate::XAuthorityRequestPacket {
                         kind: crate::XAuthorityRequestKind::MapWindow { window, .. },
                         ..
@@ -555,7 +607,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
         let writer_result = writer
             .thread
             .join()
-            .map_err(|_| X11SetupSocketError::new("X11 key event writer thread panicked"))?;
+            .map_err(|_| X11SetupSocketError::new("X11 input event writer thread panicked"))?;
         result?;
         writer_result
     } else {
@@ -564,19 +616,20 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
 }
 
 #[cfg(unix)]
-struct X11KeyEventWriter {
+struct X11InputEventWriter {
     stop: Arc<AtomicBool>,
     thread: std::thread::JoinHandle<Result<(), X11SetupSocketError>>,
 }
 
 #[cfg(unix)]
-fn spawn_x11_key_event_writer(
+fn spawn_x11_input_event_writer(
     stream: Arc<Mutex<UnixStream>>,
     byte_order: XByteOrder,
     sequence: Arc<AtomicU16>,
     focused_window: Arc<AtomicU64>,
-    receiver: Receiver<XAuthorityKeyEvent>,
-) -> Result<X11KeyEventWriter, X11SetupSocketError> {
+    surface_windows: Arc<Mutex<BTreeMap<SurfaceId, XResourceId>>>,
+    receiver: Receiver<XAuthorityInputEvent>,
+) -> Result<X11InputEventWriter, X11SetupSocketError> {
     let stop = Arc::new(AtomicBool::new(false));
     let writer_stop = stop.clone();
     let thread = std::thread::spawn(move || {
@@ -586,17 +639,79 @@ fn spawn_x11_key_event_writer(
                 Err(RecvTimeoutError::Timeout) => continue,
                 Err(RecvTimeoutError::Disconnected) => return Ok(()),
             };
-            let event_window = XResourceId::new(focused_window.load(Ordering::Acquire), 1);
+            let focused_window = XResourceId::new(focused_window.load(Ordering::Acquire), 1);
+            let root = XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1);
+            let sequence = sequence.load(Ordering::Acquire);
             let record = encode_x_client_event(
                 byte_order,
-                XClientEvent::Key {
-                    sequence: sequence.load(Ordering::Acquire),
-                    pressed: event.pressed,
-                    keycode: event.keycode,
-                    time: event.time_msec,
-                    root: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
-                    event: event_window,
-                    state: event.state,
+                match event {
+                    XAuthorityInputEvent::Key(event) => XClientEvent::Key {
+                        sequence,
+                        pressed: event.pressed,
+                        keycode: event.keycode,
+                        time: event.time_msec,
+                        root,
+                        event: focused_window,
+                        state: event.state,
+                    },
+                    XAuthorityInputEvent::Pointer(XAuthorityPointerEvent {
+                        kind: XAuthorityPointerEventKind::Motion,
+                        surface,
+                        root_x,
+                        root_y,
+                        event_x,
+                        event_y,
+                        state,
+                        time_msec,
+                    }) => XClientEvent::PointerMotion {
+                        sequence,
+                        time: time_msec,
+                        root,
+                        event: *surface_windows
+                            .lock()
+                            .map_err(|_| {
+                                X11SetupSocketError::new("X11 surface/window map lock poisoned")
+                            })?
+                            .get(&surface)
+                            .ok_or_else(|| {
+                                X11SetupSocketError::new("X11 pointer target surface is unknown")
+                            })?,
+                        root_x,
+                        root_y,
+                        event_x,
+                        event_y,
+                        state,
+                    },
+                    XAuthorityInputEvent::Pointer(XAuthorityPointerEvent {
+                        kind: XAuthorityPointerEventKind::Button { button, pressed },
+                        surface,
+                        root_x,
+                        root_y,
+                        event_x,
+                        event_y,
+                        state,
+                        time_msec,
+                    }) => XClientEvent::PointerButton {
+                        sequence,
+                        pressed,
+                        button,
+                        time: time_msec,
+                        root,
+                        event: *surface_windows
+                            .lock()
+                            .map_err(|_| {
+                                X11SetupSocketError::new("X11 surface/window map lock poisoned")
+                            })?
+                            .get(&surface)
+                            .ok_or_else(|| {
+                                X11SetupSocketError::new("X11 pointer target surface is unknown")
+                            })?,
+                        root_x,
+                        root_y,
+                        event_x,
+                        event_y,
+                        state,
+                    },
                 },
             );
             let mut stream = stream
@@ -607,16 +722,16 @@ fn spawn_x11_key_event_writer(
                     return Ok(());
                 }
                 return Err(X11SetupSocketError::new(format!(
-                    "failed to write X11 key event: {error}"
+                    "failed to write X11 input event: {error}"
                 )));
             }
             stream.flush().map_err(|error| {
-                X11SetupSocketError::new(format!("failed to flush X11 key event: {error}"))
+                X11SetupSocketError::new(format!("failed to flush X11 input event: {error}"))
             })?;
         }
         Ok(())
     });
-    Ok(X11KeyEventWriter { stop, thread })
+    Ok(X11InputEventWriter { stop, thread })
 }
 
 #[cfg(unix)]

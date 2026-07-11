@@ -2,7 +2,7 @@ use super::prelude::*;
 
 use sophia_engine::{FocusedInputRoute, InputFocusState, NonBlockingInputPoller};
 use sophia_protocol::{DeviceId, SeatId};
-use sophia_x_authority::XCoreKeyboardMapper;
+use sophia_x_authority::{XCoreKeyboardMapper, XCorePointerMapper};
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::process::{Child, Stdio};
@@ -41,13 +41,13 @@ pub(crate) fn run_persistent_xterm_session(
 
     let server_path = config.socket_path.clone();
     let (authority_sender, authority_receiver) = sync_channel(SESSION_AUTHORITY_CAPACITY);
-    let (key_sender, key_receiver) = sync_channel(SESSION_KEY_CAPACITY);
+    let (input_sender, input_receiver) = sync_channel(SESSION_KEY_CAPACITY);
     let server = std::thread::spawn(move || {
         run_x11_core_socket_server_once_channels(
             &server_path,
             NamespaceId::from_raw(50),
             authority_sender,
-            key_receiver,
+            input_receiver,
         )
     });
     super::x_authority::wait_for_socket_path(&config.socket_path)?;
@@ -78,7 +78,7 @@ pub(crate) fn run_persistent_xterm_session(
     let mut process = SessionProcessGuard::new(child, config.socket_path.clone());
 
     println!(
-        "sophia_live_session schema=5 status=running display={} terminal=xterm runtime=persistent authority_capacity={} key_capacity={} native_presentation={} physical_input={}",
+        "sophia_live_session schema=6 status=running display={} terminal=xterm runtime=persistent authority_capacity={} input_capacity={} native_presentation={} physical_input={} pointer_proof={}",
         config.display,
         SESSION_AUTHORITY_CAPACITY,
         SESSION_KEY_CAPACITY,
@@ -92,18 +92,23 @@ pub(crate) fn run_persistent_xterm_session(
         } else {
             "disabled"
         },
+        if config.expect_physical_pointer {
+            "enabled"
+        } else {
+            "disabled"
+        },
     );
 
     let result = run_session_loop(
         &config,
         &authority_receiver,
-        &key_sender,
+        &input_sender,
         process.child_mut()?,
         &mut physical_input,
         &mut native_scanout,
     );
     process.terminate()?;
-    drop(key_sender);
+    drop(input_sender);
     let server_result = server
         .join()
         .map_err(|_| "persistent X authority server thread panicked")?;
@@ -120,6 +125,7 @@ struct PersistentXtermSessionConfig {
     max_ticks: Option<usize>,
     inject_text: Option<String>,
     expect_physical_text: Option<String>,
+    expect_physical_pointer: bool,
     input_devices: Vec<std::path::PathBuf>,
     native_scanout: bool,
 }
@@ -142,6 +148,7 @@ impl PersistentXtermSessionConfig {
         }
         let inject_text = arg_value(args, "--inject-text");
         let expect_physical_text = arg_value(args, "--expect-physical-text");
+        let expect_physical_pointer = args.iter().any(|arg| arg == "--expect-physical-pointer");
         let native_scanout = args.iter().any(|arg| arg == "--native-scanout");
         if native_scanout && std::env::var_os("SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE").is_none() {
             return Err(
@@ -179,6 +186,12 @@ impl PersistentXtermSessionConfig {
         if expect_physical_text.is_some() && input_devices.is_empty() {
             return Err("--expect-physical-text requires --input-devices".into());
         }
+        if expect_physical_pointer && expect_physical_text.is_none() {
+            return Err(
+                "--expect-physical-pointer requires --expect-physical-text for visible content"
+                    .into(),
+            );
+        }
         if let Some(text) = inject_text.as_ref().or(expect_physical_text.as_ref())
             && (text.is_empty()
                 || text.len() > 24
@@ -194,6 +207,7 @@ impl PersistentXtermSessionConfig {
             max_ticks,
             inject_text,
             expect_physical_text,
+            expect_physical_pointer,
             input_devices,
             native_scanout,
         })
@@ -231,7 +245,7 @@ fn prepare_display_socket(path: &std::path::Path) -> Result<(), Box<dyn std::err
 fn run_session_loop(
     config: &PersistentXtermSessionConfig,
     authority_receiver: &Receiver<XAuthorityObservedTransactionBatch>,
-    key_sender: &SyncSender<XAuthorityKeyEvent>,
+    input_sender: &SyncSender<XAuthorityInputEvent>,
     child: &mut Child,
     physical_input: &mut Option<
         sophia_backend_live::NativeLibinputEventPoller<
@@ -252,6 +266,9 @@ fn run_session_loop(
     let mut injection_checksum = None;
     let mut physical_input_ready_at = None;
     let mut input_pixel_change = false;
+    let mut pointer_checksum = None;
+    let mut pointer_phase_started_at = None;
+    let mut pointer_pixel_change = false;
     let mut batches = 0usize;
     let mut transactions = 0usize;
     let mut backend_ticks = 0usize;
@@ -259,8 +276,11 @@ fn run_session_loop(
     let mut runtime_surfaces = 0u64;
     let mut focus = InputFocusState::new();
     let mut modifiers = XCoreKeyboardMapper::new();
+    let mut pointer = XCorePointerMapper::new();
     let mut physical_events = 0usize;
     let mut physical_keys_routed = 0usize;
+    let mut physical_pointer_events = 0usize;
+    let mut physical_pointer_routed = 0usize;
     let mut session_ticks = 0usize;
     let seat = SeatId::from_raw(SESSION_SEAT_RAW);
 
@@ -271,14 +291,28 @@ fn run_session_loop(
         if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             break;
         }
-        let waiting_for_physical_pixels = physical_input_ready_at.is_some() && !input_pixel_change;
-        if waiting_for_physical_pixels {
-            if physical_input_ready_at.is_some_and(|ready_at: Instant| {
-                ready_at.elapsed() >= Duration::from_millis(SESSION_PHYSICAL_INPUT_TIMEOUT_MSEC)
-            }) {
-                return Err(
-                    "persistent live session timed out waiting for physical input pixels".into(),
-                );
+        let waiting_for_keyboard_pixels = physical_input_ready_at.is_some() && !input_pixel_change;
+        let waiting_for_pointer_pixels =
+            config.expect_physical_pointer && input_pixel_change && !pointer_pixel_change;
+        if waiting_for_pointer_pixels && pointer_phase_started_at.is_none() {
+            pointer_phase_started_at = Some(Instant::now());
+        }
+        let proof_wait_started_at = if waiting_for_keyboard_pixels {
+            physical_input_ready_at
+        } else if waiting_for_pointer_pixels {
+            pointer_phase_started_at
+        } else {
+            None
+        };
+        if let Some(proof_wait_started_at) = proof_wait_started_at {
+            if proof_wait_started_at.elapsed()
+                >= Duration::from_millis(SESSION_PHYSICAL_INPUT_TIMEOUT_MSEC)
+            {
+                return Err(format!(
+                    "persistent live session timed out waiting for physical input pixels: keyboard_routed={physical_keys_routed} keyboard_pixels={input_pixel_change} pointer_observed={physical_pointer_events} pointer_routed={physical_pointer_routed} pointer_pixels={pointer_pixel_change} pointer_baseline={pointer_checksum:?} final_checksum={:?}",
+                    scene.last_report.as_ref().map(|report| report.checksum)
+                )
+                .into());
             }
         } else {
             if config
@@ -303,6 +337,12 @@ fn run_session_loop(
                     && (config.expect_physical_text.is_none() || physical_keys_routed > 0)
                 {
                     input_pixel_change = true;
+                }
+                if let Some(before_frame) = pointer_checksum
+                    && report.checksum != before_frame
+                    && physical_pointer_routed > 0
+                {
+                    pointer_pixel_change = true;
                 }
 
                 if runtime.is_none() {
@@ -359,15 +399,26 @@ fn run_session_loop(
         }
 
         if let (Some(poller), Some(runtime)) = (physical_input.as_mut(), runtime.as_ref()) {
-            let report = route_physical_keyboard(
+            let report = route_physical_input(
                 poller,
                 &focus,
                 runtime.committed_surfaces(),
-                key_sender,
+                &runtime.input_layers(),
+                input_sender,
                 &mut modifiers,
+                &mut pointer,
             )?;
             physical_events = physical_events.saturating_add(report.events);
             physical_keys_routed = physical_keys_routed.saturating_add(report.keys_routed);
+            physical_pointer_events = physical_pointer_events.saturating_add(report.pointer_events);
+            physical_pointer_routed = physical_pointer_routed.saturating_add(report.pointer_routed);
+            if report.pointer_events > 0 {
+                println!(
+                    "sophia_live_session_pointer schema=1 status=observed events={} routed={}",
+                    report.pointer_events, report.pointer_routed
+                );
+                std::io::stdout().flush()?;
+            }
         }
 
         if injection_checksum.is_none()
@@ -380,7 +431,7 @@ fn run_session_loop(
                 .as_ref()
                 .map(|report| (report.checksum, scene.buffer_checksum()));
             if let Some(text) = config.inject_text.as_deref() {
-                send_test_text(key_sender, text)?;
+                send_test_text(input_sender, text)?;
             } else {
                 physical_input_ready_at = Some(Instant::now());
                 println!(
@@ -392,6 +443,18 @@ fn run_session_loop(
                 );
                 std::io::stdout().flush()?;
             }
+        }
+        if config.expect_physical_pointer
+            && input_pixel_change
+            && pointer_checksum.is_none()
+            && scene.last_report.is_some()
+            && last_authority_update.elapsed() >= Duration::from_millis(SESSION_INPUT_QUIET_MSEC)
+        {
+            pointer_checksum = scene.last_report.as_ref().map(|report| report.checksum);
+            println!(
+                "sophia_live_session_pointer schema=1 status=ready source=physical action=select"
+            );
+            std::io::stdout().flush()?;
         }
     }
 
@@ -414,8 +477,14 @@ fn run_session_loop(
     if config.expect_physical_text.is_some() && physical_keys_routed == 0 {
         return Err("persistent live session received no routed physical keys".into());
     }
+    if config.expect_physical_pointer && (!pointer_pixel_change || physical_pointer_routed == 0) {
+        return Err(format!(
+            "persistent live session pointer input did not change pixels: baseline={pointer_checksum:?} routed={physical_pointer_routed} observed={physical_pointer_events}"
+        )
+        .into());
+    }
     println!(
-        "sophia_live_session schema=5 status=bounded_complete display={} elapsed_msec={} session_ticks={} authority_batches={} authority_transactions={} authority_queue_capacity={} authority_batches_dropped=0 backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_max_nonzero_pixel_bytes={} cpu_nonzero_frames={} cpu_checksum={} injected_input={} input_pixel_change={} physical_events={} physical_keys_routed={} native_presentation={} native_submissions={} native_submit_deferred={} native_submit_failures={} native_retirements={} native_retire_failures={} native_max_in_flight_ticks={} native_max_submit_to_page_flip_msec={} native_callback_accepted={} native_callback_rejected={} native_callback_queue_saturated={} native_nonzero_exports={} native_export_attempts={} native_in_flight={} native_cleanup_pending={} physical_input={}",
+        "sophia_live_session schema=6 status=bounded_complete display={} elapsed_msec={} session_ticks={} authority_batches={} authority_transactions={} authority_queue_capacity={} authority_batches_dropped=0 backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_max_nonzero_pixel_bytes={} cpu_nonzero_frames={} cpu_checksum={} injected_input={} input_pixel_change={} physical_events={} physical_keys_routed={} pointer_pixel_change={} physical_pointer_events={} physical_pointer_routed={} pointer_proof={} native_presentation={} native_submissions={} native_submit_deferred={} native_submit_failures={} native_retirements={} native_retire_failures={} native_max_in_flight_ticks={} native_max_submit_to_page_flip_msec={} native_callback_accepted={} native_callback_rejected={} native_callback_queue_saturated={} native_nonzero_exports={} native_export_attempts={} native_in_flight={} native_cleanup_pending={} physical_input={}",
         config.display,
         started.elapsed().as_millis(),
         session_ticks,
@@ -434,6 +503,14 @@ fn run_session_loop(
         input_pixel_change,
         physical_events,
         physical_keys_routed,
+        pointer_pixel_change,
+        physical_pointer_events,
+        physical_pointer_routed,
+        if config.expect_physical_pointer {
+            "enabled"
+        } else {
+            "disabled"
+        },
         if native_scanout.is_some() {
             "enabled"
         } else {
@@ -591,6 +668,27 @@ impl PersistentBackendRuntime {
 
     fn committed_surfaces(&self) -> &[CommittedSurfaceState] {
         self.runtime.assembly().committed_surfaces()
+    }
+
+    fn input_layers(&self) -> Vec<LayerSnapshot> {
+        self.layers
+            .values()
+            .enumerate()
+            .map(|(index, transaction)| LayerSnapshot {
+                surface: transaction.surface,
+                window: None,
+                namespace: None,
+                stack_rank: u32::try_from(index).unwrap_or(u32::MAX),
+                geometry: transaction.target_geometry,
+                source: transaction.target_buffer,
+                damage: transaction.damage.clone(),
+                opacity: 1.0,
+                crop: None,
+                transform: Transform::IDENTITY,
+                generation: transaction.previous_committed_generation,
+                resize_sync: ResizeSyncCapability::ImplicitOnly,
+            })
+            .collect()
     }
 
     fn drain_native_scanout(
@@ -954,7 +1052,7 @@ impl PersistentCpuScene {
 }
 
 fn send_test_text(
-    sender: &SyncSender<XAuthorityKeyEvent>,
+    sender: &SyncSender<XAuthorityInputEvent>,
     text: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut time_msec = 1u32;
@@ -965,12 +1063,15 @@ fn send_test_text(
     {
         let keycode = keycode.ok_or("test input has no core X keycode")?;
         for pressed in [true, false] {
-            sender.try_send(XAuthorityKeyEvent {
-                keycode,
-                pressed,
-                state: 0,
-                time_msec,
-            })?;
+            sender.try_send(
+                XAuthorityKeyEvent {
+                    keycode,
+                    pressed,
+                    state: 0,
+                    time_msec,
+                }
+                .into(),
+            )?;
             time_msec = time_msec.saturating_add(1);
         }
     }
@@ -978,46 +1079,107 @@ fn send_test_text(
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-struct PhysicalKeyboardRouteReport {
+struct PhysicalInputRouteReport {
     events: usize,
     keys_routed: usize,
+    pointer_events: usize,
+    pointer_routed: usize,
 }
 
-fn route_physical_keyboard(
+fn route_physical_input(
     poller: &mut sophia_backend_live::NativeLibinputEventPoller<
         sophia_backend_live::NativeLibinputEventReader,
     >,
     focus: &InputFocusState,
     committed_surfaces: &[CommittedSurfaceState],
-    key_sender: &SyncSender<XAuthorityKeyEvent>,
+    input_layers: &[LayerSnapshot],
+    input_sender: &SyncSender<XAuthorityInputEvent>,
     modifiers: &mut XCoreKeyboardMapper,
-) -> Result<PhysicalKeyboardRouteReport, Box<dyn std::error::Error>> {
+    pointer: &mut XCorePointerMapper,
+) -> Result<PhysicalInputRouteReport, Box<dyn std::error::Error>> {
     let events = poller.poll_ready()?;
-    let mut report = PhysicalKeyboardRouteReport {
+    let mut report = PhysicalInputRouteReport {
         events: events.len(),
         keys_routed: 0,
+        pointer_events: 0,
+        pointer_routed: 0,
     };
     for event in events {
-        let FocusedInputRoute::Routed(event) =
-            focus.route_keyboard_event(event, committed_surfaces)
-        else {
-            continue;
-        };
-        let sophia_protocol::InputEventKind::Key { keycode, pressed } = event.kind else {
-            continue;
-        };
-        let Some((keycode, state)) = modifiers.map_evdev_key(keycode, pressed) else {
-            continue;
-        };
-        key_sender.try_send(XAuthorityKeyEvent {
-            keycode,
-            pressed,
-            state,
-            time_msec: u32::try_from(event.time_msec).unwrap_or(u32::MAX),
-        })?;
-        report.keys_routed = report.keys_routed.saturating_add(1);
+        match event.kind {
+            sophia_protocol::InputEventKind::Key { keycode, pressed } => {
+                let FocusedInputRoute::Routed(event) =
+                    focus.route_keyboard_event(event, committed_surfaces)
+                else {
+                    continue;
+                };
+                let Some((keycode, state)) = modifiers.map_evdev_key(keycode, pressed) else {
+                    continue;
+                };
+                input_sender.try_send(
+                    XAuthorityKeyEvent {
+                        keycode,
+                        pressed,
+                        state,
+                        time_msec: u32::try_from(event.time_msec).unwrap_or(u32::MAX),
+                    }
+                    .into(),
+                )?;
+                report.keys_routed = report.keys_routed.saturating_add(1);
+            }
+            kind @ (sophia_protocol::InputEventKind::PointerMotion
+            | sophia_protocol::InputEventKind::PointerButton { .. }) => {
+                report.pointer_events = report.pointer_events.saturating_add(1);
+                let route = sophia_engine::hit_test_scene_surface_for_input(&event, input_layers);
+                if route.target_surface != focus.focused_surface(event.seat) {
+                    continue;
+                }
+                let (Some(global), Some(local)) = (event.global_position, route.local_position)
+                else {
+                    continue;
+                };
+                let Some(surface) = route.target_surface else {
+                    continue;
+                };
+                let (event_kind, state) = match kind {
+                    sophia_protocol::InputEventKind::PointerMotion => {
+                        (XAuthorityPointerEventKind::Motion, pointer.state())
+                    }
+                    sophia_protocol::InputEventKind::PointerButton { button, pressed } => {
+                        let Some((button, state)) = pointer.map_evdev_button(button, pressed)
+                        else {
+                            continue;
+                        };
+                        (
+                            XAuthorityPointerEventKind::Button { button, pressed },
+                            state,
+                        )
+                    }
+                    sophia_protocol::InputEventKind::Key { .. } => unreachable!(),
+                };
+                input_sender.try_send(XAuthorityInputEvent::Pointer(XAuthorityPointerEvent {
+                    kind: event_kind,
+                    surface,
+                    root_x: pointer_coordinate(global.x),
+                    root_y: pointer_coordinate(global.y),
+                    event_x: pointer_coordinate(local.x),
+                    event_y: pointer_coordinate(local.y),
+                    state,
+                    time_msec: u32::try_from(event.time_msec).unwrap_or(u32::MAX),
+                }))?;
+                report.pointer_routed = report.pointer_routed.saturating_add(1);
+            }
+        }
     }
     Ok(report)
+}
+
+fn pointer_coordinate(value: f64) -> i16 {
+    if !value.is_finite() {
+        return 0;
+    }
+    value
+        .round()
+        .clamp(f64::from(i16::MIN), f64::from(i16::MAX)) as i16
 }
 
 struct SessionProcessGuard {

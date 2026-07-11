@@ -955,12 +955,15 @@ pub(crate) fn run_x_authority_xterm_input_smoke()
     {
         let keycode = keycode.ok_or("input smoke character has no X keycode")?;
         for pressed in [true, false] {
-            key_sender.send(XAuthorityKeyEvent {
-                keycode,
-                pressed,
-                state: 0,
-                time_msec,
-            })?;
+            key_sender.send(
+                XAuthorityKeyEvent {
+                    keycode,
+                    pressed,
+                    state: 0,
+                    time_msec,
+                }
+                .into(),
+            )?;
             time_msec = time_msec.saturating_add(1);
         }
     }

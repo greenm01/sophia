@@ -9,6 +9,9 @@ pub const X_CLIENT_OUTPUT_RECORD_LEN: usize = 32;
 const X_ERROR: u8 = 0;
 const X_KEY_PRESS: u8 = 2;
 const X_KEY_RELEASE: u8 = 3;
+const X_BUTTON_PRESS: u8 = 4;
+const X_BUTTON_RELEASE: u8 = 5;
+const X_MOTION_NOTIFY: u8 = 6;
 const X_EXPOSE: u8 = 12;
 const X_MAP_NOTIFY: u8 = 19;
 const X_CONFIGURE_NOTIFY: u8 = 22;
@@ -60,6 +63,30 @@ pub enum XClientEvent {
         time: XTimestamp,
         root: XResourceId,
         event: XResourceId,
+        state: u16,
+    },
+    PointerMotion {
+        sequence: u16,
+        time: XTimestamp,
+        root: XResourceId,
+        event: XResourceId,
+        root_x: i16,
+        root_y: i16,
+        event_x: i16,
+        event_y: i16,
+        state: u16,
+    },
+    PointerButton {
+        sequence: u16,
+        pressed: bool,
+        button: u8,
+        time: XTimestamp,
+        root: XResourceId,
+        event: XResourceId,
+        root_x: i16,
+        root_y: i16,
+        event_x: i16,
+        event_y: i16,
         state: u16,
     },
     Expose {
@@ -794,6 +821,62 @@ pub fn encode_x_client_event(
             put_u16(byte_order, &mut out[28..30], state);
             out[30] = 1;
         }
+        XClientEvent::PointerMotion {
+            sequence,
+            time,
+            root,
+            event,
+            root_x,
+            root_y,
+            event_x,
+            event_y,
+            state,
+        } => write_pointer_event(
+            byte_order,
+            &mut out,
+            X_MOTION_NOTIFY,
+            0,
+            sequence,
+            time,
+            root,
+            event,
+            root_x,
+            root_y,
+            event_x,
+            event_y,
+            state,
+        ),
+        XClientEvent::PointerButton {
+            sequence,
+            pressed,
+            button,
+            time,
+            root,
+            event,
+            root_x,
+            root_y,
+            event_x,
+            event_y,
+            state,
+        } => write_pointer_event(
+            byte_order,
+            &mut out,
+            if pressed {
+                X_BUTTON_PRESS
+            } else {
+                X_BUTTON_RELEASE
+            },
+            button,
+            sequence,
+            time,
+            root,
+            event,
+            root_x,
+            root_y,
+            event_x,
+            event_y,
+            state,
+        ),
         XClientEvent::Expose {
             sequence,
             window,
@@ -879,6 +962,35 @@ pub fn encode_x_client_event(
         }
     }
     out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_pointer_event(
+    byte_order: XByteOrder,
+    out: &mut [u8; X_CLIENT_OUTPUT_RECORD_LEN],
+    event_type: u8,
+    detail: u8,
+    sequence: u16,
+    time: XTimestamp,
+    root: XResourceId,
+    event: XResourceId,
+    root_x: i16,
+    root_y: i16,
+    event_x: i16,
+    event_y: i16,
+    state: u16,
+) {
+    write_event_header(byte_order, out, event_type, detail, sequence);
+    put_u32(byte_order, &mut out[4..8], time);
+    put_resource(byte_order, &mut out[8..12], root);
+    put_resource(byte_order, &mut out[12..16], event);
+    put_resource(byte_order, &mut out[16..20], XResourceId::NONE);
+    put_i16(byte_order, &mut out[20..22], root_x);
+    put_i16(byte_order, &mut out[22..24], root_y);
+    put_i16(byte_order, &mut out[24..26], event_x);
+    put_i16(byte_order, &mut out[26..28], event_y);
+    put_u16(byte_order, &mut out[28..30], state);
+    out[30] = 1;
 }
 
 pub fn x_error_from_wire_parse(

@@ -140,6 +140,19 @@ fn transformed_scene_hit_test_reports_no_target_for_miss() {
 }
 
 #[test]
+fn surface_hit_test_routes_without_exposing_authority_window_identity() {
+    let layer = test_layer(0, 0, 0, Region::empty());
+    let event = motion_event(73, 10.0, 10.0);
+
+    let route = hit_test_scene_surface_for_input(&event, &[layer]);
+
+    assert_eq!(route.outcome, InputRouteOutcome::Routed);
+    assert_eq!(route.target_surface, Some(SurfaceId::new(0, 1)));
+    assert_eq!(route.target_window, None);
+    assert_eq!(route.local_position, Some(Point { x: 10.0, y: 10.0 }));
+}
+
+#[test]
 fn transformed_scene_hit_test_feeds_routed_input_request_generation() {
     let mut layer = test_layer(0, 0, 0, Region::empty());
     layer.window = Some(XWindowId::new(0x30, 1));

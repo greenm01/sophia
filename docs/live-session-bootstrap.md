@@ -57,6 +57,12 @@ For an external libinput proof, replace `--inject-text` with
 stable, pauses bounded tick accounting for at most five seconds, and succeeds
 only after routed physical keys change later terminal pixels.
 
+Add `--expect-physical-pointer` to extend that bounded proof. After keyboard
+pixels stabilize, the session emits a physical-pointer readiness marker and
+requires libinput pointer events to pass Engine surface-only hit-testing and
+produce another client pixel change. X Authority resolves the routed Sophia
+surface to its protocol-owned X window; Engine does not receive the XID.
+
 Passing evidence reports `status=bounded_complete`, matching authority batch,
 backend tick, and runtime commit counts, nonzero composed pixels, and
 `input_pixel_change=true`.

@@ -86,9 +86,11 @@ Use `tools/qemu_session_harness.sh` for repeated native GBM/KMS development.
 The harness waits for the guest's physical-input readiness marker, types
 `sophia` through QMP and virtio-keyboard, and requires all press/release events
 to pass through libinput and Engine focus before changed xterm pixels count as
-input proof. It also attaches virtio-mouse for the next pointer-routing slice;
-the current verifier does not claim pointer delivery, multi-head presentation,
-per-output vsync, or VRR coverage.
+input proof. QMP also performs a bounded virtio-mouse double-click selection,
+and the verifier requires
+nonzero routed pointer events plus a second xterm pixel change. The current
+verifier does not claim multi-head presentation, per-output vsync, or VRR
+coverage.
 It boots an isolated direct-kernel initramfs with virtio-gpu and verifies
 exactly 300 session ticks without host DRM, input-device, VT, disk, or guest
 network access. The QEMU evidence verifier also rejects native submit/retire

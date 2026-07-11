@@ -56,7 +56,7 @@ Authority now advances a window generation after each emitted visual
 transaction, so long-running Engine commits remain contiguous. Native scanout
 now joins this owner behind `--native-scanout`: the same loop queues composed
 CPU frames for GL/GBM export, polls native page flips, retires tracked KMS
-submissions, and drains cleanup. Reduced schema 5 evidence records successful
+submissions, and drains cleanup. Reduced schema 6 evidence records successful
 submits, deferrals and failures, submit-to-page-flip latency, maximum in-flight
 age, callback pressure, nonzero exports, authority drops, and cleanup debt.
 The non-native repeated-xterm regression and strict verifier fixtures pass.
@@ -119,11 +119,16 @@ without rejected callbacks, failed transitions, or cleanup debt. Tick counting
 pauses for a bounded five-second physical-input window so readiness at the last
 scheduled tick cannot race QMP delivery.
 
-The guest now also exposes virtio-mouse and libinput maps pointer events to a
-separate Engine device ID. This is admission plumbing only: the persistent X
-Authority path still lacks pointer motion/button delivery, so no mouse proof is
-claimed. The next input slice must combine QMP mouse events, Engine hit-testing
-and focus, core X pointer delivery, and visible client response.
+The guest also exposes virtio-mouse and libinput maps pointer events to a
+separate Engine device ID. The completed pointer slice performs QMP word
+selection in the typed xterm. Five motion/button events pass through libinput,
+Engine surface-only hit-testing/focus, and core X MotionNotify/Button events;
+all five route and a second terminal pixel change is observed. The first drag
+attempt exposed that targeting the last mapped X window was insufficient even
+though all input reached Engine. Pointer events now carry only the routed
+Sophia surface, and X Authority resolves that surface through its internal
+surface/window table. This preserves the authority boundary: Engine never
+receives or interprets the client XID.
 
 Likewise, current native presentation is a single-output, page-flip-retired
 fixed-refresh path. Multi-monitor support requires independent per-output
