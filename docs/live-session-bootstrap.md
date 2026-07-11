@@ -20,24 +20,30 @@ supervision fails.
 
 ## Target Shape
 
-The first usable live session launcher should become a single command, for
-example:
+The first bootstrap live session launcher is now a single command:
 
 ```sh
-cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- sophia-live-session --display=:77 --terminal=xterm
+cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- sophia-live-session --terminal=xterm
 ```
 
-That command does not exist yet. Its first implementation should assemble only
-the boundaries Sophia already owns:
+The current implementation assembles only the boundaries Sophia already owns:
 
-- run live preflight for output/input/backend readiness;
-- start a persistent Sophia X Authority display, for example `:77`;
+- bind a generated Sophia X Authority display for one terminal proof;
 - launch one terminal client against that display;
 - drain X Authority transaction batches into runtime;
-- run the live backend session loop;
-- submit rendered frames through the existing scanout path;
-- emit reduced status lines for authority, runtime, scanout, and input health;
+- run the deterministic live composition/scanout path;
+- emit reduced status lines for authority, runtime, composition, and known
+  pending input/persistence work;
 - shut down cleanly from the outside control plane.
+
+It is not a persistent interactive session yet. It reports
+`status=bootstrap_ready_keyboard_pending` when the terminal authority/runtime
+composition proof passes.
+
+Explicit display binding, such as `--display=:77`, is still a target for the
+persistent live session. The current proof-mode launcher intentionally uses the
+same generated display path as the X Authority real-client smokes because low
+display numbers can still stall in xterm palette/setup before text damage.
 
 ## First Terminal Milestone
 
@@ -69,8 +75,8 @@ resource behavior the real xterm stream demands.
 
 Next live-session blocker:
 
-- build a persistent `sophia-live-session` launcher around the passing terminal
-  render proof;
+- extend `sophia-live-session` from single-client proof mode to a persistent
+  X Authority and live backend loop;
 - route physical keyboard input into the focused X terminal surface;
 - prove typed text reaches the terminal before running Codex inside Sophia.
 

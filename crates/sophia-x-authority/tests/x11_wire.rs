@@ -2308,7 +2308,10 @@ fn x11_dispatch_alloc_color_echoes_reduced_rgb_pixel() {
     );
     assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][10..12]), 0);
     assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][12..14]), 0);
-    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][16..20]), 1);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &encoded[0][16..20]),
+        0xff0000
+    );
 }
 
 #[test]

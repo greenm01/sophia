@@ -207,6 +207,19 @@ struct XAuthorityExternalProbeSmokeReport {
     runtime_committed: u64,
     runtime_surfaces: u64,
     first_error: Option<String>,
+    #[cfg_attr(not(feature = "atomic-scanout-live"), allow(dead_code))]
+    observed_transactions: Vec<SurfaceTransaction>,
+}
+
+#[cfg(feature = "atomic-scanout-live")]
+#[derive(Clone, Debug)]
+pub(crate) struct XAuthorityTerminalRenderProof {
+    pub display: String,
+    pub requests: usize,
+    pub transactions: usize,
+    pub runtime_committed: u64,
+    pub runtime_surfaces: u64,
+    pub authority_batches: Vec<AuthorityTransactionIntake>,
 }
 
 #[derive(Clone, Debug)]
@@ -380,6 +393,10 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
             "Sophia xterm",
             "-cm",
             "-dc",
+            "-xrm",
+            "*numColorRegisters: 2",
+            "-tn",
+            "vt100",
             "-hold",
             "-e",
             "sh",
@@ -765,17 +782,53 @@ fn run_x_authority_external_probe_smoke_spec(
     spec: &ExternalProbeSmokeSpec,
 ) -> Result<XAuthorityExternalProbeSmokeReport, Box<dyn std::error::Error>> {
     let command = resolve_external_probe_binary(spec.label, spec.binary)?;
+    let (display, socket_path) = temp_xauthority_display(spec.display_base)?;
     run_x_authority_external_probe_smoke(
         spec.label,
         &command,
         spec.display_mode,
         spec.args,
-        spec.display_base,
+        display,
+        socket_path,
         NamespaceId::from_raw(spec.namespace),
         spec.require_transactions,
         spec.allow_proof_kill_without_transactions,
         spec.allow_client_failure_without_x_error,
     )
+}
+
+#[cfg(feature = "atomic-scanout-live")]
+pub(crate) fn collect_x_authority_xterm_render_authority_batches(
+    terminal: &str,
+) -> Result<XAuthorityTerminalRenderProof, Box<dyn std::error::Error>> {
+    let spec = EXTERNAL_PROBE_SMOKES
+        .iter()
+        .find(|spec| spec.command_name == "x-authority-xterm-render-smoke")
+        .ok_or("xterm render smoke spec is missing")?;
+    let command = resolve_external_probe_binary(spec.label, terminal)?;
+    let (display, socket_path) = temp_xauthority_display(spec.display_base)?;
+    let report = run_x_authority_external_probe_smoke(
+        spec.label,
+        &command,
+        spec.display_mode,
+        spec.args,
+        display,
+        socket_path,
+        NamespaceId::from_raw(spec.namespace),
+        spec.require_transactions,
+        spec.allow_proof_kill_without_transactions,
+        spec.allow_client_failure_without_x_error,
+    )?;
+    let authority_batches =
+        authority_intakes_from_observed_transactions(&report.observed_transactions);
+    Ok(XAuthorityTerminalRenderProof {
+        display: report.display,
+        requests: report.requests,
+        transactions: report.transactions,
+        runtime_committed: report.runtime_committed,
+        runtime_surfaces: report.runtime_surfaces,
+        authority_batches,
+    })
 }
 
 fn resolve_external_probe_binary(
@@ -844,13 +897,13 @@ fn run_x_authority_external_probe_smoke(
     command: &std::path::Path,
     display_mode: ExternalProbeDisplayMode,
     command_args: &[&str],
-    display_base: u32,
+    display: String,
+    socket_path: std::path::PathBuf,
     namespace: NamespaceId,
     require_transactions: bool,
     allow_proof_kill_without_transactions: bool,
     allow_client_failure_without_x_error: bool,
 ) -> Result<XAuthorityExternalProbeSmokeReport, Box<dyn std::error::Error>> {
-    let (display, socket_path) = temp_xauthority_display(display_base)?;
     let server_path = socket_path.clone();
     let (sender, receiver) = sync_channel(256);
     let server = std::thread::spawn(move || {
@@ -908,7 +961,7 @@ fn run_x_authority_external_probe_smoke(
         .stderr(std::process::Stdio::piped());
     let mut child = command.spawn()?;
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(4);
+    let deadline = std::time::Instant::now() + Duration::from_secs(8);
     let mut transactions = Vec::new();
     let mut first_error = None;
     let mut opcodes = std::collections::BTreeSet::new();
@@ -1061,6 +1114,7 @@ fn run_x_authority_external_probe_smoke(
         runtime_committed,
         runtime_surfaces,
         first_error,
+        observed_transactions: transactions,
     })
 }
 
@@ -1206,6 +1260,18 @@ fn authority_intakes_from_observed_batches(
     batches
         .iter()
         .map(|batch| AuthorityTransactionIntake::new(batch.transaction, batch.transactions.clone()))
+        .collect()
+}
+
+#[cfg(feature = "atomic-scanout-live")]
+fn authority_intakes_from_observed_transactions(
+    transactions: &[SurfaceTransaction],
+) -> Vec<AuthorityTransactionIntake> {
+    transactions
+        .iter()
+        .map(|transaction| {
+            AuthorityTransactionIntake::new(transaction.transaction, vec![transaction.clone()])
+        })
         .collect()
 }
 

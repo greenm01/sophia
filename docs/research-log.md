@@ -32,6 +32,22 @@ The passing reduced evidence is `outcome=proof_window_killed`, `status=-1`,
 persistent `sophia-live-session` launcher and route keyboard input to the
 focused terminal surface.
 
+`sophia-live-session --terminal=xterm` now exists as the first bootstrap
+launcher slice. It binds an auto high local X display for one xterm render
+proof, drains the observed authority transactions through deterministic live
+composition/scanout, and reports the remaining gaps as `keyboard=pending` and
+`persistence=single_client_probe`. It intentionally does not claim to be a
+persistent interactive session yet. Explicit display binding remains pending
+because low display numbers such as `:77` can still stall in xterm palette/setup
+before terminal text damage.
+
+The passing reduced evidence on `:7926` was
+`status=bootstrap_ready_keyboard_pending`, `authority_requests=232`,
+`authority_transactions=4`, `authority_runtime_committed=4`,
+`authority_runtime_surfaces=4`, `composition_status=Passed`,
+`composition_batches=4`, `composition_committed=4`, and
+`composition_surfaces=4`.
+
 ## 2026-07-10: zenity as GTK Startup Probe
 
 `x-authority-zenity-smoke` now launches `zenity` through the CLI external-probe

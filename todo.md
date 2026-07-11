@@ -30,16 +30,17 @@ Current milestone target:
   separate live-session TTY.
 - [x] Turn xterm from setup/lifecycle coverage into a rendered terminal
   transaction proof.
-- [ ] Bootstrap a persistent Sophia live session launcher from the passing
+- [x] Bootstrap the first `sophia-live-session` launcher slice from the passing
   terminal render proof and report reduced health.
+- [ ] Extend `sophia-live-session` from single-client proof mode into a
+  persistent X Authority/live backend loop.
 
 Next logical steps:
 
-- [ ] Implement a `sophia-live-session` CLI command that starts persistent X
-  Authority, one terminal client, runtime intake, and live scanout with reduced
-  status lines.
-- [ ] Reuse the passing `x-authority-xterm-render-smoke` profile as the terminal
-  client baseline for the launcher.
+- [ ] Split the X Authority socket server into reusable single-client and
+  persistent-loop entry points.
+- [ ] Teach `sophia-live-session` to keep the X Authority loop and terminal
+  process alive until the outside control plane stops it.
 - [ ] Route keyboard input to the focused xterm surface, then test launching
   Codex inside that terminal.
 - [ ] Return to GTK/XInput2/zenity rendered dialog proof after the terminal
@@ -54,8 +55,10 @@ Next logical steps:
 - [ ] Keep the operator control plane outside Sophia until xterm rendering and
   keyboard routing are proven.
 - [x] Convert xterm into the first rendered terminal proof.
-- [ ] Add a persistent `sophia-live-session` launcher around X Authority,
-  runtime intake, and live scanout.
+- [x] Add the first `sophia-live-session` bootstrap command around the xterm
+  render proof, runtime intake, and deterministic live scanout composition.
+- [ ] Upgrade `sophia-live-session` to a persistent X Authority/live backend
+  loop.
 
 ### 2. Wayland Authority Skeleton
 
@@ -97,6 +100,11 @@ Next logical steps:
   now reaches xterm text drawing with `first_error=none`, commits four terminal
   `SurfaceTransaction` values, and uses `-cm -dc` to avoid spending the proof
   window on 256-color palette setup.
+- [x] Added `sophia-live-session --terminal=xterm` as the first bootstrap
+  launcher slice. It binds a generated display for one xterm render proof,
+  drains authority transactions through deterministic live composition, reports
+  `status=bootstrap_ready_keyboard_pending`, and keeps explicit display binding,
+  persistence, and keyboard routing as pending work.
 - [x] `x-authority-zenity-smoke` launches `zenity` through PATH/env-resolved
   probe configuration, keeps `first_error=none` under `dbus-run-session`, and
   adds only the demanded bounded `GetSelectionOwner`, `GrabServer`,

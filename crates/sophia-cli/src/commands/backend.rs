@@ -1,8 +1,10 @@
 #[cfg(feature = "atomic-scanout-smoke-live")]
 use std::time::{Duration, Instant};
 
+#[cfg(feature = "atomic-scanout-live")]
+use super::prelude::arg_value;
 #[cfg(feature = "atomic-scanout-smoke-live")]
-use super::prelude::{arg_value, parse_u64};
+use super::prelude::parse_u64;
 #[cfg(feature = "atomic-scanout-smoke-live")]
 use sophia_cli::backend_args::{
     atomic_scanout_smoke_child_args, atomic_scanout_smoke_child_timeout,
@@ -45,6 +47,12 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
             .into());
         }
 
+        return Ok(true);
+    }
+
+    #[cfg(feature = "atomic-scanout-live")]
+    if args.iter().any(|arg| arg == "sophia-live-session") {
+        run_sophia_live_session_bootstrap(args)?;
         return Ok(true);
     }
 
@@ -105,6 +113,67 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
     }
 
     Ok(false)
+}
+
+#[cfg(feature = "atomic-scanout-live")]
+fn run_sophia_live_session_bootstrap(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(display) = arg_value(args, "--display") {
+        return Err(format!(
+            "sophia-live-session proof mode does not support explicit --display={display} yet; omit --display to use the generated proof display"
+        )
+        .into());
+    }
+    let terminal = arg_value(args, "--terminal").unwrap_or_else(|| "xterm".to_owned());
+    let terminal_name = std::path::Path::new(&terminal)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(terminal.as_str());
+    if terminal_name != "xterm" {
+        return Err(format!(
+            "sophia-live-session currently supports --terminal=xterm, got {terminal:?}"
+        )
+        .into());
+    }
+
+    let terminal_proof =
+        super::x_authority::collect_x_authority_xterm_render_authority_batches(&terminal)?;
+    let proof_display = terminal_proof.display.clone();
+    let proof_requests = terminal_proof.requests;
+    let proof_transactions = terminal_proof.transactions;
+    let proof_runtime_committed = terminal_proof.runtime_committed;
+    let proof_runtime_surfaces = terminal_proof.runtime_surfaces;
+    let composition =
+        sophia_backend_live::run_live_session_composition_smoke(terminal_proof.authority_batches);
+
+    let status =
+        if composition.status == sophia_backend_live::LiveSessionCompositionSmokeStatus::Passed {
+            "bootstrap_ready_keyboard_pending"
+        } else {
+            "composition_failed"
+        };
+    println!(
+        "sophia_live_session_bootstrap schema=1 status={} proof_display={} terminal={} authority_requests={} authority_transactions={} authority_runtime_committed={} authority_runtime_surfaces={} composition_status={:?} composition_batches={} composition_committed={} composition_surfaces={} keyboard=pending persistence=single_client_probe explicit_display=pending",
+        status,
+        proof_display,
+        terminal_name,
+        proof_requests,
+        proof_transactions,
+        proof_runtime_committed,
+        proof_runtime_surfaces,
+        composition.status,
+        composition.authority_batches_input,
+        composition.authority_transactions_committed,
+        composition.authority_surfaces_applied,
+    );
+
+    if composition.status != sophia_backend_live::LiveSessionCompositionSmokeStatus::Passed {
+        return Err(format!(
+            "sophia live session bootstrap composition failed with status {:?}",
+            composition.status
+        )
+        .into());
+    }
+    Ok(())
 }
 
 #[cfg(feature = "atomic-scanout-smoke-live")]

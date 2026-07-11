@@ -889,12 +889,12 @@ pub fn dispatch_x11_wire_request(
         XWireRequest::AllocColor {
             red, green, blue, ..
         } => {
-            let black = red == 0 && green == 0 && blue == 0;
+            let pixel = true_color_pixel_from_rgb16(red, green, blue);
             XDispatchResult {
                 response: None,
                 outputs: vec![XClientOutput::Reply(XClientReply::AllocColor {
                     sequence: context.sequence,
-                    pixel: if black { 0 } else { 1 },
+                    pixel,
                     red,
                     green,
                     blue,
@@ -1695,4 +1695,8 @@ fn clamp_i16(value: i32) -> i16 {
 
 fn clamp_u16(value: i32) -> u16 {
     value.clamp(0, i32::from(u16::MAX)) as u16
+}
+
+fn true_color_pixel_from_rgb16(red: u16, green: u16, blue: u16) -> u32 {
+    (u32::from(red & 0xff00) << 8) | u32::from(green & 0xff00) | (u32::from(blue) >> 8)
 }
