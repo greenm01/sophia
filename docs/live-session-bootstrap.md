@@ -29,9 +29,9 @@ cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- sophia-li
 This default mode binds `:77` unless `--display=:NUMBER` is supplied, launches
 one xterm, and keeps the X Authority server, live backend runtime, and composed
 CPU scene alive until xterm exits or the outside control plane stops Sophia.
-It refuses an active display socket rather than replacing it. Native scanout
-remains pending, so keep the outside TTY control plane. Physical keyboard input
-can be enabled with one or more explicit comma-separated event nodes:
+It refuses an active display socket rather than replacing it. Keep the outside
+TTY control plane. Physical keyboard input can be enabled with one or more
+explicit comma-separated event nodes:
 
 ```sh
 cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- \
@@ -54,6 +54,20 @@ cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- \
 Passing evidence reports `status=bounded_complete`, matching authority batch,
 backend tick, and runtime commit counts, nonzero composed pixels, and
 `input_pixel_change=true`.
+
+On an exclusive TTY with no other DRM master, persistent native presentation is
+enabled by the gated `--native-scanout` flag. The bounded hardware wrapper
+starts xterm, injects terminal input, keeps GBM/KMS and page-flip ownership in
+the same session loop, and verifies its reduced evidence:
+
+```sh
+tools/live_session_persistent_hardware_proof.sh
+```
+
+The verifier requires at least one nonzero terminal frame export, successful
+submit and retirement, no rejected page-flip callbacks, no dropped authority
+batches, and no in-flight frame or cleanup debt at shutdown. A running River or
+other compositor owns DRM master and must be stopped before this proof.
 
 The destructive TTY3 terminal-content presentation proof is:
 
@@ -119,7 +133,7 @@ resource behavior the real xterm stream demands.
 
 Next live-session blockers:
 
-- join the persistent CPU/backend loop to native GBM/KMS presentation;
+- pass the strict persistent GBM/KMS proof from an exclusive TTY;
 - route physical keyboard input into the focused X terminal surface;
 - prove operator-typed text reaches terminal pixels before running Codex inside
   Sophia.

@@ -27,7 +27,20 @@ A bounded real-xterm run passes repeated authority/runtime ticks and injected
 pixel change. Building it exposed and fixed static drawing generations: X
 Authority now advances a window generation after each emitted visual
 transaction, so long-running Engine commits remain contiguous. Native scanout
-is still outside this owner.
+now joins this owner behind `--native-scanout`: the same loop queues composed
+CPU frames for GL/GBM export, polls native page flips, retires tracked KMS
+submissions, and drains cleanup. Reduced schema 4 evidence records successful
+submits, deferrals and failures, submit-to-page-flip latency, maximum in-flight
+age, callback pressure, nonzero exports, authority drops, and cleanup debt.
+The non-native repeated-xterm regression and strict verifier fixtures pass.
+
+The strict persistent hardware rerun is open. The corrected counters exposed
+that the current TTY attempt had exported frames but no accepted KMS commit.
+The established one-shot content proof failed at the same atomic commit, while
+River and Xwayland were active on the only DRM card. This isolates the current
+failure to DRM ownership/session state rather than the persistent coordinator;
+rerun `tools/live_session_persistent_hardware_proof.sh` after the supervised
+River session has intentionally released DRM master.
 
 Physical keyboard plumbing now enters the persistent owner through explicit
 libinput event nodes. `InputFocusState` in Sophia Engine validates a seat's
@@ -50,8 +63,10 @@ remain open because no Haskell/xmonad executable is installed.
 
 - Which xmonad startup request is the first unsupported request after setup,
   root event-mask selection, atom/property access, and synthetic lifecycle?
-- Which physical-input ownership path can supply libinput keys to the focused X
-  channel without duplicating Engine focus policy?
+- Does the exclusive-TTY persistent hardware proof remain clean for 300 ticks
+  and 30 seconds once River releases DRM master?
+- Can an operator-typed run produce nonzero physical key routing and changed
+  xterm pixels through the existing Engine focus path?
 
 Both questions remain probe-driven: implement the first observed missing path,
 then rerun the relevant real-client smoke.

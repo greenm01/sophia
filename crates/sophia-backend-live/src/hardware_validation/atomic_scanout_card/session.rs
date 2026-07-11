@@ -96,6 +96,34 @@ impl RealAtomicScanoutPageFlipSession {
             sender,
         )
     }
+
+    #[cfg(all(feature = "gbm-probe", feature = "libdrm-events"))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_native_gbm_runtime_tick<P, E>(
+        &mut self,
+        runtime: &mut LiveBackendRuntimeAssembly<P>,
+        input: CompositorBackendTickInput,
+        exporter: &mut NativeGbmRenderedScanoutBufferDiscoveryExporter<E>,
+        sender: &std::sync::mpsc::SyncSender<LivePageFlipCallback>,
+        max_read: usize,
+        max_emit: usize,
+    ) -> Result<LiveBackendRuntimeNativePageFlipTickReport, CompositorBackendAssemblyError>
+    where
+        P: NonBlockingInputPoller,
+        E: RenderDeviceDiscoveryBackend,
+    {
+        runtime
+            .run_tick_with_native_gbm_rendered_primary_plane_scanout_exporter_and_native_page_flip_events_with(
+                input,
+                &self.card,
+                exporter,
+                &mut self.reader,
+                &mut self.poller,
+                sender,
+                max_read,
+                max_emit,
+            )
+    }
 }
 
 #[derive(Debug)]

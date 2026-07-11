@@ -48,7 +48,7 @@ pub(crate) fn print(verbose: bool) {
     println!("commands: x-authority-present-pixmap-smoke");
     #[cfg(feature = "atomic-scanout-live")]
     println!(
-        "commands: sophia-live-session [--display=:77] [--terminal=xterm] [--input-devices=/dev/input/eventN,...] [--max-runtime-ms=N] [--inject-text=lowercase] [--proof]"
+        "commands: sophia-live-session [--display=:77] [--terminal=xterm] [--input-devices=/dev/input/eventN,...] [--native-scanout] [--max-runtime-ms=N] [--inject-text=lowercase] [--proof]"
     );
     #[cfg(feature = "atomic-scanout-live")]
     println!("commands: live-session-composition-smoke");

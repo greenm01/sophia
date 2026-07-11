@@ -58,4 +58,7 @@ expect_fail tools/verify_runtime_rendered_scanout_evidence.sh runtime_rendered_s
 expect_pass tools/verify_live_session_content_evidence.sh live_session_content_evidence_pass.log
 expect_fail tools/verify_live_session_content_evidence.sh live_session_content_evidence_checksum_mismatch.log
 
+expect_pass tools/verify_live_session_persistent_evidence.sh live_session_persistent_evidence_pass.log
+expect_fail tools/verify_live_session_persistent_evidence.sh live_session_persistent_evidence_cleanup_debt.log
+
 echo "atomic scanout verifier fixtures passed"

@@ -32,7 +32,10 @@ Current truth:
 - `sophia-live-session --proof` remains a one-shot composition/input proof.
 - Default `sophia-live-session` now binds an explicit display, owns one xterm
   and X Authority server, and drains repeated authority batches through one
-  live backend runtime and CPU scene until bounded or externally stopped.
+  live backend runtime and CPU scene until bounded or externally stopped. Its
+  gated `--native-scanout` mode owns GBM/KMS export, submit, page-flip intake,
+  retirement, and cleanup in that same loop. The strict persistent hardware
+  proof still needs an exclusive TTY rerun without River holding DRM master.
 
 Exit criteria:
 
@@ -42,8 +45,8 @@ Exit criteria:
   frame contains terminal content rather than an allocated blank buffer.
 - [ ] Keep X Authority, live backend ticks, scanout ownership, and xterm alive
   under one persistent session owner until the outside control plane stops it.
-  Authority, backend ticks, and xterm are persistent; native scanout ownership
-  is the remaining part of this item.
+  The ownership path is implemented; the new bounded verifier must pass after
+  the supervised River session releases DRM master.
 - [ ] Route focused keyboard press/release events from physical libinput into
   xterm and prove typed text changes composed terminal pixels. The route and
   real device open pass; the injected X11-event proof passes; TTY typing
@@ -66,8 +69,9 @@ Exit criteria:
 
 ### 2. Live Session Stability Evidence
 
-- [ ] Record submit-to-page-flip latency, maximum in-flight frame age, authority
-  queue pressure, rejected/dropped batches, and cleanup debt over repeated ticks.
+- [x] Record submit-to-page-flip latency, maximum in-flight frame age, authority
+  queue capacity, rejected/dropped batches, page-flip callback pressure, and
+  cleanup debt over repeated ticks.
 - [ ] Pass 300 deterministic ticks and a 30-second TTY hardware session with no
   dropped authority batches or unresolved cleanup debt.
 

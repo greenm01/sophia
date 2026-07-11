@@ -24,8 +24,8 @@ x11rb = "0.13.1"
 
 [features]
 default = []
-atomic-scanout-live = ["sophia-backend-live/libdrm-events", "sophia-backend-live/libinput-events"]
-atomic-scanout-smoke-live = ["atomic-scanout-live", "sophia-backend-live/gbm-probe"]
+atomic-scanout-live = ["sophia-backend-live/gbm-probe", "sophia-backend-live/libdrm-events", "sophia-backend-live/libinput-events"]
+atomic-scanout-smoke-live = ["atomic-scanout-live"]
 
 [lints]
 workspace = true
