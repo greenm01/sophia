@@ -75,6 +75,10 @@ Current milestone target:
 
 ## Done Recently
 
+- [x] `x-authority-xeyes-smoke` launches `/usr/bin/xeyes`, keeps
+  compatibility expansion probe-driven, and adds only the demanded
+  `QueryColors`, `ClearArea`, and `PolyFillArc` paths with reduced
+  Engine/Runtime transaction evidence.
 - [x] `live-session-composition-smoke` now reuses the X Authority
   Present-pixmap socket path, drains the bounded authority queue into runtime
   intake, commits one authority transaction, submits a rendered primary plane

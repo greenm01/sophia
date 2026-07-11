@@ -22,10 +22,11 @@ and the real-client smoke that exercises the touched path:
 ```sh
 cargo test --offline -q -p sophia-x-authority --test x11_wire
 cargo run --offline -q -p sophia-cli -- x-authority-xclock-smoke
+cargo run --offline -q -p sophia-cli -- x-authority-xeyes-smoke
 ```
 
-`x-authority-xclock-smoke` is a regression smoke, not a full X server
-conformance test. Its reduced output must keep `first_error=none`, report the
+The real-client smokes are regression smokes, not full X server conformance
+tests. Their reduced output must keep `first_error=none`, report the
 proof-window outcome explicitly, and include request/opcode counters so future
 client-driven regressions show which compatibility surface changed.
 

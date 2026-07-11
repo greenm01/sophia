@@ -21,6 +21,26 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
         return Ok(true);
     }
 
+    if args.iter().any(|arg| arg == "x-authority-xeyes-smoke") {
+        let report = run_x_authority_xeyes_smoke()?;
+        println!(
+            "x-authority-xeyes-smoke display={} outcome={} status={} stdout_bytes={} stderr_bytes={} requests={} opcode_count={} opcodes={} transactions={} runtime_committed={} runtime_surfaces={} first_error={}",
+            report.display,
+            report.outcome,
+            report.status,
+            report.stdout_bytes,
+            report.stderr_bytes,
+            report.requests,
+            report.opcode_count,
+            report.opcodes,
+            report.transactions,
+            report.runtime_committed,
+            report.runtime_surfaces,
+            report.first_error.as_deref().unwrap_or("none")
+        );
+        return Ok(true);
+    }
+
     if args
         .iter()
         .any(|arg| arg == "x-authority-present-pixmap-smoke")
@@ -205,7 +225,7 @@ struct XAuthorityXlibPutImageSmokeReport {
 }
 
 #[derive(Clone, Debug)]
-struct XAuthorityXclockSmokeReport {
+struct XAuthorityExternalProbeSmokeReport {
     display: String,
     outcome: String,
     status: i32,
@@ -219,6 +239,9 @@ struct XAuthorityXclockSmokeReport {
     runtime_surfaces: u64,
     first_error: Option<String>,
 }
+
+type XAuthorityXclockSmokeReport = XAuthorityExternalProbeSmokeReport;
+type XAuthorityXeyesSmokeReport = XAuthorityExternalProbeSmokeReport;
 
 #[derive(Clone, Debug)]
 struct XAuthorityPresentPixmapSmokeReport {
@@ -589,15 +612,41 @@ fn run_x_authority_xlib_put_image_smoke()
 
 fn run_x_authority_xclock_smoke() -> Result<XAuthorityXclockSmokeReport, Box<dyn std::error::Error>>
 {
-    let (display, socket_path) = temp_xauthority_display(6600)?;
+    run_x_authority_external_probe_smoke(
+        "xclock",
+        "/usr/bin/xclock",
+        &["-analog", "-norender", "-update", "1"],
+        6600,
+        NamespaceId::from_raw(48),
+    )
+}
+
+fn run_x_authority_xeyes_smoke() -> Result<XAuthorityXeyesSmokeReport, Box<dyn std::error::Error>> {
+    run_x_authority_external_probe_smoke(
+        "xeyes",
+        "/usr/bin/xeyes",
+        &[],
+        6800,
+        NamespaceId::from_raw(49),
+    )
+}
+
+fn run_x_authority_external_probe_smoke(
+    label: &str,
+    command: &str,
+    command_args: &[&str],
+    display_base: u32,
+    namespace: NamespaceId,
+) -> Result<XAuthorityExternalProbeSmokeReport, Box<dyn std::error::Error>> {
+    let (display, socket_path) = temp_xauthority_display(display_base)?;
     let server_path = socket_path.clone();
     let (sender, receiver) = sync_channel(256);
     let server = std::thread::spawn(move || {
-        run_x11_core_socket_server_once_traced(&server_path, NamespaceId::from_raw(48), |trace| {
-            let _ = sender.try_send(XclockObservation::Opcode(trace.major_opcode));
+        run_x11_core_socket_server_once_traced(&server_path, namespace, |trace| {
+            let _ = sender.try_send(ExternalProbeObservation::Opcode(trace.major_opcode));
             for output in &trace.result.outputs {
                 if let XClientOutput::Error(error) = output {
-                    let _ = sender.try_send(XclockObservation::Error(format!(
+                    let _ = sender.try_send(ExternalProbeObservation::Error(format!(
                         "{:?}:major={}:resource={:#x}",
                         error.code, error.major_code, error.resource_id
                     )));
@@ -605,7 +654,7 @@ fn run_x_authority_xclock_smoke() -> Result<XAuthorityXclockSmokeReport, Box<dyn
             }
             if let Some(response) = &trace.result.response {
                 if !response.transactions.is_empty() {
-                    let _ = sender.try_send(XclockObservation::Transactions(
+                    let _ = sender.try_send(ExternalProbeObservation::Transactions(
                         response.transactions.clone(),
                     ));
                 }
@@ -615,16 +664,14 @@ fn run_x_authority_xclock_smoke() -> Result<XAuthorityXclockSmokeReport, Box<dyn
     });
     wait_for_socket_path(&socket_path)?;
 
-    let mut child = std::process::Command::new("/usr/bin/xclock")
-        .arg("-analog")
-        .arg("-norender")
-        .arg("-update")
-        .arg("1")
+    let mut command = std::process::Command::new(command);
+    command
+        .args(command_args)
         .arg("-display")
         .arg(&display)
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()?;
+        .stderr(std::process::Stdio::piped());
+    let mut child = command.spawn()?;
 
     let deadline = std::time::Instant::now() + Duration::from_secs(4);
     let mut transactions = Vec::new();
@@ -635,12 +682,12 @@ fn run_x_authority_xclock_smoke() -> Result<XAuthorityXclockSmokeReport, Box<dyn
     while std::time::Instant::now() < deadline {
         while let Ok(observation) = receiver.try_recv() {
             match observation {
-                XclockObservation::Opcode(opcode) => {
+                ExternalProbeObservation::Opcode(opcode) => {
                     requests = requests.saturating_add(1);
                     opcodes.insert(opcode);
                 }
-                XclockObservation::Transactions(batch) => transactions.extend(batch),
-                XclockObservation::Error(error) => {
+                ExternalProbeObservation::Transactions(batch) => transactions.extend(batch),
+                ExternalProbeObservation::Error(error) => {
                     first_error.get_or_insert(error);
                 }
             }
@@ -670,12 +717,12 @@ fn run_x_authority_xclock_smoke() -> Result<XAuthorityXclockSmokeReport, Box<dyn
 
     while let Ok(observation) = receiver.try_recv() {
         match observation {
-            XclockObservation::Opcode(opcode) => {
+            ExternalProbeObservation::Opcode(opcode) => {
                 requests = requests.saturating_add(1);
                 opcodes.insert(opcode);
             }
-            XclockObservation::Transactions(batch) => transactions.extend(batch),
-            XclockObservation::Error(error) => {
+            ExternalProbeObservation::Transactions(batch) => transactions.extend(batch),
+            ExternalProbeObservation::Error(error) => {
                 first_error.get_or_insert(error);
             }
         }
@@ -683,7 +730,7 @@ fn run_x_authority_xclock_smoke() -> Result<XAuthorityXclockSmokeReport, Box<dyn
 
     if transactions.is_empty() {
         return Err(format!(
-            "xclock did not produce an authority transaction for {display}: status={status} stderr={} first_error={}",
+            "{label} did not produce an authority transaction for {display}: status={status} stderr={} first_error={}",
             String::from_utf8_lossy(&output.stderr).trim(),
             first_error.as_deref().unwrap_or("none")
         )
@@ -695,7 +742,7 @@ fn run_x_authority_xclock_smoke() -> Result<XAuthorityXclockSmokeReport, Box<dyn
         || runtime_state.authority_surfaces_applied == 0
     {
         return Err(format!(
-            "xclock transactions did not commit through runtime for {display}: transactions={} committed={} surfaces={}",
+            "{label} transactions did not commit through runtime for {display}: transactions={} committed={} surfaces={}",
             transactions.len(),
             runtime_state.authority_transactions_committed,
             runtime_state.authority_surfaces_applied
@@ -717,7 +764,7 @@ fn run_x_authority_xclock_smoke() -> Result<XAuthorityXclockSmokeReport, Box<dyn
         .collect::<Vec<_>>()
         .join(",");
 
-    Ok(XAuthorityXclockSmokeReport {
+    Ok(XAuthorityExternalProbeSmokeReport {
         display,
         outcome: outcome.to_owned(),
         status,
@@ -734,7 +781,7 @@ fn run_x_authority_xclock_smoke() -> Result<XAuthorityXclockSmokeReport, Box<dyn
 }
 
 #[derive(Clone, Debug)]
-enum XclockObservation {
+enum ExternalProbeObservation {
     Opcode(u8),
     Transactions(Vec<SurfaceTransaction>),
     Error(String),

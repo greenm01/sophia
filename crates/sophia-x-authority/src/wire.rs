@@ -28,12 +28,15 @@ const X_CREATE_PIXMAP: u8 = 53;
 const X_FREE_PIXMAP: u8 = 54;
 const X_CREATE_GC: u8 = 55;
 const X_FREE_GC: u8 = 60;
+const X_CLEAR_AREA: u8 = 61;
 const X_COPY_AREA: u8 = 62;
 const X_POLY_LINE: u8 = 65;
 const X_POLY_SEGMENT: u8 = 66;
 const X_FILL_POLY: u8 = 69;
 const X_POLY_FILL_RECTANGLE: u8 = 70;
+const X_POLY_FILL_ARC: u8 = 71;
 const X_PUT_IMAGE: u8 = 72;
+const X_QUERY_COLORS: u8 = 91;
 const X_QUERY_EXTENSION: u8 = 98;
 const X_LIST_EXTENSIONS: u8 = 99;
 const X_QUERY_BEST_SIZE: u8 = 97;
@@ -69,12 +72,15 @@ const X_CREATE_PIXMAP_REQ_LEN: usize = 16;
 const X_FREE_PIXMAP_REQ_LEN: usize = 8;
 const X_CREATE_GC_REQ_LEN: usize = 16;
 const X_FREE_GC_REQ_LEN: usize = 8;
+const X_CLEAR_AREA_REQ_LEN: usize = 16;
 const X_COPY_AREA_REQ_LEN: usize = 28;
 const X_POLY_LINE_REQ_LEN: usize = 12;
 const X_POLY_SEGMENT_REQ_LEN: usize = 12;
 const X_FILL_POLY_REQ_LEN: usize = 16;
 const X_POLY_FILL_RECTANGLE_REQ_LEN: usize = 12;
+const X_POLY_FILL_ARC_REQ_LEN: usize = 12;
 const X_PUT_IMAGE_REQ_LEN: usize = 24;
+const X_QUERY_COLORS_REQ_LEN: usize = 8;
 const X_QUERY_EXTENSION_REQ_LEN: usize = 8;
 const X_LIST_EXTENSIONS_REQ_LEN: usize = 4;
 const X_QUERY_BEST_SIZE_REQ_LEN: usize = 12;
@@ -85,6 +91,7 @@ const X_MIT_SHM_DETACH_REQ_LEN: usize = 8;
 const X_MIT_SHM_PUT_IMAGE_REQ_LEN: usize = 40;
 
 pub const X_PUT_IMAGE_MAX_DATA_BYTES: usize = crate::X_PROPERTY_MAX_VALUE_BYTES;
+pub const X_QUERY_COLORS_MAX_PIXELS: usize = 256;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct XWireClientContext {
@@ -120,6 +127,14 @@ pub enum XWireRequest {
     },
     FreeGraphicsContext {
         gc: XResourceId,
+    },
+    ClearArea {
+        exposures: bool,
+        window: XResourceId,
+        x: i16,
+        y: i16,
+        width: u16,
+        height: u16,
     },
     PolyFillRectangle {
         drawable: XResourceId,
@@ -203,6 +218,11 @@ pub enum XWireRequest {
         gc: XResourceId,
         damage: Option<Rect>,
     },
+    PolyFillArc {
+        drawable: XResourceId,
+        gc: XResourceId,
+        damage: Vec<Rect>,
+    },
     ShmQueryVersion,
     ShmAttach {
         segment: XResourceId,
@@ -228,6 +248,10 @@ pub enum XWireRequest {
         send_event: bool,
         segment: XResourceId,
         offset: u32,
+    },
+    QueryColors {
+        colormap: XResourceId,
+        pixels: Vec<u32>,
     },
 }
 
@@ -312,12 +336,15 @@ pub fn decode_x11_core_request(
         X_FREE_PIXMAP => decode_free_pixmap(context, bytes),
         X_CREATE_GC => decode_create_gc(context, bytes),
         X_FREE_GC => decode_free_gc(context, bytes),
+        X_CLEAR_AREA => decode_clear_area(context, bytes),
         X_COPY_AREA => decode_copy_area(context, bytes),
         X_POLY_LINE => decode_poly_line(context, bytes),
         X_POLY_SEGMENT => decode_poly_segment(context, bytes),
         X_FILL_POLY => decode_fill_poly(context, bytes),
         X_POLY_FILL_RECTANGLE => decode_poly_fill_rectangle(context, bytes),
+        X_POLY_FILL_ARC => decode_poly_fill_arc(context, bytes),
         X_PUT_IMAGE => decode_put_image(context, bytes),
+        X_QUERY_COLORS => decode_query_colors(context, bytes),
         X_QUERY_BEST_SIZE => decode_query_best_size(context, bytes),
         X_QUERY_EXTENSION => decode_query_extension(context, bytes),
         X_LIST_EXTENSIONS => decode_list_extensions(bytes),
@@ -469,6 +496,50 @@ fn decode_copy_area(
     })
 }
 
+fn decode_clear_area(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_CLEAR_AREA, X_CLEAR_AREA_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::ClearArea {
+        exposures: bytes[1] != 0,
+        window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        x: context.byte_order.i16(&bytes[8..10]),
+        y: context.byte_order.i16(&bytes[10..12]),
+        width: context.byte_order.u16(&bytes[12..14]),
+        height: context.byte_order.u16(&bytes[14..16]),
+    })
+}
+
+fn decode_query_colors(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_len(X_QUERY_COLORS, X_QUERY_COLORS_REQ_LEN, bytes.len())?;
+    let pixel_bytes = &bytes[X_QUERY_COLORS_REQ_LEN..];
+    if pixel_bytes.len() % 4 != 0 {
+        return Err(XWireParseError::InvalidLength {
+            opcode: X_QUERY_COLORS,
+            expected_at_least: X_QUERY_COLORS_REQ_LEN + ((pixel_bytes.len() + 3) & !3),
+            actual: bytes.len(),
+        });
+    }
+    if pixel_bytes.len() / 4 > X_QUERY_COLORS_MAX_PIXELS {
+        return Err(XWireParseError::PropertyValueTooLarge {
+            len: pixel_bytes.len(),
+            max: X_QUERY_COLORS_MAX_PIXELS * 4,
+        });
+    }
+
+    Ok(XWireRequest::QueryColors {
+        colormap: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        pixels: pixel_bytes
+            .chunks_exact(4)
+            .map(|pixel| context.byte_order.u32(pixel))
+            .collect(),
+    })
+}
+
 fn decode_poly_segment(
     context: XWireClientContext,
     bytes: &[u8],
@@ -602,6 +673,45 @@ fn decode_poly_fill_rectangle(
         gc: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
         rectangles,
     })
+}
+
+fn decode_poly_fill_arc(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_len(X_POLY_FILL_ARC, X_POLY_FILL_ARC_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::PolyFillArc {
+        drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        gc: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
+        damage: arc_damage_bounds(context, X_POLY_FILL_ARC, X_POLY_FILL_ARC_REQ_LEN, bytes)?,
+    })
+}
+
+fn arc_damage_bounds(
+    context: XWireClientContext,
+    opcode: u8,
+    header_len: usize,
+    bytes: &[u8],
+) -> Result<Vec<Rect>, XWireParseError> {
+    let arc_bytes = &bytes[header_len..];
+    if arc_bytes.len() % 12 != 0 {
+        return Err(XWireParseError::InvalidLength {
+            opcode,
+            expected_at_least: header_len + ((arc_bytes.len() + 11) / 12) * 12,
+            actual: bytes.len(),
+        });
+    }
+
+    let mut damage = Vec::with_capacity(arc_bytes.len() / 12);
+    for arc in arc_bytes.chunks_exact(12) {
+        damage.push(Rect {
+            x: i32::from(context.byte_order.i16(&arc[0..2])),
+            y: i32::from(context.byte_order.i16(&arc[2..4])),
+            width: i32::from(context.byte_order.u16(&arc[4..6])),
+            height: i32::from(context.byte_order.u16(&arc[6..8])),
+        });
+    }
+    Ok(damage)
 }
 
 fn decode_free_gc(

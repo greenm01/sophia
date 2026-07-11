@@ -260,6 +260,60 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
+        XWireRequest::ClearArea {
+            window,
+            x,
+            y,
+            width,
+            height,
+            ..
+        } => {
+            let transaction = TransactionId::from_raw(u64::from(context.sequence));
+            if width == 0 || height == 0 {
+                let outputs =
+                    if let Err(error) = runtime.validate_window_access(context.namespace, window) {
+                        vec![XClientOutput::Error(x_error_from_runtime(
+                            error,
+                            context.sequence,
+                            context.major_opcode,
+                            u32::try_from(window.local.raw()).unwrap_or(0),
+                        ))]
+                    } else {
+                        Vec::new()
+                    };
+                return XDispatchResult {
+                    response: Some(XAuthorityResponsePacket::accepted(transaction)),
+                    outputs,
+                    metadata_candidates: Vec::new(),
+                };
+            }
+            let response = runtime.apply_core_draw(
+                transaction,
+                context.namespace,
+                window,
+                Region::single(Rect {
+                    x: i32::from(x),
+                    y: i32::from(y),
+                    width: i32::from(width),
+                    height: i32::from(height),
+                }),
+            );
+            let outputs = if let XAuthorityResponseOutcome::Rejected(error) = response.outcome {
+                vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(window.local.raw()).unwrap_or(0),
+                ))]
+            } else {
+                Vec::new()
+            };
+            XDispatchResult {
+                response: Some(response),
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::OpenFont { font, .. } => {
             let outputs =
                 match runtime.open_font(context.namespace, font, u64::from(context.sequence)) {
@@ -418,6 +472,14 @@ pub fn dispatch_x11_wire_request(
                 sequence: context.sequence,
                 width,
                 height,
+            })],
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::QueryColors { pixels, .. } => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::QueryColors {
+                sequence: context.sequence,
+                pixels,
             })],
             metadata_candidates: Vec::new(),
         },
@@ -625,6 +687,42 @@ pub fn dispatch_x11_wire_request(
             }
         }
         XWireRequest::PolySegment {
+            drawable, damage, ..
+        } => {
+            let transaction = TransactionId::from_raw(u64::from(context.sequence));
+            if runtime
+                .validate_pixmap_access(context.namespace, drawable)
+                .is_ok()
+            {
+                return XDispatchResult {
+                    response: Some(XAuthorityResponsePacket::accepted(transaction)),
+                    outputs: Vec::new(),
+                    metadata_candidates: Vec::new(),
+                };
+            }
+            let mut region = Region::empty();
+            for rect in damage {
+                region.push(rect);
+            }
+            let response =
+                runtime.apply_core_draw(transaction, context.namespace, drawable, region);
+            let outputs = if let XAuthorityResponseOutcome::Rejected(error) = response.outcome {
+                vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(drawable.local.raw()).unwrap_or(0),
+                ))]
+            } else {
+                Vec::new()
+            };
+            XDispatchResult {
+                response: Some(response),
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::PolyFillArc {
             drawable, damage, ..
         } => {
             let transaction = TransactionId::from_raw(u64::from(context.sequence));

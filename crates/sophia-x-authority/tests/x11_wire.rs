@@ -457,6 +457,24 @@ fn x11_core_decoder_captures_create_gc_requests() {
             drawable: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
         }
     );
+
+    let clear = decode_x11_core_request(
+        context(namespace, 508, XByteOrder::LittleEndian),
+        &clear_area_request(XByteOrder::LittleEndian, true, 0x220010, 3, 4, 40, 30),
+    )
+    .unwrap();
+
+    assert_eq!(
+        clear,
+        XWireRequest::ClearArea {
+            exposures: true,
+            window: XResourceId::new(0x220010, 1),
+            x: 3,
+            y: 4,
+            width: 40,
+            height: 30,
+        }
+    );
 }
 
 #[test]
@@ -575,6 +593,31 @@ fn x11_core_decoder_captures_poly_fill_rectangle_requests() {
                 width: 11,
                 height: 15,
             }),
+        }
+    );
+
+    let fill_arcs = decode_x11_core_request(
+        context(namespace, 511, XByteOrder::LittleEndian),
+        &poly_fill_arc_request(
+            XByteOrder::LittleEndian,
+            0x220010,
+            0x220011,
+            &[(7, 8, 41, 31, 0, 23040)],
+        ),
+    )
+    .unwrap();
+
+    assert_eq!(
+        fill_arcs,
+        XWireRequest::PolyFillArc {
+            drawable: XResourceId::new(0x220010, 1),
+            gc: XResourceId::new(0x220011, 1),
+            damage: vec![Rect {
+                x: 7,
+                y: 8,
+                width: 41,
+                height: 31,
+            }],
         }
     );
 }
@@ -1202,6 +1245,52 @@ fn x11_dispatch_query_best_size_echoes_requested_dimensions() {
 }
 
 #[test]
+fn x11_dispatch_query_colors_returns_bounded_color_records() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let request = decode_x11_core_request(
+        context(namespace, 525, XByteOrder::LittleEndian),
+        &query_colors_request(XByteOrder::LittleEndian, X_SETUP_DEFAULT_ROOT, &[0, 1]),
+    )
+    .unwrap();
+
+    assert_eq!(
+        request,
+        XWireRequest::QueryColors {
+            colormap: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+            pixels: vec![0, 1],
+        }
+    );
+
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 91),
+        request,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][4..8]), 4);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][8..10]), 2);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][32..34]), 0);
+    assert_eq!(
+        read_u16(XByteOrder::LittleEndian, &encoded[0][40..42]),
+        u16::MAX
+    );
+    assert_eq!(
+        read_u16(XByteOrder::LittleEndian, &encoded[0][42..44]),
+        u16::MAX
+    );
+    assert_eq!(
+        read_u16(XByteOrder::LittleEndian, &encoded[0][44..46]),
+        u16::MAX
+    );
+}
+
+#[test]
 fn x11_dispatch_reads_bounded_property_slices() {
     let namespace = NamespaceId::from_raw(45);
     let mut runtime = XAuthorityRuntime::new();
@@ -1786,6 +1875,32 @@ fn x11_dispatch_poly_fill_rectangle_emits_core_draw_transaction() {
         &mut properties,
     );
 
+    let clear = decode_x11_core_request(
+        context(namespace, 601, XByteOrder::LittleEndian),
+        &clear_area_request(XByteOrder::LittleEndian, false, 0x220101, 4, 5, 33, 22),
+    )
+    .unwrap();
+    let clear = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 61),
+        clear,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    assert!(clear.outputs.is_empty());
+    let response = clear.response.unwrap();
+    assert_eq!(response.transactions.len(), 1);
+    assert_eq!(
+        response.transactions[0].damage,
+        Region::single(Rect {
+            x: 4,
+            y: 5,
+            width: 33,
+            height: 22,
+        })
+    );
+
     let fill = decode_x11_core_request(
         context(namespace, 602, XByteOrder::LittleEndian),
         &poly_fill_rectangle_request(
@@ -1923,6 +2038,41 @@ fn x11_dispatch_poly_fill_rectangle_emits_core_draw_transaction() {
             y: 5,
             width: 11,
             height: 16,
+        })
+    );
+
+    let fill_arcs = decode_x11_core_request(
+        context(namespace, 606, XByteOrder::LittleEndian),
+        &poly_fill_arc_request(
+            XByteOrder::LittleEndian,
+            0x220101,
+            0x220102,
+            &[(6, 7, 22, 12, 0, 23040)],
+        ),
+    )
+    .unwrap();
+    let fill_arcs = dispatch_x11_wire_request(
+        dispatch_context(namespace, 6, XByteOrder::LittleEndian, 71),
+        fill_arcs,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    assert!(fill_arcs.outputs.is_empty());
+    let response = fill_arcs.response.unwrap();
+    assert_eq!(response.transactions.len(), 1);
+    assert_eq!(
+        response.transactions[0].surface,
+        SurfaceId::new(0x220101, 1)
+    );
+    assert_eq!(
+        response.transactions[0].damage,
+        Region::single(Rect {
+            x: 6,
+            y: 7,
+            width: 22,
+            height: 12,
         })
     );
 }
@@ -2998,6 +3148,25 @@ fn create_pixmap_request(
     out
 }
 
+fn clear_area_request(
+    byte_order: XByteOrder,
+    exposures: bool,
+    window: u32,
+    x: i16,
+    y: i16,
+    width: u16,
+    height: u16,
+) -> Vec<u8> {
+    let mut out = vec![61, u8::from(exposures)];
+    push_u16(&mut out, byte_order, 4);
+    push_u32(&mut out, byte_order, window);
+    push_i16(&mut out, byte_order, x);
+    push_i16(&mut out, byte_order, y);
+    push_u16(&mut out, byte_order, width);
+    push_u16(&mut out, byte_order, height);
+    out
+}
+
 fn open_font_request(byte_order: XByteOrder, font: u32, name: &str) -> Vec<u8> {
     let mut out = vec![45, 0];
     let len_units = (12 + padded_len_for_test(name.len())) / 4;
@@ -3113,6 +3282,28 @@ fn poly_line_request(
     for (x, y) in points {
         push_i16(&mut out, byte_order, *x);
         push_i16(&mut out, byte_order, *y);
+    }
+    out
+}
+
+fn poly_fill_arc_request(
+    byte_order: XByteOrder,
+    drawable: u32,
+    gc: u32,
+    arcs: &[(i16, i16, u16, u16, i16, i16)],
+) -> Vec<u8> {
+    let mut out = vec![71, 0];
+    let len_units = 3 + arcs.len() * 3;
+    push_u16(&mut out, byte_order, len_units as u16);
+    push_u32(&mut out, byte_order, drawable);
+    push_u32(&mut out, byte_order, gc);
+    for (x, y, width, height, angle1, angle2) in arcs {
+        push_i16(&mut out, byte_order, *x);
+        push_i16(&mut out, byte_order, *y);
+        push_u16(&mut out, byte_order, *width);
+        push_u16(&mut out, byte_order, *height);
+        push_i16(&mut out, byte_order, *angle1);
+        push_i16(&mut out, byte_order, *angle2);
     }
     out
 }
@@ -3273,6 +3464,17 @@ fn push_u64(out: &mut Vec<u8>, byte_order: XByteOrder, value: u64) {
         XByteOrder::LittleEndian => out.extend_from_slice(&value.to_le_bytes()),
         XByteOrder::BigEndian => out.extend_from_slice(&value.to_be_bytes()),
     }
+}
+
+fn query_colors_request(byte_order: XByteOrder, colormap: u32, pixels: &[u32]) -> Vec<u8> {
+    let mut out = vec![91, 0];
+    let len_units = 2 + pixels.len();
+    push_u16(&mut out, byte_order, len_units as u16);
+    push_u32(&mut out, byte_order, colormap);
+    for pixel in pixels {
+        push_u32(&mut out, byte_order, *pixel);
+    }
+    out
 }
 
 fn read_u16(byte_order: XByteOrder, bytes: &[u8]) -> u16 {

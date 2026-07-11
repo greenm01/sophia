@@ -152,6 +152,10 @@ pub enum XClientReply {
         item_count: u32,
         bytes: Vec<u8>,
     },
+    QueryColors {
+        sequence: u16,
+        pixels: Vec<u32>,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -320,6 +324,30 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             put_u32(byte_order, &mut out[16..20], item_count);
             out[X_CLIENT_OUTPUT_RECORD_LEN..X_CLIENT_OUTPUT_RECORD_LEN + bytes.len()]
                 .copy_from_slice(&bytes);
+            out
+        }
+        XClientReply::QueryColors { sequence, pixels } => {
+            let colors_len = pixels.len().saturating_mul(8);
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN + colors_len];
+            write_reply_header(
+                byte_order,
+                &mut out[..X_CLIENT_OUTPUT_RECORD_LEN],
+                sequence,
+                u32::try_from(colors_len / 4).unwrap_or(0),
+            );
+            put_u16(
+                byte_order,
+                &mut out[8..10],
+                u16::try_from(pixels.len()).unwrap_or(0),
+            );
+            let mut offset = X_CLIENT_OUTPUT_RECORD_LEN;
+            for pixel in pixels {
+                let intensity = if pixel == 0 { 0 } else { u16::MAX };
+                put_u16(byte_order, &mut out[offset..offset + 2], intensity);
+                put_u16(byte_order, &mut out[offset + 2..offset + 4], intensity);
+                put_u16(byte_order, &mut out[offset + 4..offset + 6], intensity);
+                offset += 8;
+            }
             out
         }
     }

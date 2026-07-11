@@ -3,6 +3,19 @@
 This file records early decisions, assumptions, and open questions. Keep it
 short and chronological.
 
+## 2026-07-10: xeyes as Arc Drawing Probe
+
+`x-authority-xeyes-smoke` now launches `/usr/bin/xeyes` against Sophia X
+Authority and reaches Engine/Runtime committed authority transactions with no X
+protocol error. The compatibility work stayed probe-driven: xeyes added bounded
+`QueryColors`, `ClearArea`, and `PolyFillArc` handling without broad colormap or
+graphics primitive ownership.
+
+The passing reduced evidence was `outcome=proof_window_killed`, `requests=59`,
+`opcode_count=16`, `opcodes=1,8,9,16,18,20,43,53,54,55,60,61,71,72,91,98`,
+`transactions=5`, `runtime_committed=5`, `runtime_surfaces=5`, and
+`first_error=none`.
+
 ## 2026-07-10: Live Session Composition Smoke
 
 `live-session-composition-smoke` now composes the Sophia X Authority

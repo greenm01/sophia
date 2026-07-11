@@ -397,3 +397,18 @@ and sorted major-opcode list, so future regressions show which compatibility
 surface changed without exposing XIDs or namespace IDs. The authority still does
 not become a full X server: unsupported requests remain fail-closed, and only
 reduced transaction facts cross into runtime.
+
+## External xeyes Probe
+
+`x-authority-xeyes-smoke` launches `/usr/bin/xeyes` against a temporary Sophia X
+Authority socket and keeps authority coverage probe-driven. The probe added the
+request surface xeyes actually exercised after xclock: bounded `QueryColors`,
+`ClearArea`, and `PolyFillArc` handling. Arc and clear operations reduce to core
+draw damage transactions; color replies return bounded RGB records without
+making Sophia X Authority a full colormap implementation.
+
+The passing proof reached five Engine/Runtime committed authority transactions
+with no X protocol error before the harness killed the long-running xeyes
+process. The reduced report includes the total request count, sorted opcode
+list, runtime counters, and `first_error=none` so future real-client regressions
+identify the next compatibility gap directly.
