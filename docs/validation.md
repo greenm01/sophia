@@ -108,10 +108,15 @@ regression loop. On a dedicated TTY, after the graphical compositor has
 released DRM master, run:
 
 ```sh
-SOPHIA_OPERATOR_KEYBOARD=/dev/input/by-id/...-event-kbd \
-  tools/operator_keyboard_hardware_proof.sh
-tools/vrr_hardware_proof.sh
+tools/finish_milestones_1_2.sh
 ```
+
+The combined helper auto-selects the keyboard when exactly one stable keyboard
+path exists, reruns the real xmonad gate, and executes both physical proofs. It
+refuses to proceed while River, Niri, Sway, Hyprland, KWin, or Xorg is active,
+so invoking it accidentally from the live graphical session cannot take DRM
+master or modeset the display. Set `SOPHIA_OPERATOR_KEYBOARD` only when more
+than one keyboard path is listed.
 
 The keyboard helper waits for the explicit physical-input readiness line; type
 `sophia` only after it appears. The proof fails unless libinput observes and
