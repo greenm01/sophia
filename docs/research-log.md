@@ -3,6 +3,25 @@
 This file records early decisions, assumptions, and open questions. Keep it
 short and chronological.
 
+## 2026-07-10: xterm as Terminal Setup Probe
+
+`x-authority-xterm-smoke` now launches `/usr/bin/xterm` against Sophia X
+Authority and runs through terminal setup/lifecycle requests with no X protocol
+error. The compatibility work stayed probe-driven: xterm added bounded
+`ConfigureWindow` decoding and namespace-checked dispatch. It does not yet
+prove rendered terminal contents because the observed request stream reaches
+pixmap/image setup but produces no Sophia `SurfaceTransaction`.
+
+The external-probe harness now passes `-display` before client-specific
+arguments so X Toolkit clients that use `-e` still receive the intended test
+display, and no-transaction failure messages include request/opcode counters.
+
+The passing reduced evidence was `outcome=proof_window_killed`,
+`requests=82`, `opcode_count=16`,
+`opcodes=1,12,16,18,20,43,45,46,47,53,54,55,60,72,94,98`,
+`transactions=0`, `runtime_committed=0`, `runtime_surfaces=0`, and
+`first_error=none`.
+
 ## 2026-07-10: xcalc as Athena Widget Probe
 
 `x-authority-xcalc-smoke` now launches `/usr/bin/xcalc` against Sophia X

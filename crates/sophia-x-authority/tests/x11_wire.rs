@@ -168,13 +168,18 @@ fn x11_core_decoder_maps_create_and_map_to_authority_packets() {
         &resource_request(XByteOrder::LittleEndian, 10, 0x220001),
     )
     .unwrap();
-    let attributes = decode_x11_core_request(
+    let configure = decode_x11_core_request(
         context(namespace, 505, XByteOrder::LittleEndian),
+        &configure_window_request(XByteOrder::LittleEndian, 0x220001, 0x000c, &[12, 14]),
+    )
+    .unwrap();
+    let attributes = decode_x11_core_request(
+        context(namespace, 506, XByteOrder::LittleEndian),
         &change_window_attributes_request(XByteOrder::LittleEndian, X_SETUP_DEFAULT_ROOT),
     )
     .unwrap();
     let get_attributes = decode_x11_core_request(
-        context(namespace, 506, XByteOrder::LittleEndian),
+        context(namespace, 507, XByteOrder::LittleEndian),
         &resource_request(XByteOrder::LittleEndian, 3, X_SETUP_DEFAULT_ROOT),
     )
     .unwrap();
@@ -224,18 +229,25 @@ fn x11_core_decoder_maps_create_and_map_to_authority_packets() {
             window: XResourceId::new(0x220001, 1),
         }
     );
+    assert_eq!(
+        configure,
+        XWireRequest::ConfigureWindow {
+            window: XResourceId::new(0x220001, 1),
+            value_mask: 0x000c,
+        }
+    );
     let geometry = decode_x11_core_request(
-        context(namespace, 507, XByteOrder::LittleEndian),
+        context(namespace, 508, XByteOrder::LittleEndian),
         &resource_request(XByteOrder::LittleEndian, 14, X_SETUP_DEFAULT_ROOT),
     )
     .unwrap();
     let tree = decode_x11_core_request(
-        context(namespace, 508, XByteOrder::LittleEndian),
+        context(namespace, 509, XByteOrder::LittleEndian),
         &resource_request(XByteOrder::LittleEndian, 15, X_SETUP_DEFAULT_ROOT),
     )
     .unwrap();
     let list_properties = decode_x11_core_request(
-        context(namespace, 509, XByteOrder::LittleEndian),
+        context(namespace, 510, XByteOrder::LittleEndian),
         &resource_request(XByteOrder::LittleEndian, 21, X_SETUP_DEFAULT_ROOT),
     )
     .unwrap();
@@ -258,7 +270,7 @@ fn x11_core_decoder_maps_create_and_map_to_authority_packets() {
         }
     );
     let translate = decode_x11_core_request(
-        context(namespace, 510, XByteOrder::LittleEndian),
+        context(namespace, 511, XByteOrder::LittleEndian),
         &translate_coordinates_request(
             XByteOrder::LittleEndian,
             X_SETUP_DEFAULT_ROOT,
@@ -2300,13 +2312,27 @@ fn x11_dispatch_emits_configure_map_property_and_selection_failure_outputs() {
     );
     assert!(unmap.outputs.is_empty());
 
-    let map_subwindows = decode_x11_core_request(
+    let configure = decode_x11_core_request(
         context(namespace, 604, XByteOrder::LittleEndian),
+        &configure_window_request(XByteOrder::LittleEndian, 0x220101, 0x000c, &[12, 14]),
+    )
+    .unwrap();
+    let configure = dispatch_x11_wire_request(
+        dispatch_context(namespace, 4, XByteOrder::LittleEndian, 12),
+        configure,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert!(configure.outputs.is_empty());
+
+    let map_subwindows = decode_x11_core_request(
+        context(namespace, 605, XByteOrder::LittleEndian),
         &resource_request(XByteOrder::LittleEndian, 9, X_SETUP_DEFAULT_ROOT),
     )
     .unwrap();
     let map_subwindows = dispatch_x11_wire_request(
-        dispatch_context(namespace, 4, XByteOrder::LittleEndian, 9),
+        dispatch_context(namespace, 5, XByteOrder::LittleEndian, 9),
         map_subwindows,
         &mut runtime,
         &mut atoms,
@@ -2323,12 +2349,12 @@ fn x11_dispatch_emits_configure_map_property_and_selection_failure_outputs() {
     );
 
     let attributes = decode_x11_core_request(
-        context(namespace, 605, XByteOrder::LittleEndian),
+        context(namespace, 606, XByteOrder::LittleEndian),
         &change_window_attributes_request(XByteOrder::LittleEndian, X_SETUP_DEFAULT_ROOT),
     )
     .unwrap();
     let attributes = dispatch_x11_wire_request(
-        dispatch_context(namespace, 5, XByteOrder::LittleEndian, 2),
+        dispatch_context(namespace, 6, XByteOrder::LittleEndian, 2),
         attributes,
         &mut runtime,
         &mut atoms,
@@ -2337,7 +2363,7 @@ fn x11_dispatch_emits_configure_map_property_and_selection_failure_outputs() {
     assert!(attributes.outputs.is_empty());
 
     let property = decode_x11_core_request(
-        context(namespace, 606, XByteOrder::LittleEndian),
+        context(namespace, 607, XByteOrder::LittleEndian),
         &change_property_request(
             XByteOrder::LittleEndian,
             XPropertyMode::Replace,
@@ -2350,7 +2376,7 @@ fn x11_dispatch_emits_configure_map_property_and_selection_failure_outputs() {
     )
     .unwrap();
     let property = dispatch_x11_wire_request(
-        dispatch_context(namespace, 6, XByteOrder::LittleEndian, 18),
+        dispatch_context(namespace, 7, XByteOrder::LittleEndian, 18),
         property,
         &mut runtime,
         &mut atoms,
@@ -2363,7 +2389,7 @@ fn x11_dispatch_emits_configure_map_property_and_selection_failure_outputs() {
     );
 
     let selection = decode_x11_core_request(
-        context(namespace, 607, XByteOrder::LittleEndian),
+        context(namespace, 608, XByteOrder::LittleEndian),
         &convert_selection_request(XByteOrder::LittleEndian, 0x220101, 100, 101, 102, 33),
     )
     .unwrap();
@@ -4271,6 +4297,24 @@ fn alloc_named_color_request(byte_order: XByteOrder, colormap: u32, name: &str) 
     push_u16(&mut out, byte_order, 0);
     out.extend_from_slice(name.as_bytes());
     pad_to_four(&mut out);
+    out
+}
+
+fn configure_window_request(
+    byte_order: XByteOrder,
+    window: u32,
+    value_mask: u16,
+    values: &[u32],
+) -> Vec<u8> {
+    let mut out = vec![12, 0];
+    let len_units = 3 + values.len();
+    push_u16(&mut out, byte_order, len_units as u16);
+    push_u32(&mut out, byte_order, window);
+    push_u16(&mut out, byte_order, value_mask);
+    push_u16(&mut out, byte_order, 0);
+    for value in values {
+        push_u32(&mut out, byte_order, *value);
+    }
     out
 }
 

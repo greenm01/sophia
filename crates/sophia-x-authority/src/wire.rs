@@ -14,6 +14,7 @@ const X_DESTROY_WINDOW: u8 = 4;
 const X_MAP_WINDOW: u8 = 8;
 const X_MAP_SUBWINDOWS: u8 = 9;
 const X_UNMAP_WINDOW: u8 = 10;
+const X_CONFIGURE_WINDOW: u8 = 12;
 const X_GET_GEOMETRY: u8 = 14;
 const X_QUERY_TREE: u8 = 15;
 const X_INTERN_ATOM: u8 = 16;
@@ -75,6 +76,7 @@ const X_DESTROY_WINDOW_REQ_LEN: usize = 8;
 const X_MAP_WINDOW_REQ_LEN: usize = 8;
 const X_MAP_SUBWINDOWS_REQ_LEN: usize = 8;
 const X_UNMAP_WINDOW_REQ_LEN: usize = 8;
+const X_CONFIGURE_WINDOW_REQ_LEN: usize = 12;
 const X_GET_GEOMETRY_REQ_LEN: usize = 8;
 const X_QUERY_TREE_REQ_LEN: usize = 8;
 const X_INTERN_ATOM_REQ_LEN: usize = 8;
@@ -150,6 +152,10 @@ pub enum XWireRequest {
     },
     UnmapWindow {
         window: XResourceId,
+    },
+    ConfigureWindow {
+        window: XResourceId,
+        value_mask: u16,
     },
     GetGeometry {
         drawable: XResourceId,
@@ -410,6 +416,7 @@ pub fn decode_x11_core_request(
         X_MAP_WINDOW => decode_map_window(context, bytes),
         X_MAP_SUBWINDOWS => decode_map_subwindows(context, bytes),
         X_UNMAP_WINDOW => decode_unmap_window(context, bytes),
+        X_CONFIGURE_WINDOW => decode_configure_window(context, bytes),
         X_GET_GEOMETRY => decode_get_geometry(context, bytes),
         X_QUERY_TREE => decode_query_tree(context, bytes),
         X_INTERN_ATOM => decode_intern_atom(context, bytes),
@@ -719,6 +726,27 @@ fn decode_unmap_window(
     require_exact_len(X_UNMAP_WINDOW, X_UNMAP_WINDOW_REQ_LEN, bytes.len())?;
     Ok(XWireRequest::UnmapWindow {
         window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+    })
+}
+
+fn decode_configure_window(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_len(X_CONFIGURE_WINDOW, X_CONFIGURE_WINDOW_REQ_LEN, bytes.len())?;
+    let value_mask = context.byte_order.u16(&bytes[8..10]);
+    let value_count = usize::try_from(value_mask.count_ones()).unwrap_or(usize::MAX);
+    let expected_len = X_CONFIGURE_WINDOW_REQ_LEN + value_count.saturating_mul(4);
+    if bytes.len() != expected_len {
+        return Err(XWireParseError::InvalidLength {
+            opcode: X_CONFIGURE_WINDOW,
+            expected_at_least: expected_len,
+            actual: bytes.len(),
+        });
+    }
+    Ok(XWireRequest::ConfigureWindow {
+        window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        value_mask,
     })
 }
 

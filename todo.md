@@ -35,9 +35,9 @@ Current milestone target:
 
 Next logical steps:
 
-- [ ] Add the next toolkit-shaped external client probe, preferring a small
-  GTK or GIMP-adjacent utility that is available on the host, and implement
-  only the first demanded opcode/reply surface.
+- [ ] Add the next GTK or GIMP-adjacent external client probe once a suitable
+  host binary is available, and implement only the first demanded opcode/reply
+  surface.
 - [ ] Convert one long-running external smoke into a stricter rendered-output
   assertion once Authority-to-Engine transactions can be observed through the
   live composition path.
@@ -86,6 +86,10 @@ Next logical steps:
 
 ## Done Recently
 
+- [x] `x-authority-xterm-smoke` launches `/usr/bin/xterm`, keeps
+  `first_error=none`, and adds only the demanded bounded `ConfigureWindow`
+  decode/dispatch path. This is a terminal setup/lifecycle regression with no
+  rendered transaction proof yet.
 - [x] `x-authority-xcalc-smoke` launches `/usr/bin/xcalc`, keeps
   `first_error=none`, and adds only the demanded bounded `AllocNamedColor`,
   `UnmapWindow`, one-character padded `PolyText8`, and client-disconnect

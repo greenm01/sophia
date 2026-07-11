@@ -236,6 +236,7 @@ struct ExternalProbeSmokeSpec {
     display_base: u32,
     namespace: u64,
     require_transactions: bool,
+    allow_proof_kill_without_transactions: bool,
 }
 
 const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
@@ -247,6 +248,7 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         display_base: 6600,
         namespace: 48,
         require_transactions: true,
+        allow_proof_kill_without_transactions: false,
     },
     ExternalProbeSmokeSpec {
         command_name: "x-authority-xeyes-smoke",
@@ -256,6 +258,7 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         display_base: 6800,
         namespace: 49,
         require_transactions: true,
+        allow_proof_kill_without_transactions: false,
     },
     ExternalProbeSmokeSpec {
         command_name: "x-authority-xwininfo-root-smoke",
@@ -265,6 +268,7 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         display_base: 6900,
         namespace: 50,
         require_transactions: false,
+        allow_proof_kill_without_transactions: false,
     },
     ExternalProbeSmokeSpec {
         command_name: "x-authority-xprop-root-smoke",
@@ -274,6 +278,7 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         display_base: 7000,
         namespace: 51,
         require_transactions: false,
+        allow_proof_kill_without_transactions: false,
     },
     ExternalProbeSmokeSpec {
         command_name: "x-authority-xsetroot-name-smoke",
@@ -283,6 +288,7 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         display_base: 7100,
         namespace: 52,
         require_transactions: false,
+        allow_proof_kill_without_transactions: false,
     },
     ExternalProbeSmokeSpec {
         command_name: "x-authority-xlogo-smoke",
@@ -292,6 +298,7 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         display_base: 7200,
         namespace: 53,
         require_transactions: true,
+        allow_proof_kill_without_transactions: false,
     },
     ExternalProbeSmokeSpec {
         command_name: "x-authority-xmessage-smoke",
@@ -301,6 +308,7 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         display_base: 7300,
         namespace: 54,
         require_transactions: true,
+        allow_proof_kill_without_transactions: false,
     },
     ExternalProbeSmokeSpec {
         command_name: "x-authority-xrandr-query-smoke",
@@ -310,6 +318,7 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         display_base: 7400,
         namespace: 55,
         require_transactions: false,
+        allow_proof_kill_without_transactions: false,
     },
     ExternalProbeSmokeSpec {
         command_name: "x-authority-xcalc-smoke",
@@ -319,6 +328,17 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         display_base: 7500,
         namespace: 56,
         require_transactions: true,
+        allow_proof_kill_without_transactions: false,
+    },
+    ExternalProbeSmokeSpec {
+        command_name: "x-authority-xterm-smoke",
+        label: "xterm",
+        binary: "/usr/bin/xterm",
+        args: &["-geometry", "80x24", "-title", "Sophia xterm", "-e", "true"],
+        display_base: 7600,
+        namespace: 57,
+        require_transactions: false,
+        allow_proof_kill_without_transactions: true,
     },
 ];
 
@@ -681,6 +701,7 @@ fn run_x_authority_external_probe_smoke_spec(
         spec.display_base,
         NamespaceId::from_raw(spec.namespace),
         spec.require_transactions,
+        spec.allow_proof_kill_without_transactions,
     )
 }
 
@@ -713,6 +734,7 @@ fn run_x_authority_external_probe_smoke(
     display_base: u32,
     namespace: NamespaceId,
     require_transactions: bool,
+    allow_proof_kill_without_transactions: bool,
 ) -> Result<XAuthorityExternalProbeSmokeReport, Box<dyn std::error::Error>> {
     let (display, socket_path) = temp_xauthority_display(display_base)?;
     let server_path = socket_path.clone();
@@ -748,9 +770,9 @@ fn run_x_authority_external_probe_smoke(
 
     let mut command = std::process::Command::new(command);
     command
-        .args(command_args)
         .arg("-display")
         .arg(&display)
+        .args(command_args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     let mut child = command.spawn()?;
@@ -810,9 +832,16 @@ fn run_x_authority_external_probe_smoke(
         }
     }
 
+    let opcode_count = opcodes.len();
+    let opcodes = opcodes
+        .iter()
+        .map(u8::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+
     if let Some(error) = &first_error {
         return Err(format!(
-            "{label} produced an X protocol error for {display}: status={status} first_error={error} stderr={}",
+            "{label} produced an X protocol error for {display}: status={status} requests={requests} opcode_count={opcode_count} opcodes={opcodes} first_error={error} stderr={}",
             String::from_utf8_lossy(&output.stderr).trim(),
         )
         .into());
@@ -820,16 +849,19 @@ fn run_x_authority_external_probe_smoke(
 
     if require_transactions && transactions.is_empty() {
         return Err(format!(
-            "{label} did not produce an authority transaction for {display}: status={status} stderr={} first_error={}",
+            "{label} did not produce an authority transaction for {display}: status={status} requests={requests} opcode_count={opcode_count} opcodes={opcodes} stderr={} first_error={}",
             String::from_utf8_lossy(&output.stderr).trim(),
             first_error.as_deref().unwrap_or("none")
         )
         .into());
     }
 
-    if !require_transactions && !output.status.success() {
+    if !require_transactions
+        && !output.status.success()
+        && !(allow_proof_kill_without_transactions && proof_window_killed)
+    {
         return Err(format!(
-            "{label} probe failed for {display}: status={status} stderr={} first_error={}",
+            "{label} probe failed for {display}: status={status} requests={requests} opcode_count={opcode_count} opcodes={opcodes} stderr={} first_error={}",
             String::from_utf8_lossy(&output.stderr).trim(),
             first_error.as_deref().unwrap_or("none")
         )
@@ -866,12 +898,6 @@ fn run_x_authority_external_probe_smoke(
     } else {
         "client_exited_failure"
     };
-    let opcode_count = opcodes.len();
-    let opcodes = opcodes
-        .iter()
-        .map(u8::to_string)
-        .collect::<Vec<_>>()
-        .join(",");
 
     Ok(XAuthorityExternalProbeSmokeReport {
         display,

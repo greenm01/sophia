@@ -69,13 +69,16 @@ External-client coverage is admitted only when a real probe exposes a missing
 request, reply, lifecycle, or error path. Current real-client smokes cover
 root/window introspection (`xwininfo`, `xprop`), root property mutation
 (`xsetroot`), drawing clients (`xclock`, `xeyes`, `xlogo`, `xmessage`), output
-introspection (`xrandr --query`), and Athena widget behavior (`xcalc`).
+introspection (`xrandr --query`), Athena widget behavior (`xcalc`), and
+terminal setup/lifecycle behavior (`xterm`).
 
 Each external smoke must keep `first_error=none`. New compatibility code should
 remain bounded and narrow: for example, xcalc admitted `AllocNamedColor`,
 `UnmapWindow`, padded one-character `PolyText8`, and normal client-disconnect
 teardown without turning Sophia X Authority into a broad X11 conformance
-project.
+project. xterm admitted `ConfigureWindow` as a namespace-checked lifecycle
+request, but it is not yet treated as rendered-output coverage because the
+current proof has zero committed `SurfaceTransaction` values.
 
 ## Namespace Model
 

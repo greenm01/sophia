@@ -189,6 +189,24 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
+        XWireRequest::ConfigureWindow { window, .. } => {
+            let outputs =
+                if let Err(error) = runtime.validate_window_access(context.namespace, window) {
+                    vec![XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(window.local.raw()).unwrap_or(0),
+                    ))]
+                } else {
+                    Vec::new()
+                };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::GetGeometry { drawable } => {
             let output = if drawable.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
                 XClientOutput::Reply(XClientReply::GetGeometry {

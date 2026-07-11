@@ -30,6 +30,7 @@ cargo run --offline -q -p sophia-cli -- x-authority-xlogo-smoke
 cargo run --offline -q -p sophia-cli -- x-authority-xmessage-smoke
 cargo run --offline -q -p sophia-cli -- x-authority-xrandr-query-smoke
 cargo run --offline -q -p sophia-cli -- x-authority-xcalc-smoke
+cargo run --offline -q -p sophia-cli -- x-authority-xterm-smoke
 ```
 
 The real-client smokes are regression smokes, not full X server conformance
@@ -38,6 +39,9 @@ proof-window outcome explicitly, and include request/opcode counters so future
 client-driven regressions show which compatibility surface changed. The
 external probe harness fails if it observes any client-visible X protocol
 error, even after a drawing client has already produced authority transactions.
+`x-authority-xterm-smoke` is a setup/lifecycle regression, not a rendered
+transaction proof; its reduced output is expected to report zero committed
+runtime transactions until xterm exposes a visible drawing handoff.
 Parse-error details include a bounded request head so extension decode failures
 show the concrete minor opcode that drove the next compatibility slice.
 
