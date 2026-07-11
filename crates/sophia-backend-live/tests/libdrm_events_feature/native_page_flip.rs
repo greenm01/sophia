@@ -168,14 +168,26 @@ fn native_libdrm_page_flip_event_reducer_uses_private_crtc_routes() {
         duration: std::time::Duration::from_millis(16),
         crtc,
     };
+    let mut routes = [LibdrmNativeCrtcRoute::new(crtc, slot)];
 
     assert_eq!(
-        reduce_native_page_flip_event(&event, &[LibdrmNativeCrtcRoute::new(crtc, slot)]),
+        reduce_native_page_flip_event(&event, &mut routes),
         Some(LibdrmNativePageFlipCallback::new(slot, 91))
     );
     assert_eq!(
-        reduce_native_page_flip_event(&event, &[LibdrmNativeCrtcRoute::new(other_crtc, slot)]),
+        reduce_native_page_flip_event(&event, &mut [LibdrmNativeCrtcRoute::new(other_crtc, slot)]),
         None
+    );
+
+    let initial_event = drm::control::PageFlipEvent { frame: 0, ..event };
+    let mut initial_route = [LibdrmNativeCrtcRoute::new(crtc, slot)];
+    assert_eq!(
+        reduce_native_page_flip_event(&initial_event, &mut initial_route),
+        Some(LibdrmNativePageFlipCallback::new(slot, 1))
+    );
+    assert_eq!(
+        reduce_native_page_flip_event(&initial_event, &mut initial_route),
+        Some(LibdrmNativePageFlipCallback::new(slot, 2))
     );
 }
 

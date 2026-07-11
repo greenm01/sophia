@@ -36,16 +36,29 @@ pub struct LibdrmNativeOutputRoute {
 pub struct LibdrmNativeCrtcRoute {
     crtc: drm::control::crtc::Handle,
     slot: LibdrmNativeOutputSlot,
+    last_frame_serial: u64,
 }
 
 #[cfg(feature = "libdrm-events")]
 impl LibdrmNativeCrtcRoute {
     pub const fn new(crtc: drm::control::crtc::Handle, slot: LibdrmNativeOutputSlot) -> Self {
-        Self { crtc, slot }
+        Self {
+            crtc,
+            slot,
+            last_frame_serial: 0,
+        }
     }
 
     pub(crate) const fn slot(self) -> LibdrmNativeOutputSlot {
         self.slot
+    }
+
+    fn observe_frame(&mut self, native_frame: u32) -> u64 {
+        let next_serial = u64::from(native_frame)
+            .max(self.last_frame_serial.saturating_add(1))
+            .max(1);
+        self.last_frame_serial = next_serial;
+        next_serial
     }
 }
 
@@ -97,11 +110,10 @@ impl LibdrmNativePageFlipCallback {
 #[cfg(feature = "libdrm-events")]
 pub fn reduce_native_page_flip_event(
     event: &drm::control::PageFlipEvent,
-    routes: &[LibdrmNativeCrtcRoute],
+    routes: &mut [LibdrmNativeCrtcRoute],
 ) -> Option<LibdrmNativePageFlipCallback> {
-    let route = routes.iter().find(|route| route.crtc == event.crtc)?;
-    Some(LibdrmNativePageFlipCallback::new(
-        route.slot(),
-        u64::from(event.frame),
-    ))
+    let route = routes.iter_mut().find(|route| route.crtc == event.crtc)?;
+    let slot = route.slot();
+    let frame_serial = route.observe_frame(event.frame);
+    Some(LibdrmNativePageFlipCallback::new(slot, frame_serial))
 }

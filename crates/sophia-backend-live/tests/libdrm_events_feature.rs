@@ -887,11 +887,17 @@ impl LibdrmNativePrimaryPlaneResourceDevice for FakeModifierOnlyPrimaryPlaneReso
 
     fn add_scanout_framebuffer_without_modifiers<B>(
         &self,
-        _buffer: &B,
+        buffer: &B,
     ) -> io::Result<drm::control::framebuffer::Handle>
     where
         B: drm::buffer::PlanarBuffer + ?Sized,
     {
+        if buffer.modifier().is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "implicit framebuffer registration received a modifier",
+            ));
+        }
         clone_io_result(&self.fallback_framebuffer)
     }
 
@@ -4988,6 +4994,26 @@ fn native_libdrm_renderer_scanout_buffer_rejects_invalid_renderer_descriptors() 
     );
     assert_eq!(
         linear_resources.status,
+        LibdrmNativePrimaryPlaneResourceCreateStatus::Created
+    );
+
+    let linear_fallback_resources = create_native_primary_plane_page_flip_resources(
+        &FakeModifierOnlyPrimaryPlaneResourceDevice {
+            mode_blob: Ok(15),
+            framebuffer_with_modifiers: Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+            fallback_framebuffer: Ok(framebuffer_handle()),
+            destroy_framebuffer: Ok(()),
+            destroy_mode_blob: Ok(()),
+        },
+        selected,
+        &linear_buffer,
+    );
+    assert_eq!(
+        linear_fallback_resources.framebuffer,
+        Some(LibdrmNativePrimaryPlaneFramebufferCreateDetail::CreatedWithAddFb2)
+    );
+    assert_eq!(
+        linear_fallback_resources.status,
         LibdrmNativePrimaryPlaneResourceCreateStatus::Created
     );
 

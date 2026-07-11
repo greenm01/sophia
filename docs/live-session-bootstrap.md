@@ -74,6 +74,31 @@ page flips for steady updates. Both the bounded proof and a 30-second TTY3 run
 pass. Use an isolated QEMU `virtio-gpu` guest for repeated development and keep
 the physical TTY proof for final driver evidence.
 
+The isolated guest harness is now the default repeated native-session path.
+On Void, install QEMU once if it is missing:
+
+```sh
+sudo xbps-install -S qemu-system-amd64
+```
+
+Then build the direct-kernel guest initramfs and run the proof as an ordinary
+user:
+
+```sh
+tools/build_qemu_session_initramfs.sh
+tools/qemu_session_harness.sh
+```
+
+The guest has no disk and no network device. QEMU stays headless, exposes its
+display only to an unconnected Unix-domain VNC sink, and emulates virtio-gpu
+and a virtio keyboard. It does not pass through or open host DRM/input devices
+and does not switch a host VT. The guest owns its own DRM card, starts udev,
+opens the virtual input nodes through libinput, runs exactly 300 session-loop
+ticks, and powers off. The strict verifier requires clean native submission,
+page-flip retirement, xterm pixel export/input change, no callback rejection,
+and no in-flight frame or cleanup debt. Evidence defaults to
+`/tmp/sophia-qemu-session.log`; build artifacts stay under ignored `.qemu/`.
+
 The destructive TTY3 terminal-content presentation proof is:
 
 ```sh
@@ -141,7 +166,8 @@ Next live-session blockers:
 - route physical keyboard input into the focused X terminal surface;
 - prove operator-typed text reaches terminal pixels before running Codex inside
   Sophia;
-- add the QEMU session harness and pass 300 deterministic ticks.
+- inject QMP virtual-keyboard events and prove they change xterm pixels through
+  the physical libinput route; the guest already opens the virtual input nodes.
 
 ## Input Milestone
 

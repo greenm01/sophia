@@ -61,4 +61,7 @@ expect_fail tools/verify_live_session_content_evidence.sh live_session_content_e
 expect_pass tools/verify_live_session_persistent_evidence.sh live_session_persistent_evidence_pass.log
 expect_fail tools/verify_live_session_persistent_evidence.sh live_session_persistent_evidence_cleanup_debt.log
 
+expect_pass tools/verify_qemu_session_evidence.sh qemu_session_evidence_pass.log
+expect_fail tools/verify_qemu_session_evidence.sh qemu_session_evidence_wrong_ticks.log
+
 echo "atomic scanout verifier fixtures passed"

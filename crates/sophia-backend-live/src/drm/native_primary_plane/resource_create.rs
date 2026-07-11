@@ -504,7 +504,8 @@ where
     D: LibdrmNativePrimaryPlaneResourceDevice,
     B: drm::buffer::Buffer + drm::buffer::PlanarBuffer + ?Sized,
 {
-    if let Ok(framebuffer) = device.add_scanout_framebuffer_without_modifiers(buffer) {
+    let implicit_buffer = LibdrmImplicitPlanarBuffer(buffer);
+    if let Ok(framebuffer) = device.add_scanout_framebuffer_without_modifiers(&implicit_buffer) {
         return LibdrmNativePrimaryPlaneFramebufferCreateResult {
             detail: LibdrmNativePrimaryPlaneFramebufferCreateDetail::CreatedWithAddFb2,
             framebuffer: Some(framebuffer),
@@ -520,6 +521,39 @@ where
             detail: failed_detail,
             framebuffer: None,
         },
+    }
+}
+
+#[cfg(feature = "libdrm-events")]
+struct LibdrmImplicitPlanarBuffer<'a, B: drm::buffer::PlanarBuffer + ?Sized>(&'a B);
+
+#[cfg(feature = "libdrm-events")]
+impl<B> drm::buffer::PlanarBuffer for LibdrmImplicitPlanarBuffer<'_, B>
+where
+    B: drm::buffer::PlanarBuffer + ?Sized,
+{
+    fn size(&self) -> (u32, u32) {
+        self.0.size()
+    }
+
+    fn format(&self) -> drm::buffer::DrmFourcc {
+        self.0.format()
+    }
+
+    fn modifier(&self) -> Option<drm::buffer::DrmModifier> {
+        None
+    }
+
+    fn pitches(&self) -> [u32; 4] {
+        self.0.pitches()
+    }
+
+    fn handles(&self) -> [Option<drm::buffer::Handle>; 4] {
+        self.0.handles()
+    }
+
+    fn offsets(&self) -> [u32; 4] {
+        self.0.offsets()
     }
 }
 

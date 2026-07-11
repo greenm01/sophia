@@ -32,7 +32,7 @@ for field in "${parts[@]:1}"; do
 done
 
 expected_keys=(
-    schema status display elapsed_msec authority_batches authority_transactions
+    schema status display elapsed_msec session_ticks authority_batches authority_transactions
     authority_queue_capacity authority_batches_dropped backend_ticks
     runtime_committed runtime_surfaces cpu_layers cpu_nonzero_pixel_bytes
     cpu_max_nonzero_pixel_bytes cpu_nonzero_frames cpu_checksum injected_input
@@ -55,7 +55,7 @@ for key in "${expected_keys[@]}"; do
     fi
 done
 
-[[ "${observed[schema]}" == "4" ]]
+[[ "${observed[schema]}" == "5" ]]
 [[ "${observed[status]}" == "bounded_complete" ]]
 [[ "${observed[injected_input]}" == "true" ]]
 [[ "${observed[input_pixel_change]}" == "true" ]]
@@ -64,7 +64,7 @@ done
 [[ "${observed[native_cleanup_pending]}" == "false" ]]
 
 numeric_keys=(
-    elapsed_msec authority_batches authority_transactions authority_queue_capacity
+    elapsed_msec session_ticks authority_batches authority_transactions authority_queue_capacity
     authority_batches_dropped backend_ticks runtime_committed runtime_surfaces
     cpu_layers cpu_nonzero_pixel_bytes cpu_max_nonzero_pixel_bytes
     cpu_nonzero_frames cpu_checksum physical_events physical_keys_routed
@@ -82,7 +82,7 @@ for key in "${numeric_keys[@]}"; do
 done
 
 positive_keys=(
-    elapsed_msec authority_batches authority_transactions authority_queue_capacity
+    elapsed_msec session_ticks authority_batches authority_transactions authority_queue_capacity
     backend_ticks runtime_committed runtime_surfaces cpu_layers
     cpu_max_nonzero_pixel_bytes cpu_nonzero_frames cpu_checksum
     native_submissions native_retirements native_callback_accepted

@@ -145,7 +145,7 @@ where
                 continue;
             };
 
-            match reduce_native_page_flip_event(&page_flip, &self.crtc_routes) {
+            match reduce_native_page_flip_event(&page_flip, &mut self.crtc_routes) {
                 Some(callback) => callbacks.push(callback),
                 None => rejected_callbacks = rejected_callbacks.saturating_add(1),
             }

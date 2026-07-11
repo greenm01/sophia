@@ -227,8 +227,9 @@ gap is integration: core X drawing now produces bounded XRGB8888 pixels, the
 CPU compositor consumes them, and injected core keys change real xterm pixels.
 TTY3 evidence now proves the exact composed xterm checksum is exported through
 native GL/GBM, submitted to KMS, and retired after page flip. The next operator
-milestone is joining that native owner to the persistent session and closing
-the physical typed-text proof. The xmonad bridge translation core exists; its
+milestone is closing the physical typed-text proof. An isolated headless QEMU
+virtio-gpu harness now passes 300 persistent native-session ticks without host
+DRM or VT ownership. The xmonad bridge translation core exists; its
 embedded X server and real xmonad smoke remain ahead of Wayland.
 
 ## License

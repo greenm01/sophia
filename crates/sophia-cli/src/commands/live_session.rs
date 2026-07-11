@@ -74,7 +74,7 @@ pub(crate) fn run_persistent_xterm_session(
     let mut process = SessionProcessGuard::new(child, config.socket_path.clone());
 
     println!(
-        "sophia_live_session schema=4 status=running display={} terminal=xterm runtime=persistent authority_capacity={} key_capacity={} native_presentation={} physical_input={}",
+        "sophia_live_session schema=5 status=running display={} terminal=xterm runtime=persistent authority_capacity={} key_capacity={} native_presentation={} physical_input={}",
         config.display,
         SESSION_AUTHORITY_CAPACITY,
         SESSION_KEY_CAPACITY,
@@ -113,6 +113,7 @@ struct PersistentXtermSessionConfig {
     socket_path: std::path::PathBuf,
     terminal: String,
     max_runtime: Option<Duration>,
+    max_ticks: Option<usize>,
     inject_text: Option<String>,
     input_devices: Vec<std::path::PathBuf>,
     native_scanout: bool,
@@ -127,6 +128,13 @@ impl PersistentXtermSessionConfig {
             .map(parse_u64)
             .transpose()?
             .map(Duration::from_millis);
+        let max_ticks = arg_value(args, "--max-ticks")
+            .as_deref()
+            .map(parse_usize)
+            .transpose()?;
+        if max_ticks.is_some_and(|ticks| ticks == 0 || ticks > 1_000_000) {
+            return Err("--max-ticks accepts a value from 1 through 1000000".into());
+        }
         let inject_text = arg_value(args, "--inject-text");
         let native_scanout = args.iter().any(|arg| arg == "--native-scanout");
         if native_scanout && std::env::var_os("SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE").is_none() {
@@ -150,8 +158,10 @@ impl PersistentXtermSessionConfig {
         {
             return Err("--input-devices accepts 1-16 comma-separated absolute paths".into());
         }
-        if inject_text.is_some() && max_runtime.is_none() {
-            return Err("--inject-text requires --max-runtime-ms for a bounded proof".into());
+        if inject_text.is_some() && max_runtime.is_none() && max_ticks.is_none() {
+            return Err(
+                "--inject-text requires --max-runtime-ms or --max-ticks for a bounded proof".into(),
+            );
         }
         if let Some(text) = &inject_text
             && (text.is_empty()
@@ -165,6 +175,7 @@ impl PersistentXtermSessionConfig {
             socket_path: std::path::PathBuf::from(format!("/tmp/.X11-unix/X{display_number}")),
             terminal: arg_value(args, "--terminal").unwrap_or_else(|| "xterm".to_owned()),
             max_runtime,
+            max_ticks,
             inject_text,
             input_devices,
             native_scanout,
@@ -228,6 +239,7 @@ fn run_session_loop(
     let mut modifiers = XCoreKeyboardMapper::new();
     let mut physical_events = 0usize;
     let mut physical_keys_routed = 0usize;
+    let mut session_ticks = 0usize;
     let seat = SeatId::from_raw(SESSION_SEAT_RAW);
 
     loop {
@@ -237,6 +249,13 @@ fn run_session_loop(
         if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             break;
         }
+        if config
+            .max_ticks
+            .is_some_and(|max_ticks| session_ticks >= max_ticks)
+        {
+            break;
+        }
+        session_ticks = session_ticks.saturating_add(1);
 
         match authority_receiver.recv_timeout(Duration::from_millis(25)) {
             Ok(batch) => {
@@ -350,9 +369,10 @@ fn run_session_loop(
         .into());
     }
     println!(
-        "sophia_live_session schema=4 status=bounded_complete display={} elapsed_msec={} authority_batches={} authority_transactions={} authority_queue_capacity={} authority_batches_dropped=0 backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_max_nonzero_pixel_bytes={} cpu_nonzero_frames={} cpu_checksum={} injected_input={} input_pixel_change={} physical_events={} physical_keys_routed={} native_presentation={} native_submissions={} native_submit_deferred={} native_submit_failures={} native_retirements={} native_retire_failures={} native_max_in_flight_ticks={} native_max_submit_to_page_flip_msec={} native_callback_accepted={} native_callback_rejected={} native_callback_queue_saturated={} native_nonzero_exports={} native_export_attempts={} native_in_flight={} native_cleanup_pending={} physical_input={}",
+        "sophia_live_session schema=5 status=bounded_complete display={} elapsed_msec={} session_ticks={} authority_batches={} authority_transactions={} authority_queue_capacity={} authority_batches_dropped=0 backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_max_nonzero_pixel_bytes={} cpu_nonzero_frames={} cpu_checksum={} injected_input={} input_pixel_change={} physical_events={} physical_keys_routed={} native_presentation={} native_submissions={} native_submit_deferred={} native_submit_failures={} native_retirements={} native_retire_failures={} native_max_in_flight_ticks={} native_max_submit_to_page_flip_msec={} native_callback_accepted={} native_callback_rejected={} native_callback_queue_saturated={} native_nonzero_exports={} native_export_attempts={} native_in_flight={} native_cleanup_pending={} physical_input={}",
         config.display,
         started.elapsed().as_millis(),
+        session_ticks,
         batches,
         transactions,
         SESSION_AUTHORITY_CAPACITY,

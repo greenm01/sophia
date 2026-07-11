@@ -3,6 +3,33 @@
 This file records decisions and unresolved questions for the active milestone.
 Completed evidence is archived in `research-log-archive.md`.
 
+## 2026-07-11: Isolated Virtio-GPU Session Evidence
+
+Sophia now has a direct-kernel QEMU initramfs builder and a headless session
+harness. The guest has no storage or network device, uses serial control and an
+unconnected Unix-domain VNC display sink, and owns emulated virtio-gpu and
+virtio-keyboard devices. It starts udev, mounts devpts, launches real xterm,
+opens the virtual input nodes through libinput, and runs persistent native
+scanout for an exact `--max-ticks=300` budget without host DRM or VT access.
+
+The passing run completed 300 session ticks, 42 native submissions, 41 steady
+retirements, 41 accepted page-flip callbacks, two nonzero terminal exports,
+injected terminal pixel change, and zero submit failures, retire failures,
+rejected callbacks, saturated callback queues, in-flight frames, or cleanup
+debt. The strict verifier accepted `/tmp/sophia-qemu-session.log`.
+
+Guest bring-up exposed two real cross-driver defects. AddFB2 fallback passed a
+linear modifier while clearing `DRM_MODE_FB_MODIFIERS`, which violated the DRM
+crate's flag/value invariant; the implicit fallback now wraps the same planes
+with `modifier=None`. Virtio-gpu also reports repeated zero page-flip sequence
+values. Native CRTC routes now normalize driver values into strictly increasing
+Sophia-local serials, preserving stale-event rejection across repeated values
+and 32-bit sequence wrap. Focused regressions cover both fixes.
+
+The guest virtual keyboard is present and opens through libinput, but the
+current proof uses Sophia's bounded X key injection for the pixel-change check.
+QMP-driven virtual-key input remains the next isolated input proof.
+
 ## 2026-07-10: Roadmap And Documentation Review
 
 The xterm compatibility stream currently reaches `ImageText8`, emits four
@@ -29,7 +56,7 @@ Authority now advances a window generation after each emitted visual
 transaction, so long-running Engine commits remain contiguous. Native scanout
 now joins this owner behind `--native-scanout`: the same loop queues composed
 CPU frames for GL/GBM export, polls native page flips, retires tracked KMS
-submissions, and drains cleanup. Reduced schema 4 evidence records successful
+submissions, and drains cleanup. Reduced schema 5 evidence records successful
 submits, deferrals and failures, submit-to-page-flip latency, maximum in-flight
 age, callback pressure, nonzero exports, authority drops, and cleanup debt.
 The non-native repeated-xterm regression and strict verifier fixtures pass.
@@ -73,10 +100,8 @@ remain open because no Haskell/xmonad executable is installed.
 
 - Which xmonad startup request is the first unsupported request after setup,
   root event-mask selection, atom/property access, and synthetic lifecycle?
-- Does the isolated QEMU `virtio-gpu` session remain clean for 300 deterministic
-  ticks and repeated process restarts?
 - Can an operator-typed run produce nonzero physical key routing and changed
   xterm pixels through the existing Engine focus path?
 
-Both questions remain probe-driven: implement the first observed missing path,
+These questions remain probe-driven: implement the first observed missing path,
 then rerun the relevant real-client smoke.

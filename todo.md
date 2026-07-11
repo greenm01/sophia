@@ -30,6 +30,9 @@ Current truth:
   front buffer. The TTY3 content proof exports the exact composed xterm
   checksum, submits it to KMS, observes page-flip retirement, and drains cleanup.
 - `sophia-live-session --proof` remains a one-shot composition/input proof.
+- The isolated headless QEMU harness boots a direct-kernel initramfs with
+  virtio-gpu, a virtual keyboard, serial control, no guest network or storage,
+  and no host DRM/VT access. Its strict 300-tick native session proof passes.
 - Default `sophia-live-session` now binds an explicit display, owns one xterm
   and X Authority server, and drains repeated authority batches through one
   live backend runtime and CPU scene until bounded or externally stopped. Its
@@ -73,7 +76,7 @@ Exit criteria:
   cleanup debt over repeated ticks.
 - [x] Pass a 30-second TTY hardware session with no dropped authority batches,
   rejected callbacks, failed scanout transitions, or unresolved cleanup debt.
-- [ ] Add an isolated QEMU `virtio-gpu` session harness and pass 300
+- [x] Add an isolated QEMU `virtio-gpu` session harness and pass 300
   deterministic ticks without depending on host DRM or VT ownership.
 
 ### 3. Wayland Authority Skeleton

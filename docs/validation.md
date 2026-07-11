@@ -71,6 +71,8 @@ cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- sophia-li
 # type into xterm, and require physical_keys_routed>0 plus changed pixels.
 tools/live_session_content_hardware_proof.sh
 tools/live_session_persistent_hardware_proof.sh
+tools/build_qemu_session_initramfs.sh
+tools/qemu_session_harness.sh
 ```
 
 `live-session-composition-smoke` is non-destructive. Its reduced output must
@@ -79,6 +81,14 @@ transactions, applied runtime surfaces, and
 `rendered_scanout_submit=SubmittedWaitingForPageFlip`,
 `rendered_scanout_retire=RetiredAfterPageFlip`,
 `runtime_scanout_state=Retired`, and `cleanup_pending=false`.
+
+Use `tools/qemu_session_harness.sh` for repeated native GBM/KMS development.
+It boots an isolated direct-kernel initramfs with virtio-gpu and verifies
+exactly 300 session ticks without host DRM, input-device, VT, disk, or guest
+network access. The QEMU evidence verifier also rejects native submit/retire
+failure, rejected callbacks, in-flight ownership, cleanup debt, and a tick
+count other than 300. Keep the physical TTY proof for final AMD driver and
+operator-typed input evidence.
 
 The optional renderer-native features have extra local checks:
 
