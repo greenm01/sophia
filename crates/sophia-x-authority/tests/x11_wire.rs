@@ -168,6 +168,11 @@ fn x11_core_decoder_maps_create_and_map_to_authority_packets() {
         &change_window_attributes_request(XByteOrder::LittleEndian, X_SETUP_DEFAULT_ROOT),
     )
     .unwrap();
+    let get_attributes = decode_x11_core_request(
+        context(namespace, 505, XByteOrder::LittleEndian),
+        &resource_request(XByteOrder::LittleEndian, 3, X_SETUP_DEFAULT_ROOT),
+    )
+    .unwrap();
 
     let XWireRequest::Authority(create) = create else {
         panic!("expected authority request");
@@ -205,6 +210,54 @@ fn x11_core_decoder_maps_create_and_map_to_authority_packets() {
     assert_eq!(
         map_subwindows,
         XWireRequest::MapSubwindows {
+            window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+        }
+    );
+    let geometry = decode_x11_core_request(
+        context(namespace, 505, XByteOrder::LittleEndian),
+        &resource_request(XByteOrder::LittleEndian, 14, X_SETUP_DEFAULT_ROOT),
+    )
+    .unwrap();
+    let tree = decode_x11_core_request(
+        context(namespace, 506, XByteOrder::LittleEndian),
+        &resource_request(XByteOrder::LittleEndian, 15, X_SETUP_DEFAULT_ROOT),
+    )
+    .unwrap();
+    assert_eq!(
+        geometry,
+        XWireRequest::GetGeometry {
+            drawable: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+        }
+    );
+    assert_eq!(
+        tree,
+        XWireRequest::QueryTree {
+            window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+        }
+    );
+    let translate = decode_x11_core_request(
+        context(namespace, 507, XByteOrder::LittleEndian),
+        &translate_coordinates_request(
+            XByteOrder::LittleEndian,
+            X_SETUP_DEFAULT_ROOT,
+            X_SETUP_DEFAULT_ROOT,
+            12,
+            34,
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        translate,
+        XWireRequest::TranslateCoordinates {
+            source: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+            destination: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+            src_x: 12,
+            src_y: 34,
+        }
+    );
+    assert_eq!(
+        get_attributes,
+        XWireRequest::GetWindowAttributes {
             window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
         }
     );
@@ -1242,6 +1295,141 @@ fn x11_dispatch_query_best_size_echoes_requested_dimensions() {
     assert_eq!(encoded[0][0], 1);
     assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][8..10]), 64);
     assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][10..12]), 32);
+}
+
+#[test]
+fn x11_dispatch_get_geometry_reports_root_dimensions() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let request = decode_x11_core_request(
+        context(namespace, 525, XByteOrder::LittleEndian),
+        &resource_request(XByteOrder::LittleEndian, 14, X_SETUP_DEFAULT_ROOT),
+    )
+    .unwrap();
+
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 14),
+        request,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(encoded[0][1], 24);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &encoded[0][8..12]),
+        X_SETUP_DEFAULT_ROOT
+    );
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][12..14]), 0);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][14..16]), 0);
+    assert_eq!(
+        read_u16(XByteOrder::LittleEndian, &encoded[0][16..18]),
+        X_SETUP_ROOT_WIDTH
+    );
+    assert_eq!(
+        read_u16(XByteOrder::LittleEndian, &encoded[0][18..20]),
+        X_SETUP_ROOT_HEIGHT
+    );
+}
+
+#[test]
+fn x11_dispatch_get_window_attributes_reports_root_visual_state() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let request = decode_x11_core_request(
+        context(namespace, 527, XByteOrder::LittleEndian),
+        &resource_request(XByteOrder::LittleEndian, 3, X_SETUP_DEFAULT_ROOT),
+    )
+    .unwrap();
+
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 3),
+        request,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][4..8]), 3);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &encoded[0][8..12]),
+        X_SETUP_DEFAULT_VISUAL
+    );
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][12..14]), 1);
+    assert_eq!(encoded[0][26], 2);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &encoded[0][28..32]),
+        X_SETUP_DEFAULT_COLORMAP
+    );
+}
+
+#[test]
+fn x11_dispatch_query_tree_reports_root_without_children() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let request = decode_x11_core_request(
+        context(namespace, 528, XByteOrder::LittleEndian),
+        &resource_request(XByteOrder::LittleEndian, 15, X_SETUP_DEFAULT_ROOT),
+    )
+    .unwrap();
+
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 15),
+        request,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][4..8]), 0);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &encoded[0][8..12]),
+        X_SETUP_DEFAULT_ROOT
+    );
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][12..16]), 0);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][16..18]), 0);
+}
+
+#[test]
+fn x11_dispatch_translate_coordinates_echoes_root_coordinates() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let request = decode_x11_core_request(
+        context(namespace, 526, XByteOrder::LittleEndian),
+        &translate_coordinates_request(
+            XByteOrder::LittleEndian,
+            X_SETUP_DEFAULT_ROOT,
+            X_SETUP_DEFAULT_ROOT,
+            12,
+            34,
+        ),
+    )
+    .unwrap();
+
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 40),
+        request,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(encoded[0][1], 1);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][8..12]), 0);
+    assert_eq!(read_i16(XByteOrder::LittleEndian, &encoded[0][12..14]), 12);
+    assert_eq!(read_i16(XByteOrder::LittleEndian, &encoded[0][14..16]), 34);
 }
 
 #[test]
@@ -3017,6 +3205,22 @@ fn resource_request(byte_order: XByteOrder, opcode: u8, id: u32) -> Vec<u8> {
     out
 }
 
+fn translate_coordinates_request(
+    byte_order: XByteOrder,
+    source: u32,
+    destination: u32,
+    src_x: i16,
+    src_y: i16,
+) -> Vec<u8> {
+    let mut out = vec![40, 0];
+    push_u16(&mut out, byte_order, 4);
+    push_u32(&mut out, byte_order, source);
+    push_u32(&mut out, byte_order, destination);
+    push_i16(&mut out, byte_order, src_x);
+    push_i16(&mut out, byte_order, src_y);
+    out
+}
+
 fn intern_atom_request(byte_order: XByteOrder, only_if_exists: bool, name: &str) -> Vec<u8> {
     let mut out = vec![16, u8::from(only_if_exists)];
     let len_units = (8 + padded_len_for_test(name.len())) / 4;
@@ -3481,6 +3685,13 @@ fn read_u16(byte_order: XByteOrder, bytes: &[u8]) -> u16 {
     match byte_order {
         XByteOrder::LittleEndian => u16::from_le_bytes(bytes.try_into().unwrap()),
         XByteOrder::BigEndian => u16::from_be_bytes(bytes.try_into().unwrap()),
+    }
+}
+
+fn read_i16(byte_order: XByteOrder, bytes: &[u8]) -> i16 {
+    match byte_order {
+        XByteOrder::LittleEndian => i16::from_le_bytes(bytes.try_into().unwrap()),
+        XByteOrder::BigEndian => i16::from_be_bytes(bytes.try_into().unwrap()),
     }
 }
 

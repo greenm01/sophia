@@ -43,6 +43,29 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
 
     if args
         .iter()
+        .any(|arg| arg == "x-authority-xwininfo-root-smoke")
+    {
+        let report = run_x_authority_xwininfo_root_smoke()?;
+        println!(
+            "x-authority-xwininfo-root-smoke display={} outcome={} status={} stdout_bytes={} stderr_bytes={} requests={} opcode_count={} opcodes={} transactions={} runtime_committed={} runtime_surfaces={} first_error={}",
+            report.display,
+            report.outcome,
+            report.status,
+            report.stdout_bytes,
+            report.stderr_bytes,
+            report.requests,
+            report.opcode_count,
+            report.opcodes,
+            report.transactions,
+            report.runtime_committed,
+            report.runtime_surfaces,
+            report.first_error.as_deref().unwrap_or("none")
+        );
+        return Ok(true);
+    }
+
+    if args
+        .iter()
         .any(|arg| arg == "x-authority-present-pixmap-smoke")
     {
         let report = run_x_authority_present_pixmap_smoke()?;
@@ -242,6 +265,7 @@ struct XAuthorityExternalProbeSmokeReport {
 
 type XAuthorityXclockSmokeReport = XAuthorityExternalProbeSmokeReport;
 type XAuthorityXeyesSmokeReport = XAuthorityExternalProbeSmokeReport;
+type XAuthorityXwininfoRootSmokeReport = XAuthorityExternalProbeSmokeReport;
 
 #[derive(Clone, Debug)]
 struct XAuthorityPresentPixmapSmokeReport {
@@ -618,6 +642,7 @@ fn run_x_authority_xclock_smoke() -> Result<XAuthorityXclockSmokeReport, Box<dyn
         &["-analog", "-norender", "-update", "1"],
         6600,
         NamespaceId::from_raw(48),
+        true,
     )
 }
 
@@ -628,6 +653,19 @@ fn run_x_authority_xeyes_smoke() -> Result<XAuthorityXeyesSmokeReport, Box<dyn s
         &[],
         6800,
         NamespaceId::from_raw(49),
+        true,
+    )
+}
+
+fn run_x_authority_xwininfo_root_smoke()
+-> Result<XAuthorityXwininfoRootSmokeReport, Box<dyn std::error::Error>> {
+    run_x_authority_external_probe_smoke(
+        "xwininfo",
+        "/usr/bin/xwininfo",
+        &["-root"],
+        6900,
+        NamespaceId::from_raw(50),
+        false,
     )
 }
 
@@ -637,6 +675,7 @@ fn run_x_authority_external_probe_smoke(
     command_args: &[&str],
     display_base: u32,
     namespace: NamespaceId,
+    require_transactions: bool,
 ) -> Result<XAuthorityExternalProbeSmokeReport, Box<dyn std::error::Error>> {
     let (display, socket_path) = temp_xauthority_display(display_base)?;
     let server_path = socket_path.clone();
@@ -728,7 +767,7 @@ fn run_x_authority_external_probe_smoke(
         }
     }
 
-    if transactions.is_empty() {
+    if require_transactions && transactions.is_empty() {
         return Err(format!(
             "{label} did not produce an authority transaction for {display}: status={status} stderr={} first_error={}",
             String::from_utf8_lossy(&output.stderr).trim(),
@@ -737,15 +776,34 @@ fn run_x_authority_external_probe_smoke(
         .into());
     }
 
-    let runtime_state = runtime_state_from_observed_transactions(&transactions)?;
-    if runtime_state.authority_transactions_committed == 0
-        || runtime_state.authority_surfaces_applied == 0
-    {
+    if !require_transactions && !output.status.success() {
+        return Err(format!(
+            "{label} probe failed for {display}: status={status} stderr={} first_error={}",
+            String::from_utf8_lossy(&output.stderr).trim(),
+            first_error.as_deref().unwrap_or("none")
+        )
+        .into());
+    }
+
+    let runtime_state = if transactions.is_empty() {
+        None
+    } else {
+        Some(runtime_state_from_observed_transactions(&transactions)?)
+    };
+    let runtime_committed = runtime_state
+        .as_ref()
+        .map(|state| state.authority_transactions_committed)
+        .unwrap_or(0);
+    let runtime_surfaces = runtime_state
+        .as_ref()
+        .map(|state| state.authority_surfaces_applied)
+        .unwrap_or(0);
+    if require_transactions && (runtime_committed == 0 || runtime_surfaces == 0) {
         return Err(format!(
             "{label} transactions did not commit through runtime for {display}: transactions={} committed={} surfaces={}",
             transactions.len(),
-            runtime_state.authority_transactions_committed,
-            runtime_state.authority_surfaces_applied
+            runtime_committed,
+            runtime_surfaces
         )
         .into());
     }
@@ -774,8 +832,8 @@ fn run_x_authority_external_probe_smoke(
         opcode_count,
         opcodes,
         transactions: transactions.len(),
-        runtime_committed: runtime_state.authority_transactions_committed,
-        runtime_surfaces: runtime_state.authority_surfaces_applied,
+        runtime_committed,
+        runtime_surfaces,
         first_error,
     })
 }

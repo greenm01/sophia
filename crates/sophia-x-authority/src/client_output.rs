@@ -2,6 +2,7 @@ use crate::{
     X_ATOM_NONE, XAuthorityRuntimeError, XByteOrder, XResourceId, XTimestamp, XWireParseError,
     padded_len,
 };
+use sophia_protocol::Rect;
 
 pub const X_CLIENT_OUTPUT_RECORD_LEN: usize = 32;
 
@@ -104,6 +105,26 @@ pub enum XClientReply {
         sequence: u16,
         name: String,
     },
+    GetGeometry {
+        sequence: u16,
+        depth: u8,
+        root: XResourceId,
+        geometry: Rect,
+        border_width: u16,
+    },
+    QueryTree {
+        sequence: u16,
+        root: XResourceId,
+        parent: XResourceId,
+        children: Vec<XResourceId>,
+    },
+    GetWindowAttributes {
+        sequence: u16,
+        visual: u32,
+        colormap: XResourceId,
+        map_state: u8,
+        override_redirect: bool,
+    },
     QueryExtension {
         sequence: u16,
         present: bool,
@@ -138,6 +159,13 @@ pub enum XClientReply {
         sequence: u16,
         focus: XResourceId,
         revert_to: u8,
+    },
+    TranslateCoordinates {
+        sequence: u16,
+        same_screen: bool,
+        child: Option<XResourceId>,
+        dst_x: i16,
+        dst_y: i16,
     },
     QueryFont {
         sequence: u16,
@@ -198,6 +226,96 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             );
             out[X_CLIENT_OUTPUT_RECORD_LEN..X_CLIENT_OUTPUT_RECORD_LEN + bytes.len()]
                 .copy_from_slice(bytes);
+            out
+        }
+        XClientReply::GetGeometry {
+            sequence,
+            depth,
+            root,
+            geometry,
+            border_width,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            out[1] = depth;
+            put_resource(byte_order, &mut out[8..12], root);
+            put_i16(
+                byte_order,
+                &mut out[12..14],
+                i16::try_from(geometry.x).unwrap_or(0),
+            );
+            put_i16(
+                byte_order,
+                &mut out[14..16],
+                i16::try_from(geometry.y).unwrap_or(0),
+            );
+            put_u16(
+                byte_order,
+                &mut out[16..18],
+                u16::try_from(geometry.width).unwrap_or(0),
+            );
+            put_u16(
+                byte_order,
+                &mut out[18..20],
+                u16::try_from(geometry.height).unwrap_or(0),
+            );
+            put_u16(byte_order, &mut out[20..22], border_width);
+            out
+        }
+        XClientReply::QueryTree {
+            sequence,
+            root,
+            parent,
+            children,
+        } => {
+            let children_len = children.len().saturating_mul(4);
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN + children_len];
+            write_reply_header(
+                byte_order,
+                &mut out[..X_CLIENT_OUTPUT_RECORD_LEN],
+                sequence,
+                u32::try_from(children_len / 4).unwrap_or(0),
+            );
+            put_resource(byte_order, &mut out[8..12], root);
+            put_resource(byte_order, &mut out[12..16], parent);
+            put_u16(
+                byte_order,
+                &mut out[16..18],
+                u16::try_from(children.len()).unwrap_or(0),
+            );
+            let mut offset = X_CLIENT_OUTPUT_RECORD_LEN;
+            for child in children {
+                put_resource(byte_order, &mut out[offset..offset + 4], child);
+                offset += 4;
+            }
+            out
+        }
+        XClientReply::GetWindowAttributes {
+            sequence,
+            visual,
+            colormap,
+            map_state,
+            override_redirect,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN + 12];
+            write_reply_header(
+                byte_order,
+                &mut out[..X_CLIENT_OUTPUT_RECORD_LEN],
+                sequence,
+                3,
+            );
+            out[1] = 0;
+            put_u32(byte_order, &mut out[8..12], visual);
+            put_u16(byte_order, &mut out[12..14], 1);
+            out[14] = 0;
+            out[15] = 1;
+            put_u32(byte_order, &mut out[16..20], 0);
+            put_u32(byte_order, &mut out[20..24], 0);
+            out[24] = 0;
+            out[25] = 1;
+            out[26] = map_state;
+            out[27] = u8::from(override_redirect);
+            put_resource(byte_order, &mut out[28..32], colormap);
             out
         }
         XClientReply::QueryExtension {
@@ -295,6 +413,25 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             write_reply_header(byte_order, &mut out, sequence, 0);
             out[1] = revert_to;
             put_resource(byte_order, &mut out[8..12], focus);
+            out
+        }
+        XClientReply::TranslateCoordinates {
+            sequence,
+            same_screen,
+            child,
+            dst_x,
+            dst_y,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            out[1] = u8::from(same_screen);
+            put_resource(
+                byte_order,
+                &mut out[8..12],
+                child.unwrap_or(XResourceId::NONE),
+            );
+            put_i16(byte_order, &mut out[12..14], dst_x);
+            put_i16(byte_order, &mut out[14..16], dst_y);
             out
         }
         XClientReply::QueryFont {

@@ -23,6 +23,7 @@ and the real-client smoke that exercises the touched path:
 cargo test --offline -q -p sophia-x-authority --test x11_wire
 cargo run --offline -q -p sophia-cli -- x-authority-xclock-smoke
 cargo run --offline -q -p sophia-cli -- x-authority-xeyes-smoke
+cargo run --offline -q -p sophia-cli -- x-authority-xwininfo-root-smoke
 ```
 
 The real-client smokes are regression smokes, not full X server conformance

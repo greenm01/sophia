@@ -75,6 +75,10 @@ Current milestone target:
 
 ## Done Recently
 
+- [x] `x-authority-xwininfo-root-smoke` launches `/usr/bin/xwininfo -root`,
+  exits successfully with `first_error=none`, and adds only the demanded
+  `GetWindowAttributes`, `GetGeometry`, `QueryTree`, and
+  `TranslateCoordinates` root/window introspection replies.
 - [x] `x-authority-xeyes-smoke` launches `/usr/bin/xeyes`, keeps
   compatibility expansion probe-driven, and adds only the demanded
   `QueryColors`, `ClearArea`, and `PolyFillArc` paths with reduced

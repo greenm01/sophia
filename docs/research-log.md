@@ -3,6 +3,18 @@
 This file records early decisions, assumptions, and open questions. Keep it
 short and chronological.
 
+## 2026-07-10: xwininfo as Root Introspection Probe
+
+`x-authority-xwininfo-root-smoke` now launches `/usr/bin/xwininfo -root`
+against Sophia X Authority and exits successfully with no X protocol error. The
+compatibility work stayed introspection-only: xwininfo added bounded
+`GetWindowAttributes`, `GetGeometry`, `QueryTree`, and `TranslateCoordinates`
+replies for root/window facts without creating Engine transactions.
+
+The passing reduced evidence was `outcome=client_exited_success`, `requests=9`,
+`opcode_count=6`, `opcodes=3,14,15,16,20,40`, `transactions=0`,
+`runtime_committed=0`, `runtime_surfaces=0`, and `first_error=none`.
+
 ## 2026-07-10: xeyes as Arc Drawing Probe
 
 `x-authority-xeyes-smoke` now launches `/usr/bin/xeyes` against Sophia X

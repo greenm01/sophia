@@ -1,5 +1,5 @@
 use sophia_portal::ClipboardPortal;
-use sophia_protocol::{AuthoritySurface, NamespaceId, Region, TransactionId};
+use sophia_protocol::{AuthoritySurface, NamespaceId, Rect, Region, TransactionId};
 
 use crate::{
     ClipboardSelectionFailureRequest, XAuthorityPortalCommand, XAuthorityRequestKind,
@@ -222,6 +222,19 @@ impl XAuthorityRuntime {
             .lookup(namespace, window, XResourceKind::Window)
             .map(|_| ())
             .map_err(Into::into)
+    }
+
+    pub fn window_geometry(
+        &self,
+        namespace: NamespaceId,
+        window: crate::XResourceId,
+    ) -> Result<Rect, XAuthorityRuntimeError> {
+        self.resources
+            .lookup(namespace, window, XResourceKind::Window)?;
+        self.windows
+            .get(window)
+            .map(|record| record.geometry)
+            .ok_or(XAuthorityRuntimeError::UnknownResource)
     }
 
     pub fn map_namespace_windows(

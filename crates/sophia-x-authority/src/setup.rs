@@ -79,6 +79,8 @@ pub const X_SETUP_DEFAULT_MAX_REQUEST_UNITS: u16 = u16::MAX;
 pub const X_SETUP_DEFAULT_ROOT: u32 = 0x20;
 pub const X_SETUP_DEFAULT_COLORMAP: u32 = 0x21;
 pub const X_SETUP_DEFAULT_VISUAL: u32 = 0x22;
+pub const X_SETUP_ROOT_WIDTH: u16 = 1280;
+pub const X_SETUP_ROOT_HEIGHT: u16 = 720;
 
 const X_SETUP_SUCCESS: u8 = 1;
 const X_SETUP_FAILURE: u8 = 0;
@@ -396,8 +398,8 @@ fn encode_root(byte_order: XByteOrder, out: &mut Vec<u8>) {
     byte_order.push_u32(out, 0x00ff_ffff);
     byte_order.push_u32(out, 0x0000_0000);
     byte_order.push_u32(out, 0);
-    byte_order.push_u16(out, 1280);
-    byte_order.push_u16(out, 720);
+    byte_order.push_u16(out, X_SETUP_ROOT_WIDTH);
+    byte_order.push_u16(out, X_SETUP_ROOT_HEIGHT);
     byte_order.push_u16(out, 340);
     byte_order.push_u16(out, 190);
     byte_order.push_u16(out, 1);

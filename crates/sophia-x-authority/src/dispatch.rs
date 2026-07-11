@@ -1,11 +1,12 @@
 use crate::{
-    X_MIT_SHM_EXTENSION_NAME, X_MIT_SHM_MAJOR_OPCODE, X_SOPHIA_PRESENT_EXTENSION_NAME,
-    X_SOPHIA_PRESENT_MAJOR_OPCODE, XAtomTable, XAuthorityRequestKind, XAuthorityResponseOutcome,
-    XAuthorityResponsePacket, XAuthorityRuntime, XByteOrder, XClientEvent, XClientOutput,
-    XClientReply, XErrorCode, XMetadataPropertyCandidate, XPropertyError, XPropertyTable,
-    XResourceId, XWireParseError, XWireRequest, encode_x_client_output,
-    metadata_property_candidate, x_error_from_runtime, x_error_from_wire_parse,
-    x_selection_failure_event,
+    X_MIT_SHM_EXTENSION_NAME, X_MIT_SHM_MAJOR_OPCODE, X_SETUP_DEFAULT_COLORMAP,
+    X_SETUP_DEFAULT_ROOT, X_SETUP_DEFAULT_VISUAL, X_SETUP_ROOT_HEIGHT, X_SETUP_ROOT_WIDTH,
+    X_SOPHIA_PRESENT_EXTENSION_NAME, X_SOPHIA_PRESENT_MAJOR_OPCODE, XAtomTable,
+    XAuthorityRequestKind, XAuthorityResponseOutcome, XAuthorityResponsePacket, XAuthorityRuntime,
+    XByteOrder, XClientEvent, XClientOutput, XClientReply, XErrorCode, XMetadataPropertyCandidate,
+    XPropertyError, XPropertyTable, XResourceId, XWireParseError, XWireRequest,
+    encode_x_client_output, metadata_property_candidate, x_error_from_runtime,
+    x_error_from_wire_parse, x_selection_failure_event,
 };
 use sophia_protocol::{NamespaceId, Rect, Region, TransactionId};
 
@@ -66,6 +67,37 @@ pub fn dispatch_x11_wire_request(
             XDispatchResult {
                 response: None,
                 outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::GetWindowAttributes { window } => {
+            let output = if window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
+                XClientOutput::Reply(XClientReply::GetWindowAttributes {
+                    sequence: context.sequence,
+                    visual: X_SETUP_DEFAULT_VISUAL,
+                    colormap: XResourceId::new(u64::from(X_SETUP_DEFAULT_COLORMAP), 1),
+                    map_state: 2,
+                    override_redirect: false,
+                })
+            } else if let Err(error) = runtime.validate_window_access(context.namespace, window) {
+                XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(window.local.raw()).unwrap_or(0),
+                ))
+            } else {
+                XClientOutput::Reply(XClientReply::GetWindowAttributes {
+                    sequence: context.sequence,
+                    visual: X_SETUP_DEFAULT_VISUAL,
+                    colormap: XResourceId::new(u64::from(X_SETUP_DEFAULT_COLORMAP), 1),
+                    map_state: 2,
+                    override_redirect: false,
+                })
+            };
+            XDispatchResult {
+                response: None,
+                outputs: vec![output],
                 metadata_candidates: Vec::new(),
             }
         }
@@ -136,6 +168,72 @@ pub fn dispatch_x11_wire_request(
             XDispatchResult {
                 response: None,
                 outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::GetGeometry { drawable } => {
+            let output = if drawable.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
+                XClientOutput::Reply(XClientReply::GetGeometry {
+                    sequence: context.sequence,
+                    depth: 24,
+                    root: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+                    geometry: Rect {
+                        x: 0,
+                        y: 0,
+                        width: i32::from(X_SETUP_ROOT_WIDTH),
+                        height: i32::from(X_SETUP_ROOT_HEIGHT),
+                    },
+                    border_width: 0,
+                })
+            } else {
+                match runtime.window_geometry(context.namespace, drawable) {
+                    Ok(geometry) => XClientOutput::Reply(XClientReply::GetGeometry {
+                        sequence: context.sequence,
+                        depth: 24,
+                        root: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+                        geometry,
+                        border_width: 0,
+                    }),
+                    Err(error) => XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(drawable.local.raw()).unwrap_or(0),
+                    )),
+                }
+            };
+            XDispatchResult {
+                response: None,
+                outputs: vec![output],
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::QueryTree { window } => {
+            let output = if window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
+                XClientOutput::Reply(XClientReply::QueryTree {
+                    sequence: context.sequence,
+                    root: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+                    parent: XResourceId::NONE,
+                    children: Vec::new(),
+                })
+            } else if let Err(error) = runtime.validate_window_access(context.namespace, window) {
+                XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(window.local.raw()).unwrap_or(0),
+                ))
+            } else {
+                XClientOutput::Reply(XClientReply::QueryTree {
+                    sequence: context.sequence,
+                    root: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+                    parent: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+                    children: Vec::new(),
+                })
+            };
+            XDispatchResult {
+                response: None,
+                outputs: vec![output],
                 metadata_candidates: Vec::new(),
             }
         }
@@ -445,6 +543,44 @@ pub fn dispatch_x11_wire_request(
             })],
             metadata_candidates: Vec::new(),
         },
+        XWireRequest::TranslateCoordinates {
+            source,
+            destination,
+            src_x,
+            src_y,
+        } => {
+            let output =
+                if let Err(error) = runtime.validate_drawable_access(context.namespace, source) {
+                    XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(source.local.raw()).unwrap_or(0),
+                    ))
+                } else if let Err(error) =
+                    runtime.validate_drawable_access(context.namespace, destination)
+                {
+                    XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(destination.local.raw()).unwrap_or(0),
+                    ))
+                } else {
+                    XClientOutput::Reply(XClientReply::TranslateCoordinates {
+                        sequence: context.sequence,
+                        same_screen: true,
+                        child: None,
+                        dst_x: src_x,
+                        dst_y: src_y,
+                    })
+                };
+            XDispatchResult {
+                response: None,
+                outputs: vec![output],
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::QueryExtension { name } => {
             let extension = extension_query_result(&name);
             XDispatchResult {

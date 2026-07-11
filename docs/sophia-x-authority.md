@@ -412,3 +412,16 @@ with no X protocol error before the harness killed the long-running xeyes
 process. The reduced report includes the total request count, sorted opcode
 list, runtime counters, and `first_error=none` so future real-client regressions
 identify the next compatibility gap directly.
+
+## External xwininfo Probe
+
+`x-authority-xwininfo-root-smoke` launches `/usr/bin/xwininfo -root` against a
+temporary Sophia X Authority socket and treats root-window introspection as a
+separate non-drawing compatibility surface. The probe added only the request
+surface xwininfo actually exercised: bounded `GetWindowAttributes`,
+`GetGeometry`, `QueryTree`, and `TranslateCoordinates` replies.
+
+The passing proof exits successfully with no Engine transactions because the
+client does not draw. Its reduced report still records request count, opcode
+set, zero runtime counters, and `first_error=none`, so introspection regressions
+remain visible without requiring visual transaction evidence.

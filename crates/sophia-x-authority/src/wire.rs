@@ -9,15 +9,19 @@ use crate::{
 
 const X_CREATE_WINDOW: u8 = 1;
 const X_CHANGE_WINDOW_ATTRIBUTES: u8 = 2;
+const X_GET_WINDOW_ATTRIBUTES: u8 = 3;
 const X_DESTROY_WINDOW: u8 = 4;
 const X_MAP_WINDOW: u8 = 8;
 const X_MAP_SUBWINDOWS: u8 = 9;
+const X_GET_GEOMETRY: u8 = 14;
+const X_QUERY_TREE: u8 = 15;
 const X_INTERN_ATOM: u8 = 16;
 const X_GET_ATOM_NAME: u8 = 17;
 const X_CHANGE_PROPERTY: u8 = 18;
 const X_GET_PROPERTY: u8 = 20;
 const X_SET_SELECTION_OWNER: u8 = 22;
 const X_CONVERT_SELECTION: u8 = 24;
+const X_TRANSLATE_COORDINATES: u8 = 40;
 const X_GET_INPUT_FOCUS: u8 = 43;
 const X_OPEN_FONT: u8 = 45;
 const X_CLOSE_FONT: u8 = 46;
@@ -53,15 +57,19 @@ pub const X_MIT_SHM_PUT_IMAGE_MINOR_OPCODE: u8 = 3;
 
 const X_CREATE_WINDOW_REQ_LEN: usize = 32;
 const X_CHANGE_WINDOW_ATTRIBUTES_REQ_LEN: usize = 12;
+const X_GET_WINDOW_ATTRIBUTES_REQ_LEN: usize = 8;
 const X_DESTROY_WINDOW_REQ_LEN: usize = 8;
 const X_MAP_WINDOW_REQ_LEN: usize = 8;
 const X_MAP_SUBWINDOWS_REQ_LEN: usize = 8;
+const X_GET_GEOMETRY_REQ_LEN: usize = 8;
+const X_QUERY_TREE_REQ_LEN: usize = 8;
 const X_INTERN_ATOM_REQ_LEN: usize = 8;
 const X_GET_ATOM_NAME_REQ_LEN: usize = 8;
 const X_CHANGE_PROPERTY_REQ_LEN: usize = 24;
 const X_GET_PROPERTY_REQ_LEN: usize = 24;
 const X_SET_SELECTION_OWNER_REQ_LEN: usize = 16;
 const X_CONVERT_SELECTION_REQ_LEN: usize = 24;
+const X_TRANSLATE_COORDINATES_REQ_LEN: usize = 16;
 const X_GET_INPUT_FOCUS_REQ_LEN: usize = 4;
 const X_OPEN_FONT_REQ_LEN: usize = 12;
 const X_CLOSE_FONT_REQ_LEN: usize = 8;
@@ -106,10 +114,19 @@ pub enum XWireRequest {
     ChangeWindowAttributes {
         window: XResourceId,
     },
+    GetWindowAttributes {
+        window: XResourceId,
+    },
     DestroyWindow {
         window: XResourceId,
     },
     MapSubwindows {
+        window: XResourceId,
+    },
+    GetGeometry {
+        drawable: XResourceId,
+    },
+    QueryTree {
         window: XResourceId,
     },
     InternAtom {
@@ -253,6 +270,12 @@ pub enum XWireRequest {
         colormap: XResourceId,
         pixels: Vec<u32>,
     },
+    TranslateCoordinates {
+        source: XResourceId,
+        destination: XResourceId,
+        src_x: i16,
+        src_y: i16,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -317,15 +340,19 @@ pub fn decode_x11_core_request(
     match opcode {
         X_CREATE_WINDOW => decode_create_window(context, bytes),
         X_CHANGE_WINDOW_ATTRIBUTES => decode_change_window_attributes(context, bytes),
+        X_GET_WINDOW_ATTRIBUTES => decode_get_window_attributes(context, bytes),
         X_DESTROY_WINDOW => decode_destroy_window(context, bytes),
         X_MAP_WINDOW => decode_map_window(context, bytes),
         X_MAP_SUBWINDOWS => decode_map_subwindows(context, bytes),
+        X_GET_GEOMETRY => decode_get_geometry(context, bytes),
+        X_QUERY_TREE => decode_query_tree(context, bytes),
         X_INTERN_ATOM => decode_intern_atom(context, bytes),
         X_GET_ATOM_NAME => decode_get_atom_name(context, bytes),
         X_CHANGE_PROPERTY => decode_change_property(context, bytes),
         X_GET_PROPERTY => decode_get_property(context, bytes),
         X_SET_SELECTION_OWNER => decode_set_selection_owner(context, bytes),
         X_CONVERT_SELECTION => decode_convert_selection(context, bytes),
+        X_TRANSLATE_COORDINATES => decode_translate_coordinates(context, bytes),
         X_GET_INPUT_FOCUS => decode_get_input_focus(bytes),
         X_OPEN_FONT => decode_open_font(context, bytes),
         X_CLOSE_FONT => decode_close_font(context, bytes),
@@ -493,6 +520,57 @@ fn decode_copy_area(
         dst_y: context.byte_order.i16(&bytes[22..24]),
         width: context.byte_order.u16(&bytes[24..26]),
         height: context.byte_order.u16(&bytes[26..28]),
+    })
+}
+
+fn decode_query_tree(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_QUERY_TREE, X_QUERY_TREE_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::QueryTree {
+        window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+    })
+}
+
+fn decode_get_window_attributes(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(
+        X_GET_WINDOW_ATTRIBUTES,
+        X_GET_WINDOW_ATTRIBUTES_REQ_LEN,
+        bytes.len(),
+    )?;
+    Ok(XWireRequest::GetWindowAttributes {
+        window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+    })
+}
+
+fn decode_translate_coordinates(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(
+        X_TRANSLATE_COORDINATES,
+        X_TRANSLATE_COORDINATES_REQ_LEN,
+        bytes.len(),
+    )?;
+    Ok(XWireRequest::TranslateCoordinates {
+        source: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        destination: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
+        src_x: context.byte_order.i16(&bytes[12..14]),
+        src_y: context.byte_order.i16(&bytes[14..16]),
+    })
+}
+
+fn decode_get_geometry(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_GET_GEOMETRY, X_GET_GEOMETRY_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::GetGeometry {
+        drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
     })
 }
 
