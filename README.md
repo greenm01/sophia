@@ -1,14 +1,16 @@
-# The Sophia Manifesto
+# The Linux Desktop Problem
 
-X11 is a beautiful, asynchronous disaster. Designed for diskless terminals and slow networks, it offers a hacker's playground—a shared property tree where any script can move any window. You want a tiling window manager? You write one. You want a global hotkey daemon? You build it. X11 never asks for a committee's permission. But X11 tears. It leaves black borders during resizes. It operates on the flawed assumption that every client is trustworthy.
+The current landscape forces a choice between extremes: decentralized freedom versus centralized bureaucracy.
 
-Wayland stepped in to fix the visual rot. It enforces atomic buffer swaps and secures the desktop. The tearing stopped. The freedom stopped, too. Wayland makes the compositor a dictator. If you want a screenshot tool or a custom dock, you wait for a committee of competing developers to ratify an XML schema. It traded the permissionless joy of the Linux desktop for a totalatarian, bureaucratic straitjacket where everything is designed by committee... i.e. hell.
+X11 is a beautiful, asynchronous disaster. Built for diskless terminals and slow networks, it offers a hacker's playground—a shared property tree where any script can move any window. You want a tiling window manager? You write one. You want a global hotkey daemon? You build it. X11 never asks a committee for permission. But X11 tears. It leaves black borders during resizes, and it operates on the flawed assumption that every client is trustworthy.
 
-Sophia rejects this false binary. 
+Wayland stepped in to fix the visual rot. It enforces atomic buffer swaps and secures the desktop. The tearing stopped, but so did the freedom. Wayland makes the compositor a dictator. If you want a screenshot tool or a custom dock, you wait for competing developers to ratify an XML schema. It traded the permissionless joy of the Linux desktop for a bureaucratic straitjacket.
 
-Sophia is a secure, frame-perfect session stack for the Linux desktop. It shatters the monolithic display server and divides the labor.
+Sophia rejects this false binary.
 
-## The Engine Dictates the Pixels
+Sophia is a secure, atomic session stack for the Linux desktop. It shatters the monolithic display server and divides the labor.
+
+# The Engine Dictates the Pixels
 
 Sophia Engine is the absolute visual authority. It hit-tests the scene, schedules the frames, and owns the scanout. It enforces a simple, unbreakable rule: no new geometry appears on the screen without matching, committed pixels. If an application hangs during a resize, Sophia fails closed. The old, perfectly rendered layout remains on the screen. 
 
