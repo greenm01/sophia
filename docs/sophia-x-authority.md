@@ -63,6 +63,20 @@ Deferred unless a real app requires them:
 - XTEST-style synthetic input as a privileged general API;
 - broad extension coverage that does not affect real target clients.
 
+## Probe-Driven Coverage
+
+External-client coverage is admitted only when a real probe exposes a missing
+request, reply, lifecycle, or error path. Current real-client smokes cover
+root/window introspection (`xwininfo`, `xprop`), root property mutation
+(`xsetroot`), drawing clients (`xclock`, `xeyes`, `xlogo`, `xmessage`), output
+introspection (`xrandr --query`), and Athena widget behavior (`xcalc`).
+
+Each external smoke must keep `first_error=none`. New compatibility code should
+remain bounded and narrow: for example, xcalc admitted `AllocNamedColor`,
+`UnmapWindow`, padded one-character `PolyText8`, and normal client-disconnect
+teardown without turning Sophia X Authority into a broad X11 conformance
+project.
+
 ## Namespace Model
 
 Every client connection belongs to a `NamespaceId` before it can create

@@ -171,6 +171,24 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
+        XWireRequest::UnmapWindow { window } => {
+            let outputs =
+                if let Err(error) = runtime.validate_window_access(context.namespace, window) {
+                    vec![XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(window.local.raw()).unwrap_or(0),
+                    ))]
+                } else {
+                    Vec::new()
+                };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::GetGeometry { drawable } => {
             let output = if drawable.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
                 XClientOutput::Reply(XClientReply::GetGeometry {
@@ -715,6 +733,21 @@ pub fn dispatch_x11_wire_request(
             })],
             metadata_candidates: Vec::new(),
         },
+        XWireRequest::AllocNamedColor { name, .. } => {
+            let black = name.eq_ignore_ascii_case("black");
+            let intensity = if black { 0 } else { u16::MAX };
+            XDispatchResult {
+                response: None,
+                outputs: vec![XClientOutput::Reply(XClientReply::AllocNamedColor {
+                    sequence: context.sequence,
+                    pixel: if black { 0 } else { 1 },
+                    red: intensity,
+                    green: intensity,
+                    blue: intensity,
+                })],
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::ShmQueryVersion => XDispatchResult {
             response: None,
             outputs: vec![XClientOutput::Reply(XClientReply::ShmQueryVersion {

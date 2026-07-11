@@ -311,6 +311,15 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         namespace: 55,
         require_transactions: false,
     },
+    ExternalProbeSmokeSpec {
+        command_name: "x-authority-xcalc-smoke",
+        label: "xcalc",
+        binary: "/usr/bin/xcalc",
+        args: &[],
+        display_base: 7500,
+        namespace: 56,
+        require_transactions: true,
+    },
 ];
 
 fn run_x_authority_x11_smoke() -> Result<XAuthorityX11SmokeReport, Box<dyn std::error::Error>> {

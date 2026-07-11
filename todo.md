@@ -33,6 +33,17 @@ Current milestone target:
 - [ ] Keep XLibre bridge smokes as prototype references until Sophia X Authority
   has equivalent live coverage.
 
+Next logical steps:
+
+- [ ] Add the next toolkit-shaped external client probe, preferring a small
+  GTK or GIMP-adjacent utility that is available on the host, and implement
+  only the first demanded opcode/reply surface.
+- [ ] Convert one long-running external smoke into a stricter rendered-output
+  assertion once Authority-to-Engine transactions can be observed through the
+  live composition path.
+- [ ] Start the Wayland Authority skeleton only after the X Authority probe set
+  includes one toolkit client beyond Athena/Xaw-style programs.
+
 ---
 
 ## Next 3 Milestones
@@ -75,6 +86,10 @@ Current milestone target:
 
 ## Done Recently
 
+- [x] `x-authority-xcalc-smoke` launches `/usr/bin/xcalc`, keeps
+  `first_error=none`, and adds only the demanded bounded `AllocNamedColor`,
+  `UnmapWindow`, one-character padded `PolyText8`, and client-disconnect
+  handling needed by this Athena widget probe.
 - [x] `x-authority-xrandr-query-smoke` launches `/usr/bin/xrandr --query`,
   keeps `first_error=none`, and adds only the demanded minimal `RANDR`
   extension advertisement, fixed root screen-size range, and empty screen

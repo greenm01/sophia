@@ -29,6 +29,7 @@ cargo run --offline -q -p sophia-cli -- x-authority-xsetroot-name-smoke
 cargo run --offline -q -p sophia-cli -- x-authority-xlogo-smoke
 cargo run --offline -q -p sophia-cli -- x-authority-xmessage-smoke
 cargo run --offline -q -p sophia-cli -- x-authority-xrandr-query-smoke
+cargo run --offline -q -p sophia-cli -- x-authority-xcalc-smoke
 ```
 
 The real-client smokes are regression smokes, not full X server conformance

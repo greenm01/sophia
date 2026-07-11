@@ -13,6 +13,7 @@ const X_GET_WINDOW_ATTRIBUTES: u8 = 3;
 const X_DESTROY_WINDOW: u8 = 4;
 const X_MAP_WINDOW: u8 = 8;
 const X_MAP_SUBWINDOWS: u8 = 9;
+const X_UNMAP_WINDOW: u8 = 10;
 const X_GET_GEOMETRY: u8 = 14;
 const X_QUERY_TREE: u8 = 15;
 const X_INTERN_ATOM: u8 = 16;
@@ -43,6 +44,7 @@ const X_POLY_FILL_RECTANGLE: u8 = 70;
 const X_POLY_FILL_ARC: u8 = 71;
 const X_PUT_IMAGE: u8 = 72;
 const X_POLY_TEXT8: u8 = 74;
+const X_ALLOC_NAMED_COLOR: u8 = 85;
 const X_QUERY_COLORS: u8 = 91;
 const X_CREATE_GLYPH_CURSOR: u8 = 94;
 const X_FREE_CURSOR: u8 = 95;
@@ -72,6 +74,7 @@ const X_GET_WINDOW_ATTRIBUTES_REQ_LEN: usize = 8;
 const X_DESTROY_WINDOW_REQ_LEN: usize = 8;
 const X_MAP_WINDOW_REQ_LEN: usize = 8;
 const X_MAP_SUBWINDOWS_REQ_LEN: usize = 8;
+const X_UNMAP_WINDOW_REQ_LEN: usize = 8;
 const X_GET_GEOMETRY_REQ_LEN: usize = 8;
 const X_QUERY_TREE_REQ_LEN: usize = 8;
 const X_INTERN_ATOM_REQ_LEN: usize = 8;
@@ -102,6 +105,7 @@ const X_POLY_FILL_RECTANGLE_REQ_LEN: usize = 12;
 const X_POLY_FILL_ARC_REQ_LEN: usize = 12;
 const X_PUT_IMAGE_REQ_LEN: usize = 24;
 const X_POLY_TEXT8_REQ_LEN: usize = 16;
+const X_ALLOC_NAMED_COLOR_REQ_LEN: usize = 12;
 const X_QUERY_COLORS_REQ_LEN: usize = 8;
 const X_CREATE_GLYPH_CURSOR_REQ_LEN: usize = 32;
 const X_FREE_CURSOR_REQ_LEN: usize = 8;
@@ -120,6 +124,7 @@ const X_RANDR_GET_SCREEN_RESOURCES_REQ_LEN: usize = 8;
 pub const X_PUT_IMAGE_MAX_DATA_BYTES: usize = crate::X_PROPERTY_MAX_VALUE_BYTES;
 pub const X_QUERY_COLORS_MAX_PIXELS: usize = 256;
 pub const X_POLY_TEXT8_MAX_BYTES: usize = crate::X_PROPERTY_MAX_VALUE_BYTES;
+pub const X_ALLOC_NAMED_COLOR_MAX_NAME_BYTES: usize = 256;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct XWireClientContext {
@@ -141,6 +146,9 @@ pub enum XWireRequest {
         window: XResourceId,
     },
     MapSubwindows {
+        window: XResourceId,
+    },
+    UnmapWindow {
         window: XResourceId,
     },
     GetGeometry {
@@ -203,6 +211,10 @@ pub enum XWireRequest {
         x: i16,
         y: i16,
         glyph_count: usize,
+    },
+    AllocNamedColor {
+        colormap: XResourceId,
+        name: String,
     },
     GetInputFocus,
     OpenFont {
@@ -397,6 +409,7 @@ pub fn decode_x11_core_request(
         X_DESTROY_WINDOW => decode_destroy_window(context, bytes),
         X_MAP_WINDOW => decode_map_window(context, bytes),
         X_MAP_SUBWINDOWS => decode_map_subwindows(context, bytes),
+        X_UNMAP_WINDOW => decode_unmap_window(context, bytes),
         X_GET_GEOMETRY => decode_get_geometry(context, bytes),
         X_QUERY_TREE => decode_query_tree(context, bytes),
         X_INTERN_ATOM => decode_intern_atom(context, bytes),
@@ -427,6 +440,7 @@ pub fn decode_x11_core_request(
         X_POLY_FILL_ARC => decode_poly_fill_arc(context, bytes),
         X_PUT_IMAGE => decode_put_image(context, bytes),
         X_POLY_TEXT8 => decode_poly_text8(context, bytes),
+        X_ALLOC_NAMED_COLOR => decode_alloc_named_color(context, bytes),
         X_QUERY_COLORS => decode_query_colors(context, bytes),
         X_CREATE_GLYPH_CURSOR => decode_create_glyph_cursor(context, bytes),
         X_FREE_CURSOR => decode_free_cursor(context, bytes),
@@ -624,6 +638,9 @@ fn decode_poly_text8(
     while offset < item_bytes.len() {
         let len = item_bytes[offset];
         offset += 1;
+        if len == 0 && item_bytes[offset..].iter().all(|byte| *byte == 0) {
+            break;
+        }
         if len == u8::MAX {
             if item_bytes.len().saturating_sub(offset) < 4 {
                 return Err(XWireParseError::InvalidLength {
@@ -636,16 +653,26 @@ fn decode_poly_text8(
             continue;
         }
 
-        let item_len = 1usize + usize::from(len);
-        if item_bytes.len().saturating_sub(offset) < item_len {
+        let remaining = item_bytes.len().saturating_sub(offset);
+        let glyph_len = usize::from(len);
+        if remaining >= 1 + glyph_len {
+            offset += 1 + glyph_len;
+            glyph_count = glyph_count.saturating_add(glyph_len);
+            continue;
+        }
+        if remaining == glyph_len && glyph_len > 0 {
+            offset += glyph_len;
+            glyph_count = glyph_count.saturating_add(glyph_len - 1);
+            continue;
+        }
+        let item_len = 1usize + glyph_len;
+        if remaining < item_len {
             return Err(XWireParseError::InvalidLength {
                 opcode: X_POLY_TEXT8,
                 expected_at_least: X_POLY_TEXT8_REQ_LEN + offset + item_len,
                 actual: bytes.len(),
             });
         }
-        offset += item_len;
-        glyph_count = glyph_count.saturating_add(usize::from(len));
     }
 
     Ok(XWireRequest::PolyText8 {
@@ -681,6 +708,16 @@ fn decode_query_tree(
 ) -> Result<XWireRequest, XWireParseError> {
     require_exact_len(X_QUERY_TREE, X_QUERY_TREE_REQ_LEN, bytes.len())?;
     Ok(XWireRequest::QueryTree {
+        window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+    })
+}
+
+fn decode_unmap_window(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_UNMAP_WINDOW, X_UNMAP_WINDOW_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::UnmapWindow {
         window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
     })
 }
@@ -902,6 +939,44 @@ fn decode_poly_fill_rectangle(
         drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
         gc: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
         rectangles,
+    })
+}
+
+fn decode_alloc_named_color(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_len(
+        X_ALLOC_NAMED_COLOR,
+        X_ALLOC_NAMED_COLOR_REQ_LEN,
+        bytes.len(),
+    )?;
+    let name_len = usize::from(context.byte_order.u16(&bytes[8..10]));
+    if name_len > X_ALLOC_NAMED_COLOR_MAX_NAME_BYTES {
+        return Err(XWireParseError::PropertyValueTooLarge {
+            len: name_len,
+            max: X_ALLOC_NAMED_COLOR_MAX_NAME_BYTES,
+        });
+    }
+    let expected_len = X_ALLOC_NAMED_COLOR_REQ_LEN + padded_len(name_len);
+    if bytes.len() != expected_len {
+        return Err(XWireParseError::InvalidLength {
+            opcode: X_ALLOC_NAMED_COLOR,
+            expected_at_least: expected_len,
+            actual: bytes.len(),
+        });
+    }
+    let name = core::str::from_utf8(
+        &bytes[X_ALLOC_NAMED_COLOR_REQ_LEN..X_ALLOC_NAMED_COLOR_REQ_LEN + name_len],
+    )
+    .map_err(|_| XWireParseError::InvalidLength {
+        opcode: X_ALLOC_NAMED_COLOR,
+        expected_at_least: expected_len,
+        actual: bytes.len(),
+    })?;
+    Ok(XWireRequest::AllocNamedColor {
+        colormap: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        name: name.to_owned(),
     })
 }
 

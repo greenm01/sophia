@@ -253,7 +253,7 @@ fn serve_x11_core_socket_client_with_trace_observer(
             Err(error) => {
                 let head = request
                     .iter()
-                    .take(8)
+                    .take(24)
                     .map(|byte| format!("{byte:02x}"))
                     .collect::<Vec<_>>()
                     .join("");
@@ -268,13 +268,29 @@ fn serve_x11_core_socket_client_with_trace_observer(
             result: &output,
         })?;
         for record in output.encoded_outputs(setup.byte_order) {
-            stream.write_all(&record).map_err(|error| {
-                X11SetupSocketError::new(format!("failed to write X11 output: {error}"))
-            })?;
+            if let Err(error) = stream.write_all(&record) {
+                if matches!(
+                    error.kind(),
+                    ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::UnexpectedEof
+                ) {
+                    return Ok(());
+                }
+                return Err(X11SetupSocketError::new(format!(
+                    "failed to write X11 output: {error}"
+                )));
+            }
         }
-        stream.flush().map_err(|error| {
-            X11SetupSocketError::new(format!("failed to flush X11 output: {error}"))
-        })?;
+        if let Err(error) = stream.flush() {
+            if matches!(
+                error.kind(),
+                ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::UnexpectedEof
+            ) {
+                return Ok(());
+            }
+            return Err(X11SetupSocketError::new(format!(
+                "failed to flush X11 output: {error}"
+            )));
+        }
     }
 
     Ok(())

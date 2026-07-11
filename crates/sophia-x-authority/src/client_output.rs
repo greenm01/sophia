@@ -195,6 +195,13 @@ pub enum XClientReply {
         item_count: u32,
         bytes: Vec<u8>,
     },
+    AllocNamedColor {
+        sequence: u16,
+        pixel: u32,
+        red: u16,
+        green: u16,
+        blue: u16,
+    },
     ListProperties {
         sequence: u16,
         atoms: Vec<u32>,
@@ -517,6 +524,24 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             put_u32(byte_order, &mut out[16..20], item_count);
             out[X_CLIENT_OUTPUT_RECORD_LEN..X_CLIENT_OUTPUT_RECORD_LEN + bytes.len()]
                 .copy_from_slice(&bytes);
+            out
+        }
+        XClientReply::AllocNamedColor {
+            sequence,
+            pixel,
+            red,
+            green,
+            blue,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            put_u32(byte_order, &mut out[8..12], pixel);
+            put_u16(byte_order, &mut out[12..14], red);
+            put_u16(byte_order, &mut out[14..16], green);
+            put_u16(byte_order, &mut out[16..18], blue);
+            put_u16(byte_order, &mut out[18..20], red);
+            put_u16(byte_order, &mut out[20..22], green);
+            put_u16(byte_order, &mut out[22..24], blue);
             out
         }
         XClientReply::ListProperties { sequence, atoms } => {
