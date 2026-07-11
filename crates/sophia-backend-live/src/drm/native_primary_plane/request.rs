@@ -37,6 +37,20 @@ pub fn build_native_primary_plane_atomic_request(
 }
 
 #[cfg(feature = "libdrm-events")]
+pub fn build_native_primary_plane_atomic_request_with_vrr(
+    objects: LibdrmNativePrimaryPlaneObjects,
+    properties: LibdrmNativePrimaryPlanePropertyHandles,
+    enabled: bool,
+) -> LibdrmNativeAtomicRequestBuildResult {
+    build_native_primary_plane_atomic_request_with_scope(
+        objects,
+        properties,
+        LibdrmNativeAtomicCommitRequestScope::Modeset,
+        Some(enabled),
+    )
+}
+
+#[cfg(feature = "libdrm-events")]
 pub fn build_native_primary_plane_page_flip_atomic_request(
     objects: LibdrmNativePrimaryPlaneObjects,
     properties: LibdrmNativePrimaryPlanePropertyHandles,

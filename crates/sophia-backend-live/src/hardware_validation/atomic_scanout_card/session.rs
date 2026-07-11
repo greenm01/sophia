@@ -31,6 +31,13 @@ impl RealAtomicScanoutPageFlipSession {
         &self.outputs
     }
 
+    pub fn vrr_properties_for_selection(
+        &self,
+        selection: LibdrmNativePrimaryPlaneSelection,
+    ) -> LibdrmNativeVrrPropertyDiscoveryResult {
+        discover_native_vrr_properties(&self.card, selection.connector, selection.crtc)
+    }
+
     #[cfg(feature = "gbm-probe")]
     pub fn render_device_discovery(&self) -> io::Result<RealAtomicScanoutRenderDeviceDiscovery> {
         RealAtomicScanoutRenderDeviceDiscovery::from_card(&self.card)

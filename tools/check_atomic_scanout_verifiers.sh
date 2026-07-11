@@ -70,4 +70,7 @@ expect_fail tools/verify_qemu_session_evidence.sh qemu_session_evidence_missing_
 expect_fail tools/verify_qemu_session_evidence.sh qemu_session_evidence_duplicate_output_checksum.log
 expect_fail tools/verify_qemu_session_evidence.sh qemu_session_evidence_vsync_overlap.log
 
+expect_pass tools/verify_vrr_hardware_evidence.sh vrr_hardware_evidence_pass.log
+expect_fail tools/verify_vrr_hardware_evidence.sh vrr_hardware_evidence_missing_fallback.log
+
 echo "atomic scanout verifier fixtures passed"

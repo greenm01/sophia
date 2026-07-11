@@ -71,6 +71,8 @@ cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- sophia-li
 # type into xterm, and require physical_keys_routed>0 plus changed pixels.
 tools/live_session_content_hardware_proof.sh
 tools/live_session_persistent_hardware_proof.sh
+tools/operator_keyboard_hardware_proof.sh
+tools/vrr_hardware_proof.sh
 tools/build_qemu_session_initramfs.sh
 tools/qemu_session_harness.sh
 ```
@@ -100,6 +102,26 @@ failure, rejected callbacks, in-flight ownership, cleanup debt, and a tick
 count other than 300. QEMU does not claim VRR because virtio-gpu does not expose
 the physical property contract. Keep the physical TTY proof for the AMD
 multi-connector/VRR gates and operator-typed input evidence.
+
+The two remaining physical gates are deliberately separate from the QEMU
+regression loop. On a dedicated TTY, after the graphical compositor has
+released DRM master, run:
+
+```sh
+SOPHIA_OPERATOR_KEYBOARD=/dev/input/by-id/...-event-kbd \
+  tools/operator_keyboard_hardware_proof.sh
+tools/vrr_hardware_proof.sh
+```
+
+The keyboard helper waits for the explicit physical-input readiness line; type
+`sophia` only after it appears. The proof fails unless libinput observes and
+Engine routes physical key events and the later xterm pixels change. The VRR
+helper is destructive and requires a connector reporting `VRR_CAPABLE=1` plus
+the selected CRTC's `VRR_ENABLED` property. It submits an Engine-eligible
+opaque fullscreen modeset with `VRR_ENABLED=true`, waits for presentation, then
+submits an overlay/ineligible fixed-refresh fallback with `VRR_ENABLED=false`
+and waits for its page flip and retirement. Both reduced phase lines and the
+underlying atomic scanout lines must pass their strict verifiers.
 
 The optional renderer-native features have extra local checks:
 

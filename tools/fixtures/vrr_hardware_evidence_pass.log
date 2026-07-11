@@ -1,0 +1,2 @@
+sophia_vrr_hardware_evidence schema=1 phase=Activation status=Passed discovery=Discovered capability=true eligibility=Fullscreen decision=Enabled property_request=true atomic_commit=Presented retire=RetiredAfterPageFlip
+sophia_vrr_hardware_evidence schema=1 phase=FixedFallback status=Passed discovery=Discovered capability=true eligibility=OverlayPresent decision=Ineligible property_request=false atomic_commit=Presented retire=RetiredAfterPageFlip

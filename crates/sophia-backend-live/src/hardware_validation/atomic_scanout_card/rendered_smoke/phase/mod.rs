@@ -135,7 +135,7 @@ impl RealAtomicScanoutPageFlipSession {
         )
     }
 
-    fn submit_native_gbm_rendered_primary_plane_smoke_phase_with_policy<R>(
+    pub(super) fn submit_native_gbm_rendered_primary_plane_smoke_phase_with_policy<R>(
         &mut self,
         phase: LibdrmNativeAtomicScanoutSmokePhase,
         exporter: &mut NativeGbmRenderedScanoutBufferDiscoveryExporter<R>,

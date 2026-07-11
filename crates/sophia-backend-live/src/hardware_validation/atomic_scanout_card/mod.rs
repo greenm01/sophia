@@ -18,7 +18,7 @@ pub use render_device::*;
 #[cfg(feature = "gbm-probe")]
 pub use rendered_smoke::{
     RealAtomicScanoutSmokeConfig, run_real_atomic_scanout_smoke_phases,
-    run_real_atomic_scanout_smoke_phases_with,
+    run_real_atomic_scanout_smoke_phases_with, run_real_atomic_vrr_smoke_phases_with,
 };
 #[cfg(feature = "gbm-probe")]
 pub use runtime_evidence::{

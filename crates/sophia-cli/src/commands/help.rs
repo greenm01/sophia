@@ -64,6 +64,10 @@ pub(crate) fn print(verbose: bool) {
     );
     #[cfg(feature = "atomic-scanout-smoke-live")]
     println!(
+        "commands: atomic-vrr-smoke [--slot=1] [--output=1] [--authority=1] [--page-flip-timeout-ms=8000] [--child-timeout-ms=30000]"
+    );
+    #[cfg(feature = "atomic-scanout-smoke-live")]
+    println!(
         "commands: atomic-scanout-runtime-evidence [--slot=1] [--output=1] [--authority=1] [--page-flip-timeout-ms=8000]"
     );
 

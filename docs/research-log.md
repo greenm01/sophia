@@ -178,3 +178,22 @@ opaque, unoccluded fullscreen surface without overlays or required composition.
 Atomic page-flip request construction fails closed if VRR is requested without
 the enable property. Activation and fallback remain an AMD hardware gate;
 virtio-gpu is not accepted as VRR evidence.
+
+The physical VRR gate now has a dedicated two-phase runner and strict reduced
+evidence verifier. During implementation, the proof exposed that the native
+page-flip builder carried `VRR_ENABLED`, but the modeset branch ignored the
+same policy request. Modeset request construction now supports the property and
+fails closed when its handle is absent. `tools/vrr_hardware_proof.sh` derives an
+Enabled decision for one opaque, unoccluded fullscreen surface and commits
+`VRR_ENABLED=true`, then derives an Ineligible decision for an overlay-present
+scene and commits the fixed-refresh `false` fallback. It requires presented and
+retired callbacks for both phases. The destructive AMD run is still pending
+because it must be performed from the dedicated TTY, not the active graphical
+session.
+
+`tools/operator_keyboard_hardware_proof.sh` similarly packages the remaining
+operator gate without guessing an input node. The operator supplies a stable
+`...-event-kbd` path, waits for the physical-input readiness marker, and types
+the expected lowercase proof text. Existing persistent-session evidence rejects
+the run unless physical keys route through Engine focus and later xterm pixels
+change.

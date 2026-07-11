@@ -16,6 +16,19 @@ pub fn run_real_atomic_scanout_smoke_phases() -> Vec<LibdrmNativeAtomicScanoutSm
 pub fn run_real_atomic_scanout_smoke_phases_with(
     config: RealAtomicScanoutSmokeConfig,
 ) -> Vec<LibdrmNativeAtomicScanoutSmokeEvidence> {
+    run_real_atomic_scanout_smoke_phases_with_policy(config, false)
+}
+
+pub fn run_real_atomic_vrr_smoke_phases_with(
+    config: RealAtomicScanoutSmokeConfig,
+) -> Vec<LibdrmNativeAtomicScanoutSmokeEvidence> {
+    run_real_atomic_scanout_smoke_phases_with_policy(config, true)
+}
+
+fn run_real_atomic_scanout_smoke_phases_with_policy(
+    config: RealAtomicScanoutSmokeConfig,
+    prove_vrr: bool,
+) -> Vec<LibdrmNativeAtomicScanoutSmokeEvidence> {
     let mut session_result = select_real_atomic_scanout_card().into_page_flip_session(
         config.slot,
         config.output,
@@ -27,6 +40,48 @@ pub fn run_real_atomic_scanout_smoke_phases_with(
                 .failure_evidence()
                 .unwrap_or_else(LibdrmNativeAtomicScanoutSmokeEvidence::kms_selection_failed),
         ];
+    };
+    let (initial_policy, steady_policy) = if prove_vrr {
+        let discovery = session.vrr_properties_for_selection(session.selection());
+        if discovery.status != LibdrmNativeVrrPropertyDiscoveryStatus::Discovered
+            || !discovery.capable
+            || discovery.enable_property.is_none()
+        {
+            return vec![LibdrmNativeAtomicScanoutSmokeEvidence::property_discovery_failed()];
+        }
+        let capability = OutputVrrCapability { capable: true };
+        let activation = decide_output_vrr(
+            true,
+            capability,
+            OutputVrrEligibility {
+                opaque_fullscreen_surface_count: 1,
+                unoccluded: true,
+                overlays_present: false,
+                composition_required: false,
+            },
+        );
+        let fallback = decide_output_vrr(
+            true,
+            capability,
+            OutputVrrEligibility {
+                opaque_fullscreen_surface_count: 1,
+                unoccluded: true,
+                overlays_present: true,
+                composition_required: false,
+            },
+        );
+        if activation != OutputVrrDecision::Enabled || fallback != OutputVrrDecision::Ineligible {
+            return vec![LibdrmNativeAtomicScanoutSmokeEvidence::property_discovery_failed()];
+        }
+        (
+            LibdrmNativePrimaryPlaneScanoutSubmitPolicy::modeset().with_vrr_enabled(true),
+            LibdrmNativePrimaryPlaneScanoutSubmitPolicy::page_flip().with_vrr_enabled(false),
+        )
+    } else {
+        (
+            LibdrmNativePrimaryPlaneScanoutSubmitPolicy::modeset(),
+            LibdrmNativePrimaryPlaneScanoutSubmitPolicy::page_flip(),
+        )
     };
     let discovery = match session.render_device_discovery() {
         Ok(discovery) => discovery,
@@ -48,10 +103,13 @@ pub fn run_real_atomic_scanout_smoke_phases_with(
         .with_preferred_modifiers(session.preferred_xrgb8888_scanout_modifiers());
     let mut intake = LivePageFlipCallbackIntake::new(config.output);
 
-    let mut initial = match session.submit_native_gbm_rendered_primary_plane_smoke_phase(
-        LibdrmNativeAtomicScanoutSmokePhase::InitialModeset,
-        &mut exporter,
-    ) {
+    let mut initial = match session
+        .submit_native_gbm_rendered_primary_plane_smoke_phase_with_policy(
+            LibdrmNativeAtomicScanoutSmokePhase::InitialModeset,
+            &mut exporter,
+            initial_policy,
+            session.selection(),
+        ) {
         Ok(initial) => initial,
         Err(evidence) => return vec![evidence],
     };
@@ -88,9 +146,11 @@ pub fn run_real_atomic_scanout_smoke_phases_with(
         )];
     }
 
-    let mut steady = match session.submit_native_gbm_rendered_primary_plane_smoke_phase(
+    let mut steady = match session.submit_native_gbm_rendered_primary_plane_smoke_phase_with_policy(
         LibdrmNativeAtomicScanoutSmokePhase::SteadyPageFlip,
         &mut exporter,
+        steady_policy,
+        session.selection(),
     ) {
         Ok(steady) => steady,
         Err(evidence) => {

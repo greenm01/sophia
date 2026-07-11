@@ -14,6 +14,15 @@ echo "Sophia persistent live-session hardware proof"
 echo "This proof requires exclusive DRM/KMS ownership on the active TTY."
 echo "Evidence: $EVIDENCE_FILE"
 
+input_proof_args=(--inject-text=sophia)
+for arg in "$@"; do
+    case "$arg" in
+        --inject-text=*|--expect-physical-text=*)
+            input_proof_args=()
+            ;;
+    esac
+done
+
 if [[ "$SKIP_PREFLIGHT" != "1" ]]; then
     "$ROOT_DIR/tools/atomic_scanout_preflight.sh"
 fi
@@ -25,7 +34,7 @@ set +e
         cargo run --quiet --offline -p sophia-cli \
         --features "atomic-scanout-live" \
         -- sophia-live-session --display="$DISPLAY_NAME" --native-scanout \
-        --max-runtime-ms="$RUNTIME_MSEC" --inject-text=sophia "$@"
+        --max-runtime-ms="$RUNTIME_MSEC" "${input_proof_args[@]}" "$@"
 ) 2>&1 | tee "$EVIDENCE_FILE"
 proof_status="${PIPESTATUS[0]}"
 set -e

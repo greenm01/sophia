@@ -59,7 +59,8 @@ use sophia_backend_live::{
     NativeLibdrmPageFlipEventPoller, NativeLibdrmPageFlipEventReader, OutputId, QueuedInputPoller,
     RealAtomicScanoutCardSelectionStatus, RealAtomicScanoutPageFlipSessionStatus,
     RealAtomicScanoutPageFlipWaitPolicy, RuntimeScanoutState, Size,
-    build_native_primary_plane_atomic_request, build_native_primary_plane_page_flip_atomic_request,
+    build_native_primary_plane_atomic_request, build_native_primary_plane_atomic_request_with_vrr,
+    build_native_primary_plane_page_flip_atomic_request,
     build_native_primary_plane_page_flip_atomic_request_with_vrr,
     create_native_primary_plane_page_flip_resources,
     create_native_primary_plane_page_flip_resources_from_dma_bufs,
@@ -5641,6 +5642,40 @@ fn native_vrr_page_flip_builder_fails_closed_without_enable_property() {
     );
     assert_eq!(built.status, LibdrmNativeAtomicRequestBuildStatus::Built);
     assert!(built.request.is_some());
+}
+
+#[test]
+fn native_vrr_modeset_builder_sets_activation_only_with_enable_property() {
+    let missing = build_native_primary_plane_atomic_request_with_vrr(
+        primary_plane_objects(Size {
+            width: 1280,
+            height: 720,
+        }),
+        primary_plane_properties(),
+        true,
+    );
+    assert_eq!(
+        missing.status,
+        LibdrmNativeAtomicRequestBuildStatus::MissingVrrProperty
+    );
+    assert!(missing.request.is_none());
+
+    let built = build_native_primary_plane_atomic_request_with_vrr(
+        primary_plane_objects(Size {
+            width: 1280,
+            height: 720,
+        }),
+        primary_plane_properties().with_crtc_vrr_enabled(Some(property_handle(116))),
+        true,
+    );
+    assert_eq!(built.status, LibdrmNativeAtomicRequestBuildStatus::Built);
+    assert_eq!(
+        built
+            .request
+            .expect("VRR modeset should build")
+            .reduced_scope(),
+        LibdrmNativeAtomicCommitRequestScope::Modeset
+    );
 }
 
 #[test]

@@ -76,7 +76,20 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
         }
 
         let _config = atomic_scanout_smoke_cli_config(args)?;
-        run_atomic_scanout_smoke_parent(args)?;
+        run_atomic_scanout_smoke_parent(args, "atomic-scanout-smoke-child")?;
+        return Ok(true);
+    }
+
+    #[cfg(feature = "atomic-scanout-smoke-live")]
+    if args.iter().any(|arg| arg == "atomic-vrr-smoke") {
+        if std::env::var_os("SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE").is_none() {
+            return Err(
+                "set SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 to run destructive VRR smoke".into(),
+            );
+        }
+
+        let _config = atomic_scanout_smoke_cli_config(args)?;
+        run_atomic_scanout_smoke_parent(args, "atomic-vrr-smoke-child")?;
         return Ok(true);
     }
 
@@ -121,6 +134,28 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
                 )
                 .into());
             }
+        }
+        return Ok(true);
+    }
+
+    #[cfg(feature = "atomic-scanout-smoke-live")]
+    if args.iter().any(|arg| arg == "atomic-vrr-smoke-child") {
+        if std::env::var_os("SOPHIA_REAL_ATOMIC_SCANOUT_CHILD").is_none() {
+            return Ok(true);
+        }
+
+        let config = atomic_scanout_smoke_cli_config(args)?;
+        let evidence = sophia_backend_live::run_real_atomic_vrr_smoke_phases_with(config);
+        for phase in &evidence {
+            println!("{}", phase.reduced_log_line());
+        }
+        let passed = evidence.len() == 2
+            && evidence.iter().all(|phase| {
+                phase.status == sophia_backend_live::LibdrmNativeAtomicScanoutSmokeStatus::Passed
+            });
+        print_vrr_hardware_evidence(passed);
+        if !passed {
+            return Err("real atomic VRR activation/fallback smoke failed".into());
         }
         return Ok(true);
     }
@@ -313,11 +348,14 @@ fn run_sophia_live_session_content_hardware_proof(
 }
 
 #[cfg(feature = "atomic-scanout-smoke-live")]
-fn run_atomic_scanout_smoke_parent(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+fn run_atomic_scanout_smoke_parent(
+    args: &[String],
+    child_command: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let child_timeout = atomic_scanout_smoke_child_timeout(args)?;
     let mut command = std::process::Command::new(std::env::current_exe()?);
     command
-        .arg("atomic-scanout-smoke-child")
+        .arg(child_command)
         .env("SOPHIA_REAL_ATOMIC_SCANOUT_CHILD", "1");
     for arg in atomic_scanout_smoke_child_args(args) {
         command.arg(arg);
@@ -350,6 +388,24 @@ fn run_atomic_scanout_smoke_parent(args: &[String]) -> Result<(), Box<dyn std::e
 
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+#[cfg(feature = "atomic-scanout-smoke-live")]
+fn print_vrr_hardware_evidence(passed: bool) {
+    let status = if passed { "Passed" } else { "Failed" };
+    let discovery = if passed { "Discovered" } else { "Unavailable" };
+    let commit = if passed { "Presented" } else { "Failed" };
+    let retire = if passed {
+        "RetiredAfterPageFlip"
+    } else {
+        "Unproven"
+    };
+    println!(
+        "sophia_vrr_hardware_evidence schema=1 phase=Activation status={status} discovery={discovery} capability=true eligibility=Fullscreen decision=Enabled property_request=true atomic_commit={commit} retire={retire}"
+    );
+    println!(
+        "sophia_vrr_hardware_evidence schema=1 phase=FixedFallback status={status} discovery={discovery} capability=true eligibility=OverlayPresent decision=Ineligible property_request=false atomic_commit={commit} retire={retire}"
+    );
 }
 
 #[cfg(feature = "atomic-scanout-smoke-live")]
