@@ -3887,6 +3887,72 @@ fn x11_core_socket_smoke_round_trips_atom_property_and_window_events() {
 
 #[cfg(unix)]
 #[test]
+fn x11_core_listener_reuses_authority_state_across_sequential_clients() {
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let socket_path = std::env::temp_dir().join(format!(
+        "sophia-x11-persistent-core-test-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let server_path = socket_path.clone();
+    let server = thread::spawn(move || {
+        let listener = bind_x11_core_socket_server(&server_path).unwrap();
+        let mut state = X11CoreSocketServerState::new();
+        serve_x11_core_socket_listener_once(&listener, NamespaceId::from_raw(52), &mut state)
+            .unwrap();
+        serve_x11_core_socket_listener_once(&listener, NamespaceId::from_raw(52), &mut state)
+            .unwrap();
+    });
+
+    wait_for_socket(&socket_path);
+    let mut first = UnixStream::connect(&socket_path).unwrap();
+    first
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    read_setup_success(&mut first, XByteOrder::LittleEndian);
+    first
+        .write_all(&create_window_request(
+            XByteOrder::LittleEndian,
+            0x220701,
+            1,
+            2,
+            300,
+            200,
+        ))
+        .unwrap();
+    let configure = read_x_record(&mut first);
+    assert_eq!(configure[0], 22);
+    drop(first);
+
+    let mut second = UnixStream::connect(&socket_path).unwrap();
+    second
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    read_setup_success(&mut second, XByteOrder::LittleEndian);
+    second
+        .write_all(&resource_request(XByteOrder::LittleEndian, 8, 0x220701))
+        .unwrap();
+    let map = read_x_record(&mut second);
+    assert_eq!(map[0], 19);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &map[8..12]), 0x220701);
+    let expose = read_x_record(&mut second);
+    assert_eq!(expose[0], 12);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &expose[4..8]), 0x220701);
+
+    drop(second);
+    server.join().unwrap();
+    let _ = std::fs::remove_file(&socket_path);
+}
+
+#[cfg(unix)]
+#[test]
 fn x11_core_socket_observer_sees_poly_fill_rectangle_transaction() {
     use std::io::Write;
     use std::os::unix::net::UnixStream;

@@ -48,6 +48,15 @@ The passing reduced evidence on `:7926` was
 `composition_batches=4`, `composition_committed=4`, and
 `composition_surfaces=4`.
 
+The X11 Authority socket layer now separates socket binding, one-client
+serving, and a persistent sequential listener. Runtime, atom, and property
+tables are shared by that listener rather than being rebuilt for each accepted
+connection; a regression test creates a window through one connection and maps
+it through the next. This is the backend entry point required by the live
+launcher, but it deliberately does not claim concurrent multi-client dispatch
+or client-specific X resource-ID allocation. Those are later protocol
+milestones, not requirements for the first xterm control loop.
+
 ## 2026-07-10: zenity as GTK Startup Probe
 
 `x-authority-zenity-smoke` now launches `zenity` through the CLI external-probe

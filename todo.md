@@ -37,8 +37,8 @@ Current milestone target:
 
 Next logical steps:
 
-- [ ] Split the X Authority socket server into reusable single-client and
-  persistent-loop entry points.
+- [x] Split the X11 Authority socket server into reusable single-client and
+  persistent sequential-loop entry points with shared authority state.
 - [ ] Teach `sophia-live-session` to keep the X Authority loop and terminal
   process alive until the outside control plane stops it.
 - [ ] Route keyboard input to the focused xterm surface, then test launching
