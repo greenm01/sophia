@@ -44,6 +44,16 @@ same-build rerun of the default physical-text QEMU scenario routed all 14 key
 events but timed out waiting for the expected xterm pixel change, so that
 content regression remains open independently of the recovery gate.
 
+The first guarded physical-TTY rerun then proved the interlock on hardware: the
+first chord armed before takeover and the second returned to the text TTY
+without rebooting. Persistent logs showed physical poller readiness, committed
+focus, observed and routed keys, and XTEST injection, but Kitty received no
+usable input. The installed XTEST protocol definition identifies the stopped
+seam: FakeInput's `time` field is a delivery delay in milliseconds, while the
+adapter had supplied libinput's monotonic event timestamp. The compatibility
+injector now requests zero-delay delivery and synchronously checks each XTEST
+request instead of treating a queued unchecked request as successful.
+
 ## 2026-07-11: Isolated Virtio-GPU Session Evidence
 
 Sophia now has a direct-kernel QEMU initramfs builder and a headless session

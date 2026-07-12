@@ -145,7 +145,7 @@ impl LiveCompositeCapture {
         &self,
         keycode: u8,
         pressed: bool,
-        time_msec: u32,
+        source_time_msec: u32,
     ) -> Result<(), XBridgeError> {
         if keycode < 8 || self.focused_window.is_none() {
             return Ok(());
@@ -158,12 +158,16 @@ impl LiveCompositeCapture {
                     KEY_RELEASE_EVENT
                 },
                 keycode,
-                time_msec,
+                xtest_delivery_delay_msec(source_time_msec),
                 x11rb::NONE,
                 0,
                 0,
                 0,
             )
+            .map_err(|error| XBridgeError::RoutedInput {
+                message: error.to_string(),
+            })?
+            .check()
             .map_err(|error| XBridgeError::RoutedInput {
                 message: error.to_string(),
             })?;
@@ -172,5 +176,22 @@ impl LiveCompositeCapture {
             .map_err(|error| XBridgeError::RoutedInput {
                 message: error.to_string(),
             })
+    }
+}
+
+fn xtest_delivery_delay_msec(_source_time_msec: u32) -> u32 {
+    // XTEST FakeInput's `time` field is a delivery delay, not an event
+    // timestamp. Reusing libinput's monotonic timestamp can postpone delivery
+    // for days, so live routed input must always request immediate delivery.
+    x11rb::CURRENT_TIME
+}
+
+#[cfg(test)]
+mod tests {
+    use super::xtest_delivery_delay_msec;
+
+    #[test]
+    fn libinput_timestamp_is_not_reused_as_xtest_delivery_delay() {
+        assert_eq!(xtest_delivery_delay_msec(u32::MAX), 0);
     }
 }
