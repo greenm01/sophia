@@ -290,3 +290,26 @@ Non-destructive inspection after that correction reports connector 100, CRTC
 capable, so activation/fallback evidence cannot be produced on this hardware.
 The gate remains open for a connector reporting capability `1`; Sophia does not
 override the value or treat a property contract without capability as proof.
+
+## 2026-07-12: Temporary XLibre Compatibility Provider For Kitty
+
+Kitty's installed X11 backend requires XKB and a working OpenGL context, while
+Sophia X Authority deliberately does not yet advertise XKB, GLX, DRI3, or
+Present. Pretending that Kitty was another core-drawing probe would therefore
+produce a launcher that connected but could never render.
+
+The first usable compatibility checkpoint instead reactivates the historical
+XLibre bridge as an explicitly temporary protocol authority. XLibre runs on the
+dummy video driver with software GL, no physical input devices, no TCP listener,
+and a private MIT cookie. A persistent XComposite adapter owns the XIDs and
+named pixmaps, converts readbacks into opaque `XLibrePrototype` surface
+transactions, and never exposes client identity to Engine or the WM. Engine
+continues to own physical input, focus routing, composition, frame scheduling,
+and KMS. Core key events return through a bridge-private XTEST adapter until the
+Sophia-owned X Authority has native GPU-buffer coverage.
+
+The first real headless run used Kitty 0.47.4 against XLibre 1.25.1.8. It
+materialized one 925 KB nonzero Kitty surface. Capture checksum deduplication
+reduced a four-second run from 29 repeated batches to six actual pixel changes;
+injected `sophia` plus Return then changed the composed checksum and completed
+in 2.6 seconds. Native TTY presentation remains the operator gate.

@@ -12,11 +12,17 @@ impl XCoreKeyboardMapper {
     }
 
     pub fn map_evdev_key(&mut self, evdev_keycode: u32, pressed: bool) -> Option<(u8, u16)> {
+        if evdev_keycode == 0 {
+            return None;
+        }
         let state = self.modifier_mask();
         match evdev_keycode {
-            42 | 54 => update_modifier_count(&mut self.shift, pressed),
-            29 | 97 => update_modifier_count(&mut self.control, pressed),
-            56 | 100 => update_modifier_count(&mut self.alt, pressed),
+            42 => update_modifier_bit(&mut self.shift, 1, pressed),
+            54 => update_modifier_bit(&mut self.shift, 2, pressed),
+            29 => update_modifier_bit(&mut self.control, 1, pressed),
+            97 => update_modifier_bit(&mut self.control, 2, pressed),
+            56 => update_modifier_bit(&mut self.alt, 1, pressed),
+            100 => update_modifier_bit(&mut self.alt, 2, pressed),
             58 if pressed => self.caps_lock = !self.caps_lock,
             _ => {}
         }
@@ -34,10 +40,10 @@ impl XCoreKeyboardMapper {
     }
 }
 
-fn update_modifier_count(count: &mut u8, pressed: bool) {
+fn update_modifier_bit(bits: &mut u8, bit: u8, pressed: bool) {
     if pressed {
-        *count = count.saturating_add(1);
+        *bits |= bit;
     } else {
-        *count = count.saturating_sub(1);
+        *bits &= !bit;
     }
 }

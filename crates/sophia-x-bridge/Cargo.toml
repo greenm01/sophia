@@ -9,7 +9,7 @@ rust-version.workspace = true
 [dependencies]
 sophia-portal = { path = "../sophia-portal" }
 sophia-protocol = { path = "../sophia-protocol" }
-x11rb = { version = "0.13.1", features = ["composite", "damage", "render", "shape", "xfixes", "xinput"] }
+x11rb = { version = "0.13.1", features = ["composite", "damage", "render", "shape", "xfixes", "xinput", "xtest"] }
 
 [lints]
 workspace = true

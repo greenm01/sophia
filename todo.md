@@ -53,6 +53,11 @@ Exit criteria:
 
 ## Next Milestone: Live Generic Legacy-WM Bridge
 
+- [x] Add an explicitly temporary XLibre compatibility provider for GPU-only
+  clients beyond Sophia X Authority's current subset. A real Kitty X11/GLX
+  process now produces readable nonzero pixels, and injected core keys change
+  later pixels through opaque `XLibrePrototype` surface transactions. The
+  dedicated-TTY native presentation gate remains.
 - [x] Add an optional generic WM socket to `sophia-live-session`. Send only
   opaque live-surface layout snapshots, validate the reply in Engine, and apply
   the committed proposal to composition, hit-testing, and scanout.
@@ -89,3 +94,5 @@ Exit criteria:
   Authority milestones; the first operator session stays one client/namespace.
 - XLibre remains a prototype/reference until equivalent live transaction,
   namespace, selection, and routed-input coverage exists in Sophia-owned paths.
+  The Kitty compatibility provider uses software GL, XComposite readback, and
+  an internal XTEST input adapter; none of those become Engine policy.

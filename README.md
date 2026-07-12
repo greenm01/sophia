@@ -234,6 +234,10 @@ session now applies real xmonad placement, resize, and focus to one real xterm.
 Its headless gate requires a readable fixed-font ASCII marker, one acknowledged
 configure, and a later injected-input pixel change; the dedicated-TTY operator
 visual gate remains.
+An explicitly temporary XLibre compatibility provider can also run unmodified
+Kitty through software GL and XComposite readback. Its headless gate produces
+readable nonzero Kitty pixels and proves injected text changes a later composed
+frame; Sophia still owns input routing, composition, and scanout.
 The remaining hardware gap is VRR: the current eDP connector
 exposes `vrr_capable` and its CRTC exposes `VRR_ENABLED`, but capability is `0`,
 so activation evidence requires a different display.

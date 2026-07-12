@@ -100,6 +100,28 @@ tools/stop_sophia_xmonad_session.sh
 The wrapper owns the session process group and restores `keyd` during either
 shutdown path.
 
+## Kitty Compatibility Session
+
+Kitty needs XKB plus a real OpenGL window path that Sophia X Authority does not
+yet implement. The temporary compatibility launcher runs a private XLibre dummy
+server with software GL and imports Kitty through the existing XComposite
+authority boundary:
+
+```sh
+tools/install_sophia_session.sh
+```
+
+After that one-time install, switch to a dedicated TTY and run `sophia`. The
+launcher builds Sophia, verifies KMS ownership, stops and later restores `keyd`,
+puts the TTY in raw/no-echo mode, launches normal Kitty configuration, and sends
+all session output to the runtime state directory instead of the scanned-out
+console. Close Kitty normally or run `sophia stop` from another TTY.
+
+XLibre receives no physical devices and does not own scanout. Engine routes
+physical keys to the focused opaque surface; the compatibility adapter delivers
+them through a private XTEST connection. This is a usability bridge, not the
+long-term X Authority GPU path and not an Engine dependency.
+
 On an exclusive TTY with no other DRM master, persistent native presentation is
 enabled by the gated `--native-scanout` flag. The bounded hardware wrapper
 starts xterm, injects terminal input, keeps GBM/KMS and page-flip ownership in

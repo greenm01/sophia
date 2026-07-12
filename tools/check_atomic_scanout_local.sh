@@ -23,5 +23,9 @@ bash -n tools/finish_milestones_1_2.sh
 bash -n tools/run_sophia_xmonad_session.sh
 bash -n tools/stop_sophia_xmonad_session.sh
 bash -n tools/xmonad_live_session_smoke.sh
+bash -n tools/run_sophia_kitty_session.sh
+bash -n tools/stop_sophia_kitty_session.sh
+bash -n tools/install_sophia_session.sh
+python3 -c 'compile(open("tools/sophia_tty_mode.py", encoding="utf-8").read(), "tools/sophia_tty_mode.py", "exec")'
 
 echo "atomic scanout local checks passed"

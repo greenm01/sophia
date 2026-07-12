@@ -16,6 +16,8 @@ use std::process::{Child, Stdio};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
 use std::time::{Duration, Instant};
 
+pub(super) mod xlibre_compat;
+
 const SESSION_AUTHORITY_CAPACITY: usize = 256;
 const SESSION_KEY_CAPACITY: usize = 64;
 const SESSION_CONTROL_CAPACITY: usize = 32;
@@ -180,6 +182,7 @@ struct PersistentXtermSessionConfig {
     wm_process: Option<String>,
     wm_process_args: Vec<String>,
     wm_socket_path: std::path::PathBuf,
+    input_quiet_msec: u64,
 }
 
 impl PersistentXtermSessionConfig {
@@ -303,6 +306,7 @@ impl PersistentXtermSessionConfig {
                 "sophia-live-wm-{}-{display_number}.sock",
                 std::process::id()
             )),
+            input_quiet_msec: SESSION_INPUT_QUIET_MSEC,
         })
     }
 
@@ -1084,7 +1088,7 @@ fn run_session_loop(
                 }
                 if layout.pending.is_none()
                     && last_authority_update.elapsed()
-                        >= Duration::from_millis(SESSION_INPUT_QUIET_MSEC)
+                        >= Duration::from_millis(config.input_quiet_msec)
                     && let Some(wm_session) = wm_session.as_mut()
                 {
                     for surface in layout.take_unmanaged_surfaces() {
@@ -1188,10 +1192,10 @@ fn run_session_loop(
         if injection_checksum.is_none()
             && config.input_proof_requested()
             && input_baseline_presented
-            && (last_authority_update.elapsed() >= Duration::from_millis(SESSION_INPUT_QUIET_MSEC)
+            && (last_authority_update.elapsed() >= Duration::from_millis(config.input_quiet_msec)
                 || wm_session.as_ref().is_some_and(|wm| {
                     wm.last_committed_at.is_some_and(|committed| {
-                        committed.elapsed() >= Duration::from_millis(SESSION_INPUT_QUIET_MSEC)
+                        committed.elapsed() >= Duration::from_millis(config.input_quiet_msec)
                     })
                 }))
         {
@@ -1218,7 +1222,7 @@ fn run_session_loop(
             && input_pixel_change
             && pointer_checksum.is_none()
             && scene.last_report.is_some()
-            && last_authority_update.elapsed() >= Duration::from_millis(SESSION_INPUT_QUIET_MSEC)
+            && last_authority_update.elapsed() >= Duration::from_millis(config.input_quiet_msec)
         {
             pointer_checksum = scene.last_report.as_ref().map(|report| report.checksum);
             println!(
@@ -2432,14 +2436,21 @@ fn pointer_coordinate(value: f64) -> i16 {
 
 struct SessionProcessGuard {
     child: Option<Child>,
-    socket_path: std::path::PathBuf,
+    socket_path: Option<std::path::PathBuf>,
 }
 
 impl SessionProcessGuard {
     fn new(child: Child, socket_path: std::path::PathBuf) -> Self {
         Self {
             child: Some(child),
-            socket_path,
+            socket_path: Some(socket_path),
+        }
+    }
+
+    fn child_only(child: Child) -> Self {
+        Self {
+            child: Some(child),
+            socket_path: None,
         }
     }
 
@@ -2456,10 +2467,12 @@ impl SessionProcessGuard {
             }
             child.wait()?;
         }
-        match std::fs::remove_file(&self.socket_path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
+        if let Some(socket_path) = self.socket_path.as_ref() {
+            match std::fs::remove_file(socket_path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
         }
         Ok(())
     }

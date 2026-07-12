@@ -418,7 +418,17 @@ fn evdev_keyboard_mapping_preserves_x_modifier_event_order() {
 
     assert_eq!(keyboard.map_evdev_key(58, true), Some((66, 0)));
     assert_eq!(keyboard.modifier_mask(), 2);
+    assert_eq!(keyboard.map_evdev_key(0, true), None);
     assert_eq!(keyboard.map_evdev_key(u32::MAX, true), None);
+}
+
+#[test]
+fn repeated_modifier_edges_do_not_leave_core_state_stuck() {
+    let mut keyboard = XCoreKeyboardMapper::new();
+    assert_eq!(keyboard.map_evdev_key(42, true), Some((50, 0)));
+    assert_eq!(keyboard.map_evdev_key(42, true), Some((50, 1)));
+    assert_eq!(keyboard.map_evdev_key(42, false), Some((50, 1)));
+    assert_eq!(keyboard.modifier_mask(), 0);
 }
 
 #[test]
