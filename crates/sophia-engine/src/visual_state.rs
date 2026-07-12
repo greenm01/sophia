@@ -136,7 +136,9 @@ impl SurfaceVisualStateTable {
         if transaction.target_geometry.is_empty() {
             return SurfaceTransactionCommitReadiness::EmptyGeometry;
         }
-        if matches!(transaction.target_buffer, BufferSource::None) {
+        if matches!(transaction.target_buffer, BufferSource::None)
+            && self.committed(transaction.surface).is_none()
+        {
             return SurfaceTransactionCommitReadiness::MissingBuffer;
         }
         if transaction.readiness != SurfaceTransactionReadiness::Ready {

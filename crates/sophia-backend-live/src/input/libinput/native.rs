@@ -69,7 +69,6 @@ impl NativeLibinputEventReader {
             kind,
             global_position,
             target_surface: None,
-            target_window: None,
             local_position: None,
         }
     }

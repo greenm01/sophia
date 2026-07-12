@@ -2045,7 +2045,6 @@ fn motion_event(serial: u64, x: f64, y: f64) -> InputEventPacket {
         kind: InputEventKind::PointerMotion,
         global_position: Some(Point { x, y }),
         target_surface: None,
-        target_window: None,
         local_position: None,
     }
 }
@@ -2053,7 +2052,7 @@ fn motion_event(serial: u64, x: f64, y: f64) -> InputEventPacket {
 fn test_layer(raw_surface: u32) -> LayerSnapshot {
     LayerSnapshot {
         surface: SurfaceId::new(raw_surface, 1),
-        window: None,
+        authority_local_id: None,
         namespace: Some(NamespaceId::from_raw(7)),
         stack_rank: 0,
         geometry: Rect {

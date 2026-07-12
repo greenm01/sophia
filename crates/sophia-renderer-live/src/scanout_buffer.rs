@@ -188,6 +188,7 @@ pub enum LiveRendererScanoutBufferExportDetail {
     EglContextUnavailable,
     EglMakeCurrentFailed,
     GlSmokeFailed,
+    DmaBufImportFailed,
     EglSwapBuffersFailed,
     FrontBufferLockFailed,
     InvalidBufferDescriptor,

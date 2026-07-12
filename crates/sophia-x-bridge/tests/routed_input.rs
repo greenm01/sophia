@@ -13,7 +13,7 @@ fn builds_flat_routed_input_request_for_xlibre() {
         Transform::IDENTITY,
     );
 
-    let request = build_flat_routed_input_request(&event, &route).unwrap();
+    let request = build_flat_routed_input_request(&event, &route, xid(0x30)).unwrap();
 
     assert_eq!(request.serial, 10);
     assert_eq!(request.seat, SeatId::from_raw(1));
@@ -47,7 +47,7 @@ fn flat_routed_input_rejects_transformed_routes() {
     );
 
     assert_eq!(
-        build_flat_routed_input_request(&event, &route),
+        build_flat_routed_input_request(&event, &route, xid(0x30)),
         Err(RoutedInputAdapterError::UnsupportedTransform)
     );
 }
@@ -69,7 +69,7 @@ fn transformed_routed_input_uses_engine_supplied_local_coordinates() {
         },
     );
 
-    let request = build_routed_input_request(&event, &route).unwrap();
+    let request = build_routed_input_request(&event, &route, xid(0x30)).unwrap();
 
     assert_eq!(request.serial, 13);
     assert_eq!(request.target_window, xid(0x30));
@@ -97,7 +97,7 @@ fn transformed_routed_input_rejects_non_finite_local_coordinates() {
     );
 
     assert_eq!(
-        build_routed_input_request(&event, &route),
+        build_routed_input_request(&event, &route, xid(0x30)),
         Err(RoutedInputAdapterError::InvalidLocalPosition)
     );
 }
@@ -114,7 +114,7 @@ fn flat_routed_input_rejects_stale_target_before_xlibre_request() {
     );
 
     assert_eq!(
-        build_flat_routed_input_request(&event, &route),
+        build_flat_routed_input_request(&event, &route, xid(0x30)),
         Err(RoutedInputAdapterError::StaleTarget)
     );
 }

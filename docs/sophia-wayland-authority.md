@@ -1,10 +1,10 @@
 # Sophia Wayland Authority
 
-Sophia Wayland Authority is a future protocol authority for Wayland-only
-clients. It must not become Sophia's compositor core. It terminates Wayland
-client protocol, owns Wayland object/resource semantics, enforces namespace
-checks for those clients, and emits Sophia `SurfaceTransaction` records to
-Sophia Engine.
+Sophia Wayland Authority is the native protocol authority for Wayland-only
+clients. Its bounded first implementation terminates a private Smithay Wayland
+socket, owns protocol object/resource semantics, assigns each client a Sophia
+namespace, and emits Sophia `SurfaceTransaction` records to Sophia Engine. It
+must not become Sophia's compositor core.
 
 Sophia Engine remains the only owner of physical input, scene graph state,
 workspace layout, compositor chrome, frame scheduling, renderer imports, atomic
@@ -61,6 +61,23 @@ Allowed authority state is protocol-local:
 The practical rule is simple: if a decision affects what the whole desktop
 looks like, where a surface lives, which namespace may cross a boundary, or
 what gets scanned out, it belongs outside the Wayland Authority.
+
+## Implemented First Slice
+
+The current authority implements `wl_compositor`, `wl_subcompositor`,
+`xdg_wm_base`, one `wl_output`, SHM ARGB/XRGB buffers, frame callbacks, buffer
+release, and an Engine-routed keyboard/pointer seat. The native-scanout session
+also advertises a deliberately narrow linux-dmabuf global: one linear or
+implicit XRGB8888/ARGB8888 plane with bounded dimensions and validated stride.
+
+SHM contents are copied into immutable CPU registrations before entering the
+Engine. Admitted DMA-BUFs remain opaque outside the renderer boundary, are
+imported as EGL images without CPU readback, and receive `wl_buffer.release`
+only after Sophia observes presentation of the corresponding KMS submission.
+Their admission metadata remains available so the client can legally reattach
+the same buffer after release. Clipboard,
+drag-and-drop, popups, explicit synchronization, decorations, and broader
+optional protocols remain future slices.
 
 ## `wl_surface` Transaction Mapping
 

@@ -2,7 +2,7 @@ use crate::prelude::*;
 use crate::render::should_render;
 
 pub fn hit_test_scene_for_input(event: &InputEventPacket, layers: &[LayerSnapshot]) -> InputRoute {
-    hit_test_layers(event, layers, true)
+    hit_test_layers(event, layers)
 }
 
 /// Hit-tests Engine visual truth when the authority must retain protocol-native
@@ -11,14 +11,10 @@ pub fn hit_test_scene_surface_for_input(
     event: &InputEventPacket,
     layers: &[LayerSnapshot],
 ) -> InputRoute {
-    hit_test_layers(event, layers, false)
+    hit_test_layers(event, layers)
 }
 
-fn hit_test_layers(
-    event: &InputEventPacket,
-    layers: &[LayerSnapshot],
-    require_window: bool,
-) -> InputRoute {
+fn hit_test_layers(event: &InputEventPacket, layers: &[LayerSnapshot]) -> InputRoute {
     let Some(global_position) = event.global_position else {
         return missed_input_route(event, Point::default());
     };
@@ -40,15 +36,9 @@ fn hit_test_layers(
             continue;
         }
 
-        let target_window = layer.window.filter(|window| window.is_valid());
-        if require_window && target_window.is_none() {
-            continue;
-        }
-
         return InputRoute {
             input_serial: event.serial,
             target_surface: Some(layer.surface),
-            target_window,
             global_position,
             local_position: Some(Point {
                 x: untransformed_position.x - f64::from(layer.geometry.x),
@@ -66,7 +56,6 @@ fn missed_input_route(event: &InputEventPacket, global_position: Point) -> Input
     InputRoute {
         input_serial: event.serial,
         target_surface: None,
-        target_window: None,
         global_position,
         local_position: None,
         transform: sophia_protocol::Transform::IDENTITY,

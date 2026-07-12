@@ -132,6 +132,27 @@ impl PersistentXrgb8888GlPipeline {
                 glow::UNSIGNED_BYTE,
                 glow::PixelUnpackData::Slice(Some(pixels)),
             );
+        }
+        self.draw_bound_texture()
+    }
+
+    pub(crate) unsafe fn draw_egl_image(
+        &self,
+        image_target: unsafe extern "system" fn(u32, *const c_void),
+        image: *const c_void,
+    ) -> Result<(), NativeEglDrawSmokeStatus> {
+        unsafe {
+            self.gl
+                .viewport(0, 0, self.width as i32, self.height as i32);
+            self.gl.active_texture(glow::TEXTURE0);
+            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+            image_target(glow::TEXTURE_2D, image);
+        }
+        self.draw_bound_texture()
+    }
+
+    fn draw_bound_texture(&self) -> Result<(), NativeEglDrawSmokeStatus> {
+        unsafe {
             self.gl
                 .bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
             self.gl.use_program(Some(self.program));

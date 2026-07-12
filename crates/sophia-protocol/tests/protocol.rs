@@ -58,7 +58,7 @@ fn layer_snapshot_is_cloneable_frame_data() {
     let surface = SurfaceId::new(0, 1);
     let snapshot = LayerSnapshot {
         surface,
-        window: Some(XWindowId::new(42, 1)),
+        authority_local_id: Some(AuthorityLocalId::new(42, 1)),
         namespace: Some(NamespaceId::from_raw(1)),
         stack_rank: 0,
         geometry: Rect {
@@ -133,7 +133,7 @@ fn authority_surface_carries_protocol_ownership_without_metadata() {
 fn surface_transaction_carries_atomic_geometry_buffer_and_readiness() {
     let layer = LayerSnapshot {
         surface: SurfaceId::new(4, 1),
-        window: Some(XWindowId::new(0x99, 2)),
+        authority_local_id: Some(AuthorityLocalId::new(0x99, 2)),
         namespace: Some(NamespaceId::from_raw(8)),
         stack_rank: 0,
         geometry: Rect {
@@ -182,7 +182,7 @@ fn surface_transaction_carries_atomic_geometry_buffer_and_readiness() {
 fn committed_surface_state_is_cloneable_visual_state() {
     let layer = LayerSnapshot {
         surface: SurfaceId::new(5, 1),
-        window: None,
+        authority_local_id: None,
         namespace: None,
         stack_rank: 0,
         geometry: Rect {
@@ -389,13 +389,14 @@ fn wm_response_converts_to_layout_transaction() {
 }
 
 #[test]
-fn xlibre_routed_input_request_is_targeted_but_not_direct_delivery() {
-    let request = XLibreRoutedInputRequest {
+fn routed_input_request_is_protocol_neutral_and_surface_targeted() {
+    let request = RoutedInputRequest {
         serial: 99,
         seat: SeatId::from_raw(1),
         device: DeviceId::from_raw(2),
         time_msec: 1_000,
-        target_window: XWindowId::new(0x42, 1),
+        target_surface: SurfaceId::new(42, 1),
+        global_position: Point { x: 20.0, y: 30.0 },
         local_position: Point { x: 12.5, y: 9.0 },
         kind: InputEventKind::PointerButton {
             button: 1,
@@ -404,7 +405,7 @@ fn xlibre_routed_input_request_is_targeted_but_not_direct_delivery() {
     };
 
     assert_eq!(request.serial, 99);
-    assert_eq!(request.target_window, XWindowId::new(0x42, 1));
+    assert_eq!(request.target_surface, SurfaceId::new(42, 1));
     assert_eq!(request.local_position.x, 12.5);
     assert_eq!(request.device, DeviceId::from_raw(2));
     assert_eq!(
@@ -417,95 +418,17 @@ fn xlibre_routed_input_request_is_targeted_but_not_direct_delivery() {
 }
 
 #[test]
-fn xlibre_routed_input_decision_carries_server_side_rejection() {
-    let decision = XLibreRoutedInputDecision {
+fn routed_input_decision_carries_authority_rejection() {
+    let decision = RoutedInputDecision {
         serial: 100,
-        target_window: XWindowId::new(0x55, 3),
-        outcome: XLibreRoutedInputOutcome::RejectedDeniedNamespace,
+        target_surface: SurfaceId::new(55, 3),
+        outcome: RoutedInputOutcome::RejectedDeniedNamespace,
     };
 
     assert_eq!(decision.serial, 100);
     assert_eq!(
         decision.outcome,
-        XLibreRoutedInputOutcome::RejectedDeniedNamespace
-    );
-}
-
-#[test]
-fn xlibre_routed_input_request_has_stable_wire_shape() {
-    let request = XLibreRoutedInputRequest {
-        serial: 0x0000_0001_0000_0002,
-        seat: SeatId::from_raw(3),
-        device: DeviceId::from_raw(4),
-        time_msec: 5,
-        target_window: XWindowId::new(0x1200_0042, 1),
-        local_position: Point { x: 12.5, y: 9.25 },
-        kind: InputEventKind::PointerButton {
-            button: 1,
-            pressed: true,
-        },
-    };
-
-    let wire = request.to_wire_request();
-
-    assert_eq!(XLIBRE_ROUTED_INPUT_EXTENSION_NAME, "SOPHIA-ROUTED-INPUT");
-    assert_eq!(XLIBRE_ROUTED_INPUT_ROUTE_EVENT_OPCODE, 1);
-    assert_eq!(XLIBRE_ROUTED_INPUT_ROUTE_EVENT_LENGTH, 11);
-    assert_eq!(wire.serial_hi, 1);
-    assert_eq!(wire.serial_lo, 2);
-    assert_eq!(wire.target_xid, 0x1200_0042);
-    assert_eq!(wire.seat, 3);
-    assert_eq!(wire.device, 4);
-    assert_eq!(wire.local_x_24_8, 3200);
-    assert_eq!(wire.local_y_24_8, 2368);
-    assert_eq!(wire.event_code, 2);
-    assert_eq!(wire.detail, 1);
-    assert_eq!(wire.flags, 1);
-}
-
-#[test]
-fn xlibre_routed_input_wire_request_decodes_to_packet() {
-    let wire = XLibreRoutedInputWireRequest {
-        serial_hi: 7,
-        serial_lo: 8,
-        target_xid: 0x44,
-        seat: 1,
-        device: 2,
-        time_msec: 10,
-        local_x_24_8: 512,
-        local_y_24_8: 768,
-        event_code: 1,
-        detail: 0,
-        flags: 0,
-    };
-
-    let request = wire.to_request().unwrap();
-
-    assert_eq!(request.serial, 0x0000_0007_0000_0008);
-    assert_eq!(request.target_window, XWindowId::new(0x44, 1));
-    assert_eq!(request.local_position, Point { x: 2.0, y: 3.0 });
-    assert_eq!(request.kind, InputEventKind::PointerMotion);
-}
-
-#[test]
-fn xlibre_routed_input_wire_request_rejects_unknown_event_code() {
-    let wire = XLibreRoutedInputWireRequest {
-        serial_hi: 0,
-        serial_lo: 1,
-        target_xid: 0x44,
-        seat: 1,
-        device: 2,
-        time_msec: 10,
-        local_x_24_8: 0,
-        local_y_24_8: 0,
-        event_code: 99,
-        detail: 0,
-        flags: 0,
-    };
-
-    assert_eq!(
-        wire.to_request(),
-        Err(XLibreRoutedInputWireError::UnsupportedEventCode)
+        RoutedInputOutcome::RejectedDeniedNamespace
     );
 }
 

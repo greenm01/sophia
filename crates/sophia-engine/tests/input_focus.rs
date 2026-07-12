@@ -31,7 +31,6 @@ fn key(seat: SeatId) -> InputEventPacket {
         },
         global_position: None,
         target_surface: None,
-        target_window: None,
         local_position: None,
     }
 }
@@ -51,7 +50,6 @@ fn engine_focus_routes_keyboard_to_a_committed_surface() {
         panic!("focused keyboard event should route");
     };
     assert_eq!(event.target_surface, Some(surface));
-    assert_eq!(event.target_window, None);
 }
 
 #[test]

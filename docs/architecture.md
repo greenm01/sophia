@@ -71,23 +71,20 @@ and returns command packets.
 
 ## Current Architecture Focus
 
-Sophia X Authority now serves a bounded real X11 subset, runs real-client
-compatibility probes, and emits drawing transactions through a persistent
-sequential listener. Native backend evidence also reaches rendered GBM/KMS
-submit and page-flip retirement. Core X drawing now updates bounded XRGB8888
-buffers, renderer-live composes them, and the native EGL adapter can upload the
-composed frame to a GBM front buffer. TTY3 evidence now matches the requested
-and exported xterm-frame checksum through KMS submit and accepted page-flip
-retirement, proving terminal content replaces the old clear color.
+Sophia now has a bounded native Wayland authority built on Smithay. A real
+Kitty client connects to its private socket with no X server, commits SHM
+buffers, and receives Engine-routed keyboard and pointer events. The same
+protocol-neutral `SurfaceTransaction` and `RoutedInputRequest` records serve
+the Wayland and modern-X authorities; Engine contains no XLibre window or wire
+identity.
 
-Native scanout ownership now lives in the persistent X Authority/backend loop.
-Explicit libinput devices reduce into Engine-owned seat focus, then X Authority
-selects the authority-private event-mask target, emits core focus/key events,
-and withholds readiness until the prompt checksum is page-flip-confirmed. Exact
-operator input changes presented xterm pixels on AMD hardware. Real xmonad enters
-through the isolated blind X11 WM bridge, never the client-facing Authority
-display. The active architecture gate is VRR hardware evidence; the current
-panel exposes the property contract but reports capability `0`.
+The native session admits a narrow linear XRGB/ARGB DMA-BUF subset and imports
+it directly into EGL without CPU readback. KMS submission remains owned by the
+backend, and Wayland frame/buffer feedback waits for the matching observed
+presentation. The production CLI and installed Kitty launcher neither link nor
+start XLibre; its bridge remains an opt-in research fixture. The active gate is
+operator hardware evidence for native Kitty input, resize, latency, and TTY
+recovery, followed by DMA-BUF performance evidence.
 
 ## Load-Bearing Boundaries
 
@@ -123,10 +120,10 @@ protocol subset capable of running real applications while avoiding the full
 Xorg/XLibre object graph. It should learn from Phoenix's clean-room approach and
 from Sophia's existing XLibre prototype seams.
 
-A later **Sophia Wayland Authority** can support Wayland-only applications by
+A bounded **Sophia Wayland Authority** now supports Wayland-only applications by
 terminating `wl_surface`, `xdg_toplevel`, buffer attach, damage, and commit
 semantics, then emitting the same internal surface transactions as the X
-authority. Its first boundary is documented in
+authority. Its boundary is documented in
 [sophia-wayland-authority.md](sophia-wayland-authority.md). It must not become a
 second compositor; Sophia Engine remains the only visual authority.
 

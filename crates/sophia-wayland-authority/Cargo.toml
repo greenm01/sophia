@@ -1,0 +1,20 @@
+[package]
+name = "sophia-wayland-authority"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sophia-protocol = { path = "../sophia-protocol" }
+smithay = { version = "0.7", default-features = false, features = ["wayland_frontend"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+new_without_default = "allow"

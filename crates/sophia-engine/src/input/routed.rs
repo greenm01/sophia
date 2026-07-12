@@ -16,7 +16,7 @@ pub struct RoutedInputFlush {
 pub enum RoutedInputRequestError {
     SerialMismatch,
     RouteNotAccepted,
-    MissingTargetWindow,
+    MissingTargetSurface,
     MissingLocalPosition,
 }
 
@@ -43,8 +43,7 @@ pub struct RoutedInputCoalescer {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct RoutedInputRouteKey {
-    target_surface: Option<SurfaceId>,
-    target_window: XWindowId,
+    target_surface: SurfaceId,
 }
 
 impl RoutedInputCoalescer {
@@ -123,7 +122,7 @@ impl RoutedInputCoalescer {
 pub fn routed_input_request_from_physical_event(
     event: &InputEventPacket,
     route: &InputRoute,
-) -> Result<XLibreRoutedInputRequest, RoutedInputRequestError> {
+) -> Result<RoutedInputRequest, RoutedInputRequestError> {
     if event.serial != route.input_serial {
         return Err(RoutedInputRequestError::SerialMismatch);
     }
@@ -131,20 +130,21 @@ pub fn routed_input_request_from_physical_event(
         return Err(RoutedInputRequestError::RouteNotAccepted);
     }
 
-    let target_window = route
-        .target_window
-        .filter(|window| window.is_valid())
-        .ok_or(RoutedInputRequestError::MissingTargetWindow)?;
+    let target_surface = route
+        .target_surface
+        .filter(|surface| surface.is_valid())
+        .ok_or(RoutedInputRequestError::MissingTargetSurface)?;
     let local_position = route
         .local_position
         .ok_or(RoutedInputRequestError::MissingLocalPosition)?;
 
-    Ok(XLibreRoutedInputRequest {
+    Ok(RoutedInputRequest {
         serial: event.serial,
         seat: event.seat,
         device: event.device,
         time_msec: event.time_msec,
-        target_window,
+        target_surface,
+        global_position: route.global_position,
         local_position,
         kind: event.kind,
     })
@@ -152,7 +152,7 @@ pub fn routed_input_request_from_physical_event(
 
 pub fn routed_input_requests_from_flush(
     flush: &RoutedInputFlush,
-) -> Result<Vec<XLibreRoutedInputRequest>, RoutedInputRequestError> {
+) -> Result<Vec<RoutedInputRequest>, RoutedInputRequestError> {
     flush
         .inputs
         .iter()
@@ -168,13 +168,10 @@ fn coalescible_motion_key(input: &QueuedRoutedInput) -> Option<RoutedInputRouteK
         return None;
     }
 
-    let target_window = input
+    let target_surface = input
         .route
-        .target_window
-        .filter(|window| window.is_valid())?;
+        .target_surface
+        .filter(|surface| surface.is_valid())?;
 
-    Some(RoutedInputRouteKey {
-        target_surface: input.route.target_surface,
-        target_window,
-    })
+    Some(RoutedInputRouteKey { target_surface })
 }

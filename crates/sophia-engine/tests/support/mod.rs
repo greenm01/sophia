@@ -37,17 +37,17 @@ pub use sophia_engine::{
 };
 pub use sophia_portal::{NotificationRequest, NotificationUrgency, PortalCommand};
 pub use sophia_protocol::{
-    AttentionState, AuthorityKind, BrokerHealthPacket, BrokerHealthState, BrokerKind, BufferSource,
-    ChromeActionKind, ChromeActionRequest, ChromeDescriptor, CommittedSurfaceState, DamageFrame,
-    DeviceId, DisplayLabel, IconTokenId, InputEventKind, InputEventPacket, InputRoute,
-    InputRouteOutcome, IpcCodecError, LayerSnapshot, LayoutNodeCapabilities, LayoutNodeKind,
-    LayoutNodeSnapshot, LayoutNodeState, LayoutTransaction, NamespaceId, OutputId, Point,
-    PortalTransferId, Rect, Region, ResizeSyncCapability, SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAGIC,
-    SOPHIA_IPC_MAX_PAYLOAD_LEN, SOPHIA_IPC_VERSION, SeatId, Size, SurfaceConstraints, SurfaceId,
-    SurfacePlacement, SurfaceTransaction, SurfaceTransactionReadiness, TransactionCommit,
-    TransactionId, TransactionOutcome, Transform, TrustLevel, WmCommand, WmRequestKind,
-    WmRequestPacket, WmResponsePacket, WorkspaceId, XWindowId, decode_wm_request_frame,
-    encode_wm_response_frame,
+    AttentionState, AuthorityKind, AuthorityLocalId, BrokerHealthPacket, BrokerHealthState,
+    BrokerKind, BufferSource, ChromeActionKind, ChromeActionRequest, ChromeDescriptor,
+    CommittedSurfaceState, DamageFrame, DeviceId, DisplayLabel, IconTokenId, InputEventKind,
+    InputEventPacket, InputRoute, InputRouteOutcome, IpcCodecError, LayerSnapshot,
+    LayoutNodeCapabilities, LayoutNodeKind, LayoutNodeSnapshot, LayoutNodeState, LayoutTransaction,
+    NamespaceId, OutputId, Point, PortalTransferId, Rect, Region, ResizeSyncCapability,
+    SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAGIC, SOPHIA_IPC_MAX_PAYLOAD_LEN, SOPHIA_IPC_VERSION,
+    SeatId, Size, SurfaceConstraints, SurfaceId, SurfacePlacement, SurfaceTransaction,
+    SurfaceTransactionReadiness, TransactionCommit, TransactionId, TransactionOutcome, Transform,
+    TrustLevel, WmCommand, WmRequestKind, WmRequestPacket, WmResponsePacket, WorkspaceId,
+    XWindowId, decode_wm_request_frame, encode_wm_response_frame,
 };
 pub use sophia_runtime::{
     RestartPolicy, RuntimeScanoutState, SessionRuntimeCommand, SessionRuntimeObservation,
@@ -61,7 +61,7 @@ pub use std::time::Duration;
 pub fn test_layer(surface_index: u32, stack_rank: u32, x: i32, damage: Region) -> LayerSnapshot {
     LayerSnapshot {
         surface: SurfaceId::new(surface_index, 1),
-        window: None,
+        authority_local_id: None,
         namespace: None,
         stack_rank,
         geometry: Rect {
@@ -95,16 +95,14 @@ pub fn input_event(serial: u64, kind: InputEventKind, x: f64, y: f64) -> InputEv
         kind,
         global_position: Some(Point { x, y }),
         target_surface: Some(SurfaceId::new(1, 1)),
-        target_window: Some(XWindowId::new(0x30, 1)),
         local_position: Some(Point { x, y }),
     }
 }
 
-pub fn route(serial: u64, target_window: u32, x: f64, y: f64) -> InputRoute {
+pub fn route(serial: u64, target_surface: u32, x: f64, y: f64) -> InputRoute {
     InputRoute {
         input_serial: serial,
-        target_surface: Some(SurfaceId::new(1, 1)),
-        target_window: Some(XWindowId::new(target_window, 1)),
+        target_surface: Some(SurfaceId::new(target_surface, 1)),
         global_position: Point { x, y },
         local_position: Some(Point { x, y }),
         transform: Transform::IDENTITY,

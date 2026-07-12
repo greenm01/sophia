@@ -3,6 +3,28 @@
 This file records decisions and unresolved questions for the active milestone.
 Completed evidence is archived in `research-log-archive.md`.
 
+## 2026-07-12: Native Wayland Replaces The Kitty Compatibility Runtime
+
+Sophia's production Kitty path now terminates a private Wayland socket through
+the Smithay-backed Sophia Wayland Authority. Engine input routes and layer
+records are protocol-neutral; keyboard focus and pointer hit-testing remain in
+Engine, while the authority translates accepted routes into `wl_keyboard` and
+`wl_pointer` delivery. A real Kitty 0.47.4 process completes the headless smoke
+with `DISPLAY` removed, changing nonzero SHM frames, and no X server process.
+
+The installed launcher now uses the native Wayland/KMS session and retains the
+independent Ctrl-Alt-Backspace recovery interlock. XLibre is excluded from the
+production dependency graph and launcher, with its crate available only behind
+the `xlibre-research` feature as historical evidence.
+
+The native-scanout session advertises a bounded single-plane linear/implicit
+XRGB8888/ARGB8888 DMA-BUF subset. Accepted buffers cross the renderer boundary
+as owned descriptors, become EGL images without CPU readback, and render into
+the persistent GBM target. Wayland presentation and buffer-release feedback is
+withheld until the matching KMS submission is observed as presented. The next
+evidence gate is the guarded hardware run: text, navigation, pointer, resize,
+sub-100 ms presentation, clean exit, and TTY recovery.
+
 ## 2026-07-12: Installed-Session Input Recovery Interlock
 
 The first installed Kitty operator run exposed a control-plane failure: scanout

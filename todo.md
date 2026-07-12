@@ -9,92 +9,54 @@ next milestone becomes active.
 
 ---
 
-## Active Milestone: Pointer And Multi-Output Presentation
+## Active Milestone: Native Kitty Hardware Proof
 
 Current truth:
 
-- The visible interactive X terminal milestone is complete. On AMD TTY
-  hardware, operator-entered `sophia` plus Return produced exactly 14 matched
-  physical events, changed xterm pixels, and presented/retired the changed frame
-  with clean scanout ownership.
-- QEMU proves external keyboard and pointer input, two independently presented
-  outputs, distinct content, and page-flip-paced fixed refresh without overlap.
-- DRM discovery recognizes connector `vrr_capable` and CRTC `VRR_ENABLED`; the
-  Engine policy enables only one opaque, unoccluded fullscreen surface and
-  falls back to fixed refresh when overlays require composition.
-- The current AMD eDP connector exposes the full property contract but reports
-  `vrr_capable=0`. It cannot provide activation evidence. Completing this
-  milestone requires a different connector/display reporting capability `1`.
+- The production CLI and installed launcher no longer link, select, or start the
+  XLibre bridge. Historical probes require the opt-in `xlibre-research` feature.
+- A real Kitty 0.47.4 process connects over native Wayland with `DISPLAY`
+  removed and software GL, commits SHM buffers, and produces changing nonzero
+  pixels through Sophia's protocol-neutral Engine path.
+- The live authority supports ordered pipelined commits, xdg configure/ack,
+  frame callbacks, buffer release, keyboard/pointer seat delivery, SHM, and
+  bounded linear DMA-BUF admission.
 
 Exit criteria:
 
-- [x] Drive virtio-mouse motion and buttons through QMP, reduce them through
-  libinput, apply Engine-owned hit-testing/focus, deliver core X pointer events,
-  and prove a real xterm changes pixels through word selection.
-- [x] Bound Engine output discovery and add independent per-output clocks,
-  pending damage, in-flight ownership, and exact retirement validation. Pass a
-  QEMU topology gate with two connected virtio KMS outputs.
-- [x] Replace the persistent native session's single selected output with a
-  bounded output table whose scanout owner, damage, in-flight frame, retirement,
-  and frame clock are tracked independently per output.
-- [x] Present independent content/damage and observe clean native retirement on
-  both connected QEMU outputs, then retain an AMD multi-connector run as the
-  physical-driver gate.
-- [x] Pace fixed-refresh presentation from each output's vblank/page-flip
-  timeline and prove no unsynchronized or overlapping submission is accepted;
-  this is the per-output vsync gate.
-- [ ] Complete the hardware gate for the implemented DRM VRR capability/property
-  discovery and Engine fullscreen-eligibility policy. VRR remains disabled by
-  default; prove both VRR activation and fixed-refresh fallback on hardware
-  reporting `vrr_capable=1`. The current panel is not capable, and QEMU is not
-  treated as VRR evidence unless its virtual display exposes the real contract.
+- [ ] Prove one software-rendered native Wayland Kitty toplevel can resize,
+  accept text/navigation/pointer input, meet the 100 ms presentation budget,
+  exit cleanly, and recover to its TTY.
+- [x] Make the installed session launch an arbitrary Wayland client without an
+  X server, keeping Kitty confined to acceptance tooling.
+- [x] Remove XLibre/Xorg launch paths and production dependencies; retain the
+  bridge only as an opt-in historical workspace member.
+- [x] Add native KMS presentation wiring for the Wayland session while
+  preserving the existing independent TTY recovery guard.
 
----
+## Next Milestone: Native DMA-BUF Hardware Evidence
 
-## Next Milestone: Live Generic Legacy-WM Bridge
+- [x] Advertise only bounded single-plane XRGB/ARGB linear formats and validate
+  dimensions, modifier, plane count, and stride before admitting an opaque
+  `DmaBuf` handle.
+- [x] Import admitted DMA-BUFs into the native EGL renderer without CPU
+  readback, preserve reusable `wl_buffer` admission, and feed actual KMS
+  presentation retirement back to the Wayland authority before release.
+- [ ] Prove hardware Kitty remains within the presentation budget on that path
+  while SHM remains available for software clients.
 
-- [x] Add an explicitly temporary XLibre compatibility provider for GPU-only
-  clients beyond Sophia X Authority's current subset. A real Kitty X11/GLX
-  process now produces readable nonzero pixels, and injected core keys change
-  later pixels through opaque `XLibrePrototype` surface transactions. The
-  installed launcher now requires an independent physical-keyboard recovery
-  guard before graphics takeover; its dedicated-TTY typing and forced-recovery
-  hardware gate remains.
-- [x] Add an optional generic WM socket to `sophia-live-session`. Send only
-  opaque live-surface layout snapshots, validate the reply in Engine, and apply
-  the committed proposal to composition, hit-testing, and scanout.
-- [ ] Prove the existing xterm remains visible and operator input changes its
-  presented pixels while xmonad supplies layout through the generic bridge.
-  Xmonad remains a proof fixture and must not appear in Engine or live-session
-  policy branches. The headless path now proves readable fixed-font ASCII,
-  damage-patch materialization, a real configure acknowledgement, resized
-  pixels, committed focus, and injected-input pixel change. The dedicated-TTY
-  visual gate remains.
-- [x] Remove the first-session fixed client-size constraint. X Authority now
-  publishes an ordered full replacement for a new size followed by bounded
-  damage patches, so xmonad can resize xterm without a full-buffer repaint
-  loop. The configure/focus seam remains keyed only by `SurfaceId`.
-- [ ] Add a second legacy X11 WM compatibility smoke through the same
-  `--wm=PATH --wm-arg=ARG` launcher with no Engine changes.
+## Following Milestone: Historical Bridge Archive
 
----
-
-## Following Milestone: Wayland Authority Skeleton
-
-- [ ] Start the deterministic Wayland Authority reducer/socket boundary only
-  after the live generic legacy-WM session proof passes.
-- [ ] Preserve the same authority contract: Wayland protocol resources remain
-  in the authority; visual truth and commit readiness remain in Sophia Engine.
-
----
+- [ ] Move the opt-in XLibre bridge crate, patches, scripts, and fixtures into a
+  non-workspace research archive after its remaining architectural lessons are
+  represented by Sophia-owned regression tests.
 
 ## Deferred
 
-- GTK/XInput2/zenity rendered-dialog work resumes after the terminal and xmonad
-  control paths are usable.
-- Concurrent X clients and per-client X resource-ID allocation remain later X
-  Authority milestones; the first operator session stays one client/namespace.
-- XLibre remains a prototype/reference until equivalent live transaction,
-  namespace, selection, and routed-input coverage exists in Sophia-owned paths.
-  The Kitty compatibility provider uses software GL, XComposite readback, and
-  an internal XTEST input adapter; none of those become Engine policy.
+- VRR activation evidence waits for hardware reporting `vrr_capable=1`; the
+  current panel cannot prove it.
+- Dedicated-TTY xmonad visual evidence and a second legacy-WM smoke no longer
+  block the protocol-authority path.
+- GTK/XInput2/zenity, clipboard, drag-and-drop, optional Wayland protocols,
+  concurrent X clients, and broader desktop compatibility resume after the
+  native terminal path is stable.

@@ -1,4 +1,10 @@
-use std::{ffi::c_void, os::fd::OwnedFd, ptr, time::Duration, time::Instant};
+use std::{
+    ffi::c_void,
+    os::fd::{AsRawFd, BorrowedFd, OwnedFd},
+    ptr,
+    time::Duration,
+    time::Instant,
+};
 
 use crate::gbm_platform::{
     EGL_PLATFORM_GBM_KHR,
@@ -132,6 +138,29 @@ pub struct NativeGbmRenderedScanoutContext<T: std::os::fd::AsFd> {
     gbm_device: gbm::Device<T>,
     target: Option<PersistentNativeFrameTarget>,
     stats: NativeGbmPersistentRenderStats,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct NativeDmaBufFrame<'a> {
+    pub width: u32,
+    pub height: u32,
+    pub format: u32,
+    pub modifier: u64,
+    pub fd: BorrowedFd<'a>,
+    pub offset: u32,
+    pub stride: u32,
+}
+
+impl NativeDmaBufFrame<'_> {
+    pub fn is_valid(&self) -> bool {
+        const DRM_FORMAT_XRGB8888: u32 = 0x3432_5258;
+        const DRM_FORMAT_ARGB8888: u32 = 0x3432_5241;
+        self.width > 0
+            && self.height > 0
+            && matches!(self.format, DRM_FORMAT_XRGB8888 | DRM_FORMAT_ARGB8888)
+            && self.stride >= self.width.saturating_mul(4)
+            && matches!(self.modifier, 0 | u64::MAX)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -281,6 +310,118 @@ where
             Ok(buffer) => exported_scanout_buffer_report(buffer),
             Err(detail) => failed_scanout_buffer_report(detail),
         }
+    }
+
+    pub fn export_dmabuf_owned_scanout_buffer_with_modifiers(
+        &mut self,
+        frame: NativeDmaBufFrame<'_>,
+        preferred_modifiers: &[u64],
+    ) -> NativeGbmOwnedScanoutBufferExportReport {
+        if !frame.is_valid() {
+            return NativeGbmOwnedScanoutBufferExportReport {
+                status: NativeGbmScanoutBufferExportStatus::InvalidTarget,
+                detail: NativeGbmScanoutBufferExportDetail::InvalidTarget,
+                buffer: None,
+            };
+        }
+        let result = self.render_persistent_dmabuf(frame, preferred_modifiers);
+        match result {
+            Ok(buffer) => exported_scanout_buffer_report(buffer),
+            Err(detail) => failed_scanout_buffer_report(detail),
+        }
+    }
+
+    fn render_persistent_dmabuf(
+        &mut self,
+        frame: NativeDmaBufFrame<'_>,
+        preferred_modifiers: &[u64],
+    ) -> Result<NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExportDetail> {
+        let preferred_modifiers = preferred_modifiers
+            .iter()
+            .copied()
+            .filter(|modifier| *modifier != u64::MAX)
+            .collect::<Vec<_>>();
+        let reusable = self.target.as_ref().is_some_and(|target| {
+            target.width == frame.width
+                && target.height == frame.height
+                && target.preferred_modifiers == preferred_modifiers
+        });
+        if !reusable && let Some(target) = self.target.take() {
+            self.destroy_persistent_target(target);
+            self.stats.target_recreations = self.stats.target_recreations.saturating_add(1);
+        }
+        if let Some(mut target) = self.target.take() {
+            let result = render_persistent_target_dmabuf(
+                &self.egl,
+                self.display,
+                &self.gbm_device,
+                &mut target,
+                frame,
+            );
+            if result.is_ok() {
+                self.target = Some(target);
+            } else {
+                self.destroy_persistent_target(target);
+            }
+            return result;
+        }
+
+        self.egl
+            .bind_api(khronos_egl::OPENGL_API)
+            .map_err(|_| NativeGbmScanoutBufferExportDetail::EglBindApiFailed)?;
+        let reduced = reduced_gbm_scanout_modifiers(&preferred_modifiers);
+        let mut last_detail = NativeGbmScanoutBufferExportDetail::EglConfigUnavailable;
+        for candidate in rendered_scanout_candidates(&reduced) {
+            let Some(config) = choose_scanout_config_for_format(
+                &self.egl,
+                self.display,
+                candidate.config_attributes,
+                candidate.format,
+            ) else {
+                continue;
+            };
+            let target = create_persistent_target(
+                &self.egl,
+                self.display,
+                &self.gbm_device,
+                frame.width,
+                frame.height,
+                preferred_modifiers.clone(),
+                config,
+                candidate,
+            );
+            let mut target = match target {
+                Ok(target) => target,
+                Err(detail) => {
+                    last_detail = preferred_scanout_failure_detail(last_detail, detail);
+                    continue;
+                }
+            };
+            match render_persistent_target_dmabuf(
+                &self.egl,
+                self.display,
+                &self.gbm_device,
+                &mut target,
+                frame,
+            ) {
+                Ok(buffer) if is_supported_rendered_scanout_candidate_buffer(&buffer) => {
+                    self.stats.target_creations = self.stats.target_creations.saturating_add(1);
+                    self.stats.gl_pipeline_creations =
+                        self.stats.gl_pipeline_creations.saturating_add(1);
+                    self.target = Some(target);
+                    return Ok(buffer);
+                }
+                Ok(_) => {
+                    self.destroy_persistent_target(target);
+                    last_detail = NativeGbmScanoutBufferExportDetail::InvalidBufferDescriptor;
+                }
+                Err(detail) => {
+                    self.destroy_persistent_target(target);
+                    last_detail = preferred_scanout_failure_detail(last_detail, detail);
+                }
+            }
+        }
+        Err(last_detail)
     }
 
     fn render_persistent_xrgb8888(
@@ -837,6 +978,123 @@ fn render_persistent_target_frame<T: std::os::fd::AsFd>(
     result
 }
 
+fn render_persistent_target_dmabuf<T: std::os::fd::AsFd>(
+    egl: &khronos_egl::DynamicInstance<khronos_egl::EGL1_5>,
+    display: khronos_egl::Display,
+    gbm_device: &gbm::Device<T>,
+    target: &mut PersistentNativeFrameTarget,
+    frame: NativeDmaBufFrame<'_>,
+) -> Result<NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExportDetail> {
+    use gbm::AsRaw as _;
+
+    const EGL_LINUX_DMA_BUF_EXT: khronos_egl::Enum = 0x3270;
+    const EGL_WIDTH: khronos_egl::Attrib = 0x3057;
+    const EGL_HEIGHT: khronos_egl::Attrib = 0x3056;
+    const EGL_LINUX_DRM_FOURCC_EXT: khronos_egl::Attrib = 0x3271;
+    const EGL_DMA_BUF_PLANE0_FD_EXT: khronos_egl::Attrib = 0x3272;
+    const EGL_DMA_BUF_PLANE0_OFFSET_EXT: khronos_egl::Attrib = 0x3273;
+    const EGL_DMA_BUF_PLANE0_PITCH_EXT: khronos_egl::Attrib = 0x3274;
+    const EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT: khronos_egl::Attrib = 0x3443;
+    const EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT: khronos_egl::Attrib = 0x3444;
+
+    let gbm_surface = create_rendered_scanout_surface(
+        gbm_device,
+        target.width,
+        target.height,
+        target.candidate.format,
+        &target.candidate.modifiers,
+        target.candidate.usage,
+    )?;
+    let native_window = gbm_surface.as_raw() as khronos_egl::NativeWindowType;
+    let egl_surface =
+        unsafe { egl.create_window_surface(display, target.config, native_window, None) }
+            .map_err(|_| NativeGbmScanoutBufferExportDetail::EglSurfaceUnavailable)?;
+    if egl
+        .make_current(
+            display,
+            Some(egl_surface),
+            Some(egl_surface),
+            Some(target.egl_context),
+        )
+        .is_err()
+    {
+        let _ = egl.destroy_surface(display, egl_surface);
+        return Err(NativeGbmScanoutBufferExportDetail::EglMakeCurrentFailed);
+    }
+
+    let mut attributes = vec![
+        EGL_WIDTH,
+        frame.width as khronos_egl::Attrib,
+        EGL_HEIGHT,
+        frame.height as khronos_egl::Attrib,
+        EGL_LINUX_DRM_FOURCC_EXT,
+        frame.format as khronos_egl::Attrib,
+        EGL_DMA_BUF_PLANE0_FD_EXT,
+        frame.fd.as_raw_fd() as khronos_egl::Attrib,
+        EGL_DMA_BUF_PLANE0_OFFSET_EXT,
+        frame.offset as khronos_egl::Attrib,
+        EGL_DMA_BUF_PLANE0_PITCH_EXT,
+        frame.stride as khronos_egl::Attrib,
+    ];
+    if frame.modifier != u64::MAX {
+        attributes.extend_from_slice(&[
+            EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT,
+            (frame.modifier & u64::from(u32::MAX)) as khronos_egl::Attrib,
+            EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT,
+            (frame.modifier >> 32) as khronos_egl::Attrib,
+        ]);
+    }
+    attributes.push(khronos_egl::ATTRIB_NONE);
+    let no_context = unsafe { khronos_egl::Context::from_ptr(khronos_egl::NO_CONTEXT) };
+    let no_buffer = unsafe { khronos_egl::ClientBuffer::from_ptr(ptr::null_mut()) };
+    let image = egl
+        .create_image(
+            display,
+            no_context,
+            EGL_LINUX_DMA_BUF_EXT,
+            no_buffer,
+            &attributes,
+        )
+        .map_err(|_| NativeGbmScanoutBufferExportDetail::DmaBufImportFailed);
+    let result = match image {
+        Ok(image) => {
+            let result = egl
+                .get_proc_address("glEGLImageTargetTexture2DOES")
+                .ok_or(NativeGbmScanoutBufferExportDetail::DmaBufImportFailed)
+                .map(|image_target| unsafe {
+                    std::mem::transmute::<
+                        extern "system" fn(),
+                        unsafe extern "system" fn(u32, *const c_void),
+                    >(image_target)
+                })
+                .and_then(|image_target| {
+                    unsafe { target.pipeline.draw_egl_image(image_target, image.as_ptr()) }
+                        .map_err(|_| NativeGbmScanoutBufferExportDetail::DmaBufImportFailed)
+                })
+                .and_then(|()| {
+                    egl.swap_buffers(display, egl_surface)
+                        .map_err(|_| NativeGbmScanoutBufferExportDetail::EglSwapBuffersFailed)
+                })
+                .and_then(|()| {
+                    let buffer = unsafe { gbm_surface.lock_front_buffer() }
+                        .map_err(|_| NativeGbmScanoutBufferExportDetail::FrontBufferLockFailed)?;
+                    native_owned_scanout_buffer_from_bo(
+                        target.width,
+                        target.height,
+                        buffer,
+                        Some(gbm_surface),
+                    )
+                });
+            let _ = egl.destroy_image(display, image);
+            result
+        }
+        Err(detail) => Err(detail),
+    };
+    let _ = egl.make_current(display, None, None, None);
+    let _ = egl.destroy_surface(display, egl_surface);
+    result
+}
+
 fn render_initialized_gbm_scanout_front_buffer_with_config<T: std::os::fd::AsFd>(
     egl: &khronos_egl::DynamicInstance<khronos_egl::EGL1_5>,
     display: khronos_egl::Display,
@@ -1052,6 +1310,36 @@ fn preferred_scanout_failure_detail(
         next
     } else {
         current
+    }
+}
+
+#[cfg(test)]
+mod dmabuf_tests {
+    use std::fs::File;
+    use std::os::fd::AsFd;
+
+    use super::NativeDmaBufFrame;
+
+    #[test]
+    fn validates_bounded_linear_xrgb_descriptor() {
+        let file = File::open("/dev/null").unwrap();
+        let valid = NativeDmaBufFrame {
+            width: 64,
+            height: 32,
+            format: 0x3432_5258,
+            modifier: 0,
+            fd: file.as_fd(),
+            offset: 0,
+            stride: 256,
+        };
+        assert!(valid.is_valid());
+        assert!(
+            !NativeDmaBufFrame {
+                stride: 64,
+                ..valid
+            }
+            .is_valid()
+        );
     }
 }
 

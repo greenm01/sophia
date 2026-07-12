@@ -108,7 +108,7 @@ fn relayout_request(
 fn layer(index: u32) -> LayerSnapshot {
     LayerSnapshot {
         surface: SurfaceId::new(index, 1),
-        window: None,
+        authority_local_id: None,
         namespace: None,
         stack_rank: index,
         geometry: Rect {

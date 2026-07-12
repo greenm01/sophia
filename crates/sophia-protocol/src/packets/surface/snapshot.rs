@@ -59,7 +59,7 @@ impl SurfaceSnapshot {
 #[derive(Clone, Debug, PartialEq)]
 pub struct LayerSnapshot {
     pub surface: SurfaceId,
-    pub window: Option<XWindowId>,
+    pub authority_local_id: Option<AuthorityLocalId>,
     pub namespace: Option<NamespaceId>,
     pub stack_rank: u32,
     pub geometry: Rect,

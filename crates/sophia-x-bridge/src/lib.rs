@@ -2,6 +2,7 @@ mod live;
 mod routed_input;
 mod selection;
 mod state;
+mod xlibre_protocol;
 
 mod prelude {
     pub(crate) use core::fmt;
@@ -10,17 +11,19 @@ mod prelude {
     pub(crate) use std::time::Duration;
     pub(crate) use std::{io::IoSlice, time::Instant};
 
+    pub(crate) use crate::xlibre_protocol::{
+        XLIBRE_ROUTED_INPUT_EXTENSION_NAME, XLIBRE_ROUTED_INPUT_ROUTE_EVENT_LENGTH,
+        XLIBRE_ROUTED_INPUT_ROUTE_EVENT_OPCODE, XLibreRoutedInputDecision,
+        XLibreRoutedInputOutcome, XLibreRoutedInputRequest, XLibreRoutedInputWireRequest,
+    };
     pub(crate) use sophia_portal::{
         ClipboardPortal, ClipboardTarget, ClipboardTransferRequest, PortalCommand, PortalError,
     };
     pub(crate) use sophia_protocol::{
-        BufferSource, DamageFrame, DeviceId, InputEventKind, InputEventPacket, InputRoute,
-        InputRouteOutcome, LayerSnapshot, NamespaceId, OutputId, Point, PortalTransferId, Rect,
-        Region, ResizeSyncCapability, SeatId, Size, SurfaceId, SurfaceSnapshot, Transform,
-        XLIBRE_ROUTED_INPUT_EXTENSION_NAME, XLIBRE_ROUTED_INPUT_ROUTE_EVENT_LENGTH,
-        XLIBRE_ROUTED_INPUT_ROUTE_EVENT_OPCODE, XLibreRoutedInputDecision,
-        XLibreRoutedInputOutcome, XLibreRoutedInputRequest, XLibreRoutedInputWireRequest,
-        XWindowId, XWindowMirror,
+        AuthorityLocalId, BufferSource, DamageFrame, DeviceId, InputEventKind, InputEventPacket,
+        InputRoute, InputRouteOutcome, LayerSnapshot, NamespaceId, OutputId, Point,
+        PortalTransferId, Rect, Region, ResizeSyncCapability, SeatId, Size, SurfaceId,
+        SurfaceSnapshot, Transform, XWindowId, XWindowMirror,
     };
     pub(crate) use x11rb::connection::{Connection, RequestConnection};
     pub(crate) use x11rb::errors::ParseError;
@@ -49,3 +52,4 @@ pub use live::*;
 pub use routed_input::*;
 pub use selection::*;
 pub use state::*;
+pub use xlibre_protocol::*;

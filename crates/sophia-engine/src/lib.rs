@@ -19,10 +19,10 @@ mod prelude {
         FrameSnapshot, IconTokenId, InputEventKind, InputEventPacket, InputRoute,
         InputRouteOutcome, IpcCodecError, LayerSnapshot, LayoutNodeSnapshot, LayoutTransaction,
         OutputId, Point, PortalTransferId, Rect, Region, RenderCommand, RenderCommandKind,
-        ResizeSyncCapability, SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAX_PAYLOAD_LEN, SeatId, Size,
-        SurfaceId, SurfaceTransaction, SurfaceTransactionReadiness, TransactionCommit,
-        TransactionId, TransactionOutcome, TrustLevel, WmRequestKind, WmRequestPacket,
-        WmResponsePacket, WorkspaceId, XLibreRoutedInputRequest, XWindowId,
+        ResizeSyncCapability, RoutedInputRequest, SOPHIA_IPC_HEADER_LEN,
+        SOPHIA_IPC_MAX_PAYLOAD_LEN, SeatId, Size, SurfaceId, SurfaceTransaction,
+        SurfaceTransactionReadiness, TransactionCommit, TransactionId, TransactionOutcome,
+        TrustLevel, WmRequestKind, WmRequestPacket, WmResponsePacket, WorkspaceId,
         decode_wm_response_frame, encode_wm_request_frame,
     };
     pub(crate) use sophia_runtime::{

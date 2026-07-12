@@ -9,8 +9,23 @@ members = [
     "crates/sophia-renderer-live",
     "crates/sophia-runtime",
     "crates/sophia-wm-demo",
+    "crates/sophia-wayland-authority",
     "crates/sophia-x-authority",
     "crates/sophia-x-bridge",
+    "crates/sophia-x11-wm-bridge",
+]
+default-members = [
+    "crates/sophia-cli",
+    "crates/sophia-backend-live",
+    "crates/sophia-engine",
+    "crates/sophia-portal",
+    "crates/sophia-protocol",
+    "crates/sophia-renderer-native-egl",
+    "crates/sophia-renderer-live",
+    "crates/sophia-runtime",
+    "crates/sophia-wayland-authority",
+    "crates/sophia-wm-demo",
+    "crates/sophia-x-authority",
     "crates/sophia-x11-wm-bridge",
 ]
 resolver = "3"

@@ -1,4 +1,4 @@
-use std::os::fd::{AsFd, OwnedFd};
+use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 
 use crate::{
     LiveGbmEglFrameTargetRecord, LiveRendererScanoutBufferDescriptor,
@@ -87,6 +87,54 @@ pub enum NativeGbmRenderedScanoutContextStatus {
 
 pub struct NativeGbmRenderedScanoutContext<T: AsFd> {
     inner: sophia_renderer_native_egl::NativeGbmRenderedScanoutContext<T>,
+}
+
+#[derive(Debug)]
+pub struct LiveOwnedDmaBufFrame {
+    pub width: u32,
+    pub height: u32,
+    pub format: u32,
+    pub modifier: u64,
+    pub fd: OwnedFd,
+    pub offset: u32,
+    pub stride: u32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct LiveDmaBufFrame<'a> {
+    pub width: u32,
+    pub height: u32,
+    pub format: u32,
+    pub modifier: u64,
+    pub fd: BorrowedFd<'a>,
+    pub offset: u32,
+    pub stride: u32,
+}
+
+impl LiveOwnedDmaBufFrame {
+    pub fn as_frame(&self) -> LiveDmaBufFrame<'_> {
+        LiveDmaBufFrame {
+            width: self.width,
+            height: self.height,
+            format: self.format,
+            modifier: self.modifier,
+            fd: self.fd.as_fd(),
+            offset: self.offset,
+            stride: self.stride,
+        }
+    }
+
+    pub fn try_clone(&self) -> std::io::Result<Self> {
+        Ok(Self {
+            width: self.width,
+            height: self.height,
+            format: self.format,
+            modifier: self.modifier,
+            fd: self.fd.try_clone()?,
+            offset: self.offset,
+            stride: self.stride,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -192,6 +240,39 @@ where
                     target.size.height as u32,
                     frame.stride,
                     &frame.bytes,
+                    preferred_modifiers,
+                ),
+        )
+    }
+
+    pub fn export_dmabuf_owned_scanout_buffer_with_modifiers(
+        &mut self,
+        target: LiveGbmEglFrameTargetRecord,
+        frame: LiveDmaBufFrame<'_>,
+        preferred_modifiers: &[u64],
+    ) -> NativeGbmOwnedScanoutBufferExportReport {
+        if !target.is_valid_scanout_target()
+            || target.size.width != i32::try_from(frame.width).unwrap_or(i32::MAX)
+            || target.size.height != i32::try_from(frame.height).unwrap_or(i32::MAX)
+        {
+            return NativeGbmOwnedScanoutBufferExportReport::new(
+                LiveRendererScanoutBufferExportStatus::InvalidTarget,
+                LiveRendererScanoutBufferExportDetail::InvalidTarget,
+                None,
+            );
+        }
+        reduced_native_owned_scanout_buffer_export_report(
+            self.inner
+                .export_dmabuf_owned_scanout_buffer_with_modifiers(
+                    sophia_renderer_native_egl::NativeDmaBufFrame {
+                        width: frame.width,
+                        height: frame.height,
+                        format: frame.format,
+                        modifier: frame.modifier,
+                        fd: frame.fd,
+                        offset: frame.offset,
+                        stride: frame.stride,
+                    },
                     preferred_modifiers,
                 ),
         )
@@ -372,6 +453,9 @@ fn reduced_native_owned_scanout_buffer_export_detail(
         }
         sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::GlSmokeFailed => {
             LiveRendererScanoutBufferExportDetail::GlSmokeFailed
+        }
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::DmaBufImportFailed => {
+            LiveRendererScanoutBufferExportDetail::DmaBufImportFailed
         }
         sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::EglSwapBuffersFailed => {
             LiveRendererScanoutBufferExportDetail::EglSwapBuffersFailed

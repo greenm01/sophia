@@ -237,7 +237,7 @@ fn layer_templates_from_surface_transactions(
         .enumerate()
         .map(|(index, transaction)| LayerSnapshot {
             surface: transaction.surface,
-            window: None,
+            authority_local_id: None,
             namespace: transaction.namespace,
             stack_rank: u32::try_from(index).unwrap_or(u32::MAX),
             geometry: transaction.target_geometry,

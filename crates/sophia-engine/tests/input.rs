@@ -108,9 +108,9 @@ fn routed_input_coalescer_flushes_for_drag_grab_and_focus_barriers() {
 #[test]
 fn transformed_scene_hit_test_routes_to_topmost_layer_local_coordinates() {
     let mut lower = test_layer(0, 0, 0, Region::empty());
-    lower.window = Some(XWindowId::new(0x20, 1));
+    lower.authority_local_id = Some(AuthorityLocalId::new(0x20, 1));
     let mut upper = test_layer(1, 10, 0, Region::empty());
-    upper.window = Some(XWindowId::new(0x30, 1));
+    upper.authority_local_id = Some(AuthorityLocalId::new(0x30, 1));
     upper.transform = scale_translate_transform(2.0, 30.0, 40.0);
     let event = motion_event(70, 50.0, 60.0);
 
@@ -118,7 +118,6 @@ fn transformed_scene_hit_test_routes_to_topmost_layer_local_coordinates() {
 
     assert_eq!(route.outcome, InputRouteOutcome::Routed);
     assert_eq!(route.target_surface, Some(SurfaceId::new(1, 1)));
-    assert_eq!(route.target_window, Some(XWindowId::new(0x30, 1)));
     assert_eq!(route.global_position, Point { x: 50.0, y: 60.0 });
     assert_eq!(route.local_position, Some(Point { x: 10.0, y: 10.0 }));
     assert_eq!(route.transform, scale_translate_transform(2.0, 30.0, 40.0));
@@ -127,7 +126,7 @@ fn transformed_scene_hit_test_routes_to_topmost_layer_local_coordinates() {
 #[test]
 fn transformed_scene_hit_test_reports_no_target_for_miss() {
     let mut layer = test_layer(0, 0, 0, Region::empty());
-    layer.window = Some(XWindowId::new(0x20, 1));
+    layer.authority_local_id = Some(AuthorityLocalId::new(0x20, 1));
     layer.transform = scale_translate_transform(2.0, 30.0, 40.0);
     let event = motion_event(71, 10.0, 10.0);
 
@@ -135,7 +134,6 @@ fn transformed_scene_hit_test_reports_no_target_for_miss() {
 
     assert_eq!(route.outcome, InputRouteOutcome::NoTarget);
     assert_eq!(route.target_surface, None);
-    assert_eq!(route.target_window, None);
     assert_eq!(route.local_position, None);
 }
 
@@ -148,14 +146,13 @@ fn surface_hit_test_routes_without_exposing_authority_window_identity() {
 
     assert_eq!(route.outcome, InputRouteOutcome::Routed);
     assert_eq!(route.target_surface, Some(SurfaceId::new(0, 1)));
-    assert_eq!(route.target_window, None);
     assert_eq!(route.local_position, Some(Point { x: 10.0, y: 10.0 }));
 }
 
 #[test]
 fn transformed_scene_hit_test_feeds_routed_input_request_generation() {
     let mut layer = test_layer(0, 0, 0, Region::empty());
-    layer.window = Some(XWindowId::new(0x30, 1));
+    layer.authority_local_id = Some(AuthorityLocalId::new(0x30, 1));
     layer.transform = scale_translate_transform(2.0, 30.0, 40.0);
     let event = motion_event(72, 54.0, 64.0);
 
@@ -163,13 +160,13 @@ fn transformed_scene_hit_test_feeds_routed_input_request_generation() {
     let request = routed_input_request_from_physical_event(&event, &route).unwrap();
 
     assert_eq!(request.serial, 72);
-    assert_eq!(request.target_window, XWindowId::new(0x30, 1));
+    assert_eq!(request.target_surface, SurfaceId::new(0, 1));
     assert_eq!(request.local_position, Point { x: 12.0, y: 12.0 });
     assert_eq!(request.kind, InputEventKind::PointerMotion);
 }
 
 #[test]
-fn physical_input_route_becomes_xlibre_request() {
+fn physical_input_route_becomes_authority_request() {
     let event = motion_event(77, 25.0, 35.0);
     let route = route(77, 0x44, 5.0, 6.0);
 
@@ -179,13 +176,13 @@ fn physical_input_route_becomes_xlibre_request() {
     assert_eq!(request.seat, event.seat);
     assert_eq!(request.device, event.device);
     assert_eq!(request.time_msec, event.time_msec);
-    assert_eq!(request.target_window, XWindowId::new(0x44, 1));
+    assert_eq!(request.target_surface, SurfaceId::new(0x44, 1));
     assert_eq!(request.local_position, Point { x: 5.0, y: 6.0 });
     assert_eq!(request.kind, InputEventKind::PointerMotion);
 }
 
 #[test]
-fn physical_input_flush_becomes_xlibre_requests_after_state_change() {
+fn physical_input_flush_becomes_authority_requests_after_state_change() {
     let mut coalescer = RoutedInputCoalescer::new();
     coalescer.push(motion_event(1, 10.0, 10.0), route(1, 0x30, 10.0, 10.0));
     let button = input_event(
@@ -233,13 +230,13 @@ fn physical_input_route_rejects_malformed_routes() {
     );
 
     mismatched.outcome = InputRouteOutcome::Routed;
-    mismatched.target_window = None;
+    mismatched.target_surface = None;
     assert_eq!(
         routed_input_request_from_physical_event(&event, &mismatched),
-        Err(RoutedInputRequestError::MissingTargetWindow)
+        Err(RoutedInputRequestError::MissingTargetSurface)
     );
 
-    mismatched.target_window = Some(XWindowId::new(0x30, 1));
+    mismatched.target_surface = Some(SurfaceId::new(0x30, 1));
     mismatched.local_position = None;
     assert_eq!(
         routed_input_request_from_physical_event(&event, &mismatched),

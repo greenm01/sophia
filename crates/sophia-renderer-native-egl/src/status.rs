@@ -67,6 +67,7 @@ pub enum NativeGbmScanoutBufferExportDetail {
     EglContextUnavailable,
     EglMakeCurrentFailed,
     GlSmokeFailed,
+    DmaBufImportFailed,
     EglSwapBuffersFailed,
     FrontBufferLockFailed,
     InvalidBufferDescriptor,
@@ -90,6 +91,7 @@ impl NativeGbmScanoutBufferExportDetail {
             | Self::EglContextUnavailable
             | Self::EglMakeCurrentFailed
             | Self::GlSmokeFailed
+            | Self::DmaBufImportFailed
             | Self::EglSwapBuffersFailed
             | Self::FrontBufferLockFailed
             | Self::InvalidBufferDescriptor => NativeGbmScanoutBufferExportStatus::Degraded,

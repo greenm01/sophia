@@ -25,6 +25,7 @@ where
     last_target_lifecycle: Option<LiveGbmEglFrameTargetLifecycleReport>,
     last_export_status: Option<LiveRendererScanoutBufferExportStatus>,
     pending_cpu_frame: Option<LiveCpuComposedFrame>,
+    pending_dmabuf_frame: Option<sophia_renderer_live::LiveOwnedDmaBufFrame>,
     pending_cpu_frame_checksum: Option<u64>,
     cpu_frame_export_attempts: usize,
     last_cpu_frame_checksum: Option<u64>,
@@ -48,6 +49,7 @@ where
             last_target_lifecycle: None,
             last_export_status: None,
             pending_cpu_frame: None,
+            pending_dmabuf_frame: None,
             pending_cpu_frame_checksum: None,
             cpu_frame_export_attempts: 0,
             last_cpu_frame_checksum: None,
@@ -119,6 +121,14 @@ where
 
     pub const fn pending_cpu_frame(&self) -> bool {
         self.pending_cpu_frame.is_some()
+    }
+
+    pub fn set_pending_dmabuf_frame(&mut self, frame: sophia_renderer_live::LiveOwnedDmaBufFrame) {
+        self.pending_dmabuf_frame = Some(frame);
+    }
+
+    pub const fn pending_dmabuf_frame(&self) -> bool {
+        self.pending_dmabuf_frame.is_some()
     }
 
     pub const fn cpu_frame_export_attempts(&self) -> usize {
@@ -193,22 +203,30 @@ where
             );
         };
 
-        let report = match self.pending_cpu_frame.take() {
-            Some(frame) => {
-                self.cpu_frame_export_attempts = self.cpu_frame_export_attempts.saturating_add(1);
-                self.last_cpu_frame_checksum = self.pending_cpu_frame_checksum.take();
-                let report = context.export_xrgb8888_owned_scanout_buffer_with_modifiers(
-                    target,
-                    &frame,
-                    &self.preferred_modifiers,
-                );
-                self.last_cpu_frame_export_status = Some(report.status);
-                report
-            }
-            None => context.export_rendered_owned_scanout_buffer_with_modifiers(
+        let report = match self.pending_dmabuf_frame.take() {
+            Some(frame) => context.export_dmabuf_owned_scanout_buffer_with_modifiers(
                 target,
+                frame.as_frame(),
                 &self.preferred_modifiers,
             ),
+            None => match self.pending_cpu_frame.take() {
+                Some(frame) => {
+                    self.cpu_frame_export_attempts =
+                        self.cpu_frame_export_attempts.saturating_add(1);
+                    self.last_cpu_frame_checksum = self.pending_cpu_frame_checksum.take();
+                    let report = context.export_xrgb8888_owned_scanout_buffer_with_modifiers(
+                        target,
+                        &frame,
+                        &self.preferred_modifiers,
+                    );
+                    self.last_cpu_frame_export_status = Some(report.status);
+                    report
+                }
+                None => context.export_rendered_owned_scanout_buffer_with_modifiers(
+                    target,
+                    &self.preferred_modifiers,
+                ),
+            },
         };
         let descriptor = report.buffer.as_ref().map(|buffer| buffer.descriptor());
         self.last_export_status = Some(report.status);

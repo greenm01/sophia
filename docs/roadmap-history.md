@@ -6,6 +6,24 @@ validation evidence in `docs/research-log.md`.
 
 ---
 
+## Completed Native Wayland Foundation
+
+- [x] Removed XLibre concepts from Engine input and surface records, replacing
+  them with protocol-neutral surface routes and authority-local IDs.
+- [x] Added a Smithay-backed private Wayland authority for `wl_surface`,
+  `xdg_toplevel`, SHM, bounded linear DMA-BUFs, frame callbacks, buffer release,
+  keyboard, and pointer delivery.
+- [x] Ran real Kitty over the private Wayland socket with `DISPLAY` removed and
+  changing nonzero SHM frames through Engine.
+- [x] Made the installed Kitty launcher use the native Wayland authority and
+  native KMS path while preserving the independent TTY recovery guard.
+- [x] Made the XLibre bridge an opt-in research feature excluded from the
+  production dependency graph and default workspace members.
+- [x] Added direct EGL DMA-BUF import with no CPU readback and delayed Wayland
+  presentation feedback until the matching KMS submission is observed.
+
+---
+
 ## Completed Visible Interactive X Terminal
 
 - [x] Backed core X drawing with bounded XRGB8888 CPU buffers, including the
@@ -448,6 +466,36 @@ not the long-term target architecture.
 ---
 
 ## Completed Milestones
+
+- [x] Protocol-neutral authority boundary: Engine routed input now targets
+  `SurfaceId`, visual layers carry `AuthorityLocalId`, and Engine source has no
+  XLibre, X-window, Wayland, Smithay, or Kitty types. XLibre wire encoding is
+  confined to its opt-in historical adapter.
+- [x] Sophia Wayland Authority foundation: a frontend-only Smithay authority
+  owns private sockets, client namespaces, compositor/xdg resources, ordered
+  surface reducers, SHM snapshots, output advertisement, seat delivery, frame
+  callbacks, buffer releases, and bounded DMA-BUF negotiation.
+- [x] First native Kitty transaction proof: Kitty 0.47.4 ran with `DISPLAY`
+  removed and software GL, submitted 16 changing nonzero SHM frames through the
+  Sophia Wayland Authority, and completed without an X server process.
+- [x] XLibre runtime retirement: release builds and the installed launcher use
+  native Wayland; the XLibre bridge is optional behind `xlibre-research` and is
+  absent from the production dependency graph and default workspace members.
+
+- [x] Pointer and multi-output presentation: QEMU proved physical keyboard and
+  pointer routing, independent content on two KMS outputs, per-output
+  page-flip pacing, and clean retirement. DRM VRR discovery and fullscreen
+  policy are implemented; activation proof remains deferred for capable
+  hardware.
+- [x] XLibre Kitty compatibility proof: a real Kitty X11/GLX client produced
+  readable pixels through software GL and XComposite/MIT-SHM capture, accepted
+  physical keyboard input including terminal navigation keys, met the bounded
+  presentation-latency gate, and recovered successfully through the independent
+  Ctrl-Alt-Backspace guard.
+- [x] Generic legacy-WM bridge core: opaque layout snapshots, validated Engine
+  commits, resizable Xterm transactions, configure acknowledgement, focus, and
+  injected-input pixel change passed headless coverage. Remaining dedicated-TTY
+  and second-WM demonstrations are deferred rather than architecture blockers.
 
 - [x] Added the first `sophia-live-session --terminal=xterm` one-shot bootstrap
   around xterm authority transactions and deterministic composition lifecycle.

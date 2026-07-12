@@ -18,6 +18,7 @@ use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
 use std::time::{Duration, Instant};
 
 pub(super) mod input_guard;
+#[cfg(feature = "xlibre-research")]
 pub(super) mod xlibre_compat;
 
 const SESSION_AUTHORITY_CAPACITY: usize = 256;
@@ -36,6 +37,7 @@ enum SessionPhysicalInput {
             sophia_backend_live::NativeLibinputEventReader,
         >,
     ),
+    #[cfg(feature = "xlibre-research")]
     Threaded(sophia_backend_live::ThreadedNativeLibinputEventPoller),
 }
 
@@ -43,6 +45,7 @@ impl NonBlockingInputPoller for SessionPhysicalInput {
     fn poll_ready(&mut self) -> std::io::Result<Vec<sophia_protocol::InputEventPacket>> {
         match self {
             Self::Direct(poller) => poller.poll_ready(),
+            #[cfg(feature = "xlibre-research")]
             Self::Threaded(poller) => poller.poll_ready(),
         }
     }
@@ -52,6 +55,7 @@ impl SessionPhysicalInput {
     fn stats(&self) -> sophia_backend_live::ThreadedNativeInputStats {
         match self {
             Self::Direct(_) => Default::default(),
+            #[cfg(feature = "xlibre-research")]
             Self::Threaded(poller) => poller.stats(),
         }
     }
@@ -681,7 +685,7 @@ impl PersistentLiveLayout {
                         transaction.surface,
                         LayerSnapshot {
                             surface: transaction.surface,
-                            window: None,
+                            authority_local_id: None,
                             namespace: None,
                             stack_rank: u32::try_from(index).unwrap_or(u32::MAX),
                             geometry,
@@ -1759,15 +1763,34 @@ impl PersistentBackendRuntime {
     fn run_batch(
         &mut self,
         batch: &XAuthorityObservedTransactionBatch,
+        native_scanout: Option<&mut PersistentNativeScanout>,
+        native_frames: Option<Vec<ObservedComposedFrame>>,
+        wm_update: Option<WmTransactionUpdate>,
+    ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
+        self.run_authority_transactions(
+            batch.transaction,
+            &batch.transactions,
+            batch.transactions.len(),
+            native_scanout,
+            native_frames,
+            wm_update,
+        )
+    }
+
+    fn run_authority_transactions(
+        &mut self,
+        transaction_id: TransactionId,
+        transactions: &[SurfaceTransaction],
+        event_count: usize,
         mut native_scanout: Option<&mut PersistentNativeScanout>,
         native_frames: Option<Vec<ObservedComposedFrame>>,
         wm_update: Option<WmTransactionUpdate>,
     ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
-        for transaction in &batch.transactions {
+        for transaction in transactions {
             self.layers.insert(transaction.surface, transaction.clone());
         }
-        let intake = AuthorityTransactionIntake::new(batch.transaction, batch.transactions.clone());
-        let transactions = self.layers.values().cloned().collect::<Vec<_>>();
+        let intake = AuthorityTransactionIntake::new(transaction_id, transactions.to_vec());
+        let active_transactions = self.layers.values().cloned().collect::<Vec<_>>();
         let mut native_frames = native_frames.unwrap_or_default().into_iter();
         let mut first_report = None;
         for (index, output) in self.outputs.values_mut().enumerate() {
@@ -1780,8 +1803,7 @@ impl PersistentBackendRuntime {
                         "persistent live backend authority inbox is disconnected"
                     }
                 })?;
-            let input =
-                compositor_tick_input(&transactions, batch.transactions.len(), wm_update.clone());
+            let input = compositor_tick_input(&active_transactions, event_count, wm_update.clone());
             let report = match native_scanout.as_deref_mut() {
                 Some(native_scanout) => {
                     if let Some(frame) = native_frames.next() {
@@ -1818,7 +1840,7 @@ impl PersistentBackendRuntime {
             .enumerate()
             .map(|(index, transaction)| LayerSnapshot {
                 surface: transaction.surface,
-                window: None,
+                authority_local_id: None,
                 namespace: None,
                 stack_rank: u32::try_from(index).unwrap_or(u32::MAX),
                 geometry: transaction.target_geometry,
@@ -1936,6 +1958,234 @@ impl PersistentBackendRuntime {
             })
             .collect::<Vec<_>>()
             .join(",")
+    }
+}
+
+pub(super) struct WaylandNativeSession {
+    scanout: PersistentNativeScanout,
+    runtime: Option<PersistentBackendRuntime>,
+    outputs: Vec<sophia_engine::HeadlessOutput>,
+    pending_presentations: Vec<(SurfaceId, u64, usize)>,
+}
+
+impl WaylandNativeSession {
+    pub(super) fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        let scanout = PersistentNativeScanout::new()?;
+        let outputs = scanout.outputs();
+        Ok(Self {
+            scanout,
+            runtime: None,
+            outputs,
+            pending_presentations: Vec::new(),
+        })
+    }
+
+    pub(super) fn primary_size(&self) -> Size {
+        self.outputs[0].size
+    }
+
+    pub(super) fn present(
+        &mut self,
+        transaction: &SurfaceTransaction,
+        generation: u64,
+        report: &sophia_backend_live::LiveCpuCompositionReport,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        let frames = self
+            .outputs
+            .iter()
+            .map(|output| native_frame_for_output(report, output.size))
+            .collect::<Vec<_>>();
+        if self.runtime.is_none() {
+            self.runtime = Some(PersistentBackendRuntime::new(
+                &self.outputs,
+                std::slice::from_ref(transaction),
+                Some(&mut self.scanout),
+                Some(frames),
+            )?);
+            return Ok(true);
+        }
+        let runtime = self.runtime.as_mut().expect("checked above");
+        let submissions_before = self.scanout.heads[0].submissions;
+        let _ = runtime.run_authority_transactions(
+            transaction.transaction,
+            std::slice::from_ref(transaction),
+            1,
+            Some(&mut self.scanout),
+            Some(frames),
+            None,
+        )?;
+        self.queue_presentation(transaction.surface, generation, submissions_before)?;
+        Ok(false)
+    }
+
+    pub(super) fn present_dmabuf(
+        &mut self,
+        transaction: &SurfaceTransaction,
+        generation: u64,
+        frame: &sophia_backend_live::LiveOwnedDmaBufFrame,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        if self.runtime.is_none() {
+            let blank = sophia_backend_live::compose_live_cpu_frame(self.primary_size(), &[])
+                .map_err(|error| format!("native DMA-BUF bootstrap failed: {error:?}"))?;
+            let frames = self
+                .outputs
+                .iter()
+                .map(|output| native_frame_for_output(&blank, output.size))
+                .collect::<Vec<_>>();
+            self.runtime = Some(PersistentBackendRuntime::new(
+                &self.outputs,
+                std::slice::from_ref(transaction),
+                Some(&mut self.scanout),
+                Some(frames),
+            )?);
+        }
+        for head in &mut self.scanout.heads {
+            head.exporter.set_pending_dmabuf_frame(frame.try_clone()?);
+        }
+        let runtime = self.runtime.as_mut().expect("initialized above");
+        let submissions_before = self.scanout.heads[0].submissions;
+        let _ = runtime.run_authority_transactions(
+            transaction.transaction,
+            std::slice::from_ref(transaction),
+            1,
+            Some(&mut self.scanout),
+            None,
+            None,
+        )?;
+        self.queue_presentation(transaction.surface, generation, submissions_before)?;
+        Ok(false)
+    }
+
+    pub(super) fn service(&mut self) -> Result<Vec<(SurfaceId, u64)>, Box<dyn std::error::Error>> {
+        let Some(runtime) = self.runtime.as_mut() else {
+            return Ok(Vec::new());
+        };
+        if runtime.native_scanout_in_flight() || runtime.native_cleanup_pending() {
+            runtime.retire_native_scanout(&mut self.scanout)?;
+        }
+        if !runtime.native_scanout_in_flight()
+            && self
+                .scanout
+                .heads
+                .iter()
+                .enumerate()
+                .any(|(index, _)| self.scanout.pending_frame(index))
+        {
+            let _ = runtime.run_native_idle(&mut self.scanout)?;
+        }
+        let presented_submissions = self
+            .scanout
+            .heads
+            .first()
+            .map_or(0, |head| head.presented_submissions);
+        let mut ready = Vec::new();
+        let mut waiting = Vec::new();
+        for (surface, generation, required_submission) in
+            std::mem::take(&mut self.pending_presentations)
+        {
+            if required_submission <= presented_submissions {
+                ready.push((surface, generation));
+            } else {
+                waiting.push((surface, generation, required_submission));
+            }
+        }
+        self.pending_presentations = waiting;
+        Ok(ready)
+    }
+
+    fn queue_presentation(
+        &mut self,
+        surface: SurfaceId,
+        generation: u64,
+        submissions_before: usize,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let head = &self.scanout.heads[0];
+        let required_submission = required_wayland_presentation_submission(
+            submissions_before,
+            head.submissions,
+            head.exporter.pending_cpu_frame() || head.exporter.pending_dmabuf_frame(),
+        )?;
+        self.pending_presentations
+            .push((surface, generation, required_submission));
+        Ok(())
+    }
+
+    pub(super) fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(runtime) = self.runtime.as_mut() {
+            runtime.drain_native_scanout(&mut self.scanout, Duration::from_secs(2))?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn cancel_surface(&mut self, surface: SurfaceId) {
+        self.pending_presentations
+            .retain(|(candidate, _, _)| *candidate != surface);
+    }
+}
+
+fn required_wayland_presentation_submission(
+    submissions_before: usize,
+    submissions_after: usize,
+    frame_pending: bool,
+) -> Result<usize, &'static str> {
+    if submissions_after > submissions_before {
+        Ok(submissions_after)
+    } else if frame_pending {
+        Ok(submissions_after.saturating_add(1))
+    } else {
+        Err("native frame was neither submitted nor retained for a later submit")
+    }
+}
+
+fn native_frame_for_output(
+    report: &sophia_backend_live::LiveCpuCompositionReport,
+    output_size: Size,
+) -> ObservedComposedFrame {
+    if report.frame.size == output_size {
+        return ObservedComposedFrame {
+            frame: report.frame.clone(),
+            checksum: report.checksum,
+            nonzero_pixel_bytes: report.nonzero_pixel_bytes,
+        };
+    }
+    let width = usize::try_from(output_size.width).unwrap_or(0);
+    let height = usize::try_from(output_size.height).unwrap_or(0);
+    let stride = width.saturating_mul(4);
+    let mut bytes = vec![0; stride.saturating_mul(height)];
+    let source_width = usize::try_from(report.frame.size.width).unwrap_or(0);
+    let source_height = usize::try_from(report.frame.size.height).unwrap_or(0);
+    let source_stride = usize::try_from(report.frame.stride).unwrap_or(0);
+    let copy_width = width.min(source_width);
+    let copy_height = height.min(source_height);
+    for row in 0..copy_height {
+        let source = row.saturating_mul(source_stride);
+        let target = row.saturating_mul(stride);
+        let count = copy_width.saturating_mul(4);
+        if let (Some(source), Some(target)) = (
+            report.frame.bytes.get(source..source.saturating_add(count)),
+            bytes.get_mut(target..target.saturating_add(count)),
+        ) {
+            target.copy_from_slice(source);
+        }
+    }
+    let (nonzero_pixel_bytes, checksum) = bytes.iter().fold(
+        (0usize, 0xcbf2_9ce4_8422_2325u64),
+        |(nonzero, hash), byte| {
+            (
+                nonzero.saturating_add(usize::from(*byte != 0)),
+                (hash ^ u64::from(*byte)).wrapping_mul(0x100_0000_01b3),
+            )
+        },
+    );
+    ObservedComposedFrame {
+        frame: sophia_backend_live::LiveCpuComposedFrame {
+            size: output_size,
+            stride: u32::try_from(stride).unwrap_or(u32::MAX),
+            format: sophia_backend_live::LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+            bytes,
+        },
+        checksum,
+        nonzero_pixel_bytes,
     }
 }
 
@@ -2374,6 +2624,7 @@ impl PersistentNativeScanout {
 
     fn pending_frame(&self, index: usize) -> bool {
         self.heads[index].exporter.pending_cpu_frame()
+            || self.heads[index].exporter.pending_dmabuf_frame()
     }
 
     fn export_attempts(&self) -> usize {
@@ -2623,7 +2874,6 @@ fn synthetic_text_input_events(
                 kind: sophia_protocol::InputEventKind::Key { keycode, pressed },
                 global_position: None,
                 target_surface: None,
-                target_window: None,
                 local_position: None,
             });
             serial = serial.saturating_add(1);
@@ -2806,6 +3056,7 @@ impl SessionProcessGuard {
         }
     }
 
+    #[cfg(feature = "xlibre-research")]
     fn child_only(child: Child) -> Self {
         Self {
             child: Some(child),
@@ -2845,7 +3096,9 @@ impl Drop for SessionProcessGuard {
 
 #[cfg(test)]
 mod tests {
-    use super::{Rect, Size, center_geometry_without_scaling};
+    use super::{
+        Rect, Size, center_geometry_without_scaling, required_wayland_presentation_submission,
+    };
 
     #[test]
     fn compatibility_surface_is_centered_without_resizing() {
@@ -2885,5 +3138,12 @@ mod tests {
         assert_eq!(geometry.y, 0);
         assert_eq!(geometry.width, 1920);
         assert_eq!(geometry.height, 1080);
+    }
+
+    #[test]
+    fn wayland_presentation_tracks_immediate_or_deferred_native_submission() {
+        assert_eq!(required_wayland_presentation_submission(3, 4, false), Ok(4));
+        assert_eq!(required_wayland_presentation_submission(4, 4, true), Ok(5));
+        assert!(required_wayland_presentation_submission(4, 4, false).is_err());
     }
 }

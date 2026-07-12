@@ -234,20 +234,16 @@ session now applies real xmonad placement, resize, and focus to one real xterm.
 Its headless gate requires a readable fixed-font ASCII marker, one acknowledged
 configure, and a later injected-input pixel change; the dedicated-TTY operator
 visual gate remains.
-An explicitly temporary XLibre compatibility provider can also run unmodified
-Kitty through software GL and XComposite readback. Its headless gate produces
-readable nonzero Kitty pixels and proves injected text changes a later composed
-frame. The bridge uses reusable MIT-SHM readback, fixes Kitty at 1280x720, and
-rejects degraded XGetImage fallback for interactive-latency evidence; Sophia
-still owns input routing, composition, and scanout. The installed launcher uses
-the release binary, polls physical input on a bounded worker independently of
-rendering, uses row-copy CPU composition, and reuses one EGL context and GL
-upload pipeline per native output. Schema 9 evidence gates the final proof key
-to presented pixels at 100 milliseconds and records capture, composition,
-input-queue, upload, page-flip, and native-resource-reuse costs separately.
-The remaining hardware gap is VRR: the current eDP connector
-exposes `vrr_capable` and its CRTC exposes `VRR_ENABLED`, but capability is `0`,
-so activation evidence requires a different display.
+Real Kitty now connects to Sophia's private native Wayland authority with
+`DISPLAY` removed. SHM frames pass through the protocol-neutral Engine path;
+the native session additionally admits bounded linear DMA-BUFs and imports them
+into EGL without CPU readback before KMS presentation. The installed launcher
+uses this path and retains the independent Ctrl-Alt-Backspace recovery guard.
+XLibre is no longer a production dependency or launcher path; its bridge and
+smokes remain opt-in historical research. The remaining Kitty gate is a guarded
+hardware run proving resize, keyboard/navigation/pointer input, sub-100 ms
+presentation, and clean TTY recovery. VRR evidence still requires a display
+whose connector reports `vrr_capable=1`.
 
 ## License
 

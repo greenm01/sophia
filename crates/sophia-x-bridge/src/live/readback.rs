@@ -466,7 +466,7 @@ pub fn layers_from_surfaces(surfaces: &[SurfaceSnapshot]) -> Vec<LayerSnapshot> 
         .filter(|surface| surface.mapped && !surface.geometry.is_empty())
         .map(|surface| LayerSnapshot {
             surface: surface.surface,
-            window: Some(surface.window),
+            authority_local_id: Some(AuthorityLocalId::from(surface.window)),
             namespace: surface.namespace,
             stack_rank: surface.stack_rank,
             geometry: surface.geometry,

@@ -58,7 +58,6 @@ impl InputFocusState {
             return FocusedInputRoute::StaleFocus(event);
         }
         event.target_surface = Some(surface);
-        event.target_window = None;
         FocusedInputRoute::Routed(event)
     }
 }

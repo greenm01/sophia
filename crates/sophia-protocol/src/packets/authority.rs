@@ -1,4 +1,5 @@
 use crate::ids::XWindowId;
+use crate::{BufferSource, SurfaceId, TransactionCommit};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AuthorityKind {
@@ -6,6 +7,41 @@ pub enum AuthorityKind {
     SophiaWayland,
     SophiaNative,
     XLibrePrototype,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AuthorityFeedback {
+    Transaction(TransactionCommit),
+    Presented(SurfacePresentationFeedback),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SurfacePresentationFeedback {
+    pub surface: SurfaceId,
+    pub generation: u64,
+    pub presentation_msec: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BufferReleaseFeedback {
+    pub surface: SurfaceId,
+    pub source: BufferSource,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CpuBufferFormat {
+    Argb8888,
+    Xrgb8888,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CpuBufferRegistration {
+    pub handle: u64,
+    pub size: crate::Size,
+    pub stride: u32,
+    pub format: CpuBufferFormat,
+    pub generation: u64,
+    pub bytes: Vec<u8>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]

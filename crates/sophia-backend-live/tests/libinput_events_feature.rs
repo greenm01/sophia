@@ -415,7 +415,6 @@ fn motion_event(serial: u64, x: f64, y: f64) -> InputEventPacket {
         kind: InputEventKind::PointerMotion,
         global_position: Some(Point { x, y }),
         target_surface: None,
-        target_window: None,
         local_position: None,
     }
 }

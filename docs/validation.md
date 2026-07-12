@@ -76,12 +76,25 @@ tools/vrr_hardware_proof.sh
 tools/build_qemu_session_initramfs.sh
 tools/qemu_session_harness.sh
 SOPHIA_QEMU_SCENARIO=emergency-recovery tools/qemu_session_harness.sh
-tools/xlibre_compat_latency_smoke.sh
-tools/xlibre_kitty_latency_smoke.sh
-tools/xlibre_compat_shm_fallback_smoke.sh
+tools/wayland_kitty_smoke.sh
+tools/audit_no_xlibre_runtime.sh
+# Dedicated text TTY with SOPHIA_INPUT_DEVICES set:
+tools/wayland_kitty_hardware_proof.sh
 ```
 
-The XLibre latency smoke is non-destructive: it uses a dummy XLibre display,
+The native Wayland Kitty smoke is non-destructive: it uses a private Wayland
+socket, software rendering, and the headless CPU composition path. The runtime
+audit proves the production CLI dependency graph and installed launcher do not
+select or start XLibre/Xorg. Historical XLibre latency and fallback smokes remain
+available only with the `xlibre-research` feature and are not release gates.
+
+The native hardware proof advertises the bounded DMA-BUF path only while
+`--native-scanout` is active. Admitted buffers are imported by EGL without CPU
+readback; frame callbacks and `wl_buffer.release` follow observed KMS
+presentation rather than transaction queueing. Run this gate only from a
+dedicated text TTY with an outside recovery path.
+
+The archived XLibre latency smoke used a dummy XLibre display,
 routes synthetic text over the compatibility XTEST connection, and requires a
 damage patch plus presented pixel latency of at most 100 milliseconds. The
 Kitty variant uses software GL, reusable MIT-SHM readback, and a fixed 1280x720

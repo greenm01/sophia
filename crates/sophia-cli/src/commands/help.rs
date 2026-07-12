@@ -48,7 +48,10 @@ pub(crate) fn print(verbose: bool) {
     println!("commands: x-authority-present-pixmap-smoke");
     #[cfg(feature = "atomic-scanout-live")]
     println!(
-        "commands: sophia-live-session [--client-backend=sophia-x|xlibre-compat] [--client=PATH] [--client-arg=ARG ...] [--compat-display=:178] [--display=:77] [--terminal=xterm] [--terminal-exec=PATH] [--terminal-exec-arg=ARG ...] [--input-devices=/dev/input/eventN,...] [--native-scanout] [--wm-process=PATH] [--wm-process-arg=ARG ...] [--max-runtime-ms=N] [--max-ticks=N] [--inject-text=lowercase|--expect-physical-text=lowercase] [--expect-physical-pointer] [--exit-after-input-proof] [--proof]"
+        "commands: sophia-live-session [--client-backend=wayland|sophia-x] [--client=PATH] [--client-arg=ARG ...] [--display=:77] [--terminal=xterm] [--terminal-exec=PATH] [--terminal-exec-arg=ARG ...] [--input-devices=/dev/input/eventN,...] [--native-scanout] [--wm-process=PATH] [--wm-process-arg=ARG ...] [--max-runtime-ms=N] [--max-ticks=N] [--inject-text=lowercase|--expect-physical-text=lowercase] [--expect-physical-pointer] [--exit-after-input-proof] [--proof]"
+    );
+    println!(
+        "commands: sophia-wayland-session --client=PATH [--client-arg=ARG ...] [--wayland-display=sophia-0] [--input-devices=/dev/input/eventN,...] [--native-scanout] [--expect-input-presentation|--expect-input-pixel-change] [--max-input-latency-ms=100] [--max-runtime-ms=N]"
     );
     #[cfg(feature = "atomic-scanout-live")]
     println!("commands: live-session-composition-smoke");

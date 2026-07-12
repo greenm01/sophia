@@ -1,10 +1,11 @@
 use sophia_engine::{HeadlessEngine, WmSocketTransport, WmSocketTransportConfig};
 use sophia_protocol::{
     BufferSource, LayerSnapshot, LayoutNodeCapabilities, LayoutNodeKind, LayoutNodeSnapshot,
-    LayoutNodeState, NamespaceId, Rect, Region, ResizeSyncCapability, SurfaceConstraints,
-    SurfaceId, TransactionId, Transform, WmRelayoutWorkspace, WmRequestKind, WmRequestPacket,
-    WorkspaceId, XWindowId, XWindowMirror,
+    LayoutNodeState, Rect, Region, ResizeSyncCapability, SurfaceConstraints, SurfaceId,
+    TransactionId, Transform, WmRelayoutWorkspace, WmRequestKind, WmRequestPacket, WorkspaceId,
 };
+#[cfg(feature = "xlibre-research")]
+use sophia_protocol::{NamespaceId, XWindowId, XWindowMirror};
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
@@ -14,22 +15,26 @@ pub(crate) fn arg_value(args: &[String], key: &str) -> Option<String> {
         .find_map(|arg| arg.strip_prefix(&prefix).map(str::to_owned))
 }
 
+#[cfg(any(feature = "atomic-scanout-live", feature = "xlibre-research"))]
 pub(crate) fn parse_usize(value: &str) -> Result<usize, Box<dyn std::error::Error>> {
     value
         .parse::<usize>()
         .map_err(|error| format!("invalid usize value {value:?}: {error}").into())
 }
 
+#[cfg(any(feature = "atomic-scanout-live", feature = "xlibre-research"))]
 pub(crate) fn parse_u64(value: &str) -> Result<u64, Box<dyn std::error::Error>> {
     value
         .parse::<u64>()
         .map_err(|error| format!("invalid u64 value {value:?}: {error}").into())
 }
 
+#[cfg(feature = "xlibre-research")]
 pub(crate) fn duration_us(duration: Option<std::time::Duration>) -> u128 {
     duration.map_or(0, |duration| duration.as_micros())
 }
 
+#[cfg(feature = "xlibre-research")]
 pub(crate) fn clipboard_mirror(window: XWindowId, namespace: NamespaceId) -> XWindowMirror {
     XWindowMirror {
         window,
@@ -118,7 +123,7 @@ pub(crate) fn request_supervised_wm(
 pub(crate) fn synthetic_layers() -> Vec<LayerSnapshot> {
     vec![LayerSnapshot {
         surface: SurfaceId::new(1, 1),
-        window: None,
+        authority_local_id: None,
         namespace: None,
         stack_rank: 0,
         geometry: Rect {

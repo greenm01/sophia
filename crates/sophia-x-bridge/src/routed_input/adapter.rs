@@ -15,24 +15,27 @@ pub enum RoutedInputAdapterError {
 pub fn build_routed_input_request(
     event: &InputEventPacket,
     route: &InputRoute,
+    target_window: XWindowId,
 ) -> Result<XLibreRoutedInputRequest, RoutedInputAdapterError> {
-    build_routed_input_request_inner(event, route)
+    build_routed_input_request_inner(event, route, target_window)
 }
 
 pub fn build_flat_routed_input_request(
     event: &InputEventPacket,
     route: &InputRoute,
+    target_window: XWindowId,
 ) -> Result<XLibreRoutedInputRequest, RoutedInputAdapterError> {
     if route.transform != Transform::IDENTITY {
         return Err(RoutedInputAdapterError::UnsupportedTransform);
     }
 
-    build_routed_input_request_inner(event, route)
+    build_routed_input_request_inner(event, route, target_window)
 }
 
 fn build_routed_input_request_inner(
     event: &InputEventPacket,
     route: &InputRoute,
+    target_window: XWindowId,
 ) -> Result<XLibreRoutedInputRequest, RoutedInputAdapterError> {
     if event.serial != route.input_serial {
         return Err(RoutedInputAdapterError::SerialMismatch);
@@ -45,10 +48,9 @@ fn build_routed_input_request_inner(
         InputRouteOutcome::Denied => return Err(RoutedInputAdapterError::Denied),
     }
 
-    let target_window = route
-        .target_window
-        .filter(|window| window.is_valid())
-        .ok_or(RoutedInputAdapterError::MissingTargetWindow)?;
+    if !target_window.is_valid() {
+        return Err(RoutedInputAdapterError::MissingTargetWindow);
+    }
     let local_position = route
         .local_position
         .ok_or(RoutedInputAdapterError::MissingLocalPosition)?;

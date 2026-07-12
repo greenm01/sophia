@@ -167,7 +167,7 @@ fn ready_surface_transaction_commits_geometry_and_buffer_together() {
 fn committed_surface_state_projects_to_layer_with_committed_visual_truth() {
     let engine = HeadlessEngine::default();
     let mut template = test_layer(0, 9, 0, Region::empty());
-    template.window = Some(XWindowId::new(0x44, 1));
+    template.authority_local_id = Some(AuthorityLocalId::new(0x44, 1));
     template.namespace = Some(NamespaceId::from_raw(7));
     template.crop = Some(Rect {
         x: 0,
@@ -198,7 +198,10 @@ fn committed_surface_state_projects_to_layer_with_committed_visual_truth() {
         .unwrap();
 
     assert_eq!(layer.surface, template.surface);
-    assert_eq!(layer.window, Some(XWindowId::new(0x44, 1)));
+    assert_eq!(
+        layer.authority_local_id,
+        Some(AuthorityLocalId::new(0x44, 1))
+    );
     assert_eq!(layer.namespace, Some(NamespaceId::from_raw(7)));
     assert_eq!(layer.stack_rank, 9);
     assert_eq!(layer.crop, template.crop);
@@ -356,7 +359,7 @@ fn surface_visual_state_table_rejects_invalid_pending_surface() {
 }
 
 #[test]
-fn surface_transaction_readiness_requires_ready_buffer_and_geometry() {
+fn surface_transaction_readiness_allows_null_buffer_unmap_after_mapping() {
     let engine = HeadlessEngine::default();
     let old_layer = test_layer(0, 0, 0, Region::empty());
     let committed = engine.committed_state_from_layer(&old_layer);
@@ -387,6 +390,10 @@ fn surface_transaction_readiness_requires_ready_buffer_and_geometry() {
     );
     assert_eq!(
         table.transaction_commit_readiness(&missing_buffer),
+        SurfaceTransactionCommitReadiness::Ready
+    );
+    assert_eq!(
+        SurfaceVisualStateTable::new().transaction_commit_readiness(&missing_buffer),
         SurfaceTransactionCommitReadiness::MissingBuffer
     );
     assert_eq!(
@@ -403,7 +410,7 @@ fn surface_transaction_readiness_requires_ready_buffer_and_geometry() {
 }
 
 #[test]
-fn malformed_surface_transactions_do_not_commit_visual_state() {
+fn null_buffer_unmaps_but_malformed_geometry_does_not_commit() {
     let engine = HeadlessEngine::default();
     let old_layer = test_layer(0, 0, 0, Region::empty());
     let mut committed = vec![engine.committed_state_from_layer(&old_layer)];
@@ -423,9 +430,11 @@ fn malformed_surface_transactions_do_not_commit_visual_state() {
         &mut committed,
     );
 
-    assert_eq!(commit.outcome, TransactionOutcome::RejectedInvalidSurface);
-    assert!(commit.applied_surfaces.is_empty());
-    assert_eq!(committed, before);
+    assert_eq!(commit.outcome, TransactionOutcome::Committed);
+    assert_eq!(commit.applied_surfaces, vec![old_layer.surface]);
+    assert_eq!(committed[0].buffer, BufferSource::None);
+
+    let mut committed = before.clone();
 
     let mut empty_geometry = old_layer.to_surface_transaction(
         TransactionId::from_raw(85),
