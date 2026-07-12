@@ -129,6 +129,14 @@ pub struct SmokeReadbackCapture {
     pub readbacks: Vec<CpuBufferSnapshot>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct LiveCompositeCaptureFrame {
+    pub report: SmokeReadbackReport,
+    pub surfaces: Vec<SurfaceSnapshot>,
+    pub layers: Vec<LayerSnapshot>,
+    pub updates: Vec<LiveCpuBufferUpdate>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct XAtoms {
     pub wm_state: Atom,

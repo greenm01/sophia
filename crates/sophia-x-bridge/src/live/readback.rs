@@ -106,6 +106,51 @@ where
     ))
 }
 
+pub fn readback_composite_pixmap_patch<C>(
+    connection: &C,
+    pixmap: u32,
+    rect: Rect,
+    buffers: &mut CpuBufferStore,
+) -> Result<CpuBufferPatchSnapshot, XBridgeError>
+where
+    C: Connection,
+{
+    let width = u16::try_from(rect.width).map_err(|error| XBridgeError::PixmapReadback {
+        pixmap,
+        message: error.to_string(),
+    })?;
+    let height = u16::try_from(rect.height).map_err(|error| XBridgeError::PixmapReadback {
+        pixmap,
+        message: error.to_string(),
+    })?;
+    let x = i16::try_from(rect.x).map_err(|error| XBridgeError::PixmapReadback {
+        pixmap,
+        message: error.to_string(),
+    })?;
+    let y = i16::try_from(rect.y).map_err(|error| XBridgeError::PixmapReadback {
+        pixmap,
+        message: error.to_string(),
+    })?;
+    let image = connection
+        .get_image(ImageFormat::Z_PIXMAP, pixmap, x, y, width, height, u32::MAX)
+        .map_err(|error| XBridgeError::PixmapReadback {
+            pixmap,
+            message: error.to_string(),
+        })?
+        .reply()
+        .map_err(|error| XBridgeError::PixmapReadback {
+            pixmap,
+            message: error.to_string(),
+        })?;
+
+    buffers
+        .patch_pixmap(pixmap, rect, image.data)
+        .ok_or_else(|| XBridgeError::PixmapReadback {
+            pixmap,
+            message: "damage patch does not match its cached pixmap".to_owned(),
+        })
+}
+
 pub fn readback_surface_pixmaps<C>(
     connection: &C,
     surfaces: &mut [SurfaceSnapshot],
@@ -128,6 +173,17 @@ where
     }
 
     Ok(readbacks)
+}
+
+pub fn map_surface_cpu_buffers(surfaces: &mut [SurfaceSnapshot], buffers: &CpuBufferStore) {
+    for surface in surfaces {
+        let BufferSource::XPixmap { pixmap } = surface.source else {
+            continue;
+        };
+        if let Some(handle) = buffers.handle_for_pixmap(pixmap) {
+            surface.source = BufferSource::CpuBuffer { handle };
+        }
+    }
 }
 
 pub fn layers_from_surfaces(surfaces: &[SurfaceSnapshot]) -> Vec<LayerSnapshot> {

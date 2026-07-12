@@ -2,6 +2,8 @@ use super::*;
 
 use std::collections::BTreeMap;
 use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError};
 use std::time::{Duration, Instant};
 
@@ -9,9 +11,23 @@ use sophia_protocol::{AuthorityKind, SurfaceTransactionReadiness};
 use sophia_x_authority::{
     XAuthorityControlAck, XAuthorityControlCommand, XAuthorityControlOutcome, XAuthorityInputEvent,
 };
-use sophia_x_bridge::LiveCompositeCapture;
+use sophia_x_bridge::{LiveCompositeCapture, LiveXTestInput};
 
-const COMPAT_CAPTURE_INTERVAL: Duration = Duration::from_millis(33);
+const COMPAT_CAPTURE_INTERVAL: Duration = Duration::from_millis(16);
+
+#[derive(Clone, Copy, Debug, Default)]
+struct CompatInputStats {
+    keys_injected: usize,
+    max_inject: Duration,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct CompatCaptureStats {
+    full_readbacks: usize,
+    patch_readbacks: usize,
+    bytes_read: usize,
+    max_capture: Duration,
+}
 
 pub(crate) fn run_persistent_xlibre_session(
     args: &[String],
@@ -114,13 +130,13 @@ pub(crate) fn run_persistent_xlibre_session(
         &mut wm_session,
         true,
     );
-    process.terminate()?;
     drop(input_sender);
     drop(control_sender);
     drop(authority_receiver);
     let provider_result = provider
         .join()
         .map_err(|_| "XLibre compatibility provider thread panicked")?;
+    process.terminate()?;
     provider_result.map_err(|error| format!("XLibre compatibility provider failed: {error}"))?;
     result
 }
@@ -147,28 +163,85 @@ fn run_compat_provider(
     control: Receiver<XAuthorityControlCommand>,
     control_ack: SyncSender<XAuthorityControlAck>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let stop_input = Arc::new(AtomicBool::new(false));
+    let input_stop = Arc::clone(&stop_input);
+    let input_display = display.to_owned();
+    let (input_health_sender, input_health_receiver) = std::sync::mpsc::sync_channel(1);
+    let input_worker = std::thread::spawn(move || {
+        let result = run_compat_input(&input_display, input, &input_stop);
+        let health = result.as_ref().map(|_| ()).map_err(ToString::to_string);
+        let _ = input_health_sender.try_send(health);
+        result
+    });
+
+    let capture_result = run_compat_capture_provider(
+        display,
+        sender,
+        control,
+        control_ack,
+        &input_health_receiver,
+    );
+    stop_input.store(true, Ordering::Release);
+    let input_result = input_worker
+        .join()
+        .map_err(|_| "XLibre compatibility input worker panicked")?;
+    let capture_stats = capture_result?;
+    let input_stats = input_result?;
+    println!(
+        "sophia_xlibre_compat schema=1 status=complete full_readbacks={} patch_readbacks={} bytes_read={} max_capture_msec={} keys_injected={} max_inject_msec={}",
+        capture_stats.full_readbacks,
+        capture_stats.patch_readbacks,
+        capture_stats.bytes_read,
+        capture_stats.max_capture.as_millis(),
+        input_stats.keys_injected,
+        input_stats.max_inject.as_millis(),
+    );
+    std::io::stdout().flush()?;
+    Ok(())
+}
+
+fn run_compat_input(
+    display: &str,
+    input: Receiver<XAuthorityInputEvent>,
+    stop: &AtomicBool,
+) -> Result<CompatInputStats, Box<dyn std::error::Error + Send + Sync>> {
+    let injector = LiveXTestInput::connect(Some(display))?;
+    let mut key_injected_reported = false;
+    let mut stats = CompatInputStats::default();
+    while !stop.load(Ordering::Acquire) {
+        match input.recv_timeout(Duration::from_millis(5)) {
+            Ok(XAuthorityInputEvent::Key(event)) => {
+                let started = Instant::now();
+                injector.inject_key(event.keycode, event.pressed, event.time_msec)?;
+                stats.keys_injected = stats.keys_injected.saturating_add(1);
+                stats.max_inject = stats.max_inject.max(started.elapsed());
+                if !key_injected_reported {
+                    println!("sophia_live_session_input_pipeline schema=1 status=key_injected");
+                    std::io::stdout().flush()?;
+                    key_injected_reported = true;
+                }
+            }
+            Ok(XAuthorityInputEvent::Pointer(_)) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return Ok(stats),
+        }
+    }
+    Ok(stats)
+}
+
+fn run_compat_capture_provider(
+    display: &str,
+    sender: SyncSender<XAuthorityObservedTransactionBatch>,
+    control: Receiver<XAuthorityControlCommand>,
+    control_ack: SyncSender<XAuthorityControlAck>,
+    input_health: &Receiver<Result<(), String>>,
+) -> Result<CompatCaptureStats, Box<dyn std::error::Error + Send + Sync>> {
     let mut capture = LiveCompositeCapture::connect(Some(display))?;
     let mut generations = BTreeMap::new();
-    let mut checksums = BTreeMap::new();
     let mut serial = 1u64;
     let mut last_capture = Instant::now() - COMPAT_CAPTURE_INTERVAL;
-    let mut key_injected_reported = false;
+    let mut stats = CompatCaptureStats::default();
     loop {
-        loop {
-            match input.try_recv() {
-                Ok(XAuthorityInputEvent::Key(event)) => {
-                    capture.inject_key(event.keycode, event.pressed, event.time_msec)?;
-                    if !key_injected_reported {
-                        println!("sophia_live_session_input_pipeline schema=1 status=key_injected");
-                        std::io::stdout().flush()?;
-                        key_injected_reported = true;
-                    }
-                }
-                Ok(XAuthorityInputEvent::Pointer(_)) => {}
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => return Ok(()),
-            }
-        }
         loop {
             match control.try_recv() {
                 Ok(command) => {
@@ -179,7 +252,17 @@ fn run_compat_provider(
                     });
                 }
                 Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => return Ok(()),
+                Err(TryRecvError::Disconnected) => return Ok(stats),
+            }
+        }
+        match input_health.try_recv() {
+            Ok(Ok(())) => return Ok(stats),
+            Ok(Err(error)) => {
+                return Err(format!("XLibre compatibility input worker failed: {error}").into());
+            }
+            Err(TryRecvError::Empty) => {}
+            Err(TryRecvError::Disconnected) => {
+                return Err("XLibre compatibility input health channel disconnected".into());
             }
         }
         if last_capture.elapsed() < COMPAT_CAPTURE_INTERVAL {
@@ -187,47 +270,69 @@ fn run_compat_provider(
             continue;
         }
         last_capture = Instant::now();
+        let capture_started = Instant::now();
         let captured = capture.capture()?;
-        if captured.readbacks.is_empty() {
+        stats.max_capture = stats.max_capture.max(capture_started.elapsed());
+        for update in &captured.updates {
+            stats.bytes_read = stats.bytes_read.saturating_add(update.byte_len());
+            match update {
+                sophia_x_bridge::LiveCpuBufferUpdate::Replace(_) => {
+                    stats.full_readbacks = stats.full_readbacks.saturating_add(1);
+                }
+                sophia_x_bridge::LiveCpuBufferUpdate::Patch(_) => {
+                    stats.patch_readbacks = stats.patch_readbacks.saturating_add(1);
+                }
+            }
+        }
+        if captured.updates.is_empty() {
             continue;
         }
         let transaction_id = TransactionId::from_raw(serial);
         serial = serial
             .checked_add(1)
             .ok_or("compat transaction ID exhausted")?;
-        let mut updates = Vec::with_capacity(captured.readbacks.len());
+        let mut updates = Vec::with_capacity(captured.updates.len());
         let mut changed_handles = std::collections::BTreeSet::new();
-        for buffer in captured.readbacks {
-            let checksum = buffer
-                .bytes
-                .iter()
-                .fold(0xcbf2_9ce4_8422_2325u64, |hash, byte| {
-                    (hash ^ u64::from(*byte)).wrapping_mul(0x100_0000_01b3)
-                });
-            if checksums.get(&buffer.handle).copied() == Some(checksum) {
-                continue;
-            }
-            checksums.insert(buffer.handle, checksum);
-            changed_handles.insert(buffer.handle);
-            let width = usize::try_from(buffer.size.width)?;
+        for buffer in captured.updates {
+            let handle = buffer.handle();
+            changed_handles.insert(handle);
+            let size = match &buffer {
+                sophia_x_bridge::LiveCpuBufferUpdate::Replace(buffer) => buffer.size,
+                sophia_x_bridge::LiveCpuBufferUpdate::Patch(buffer) => buffer.size,
+            };
+            let width = usize::try_from(size.width)?;
             let stride = width.checked_mul(4).ok_or("compat stride overflow")?;
             let generation = generations
-                .get(&buffer.handle)
+                .get(&handle)
                 .copied()
                 .unwrap_or(0u64)
                 .saturating_add(1);
-            generations.insert(buffer.handle, generation);
-            updates.push(XAuthorityCpuBufferUpdate::Replace(
-                XAuthorityCpuBufferSnapshot {
-                    handle: buffer.handle,
-                    drawable: XResourceId::new(u64::from(buffer.pixmap), 1),
-                    size: buffer.size,
-                    stride: u32::try_from(stride)?,
-                    format: sophia_x_authority::X_AUTHORITY_CPU_BUFFER_FORMAT_XRGB8888,
-                    generation,
-                    bytes: buffer.bytes,
-                },
-            ));
+            generations.insert(handle, generation);
+            updates.push(match buffer {
+                sophia_x_bridge::LiveCpuBufferUpdate::Replace(buffer) => {
+                    XAuthorityCpuBufferUpdate::Replace(XAuthorityCpuBufferSnapshot {
+                        handle: buffer.handle,
+                        drawable: XResourceId::new(u64::from(buffer.pixmap), 1),
+                        size: buffer.size,
+                        stride: u32::try_from(stride)?,
+                        format: sophia_x_authority::X_AUTHORITY_CPU_BUFFER_FORMAT_XRGB8888,
+                        generation,
+                        bytes: buffer.bytes,
+                    })
+                }
+                sophia_x_bridge::LiveCpuBufferUpdate::Patch(buffer) => {
+                    XAuthorityCpuBufferUpdate::Patch(XAuthorityCpuBufferPatch {
+                        handle: buffer.handle,
+                        drawable: XResourceId::new(u64::from(buffer.pixmap), 1),
+                        size: buffer.size,
+                        stride: u32::try_from(stride)?,
+                        format: sophia_x_authority::X_AUTHORITY_CPU_BUFFER_FORMAT_XRGB8888,
+                        generation,
+                        rect: buffer.rect,
+                        bytes: buffer.bytes,
+                    })
+                }
+            });
         }
         let transactions = captured
             .surfaces
@@ -268,7 +373,7 @@ fn run_compat_provider(
             })
             .is_err()
         {
-            return Ok(());
+            return Ok(stats);
         }
     }
 }

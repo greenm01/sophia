@@ -932,6 +932,9 @@ fn run_session_loop(
     let mut physical_sequence_completed_at: Option<Instant> = None;
     let mut physical_input_completion_reported = false;
     let mut input_pixel_change = false;
+    let mut input_proof_started_at = None;
+    let mut input_changed_checksum = None;
+    let mut input_presented_latency = None;
     let mut pointer_checksum = None;
     let mut pointer_phase_started_at = None;
     let mut pointer_pixel_change = false;
@@ -1058,6 +1061,7 @@ fn run_session_loop(
                     && (config.expect_physical_text.is_none() || physical_keys_routed > 0)
                 {
                     input_pixel_change = true;
+                    input_changed_checksum.get_or_insert(report.checksum);
                 }
                 if let Some(before_frame) = pointer_checksum
                     && report.checksum != before_frame
@@ -1196,7 +1200,9 @@ fn run_session_loop(
                     .as_ref()
                     .is_some_and(PhysicalTextProof::is_complete)
             {
-                physical_sequence_completed_at = Some(Instant::now());
+                let completed_at = Instant::now();
+                physical_sequence_completed_at = Some(completed_at);
+                input_proof_started_at = Some(completed_at);
             }
             if report.pointer_events > 0 {
                 println!(
@@ -1255,6 +1261,7 @@ fn run_session_loop(
                 .as_ref()
                 .map(|report| (report.checksum, scene.buffer_checksum()));
             if let Some(text) = config.inject_text.as_deref() {
+                input_proof_started_at = Some(Instant::now());
                 let events = synthetic_text_input_events(text)?;
                 let expected = events.len();
                 let runtime = runtime
@@ -1310,8 +1317,21 @@ fn run_session_loop(
             );
             std::io::stdout().flush()?;
         }
-        if config.exit_after_input_proof
+        if input_presented_latency.is_none()
             && input_pixel_change
+            && let (Some(started), Some(changed_checksum)) =
+                (input_proof_started_at, input_changed_checksum)
+            && native_scanout.as_ref().is_none_or(|native| {
+                native
+                    .heads
+                    .first()
+                    .is_some_and(|head| head.presented_checksum == changed_checksum)
+            })
+        {
+            input_presented_latency = Some(started.elapsed());
+        }
+        if config.exit_after_input_proof
+            && input_presented_latency.is_some()
             && (config.expect_physical_text.is_none() || physical_input_completion_reported)
             && (!config.expect_physical_pointer || pointer_pixel_change)
         {
@@ -1335,6 +1355,9 @@ fn run_session_loop(
         )
         .into());
     }
+    if config.input_proof_requested() && input_presented_latency.is_none() {
+        return Err("persistent live session input pixels were not presented".into());
+    }
     if config.expect_physical_text.is_some()
         && (!physical_text_proof
             .as_ref()
@@ -1355,7 +1378,7 @@ fn run_session_loop(
         return Err("live session ended without a committed external WM layout".into());
     }
     println!(
-        "sophia_live_session schema=7 status=bounded_complete display={} elapsed_msec={} session_ticks={} authority_batches={} authority_transactions={} authority_queue_capacity={} authority_batches_dropped=0 backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_max_nonzero_pixel_bytes={} cpu_nonzero_frames={} cpu_checksum={} injected_input={} input_pixel_change={} physical_events={} physical_keys_routed={} pointer_pixel_change={} physical_pointer_events={} physical_pointer_routed={} pointer_proof={} native_presentation={} native_submissions={} native_submit_deferred={} native_submit_failures={} native_retirements={} native_retire_failures={} native_max_in_flight_ticks={} native_max_submit_to_page_flip_msec={} native_callback_accepted={} native_callback_rejected={} native_callback_queue_saturated={} native_nonzero_exports={} native_export_attempts={} native_in_flight={} native_cleanup_pending={} physical_input={} wm_policy={} wm_requests={} wm_committed={} wm_restarts={} wm_degraded={}",
+        "sophia_live_session schema=8 status=bounded_complete display={} elapsed_msec={} session_ticks={} authority_batches={} authority_transactions={} authority_queue_capacity={} authority_batches_dropped=0 backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_max_nonzero_pixel_bytes={} cpu_nonzero_frames={} cpu_checksum={} injected_input={} input_pixel_change={} input_presented_latency_msec={} physical_events={} physical_keys_routed={} pointer_pixel_change={} physical_pointer_events={} physical_pointer_routed={} pointer_proof={} native_presentation={} native_submissions={} native_submit_deferred={} native_submit_failures={} native_retirements={} native_retire_failures={} native_max_in_flight_ticks={} native_max_submit_to_page_flip_msec={} native_callback_accepted={} native_callback_rejected={} native_callback_queue_saturated={} native_nonzero_exports={} native_export_attempts={} native_in_flight={} native_cleanup_pending={} physical_input={} wm_policy={} wm_requests={} wm_committed={} wm_restarts={} wm_degraded={}",
         config.display,
         started.elapsed().as_millis(),
         session_ticks,
@@ -1372,6 +1395,9 @@ fn run_session_loop(
         report.checksum,
         config.inject_text.is_some(),
         input_pixel_change,
+        input_presented_latency
+            .map(|latency| latency.as_millis().to_string())
+            .unwrap_or_else(|| "none".to_owned()),
         physical_events,
         physical_keys_routed,
         pointer_pixel_change,

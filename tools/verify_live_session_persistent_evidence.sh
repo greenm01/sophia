@@ -49,7 +49,10 @@ expected_keys=(
     native_nonzero_exports native_export_attempts native_in_flight
     native_cleanup_pending physical_input
 )
-if [[ "${observed[schema]:-}" == "7" ]]; then
+if [[ "${observed[schema]:-}" == "8" ]]; then
+    expected_keys+=(input_presented_latency_msec)
+fi
+if [[ "${observed[schema]:-}" == "7" || "${observed[schema]:-}" == "8" ]]; then
     expected_keys+=(wm_policy wm_requests wm_committed wm_restarts wm_degraded)
 fi
 if [[ "${#observed[@]}" -ne "${#expected_keys[@]}" ]]; then
@@ -63,7 +66,7 @@ for key in "${expected_keys[@]}"; do
     fi
 done
 
-[[ "${observed[schema]}" == "6" || "${observed[schema]}" == "7" ]]
+[[ "${observed[schema]}" == "6" || "${observed[schema]}" == "7" || "${observed[schema]}" == "8" ]]
 [[ "${observed[status]}" == "bounded_complete" ]]
 [[ "${observed[injected_input]}" == "true" || "${observed[injected_input]}" == "false" ]]
 [[ "${observed[input_pixel_change]}" == "true" ]]
@@ -85,7 +88,10 @@ numeric_keys=(
     native_callback_rejected native_callback_queue_saturated
     native_nonzero_exports native_export_attempts
 )
-if [[ "${observed[schema]}" == "7" ]]; then
+if [[ "${observed[schema]}" == "8" ]]; then
+    numeric_keys+=(input_presented_latency_msec)
+fi
+if [[ "${observed[schema]}" == "7" || "${observed[schema]}" == "8" ]]; then
     numeric_keys+=(wm_requests wm_committed wm_restarts)
     [[ "${observed[wm_policy]}" == "disabled" || "${observed[wm_policy]}" == "external" ]]
     [[ "${observed[wm_degraded]}" == "true" || "${observed[wm_degraded]}" == "false" ]]

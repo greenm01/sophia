@@ -129,6 +129,24 @@ Reduced logs persist across reboot under
 the latest and one previous run without recording keycodes, text, or device
 paths.
 
+For the bounded Kitty latency gate, keep the outside control plane connected
+and launch:
+
+```sh
+sophia --max-runtime-ms=30000 --expect-physical-text=sophia --exit-after-input-proof
+```
+
+Arm the guard as prompted, then type `sophia` followed by Enter once Kitty is
+visible. After the TTY is restored, verify the persistent evidence with:
+
+```sh
+tools/verify_xlibre_compat_latency_evidence.sh \
+  "${XDG_STATE_HOME:-$HOME/.local/state}/sophia/kitty-session/session.log"
+```
+
+The gate requires damage-patch capture, no libinput processing-lag warning,
+and input pixels presented within 100 milliseconds of the final proof key.
+
 XLibre receives no physical devices and does not own scanout. Engine routes
 physical keys to the focused opaque surface; the compatibility adapter delivers
 them through a private XTEST connection. This is a usability bridge, not the

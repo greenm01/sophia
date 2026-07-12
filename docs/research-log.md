@@ -54,6 +54,16 @@ adapter had supplied libinput's monotonic event timestamp. The compatibility
 injector now requests zero-delay delivery and synchronously checks each XTEST
 request instead of treating a queued unchecked request as successful.
 
+That hardware rerun also exposed the compatibility renderer's full-frame cost:
+45 frames in 25.9 seconds, 8.74 MB read and hashed per frame, a 397 ms libinput
+lag warning, and a maximum 798 ms submit-to-page-flip interval. The live bridge
+now maintains X Damage trackers and a CPU-buffer base, emits one clipped packed
+patch per damaged surface, and falls back to replacement only for initial,
+resized, missing-base, or at-least-half-surface updates. XTEST uses an
+independent connection and worker so capture cannot block channel draining.
+The optimized dummy-XLibre proof presented routed xterm input in 17 ms with
+three steady patches, 1.26 MB total readback, and a 9 ms maximum capture.
+
 ## 2026-07-11: Isolated Virtio-GPU Session Evidence
 
 Sophia now has a direct-kernel QEMU initramfs builder and a headless session

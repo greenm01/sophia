@@ -360,6 +360,40 @@ fn damage_frame_drops_unmapped_surface_damage() {
 }
 
 #[test]
+fn cpu_buffer_store_applies_packed_damage_patch_to_cached_pixmap() {
+    let mut buffers = CpuBufferStore::default();
+    let base = buffers.upsert_pixmap(
+        0x5000,
+        Size {
+            width: 4,
+            height: 3,
+        },
+        24,
+        0x20,
+        vec![0; 4 * 3 * 4],
+    );
+    let patch = buffers
+        .patch_pixmap(
+            0x5000,
+            Rect {
+                x: 1,
+                y: 1,
+                width: 2,
+                height: 1,
+            },
+            vec![1, 2, 3, 4, 5, 6, 7, 8],
+        )
+        .unwrap();
+
+    assert_eq!(patch.handle, base.handle);
+    assert_eq!(patch.bytes, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+    assert_eq!(
+        &buffers.get(base.handle).unwrap().bytes[20..28],
+        &[1, 2, 3, 4, 5, 6, 7, 8]
+    );
+}
+
+#[test]
 fn emits_surface_and_layer_snapshots_for_detected_clients() {
     let mut state = XMirrorState::default();
     let mut window = mirror(0x20, None, 4);

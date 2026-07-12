@@ -37,6 +37,8 @@ mod prelude {
         SupervisedProcessKind, SupervisorEvent, update_supervisor,
     };
     pub(crate) use sophia_wm_demo::{ExternalWmClient, tile_workspace};
+    #[cfg(feature = "atomic-scanout-live")]
+    pub(crate) use sophia_x_authority::XAuthorityCpuBufferPatch;
     pub(crate) use sophia_x_authority::{
         X_SOPHIA_PRESENT_EXTENSION_NAME, X_SOPHIA_PRESENT_MAJOR_OPCODE,
         X_SOPHIA_PRESENT_PIXMAP_MINOR_OPCODE, XAuthorityCpuBufferSnapshot,
