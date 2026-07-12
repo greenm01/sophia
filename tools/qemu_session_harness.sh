@@ -6,7 +6,17 @@ OUT_DIR="${SOPHIA_QEMU_OUT_DIR:-$ROOT_DIR/.qemu}"
 KERNEL_VERSION="${SOPHIA_QEMU_KERNEL_VERSION:-$(uname -r)}"
 KERNEL_IMAGE="${SOPHIA_QEMU_KERNEL:-/boot/vmlinuz-$KERNEL_VERSION}"
 INITRAMFS="${SOPHIA_QEMU_INITRAMFS:-$OUT_DIR/sophia-$KERNEL_VERSION.img}"
-EVIDENCE_FILE="${SOPHIA_QEMU_EVIDENCE:-/tmp/sophia-qemu-session.log}"
+SCENARIO="${SOPHIA_QEMU_SCENARIO:-session}"
+if [[ "$SCENARIO" != "session" && "$SCENARIO" != "emergency-recovery" ]]; then
+    echo "SOPHIA_QEMU_SCENARIO must be session or emergency-recovery" >&2
+    exit 1
+fi
+if [[ "$SCENARIO" == "emergency-recovery" ]]; then
+    DEFAULT_EVIDENCE_FILE="/tmp/sophia-qemu-emergency-recovery.log"
+else
+    DEFAULT_EVIDENCE_FILE="/tmp/sophia-qemu-session.log"
+fi
+EVIDENCE_FILE="${SOPHIA_QEMU_EVIDENCE:-$DEFAULT_EVIDENCE_FILE}"
 QEMU_BIN="${SOPHIA_QEMU_BIN:-qemu-system-x86_64}"
 MEMORY_MIB="${SOPHIA_QEMU_MEMORY_MIB:-2048}"
 VNC_SOCKET="${SOPHIA_QEMU_VNC_SOCKET:-$OUT_DIR/display.sock}"
@@ -57,7 +67,11 @@ mkdir -p "$(dirname "$EVIDENCE_FILE")"
 rm -f "$VNC_SOCKET" "$QMP_SOCKET" "$SERIAL_FIFO"
 mkfifo "$SERIAL_FIFO"
 
-echo "sophia_qemu_session schema=3 status=starting isolation=headless display_sink=vnc-unix control=qmp-unix host_drm=none host_vt=none guest_network=none storage=none gpu=virtio-gpu gpu_devices=2 gpu_heads=2 keyboard=virtio mouse=virtio ticks=300" | tee -a "$EVIDENCE_FILE"
+if [[ "$SCENARIO" == "emergency-recovery" ]]; then
+    echo "sophia_qemu_recovery schema=1 status=starting isolation=headless control=qmp-unix host_drm=none host_vt=none keyboard=virtio chord=ctrl-alt-backspace" | tee -a "$EVIDENCE_FILE"
+else
+    echo "sophia_qemu_session schema=3 status=starting isolation=headless display_sink=vnc-unix control=qmp-unix host_drm=none host_vt=none guest_network=none storage=none gpu=virtio-gpu gpu_devices=2 gpu_heads=2 keyboard=virtio mouse=virtio ticks=300" | tee -a "$EVIDENCE_FILE"
+fi
 
 while IFS= read -r line || [[ -n "$line" ]]; do
     printf '%s\n' "${line%$'\r'}"
@@ -81,9 +95,80 @@ LOGGER_PID=$!
     -device virtio-mouse-pci \
     -kernel "$KERNEL_IMAGE" \
     -initrd "$INITRAMFS" \
-    -append "console=ttyS0 quiet loglevel=3 rdinit=/sbin/sophia-qemu-init rd.driver.pre=virtio_pci rd.driver.pre=virtio_gpu rd.driver.pre=virtio_input panic=-1" \
+    -append "console=ttyS0 quiet loglevel=3 rdinit=/sbin/sophia-qemu-init rd.driver.pre=virtio_pci rd.driver.pre=virtio_gpu rd.driver.pre=virtio_input panic=-1 sophia.scenario=$SCENARIO" \
     > "$SERIAL_FIFO" 2>&1 &
 QEMU_PID=$!
+
+if [[ "$SCENARIO" == "emergency-recovery" ]]; then
+    guard_ready=false
+    for _ in $(seq 1 600); do
+        if grep -q '^sophia_session_input_guard schema=1 status=ready ' "$EVIDENCE_FILE"; then
+            guard_ready=true
+            break
+        fi
+        if ! kill -0 "$QEMU_PID" 2>/dev/null; then
+            break
+        fi
+        sleep 0.05
+    done
+    if [[ "$guard_ready" != true ]]; then
+        echo "sophia_qemu_recovery schema=1 status=failed reason=input_guard_readiness_timeout" | tee -a "$EVIDENCE_FILE"
+        exit 1
+    fi
+
+    if ! "$ROOT_DIR/tools/qemu_qmp_emergency_chord.py" "$QMP_SOCKET"; then
+        echo "sophia_qemu_recovery schema=1 status=failed reason=qmp_arm_input_send" | tee -a "$EVIDENCE_FILE"
+        exit 1
+    fi
+    echo "sophia_qemu_recovery_input schema=1 status=sent phase=arm source=qmp device=virtio-keyboard chord=ctrl-alt-backspace events=6" | tee -a "$EVIDENCE_FILE"
+
+    recovery_ready=false
+    for _ in $(seq 1 600); do
+        if grep -q '^sophia_session_input_guard schema=1 status=armed$' "$EVIDENCE_FILE" \
+            && grep -q '^sophia_live_session_input_pipeline schema=1 status=poller_ready ' "$EVIDENCE_FILE" \
+            && grep -q '^sophia_live_session_input_pipeline schema=1 status=focus_ready$' "$EVIDENCE_FILE"; then
+            recovery_ready=true
+            break
+        fi
+        if ! kill -0 "$QEMU_PID" 2>/dev/null; then
+            break
+        fi
+        sleep 0.05
+    done
+    if [[ "$recovery_ready" != true ]]; then
+        echo "sophia_qemu_recovery schema=1 status=failed reason=armed_session_readiness_timeout" | tee -a "$EVIDENCE_FILE"
+        exit 1
+    fi
+
+    if ! "$ROOT_DIR/tools/qemu_qmp_emergency_chord.py" "$QMP_SOCKET"; then
+        echo "sophia_qemu_recovery schema=1 status=failed reason=qmp_trigger_input_send" | tee -a "$EVIDENCE_FILE"
+        exit 1
+    fi
+    echo "sophia_qemu_recovery_input schema=1 status=sent phase=trigger source=qmp device=virtio-keyboard chord=ctrl-alt-backspace events=6" | tee -a "$EVIDENCE_FILE"
+
+    set +e
+    wait "$QEMU_PID"
+    qemu_status=$?
+    QEMU_PID=""
+    wait "$LOGGER_PID"
+    logger_status=$?
+    LOGGER_PID=""
+    set -e
+    cleanup
+
+    if [[ "$qemu_status" -ne 0 ]]; then
+        echo "sophia_qemu_recovery schema=1 status=failed qemu_exit=$qemu_status" | tee -a "$EVIDENCE_FILE"
+        exit "$qemu_status"
+    fi
+    if [[ "$logger_status" -ne 0 ]]; then
+        echo "sophia_qemu_recovery schema=1 status=failed serial_logger_exit=$logger_status" | tee -a "$EVIDENCE_FILE"
+        exit "$logger_status"
+    fi
+
+    echo "sophia_qemu_recovery schema=1 status=complete qemu_exit=0" | tee -a "$EVIDENCE_FILE"
+    "$ROOT_DIR/tools/verify_qemu_emergency_recovery_evidence.sh" "$EVIDENCE_FILE"
+    exit 0
+fi
 
 input_ready=false
 for _ in $(seq 1 600); do

@@ -1,5 +1,6 @@
 use super::prelude::*;
 
+use sophia_cli::emergency_input::{EmergencyChordAction, EmergencyChordState};
 use sophia_cli::input_proof::{PhysicalTextProof, PhysicalTextProofEvent};
 use sophia_engine::{
     FocusedInputRoute, InputFocusDecision, InputFocusState, NonBlockingInputPoller,
@@ -16,6 +17,7 @@ use std::process::{Child, Stdio};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
 use std::time::{Duration, Instant};
 
+pub(super) mod input_guard;
 pub(super) mod xlibre_compat;
 
 const SESSION_AUTHORITY_CAPACITY: usize = 256;
@@ -49,6 +51,13 @@ pub(crate) fn run_persistent_xterm_session(
             64,
         )?)
     };
+    if !config.input_devices.is_empty() {
+        println!(
+            "sophia_live_session_input_pipeline schema=1 status=poller_ready devices={}",
+            config.input_devices.len()
+        );
+        std::io::stdout().flush()?;
+    }
     let mut wm_session = LiveWmSession::from_config(&config)?;
 
     let server_path = config.socket_path.clone();
@@ -153,6 +162,7 @@ pub(crate) fn run_persistent_xterm_session(
         &mut physical_input,
         &mut native_scanout,
         &mut wm_session,
+        false,
     );
     process.terminate()?;
     drop(input_sender);
@@ -899,6 +909,7 @@ fn run_session_loop(
     >,
     native_scanout: &mut Option<PersistentNativeScanout>,
     wm_session: &mut Option<LiveWmSession>,
+    require_startup_focus: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let started = Instant::now();
     let deadline = config.max_runtime.map(|duration| started + duration);
@@ -931,6 +942,7 @@ fn run_session_loop(
     let mut runtime_surfaces = 0u64;
     let mut focus = InputFocusState::new();
     let mut modifiers = XCoreKeyboardMapper::new();
+    let mut emergency_chord = EmergencyChordState::armed();
     let mut pointer = XCorePointerMapper::new();
     let mut physical_events = 0usize;
     let mut physical_keys_routed = 0usize;
@@ -938,6 +950,10 @@ fn run_session_loop(
     let mut physical_pointer_routed = 0usize;
     let mut session_ticks = 0usize;
     let seat = SeatId::from_raw(SESSION_SEAT_RAW);
+    let mut focus_deadline_started_at = None;
+    let mut focus_ready_reported = false;
+    let mut key_observed_reported = false;
+    let mut key_routed_reported = false;
 
     loop {
         if let Some(status) = child.try_wait()? {
@@ -948,6 +964,13 @@ fn run_session_loop(
         }
         if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             break;
+        }
+        if require_startup_focus
+            && focus.focused_surface(seat).is_none()
+            && focus_deadline_started_at
+                .is_some_and(|started: Instant| started.elapsed() >= Duration::from_secs(5))
+        {
+            return Err("XLibre compatibility input focus was not ready within five seconds of the first presented frame".into());
         }
         let physical_sequence_complete = physical_text_proof
             .as_ref()
@@ -1078,6 +1101,11 @@ fn run_session_loop(
                         transaction.raw()
                     );
                 }
+                if !focus_ready_reported && focus.focused_surface(seat).is_some() {
+                    println!("sophia_live_session_input_pipeline schema=1 status=focus_ready");
+                    std::io::stdout().flush()?;
+                    focus_ready_reported = true;
+                }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 let _ = layout.expire_pending();
@@ -1140,6 +1168,7 @@ fn run_session_loop(
                 &runtime.input_layers(),
                 input_sender,
                 &mut modifiers,
+                &mut emergency_chord,
                 &mut pointer,
                 physical_text_proof.as_mut(),
             )?;
@@ -1147,6 +1176,21 @@ fn run_session_loop(
             physical_keys_routed = physical_keys_routed.saturating_add(report.keys_routed);
             physical_pointer_events = physical_pointer_events.saturating_add(report.pointer_events);
             physical_pointer_routed = physical_pointer_routed.saturating_add(report.pointer_routed);
+            if !key_observed_reported && report.keys_observed > 0 {
+                println!("sophia_live_session_input_pipeline schema=1 status=key_observed");
+                std::io::stdout().flush()?;
+                key_observed_reported = true;
+            }
+            if !key_routed_reported && report.keys_routed > 0 {
+                println!("sophia_live_session_input_pipeline schema=1 status=key_routed");
+                std::io::stdout().flush()?;
+                key_routed_reported = true;
+            }
+            if report.emergency_exit {
+                println!("sophia_live_session_input_pipeline schema=1 status=emergency_exit");
+                std::io::stdout().flush()?;
+                break;
+            }
             if physical_sequence_completed_at.is_none()
                 && physical_text_proof
                     .as_ref()
@@ -1189,6 +1233,13 @@ fn run_session_loop(
                     })
                 })
         });
+        if require_startup_focus
+            && physical_input.is_some()
+            && input_baseline_presented
+            && focus_deadline_started_at.is_none()
+        {
+            focus_deadline_started_at = Some(Instant::now());
+        }
         if injection_checksum.is_none()
             && config.input_proof_requested()
             && input_baseline_presented
@@ -1204,7 +1255,36 @@ fn run_session_loop(
                 .as_ref()
                 .map(|report| (report.checksum, scene.buffer_checksum()));
             if let Some(text) = config.inject_text.as_deref() {
-                send_test_text(input_sender, text)?;
+                let events = synthetic_text_input_events(text)?;
+                let expected = events.len();
+                let runtime = runtime
+                    .as_ref()
+                    .ok_or("synthetic routed input requires an initialized runtime")?;
+                let report = route_input_events(
+                    events,
+                    &focus,
+                    runtime.committed_surfaces(),
+                    &runtime.input_layers(),
+                    input_sender,
+                    &mut modifiers,
+                    &mut emergency_chord,
+                    &mut pointer,
+                    None,
+                )?;
+                if report.keys_routed != expected {
+                    return Err(format!(
+                        "synthetic input did not traverse committed Engine focus: expected={expected} routed={}",
+                        report.keys_routed
+                    )
+                    .into());
+                }
+                if !key_routed_reported {
+                    println!(
+                        "sophia_live_session_input_pipeline schema=1 status=key_routed source=synthetic"
+                    );
+                    std::io::stdout().flush()?;
+                    key_routed_reported = true;
+                }
             } else {
                 physical_input_ready_at = Some(Instant::now());
                 println!(
@@ -2279,39 +2359,48 @@ impl PersistentCpuScene {
     }
 }
 
-fn send_test_text(
-    sender: &SyncSender<XAuthorityInputEvent>,
+fn synthetic_text_input_events(
     text: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut time_msec = 1u32;
-    for keycode in text
+) -> Result<Vec<sophia_protocol::InputEventPacket>, Box<dyn std::error::Error>> {
+    let mut serial = 1u64;
+    let mut events = Vec::with_capacity((text.len() + 1).saturating_mul(2));
+    for x_keycode in text
         .bytes()
         .map(super::x_authority::x11_keycode_for_ascii)
         .chain(std::iter::once(Some(36)))
     {
-        let keycode = keycode.ok_or("test input has no core X keycode")?;
+        let x_keycode = x_keycode.ok_or("test input has no core X keycode")?;
+        let keycode = u32::from(
+            x_keycode
+                .checked_sub(8)
+                .ok_or("test input has no evdev keycode")?,
+        );
         for pressed in [true, false] {
-            sender.try_send(
-                XAuthorityKeyEvent {
-                    keycode,
-                    pressed,
-                    state: 0,
-                    time_msec,
-                }
-                .into(),
-            )?;
-            time_msec = time_msec.saturating_add(1);
+            events.push(sophia_protocol::InputEventPacket {
+                serial,
+                seat: SeatId::from_raw(SESSION_SEAT_RAW),
+                device: DeviceId::from_raw(SESSION_KEYBOARD_DEVICE_RAW),
+                time_msec: serial,
+                kind: sophia_protocol::InputEventKind::Key { keycode, pressed },
+                global_position: None,
+                target_surface: None,
+                target_window: None,
+                local_position: None,
+            });
+            serial = serial.saturating_add(1);
         }
     }
-    Ok(())
+    Ok(events)
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct PhysicalInputRouteReport {
     events: usize,
+    keys_observed: usize,
     keys_routed: usize,
     pointer_events: usize,
     pointer_routed: usize,
+    emergency_exit: bool,
 }
 
 fn route_physical_input(
@@ -2323,19 +2412,52 @@ fn route_physical_input(
     input_layers: &[LayerSnapshot],
     input_sender: &SyncSender<XAuthorityInputEvent>,
     modifiers: &mut XCoreKeyboardMapper,
+    emergency_chord: &mut EmergencyChordState,
+    pointer: &mut XCorePointerMapper,
+    physical_text_proof: Option<&mut PhysicalTextProof>,
+) -> Result<PhysicalInputRouteReport, Box<dyn std::error::Error>> {
+    let events = poller.poll_ready()?;
+    route_input_events(
+        events,
+        focus,
+        committed_surfaces,
+        input_layers,
+        input_sender,
+        modifiers,
+        emergency_chord,
+        pointer,
+        physical_text_proof,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn route_input_events(
+    events: Vec<sophia_protocol::InputEventPacket>,
+    focus: &InputFocusState,
+    committed_surfaces: &[CommittedSurfaceState],
+    input_layers: &[LayerSnapshot],
+    input_sender: &SyncSender<XAuthorityInputEvent>,
+    modifiers: &mut XCoreKeyboardMapper,
+    emergency_chord: &mut EmergencyChordState,
     pointer: &mut XCorePointerMapper,
     mut physical_text_proof: Option<&mut PhysicalTextProof>,
 ) -> Result<PhysicalInputRouteReport, Box<dyn std::error::Error>> {
-    let events = poller.poll_ready()?;
     let mut report = PhysicalInputRouteReport {
         events: events.len(),
+        keys_observed: 0,
         keys_routed: 0,
         pointer_events: 0,
         pointer_routed: 0,
+        emergency_exit: false,
     };
     for event in events {
         match event.kind {
             sophia_protocol::InputEventKind::Key { keycode, pressed } => {
+                report.keys_observed = report.keys_observed.saturating_add(1);
+                if emergency_chord.observe(keycode, pressed) == EmergencyChordAction::Triggered {
+                    report.emergency_exit = true;
+                    continue;
+                }
                 let FocusedInputRoute::Routed(event) =
                     focus.route_keyboard_event(event, committed_surfaces)
                 else {

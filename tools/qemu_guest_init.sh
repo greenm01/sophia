@@ -16,7 +16,18 @@ mount -t devpts devpts /dev/pts
 mount -t tmpfs tmpfs /run 2>/dev/null || true
 chmod 700 "$XDG_RUNTIME_DIR"
 
-echo "sophia_qemu_guest schema=1 status=booting gpu=virtio-gpu ticks=300"
+scenario="session"
+cmdline=""
+IFS= read -r cmdline < /proc/cmdline || true
+case " $cmdline " in
+    *" sophia.scenario=emergency-recovery "*) scenario="emergency-recovery" ;;
+esac
+
+if [ "$scenario" = "emergency-recovery" ]; then
+    echo "sophia_qemu_guest schema=1 status=booting gpu=virtio-gpu scenario=emergency-recovery"
+else
+    echo "sophia_qemu_guest schema=1 status=booting gpu=virtio-gpu ticks=300"
+fi
 
 udevd --daemon
 udevadm control --log-priority=err
@@ -54,9 +65,6 @@ for connector in /sys/class/drm/card[0-9]-*; do
 done
 echo "sophia_qemu_topology schema=1 status=observed requested_heads=2 connectors=$connector_count connected=$connected_count"
 
-set -- sophia-live-session --display=:181 --native-scanout --max-ticks=300 \
-    --expect-physical-text=sophia --expect-physical-pointer
-
 input_devices=""
 for device in /dev/input/event*; do
     if [ -e "$device" ]; then
@@ -67,6 +75,48 @@ for device in /dev/input/event*; do
         fi
     fi
 done
+
+guard_pid=""
+guard_triggered_file="/tmp/sophia-input-guard.triggered"
+if [ "$scenario" = "emergency-recovery" ]; then
+    if [ -z "$input_devices" ]; then
+        echo "sophia_qemu_guest_recovery schema=1 status=failed reason=input_devices_missing"
+        sync
+        poweroff -f
+    fi
+    guard_armed_file="/tmp/sophia-input-guard.armed"
+    rm -f "$guard_armed_file" "$guard_triggered_file"
+    /usr/bin/sophia sophia-session-input-guard \
+        "--input-devices=$input_devices" \
+        "--armed-file=$guard_armed_file" \
+        "--triggered-file=$guard_triggered_file" \
+        "--owner-pid=$$" &
+    guard_pid=$!
+    guard_armed=false
+    attempt=0
+    while [ "$attempt" -lt 600 ]; do
+        if [ -s "$guard_armed_file" ]; then
+            guard_armed=true
+            break
+        fi
+        if ! kill -0 "$guard_pid" 2>/dev/null; then
+            break
+        fi
+        sleep 0.05
+        attempt=$((attempt + 1))
+    done
+    if [ "$guard_armed" != true ]; then
+        echo "sophia_qemu_guest_recovery schema=1 status=failed reason=input_guard_arm_timeout"
+        sync
+        poweroff -f
+    fi
+    set -- sophia-live-session --display=:181 --native-scanout --max-runtime-ms=30000
+    echo "sophia_qemu_guest_recovery schema=1 status=running chord=ctrl-alt-backspace"
+else
+    set -- sophia-live-session --display=:181 --native-scanout --max-ticks=300 \
+        --expect-physical-text=sophia --expect-physical-pointer
+fi
+
 if [ -n "$input_devices" ]; then
     set -- "$@" "--input-devices=$input_devices"
 fi
@@ -76,7 +126,40 @@ SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 /usr/bin/sophia "$@"
 status=$?
 set -e
 
-if [ "$status" -eq 0 ]; then
+if [ "$scenario" = "emergency-recovery" ]; then
+    guard_done=false
+    attempt=0
+    while [ "$attempt" -lt 100 ]; do
+        if ! kill -0 "$guard_pid" 2>/dev/null; then
+            guard_done=true
+            break
+        fi
+        sleep 0.05
+        attempt=$((attempt + 1))
+    done
+    set +e
+    if [ "$guard_done" = true ]; then
+        wait "$guard_pid"
+        guard_status=$?
+    else
+        kill -TERM "$guard_pid" 2>/dev/null || true
+        wait "$guard_pid" 2>/dev/null || true
+        guard_status=124
+    fi
+    set -e
+    guard_pid=""
+else
+    guard_status=0
+fi
+
+if [ "$scenario" = "emergency-recovery" ]; then
+    if [ "$status" -eq 0 ] && [ "$guard_status" -eq 0 ] \
+        && [ -s "$guard_triggered_file" ]; then
+        echo "sophia_qemu_guest_recovery schema=1 status=complete exit_status=0 guard_exit_status=0"
+    else
+        echo "sophia_qemu_guest_recovery schema=1 status=failed reason=recovery_exit exit_status=$status guard_exit_status=$guard_status"
+    fi
+elif [ "$status" -eq 0 ]; then
     echo "sophia_qemu_guest schema=1 status=complete ticks=300"
 else
     echo "sophia_qemu_guest schema=1 status=failed reason=session_exit exit_status=$status"

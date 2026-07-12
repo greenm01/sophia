@@ -48,7 +48,7 @@ A bounded persistence/input regression is:
 
 ```sh
 cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- \
-  sophia-live-session --display=:177 --max-runtime-ms=2500 --inject-text=sophia
+  sophia-live-session --display=:177 --max-runtime-ms=6000 --inject-text=sophia
 ```
 
 For an external libinput proof, replace `--inject-text` with
@@ -112,10 +112,22 @@ tools/install_sophia_session.sh
 ```
 
 After that one-time install, switch to a dedicated TTY and run `sophia`. The
-launcher builds Sophia, verifies KMS ownership, stops and later restores `keyd`,
-puts the TTY in raw/no-echo mode, launches normal Kitty configuration, and sends
-all session output to the runtime state directory instead of the scanned-out
-console. Close Kitty normally or run `sophia stop` from another TTY.
+launcher builds Sophia, verifies KMS ownership, and stops and later restores
+`keyd`. Before changing the TTY mode it starts an independent libinput guard and
+requires one press-and-full-release of Ctrl-Alt-Backspace. That first chord
+proves the selected keyboard path and arms recovery. Once Kitty is visible,
+press Ctrl-Alt-Backspace again to end the session and restore the TTY, or close
+Kitty normally or run `sophia stop` from an outside control plane.
+
+The guard remains separate from the live session process and therefore still
+terminates a wedged input/focus loop. Shutdown gives Sophia a bounded graceful
+window, then kills stuck children before restoring the saved KD mode, termios,
+and `keyd` state. Ctrl-Alt-Fn live switching remains unsupported because Sophia
+does not yet implement the required VT/DRM suspend-and-reacquire lifecycle.
+Reduced logs persist across reboot under
+`${XDG_STATE_HOME:-$HOME/.local/state}/sophia/kitty-session`; each log retains
+the latest and one previous run without recording keycodes, text, or device
+paths.
 
 XLibre receives no physical devices and does not own scanout. Engine routes
 physical keys to the focused opaque surface; the compatibility adapter delivers

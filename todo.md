@@ -57,7 +57,9 @@ Exit criteria:
   clients beyond Sophia X Authority's current subset. A real Kitty X11/GLX
   process now produces readable nonzero pixels, and injected core keys change
   later pixels through opaque `XLibrePrototype` surface transactions. The
-  dedicated-TTY native presentation gate remains.
+  installed launcher now requires an independent physical-keyboard recovery
+  guard before graphics takeover; its dedicated-TTY typing and forced-recovery
+  hardware gate remains.
 - [x] Add an optional generic WM socket to `sophia-live-session`. Send only
   opaque live-surface layout snapshots, validate the reply in Engine, and apply
   the committed proposal to composition, hit-testing, and scanout.

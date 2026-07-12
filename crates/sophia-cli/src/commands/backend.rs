@@ -13,6 +13,12 @@ use sophia_cli::backend_args::{
 use sophia_cli::backend_evidence::runtime_rendered_scanout_evidence_is_clean;
 
 pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
+    #[cfg(feature = "atomic-scanout-live")]
+    if args.iter().any(|arg| arg == "sophia-session-input-guard") {
+        super::live_session::input_guard::run(args)?;
+        return Ok(true);
+    }
+
     if args.iter().any(|arg| arg == "atomic-scanout-preflight") {
         let report = sophia_backend_live::real_atomic_scanout_preflight_report();
         println!("{}", report.reduced_log_line());

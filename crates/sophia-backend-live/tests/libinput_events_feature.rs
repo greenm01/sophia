@@ -16,6 +16,7 @@ use sophia_backend_live::{
     NativeLibinputEventReader, NativeLibinputOpenError, NonBlockingInputPoller, SeatId,
     discover_live_backend, native_libinput_event_adapter_report, open_native_libinput_path_poller,
     real_libinput_events_validation_gate, real_libinput_events_validation_smoke_report,
+    resolve_native_libinput_device_path,
 };
 use sophia_protocol::{InputEventKind, Point};
 
@@ -50,6 +51,29 @@ fn native_libinput_path_poller_fails_closed_without_exposing_paths() {
         .unwrap_err(),
         NativeLibinputOpenError::DeviceUnavailable
     );
+}
+
+#[test]
+fn native_libinput_device_paths_resolve_stable_symlinks_before_libinput_admission() {
+    let root = std::env::temp_dir().join(format!(
+        "sophia-backend-live-libinput-symlink-{}",
+        std::process::id()
+    ));
+    if root.exists() {
+        fs::remove_dir_all(&root).unwrap();
+    }
+    fs::create_dir_all(&root).unwrap();
+    let event = root.join("event0");
+    fs::write(&event, []).unwrap();
+    let by_path = root.join("platform-test-event-kbd");
+    std::os::unix::fs::symlink(&event, &by_path).unwrap();
+
+    assert_eq!(
+        resolve_native_libinput_device_path(&by_path).unwrap(),
+        event
+    );
+
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

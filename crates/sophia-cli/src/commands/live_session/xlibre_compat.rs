@@ -49,6 +49,13 @@ pub(crate) fn run_persistent_xlibre_session(
             64,
         )?)
     };
+    if !config.input_devices.is_empty() {
+        println!(
+            "sophia_live_session_input_pipeline schema=1 status=poller_ready devices={}",
+            config.input_devices.len()
+        );
+        std::io::stdout().flush()?;
+    }
 
     let (authority_sender, authority_receiver) = sync_channel(SESSION_AUTHORITY_CAPACITY);
     let (input_sender, input_receiver) = sync_channel(SESSION_KEY_CAPACITY);
@@ -105,6 +112,7 @@ pub(crate) fn run_persistent_xlibre_session(
         &mut physical_input,
         &mut native_scanout,
         &mut wm_session,
+        true,
     );
     process.terminate()?;
     drop(input_sender);
@@ -144,11 +152,17 @@ fn run_compat_provider(
     let mut checksums = BTreeMap::new();
     let mut serial = 1u64;
     let mut last_capture = Instant::now() - COMPAT_CAPTURE_INTERVAL;
+    let mut key_injected_reported = false;
     loop {
         loop {
             match input.try_recv() {
                 Ok(XAuthorityInputEvent::Key(event)) => {
                     capture.inject_key(event.keycode, event.pressed, event.time_msec)?;
+                    if !key_injected_reported {
+                        println!("sophia_live_session_input_pipeline schema=1 status=key_injected");
+                        std::io::stdout().flush()?;
+                        key_injected_reported = true;
+                    }
                 }
                 Ok(XAuthorityInputEvent::Pointer(_)) => {}
                 Err(TryRecvError::Empty) => break,

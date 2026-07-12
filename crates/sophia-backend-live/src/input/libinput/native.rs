@@ -150,9 +150,14 @@ pub struct DirectLibinputInterface;
 
 impl input::LibinputInterface for DirectLibinputInterface {
     fn open_restricted(&mut self, path: &Path, flags: i32) -> Result<OwnedFd, i32> {
+        const O_ACCMODE: i32 = 3;
+        const O_WRONLY: i32 = 1;
+        const O_RDWR: i32 = 2;
+        let access_mode = flags & O_ACCMODE;
         std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(flags)
+            .read(access_mode != O_WRONLY)
+            .write(access_mode == O_WRONLY || access_mode == O_RDWR)
+            .custom_flags(flags & !O_ACCMODE)
             .open(path)
             .map(Into::into)
             .map_err(|error| error.raw_os_error().unwrap_or(1))
@@ -192,9 +197,9 @@ pub fn open_native_libinput_path_poller(
     }
     let mut libinput = input::Libinput::new_from_path(DirectLibinputInterface);
     for path in paths {
-        let path = path
+        let resolved = resolve_native_libinput_device_path(path)?;
+        let path = resolved
             .to_str()
-            .filter(|path| path.starts_with('/'))
             .ok_or(NativeLibinputOpenError::InvalidDevicePath)?;
         libinput
             .path_add_device(path)
@@ -204,4 +209,13 @@ pub fn open_native_libinput_path_poller(
         NativeLibinputEventReader::new(libinput, devices),
         max_read_per_poll.clamp(1, 256),
     ))
+}
+
+pub fn resolve_native_libinput_device_path(
+    path: &Path,
+) -> Result<PathBuf, NativeLibinputOpenError> {
+    if !path.is_absolute() {
+        return Err(NativeLibinputOpenError::InvalidDevicePath);
+    }
+    std::fs::canonicalize(path).map_err(|_| NativeLibinputOpenError::DeviceUnavailable)
 }

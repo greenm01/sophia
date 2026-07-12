@@ -66,7 +66,7 @@ backend-live rendered scanout reporting, run:
 cargo test --offline -q -p sophia-backend-live --features libdrm-events live_session_composition
 cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- live-session-composition-smoke
 cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- sophia-live-session --proof --terminal=xterm
-cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- sophia-live-session --display=:177 --max-runtime-ms=2500 --inject-text=sophia
+cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- sophia-live-session --display=:177 --max-runtime-ms=6000 --inject-text=sophia
 # Operator TTY proof: add --input-devices=/dev/input/by-path/...-event-kbd,
 # type into xterm, and require physical_keys_routed>0 plus changed pixels.
 tools/live_session_content_hardware_proof.sh
@@ -75,7 +75,25 @@ tools/operator_keyboard_hardware_proof.sh
 tools/vrr_hardware_proof.sh
 tools/build_qemu_session_initramfs.sh
 tools/qemu_session_harness.sh
+SOPHIA_QEMU_SCENARIO=emergency-recovery tools/qemu_session_harness.sh
 ```
+
+The emergency-recovery QEMU scenario starts the independent input guard, sends
+one complete Ctrl-Alt-Backspace chord to arm it, waits for the live virtual
+libinput path and committed focus, then sends a second chord. It requires both
+the guard trigger and an `emergency_exit`, followed by bounded live-session and
+native-scanout cleanup. It is the non-destructive prerequisite for the
+installed-session recovery test. QEMU does not exercise the host VT or DRM
+device, so it cannot replace the final guarded hardware restoration gate.
+
+The installed Kitty session has an additional destructive TTY gate. Run it
+only with SSH or another outside control plane available. The first
+Ctrl-Alt-Backspace must arm the independent input guard before graphics
+takeover; normal typing must then change Kitty pixels. For the recovery half,
+stop the Sophia session process from the outside control plane, press
+Ctrl-Alt-Backspace again, and require return to the text TTY within five
+seconds with `keyd` restored and no surviving Sophia/XLibre process or DRM
+ownership. Inspect the persistent latest logs for every input-pipeline stage.
 
 `live-session-composition-smoke` is non-destructive. Its reduced output must
 report `status=Passed`, one or more drained authority batches, committed runtime

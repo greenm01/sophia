@@ -5,11 +5,15 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPAT_DISPLAY="${SOPHIA_COMPAT_DISPLAY:-:178}"
 DISPLAY_NUMBER="${COMPAT_DISPLAY#:}"
 STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/sophia-kitty-session-${UID}"
+LOG_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/sophia/kitty-session"
 PID_FILE="$STATE_DIR/wrapper.pid"
 AUTH_FILE="$STATE_DIR/Xauthority"
 XORG_CONFIG="$STATE_DIR/xorg.conf"
-XORG_LOG="$STATE_DIR/Xorg.log"
-SESSION_LOG="$STATE_DIR/session.log"
+GUARD_ARMED_FILE="$STATE_DIR/input-guard.armed"
+GUARD_TRIGGERED_FILE="$STATE_DIR/input-guard.triggered"
+XORG_LOG="$LOG_DIR/Xorg.log"
+SESSION_LOG="$LOG_DIR/session.log"
+GUARD_LOG="$LOG_DIR/input-guard.log"
 
 if [[ ! "$DISPLAY_NUMBER" =~ ^[0-9]+$ ]]; then
     echo "SOPHIA_COMPAT_DISPLAY must have the form :NUMBER." >&2
@@ -78,6 +82,17 @@ if [[ ! -r "$keyboard" ]]; then
     exit 1
 fi
 
+mkdir -p "$LOG_DIR"
+chmod 700 "$LOG_DIR"
+for log in "$XORG_LOG" "$SESSION_LOG" "$GUARD_LOG"; do
+    if [[ -f "$log" ]]; then
+        mv -f "$log" "$log.previous"
+    fi
+    : >"$log"
+    chmod 600 "$log"
+done
+rm -f "$GUARD_ARMED_FILE" "$GUARD_TRIGGERED_FILE"
+
 cd "$ROOT_DIR"
 cargo build --offline -p sophia-cli --features atomic-scanout-live
 tools/atomic_scanout_preflight.sh
@@ -127,26 +142,47 @@ kd_mode=""
 keyd_was_running=false
 xorg_pid=""
 session_pid=""
+guard_pid=""
 cleanup_done=false
+terminate_bounded() {
+    local target="$1"
+    local label="$2"
+    if ! kill -0 -- "$target" 2>/dev/null; then
+        return 0
+    fi
+    kill -TERM -- "$target" 2>/dev/null || true
+    for _ in {1..40}; do
+        if ! kill -0 -- "$target" 2>/dev/null; then
+            wait "${target#-}" 2>/dev/null || true
+            return 0
+        fi
+        sleep 0.05
+    done
+    echo "WARNING: $label did not stop after TERM; sending KILL." >&2
+    kill -KILL -- "$target" 2>/dev/null || true
+    wait "${target#-}" 2>/dev/null || true
+}
 cleanup() {
     local status=$?
     if [[ "$cleanup_done" == true ]]; then
         return "$status"
     fi
     cleanup_done=true
-    if [[ -n "$session_pid" ]] && kill -0 "$session_pid" 2>/dev/null; then
-        kill -TERM -- "-$session_pid" 2>/dev/null || true
-        wait "$session_pid" 2>/dev/null || true
+    if [[ -n "$guard_pid" ]]; then
+        terminate_bounded "$guard_pid" "Sophia input guard"
     fi
-    if [[ -n "$xorg_pid" ]] && kill -0 "$xorg_pid" 2>/dev/null; then
-        kill -TERM "$xorg_pid" 2>/dev/null || true
-        wait "$xorg_pid" 2>/dev/null || true
+    if [[ -n "$session_pid" ]]; then
+        terminate_bounded "-$session_pid" "Sophia session process group"
+    fi
+    if [[ -n "$xorg_pid" ]]; then
+        terminate_bounded "$xorg_pid" "XLibre"
     fi
     if [[ -n "$kd_mode" ]]; then
         python3 "$ROOT_DIR/tools/sophia_tty_mode.py" "$kd_mode" 2>/dev/null || true
     fi
     stty "$tty_state" 2>/dev/null || true
-    rm -f "$PID_FILE" "$AUTH_FILE" "$XORG_CONFIG"
+    rm -f "$PID_FILE" "$AUTH_FILE" "$XORG_CONFIG" \
+        "$GUARD_ARMED_FILE" "$GUARD_TRIGGERED_FILE"
     if [[ "$keyd_was_running" == true ]]; then
         if ! sudo sv up keyd; then
             echo "WARNING: keyd could not be restored; run: sudo sv up keyd" >&2
@@ -166,6 +202,30 @@ if pgrep -x keyd >/dev/null 2>&1; then
     sudo sv down keyd
     keyd_was_running=true
 fi
+
+target/debug/sophia sophia-session-input-guard \
+    --input-devices="$keyboard" \
+    --armed-file="$GUARD_ARMED_FILE" \
+    --triggered-file="$GUARD_TRIGGERED_FILE" \
+    --owner-pid="$$" >>"$GUARD_LOG" 2>&1 &
+guard_pid=$!
+echo "Safety check: press and release Ctrl-Alt-Backspace once to arm recovery."
+echo "During Sophia, press Ctrl-Alt-Backspace again to exit and restore this TTY."
+for _ in {1..600}; do
+    if [[ -s "$GUARD_ARMED_FILE" ]]; then
+        break
+    fi
+    if ! kill -0 "$guard_pid" 2>/dev/null; then
+        echo "Sophia input guard exited before arming. See $GUARD_LOG" >&2
+        exit 1
+    fi
+    sleep 0.05
+done
+if [[ ! -s "$GUARD_ARMED_FILE" ]]; then
+    echo "Sophia input guard was not armed within 30 seconds; refusing graphics takeover." >&2
+    exit 1
+fi
+echo "Emergency input guard armed."
 
 XAUTHORITY="$AUTH_FILE" /usr/libexec/Xorg "$COMPAT_DISPLAY" \
     -config "$XORG_CONFIG" \
@@ -190,8 +250,7 @@ if ! XAUTHORITY="$AUTH_FILE" xdpyinfo -display "$COMPAT_DISPLAY" >/dev/null 2>&1
 fi
 
 echo "Starting a normal Kitty session under Sophia."
-echo "Use Kitty's normal close shortcut, type exit, or run 'sophia stop' from another TTY."
-: >"$SESSION_LOG"
+echo "Type exit normally, press Ctrl-Alt-Backspace for emergency recovery, or run 'sophia stop' externally."
 kd_mode="$(python3 "$ROOT_DIR/tools/sophia_tty_mode.py" get)"
 python3 "$ROOT_DIR/tools/sophia_tty_mode.py" graphics
 stty raw -echo
@@ -209,12 +268,19 @@ setsid env \
     "$@" >"$SESSION_LOG" 2>&1 &
 session_pid=$!
 set +e
-wait "$session_pid"
+wait -n "$session_pid" "$guard_pid"
 status=$?
 set -e
-session_pid=""
-stty "$tty_state"
+if [[ -s "$GUARD_TRIGGERED_FILE" ]]; then
+    echo "Emergency input guard triggered; restoring the TTY."
+    status=130
+elif ! kill -0 "$session_pid" 2>/dev/null; then
+    session_pid=""
+elif ! kill -0 "$guard_pid" 2>/dev/null; then
+    echo "Sophia input guard exited unexpectedly. See $GUARD_LOG" >&2
+    status=1
+fi
 if (( status != 0 )); then
-    echo "Sophia Kitty session failed. See $SESSION_LOG and $XORG_LOG" >&2
+    echo "Sophia Kitty session stopped with status $status. See $SESSION_LOG, $XORG_LOG, and $GUARD_LOG" >&2
 fi
 exit "$status"
