@@ -25,7 +25,7 @@ if [[ ! "$DISPLAY_NAME" =~ ^:[0-9]+$ ]]; then
     echo "SOPHIA_XLIBRE_LATENCY_DISPLAY must have the form :NUMBER" >&2
     exit 1
 fi
-for command in cargo cvt xdpyinfo "$CLIENT_KIND"; do
+for command in cargo cvt setxkbmap xdpyinfo xmodmap "$CLIENT_KIND"; do
     if ! command -v "$command" >/dev/null 2>&1; then
         echo "missing required command: $command" >&2
         exit 1
@@ -102,6 +102,7 @@ if [[ "$ready" != true ]]; then
     sed -n '1,160p' "$STATE_DIR/Xorg.log" >&2 || true
     exit 1
 fi
+tools/configure_xlibre_evdev_keymap.sh "$DISPLAY_NAME"
 
 mkdir -p "$(dirname "$EVIDENCE_FILE")"
 client_args=()

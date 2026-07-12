@@ -396,3 +396,12 @@ creates exactly two native targets and pipelines with zero recreations, drains
 155 page flips without cleanup debt, and confirms that PRIME GEM cleanup treats
 the driver's already-closed `EINVAL` result as idempotent success. Degraded
 XGetImage remains operational but is rejected for interactive evidence.
+
+The next operator run exposed a keymap mismatch hidden by ordinary typing.
+Sophia correctly translated Linux input codes with the evdev `+8` convention,
+but device-less dummy XLibre had selected its legacy `xfree86` keycode table.
+Letter positions overlap between those tables; navigation positions do not, so
+evdev keycode 111 (`Up`) arrived as `Print`. The private server now loads the
+evdev XKB rules before launching a client and fails startup unless Up, Left,
+Right, and Down resolve at keycodes 111, 113, 114, and 116. Sophia X Authority's
+minimal core map now advertises the same navigation keysyms for direct clients.

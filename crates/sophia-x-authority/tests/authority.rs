@@ -418,6 +418,10 @@ fn evdev_keyboard_mapping_preserves_x_modifier_event_order() {
 
     assert_eq!(keyboard.map_evdev_key(58, true), Some((66, 0)));
     assert_eq!(keyboard.modifier_mask(), 2);
+    assert_eq!(keyboard.map_evdev_key(103, true), Some((111, 2)));
+    assert_eq!(keyboard.map_evdev_key(105, true), Some((113, 2)));
+    assert_eq!(keyboard.map_evdev_key(106, true), Some((114, 2)));
+    assert_eq!(keyboard.map_evdev_key(108, true), Some((116, 2)));
     assert_eq!(keyboard.map_evdev_key(0, true), None);
     assert_eq!(keyboard.map_evdev_key(u32::MAX, true), None);
 }

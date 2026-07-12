@@ -23,7 +23,7 @@ if [[ ! -t 0 ]]; then
     echo "Run this interactively from a dedicated local TTY." >&2
     exit 1
 fi
-for command in cargo kitty mcookie python3 stty xauth xdpyinfo cvt /usr/libexec/Xorg; do
+for command in cargo kitty mcookie python3 setxkbmap stty xauth xdpyinfo xmodmap cvt /usr/libexec/Xorg; do
     if ! command -v "$command" >/dev/null 2>&1; then
         echo "Missing required command: $command" >&2
         exit 1
@@ -248,6 +248,7 @@ if ! XAUTHORITY="$AUTH_FILE" xdpyinfo -display "$COMPAT_DISPLAY" >/dev/null 2>&1
     echo "XLibre did not become ready. See $XORG_LOG" >&2
     exit 1
 fi
+XAUTHORITY="$AUTH_FILE" tools/configure_xlibre_evdev_keymap.sh "$COMPAT_DISPLAY"
 
 echo "Starting a normal Kitty session under Sophia."
 echo "Type exit normally, press Ctrl-Alt-Backspace for emergency recovery, or run 'sophia stop' externally."

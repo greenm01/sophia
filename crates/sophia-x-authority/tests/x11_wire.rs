@@ -1329,6 +1329,41 @@ fn x11_dispatch_reports_us_keyboard_mapping_for_minimal_server() {
 }
 
 #[test]
+fn x11_dispatch_reports_evdev_navigation_keysyms() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let request = decode_x11_core_request(
+        context(namespace, 525, XByteOrder::LittleEndian),
+        &[101, 111, 2, 0, 6, 0, 0, 0],
+    )
+    .unwrap();
+
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 4, XByteOrder::LittleEndian, 101),
+        request,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded.len(), 1);
+    assert_eq!(encoded[0][1], 2);
+    let keysyms = encoded[0][32..]
+        .chunks_exact(4)
+        .map(|bytes| read_u32(XByteOrder::LittleEndian, bytes))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        keysyms,
+        vec![
+            0xff52, 0xff52, 0xff55, 0xff55, 0xff51, 0xff51, 0xff53, 0xff53, 0xff57, 0xff57, 0xff54,
+            0xff54,
+        ]
+    );
+}
+
+#[test]
 fn x11_dispatch_replies_to_atom_requests_and_rejects_unknown_names() {
     let namespace = NamespaceId::from_raw(45);
     let mut runtime = XAuthorityRuntime::new();

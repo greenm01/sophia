@@ -1604,6 +1604,16 @@ fn x11_us_keysyms(keycode: u8) -> (u32, u32) {
         61 => (u32::from(b'/'), u32::from(b'?')),
         65 => (u32::from(b' '), u32::from(b' ')),
         66 => (0xffe5, 0xffe5),
+        110 => (0xff50, 0xff50),
+        111 => (0xff52, 0xff52),
+        112 => (0xff55, 0xff55),
+        113 => (0xff51, 0xff51),
+        114 => (0xff53, 0xff53),
+        115 => (0xff57, 0xff57),
+        116 => (0xff54, 0xff54),
+        117 => (0xff56, 0xff56),
+        118 => (0xff63, 0xff63),
+        119 => (0xffff, 0xffff),
         _ => (0, 0),
     }
 }

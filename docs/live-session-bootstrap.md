@@ -146,7 +146,10 @@ tools/verify_xlibre_kitty_latency_evidence.sh \
 
 The launcher disables Kitty's remembered window size, requests a 1280x720 X11
 window, and centers the first compatibility surface without scaling it. The
-gate requires an unfallbacked MIT-SHM capture path, no readback larger than
+device-less XLibre server is explicitly loaded with the evdev XKB rules before
+Kitty starts; the launcher verifies Up, Left, Right, and Down at keycodes 111,
+113, 114, and 116 so physical navigation keys match Sophia's evdev input.
+The gate requires an unfallbacked MIT-SHM capture path, no readback larger than
 1280x720 XRGB, no libinput processing-lag warning, clean native-scanout drain,
 and input pixels presented within 100 milliseconds of the final proof key.
 Physical events are collected on a bounded worker and drained before capture;
