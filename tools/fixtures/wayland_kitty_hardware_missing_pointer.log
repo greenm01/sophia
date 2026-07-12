@@ -1,4 +1,4 @@
 sophia_wayland_session schema=1 status=running display=sophia-1 client=/usr/bin/kitty x_server=disabled
 sophia_wayland_frame schema=1 surface=1 generation=1 width=1280 height=720 buffer=dmabuf checksum=0 nonzero_pixel_bytes=0
-sophia_wayland_session schema=1 status=complete transactions=4 frames=4 shm_frames=0 dmabuf_frames=4 resize_requested=0 resize_commits=0 buffers=1 routed_input=24 routed_keys=24 routed_pointer=0 expected_keycodes_matched=11 expected_keycodes_total=11 input_presentations=12 input_pixel_changes=0 max_input_latency_msec=42 x_server=disabled
+sophia_wayland_session schema=1 status=complete transactions=4 frames=4 shm_frames=0 dmabuf_frames=4 resize_requested=0 resize_commits=0 buffers=1 routed_input=24 routed_keys=24 routed_pointer=0 expected_keycodes_observed=11 expected_keycodes_matched=11 expected_keycodes_total=11 input_presentations=12 pointer_presentations=0 input_pixel_changes=0 max_input_latency_msec=42 x_server=disabled
 sophia_wayland_recovery schema=1 status=complete kd_mode=0 keyd_restored=1 processes=0

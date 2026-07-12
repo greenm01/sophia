@@ -45,9 +45,11 @@ if [[ "${routed_input:-0}" -gt 0 && "${input_presentations:-0}" -eq 0 ]]; then
 fi
 if [[ "${SOPHIA_WAYLAND_REQUIRE_INPUT:-0}" == 1 ]]; then
     routed_pointer="$(sed -n 's/.*routed_pointer=\([0-9][0-9]*\).*/\1/p' <<<"$complete")"
+    pointer_presentations="$(sed -n 's/.*pointer_presentations=\([0-9][0-9]*\).*/\1/p' <<<"$complete")"
     keycodes_matched="$(sed -n 's/.*expected_keycodes_matched=\([0-9][0-9]*\).*/\1/p' <<<"$complete")"
     keycodes_total="$(sed -n 's/.*expected_keycodes_total=\([0-9][0-9]*\).*/\1/p' <<<"$complete")"
-    if [[ "${routed_pointer:-0}" -eq 0 || "${keycodes_total:-0}" -eq 0 \
+    if [[ "${routed_pointer:-0}" -eq 0 || "${pointer_presentations:-0}" -eq 0 \
+        || "${keycodes_total:-0}" -eq 0 \
         || "$keycodes_matched" != "$keycodes_total" || "${input_presentations:-0}" -eq 0 ]]; then
         echo "Wayland Kitty input evidence is incomplete" >&2
         exit 1

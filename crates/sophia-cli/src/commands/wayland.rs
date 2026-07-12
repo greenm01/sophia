@@ -118,13 +118,16 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
     let mut emergency_chord = EmergencyChordState::armed();
     let mut pending_pixel_input = VecDeque::new();
     let mut pending_presented_input = VecDeque::new();
+    let mut pending_presented_pointer = VecDeque::new();
     let mut presentation_observations = BTreeMap::new();
     let mut routed_input = 0usize;
     let mut routed_keys = 0usize;
     let mut routed_pointer = 0usize;
     let mut observed_keycodes = BTreeSet::new();
+    let mut presented_keycodes = BTreeSet::new();
     let mut input_pixel_changes = 0usize;
     let mut input_presentations = 0usize;
+    let mut pointer_presentations = 0usize;
     let mut max_observed_input_latency = Duration::ZERO;
     let mut last_checksum = None;
     let started = Instant::now();
@@ -154,8 +157,11 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                 checksum,
                 &mut pending_pixel_input,
                 &mut pending_presented_input,
+                &mut pending_presented_pointer,
+                &mut presented_keycodes,
                 &mut input_pixel_changes,
                 &mut input_presentations,
+                &mut pointer_presentations,
                 &mut max_observed_input_latency,
             );
             let item = AuthorityFeedback::Presented(SurfacePresentationFeedback {
@@ -255,11 +261,12 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                                 observed_keycodes.insert(keycode);
                                 let observed = Instant::now();
                                 pending_pixel_input.push_back((observed, last_checksum));
-                                pending_presented_input.push_back(observed);
+                                pending_presented_input.push_back((observed, keycode));
                             }
                         }
                         InputEventKind::PointerMotion | InputEventKind::PointerButton { .. } => {
                             routed_pointer = routed_pointer.saturating_add(1);
+                            pending_presented_pointer.push_back(Instant::now());
                         }
                     }
                 }
@@ -359,8 +366,11 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                                 checksum,
                                 &mut pending_pixel_input,
                                 &mut pending_presented_input,
+                                &mut pending_presented_pointer,
+                                &mut presented_keycodes,
                                 &mut input_pixel_changes,
                                 &mut input_presentations,
+                                &mut pointer_presentations,
                                 &mut max_observed_input_latency,
                             );
                             feedback.push(AuthorityFeedback::Presented(
@@ -419,7 +429,8 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
     if expect_input_presentation && (routed_input == 0 || input_presentations == 0) {
         return Err("Wayland input proof did not reach a presented client frame".into());
     }
-    let matched_keycodes = expected_keycodes.intersection(&observed_keycodes).count();
+    let observed_required_keycodes = expected_keycodes.intersection(&observed_keycodes).count();
+    let matched_keycodes = expected_keycodes.intersection(&presented_keycodes).count();
     if matched_keycodes != expected_keycodes.len() {
         return Err(format!(
             "Wayland input proof matched {matched_keycodes}/{} required keycodes",
@@ -429,6 +440,9 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
     }
     if expect_pointer_input && routed_pointer == 0 {
         return Err("Wayland input proof observed no routed pointer input".into());
+    }
+    if expect_pointer_input && pointer_presentations == 0 {
+        return Err("Wayland pointer input did not reach a presented client frame".into());
     }
     if (expect_input_pixel_change || expect_input_presentation)
         && max_observed_input_latency > Duration::from_millis(max_input_latency)
@@ -441,7 +455,7 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
         .into());
     }
     println!(
-        "sophia_wayland_session schema=1 status=complete transactions={} frames={} shm_frames={} dmabuf_frames={} resize_requested={} resize_commits={} buffers={} routed_input={} routed_keys={} routed_pointer={} expected_keycodes_matched={} expected_keycodes_total={} input_presentations={} input_pixel_changes={} max_input_latency_msec={} x_server=disabled",
+        "sophia_wayland_session schema=1 status=complete transactions={} frames={} shm_frames={} dmabuf_frames={} resize_requested={} resize_commits={} buffers={} routed_input={} routed_keys={} routed_pointer={} expected_keycodes_observed={} expected_keycodes_matched={} expected_keycodes_total={} input_presentations={} pointer_presentations={} input_pixel_changes={} max_input_latency_msec={} x_server=disabled",
         transactions,
         frames,
         shm_frames,
@@ -452,9 +466,11 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
         routed_input,
         routed_keys,
         routed_pointer,
+        observed_required_keycodes,
         matched_keycodes,
         expected_keycodes.len(),
         input_presentations,
+        pointer_presentations,
         input_pixel_changes,
         max_observed_input_latency.as_millis(),
     );
@@ -485,14 +501,22 @@ fn parse_keycodes(value: &str) -> Result<BTreeSet<u32>, Box<dyn std::error::Erro
 fn observe_input_presentation(
     checksum: Option<u64>,
     pending_pixel_input: &mut VecDeque<(Instant, Option<u64>)>,
-    pending_presented_input: &mut VecDeque<Instant>,
+    pending_presented_input: &mut VecDeque<(Instant, u32)>,
+    pending_presented_pointer: &mut VecDeque<Instant>,
+    presented_keycodes: &mut BTreeSet<u32>,
     input_pixel_changes: &mut usize,
     input_presentations: &mut usize,
+    pointer_presentations: &mut usize,
     max_observed_input_latency: &mut Duration,
 ) {
-    while let Some(started) = pending_presented_input.pop_front() {
+    while let Some((started, keycode)) = pending_presented_input.pop_front() {
         *max_observed_input_latency = (*max_observed_input_latency).max(started.elapsed());
         *input_presentations = input_presentations.saturating_add(1);
+        presented_keycodes.insert(keycode);
+    }
+    while let Some(started) = pending_presented_pointer.pop_front() {
+        *max_observed_input_latency = (*max_observed_input_latency).max(started.elapsed());
+        *pointer_presentations = pointer_presentations.saturating_add(1);
     }
     let Some(checksum) = checksum else {
         return;
