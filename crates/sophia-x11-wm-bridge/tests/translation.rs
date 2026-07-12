@@ -30,7 +30,7 @@ fn node(raw: u32) -> LayoutNodeSnapshot {
 }
 
 #[test]
-fn translates_two_synthetic_xmonad_tiles_without_metadata() {
+fn translates_two_synthetic_legacy_wm_tiles_without_metadata() {
     let transaction = TransactionId::from_raw(71);
     let request = WmRequestPacket {
         transaction,
@@ -97,4 +97,58 @@ fn translates_two_synthetic_xmonad_tiles_without_metadata() {
             .contains(&WmCommand::FocusSurface(SurfaceId::new(10, 1)))
     );
     assert!(!format!("{response:?}").contains(&format!("{:?}", NamespaceId::from_raw(99))));
+}
+
+#[test]
+fn client_size_constraints_bound_both_configure_and_render_geometry() {
+    let transaction = TransactionId::from_raw(72);
+    let mut constrained = node(12);
+    constrained.constraints.max_size = Some(Size {
+        width: 320,
+        height: 240,
+    });
+    let request = WmRequestPacket {
+        transaction,
+        kind: WmRequestKind::RelayoutWorkspace(WmRelayoutWorkspace {
+            output: OutputId::from_raw(1),
+            workspace: WorkspaceId::from_raw(1),
+            bounds: Rect {
+                x: 0,
+                y: 0,
+                width: 1200,
+                height: 800,
+            },
+            nodes: vec![constrained],
+        }),
+    };
+    let mut bridge = X11WmBridgeState::new();
+    bridge.apply_engine_request(&request).unwrap();
+    let window = bridge.synthetic_window(SurfaceId::new(12, 1)).unwrap();
+    let response = bridge
+        .translate_legacy_requests(
+            transaction,
+            &[LegacyWmRequest::ConfigureWindow {
+                window,
+                geometry: Rect {
+                    x: 20,
+                    y: 30,
+                    width: 1200,
+                    height: 800,
+                },
+                z_index: 0,
+            }],
+            300,
+        )
+        .unwrap();
+
+    assert!(response.commands.iter().any(|command| matches!(
+        command,
+        WmCommand::ConfigureSurface(request)
+            if request.size == Size { width: 320, height: 240 }
+    )));
+    assert!(response.commands.iter().any(|command| matches!(
+        command,
+        WmCommand::RenderSurface(placement)
+            if placement.geometry == Rect { x: 20, y: 30, width: 320, height: 240 }
+    )));
 }

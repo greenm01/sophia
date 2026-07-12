@@ -20,5 +20,7 @@ bash -n tools/atomic_scanout_hardware_proof.sh
 bash -n tools/atomic_scanout_hardware_status.sh
 bash -n tools/operator_keyboard_hardware_proof.sh
 bash -n tools/finish_milestones_1_2.sh
+bash -n tools/run_sophia_xmonad_session.sh
+bash -n tools/xmonad_live_session_smoke.sh
 
 echo "atomic scanout local checks passed"

@@ -227,7 +227,11 @@ A legacy compatibility policy process may sit in this same slot. The
 presents a fake, headless X11 server to existing X11 window managers while
 speaking the normal blind Sophia WM IPC to Sophia Engine. It is a stopgap for
 reusing legacy layout engines, not a protocol authority and not a path around
-the namespace or metadata boundaries.
+the namespace or metadata boundaries. The Engine never selects, launches, or
+names a particular legacy WM. The bridge accepts a configured WM executable and
+arguments; xmonad is only the first compatibility proof. Adding support for a
+legacy WM may extend the bridge's fake-X11 coverage but must not add WM-specific
+logic to Sophia Engine.
 
 The protocol should be sequence-oriented:
 
@@ -1107,8 +1111,9 @@ desktop. The implementation order is:
 3. Run X Authority, backend ticks, scanout, and xterm under one persistent
    session owner.
 4. Deliver focused keyboard events through X Authority semantics.
-5. Run xmonad as blind layout policy through a separate synthetic X11 WM
-   bridge.
+5. Connect the live session to the generic synthetic X11 WM bridge and use
+   xmonad as the first proof that a configured legacy WM can provide blind
+   layout policy without an Engine-specific integration.
 6. Measure repeated-tick latency, queue pressure, frame age, and cleanup debt.
 7. Start Wayland Authority only after those X-session gates pass.
 

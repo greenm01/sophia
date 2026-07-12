@@ -112,7 +112,9 @@ tools/finish_milestones_1_2.sh
 ```
 
 The combined helper auto-selects the keyboard when exactly one stable keyboard
-path exists, reruns the real xmonad gate, and executes both physical proofs. It
+path exists, reruns the synthetic-window real-xmonad compatibility gate, and
+executes both physical proofs. These remain separate processes; this helper does
+not claim that xmonad is wired into the live xterm session. It
 refuses to proceed while River, Niri, Sway, Hyprland, KWin, or Xorg is active,
 so invoking it accidentally from the live graphical session cannot take DRM
 master. Set `SOPHIA_OPERATOR_KEYBOARD` only when more than one keyboard path is
@@ -120,6 +122,20 @@ listed. When `keyd` is active, the interactive helper uses `sudo sv down keyd`
 before opening the physical keyboard and an EXIT trap restores it with
 `sudo sv up keyd` after success, failure, or interruption. There is no separate
 confirmation prompt whose Return could enter the exact input proof.
+
+The integrated operator path is separate:
+
+```sh
+tools/run_sophia_xmonad_session.sh
+```
+
+It starts the generic bridge as `sophia-live-session`'s supervised WM process,
+uses xmonad only as the selected bridge client, and launches one ordinary real
+xterm. A bounded automated form can pass `--max-runtime-ms=10000`,
+`--inject-text=sophia`, and `--exit-after-input-proof`; passing evidence requires one
+WM request, one committed layout with a moved surface, and a later terminal
+pixel change. The final physical gate uses the wrapper without injection and
+requires operator-visible typing on the scanned-out xterm.
 
 The keyboard helper presents `type sophia then Return:` inside the scanned-out
 xterm and waits up to 15 seconds for that exact press/release sequence. A fresh

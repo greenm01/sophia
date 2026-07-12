@@ -67,6 +67,27 @@ Passing evidence reports `status=bounded_complete`, matching authority batch,
 backend tick, and runtime commit counts, nonzero composed pixels, and
 `input_pixel_change=true`.
 
+## Real Legacy-WM Policy Session
+
+Run the first real xmonad-backed operator session from a dedicated TTY with:
+
+```sh
+tools/run_sophia_xmonad_session.sh
+```
+
+The wrapper resolves/builds xmonad, builds Sophia and the generic X11 WM
+bridge, verifies exclusive TTY/DRM/input conditions, temporarily stops keyd,
+and restores it on exit. Sophia supervises the bridge as a generic WM policy
+process. Xmonad sees only a synthetic private display; the real xterm remains
+connected to Sophia X Authority. Engine validates and applies xmonad placement,
+stacking, and focus, while physical input and scanout remain Sophia-owned.
+
+The first live compatibility gate intentionally pins xterm to its established
+client size and proves a real move from its initial offset to xmonad's tile
+origin. The Engine-to-Authority configure/acknowledgement seam exists, but
+arbitrary xterm resizing is not claimed until the core-drawing resize path no
+longer enters a repaint loop.
+
 On an exclusive TTY with no other DRM master, persistent native presentation is
 enabled by the gated `--native-scanout` flag. The bounded hardware wrapper
 starts xterm, injects terminal input, keeps GBM/KMS and page-flip ownership in
@@ -158,7 +179,8 @@ Current evidence:
   instead of spending the proof window on 256-color palette setup;
 - `x-authority-xterm-input-smoke` proves bounded core key events change a later
   real xterm buffer generation;
-- physical keyboard routing to a focused X client is not yet operator-grade.
+- physical keyboard routing to a focused X client passes the exact AMD TTY
+  proof; the combined real-xmonad physical operator gate remains open.
 
 Current terminal proof:
 

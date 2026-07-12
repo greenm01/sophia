@@ -87,24 +87,44 @@ run, but the noninteractive validation process observed zero physical events;
 an operator typing run is still the evidence gate.
 
 Wayland is gated behind the operator-grade X session. Before Wayland, Sophia
-will run xmonad through the documented X11 WM bridge. The first bridge is an
-embedded minimal X server with synthetic windows; xmonad is layout policy only
-and receives no physical input, raw metadata, namespaces, or real client XIDs.
+will connect the live session to the documented generic X11 WM bridge. The
+bridge is an embedded minimal X server with synthetic windows; a configured
+legacy WM is layout policy only and receives no physical input, raw metadata,
+namespaces, or real client XIDs. Sophia Engine speaks only its generic WM IPC
+and does not know which legacy WM the bridge supervises.
 
-The xmonad source is cloned at `~/src/xmonad` commit `a9a8b5c` as a compatibility
-reference. It is not vendored and is not a Sophia runtime dependency. The
-bridge translation core exists; the embedded server and real process smoke
-remain open because no Haskell/xmonad executable is installed.
+The xmonad source is cloned at `~/src/xmonad` commit `a9a8b5c` as the first
+compatibility reference. It is not vendored and is not a Sophia runtime
+dependency. The embedded server and real two-window xmonad process proof pass.
+The remaining gate is to feed opaque live-session surface snapshots through the
+same generic bridge socket and apply validated proposals to presented surfaces.
 
 ## Active Questions
 
-- Which xmonad startup request is the first unsupported request after setup,
-  root event-mask selection, atom/property access, and synthetic lifecycle?
-- Can an operator-typed run produce nonzero physical key routing and changed
-  xterm pixels through the existing Engine focus path?
+- Which second legacy WM provides the smallest independent compatibility proof
+  that the generic launcher and fake-X11 coverage are not xmonad-shaped?
+- Can one live-session xterm be laid out through the bridge while operator input
+  still routes through Engine focus and changes presented pixels?
 
 These questions remain probe-driven: implement the first observed missing path,
 then rerun the relevant real-client smoke.
+
+## 2026-07-11: Real Xterm Through Generic Xmonad Policy
+
+`sophia-live-session` now supervises an arbitrary Sophia WM socket process via
+generic executable/argument flags. With `sophia-x11-wm-bridge` selected as that
+process, the live session sends one opaque xterm surface to real xmonad, Engine
+validates the response, and the committed placement drives composition,
+hit-testing, backend visual state, and scanout. A headless integrated run proves
+one moved surface, committed Engine focus, and a later injected terminal pixel
+change. No xmonad identity enters Engine or the live-session policy path.
+
+The Engine-to-X-Authority control seam now supports bounded configure/focus
+commands and reduced acknowledgements keyed by `SurfaceId`. Probing arbitrary
+full-output xterm resizing exposed a repaint loop in the core-drawing path, so
+the first real one-client gate pins min/max size to the established live buffer
+and uses xmonad for placement, stacking, and focus. Removing that constraint is
+tracked explicitly rather than overstating resize compatibility.
 
 ## 2026-07-11: QMP Keyboard Proof And Presentation Boundaries
 

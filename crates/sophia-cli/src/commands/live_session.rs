@@ -1,10 +1,16 @@
 use super::prelude::*;
 
 use sophia_cli::input_proof::{PhysicalTextProof, PhysicalTextProofEvent};
-use sophia_engine::{FocusedInputRoute, InputFocusState, NonBlockingInputPoller};
-use sophia_protocol::{DeviceId, OutputId, SeatId};
-use sophia_x_authority::{XCoreKeyboardMapper, XCorePointerMapper};
-use std::collections::BTreeMap;
+use sophia_engine::{
+    FocusedInputRoute, InputFocusDecision, InputFocusState, NonBlockingInputPoller,
+};
+use sophia_protocol::{DeviceId, OutputId, SeatId, WmManageSurface};
+use sophia_x_authority::{
+    XAuthorityControlAck, XAuthorityControlCommand, XAuthorityControlOutcome, XAuthorityInputEvent,
+    XAuthorityPointerEvent, XAuthorityPointerEventKind, XCoreKeyboardMapper, XCorePointerMapper,
+    run_x11_core_socket_server_once_session_channels,
+};
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::process::{Child, Stdio};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
@@ -12,6 +18,7 @@ use std::time::{Duration, Instant};
 
 const SESSION_AUTHORITY_CAPACITY: usize = 256;
 const SESSION_KEY_CAPACITY: usize = 64;
+const SESSION_CONTROL_CAPACITY: usize = 32;
 const SESSION_INPUT_QUIET_MSEC: u64 = 500;
 const SESSION_PHYSICAL_SEQUENCE_TIMEOUT_MSEC: u64 = 15_000;
 const SESSION_PHYSICAL_PIXEL_TIMEOUT_MSEC: u64 = 5_000;
@@ -40,16 +47,21 @@ pub(crate) fn run_persistent_xterm_session(
             64,
         )?)
     };
+    let mut wm_session = LiveWmSession::from_config(&config)?;
 
     let server_path = config.socket_path.clone();
     let (authority_sender, authority_receiver) = sync_channel(SESSION_AUTHORITY_CAPACITY);
     let (input_sender, input_receiver) = sync_channel(SESSION_KEY_CAPACITY);
+    let (control_sender, control_receiver) = sync_channel(SESSION_CONTROL_CAPACITY);
+    let (control_ack_sender, control_ack_receiver) = sync_channel(SESSION_CONTROL_CAPACITY);
     let server = std::thread::spawn(move || {
-        run_x11_core_socket_server_once_channels(
+        run_x11_core_socket_server_once_session_channels(
             &server_path,
             NamespaceId::from_raw(50),
             authority_sender,
             input_receiver,
+            control_receiver,
+            control_ack_sender,
         )
     });
     super::x_authority::wait_for_socket_path(&config.socket_path)?;
@@ -61,7 +73,7 @@ pub(crate) fn run_persistent_xterm_session(
             "-cm",
             "-dc",
             "-geometry",
-            "120x36",
+            "120x36+80+60",
             "-title",
             "Sophia Terminal",
         ])
@@ -87,10 +99,11 @@ pub(crate) fn run_persistent_xterm_session(
     let mut process = SessionProcessGuard::new(child, config.socket_path.clone());
 
     println!(
-        "sophia_live_session schema=6 status=running display={} terminal=xterm runtime=persistent authority_capacity={} input_capacity={} native_presentation={} physical_input={} pointer_proof={}",
+        "sophia_live_session schema=7 status=running display={} terminal=xterm runtime=persistent authority_capacity={} input_capacity={} control_capacity={} native_presentation={} physical_input={} pointer_proof={} wm_policy={}",
         config.display,
         SESSION_AUTHORITY_CAPACITY,
         SESSION_KEY_CAPACITY,
+        SESSION_CONTROL_CAPACITY,
         if native_scanout.is_some() {
             "enabled"
         } else {
@@ -103,6 +116,11 @@ pub(crate) fn run_persistent_xterm_session(
         },
         if config.expect_physical_pointer {
             "enabled"
+        } else {
+            "disabled"
+        },
+        if wm_session.is_some() {
+            "external"
         } else {
             "disabled"
         },
@@ -120,12 +138,16 @@ pub(crate) fn run_persistent_xterm_session(
         &config,
         &authority_receiver,
         &input_sender,
+        &control_sender,
+        &control_ack_receiver,
         process.child_mut()?,
         &mut physical_input,
         &mut native_scanout,
+        &mut wm_session,
     );
     process.terminate()?;
     drop(input_sender);
+    drop(control_sender);
     let server_result = server
         .join()
         .map_err(|_| "persistent X authority server thread panicked")?;
@@ -146,6 +168,9 @@ struct PersistentXtermSessionConfig {
     exit_after_input_proof: bool,
     input_devices: Vec<std::path::PathBuf>,
     native_scanout: bool,
+    wm_process: Option<String>,
+    wm_process_args: Vec<String>,
+    wm_socket_path: std::path::PathBuf,
 }
 
 impl PersistentXtermSessionConfig {
@@ -169,6 +194,15 @@ impl PersistentXtermSessionConfig {
         let expect_physical_pointer = args.iter().any(|arg| arg == "--expect-physical-pointer");
         let exit_after_input_proof = args.iter().any(|arg| arg == "--exit-after-input-proof");
         let native_scanout = args.iter().any(|arg| arg == "--native-scanout");
+        let wm_process = arg_value(args, "--wm-process");
+        let wm_process_args = args
+            .iter()
+            .filter_map(|arg| arg.strip_prefix("--wm-process-arg="))
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        if wm_process.is_none() && !wm_process_args.is_empty() {
+            return Err("--wm-process-arg requires --wm-process".into());
+        }
         if native_scanout && std::env::var_os("SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE").is_none() {
             return Err(
                 "set SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 to run persistent native scanout"
@@ -233,6 +267,12 @@ impl PersistentXtermSessionConfig {
             exit_after_input_proof,
             input_devices,
             native_scanout,
+            wm_process,
+            wm_process_args,
+            wm_socket_path: std::env::temp_dir().join(format!(
+                "sophia-live-wm-{}-{display_number}.sock",
+                std::process::id()
+            )),
         })
     }
 
@@ -265,10 +305,562 @@ fn prepare_display_socket(path: &std::path::Path) -> Result<(), Box<dyn std::err
     Ok(())
 }
 
+struct LiveWmSession {
+    supervisor: ProcessSupervisor,
+    supervisor_state: sophia_runtime::SupervisorState,
+    restart_policy: RestartPolicy,
+    socket_path: std::path::PathBuf,
+    transport: Option<WmSocketTransport>,
+    next_transaction: u64,
+    requests: usize,
+    committed: usize,
+    last_committed_at: Option<Instant>,
+    restarts: usize,
+    degraded: bool,
+}
+
+struct LiveWmProposal {
+    transaction: TransactionId,
+    layers: Vec<LayerSnapshot>,
+    requested_sizes: BTreeMap<SurfaceId, Size>,
+    focus: Option<SurfaceId>,
+    timeout: Duration,
+    update: WmTransactionUpdate,
+    moved_surfaces: usize,
+}
+
+impl LiveWmSession {
+    fn from_config(
+        config: &PersistentXtermSessionConfig,
+    ) -> Result<Option<Self>, Box<dyn std::error::Error>> {
+        let Some(process) = config.wm_process.as_deref() else {
+            return Ok(None);
+        };
+        let _ = std::fs::remove_file(&config.wm_socket_path);
+        let socket_arg = format!("--socket={}", config.wm_socket_path.display());
+        let spec = config.wm_process_args.iter().fold(
+            ProcessLaunchSpec::new(process)
+                .arg("serve-socket")
+                .arg(socket_arg),
+            |spec, argument| spec.arg(argument),
+        );
+        let mut session = Self {
+            supervisor: ProcessSupervisor::new(SupervisedProcessKind::WindowManager, spec),
+            supervisor_state: sophia_runtime::SupervisorState::new(
+                SupervisedProcessKind::WindowManager,
+            ),
+            restart_policy: RestartPolicy::default(),
+            socket_path: config.wm_socket_path.clone(),
+            transport: None,
+            next_transaction: 1,
+            requests: 0,
+            committed: 0,
+            last_committed_at: None,
+            restarts: 0,
+            degraded: false,
+        };
+        session.start(SupervisorEvent::StartRequested)?;
+        println!("sophia_live_wm schema=1 status=ready adapter=external socket=private restarts=0");
+        Ok(Some(session))
+    }
+
+    fn start(&mut self, event: SupervisorEvent) -> Result<(), Box<dyn std::error::Error>> {
+        let (state, command) =
+            update_supervisor(self.supervisor_state.clone(), event, self.restart_policy);
+        self.supervisor_state = state;
+        let start_event = self
+            .supervisor
+            .apply(command)?
+            .ok_or("WM supervisor did not start the configured process")?;
+        let (state, _) = update_supervisor(
+            self.supervisor_state.clone(),
+            start_event,
+            self.restart_policy,
+        );
+        self.supervisor_state = state;
+        super::x_authority::wait_for_socket_path(&self.socket_path)?;
+        let stream = UnixStream::connect(&self.socket_path)?;
+        self.transport = Some(WmSocketTransport::new(
+            stream,
+            WmSocketTransportConfig {
+                response_timeout: Duration::from_millis(500),
+            },
+        ));
+        let (state, _) = update_supervisor(
+            self.supervisor_state.clone(),
+            SupervisorEvent::ProcessHealthy,
+            self.restart_policy,
+        );
+        self.supervisor_state = state;
+        Ok(())
+    }
+
+    fn poll_restart(
+        &mut self,
+        layout: &PersistentLiveLayout,
+        output: sophia_engine::HeadlessOutput,
+    ) -> Result<Option<LiveWmProposal>, Box<dyn std::error::Error>> {
+        if self.degraded || self.supervisor.poll()?.is_none() {
+            return Ok(None);
+        }
+        self.transport = None;
+        self.restarts = self.restarts.saturating_add(1);
+        if let Err(error) = self.start(SupervisorEvent::ProcessExited) {
+            if self.committed == 0 {
+                return Err(error);
+            }
+            self.degraded = true;
+            println!(
+                "sophia_live_wm schema=1 status=degraded reason=restart_failed preserved_layout=true"
+            );
+            return Ok(None);
+        }
+        println!(
+            "sophia_live_wm schema=1 status=restarted restarts={} preserved_layout=true",
+            self.restarts
+        );
+        if layout.layers.is_empty() {
+            Ok(None)
+        } else {
+            self.request_relayout(layout, output).map(Some)
+        }
+    }
+
+    fn request_manage(
+        &mut self,
+        surface: SurfaceId,
+        layout: &PersistentLiveLayout,
+        output: sophia_engine::HeadlessOutput,
+    ) -> Result<LiveWmProposal, Box<dyn std::error::Error>> {
+        let node = layout
+            .layers
+            .get(&surface)
+            .ok_or("new WM surface is missing from live layout")?;
+        let workspace = WorkspaceId::from_raw(1);
+        let request = WmRequestPacket {
+            transaction: self.mint_transaction()?,
+            kind: WmRequestKind::ManageSurface(WmManageSurface {
+                node: live_layout_node(node, workspace),
+                output: output.id,
+                workspace,
+                bounds: output_bounds(output),
+            }),
+        };
+        self.request(request, layout, output)
+    }
+
+    fn request_relayout(
+        &mut self,
+        layout: &PersistentLiveLayout,
+        output: sophia_engine::HeadlessOutput,
+    ) -> Result<LiveWmProposal, Box<dyn std::error::Error>> {
+        let workspace = WorkspaceId::from_raw(1);
+        let request = WmRequestPacket {
+            transaction: self.mint_transaction()?,
+            kind: WmRequestKind::RelayoutWorkspace(WmRelayoutWorkspace {
+                output: output.id,
+                workspace,
+                bounds: output_bounds(output),
+                nodes: layout
+                    .layers
+                    .values()
+                    .map(|layer| live_layout_node(layer, workspace))
+                    .collect(),
+            }),
+        };
+        self.request(request, layout, output)
+    }
+
+    fn request(
+        &mut self,
+        request: WmRequestPacket,
+        layout: &PersistentLiveLayout,
+        output: sophia_engine::HeadlessOutput,
+    ) -> Result<LiveWmProposal, Box<dyn std::error::Error>> {
+        let response = self
+            .transport
+            .as_mut()
+            .ok_or("WM transport is unavailable")?
+            .request(&request)?;
+        self.requests = self.requests.saturating_add(1);
+        if response.commands.len() > 8_192 {
+            return Err("WM response exceeds the live command limit".into());
+        }
+        let transaction = response.into_layout_transaction();
+        validate_live_wm_transaction(&transaction, layout, output_bounds(output))?;
+        let mut proposed = layout.layers.values().cloned().collect::<Vec<_>>();
+        let engine = HeadlessEngine::new(output);
+        let commit = engine.commit_layout_transaction(&transaction, &mut proposed);
+        if commit.outcome != TransactionOutcome::Committed {
+            return Err(format!("Engine rejected live WM proposal: {:?}", commit.outcome).into());
+        }
+        let requested_sizes = transaction
+            .requested_sizes
+            .iter()
+            .map(|request| (request.surface, request.size))
+            .collect();
+        let moved_surfaces = proposed
+            .iter()
+            .filter(|layer| {
+                layout
+                    .layers
+                    .get(&layer.surface)
+                    .is_some_and(|current| current.geometry != layer.geometry)
+            })
+            .count();
+        let timeout = Duration::from_millis(u64::from(transaction.timeout_msec.clamp(100, 2_000)));
+        Ok(LiveWmProposal {
+            transaction: transaction.transaction,
+            layers: proposed,
+            requested_sizes,
+            focus: transaction.focus,
+            timeout,
+            update: WmTransactionUpdate {
+                commit,
+                ipc_error: None,
+            },
+            moved_surfaces,
+        })
+    }
+
+    fn mint_transaction(&mut self) -> Result<TransactionId, Box<dyn std::error::Error>> {
+        let transaction = TransactionId::from_raw(self.next_transaction);
+        self.next_transaction = self
+            .next_transaction
+            .checked_add(1)
+            .ok_or("WM transaction ID space exhausted")?;
+        Ok(transaction)
+    }
+
+    fn mark_committed(&mut self) {
+        self.committed = self.committed.saturating_add(1);
+        self.last_committed_at = Some(Instant::now());
+    }
+}
+
+impl Drop for LiveWmSession {
+    fn drop(&mut self) {
+        let _ = self.supervisor.terminate();
+        let _ = std::fs::remove_file(&self.socket_path);
+    }
+}
+
+struct PendingLiveWmLayout {
+    transaction: TransactionId,
+    layers: Vec<LayerSnapshot>,
+    requested_sizes: BTreeMap<SurfaceId, Size>,
+    focus: Option<SurfaceId>,
+    deadline: Instant,
+    update: WmTransactionUpdate,
+    moved_surfaces: usize,
+}
+
+#[derive(Default)]
+struct PersistentLiveLayout {
+    layers: BTreeMap<SurfaceId, LayerSnapshot>,
+    authority_sizes: BTreeMap<SurfaceId, Size>,
+    unmanaged_surfaces: BTreeSet<SurfaceId>,
+    pending: Option<PendingLiveWmLayout>,
+    focus_to_apply: Option<(TransactionId, SurfaceId)>,
+    stage_new_surfaces_offset: bool,
+}
+
+impl PersistentLiveLayout {
+    fn new(stage_new_surfaces_offset: bool) -> Self {
+        Self {
+            stage_new_surfaces_offset,
+            ..Self::default()
+        }
+    }
+
+    fn observe_authority_batch(
+        &mut self,
+        batch: &XAuthorityObservedTransactionBatch,
+    ) -> Vec<SurfaceId> {
+        let mut new_surfaces = Vec::new();
+        for (index, transaction) in batch.transactions.iter().enumerate() {
+            let size = Size {
+                width: transaction.target_geometry.width,
+                height: transaction.target_geometry.height,
+            };
+            self.authority_sizes.insert(transaction.surface, size);
+            match self.layers.get_mut(&transaction.surface) {
+                Some(layer) => {
+                    layer.source = transaction.target_buffer;
+                    layer.damage = transaction.damage.clone();
+                    layer.generation = transaction.previous_committed_generation.saturating_add(1);
+                }
+                None => {
+                    new_surfaces.push(transaction.surface);
+                    self.unmanaged_surfaces.insert(transaction.surface);
+                    let mut geometry = transaction.target_geometry;
+                    if self.stage_new_surfaces_offset {
+                        geometry.x = geometry.x.saturating_add(80);
+                        geometry.y = geometry.y.saturating_add(60);
+                    }
+                    self.layers.insert(
+                        transaction.surface,
+                        LayerSnapshot {
+                            surface: transaction.surface,
+                            window: None,
+                            namespace: None,
+                            stack_rank: u32::try_from(index).unwrap_or(u32::MAX),
+                            geometry,
+                            source: transaction.target_buffer,
+                            damage: transaction.damage.clone(),
+                            opacity: 1.0,
+                            crop: None,
+                            transform: Transform::IDENTITY,
+                            generation: transaction.previous_committed_generation.saturating_add(1),
+                            resize_sync: ResizeSyncCapability::ImplicitOnly,
+                        },
+                    );
+                }
+            }
+        }
+        new_surfaces
+    }
+
+    fn take_unmanaged_surfaces(&mut self) -> Vec<SurfaceId> {
+        std::mem::take(&mut self.unmanaged_surfaces)
+            .into_iter()
+            .collect()
+    }
+
+    fn stage(
+        &mut self,
+        mut proposal: LiveWmProposal,
+        control_sender: &SyncSender<XAuthorityControlCommand>,
+        control_ack_receiver: &Receiver<XAuthorityControlAck>,
+    ) -> Result<Option<WmTransactionUpdate>, Box<dyn std::error::Error>> {
+        proposal
+            .requested_sizes
+            .retain(|surface, size| self.authority_sizes.get(surface) != Some(size));
+        for (surface, size) in &proposal.requested_sizes {
+            control_sender.try_send(XAuthorityControlCommand::ConfigureSurface {
+                transaction: proposal.transaction,
+                surface: *surface,
+                size: *size,
+            })?;
+        }
+        for _ in 0..proposal.requested_sizes.len() {
+            let acknowledgement = control_ack_receiver.recv_timeout(Duration::from_millis(500))?;
+            if acknowledgement.transaction != proposal.transaction
+                || acknowledgement.outcome != XAuthorityControlOutcome::Applied
+            {
+                return Err(format!(
+                    "X Authority rejected WM configure transaction {} for surface {:?}: {:?}",
+                    acknowledgement.transaction.raw(),
+                    acknowledgement.surface,
+                    acknowledgement.outcome
+                )
+                .into());
+            }
+        }
+        let ready = proposal
+            .requested_sizes
+            .iter()
+            .all(|(surface, size)| self.authority_sizes.get(surface) == Some(size));
+        if ready {
+            return Ok(Some(self.commit_proposal(proposal)));
+        }
+        self.pending = Some(PendingLiveWmLayout {
+            transaction: proposal.transaction,
+            layers: proposal.layers,
+            requested_sizes: proposal.requested_sizes,
+            focus: proposal.focus,
+            deadline: Instant::now() + proposal.timeout,
+            update: proposal.update,
+            moved_surfaces: proposal.moved_surfaces,
+        });
+        Ok(None)
+    }
+
+    fn resolve_pending(&mut self) -> Option<WmTransactionUpdate> {
+        let pending = self.pending.as_ref()?;
+        let ready = pending
+            .requested_sizes
+            .iter()
+            .all(|(surface, size)| self.authority_sizes.get(surface) == Some(size));
+        if !ready {
+            return None;
+        }
+        let pending = self.pending.take().expect("checked above");
+        Some(self.commit_pending(pending))
+    }
+
+    fn expire_pending(&mut self) -> Option<WmTransactionUpdate> {
+        if !self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| Instant::now() >= pending.deadline)
+        {
+            return None;
+        }
+        let pending = self.pending.take().expect("checked above");
+        let resize_state = pending
+            .requested_sizes
+            .iter()
+            .map(|(surface, expected)| {
+                let observed = self.authority_sizes.get(surface).copied().unwrap_or(Size {
+                    width: 0,
+                    height: 0,
+                });
+                format!(
+                    "{}x{}:{}x{}",
+                    expected.width, expected.height, observed.width, observed.height
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        println!(
+            "sophia_live_wm schema=1 status=layout_timeout transaction={} preserved_layout=true resize_state={}",
+            pending.transaction.raw(),
+            resize_state,
+        );
+        Some(WmTransactionUpdate {
+            commit: TransactionCommit {
+                transaction: pending.transaction,
+                outcome: TransactionOutcome::TimedOut,
+                applied_surfaces: Vec::new(),
+            },
+            ipc_error: None,
+        })
+    }
+
+    fn commit_proposal(&mut self, proposal: LiveWmProposal) -> WmTransactionUpdate {
+        let pending = PendingLiveWmLayout {
+            transaction: proposal.transaction,
+            layers: proposal.layers,
+            requested_sizes: proposal.requested_sizes,
+            focus: proposal.focus,
+            deadline: Instant::now(),
+            update: proposal.update,
+            moved_surfaces: proposal.moved_surfaces,
+        };
+        self.commit_pending(pending)
+    }
+
+    fn commit_pending(&mut self, pending: PendingLiveWmLayout) -> WmTransactionUpdate {
+        self.layers = pending
+            .layers
+            .into_iter()
+            .map(|layer| (layer.surface, layer))
+            .collect();
+        if let Some(surface) = pending.focus {
+            self.focus_to_apply = Some((pending.transaction, surface));
+        }
+        println!(
+            "sophia_live_wm schema=1 status=layout_committed transaction={} surfaces={} moved_surfaces={} configure_acks={} outcome={:?}",
+            pending.transaction.raw(),
+            self.layers.len(),
+            pending.moved_surfaces,
+            pending.requested_sizes.len(),
+            pending.update.commit.outcome
+        );
+        pending.update
+    }
+
+    fn projected_batch(
+        &self,
+        batch: &XAuthorityObservedTransactionBatch,
+    ) -> XAuthorityObservedTransactionBatch {
+        let mut projected = batch.clone();
+        for transaction in &mut projected.transactions {
+            if let Some(layer) = self.layers.get(&transaction.surface) {
+                transaction.target_geometry = layer.geometry;
+            }
+        }
+        projected
+    }
+}
+
+fn output_bounds(output: sophia_engine::HeadlessOutput) -> Rect {
+    Rect {
+        x: 0,
+        y: 0,
+        width: output.size.width,
+        height: output.size.height,
+    }
+}
+
+fn live_layout_node(layer: &LayerSnapshot, workspace: WorkspaceId) -> LayoutNodeSnapshot {
+    let live_size = Size {
+        width: layer.geometry.width,
+        height: layer.geometry.height,
+    };
+    LayoutNodeSnapshot {
+        surface: layer.surface,
+        workspace,
+        kind: LayoutNodeKind::Toplevel,
+        capabilities: LayoutNodeCapabilities::STANDARD_TOPLEVEL,
+        state: LayoutNodeState::NORMAL,
+        constraints: SurfaceConstraints {
+            min_size: Some(live_size),
+            max_size: Some(live_size),
+        },
+        geometry: layer.geometry,
+        generation: layer.generation,
+    }
+}
+
+fn validate_live_wm_transaction(
+    transaction: &sophia_protocol::LayoutTransaction,
+    layout: &PersistentLiveLayout,
+    bounds: Rect,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for placement in &transaction.render_positions {
+        if !layout.layers.contains_key(&placement.surface)
+            || placement.geometry.is_empty()
+            || !rect_is_within(bounds, placement.geometry)
+        {
+            return Err("live WM returned an unknown, empty, or out-of-bounds placement".into());
+        }
+    }
+    for request in &transaction.requested_sizes {
+        if !layout.layers.contains_key(&request.surface)
+            || request.size.width <= 0
+            || request.size.height <= 0
+            || request.size.width > i32::from(u16::MAX)
+            || request.size.height > i32::from(u16::MAX)
+        {
+            return Err("live WM returned an invalid surface size request".into());
+        }
+    }
+    if transaction
+        .focus
+        .is_some_and(|surface| !layout.layers.contains_key(&surface))
+    {
+        return Err("live WM returned an unknown focus surface".into());
+    }
+    Ok(())
+}
+
+fn rect_is_within(bounds: Rect, geometry: Rect) -> bool {
+    let Some(bounds_right) = bounds.x.checked_add(bounds.width) else {
+        return false;
+    };
+    let Some(bounds_bottom) = bounds.y.checked_add(bounds.height) else {
+        return false;
+    };
+    let Some(right) = geometry.x.checked_add(geometry.width) else {
+        return false;
+    };
+    let Some(bottom) = geometry.y.checked_add(geometry.height) else {
+        return false;
+    };
+    geometry.x >= bounds.x
+        && geometry.y >= bounds.y
+        && right <= bounds_right
+        && bottom <= bounds_bottom
+}
+
 fn run_session_loop(
     config: &PersistentXtermSessionConfig,
     authority_receiver: &Receiver<XAuthorityObservedTransactionBatch>,
     input_sender: &SyncSender<XAuthorityInputEvent>,
+    control_sender: &SyncSender<XAuthorityControlCommand>,
+    control_ack_receiver: &Receiver<XAuthorityControlAck>,
     child: &mut Child,
     physical_input: &mut Option<
         sophia_backend_live::NativeLibinputEventPoller<
@@ -276,6 +868,7 @@ fn run_session_loop(
         >,
     >,
     native_scanout: &mut Option<PersistentNativeScanout>,
+    wm_session: &mut Option<LiveWmSession>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let started = Instant::now();
     let deadline = config.max_runtime.map(|duration| started + duration);
@@ -285,6 +878,7 @@ fn run_session_loop(
         .unwrap_or_else(|| vec![sophia_engine::HeadlessOutput::deterministic()]);
     let output = outputs[0];
     let mut scene = PersistentCpuScene::new(output.size);
+    let mut layout = PersistentLiveLayout::new(wm_session.is_some());
     let mut runtime = None;
     let mut last_authority_update = started;
     let mut injection_checksum = None;
@@ -317,6 +911,9 @@ fn run_session_loop(
 
     loop {
         if let Some(status) = child.try_wait()? {
+            if status.success() {
+                break;
+            }
             return Err(format!("xterm exited during live session with status {status}").into());
         }
         if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
@@ -382,6 +979,21 @@ fn run_session_loop(
                 last_authority_update = Instant::now();
                 batches = batches.saturating_add(1);
                 transactions = transactions.saturating_add(batch.transactions.len());
+                let _ = layout.observe_authority_batch(&batch);
+                let mut wm_update = layout.resolve_pending().or_else(|| layout.expire_pending());
+                if wm_update
+                    .as_ref()
+                    .is_some_and(|update| update.commit.outcome == TransactionOutcome::Committed)
+                    && let Some(wm_session) = wm_session.as_mut()
+                {
+                    wm_session.mark_committed();
+                }
+                if let Some(wm_session) = wm_session.as_mut() {
+                    if let Some(proposal) = wm_session.poll_restart(&layout, output)? {
+                        wm_update = layout.stage(proposal, control_sender, control_ack_receiver)?;
+                    }
+                }
+                let batch = layout.projected_batch(&batch);
                 scene.observe(&batch);
                 let report = scene.compose()?.clone();
                 let native_frames = native_scanout
@@ -412,7 +1024,8 @@ fn run_session_loop(
                 let runtime = runtime
                     .as_mut()
                     .expect("persistent backend runtime was initialized above");
-                let tick = runtime.run_batch(&batch, native_scanout.as_mut(), native_frames)?;
+                let tick =
+                    runtime.run_batch(&batch, native_scanout.as_mut(), native_frames, wm_update)?;
                 backend_ticks = backend_ticks.saturating_add(1);
                 runtime_committed = tick
                     .engine
@@ -426,8 +1039,38 @@ fn run_session_loop(
                     let _ =
                         focus.focus_surface(seat, surface.surface, runtime.committed_surfaces());
                 }
+                if let Some((transaction, surface)) = layout.focus_to_apply.take()
+                    && focus.focus_surface(seat, surface, runtime.committed_surfaces())
+                        == InputFocusDecision::Focused
+                {
+                    println!(
+                        "sophia_live_wm schema=1 status=focus_committed transaction={} target=surface",
+                        transaction.raw()
+                    );
+                }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                let _ = layout.expire_pending();
+                if let Some(wm_session) = wm_session.as_mut()
+                    && let Some(proposal) = wm_session.poll_restart(&layout, output)?
+                {
+                    let _ = layout.stage(proposal, control_sender, control_ack_receiver)?;
+                }
+                if layout.pending.is_none()
+                    && last_authority_update.elapsed()
+                        >= Duration::from_millis(SESSION_INPUT_QUIET_MSEC)
+                    && let Some(wm_session) = wm_session.as_mut()
+                {
+                    for surface in layout.take_unmanaged_surfaces() {
+                        let proposal = wm_session.request_manage(surface, &layout, output)?;
+                        if layout
+                            .stage(proposal, control_sender, control_ack_receiver)?
+                            .is_some()
+                        {
+                            wm_session.mark_committed();
+                        }
+                    }
+                }
                 if let (Some(runtime), Some(native_scanout)) =
                     (runtime.as_mut(), native_scanout.as_mut())
                 {
@@ -519,7 +1162,12 @@ fn run_session_loop(
         if injection_checksum.is_none()
             && config.input_proof_requested()
             && input_baseline_presented
-            && last_authority_update.elapsed() >= Duration::from_millis(SESSION_INPUT_QUIET_MSEC)
+            && (last_authority_update.elapsed() >= Duration::from_millis(SESSION_INPUT_QUIET_MSEC)
+                || wm_session.as_ref().is_some_and(|wm| {
+                    wm.last_committed_at.is_some_and(|committed| {
+                        committed.elapsed() >= Duration::from_millis(SESSION_INPUT_QUIET_MSEC)
+                    })
+                }))
         {
             injection_checksum = scene
                 .last_report
@@ -591,8 +1239,13 @@ fn run_session_loop(
         )
         .into());
     }
+    if let Some(wm_session) = wm_session.as_ref()
+        && wm_session.committed == 0
+    {
+        return Err("live session ended without a committed external WM layout".into());
+    }
     println!(
-        "sophia_live_session schema=6 status=bounded_complete display={} elapsed_msec={} session_ticks={} authority_batches={} authority_transactions={} authority_queue_capacity={} authority_batches_dropped=0 backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_max_nonzero_pixel_bytes={} cpu_nonzero_frames={} cpu_checksum={} injected_input={} input_pixel_change={} physical_events={} physical_keys_routed={} pointer_pixel_change={} physical_pointer_events={} physical_pointer_routed={} pointer_proof={} native_presentation={} native_submissions={} native_submit_deferred={} native_submit_failures={} native_retirements={} native_retire_failures={} native_max_in_flight_ticks={} native_max_submit_to_page_flip_msec={} native_callback_accepted={} native_callback_rejected={} native_callback_queue_saturated={} native_nonzero_exports={} native_export_attempts={} native_in_flight={} native_cleanup_pending={} physical_input={}",
+        "sophia_live_session schema=7 status=bounded_complete display={} elapsed_msec={} session_ticks={} authority_batches={} authority_transactions={} authority_queue_capacity={} authority_batches_dropped=0 backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_max_nonzero_pixel_bytes={} cpu_nonzero_frames={} cpu_checksum={} injected_input={} input_pixel_change={} physical_events={} physical_keys_routed={} pointer_pixel_change={} physical_pointer_events={} physical_pointer_routed={} pointer_proof={} native_presentation={} native_submissions={} native_submit_deferred={} native_submit_failures={} native_retirements={} native_retire_failures={} native_max_in_flight_ticks={} native_max_submit_to_page_flip_msec={} native_callback_accepted={} native_callback_rejected={} native_callback_queue_saturated={} native_nonzero_exports={} native_export_attempts={} native_in_flight={} native_cleanup_pending={} physical_input={} wm_policy={} wm_requests={} wm_committed={} wm_restarts={} wm_degraded={}",
         config.display,
         started.elapsed().as_millis(),
         session_ticks,
@@ -671,6 +1324,15 @@ fn run_session_loop(
         } else {
             "disabled"
         },
+        if wm_session.is_some() {
+            "external"
+        } else {
+            "disabled"
+        },
+        wm_session.as_ref().map_or(0, |wm| wm.requests),
+        wm_session.as_ref().map_or(0, |wm| wm.committed),
+        wm_session.as_ref().map_or(0, |wm| wm.restarts),
+        wm_session.as_ref().is_some_and(|wm| wm.degraded),
     );
     if let (Some(runtime), Some(native_scanout)) = (runtime.as_ref(), native_scanout.as_ref())
         && (native_scanout.submissions == 0
@@ -815,6 +1477,7 @@ impl PersistentBackendRuntime {
         batch: &XAuthorityObservedTransactionBatch,
         mut native_scanout: Option<&mut PersistentNativeScanout>,
         native_frames: Option<Vec<sophia_backend_live::LiveCpuComposedFrame>>,
+        wm_update: Option<WmTransactionUpdate>,
     ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
         for transaction in &batch.transactions {
             self.layers.insert(transaction.surface, transaction.clone());
@@ -833,7 +1496,8 @@ impl PersistentBackendRuntime {
                         "persistent live backend authority inbox is disconnected"
                     }
                 })?;
-            let input = compositor_tick_input(&transactions, batch.transactions.len());
+            let input =
+                compositor_tick_input(&transactions, batch.transactions.len(), wm_update.clone());
             let report = match native_scanout.as_deref_mut() {
                 Some(native_scanout) => {
                     if let Some(frame) = native_frames.next() {
@@ -919,7 +1583,7 @@ impl PersistentBackendRuntime {
             let report = native_scanout.run_tick(
                 index,
                 &mut output.runtime,
-                compositor_tick_input(&transactions, 0),
+                compositor_tick_input(&transactions, 0, None),
             )?;
             if first_report.is_none() {
                 first_report = Some(report);
@@ -956,11 +1620,12 @@ impl PersistentBackendRuntime {
 fn compositor_tick_input(
     transactions: &[SurfaceTransaction],
     x_event_count: usize,
+    wm_update: Option<WmTransactionUpdate>,
 ) -> CompositorBackendTickInput {
     CompositorBackendTickInput {
         x_event_count: u32::try_from(x_event_count).unwrap_or(u32::MAX),
         authority_batches: Vec::new(),
-        wm_update: None,
+        wm_update,
         portal_commands: Vec::new(),
         chrome_command_count: 0,
         layer_templates: super::x_authority::layer_templates_from_surface_transactions(

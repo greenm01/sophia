@@ -1,7 +1,7 @@
 #[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 #[cfg(unix)]
-use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError};
 #[cfg(unix)]
 use std::{
     collections::BTreeMap,
@@ -25,7 +25,7 @@ use crate::{
     x11_setup_request_total_len,
 };
 #[cfg(unix)]
-use sophia_protocol::{NamespaceId, SurfaceId, TransactionId};
+use sophia_protocol::{NamespaceId, Size, SurfaceId, TransactionId};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct X11SetupSocketError {
@@ -96,6 +96,54 @@ pub enum XAuthorityInputEvent {
 }
 
 #[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum XAuthorityControlCommand {
+    ConfigureSurface {
+        transaction: TransactionId,
+        surface: SurfaceId,
+        size: Size,
+    },
+    FocusSurface {
+        transaction: TransactionId,
+        surface: SurfaceId,
+    },
+}
+
+#[cfg(unix)]
+impl XAuthorityControlCommand {
+    pub const fn transaction(self) -> TransactionId {
+        match self {
+            Self::ConfigureSurface { transaction, .. } | Self::FocusSurface { transaction, .. } => {
+                transaction
+            }
+        }
+    }
+
+    pub const fn surface(self) -> SurfaceId {
+        match self {
+            Self::ConfigureSurface { surface, .. } | Self::FocusSurface { surface, .. } => surface,
+        }
+    }
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum XAuthorityControlOutcome {
+    Applied,
+    UnknownSurface,
+    InvalidSize,
+    AuthorityRejected,
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XAuthorityControlAck {
+    pub transaction: TransactionId,
+    pub surface: SurfaceId,
+    pub outcome: XAuthorityControlOutcome,
+}
+
+#[cfg(unix)]
 impl From<XAuthorityKeyEvent> for XAuthorityInputEvent {
     fn from(event: XAuthorityKeyEvent) -> Self {
         Self::Key(event)
@@ -107,7 +155,7 @@ impl From<XAuthorityKeyEvent> for XAuthorityInputEvent {
 #[cfg(unix)]
 #[derive(Debug, Default)]
 pub struct X11CoreSocketServerState {
-    runtime: XAuthorityRuntime,
+    runtime: Arc<Mutex<XAuthorityRuntime>>,
     atoms: XAtomTable,
     properties: XPropertyTable,
 }
@@ -270,6 +318,35 @@ pub fn run_x11_core_socket_server_once_channels(
         namespace,
         &mut state,
         Some(input_receiver),
+        None,
+        move |trace| {
+            try_emit_x_authority_trace(&transaction_sender, &trace)
+                .map_err(|error| X11SetupSocketError::new(error.to_string()))?;
+            Ok(())
+        },
+    )
+}
+
+#[cfg(unix)]
+pub fn run_x11_core_socket_server_once_session_channels(
+    path: impl AsRef<Path>,
+    namespace: NamespaceId,
+    transaction_sender: SyncSender<XAuthorityObservedTransactionBatch>,
+    input_receiver: Receiver<XAuthorityInputEvent>,
+    control_receiver: Receiver<XAuthorityControlCommand>,
+    control_ack_sender: SyncSender<XAuthorityControlAck>,
+) -> Result<(), X11SetupSocketError> {
+    let listener = bind_x11_core_socket_server(path)?;
+    let (mut stream, _) = listener.accept().map_err(|error| {
+        X11SetupSocketError::new(format!("failed to accept X11 core client: {error}"))
+    })?;
+    let mut state = X11CoreSocketServerState::new();
+    serve_x11_core_socket_client_with_trace_observer_and_input(
+        &mut stream,
+        namespace,
+        &mut state,
+        Some(input_receiver),
+        Some((control_receiver, control_ack_sender)),
         move |trace| {
             try_emit_x_authority_trace(&transaction_sender, &trace)
                 .map_err(|error| X11SetupSocketError::new(error.to_string()))?;
@@ -469,7 +546,7 @@ fn serve_x11_core_socket_client_with_trace_observer(
     observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
     serve_x11_core_socket_client_with_trace_observer_and_input(
-        stream, namespace, state, None, observer,
+        stream, namespace, state, None, None, observer,
     )
 }
 
@@ -479,6 +556,10 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
     namespace: NamespaceId,
     state: &mut X11CoreSocketServerState,
     input_receiver: Option<Receiver<XAuthorityInputEvent>>,
+    control_channels: Option<(
+        Receiver<XAuthorityControlCommand>,
+        SyncSender<XAuthorityControlAck>,
+    )>,
     mut observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
     let setup = serve_x11_setup_socket_client(stream)?;
@@ -499,6 +580,21 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 focused_window.clone(),
                 surface_windows.clone(),
                 receiver,
+            )
+        })
+        .transpose()?;
+    let control_writer = control_channels
+        .map(|(receiver, acknowledgements)| {
+            spawn_x11_control_writer(
+                output_stream.clone(),
+                setup.byte_order,
+                event_sequence.clone(),
+                focused_window.clone(),
+                surface_windows.clone(),
+                state.runtime.clone(),
+                namespace,
+                receiver,
+                acknowledgements,
             )
         })
         .transpose()?;
@@ -552,10 +648,13 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                         focused_window.store(window.local.raw(), Ordering::Release);
                     }
                     request_detail = x11_core_request_trace_detail(&request);
+                    let mut runtime = state.runtime.lock().map_err(|_| {
+                        X11SetupSocketError::new("X11 authority runtime lock poisoned")
+                    })?;
                     dispatch_x11_wire_request(
                         dispatch_context,
                         request,
-                        &mut state.runtime,
+                        &mut runtime,
                         &mut state.atoms,
                         &mut state.properties,
                     )
@@ -571,7 +670,17 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                     dispatch_x11_parse_error(dispatch_context, error)
                 }
             };
-            let cpu_buffer_update = state.runtime.take_cpu_buffer_update();
+            let cpu_buffer_update = state
+                .runtime
+                .lock()
+                .map_err(|_| X11SetupSocketError::new("X11 authority runtime lock poisoned"))?
+                .take_cpu_buffer_update();
+            if std::env::var_os("SOPHIA_X11_AUTHORITY_TRACE").is_some() {
+                eprintln!(
+                    "sophia-x-authority: seq={} opcode={}",
+                    sequence, major_opcode
+                );
+            }
             observer(X11CoreDispatchTrace {
                 sequence,
                 major_opcode,
@@ -614,11 +723,19 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
             .thread
             .join()
             .map_err(|_| X11SetupSocketError::new("X11 input event writer thread panicked"))?;
-        result?;
-        writer_result
-    } else {
-        result
+        result.as_ref().map_err(Clone::clone)?;
+        writer_result?;
     }
+    if let Some(writer) = control_writer {
+        writer.stop.store(true, Ordering::Release);
+        let writer_result = writer
+            .thread
+            .join()
+            .map_err(|_| X11SetupSocketError::new("X11 control writer thread panicked"))?;
+        result.as_ref().map_err(Clone::clone)?;
+        writer_result?;
+    }
+    result
 }
 
 #[cfg(unix)]
@@ -656,6 +773,205 @@ fn x11_keyboard_event_target(request: &[u8], byte_order: XByteOrder) -> Option<X
 struct X11InputEventWriter {
     stop: Arc<AtomicBool>,
     thread: std::thread::JoinHandle<Result<(), X11SetupSocketError>>,
+}
+
+#[cfg(unix)]
+struct X11ControlWriter {
+    stop: Arc<AtomicBool>,
+    thread: std::thread::JoinHandle<Result<(), X11SetupSocketError>>,
+}
+
+#[cfg(unix)]
+#[allow(clippy::too_many_arguments)]
+fn spawn_x11_control_writer(
+    stream: Arc<Mutex<UnixStream>>,
+    byte_order: XByteOrder,
+    sequence: Arc<AtomicU16>,
+    focused_window: Arc<AtomicU64>,
+    surface_windows: Arc<Mutex<BTreeMap<SurfaceId, XResourceId>>>,
+    runtime: Arc<Mutex<XAuthorityRuntime>>,
+    namespace: NamespaceId,
+    receiver: Receiver<XAuthorityControlCommand>,
+    acknowledgements: SyncSender<XAuthorityControlAck>,
+) -> Result<X11ControlWriter, X11SetupSocketError> {
+    let stop = Arc::new(AtomicBool::new(false));
+    let writer_stop = stop.clone();
+    let thread = std::thread::spawn(move || {
+        while !writer_stop.load(Ordering::Acquire) {
+            let command = match receiver.recv_timeout(Duration::from_millis(10)) {
+                Ok(command) => command,
+                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Disconnected) => return Ok(()),
+            };
+            let transaction = command.transaction();
+            let surface = command.surface();
+            let window = surface_windows
+                .lock()
+                .map_err(|_| X11SetupSocketError::new("X11 surface/window map lock poisoned"))?
+                .get(&surface)
+                .copied();
+            let Some(window) = window else {
+                send_x11_control_ack(
+                    &acknowledgements,
+                    XAuthorityControlAck {
+                        transaction,
+                        surface,
+                        outcome: XAuthorityControlOutcome::UnknownSurface,
+                    },
+                )?;
+                continue;
+            };
+
+            let event_sequence = sequence.load(Ordering::Acquire);
+            let records = match command {
+                XAuthorityControlCommand::ConfigureSurface { size, .. } => {
+                    if size.width <= 0
+                        || size.height <= 0
+                        || size.width > i32::from(u16::MAX)
+                        || size.height > i32::from(u16::MAX)
+                    {
+                        send_x11_control_ack(
+                            &acknowledgements,
+                            XAuthorityControlAck {
+                                transaction,
+                                surface,
+                                outcome: XAuthorityControlOutcome::InvalidSize,
+                            },
+                        )?;
+                        continue;
+                    }
+                    let geometry = match runtime
+                        .lock()
+                        .map_err(|_| {
+                            X11SetupSocketError::new("X11 authority runtime lock poisoned")
+                        })?
+                        .configure_window_size_from_engine(namespace, window, size)
+                    {
+                        Ok(geometry) => geometry,
+                        Err(_) => {
+                            send_x11_control_ack(
+                                &acknowledgements,
+                                XAuthorityControlAck {
+                                    transaction,
+                                    surface,
+                                    outcome: XAuthorityControlOutcome::AuthorityRejected,
+                                },
+                            )?;
+                            continue;
+                        }
+                    };
+                    let width = u16::try_from(geometry.width).expect("validated above");
+                    let height = u16::try_from(geometry.height).expect("validated above");
+                    vec![
+                        encode_x_client_event(
+                            byte_order,
+                            XClientEvent::ConfigureNotify {
+                                sequence: event_sequence,
+                                event: window,
+                                window,
+                                above_sibling: None,
+                                x: clamp_engine_i16(geometry.x),
+                                y: clamp_engine_i16(geometry.y),
+                                width,
+                                height,
+                                border_width: 0,
+                                override_redirect: false,
+                            },
+                        ),
+                        encode_x_client_event(
+                            byte_order,
+                            XClientEvent::Expose {
+                                sequence: event_sequence,
+                                window,
+                                x: 0,
+                                y: 0,
+                                width,
+                                height,
+                                count: 0,
+                            },
+                        ),
+                    ]
+                }
+                XAuthorityControlCommand::FocusSurface { .. } => {
+                    let previous = XResourceId::new(
+                        focused_window.swap(window.local.raw(), Ordering::AcqRel),
+                        1,
+                    );
+                    let mut records = Vec::with_capacity(2);
+                    if previous != window && previous.local.raw() != u64::from(X_SETUP_DEFAULT_ROOT)
+                    {
+                        records.push(encode_x_client_event(
+                            byte_order,
+                            XClientEvent::Focus {
+                                sequence: event_sequence,
+                                focused: false,
+                                detail: 3,
+                                event: previous,
+                                mode: 0,
+                            },
+                        ));
+                    }
+                    records.push(encode_x_client_event(
+                        byte_order,
+                        XClientEvent::Focus {
+                            sequence: event_sequence,
+                            focused: true,
+                            detail: 3,
+                            event: window,
+                            mode: 0,
+                        },
+                    ));
+                    records
+                }
+            };
+
+            let mut stream = stream
+                .lock()
+                .map_err(|_| X11SetupSocketError::new("X11 output socket lock poisoned"))?;
+            for record in records {
+                if let Err(error) = stream.write_all(&record) {
+                    if is_x11_client_disconnect(&error) {
+                        return Ok(());
+                    }
+                    return Err(X11SetupSocketError::new(format!(
+                        "failed to write X11 control event: {error}"
+                    )));
+                }
+            }
+            stream.flush().map_err(|error| {
+                X11SetupSocketError::new(format!("failed to flush X11 control event: {error}"))
+            })?;
+            drop(stream);
+            send_x11_control_ack(
+                &acknowledgements,
+                XAuthorityControlAck {
+                    transaction,
+                    surface,
+                    outcome: XAuthorityControlOutcome::Applied,
+                },
+            )?;
+        }
+        Ok(())
+    });
+    Ok(X11ControlWriter { stop, thread })
+}
+
+#[cfg(unix)]
+fn send_x11_control_ack(
+    sender: &SyncSender<XAuthorityControlAck>,
+    acknowledgement: XAuthorityControlAck,
+) -> Result<(), X11SetupSocketError> {
+    match sender.try_send(acknowledgement) {
+        Ok(()) | Err(TrySendError::Disconnected(_)) => Ok(()),
+        Err(TrySendError::Full(_)) => Err(X11SetupSocketError::new(
+            "X11 control acknowledgement channel is full",
+        )),
+    }
+}
+
+#[cfg(unix)]
+fn clamp_engine_i16(value: i32) -> i16 {
+    value.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16
 }
 
 #[cfg(unix)]

@@ -190,6 +190,11 @@ impl X11WmBridgeState {
                         node.constraints.min_size,
                         node.constraints.max_size,
                     );
+                    let geometry = Rect {
+                        width: size.width,
+                        height: size.height,
+                        ..geometry
+                    };
                     commands.push(WmCommand::ConfigureSurface(SurfaceSizeRequest {
                         surface: node.surface,
                         size,

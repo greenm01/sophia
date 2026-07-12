@@ -272,6 +272,41 @@ impl XAuthorityRuntime {
         Ok(())
     }
 
+    pub fn configure_window_size_from_engine(
+        &mut self,
+        namespace: NamespaceId,
+        window: crate::XResourceId,
+        size: Size,
+    ) -> Result<Rect, XAuthorityRuntimeError> {
+        if size.width <= 0
+            || size.height <= 0
+            || size.width > i32::from(u16::MAX)
+            || size.height > i32::from(u16::MAX)
+        {
+            return Err(XAuthorityRuntimeError::InvalidResource);
+        }
+        let current = self.window_geometry(namespace, window)?;
+        let generation = self
+            .windows
+            .get(window)
+            .ok_or(XAuthorityRuntimeError::UnknownResource)?
+            .generation;
+        self.configure_window_geometry(
+            namespace,
+            window,
+            None,
+            None,
+            Some(u16::try_from(size.width).expect("validated above")),
+            Some(u16::try_from(size.height).expect("validated above")),
+            generation,
+        )?;
+        Ok(Rect {
+            width: size.width,
+            height: size.height,
+            ..current
+        })
+    }
+
     pub fn map_namespace_windows(
         &mut self,
         namespace: NamespaceId,

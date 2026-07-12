@@ -51,11 +51,30 @@ Exit criteria:
 
 ---
 
-## Next Milestone: Wayland Authority Skeleton
+## Next Milestone: Live Generic Legacy-WM Bridge
+
+- [x] Add an optional generic WM socket to `sophia-live-session`. Send only
+  opaque live-surface layout snapshots, validate the reply in Engine, and apply
+  the committed proposal to composition, hit-testing, and scanout.
+- [ ] Prove the existing xterm remains visible and operator input changes its
+  presented pixels while xmonad supplies layout through the generic bridge.
+  Xmonad remains a proof fixture and must not appear in Engine or live-session
+  policy branches. The headless real-xmonad/xterm path passes with a committed
+  move, focus, and injected-input pixel change; the dedicated-TTY physical gate
+  remains.
+- [ ] Remove the first-session fixed client-size constraint after X Authority's
+  core-drawing resize path can accept arbitrary xmonad sizes without an xterm
+  repaint loop. Keep the bounded configure/focus command and acknowledgement
+  seam keyed only by `SurfaceId`.
+- [ ] Add a second legacy X11 WM compatibility smoke through the same
+  `--wm=PATH --wm-arg=ARG` launcher with no Engine changes.
+
+---
+
+## Following Milestone: Wayland Authority Skeleton
 
 - [ ] Start the deterministic Wayland Authority reducer/socket boundary only
-  after visible xterm pixels, keyboard input, xmonad layout translation, and
-  repeated-tick X session evidence pass.
+  after the live generic legacy-WM session proof passes.
 - [ ] Preserve the same authority contract: Wayland protocol resources remain
   in the authority; visual truth and commit readiness remain in Sophia Engine.
 

@@ -1,6 +1,8 @@
 # Sophia X11 WM Bridge
 
-Status: embedded policy-only server and real xmonad two-window smoke implemented.
+Status: generic legacy-WM supervisor boundary implemented; real xmonad
+two-window compatibility proof and one-real-xterm live wiring implemented;
+dedicated-TTY operator evidence remains open.
 
 The Sophia X11 WM Bridge is a legacy window-manager translation daemon. It sits
 in the Sophia WM policy slot and lets existing X11 window managers such as i3,
@@ -37,7 +39,9 @@ The bridge resolves the conflict with a two-faced facade:
 ## Boundary And Ownership
 
 The bridge is an isolated binary/library crate named
-`sophia-x11-wm-bridge`. Its first compatibility target is xmonad.
+`sophia-x11-wm-bridge`. It launches a configured legacy WM executable without
+exposing that WM's identity to Sophia Engine. Xmonad is the first compatibility
+proof, not a session dependency or an Engine mode.
 
 It owns:
 
@@ -47,7 +51,8 @@ It owns:
 - a bidirectional table mapping Sophia `SurfaceId` values to synthetic
   `XWindowId` values;
 - fake X event queues, event masks, and property replies needed by the WM.
-- supervision of one xmonad process attached to the private bridge display.
+- supervision of one configured legacy X11 WM process attached to the private
+  bridge display.
 
 It must not own:
 
@@ -113,11 +118,17 @@ Ignored by design:
 The fake server serves policy objects, not application windows. A synthetic
 window is only a handle that lets a legacy WM calculate rectangles.
 
-The first xmonad milestone is policy-only. Sophia retains physical input,
+The first legacy-WM milestone is policy-only. Sophia retains physical input,
 global keybindings, workspace commands, and focus validation. The bridge does
-not forward raw keyboard events into xmonad, so native xmonad Mod-key bindings
-are outside the first milestone. The server is embedded in the bridge; Xvfb is
-not used.
+not forward raw keyboard events into the legacy WM, so native WM Mod-key
+bindings are outside the first milestone. The server is embedded in the bridge;
+Xvfb is not used.
+
+The target operator model is plug-and-play at this boundary: select a compatible
+legacy X11 WM executable and arguments when starting the bridge; Sophia Engine
+continues to speak exactly the same opaque WM protocol. Supporting another WM
+may require extending the bridge's bounded fake-X11 request coverage, but must
+not require an Engine change or a WM-specific Engine branch.
 
 The official xmonad source may be checked out under `~/src/xmonad` and inspected
 as a compatibility reference. It is not vendored, linked, or required at
@@ -133,19 +144,33 @@ Cabal, Stack, or distro xmonad installation.
 ## Running The Bridge
 
 The production-facing process speaks the standard framed Sophia WM protocol on
-a Unix socket and supervises exactly one xmonad process:
+a Unix socket and supervises exactly one configured legacy X11 WM process:
 
 ```sh
 cargo run --offline -p sophia-x11-wm-bridge -- \
-  serve-socket --socket=/tmp/sophia-wm.sock --xmonad=/path/to/xmonad
+  serve-socket --socket=/tmp/sophia-wm.sock --wm=/path/to/wm \
+  --wm-arg=optional-argument --wm-private-alias=compiled/wm
 ```
 
-`SOPHIA_XMONAD_BIN` provides the executable path when `--xmonad` is omitted.
-The bridge creates a private local `DISPLAY`, stages xmonad under a private
-empty home, clears its inherited environment, and exposes one synthetic root
-plus bounded synthetic top-level windows. It supplies empty property data and
-reports rendering/input extensions absent. It accepts no X client application
-connections and never forwards a physical key or pointer event.
+`SOPHIA_LEGACY_X11_WM` provides the executable path when `--wm` is omitted.
+Repeated `--wm-arg=` values are passed directly without a shell. The bridge
+creates a private local `DISPLAY` and empty home, clears inherited environment,
+and exposes one synthetic root plus bounded synthetic top-level windows. It
+supplies empty property data and reports rendering/input extensions absent. It
+accepts no X client application connections and never forwards a physical key
+or pointer event.
+
+`--wm-private-alias=` is an optional relative path below the bridge's private
+`XDG_CONFIG_HOME`. It supports WMs that re-exec a compiled/configured binary;
+the bridge rejects absolute paths and parent traversal.
+
+The Engine and live X Authority do not know whether this process is xmonad,
+dwm, i3, qtile, or another compatible WM. `sophia-live-session` can now
+supervise this adapter through generic `--wm-process` arguments and apply its
+opaque placement/focus proposal to the real xterm surface. The first live gate
+pins client size to the already rendered xterm buffer while xmonad controls
+position, stacking, and focus; arbitrary live client resizing remains a
+separate compatibility gate.
 
 Run the real policy proof with:
 
@@ -153,7 +178,8 @@ Run the real policy proof with:
 tools/xmonad_wm_bridge_smoke.sh
 ```
 
-The script uses `SOPHIA_XMONAD_BIN`, an installed `xmonad`, or the pinned
+The xmonad-only proof command is `xmonad-smoke`. The script uses
+`SOPHIA_XMONAD_BIN`, an installed `xmonad`, or the pinned
 `~/src/xmonad` Nix flake in that order. It requires two distinct rectangles from
 real xmonad `ConfigureWindow` requests and translates them into two bounded
 Sophia `RenderSurface` commands in the matching transaction. On the reference
@@ -161,6 +187,11 @@ checkout, the baseline result is two 640 by 720 tiles within a 1280 by 720
 synthetic root. Set `SOPHIA_X11_WM_TRACE=1` to print core request opcodes during
 compatibility work; the trace contains no client metadata because none is
 served.
+
+Xmonad's proof setup uses the launcher's generic private-executable-alias
+facility because xmonad re-executes a compiled binary from a fixed path below
+`XDG_CONFIG_HOME`. That workaround lives in the xmonad proof command, not in the
+generic bridge runtime or Sophia Engine.
 
 ## Inbound Translation: Engine To Legacy WM
 

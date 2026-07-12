@@ -1,8 +1,9 @@
-use std::os::unix::fs::{PermissionsExt, symlink};
 use std::{
     collections::{BTreeMap, BTreeSet},
+    ffi::OsString,
     fs,
     io::{ErrorKind, Read, Write},
+    os::unix::fs::{PermissionsExt, symlink},
     os::unix::net::{UnixListener, UnixStream},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -59,7 +60,37 @@ enum ServerCommand {
     Destroy(SyntheticXWindowId),
 }
 
-pub struct XmonadBridgeRuntime {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LegacyWmLaunchSpec {
+    executable: PathBuf,
+    arguments: Vec<OsString>,
+    private_executable_alias: Option<PathBuf>,
+}
+
+impl LegacyWmLaunchSpec {
+    pub fn new(executable: impl Into<PathBuf>) -> Self {
+        Self {
+            executable: executable.into(),
+            arguments: Vec::new(),
+            private_executable_alias: None,
+        }
+    }
+
+    pub fn arg(mut self, argument: impl Into<OsString>) -> Self {
+        self.arguments.push(argument.into());
+        self
+    }
+
+    /// Stages the executable at a path relative to the bridge's private
+    /// `XDG_CONFIG_HOME` and launches that alias. This is a generic escape hatch
+    /// for WMs that re-exec a compiled/configured binary from a fixed location.
+    pub fn with_private_executable_alias(mut self, relative_path: impl Into<PathBuf>) -> Self {
+        self.private_executable_alias = Some(relative_path.into());
+        self
+    }
+}
+
+pub struct LegacyX11WmBridgeRuntime {
     bridge: X11WmBridgeState,
     commands: Option<SyncSender<ServerCommand>>,
     legacy: Receiver<LegacyWmRequest>,
@@ -69,35 +100,46 @@ pub struct XmonadBridgeRuntime {
     config_dir: PathBuf,
 }
 
-impl XmonadBridgeRuntime {
-    pub fn start(xmonad: impl AsRef<Path>) -> Result<Self, BridgeRuntimeError> {
+impl LegacyX11WmBridgeRuntime {
+    pub fn start(spec: LegacyWmLaunchSpec) -> Result<Self, BridgeRuntimeError> {
+        let executable = resolve_executable(&spec.executable)?;
+        if let Some(relative_alias) = spec.private_executable_alias.as_deref() {
+            validate_private_executable_alias(relative_alias)?;
+        }
         let (listener, display, socket_path) = bind_private_display()?;
-        let xmonad = resolve_executable(xmonad.as_ref())?;
         let config_dir = std::env::temp_dir().join(format!(
-            "sophia-xmonad-bridge-{}-{display}",
+            "sophia-x11-wm-bridge-{}-{display}",
             std::process::id()
         ));
         fs::create_dir_all(&config_dir).map_err(|error| {
             BridgeRuntimeError::new(format!(
-                "failed to create private xmonad config directory {}: {error}",
+                "failed to create private legacy WM config directory {}: {error}",
                 config_dir.display()
             ))
         })?;
-        let xmonad_config_dir = config_dir.join("xmonad");
-        fs::create_dir_all(&xmonad_config_dir).map_err(|error| {
-            BridgeRuntimeError::new(format!(
-                "failed to create private xmonad runtime directory {}: {error}",
-                xmonad_config_dir.display()
-            ))
-        })?;
-        symlink(&xmonad, xmonad_config_dir.join("xmonad-x86_64-linux")).map_err(|error| {
-            BridgeRuntimeError::new(format!(
-                "failed to stage private xmonad executable: {error}"
-            ))
-        })?;
+        let launch_path = if let Some(relative_alias) = spec.private_executable_alias {
+            let staged = config_dir.join(relative_alias);
+            let parent = staged.parent().ok_or_else(|| {
+                BridgeRuntimeError::new("private legacy WM executable alias has no parent")
+            })?;
+            fs::create_dir_all(parent).map_err(|error| {
+                BridgeRuntimeError::new(format!(
+                    "failed to create private legacy WM runtime directory {}: {error}",
+                    parent.display()
+                ))
+            })?;
+            symlink(&executable, &staged).map_err(|error| {
+                BridgeRuntimeError::new(format!(
+                    "failed to stage private legacy WM executable: {error}"
+                ))
+            })?;
+            staged
+        } else {
+            executable.clone()
+        };
 
-        let staged_xmonad = xmonad_config_dir.join("xmonad-x86_64-linux");
-        let mut child = Command::new(&staged_xmonad)
+        let mut child = Command::new(&launch_path)
+            .args(spec.arguments)
             .env_clear()
             .env("DISPLAY", format!(":{display}"))
             .env("HOME", &config_dir)
@@ -112,12 +154,12 @@ impl XmonadBridgeRuntime {
             .spawn()
             .map_err(|error| {
                 BridgeRuntimeError::new(format!(
-                    "failed to start xmonad {}: {error}",
-                    xmonad.display()
+                    "failed to start legacy X11 WM {}: {error}",
+                    executable.display()
                 ))
             })?;
 
-        let stream = match accept_private_xmonad(&listener, &mut child) {
+        let stream = match accept_private_legacy_wm(&listener, &mut child) {
             Ok(stream) => stream,
             Err(error) => {
                 let _ = child.kill();
@@ -132,7 +174,7 @@ impl XmonadBridgeRuntime {
         let (legacy_tx, legacy_rx) = mpsc::sync_channel(256);
         let worker = thread::spawn(move || {
             let mut stream = stream;
-            serve_xmonad(&mut stream, command_rx, legacy_tx)
+            serve_legacy_wm(&mut stream, command_rx, legacy_tx)
         });
 
         Ok(Self {
@@ -157,7 +199,7 @@ impl XmonadBridgeRuntime {
             &update,
             self.commands
                 .as_ref()
-                .ok_or_else(|| BridgeRuntimeError::new("xmonad server stopped"))?,
+                .ok_or_else(|| BridgeRuntimeError::new("legacy WM server stopped"))?,
         )?;
 
         let started = Instant::now();
@@ -190,7 +232,7 @@ impl XmonadBridgeRuntime {
                     }
                 }
                 Err(RecvTimeoutError::Disconnected) => {
-                    return Err(BridgeRuntimeError::new("xmonad server disconnected"));
+                    return Err(BridgeRuntimeError::new("legacy WM server disconnected"));
                 }
             }
         }
@@ -200,7 +242,7 @@ impl XmonadBridgeRuntime {
             .all(|window| configured.contains_key(window))
         {
             return Err(BridgeRuntimeError::new(format!(
-                "xmonad did not configure all {} synthetic windows within {} ms (configured {})",
+                "legacy WM did not configure all {} synthetic windows within {} ms (configured {})",
                 expected.len(),
                 BRIDGE_TIMEOUT.as_millis(),
                 configured.len()
@@ -220,7 +262,20 @@ impl XmonadBridgeRuntime {
     }
 }
 
-fn accept_private_xmonad(
+fn validate_private_executable_alias(path: &Path) -> Result<(), BridgeRuntimeError> {
+    if path.as_os_str().is_empty()
+        || !path
+            .components()
+            .all(|component| matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(BridgeRuntimeError::new(
+            "private legacy WM executable alias must be a non-empty relative path below XDG_CONFIG_HOME",
+        ));
+    }
+    Ok(())
+}
+
+fn accept_private_legacy_wm(
     listener: &UnixListener,
     child: &mut Child,
 ) -> Result<UnixStream, BridgeRuntimeError> {
@@ -234,20 +289,20 @@ fn accept_private_xmonad(
             Err(error) if error.kind() == ErrorKind::WouldBlock => {}
             Err(error) => {
                 return Err(BridgeRuntimeError::new(format!(
-                    "failed to accept private xmonad socket: {error}"
+                    "failed to accept private legacy WM socket: {error}"
                 )));
             }
         }
         if let Some(status) = child.try_wait().map_err(|error| {
-            BridgeRuntimeError::new(format!("failed to inspect xmonad process: {error}"))
+            BridgeRuntimeError::new(format!("failed to inspect legacy WM process: {error}"))
         })? {
             return Err(BridgeRuntimeError::new(format!(
-                "xmonad exited before connecting to its private display: {status}"
+                "legacy WM exited before connecting to its private display: {status}"
             )));
         }
         if started.elapsed() >= BRIDGE_TIMEOUT {
             return Err(BridgeRuntimeError::new(format!(
-                "xmonad did not connect to its private display within {} ms",
+                "legacy WM did not connect to its private display within {} ms",
                 BRIDGE_TIMEOUT.as_millis()
             )));
         }
@@ -259,7 +314,7 @@ fn resolve_executable(path: &Path) -> Result<PathBuf, BridgeRuntimeError> {
     if path.components().count() > 1 {
         return fs::canonicalize(path).map_err(|error| {
             BridgeRuntimeError::new(format!(
-                "failed to resolve xmonad executable {}: {error}",
+                "failed to resolve legacy WM executable {}: {error}",
                 path.display()
             ))
         });
@@ -271,13 +326,13 @@ fn resolve_executable(path: &Path) -> Result<PathBuf, BridgeRuntimeError> {
         .and_then(|candidate| fs::canonicalize(candidate).ok())
         .ok_or_else(|| {
             BridgeRuntimeError::new(format!(
-                "xmonad executable '{}' was not found in PATH",
+                "legacy WM executable '{}' was not found in PATH",
                 path.display()
             ))
         })
 }
 
-impl Drop for XmonadBridgeRuntime {
+impl Drop for LegacyX11WmBridgeRuntime {
     fn drop(&mut self) {
         self.commands.take();
         let _ = self.child.kill();
@@ -292,7 +347,7 @@ impl Drop for XmonadBridgeRuntime {
 
 pub fn run_wm_socket_server(
     path: impl AsRef<Path>,
-    xmonad: impl AsRef<Path>,
+    wm: LegacyWmLaunchSpec,
 ) -> Result<(), BridgeRuntimeError> {
     let path = path.as_ref();
     match fs::remove_file(path) {
@@ -305,13 +360,13 @@ pub fn run_wm_socket_server(
             )));
         }
     }
+    let mut runtime = LegacyX11WmBridgeRuntime::start(wm)?;
     let listener = UnixListener::bind(path).map_err(|error| {
         BridgeRuntimeError::new(format!(
             "failed to bind WM socket {}: {error}",
             path.display()
         ))
     })?;
-    let mut runtime = XmonadBridgeRuntime::start(xmonad)?;
     for stream in listener.incoming() {
         let mut stream = stream.map_err(|error| {
             BridgeRuntimeError::new(format!("failed to accept WM socket client: {error}"))
@@ -415,7 +470,7 @@ fn send_engine_update(
         };
         commands
             .send(command)
-            .map_err(|_| BridgeRuntimeError::new("xmonad command channel disconnected"))?;
+            .map_err(|_| BridgeRuntimeError::new("legacy WM command channel disconnected"))?;
     }
     Ok(expected)
 }
@@ -455,7 +510,7 @@ impl XServerState {
     }
 }
 
-fn serve_xmonad(
+fn serve_legacy_wm(
     stream: &mut UnixStream,
     commands: Receiver<ServerCommand>,
     legacy: SyncSender<LegacyWmRequest>,
@@ -464,7 +519,7 @@ fn serve_xmonad(
         .map_err(|error| BridgeRuntimeError::new(format!("X11 setup failed: {error}")))?;
     if setup.byte_order != XByteOrder::LittleEndian {
         return Err(BridgeRuntimeError::new(
-            "private xmonad server currently requires little-endian X11",
+            "private legacy WM server currently requires little-endian X11",
         ));
     }
     stream.set_read_timeout(Some(IO_POLL)).map_err(|error| {
@@ -488,19 +543,19 @@ fn serve_xmonad(
             Err(error) if error.kind() == ErrorKind::UnexpectedEof => return Ok(()),
             Err(error) => {
                 return Err(BridgeRuntimeError::new(format!(
-                    "failed to read xmonad request header: {error}"
+                    "failed to read legacy WM request header: {error}"
                 )));
             }
         }
         let units = usize::from(u16::from_le_bytes([header[2], header[3]]));
         if units == 0 || units > 65_535 {
             return Err(BridgeRuntimeError::new(format!(
-                "invalid xmonad request length {units}"
+                "invalid legacy WM request length {units}"
             )));
         }
         let mut body = vec![0_u8; units * 4 - 4];
         stream.read_exact(&mut body).map_err(|error| {
-            BridgeRuntimeError::new(format!("failed to read xmonad request body: {error}"))
+            BridgeRuntimeError::new(format!("failed to read legacy WM request body: {error}"))
         })?;
         state.sequence = state.sequence.wrapping_add(1);
         if std::env::var_os("SOPHIA_X11_WM_TRACE").is_some() {
@@ -540,7 +595,7 @@ fn apply_server_command(
                 entry.geometry = geometry;
             }
             // A root ConfigureNotify is the bounded, metadata-free signal that
-            // makes xmonad re-run its current layout for an existing set.
+            // makes compatible WMs re-run their current layout for an existing set.
             write_configure_notify(stream, state.sequence, SYNTHETIC_ROOT_XID, state.root)?;
         }
         ServerCommand::Unmap(window) => {
@@ -619,7 +674,7 @@ fn dispatch_request(
         127 => {}
         other => {
             return Err(BridgeRuntimeError::new(format!(
-                "unsupported xmonad core request opcode {other}"
+                "unsupported legacy WM core request opcode {other}"
             )));
         }
     }
@@ -1023,11 +1078,11 @@ fn write_window_event(
 
 fn write_packet(stream: &mut UnixStream, bytes: &[u8]) -> Result<(), BridgeRuntimeError> {
     stream.write_all(bytes).map_err(|error| {
-        BridgeRuntimeError::new(format!("failed to write xmonad packet: {error}"))
+        BridgeRuntimeError::new(format!("failed to write legacy WM packet: {error}"))
     })?;
-    stream
-        .flush()
-        .map_err(|error| BridgeRuntimeError::new(format!("failed to flush xmonad packet: {error}")))
+    stream.flush().map_err(|error| {
+        BridgeRuntimeError::new(format!("failed to flush legacy WM packet: {error}"))
+    })
 }
 
 fn read_u16(bytes: &[u8], offset: usize) -> u16 {
@@ -1054,4 +1109,31 @@ fn push_i16(bytes: &mut Vec<u8>, value: i16) {
 }
 fn push_u32(bytes: &mut Vec<u8>, value: u32) {
     bytes.extend_from_slice(&value.to_le_bytes());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generic_launch_spec_preserves_executable_arguments_and_optional_alias() {
+        let spec = LegacyWmLaunchSpec::new("dwm")
+            .arg("--example")
+            .with_private_executable_alias("compiled/wm");
+
+        assert_eq!(spec.executable, PathBuf::from("dwm"));
+        assert_eq!(spec.arguments, vec![OsString::from("--example")]);
+        assert_eq!(
+            spec.private_executable_alias,
+            Some(PathBuf::from("compiled/wm"))
+        );
+    }
+
+    #[test]
+    fn private_executable_alias_cannot_escape_config_home() {
+        assert!(validate_private_executable_alias(Path::new("compiled/wm")).is_ok());
+        assert!(validate_private_executable_alias(Path::new("../wm")).is_err());
+        assert!(validate_private_executable_alias(Path::new("/tmp/wm")).is_err());
+        assert!(validate_private_executable_alias(Path::new("")).is_err());
+    }
 }

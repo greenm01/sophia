@@ -1,7 +1,7 @@
 use sophia_portal::{ClipboardPortal, PortalCommand};
 use sophia_protocol::{
     AuthorityKind, BufferSource, IpcCodecError, IpcMessageKind, NamespaceId, PortalDecision,
-    PortalTransferId, Rect, Region, SOPHIA_IPC_MAGIC, SurfaceConstraints, SurfaceId,
+    PortalTransferId, Rect, Region, SOPHIA_IPC_MAGIC, Size, SurfaceConstraints, SurfaceId,
     SurfaceTransactionReadiness, TransactionId, encode_frame,
 };
 use sophia_x_authority::*;
@@ -255,6 +255,67 @@ fn repeated_runtime_draws_advance_surface_generations() {
 
     assert_eq!(first.transactions[0].previous_committed_generation, 5);
     assert_eq!(second.transactions[0].previous_committed_generation, 6);
+}
+
+#[test]
+fn engine_size_control_updates_authority_geometry_without_consuming_client_generation() {
+    let namespace = NamespaceId::from_raw(18);
+    let window = XResourceId::new(0x62, 1);
+    let surface = SurfaceId::new(18, 1);
+    let mut runtime = XAuthorityRuntime::new();
+    let created = runtime.apply(XAuthorityRequestPacket {
+        transaction: TransactionId::from_raw(18),
+        namespace,
+        kind: XAuthorityRequestKind::CreateWindow {
+            window,
+            surface,
+            geometry: Rect {
+                x: 9,
+                y: 11,
+                width: 80,
+                height: 40,
+            },
+            constraints: SurfaceConstraints {
+                min_size: None,
+                max_size: None,
+            },
+            generation: 5,
+        },
+    });
+    assert_eq!(created.outcome, XAuthorityResponseOutcome::Accepted);
+
+    assert_eq!(
+        runtime
+            .configure_window_size_from_engine(
+                namespace,
+                window,
+                Size {
+                    width: 120,
+                    height: 70,
+                },
+            )
+            .unwrap(),
+        Rect {
+            x: 9,
+            y: 11,
+            width: 120,
+            height: 70,
+        }
+    );
+    let draw = runtime.apply_core_draw(
+        TransactionId::from_raw(19),
+        namespace,
+        window,
+        Region::single(Rect {
+            x: 0,
+            y: 0,
+            width: 4,
+            height: 4,
+        }),
+    );
+    assert_eq!(draw.transactions[0].previous_committed_generation, 5);
+    assert_eq!(draw.transactions[0].target_geometry.width, 120);
+    assert_eq!(draw.transactions[0].target_geometry.height, 70);
 }
 
 #[test]

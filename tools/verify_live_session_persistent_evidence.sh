@@ -49,6 +49,9 @@ expected_keys=(
     native_nonzero_exports native_export_attempts native_in_flight
     native_cleanup_pending physical_input
 )
+if [[ "${observed[schema]:-}" == "7" ]]; then
+    expected_keys+=(wm_policy wm_requests wm_committed wm_restarts wm_degraded)
+fi
 if [[ "${#observed[@]}" -ne "${#expected_keys[@]}" ]]; then
     echo "persistent live-session evidence has an unknown or missing field" >&2
     exit 1
@@ -60,7 +63,7 @@ for key in "${expected_keys[@]}"; do
     fi
 done
 
-[[ "${observed[schema]}" == "6" ]]
+[[ "${observed[schema]}" == "6" || "${observed[schema]}" == "7" ]]
 [[ "${observed[status]}" == "bounded_complete" ]]
 [[ "${observed[injected_input]}" == "true" || "${observed[injected_input]}" == "false" ]]
 [[ "${observed[input_pixel_change]}" == "true" ]]
@@ -82,6 +85,15 @@ numeric_keys=(
     native_callback_rejected native_callback_queue_saturated
     native_nonzero_exports native_export_attempts
 )
+if [[ "${observed[schema]}" == "7" ]]; then
+    numeric_keys+=(wm_requests wm_committed wm_restarts)
+    [[ "${observed[wm_policy]}" == "disabled" || "${observed[wm_policy]}" == "external" ]]
+    [[ "${observed[wm_degraded]}" == "true" || "${observed[wm_degraded]}" == "false" ]]
+    if [[ "${observed[wm_policy]}" == "disabled" ]]; then
+        (( observed[wm_requests] == 0 && observed[wm_committed] == 0 && observed[wm_restarts] == 0 ))
+        [[ "${observed[wm_degraded]}" == "false" ]]
+    fi
+fi
 for key in "${numeric_keys[@]}"; do
     if [[ ! "${observed[$key]}" =~ ^[0-9]+$ ]]; then
         echo "persistent live-session evidence expected numeric $key" >&2

@@ -29,5 +29,5 @@ exec cargo run \
     --quiet \
     --manifest-path "$repo_root/Cargo.toml" \
     --package sophia-x11-wm-bridge \
-    -- smoke \
+    -- xmonad-smoke \
     "--xmonad=$xmonad_bin"
