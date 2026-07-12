@@ -48,12 +48,14 @@ pub(crate) fn print(verbose: bool) {
     println!("commands: x-authority-present-pixmap-smoke");
     #[cfg(feature = "atomic-scanout-live")]
     println!(
-        "commands: sophia-live-session [--display=:77] [--terminal=xterm] [--input-devices=/dev/input/eventN,...] [--native-scanout] [--max-runtime-ms=N] [--max-ticks=N] [--inject-text=lowercase|--expect-physical-text=lowercase] [--expect-physical-pointer] [--proof]"
+        "commands: sophia-live-session [--display=:77] [--terminal=xterm] [--input-devices=/dev/input/eventN,...] [--native-scanout] [--max-runtime-ms=N] [--max-ticks=N] [--inject-text=lowercase|--expect-physical-text=lowercase] [--expect-physical-pointer] [--exit-after-input-proof] [--proof]"
     );
     #[cfg(feature = "atomic-scanout-live")]
     println!("commands: live-session-composition-smoke");
     #[cfg(feature = "atomic-scanout-live")]
     println!("commands: atomic-scanout-preflight");
+    #[cfg(feature = "atomic-scanout-smoke-live")]
+    println!("commands: atomic-vrr-inspect");
     #[cfg(feature = "atomic-scanout-smoke-live")]
     println!(
         "commands: sophia-live-session-content-hardware-proof [--terminal=xterm] [--slot=1] [--output=1] [--authority=1] [--page-flip-timeout-ms=8000]"

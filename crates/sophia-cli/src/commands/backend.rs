@@ -70,6 +70,35 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
     }
 
     #[cfg(feature = "atomic-scanout-smoke-live")]
+    if args.iter().any(|arg| arg == "atomic-vrr-inspect") {
+        let config = sophia_backend_live::RealAtomicScanoutSmokeConfig::default_primary_output()
+            .ok_or("default VRR inspection config is invalid")?;
+        let mut session_result = sophia_backend_live::select_real_atomic_scanout_card()
+            .into_page_flip_session(config.slot, config.output, config.authority);
+        let session = session_result.session.take().ok_or_else(|| {
+            format!(
+                "VRR inspection selection failed: {:?}",
+                session_result.status
+            )
+        })?;
+        let selection = session.selection();
+        let discovery = session.vrr_properties_for_selection(selection);
+        let (connector_properties, crtc_properties) =
+            session.property_names_for_selection(selection)?;
+        println!(
+            "sophia_vrr_inspect schema=1 connector={} crtc={} status={:?} capable={} enable_property={} connector_properties={} crtc_properties={}",
+            selection.connector_id(),
+            selection.crtc_id(),
+            discovery.status,
+            discovery.capable,
+            discovery.enable_property.is_some(),
+            connector_properties.join(","),
+            crtc_properties.join(","),
+        );
+        return Ok(true);
+    }
+
+    #[cfg(feature = "atomic-scanout-smoke-live")]
     if args.iter().any(|arg| arg == "atomic-scanout-smoke") {
         if std::env::var_os("SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE").is_none() {
             return Err("set SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 to run destructive atomic scanout smoke".into());

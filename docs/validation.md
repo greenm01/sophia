@@ -115,18 +115,30 @@ The combined helper auto-selects the keyboard when exactly one stable keyboard
 path exists, reruns the real xmonad gate, and executes both physical proofs. It
 refuses to proceed while River, Niri, Sway, Hyprland, KWin, or Xorg is active,
 so invoking it accidentally from the live graphical session cannot take DRM
-master or modeset the display. Set `SOPHIA_OPERATOR_KEYBOARD` only when more
-than one keyboard path is listed.
+master. Set `SOPHIA_OPERATOR_KEYBOARD` only when more than one keyboard path is
+listed. When `keyd` is active, the interactive helper uses `sudo sv down keyd`
+before opening the physical keyboard and an EXIT trap restores it with
+`sudo sv up keyd` after success, failure, or interruption. There is no separate
+confirmation prompt whose Return could enter the exact input proof.
 
-The keyboard helper waits for the explicit physical-input readiness line; type
-`sophia` only after it appears. The proof fails unless libinput observes and
-Engine routes physical key events and the later xterm pixels change. The VRR
-helper is destructive and requires a connector reporting `VRR_CAPABLE=1` plus
+The keyboard helper presents `type sophia then Return:` inside the scanned-out
+xterm and waits up to 15 seconds for that exact press/release sequence. A fresh
+five-second pixel deadline begins only after Return is released. The proof fails
+on an unexpected key, modifier, repeat, missing release, missing Return, or if
+later xterm pixels do not change. Accepted evidence records all 14 expected and
+matched events after Engine focus routing and core-X translation. The VRR helper
+is destructive and requires a connector reporting `vrr_capable=1` plus
 the selected CRTC's `VRR_ENABLED` property. It submits an Engine-eligible
 opaque fullscreen modeset with `VRR_ENABLED=true`, waits for presentation, then
 submits an overlay/ineligible fixed-refresh fallback with `VRR_ENABLED=false`
 and waits for its page flip and retirement. Both reduced phase lines and the
 underlying atomic scanout lines must pass their strict verifiers.
+
+Use `atomic-vrr-inspect` for a non-destructive reduced view of the selected
+connector/CRTC IDs, discovery status, capability value, enable-property
+presence, and bounded property-name lists. A connector reporting
+`vrr_capable=0` is valid unsupported hardware and cannot satisfy the activation
+gate even when its CRTC exposes `VRR_ENABLED`.
 
 The optional renderer-native features have extra local checks:
 

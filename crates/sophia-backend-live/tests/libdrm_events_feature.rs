@@ -1883,7 +1883,7 @@ fn native_vrr_discovery_requires_capability_value_and_enable_property() {
     let capable = FakeNativePropertyLookupDevice {
         connector: Ok(LibdrmNativePropertyHandleSet::new([
             ("CRTC_ID", property_handle(101)),
-            ("VRR_CAPABLE", property_handle(115)),
+            ("vrr_capable", property_handle(115)),
         ])),
         crtc: Ok(LibdrmNativePropertyHandleSet::new([
             ("MODE_ID", property_handle(102)),

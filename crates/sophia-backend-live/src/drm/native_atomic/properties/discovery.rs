@@ -146,7 +146,10 @@ where
             enable_property: None,
         };
     };
-    let Some(capable_property) = connector_properties.get("VRR_CAPABLE") else {
+    let Some(capable_property) = connector_properties
+        .get("vrr_capable")
+        .or_else(|| connector_properties.get("VRR_CAPABLE"))
+    else {
         return LibdrmNativeVrrPropertyDiscoveryResult {
             status: LibdrmNativeVrrPropertyDiscoveryStatus::Unsupported,
             capable: false,

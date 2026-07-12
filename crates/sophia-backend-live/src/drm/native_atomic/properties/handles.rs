@@ -111,4 +111,8 @@ impl LibdrmNativePropertyHandleSet {
             .iter()
             .find_map(|(candidate, handle)| (candidate == name).then_some(*handle))
     }
+
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.handles.iter().map(|(name, _)| name.as_str())
+    }
 }

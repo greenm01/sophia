@@ -63,6 +63,10 @@ if [[ "$(grep -c '^sophia_qemu_input schema=1 status=sent source=qmp device=virt
     echo "QEMU evidence is missing QMP keyboard delivery" >&2
     exit 1
 fi
+if [[ "$(grep -c '^sophia_live_session_input schema=2 status=complete source=physical text=sophia expected_events=14 matched_events=14 pixel_change=true$' "$EVIDENCE_FILE" || true)" -ne 1 ]]; then
+    echo "QEMU evidence is missing the exact physical text completion record" >&2
+    exit 1
+fi
 if [[ "$(grep -c '^sophia_live_session_pointer schema=1 status=ready source=physical action=select$' "$EVIDENCE_FILE" || true)" -ne 1 ]]; then
     echo "QEMU evidence is missing physical-pointer readiness" >&2
     exit 1
@@ -86,8 +90,8 @@ if [[ ! " $completion_line " =~ " injected_input=false " ]]; then
     exit 1
 fi
 physical_keys="$(sed -n 's/.* physical_keys_routed=\([0-9][0-9]*\) .*/\1/p' <<< "$completion_line")"
-if [[ -z "$physical_keys" ]] || (( physical_keys == 0 )); then
-    echo "QEMU evidence has no routed virtio keyboard events" >&2
+if [[ -z "$physical_keys" ]] || (( physical_keys != 14 )); then
+    echo "QEMU evidence did not route exactly 14 virtio keyboard events" >&2
     exit 1
 fi
 if [[ ! " $completion_line " =~ " pointer_proof=enabled " ]] || [[ ! " $completion_line " =~ " pointer_pixel_change=true " ]]; then

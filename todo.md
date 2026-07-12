@@ -9,69 +9,24 @@ next milestone becomes active.
 
 ---
 
-## Active Milestone: Visible Interactive X Terminal
+## Active Milestone: Pointer And Multi-Output Presentation
 
 Current truth:
 
-- Sophia Engine owns visual truth, frame commits, input routing, and scanout.
-- Sophia X Authority owns X protocol state and emits bounded transaction
-  batches. The persistent sequential listener and one-shot xterm drawing probe
-  pass.
-- Core X drawing now updates bounded XRGB8888 software buffers. The real xterm
-  proof produces inspectable text pixels, and the CPU compositor produces a
-  deterministic terminal frame.
-- A bounded core-keyboard channel, US keymap, and real xterm smoke prove that
-  injected `sophia` plus Return changes later terminal pixels. Persistent mode
-  opens explicit libinput device paths, routes keys through Engine-owned seat
-  focus, and translates evdev modifiers into core X events. The QEMU proof now
-  types through QMP, virtio-keyboard, and libinput; all 14 press/release events
-  route and change later xterm pixels without internal X event injection. An
-  operator typed-text proof on the AMD TTY remains required.
-- TTY3 native GBM/KMS submit, page-flip retirement, and cleanup evidence pass.
-- The native renderer can upload a composed XRGB8888 frame into its GL/GBM
-  front buffer. The TTY3 content proof exports the exact composed xterm
-  checksum, submits it to KMS, observes page-flip retirement, and drains cleanup.
-- `sophia-live-session --proof` remains a one-shot composition/input proof.
-- The isolated headless QEMU harness boots a direct-kernel initramfs with
-  virtio-gpu, virtual keyboard and mouse devices, QMP/serial control, no guest
-  network or storage, and no host DRM/VT access. Its strict 300-tick native
-  session and external keyboard/pointer proof passes. QMP word selection sends
-  five virtio-mouse motion/button events through libinput, Engine surface-only
-  hit-testing, and X Authority; all route and change later xterm pixels without
-  exposing X window identity to Engine.
-- The isolated guest has two separate virtio GPU devices and two connected KMS
-  connectors. Engine bounds discovery to 16 outputs, lays them out as an
-  extended horizontal desktop, and tracks independent damage, frame clocks,
-  scanout ownership, callbacks, retirement, and cleanup. The strict 300-tick
-  proof owns and retires both outputs with distinguishable content and no
-  overlapping page-flip-paced submission.
-- Default `sophia-live-session` now binds an explicit display, owns one xterm
-  and X Authority server, and drains repeated authority batches through one
-  live backend runtime and CPU scene until bounded or externally stopped. Its
-  gated `--native-scanout` mode owns GBM/KMS export, submit, page-flip intake,
-  retirement, and cleanup in that same loop. The strict persistent hardware
-  proof and a 30-second TTY3 run pass without dropped batches, callback
-  rejection, submit/retire failure, or cleanup debt.
+- The visible interactive X terminal milestone is complete. On AMD TTY
+  hardware, operator-entered `sophia` plus Return produced exactly 14 matched
+  physical events, changed xterm pixels, and presented/retired the changed frame
+  with clean scanout ownership.
+- QEMU proves external keyboard and pointer input, two independently presented
+  outputs, distinct content, and page-flip-paced fixed refresh without overlap.
+- DRM discovery recognizes connector `vrr_capable` and CRTC `VRR_ENABLED`; the
+  Engine policy enables only one opaque, unoccluded fullscreen surface and
+  falls back to fixed refresh when overlays require composition.
+- The current AMD eDP connector exposes the full property contract but reports
+  `vrr_capable=0`. It cannot provide activation evidence. Completing this
+  milestone requires a different connector/display reporting capability `1`.
 
 Exit criteria:
-
-- [x] Back core X drawing with bounded XRGB8888 CPU buffers, including the
-  fixed-font text path demanded by xterm.
-- [x] Compose those pixels into a renderer-owned frame and prove the scanned-out
-  frame contains terminal content rather than an allocated blank buffer.
-- [x] Keep X Authority, live backend ticks, scanout ownership, and xterm alive
-  under one persistent session owner until the outside control plane stops it.
-- [x] Route QMP-driven virtio keyboard press/release events from libinput into
-  xterm and prove typed text changes composed terminal pixels without using
-  Sophia's internal X event injector.
-- [ ] Repeat the external keyboard pixel proof with operator input on the AMD
-  TTY hardware path.
-
----
-
-## Next Milestones
-
-### 1. Pointer And Multi-Output Presentation
 
 - [x] Drive virtio-mouse motion and buttons through QMP, reduce them through
   libinput, apply Engine-owned hit-testing/focus, deliver core X pointer events,
@@ -90,35 +45,13 @@ Exit criteria:
   this is the per-output vsync gate.
 - [ ] Complete the hardware gate for the implemented DRM VRR capability/property
   discovery and Engine fullscreen-eligibility policy. VRR remains disabled by
-  default; prove both VRR activation and fixed-refresh fallback on capable AMD
-  hardware. QEMU is not treated as VRR evidence unless its virtual display
-  exposes the real property contract.
+  default; prove both VRR activation and fixed-refresh fallback on hardware
+  reporting `vrr_capable=1`. The current panel is not capable, and QEMU is not
+  treated as VRR evidence unless its virtual display exposes the real contract.
 
-### 2. xmonad X11 WM Bridge
+---
 
-- [x] Add the isolated `sophia-x11-wm-bridge` binary with an embedded minimal
-  X server and synthetic windows only.
-- [x] Add bounded synthetic XID/lifecycle state and translate configure/focus
-  requests into metadata-blind Sophia WM commands.
-- [x] Run xmonad as blind layout policy: no physical input, real metadata,
-  namespaces, client buffers, rendering, or scanout.
-- [x] Translate xmonad configure/focus requests into bounded Sophia WM response
-  packets and pass a real two-window tiling smoke.
-
-### 3. Live Session Stability Evidence
-
-- [x] Record submit-to-page-flip latency, maximum in-flight frame age, authority
-  queue capacity, rejected/dropped batches, page-flip callback pressure, and
-  cleanup debt over repeated ticks.
-- [x] Pass a 30-second TTY hardware session with no dropped authority batches,
-  rejected callbacks, failed scanout transitions, or unresolved cleanup debt.
-- [x] Add an isolated QEMU `virtio-gpu` session harness and pass 300
-  deterministic ticks without depending on host DRM or VT ownership.
-- [x] Replace the QEMU proof's internal X key injection with QMP-driven
-  virtio-keyboard input and require nonzero routed libinput keys plus changed
-  terminal pixels.
-
-### 4. Wayland Authority Skeleton
+## Next Milestone: Wayland Authority Skeleton
 
 - [ ] Start the deterministic Wayland Authority reducer/socket boundary only
   after visible xterm pixels, keyboard input, xmonad layout translation, and

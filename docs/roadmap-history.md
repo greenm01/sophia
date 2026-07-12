@@ -6,6 +6,32 @@ validation evidence in `docs/research-log.md`.
 
 ---
 
+## Completed Visible Interactive X Terminal
+
+- [x] Backed core X drawing with bounded XRGB8888 CPU buffers, including the
+  fixed-font xterm path, and composed those pixels into renderer-owned frames.
+- [x] Kept X Authority, backend ticks, native scanout ownership, and xterm under
+  one persistent session owner with clean submit, page-flip retirement, and
+  cleanup evidence.
+- [x] Routed QMP virtio-keyboard input through libinput and Engine focus, then
+  repeated the exact 14-event `sophia` plus Return proof with an operator on AMD
+  TTY hardware. Both paths changed later xterm pixels without internal X event
+  injection.
+- [x] Selected xterm's core-key event target from authority-private event masks,
+  emitted the required focus transition, and withheld readiness until the
+  nonzero prompt checksum was page-flip-confirmed.
+
+## Completed xmonad Bridge And Stability Evidence
+
+- [x] Ran real xmonad as metadata-blind layout policy through the isolated
+  embedded X11 WM bridge and translated its two-window configure/focus requests
+  into bounded Sophia WM packets.
+- [x] Recorded bounded session latency, queue, callback, failure, and cleanup
+  counters; passed the 30-second TTY stability run and isolated 300-tick QEMU
+  run with dual-output keyboard/pointer evidence.
+
+---
+
 ## Completed Real Backend Evidence and Runtime Seams
 
 - [x] Added `live-session-composition-smoke`, composing the Sophia X Authority

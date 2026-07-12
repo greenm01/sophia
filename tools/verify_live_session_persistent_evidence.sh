@@ -8,6 +8,10 @@ if [[ ! -s "$EVIDENCE_FILE" ]]; then
     echo "persistent live-session evidence is missing or empty: $EVIDENCE_FILE" >&2
     exit 1
 fi
+if grep -q '^Error:' "$EVIDENCE_FILE"; then
+    echo "persistent live-session evidence contains a terminal error" >&2
+    exit 1
+fi
 
 mapfile -t lines < <(grep -E "^${PREFIX} .*status=bounded_complete " "$EVIDENCE_FILE" || true)
 if [[ "${#lines[@]}" -ne 1 ]]; then
@@ -90,6 +94,61 @@ if [[ "${observed[injected_input]}" == "false" ]]; then
         echo "persistent live-session physical proof has no routed physical keys" >&2
         exit 1
     fi
+    mapfile -t input_lines < <(grep -E '^sophia_live_session_input schema=2 status=complete ' "$EVIDENCE_FILE" || true)
+    if [[ "${#input_lines[@]}" -ne 1 ]]; then
+        echo "persistent live-session evidence expected exactly 1 physical input completion line, got ${#input_lines[@]}" >&2
+        exit 1
+    fi
+    read -r -a input_parts <<< "${input_lines[0]}"
+    declare -A input_observed=()
+    for field in "${input_parts[@]:1}"; do
+        if [[ "$field" != *=* ]]; then
+            echo "persistent live-session physical input evidence has malformed field: $field" >&2
+            exit 1
+        fi
+        key="${field%%=*}"
+        value="${field#*=}"
+        if [[ -n "${input_observed[$key]+set}" ]]; then
+            echo "persistent live-session physical input evidence has duplicate field: $key" >&2
+            exit 1
+        fi
+        input_observed["$key"]="$value"
+    done
+    input_expected_keys=(schema status source text expected_events matched_events pixel_change)
+    if [[ "${#input_observed[@]}" -ne "${#input_expected_keys[@]}" ]]; then
+        echo "persistent live-session physical input evidence has an unknown or missing field" >&2
+        exit 1
+    fi
+    for key in "${input_expected_keys[@]}"; do
+        if [[ -z "${input_observed[$key]+set}" ]]; then
+            echo "persistent live-session physical input evidence is missing field: $key" >&2
+            exit 1
+        fi
+    done
+    if [[ "${input_observed[schema]}" != "2" \
+        || "${input_observed[status]}" != "complete" \
+        || "${input_observed[source]}" != "physical" \
+        || "${input_observed[pixel_change]}" != "true" \
+        || ! "${input_observed[text]}" =~ ^[a-z]{1,24}$ \
+        || ! "${input_observed[expected_events]}" =~ ^[0-9]+$ \
+        || ! "${input_observed[matched_events]}" =~ ^[0-9]+$ ]]; then
+        echo "persistent live-session physical input evidence is invalid" >&2
+        exit 1
+    fi
+    expected_events=$(( (${#input_observed[text]} + 1) * 2 ))
+    if [[ "$(grep -Fxc "sophia_live_session_input schema=1 status=ready source=physical text=${input_observed[text]}" "$EVIDENCE_FILE" || true)" -ne 1 ]]; then
+        echo "persistent live-session physical input evidence is missing matching readiness" >&2
+        exit 1
+    fi
+    if (( input_observed[expected_events] != expected_events \
+        || input_observed[matched_events] != expected_events \
+        || observed[physical_keys_routed] != expected_events )); then
+        echo "persistent live-session physical input evidence did not match the exact sequence" >&2
+        exit 1
+    fi
+elif grep -q '^sophia_live_session_input schema=2 status=complete ' "$EVIDENCE_FILE"; then
+    echo "persistent live-session injected proof contains physical input completion evidence" >&2
+    exit 1
 fi
 if [[ "${observed[pointer_proof]}" == "enabled" ]]; then
     if [[ "${observed[pointer_pixel_change]}" != "true" ]] || (( observed[physical_pointer_routed] == 0 )); then

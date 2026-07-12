@@ -485,6 +485,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
     let mut sequence = 0u16;
     let event_sequence = Arc::new(AtomicU16::new(0));
     let focused_window = Arc::new(AtomicU64::new(u64::from(X_SETUP_DEFAULT_ROOT)));
+    let mut keyboard_target_selected = false;
     let surface_windows = Arc::new(Mutex::new(BTreeMap::new()));
     let output_stream = Arc::new(Mutex::new(stream.try_clone().map_err(|error| {
         X11SetupSocketError::new(format!("failed to clone X11 output socket: {error}"))
@@ -506,6 +507,10 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
         while let Some((major_opcode, request)) = read_x11_core_request(stream, setup.byte_order)? {
             sequence = sequence.wrapping_add(1);
             event_sequence.store(sequence, Ordering::Release);
+            if let Some(window) = x11_keyboard_event_target(&request, setup.byte_order) {
+                focused_window.store(window.local.raw(), Ordering::Release);
+                keyboard_target_selected = true;
+            }
             let dispatch_context = XDispatchContext {
                 byte_order: setup.byte_order,
                 namespace,
@@ -538,10 +543,11 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                             })?
                             .insert(*surface, *window);
                     }
-                    if let crate::XWireRequest::Authority(crate::XAuthorityRequestPacket {
-                        kind: crate::XAuthorityRequestKind::MapWindow { window, .. },
-                        ..
-                    }) = &request
+                    if !keyboard_target_selected
+                        && let crate::XWireRequest::Authority(crate::XAuthorityRequestPacket {
+                            kind: crate::XAuthorityRequestKind::MapWindow { window, .. },
+                            ..
+                        }) = &request
                     {
                         focused_window.store(window.local.raw(), Ordering::Release);
                     }
@@ -616,6 +622,37 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
 }
 
 #[cfg(unix)]
+fn x11_keyboard_event_target(request: &[u8], byte_order: XByteOrder) -> Option<XResourceId> {
+    const X_CREATE_WINDOW: u8 = 1;
+    const X_CHANGE_WINDOW_ATTRIBUTES: u8 = 2;
+    const X_CW_EVENT_MASK: u32 = 1 << 11;
+    const X_KEY_EVENT_MASKS: u32 = (1 << 0) | (1 << 1);
+
+    let (value_mask_offset, values_offset) = match request.first().copied()? {
+        X_CREATE_WINDOW if request.len() >= 32 => (28, 32),
+        X_CHANGE_WINDOW_ATTRIBUTES if request.len() >= 12 => (8, 12),
+        _ => return None,
+    };
+    let value_mask = byte_order.u32(&request[value_mask_offset..value_mask_offset + 4]);
+    if value_mask & X_CW_EVENT_MASK == 0 {
+        return None;
+    }
+    let preceding_values = (value_mask & (X_CW_EVENT_MASK - 1)).count_ones() as usize;
+    let event_mask_offset = values_offset + preceding_values.saturating_mul(4);
+    if event_mask_offset + 4 > request.len() {
+        return None;
+    }
+    let event_mask = byte_order.u32(&request[event_mask_offset..event_mask_offset + 4]);
+    if event_mask & X_KEY_EVENT_MASKS == 0 {
+        return None;
+    }
+    Some(XResourceId::new(
+        u64::from(byte_order.u32(&request[4..8])),
+        1,
+    ))
+}
+
+#[cfg(unix)]
 struct X11InputEventWriter {
     stop: Arc<AtomicBool>,
     thread: std::thread::JoinHandle<Result<(), X11SetupSocketError>>,
@@ -633,6 +670,7 @@ fn spawn_x11_input_event_writer(
     let stop = Arc::new(AtomicBool::new(false));
     let writer_stop = stop.clone();
     let thread = std::thread::spawn(move || {
+        let mut focus_sent_to = None;
         while !writer_stop.load(Ordering::Acquire) {
             let event = match receiver.recv_timeout(Duration::from_millis(10)) {
                 Ok(event) => event,
@@ -717,6 +755,24 @@ fn spawn_x11_input_event_writer(
             let mut stream = stream
                 .lock()
                 .map_err(|_| X11SetupSocketError::new("X11 output socket lock poisoned"))?;
+            if matches!(event, XAuthorityInputEvent::Key(_))
+                && focus_sent_to != Some(focused_window)
+            {
+                let focus = encode_x_client_event(
+                    byte_order,
+                    XClientEvent::Focus {
+                        sequence,
+                        focused: true,
+                        detail: 3,
+                        event: focused_window,
+                        mode: 0,
+                    },
+                );
+                stream.write_all(&focus).map_err(|error| {
+                    X11SetupSocketError::new(format!("failed to write X11 focus event: {error}"))
+                })?;
+                focus_sent_to = Some(focused_window);
+            }
             if let Err(error) = stream.write_all(&record) {
                 if is_x11_client_disconnect(&error) {
                     return Ok(());

@@ -24,8 +24,9 @@ echo "Sophia operator keyboard-to-xterm pixel proof"
 echo "Run this from the dedicated hardware TTY after the compositor releases DRM."
 echo "When Sophia prints status=ready source=physical, type: $PROOF_TEXT"
 
-SOPHIA_LIVE_SESSION_RUNTIME_MSEC="${SOPHIA_LIVE_SESSION_RUNTIME_MSEC:-15000}" \
+SOPHIA_LIVE_SESSION_RUNTIME_MSEC="${SOPHIA_LIVE_SESSION_RUNTIME_MSEC:-30000}" \
     "$ROOT_DIR/tools/live_session_persistent_hardware_proof.sh" \
     "--input-devices=$KEYBOARD_DEVICE" \
     "--expect-physical-text=$PROOF_TEXT" \
+    "--exit-after-input-proof" \
     "$@"

@@ -38,6 +38,27 @@ impl RealAtomicScanoutPageFlipSession {
         discover_native_vrr_properties(&self.card, selection.connector, selection.crtc)
     }
 
+    pub fn property_names_for_selection(
+        &self,
+        selection: LibdrmNativePrimaryPlaneSelection,
+    ) -> io::Result<(Vec<String>, Vec<String>)> {
+        let mut connector = self
+            .card
+            .connector_property_handles(selection.connector)?
+            .names()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        let mut crtc = self
+            .card
+            .crtc_property_handles(selection.crtc)?
+            .names()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        connector.sort();
+        crtc.sort();
+        Ok((connector, crtc))
+    }
+
     #[cfg(feature = "gbm-probe")]
     pub fn render_device_discovery(&self) -> io::Result<RealAtomicScanoutRenderDeviceDiscovery> {
         RealAtomicScanoutRenderDeviceDiscovery::from_card(&self.card)

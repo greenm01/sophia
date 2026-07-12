@@ -60,6 +60,28 @@ if [[ "$drm_access" != true ]]; then
     exit 1
 fi
 
+keyd_was_running=false
+restore_keyd() {
+    local status=$?
+    if [[ "$keyd_was_running" == true ]]; then
+        echo
+        echo "Restoring keyd..."
+        if ! sudo sv up keyd; then
+            echo "WARNING: keyd could not be restored; run: sudo sv up keyd" >&2
+            status=1
+        fi
+    fi
+    return "$status"
+}
+
+if pgrep -x keyd >/dev/null 2>&1; then
+    echo "Temporarily stopping keyd for direct physical-keyboard evidence..."
+    sudo -v
+    sudo sv down keyd
+    keyd_was_running=true
+    trap restore_keyd EXIT
+fi
+
 echo "Sophia milestone 1 + 2 final proof"
 echo "Repository: $ROOT_DIR"
 echo "Keyboard: $keyboard"
@@ -67,10 +89,9 @@ echo
 echo "The script will:"
 echo "  1. rerun the real xmonad two-window bridge smoke"
 echo "  2. verify non-destructive atomic KMS preflight"
-echo "  3. wait for you to type 'sophia' into the physical-input proof"
+echo "  3. wait for you to type the exact 'sophia' + Return sequence"
 echo "  4. prove VRR activation and fixed-refresh fallback"
 echo
-read -r -p "Press Enter to begin, or Ctrl-C to cancel. " _
 
 cd "$ROOT_DIR"
 
@@ -84,7 +105,7 @@ tools/atomic_scanout_preflight.sh
 
 echo
 echo "[3/4] Operator keyboard pixel proof"
-echo "Type sophia only after status=ready source=physical appears."
+echo "Type sophia and press Return only when the scanned-out xterm prompts you."
 SOPHIA_OPERATOR_KEYBOARD="$keyboard" \
 SOPHIA_ATOMIC_SCANOUT_SKIP_PREFLIGHT=1 \
     tools/operator_keyboard_hardware_proof.sh

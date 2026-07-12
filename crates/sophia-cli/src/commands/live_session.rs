@@ -1,5 +1,6 @@
 use super::prelude::*;
 
+use sophia_cli::input_proof::{PhysicalTextProof, PhysicalTextProofEvent};
 use sophia_engine::{FocusedInputRoute, InputFocusState, NonBlockingInputPoller};
 use sophia_protocol::{DeviceId, OutputId, SeatId};
 use sophia_x_authority::{XCoreKeyboardMapper, XCorePointerMapper};
@@ -11,8 +12,9 @@ use std::time::{Duration, Instant};
 
 const SESSION_AUTHORITY_CAPACITY: usize = 256;
 const SESSION_KEY_CAPACITY: usize = 64;
-const SESSION_INPUT_QUIET_MSEC: u64 = 100;
-const SESSION_PHYSICAL_INPUT_TIMEOUT_MSEC: u64 = 5_000;
+const SESSION_INPUT_QUIET_MSEC: u64 = 500;
+const SESSION_PHYSICAL_SEQUENCE_TIMEOUT_MSEC: u64 = 15_000;
+const SESSION_PHYSICAL_PIXEL_TIMEOUT_MSEC: u64 = 5_000;
 const SESSION_SEAT_RAW: u64 = 1;
 const SESSION_KEYBOARD_DEVICE_RAW: u64 = 1;
 const SESSION_POINTER_DEVICE_RAW: u64 = 2;
@@ -66,13 +68,20 @@ pub(crate) fn run_persistent_xterm_session(
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
-    if config.input_proof_requested() {
-        terminal_command.args([
-            "-e",
-            "sh",
-            "-c",
-            "read line; printf 'received:%s\\n' \"$line\"; sleep 5",
-        ]);
+    if let Some(proof_text) = config
+        .inject_text
+        .as_deref()
+        .or(config.expect_physical_text.as_deref())
+    {
+        terminal_command
+            .args([
+                "-e",
+                "sh",
+                "-c",
+                "printf 'type %s then Return: ' \"$1\"; IFS= read -r line; printf '\\nreceived:%s\\n' \"$line\"; sleep 5",
+                "sophia-input-proof",
+            ])
+            .arg(proof_text);
     }
     let child = terminal_command.spawn()?;
     let mut process = SessionProcessGuard::new(child, config.socket_path.clone());
@@ -134,6 +143,7 @@ struct PersistentXtermSessionConfig {
     inject_text: Option<String>,
     expect_physical_text: Option<String>,
     expect_physical_pointer: bool,
+    exit_after_input_proof: bool,
     input_devices: Vec<std::path::PathBuf>,
     native_scanout: bool,
 }
@@ -157,6 +167,7 @@ impl PersistentXtermSessionConfig {
         let inject_text = arg_value(args, "--inject-text");
         let expect_physical_text = arg_value(args, "--expect-physical-text");
         let expect_physical_pointer = args.iter().any(|arg| arg == "--expect-physical-pointer");
+        let exit_after_input_proof = args.iter().any(|arg| arg == "--exit-after-input-proof");
         let native_scanout = args.iter().any(|arg| arg == "--native-scanout");
         if native_scanout && std::env::var_os("SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE").is_none() {
             return Err(
@@ -200,6 +211,9 @@ impl PersistentXtermSessionConfig {
                     .into(),
             );
         }
+        if exit_after_input_proof && inject_text.is_none() && expect_physical_text.is_none() {
+            return Err("--exit-after-input-proof requires an input proof".into());
+        }
         if let Some(text) = inject_text.as_ref().or(expect_physical_text.as_ref())
             && (text.is_empty()
                 || text.len() > 24
@@ -216,6 +230,7 @@ impl PersistentXtermSessionConfig {
             inject_text,
             expect_physical_text,
             expect_physical_pointer,
+            exit_after_input_proof,
             input_devices,
             native_scanout,
         })
@@ -273,7 +288,14 @@ fn run_session_loop(
     let mut runtime = None;
     let mut last_authority_update = started;
     let mut injection_checksum = None;
-    let mut physical_input_ready_at = None;
+    let mut physical_input_ready_at: Option<Instant> = None;
+    let mut physical_text_proof = config
+        .expect_physical_text
+        .as_deref()
+        .map(PhysicalTextProof::new)
+        .transpose()?;
+    let mut physical_sequence_completed_at: Option<Instant> = None;
+    let mut physical_input_completion_reported = false;
     let mut input_pixel_change = false;
     let mut pointer_checksum = None;
     let mut pointer_phase_started_at = None;
@@ -300,25 +322,47 @@ fn run_session_loop(
         if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             break;
         }
-        let waiting_for_keyboard_pixels = physical_input_ready_at.is_some() && !input_pixel_change;
-        let waiting_for_pointer_pixels =
-            config.expect_physical_pointer && input_pixel_change && !pointer_pixel_change;
+        let physical_sequence_complete = physical_text_proof
+            .as_ref()
+            .is_none_or(PhysicalTextProof::is_complete);
+        let waiting_for_keyboard_sequence =
+            physical_input_ready_at.is_some() && !physical_sequence_complete;
+        let waiting_for_keyboard_pixels = physical_sequence_complete
+            && physical_sequence_completed_at.is_some()
+            && !input_pixel_change;
+        let waiting_for_pointer_pixels = config.expect_physical_pointer
+            && physical_sequence_complete
+            && input_pixel_change
+            && !pointer_pixel_change;
         if waiting_for_pointer_pixels && pointer_phase_started_at.is_none() {
             pointer_phase_started_at = Some(Instant::now());
         }
-        let proof_wait_started_at = if waiting_for_keyboard_pixels {
-            physical_input_ready_at
-        } else if waiting_for_pointer_pixels {
-            pointer_phase_started_at
-        } else {
-            None
-        };
-        if let Some(proof_wait_started_at) = proof_wait_started_at {
-            if proof_wait_started_at.elapsed()
-                >= Duration::from_millis(SESSION_PHYSICAL_INPUT_TIMEOUT_MSEC)
+        if waiting_for_keyboard_sequence {
+            let ready_at = physical_input_ready_at.expect("checked above");
+            if ready_at.elapsed() >= Duration::from_millis(SESSION_PHYSICAL_SEQUENCE_TIMEOUT_MSEC) {
+                let proof = physical_text_proof.as_ref().expect("checked above");
+                return Err(format!(
+                    "persistent live session timed out waiting for exact physical input sequence: matched_events={} expected_events={} keyboard_routed={physical_keys_routed}",
+                    proof.matched_events(),
+                    proof.expected_events(),
+                )
+                .into());
+            }
+        } else if waiting_for_keyboard_pixels {
+            let completed_at = physical_sequence_completed_at.expect("checked above");
+            if completed_at.elapsed() >= Duration::from_millis(SESSION_PHYSICAL_PIXEL_TIMEOUT_MSEC)
             {
                 return Err(format!(
-                    "persistent live session timed out waiting for physical input pixels: keyboard_routed={physical_keys_routed} keyboard_pixels={input_pixel_change} pointer_observed={physical_pointer_events} pointer_routed={physical_pointer_routed} pointer_pixels={pointer_pixel_change} pointer_baseline={pointer_checksum:?} final_checksum={:?}",
+                    "persistent live session timed out waiting for pixels after exact physical input: keyboard_routed={physical_keys_routed} final_checksum={:?}",
+                    scene.last_report.as_ref().map(|report| report.checksum)
+                )
+                .into());
+            }
+        } else if waiting_for_pointer_pixels {
+            let started_at = pointer_phase_started_at.expect("set above");
+            if started_at.elapsed() >= Duration::from_millis(SESSION_PHYSICAL_PIXEL_TIMEOUT_MSEC) {
+                return Err(format!(
+                    "persistent live session timed out waiting for physical pointer pixels: pointer_observed={physical_pointer_events} pointer_routed={physical_pointer_routed} pointer_baseline={pointer_checksum:?} final_checksum={:?}",
                     scene.last_report.as_ref().map(|report| report.checksum)
                 )
                 .into());
@@ -413,7 +457,9 @@ fn run_session_loop(
             }
         }
 
-        if let (Some(poller), Some(runtime)) = (physical_input.as_mut(), runtime.as_ref()) {
+        if let (Some(poller), Some(runtime)) = (physical_input.as_mut(), runtime.as_ref())
+            && (config.expect_physical_text.is_none() || physical_input_ready_at.is_some())
+        {
             let report = route_physical_input(
                 poller,
                 &focus,
@@ -422,11 +468,19 @@ fn run_session_loop(
                 input_sender,
                 &mut modifiers,
                 &mut pointer,
+                physical_text_proof.as_mut(),
             )?;
             physical_events = physical_events.saturating_add(report.events);
             physical_keys_routed = physical_keys_routed.saturating_add(report.keys_routed);
             physical_pointer_events = physical_pointer_events.saturating_add(report.pointer_events);
             physical_pointer_routed = physical_pointer_routed.saturating_add(report.pointer_routed);
+            if physical_sequence_completed_at.is_none()
+                && physical_text_proof
+                    .as_ref()
+                    .is_some_and(PhysicalTextProof::is_complete)
+            {
+                physical_sequence_completed_at = Some(Instant::now());
+            }
             if report.pointer_events > 0 {
                 println!(
                     "sophia_live_session_pointer schema=1 status=observed events={} routed={}",
@@ -436,9 +490,35 @@ fn run_session_loop(
             }
         }
 
+        if !physical_input_completion_reported
+            && input_pixel_change
+            && let (Some(text), Some(proof)) = (
+                config.expect_physical_text.as_deref(),
+                physical_text_proof.as_ref(),
+            )
+            && proof.is_complete()
+        {
+            println!(
+                "sophia_live_session_input schema=2 status=complete source=physical text={} expected_events={} matched_events={} pixel_change=true",
+                text,
+                proof.expected_events(),
+                proof.matched_events(),
+            );
+            std::io::stdout().flush()?;
+            physical_input_completion_reported = true;
+        }
+
+        let input_baseline_presented = scene.last_report.as_ref().is_some_and(|report| {
+            report.nonzero_pixel_bytes > 0
+                && native_scanout.as_ref().is_none_or(|native| {
+                    native.heads.first().is_some_and(|head| {
+                        head.presented_checksum == report.checksum && head.nonzero_exports > 0
+                    })
+                })
+        });
         if injection_checksum.is_none()
             && config.input_proof_requested()
-            && scene.last_report.is_some()
+            && input_baseline_presented
             && last_authority_update.elapsed() >= Duration::from_millis(SESSION_INPUT_QUIET_MSEC)
         {
             injection_checksum = scene
@@ -460,6 +540,7 @@ fn run_session_loop(
             }
         }
         if config.expect_physical_pointer
+            && physical_input_completion_reported
             && input_pixel_change
             && pointer_checksum.is_none()
             && scene.last_report.is_some()
@@ -470,6 +551,13 @@ fn run_session_loop(
                 "sophia_live_session_pointer schema=1 status=ready source=physical action=select"
             );
             std::io::stdout().flush()?;
+        }
+        if config.exit_after_input_proof
+            && input_pixel_change
+            && (config.expect_physical_text.is_none() || physical_input_completion_reported)
+            && (!config.expect_physical_pointer || pointer_pixel_change)
+        {
+            break;
         }
     }
 
@@ -489,8 +577,13 @@ fn run_session_loop(
         )
         .into());
     }
-    if config.expect_physical_text.is_some() && physical_keys_routed == 0 {
-        return Err("persistent live session received no routed physical keys".into());
+    if config.expect_physical_text.is_some()
+        && (!physical_text_proof
+            .as_ref()
+            .is_some_and(PhysicalTextProof::is_complete)
+            || !physical_input_completion_reported)
+    {
+        return Err("persistent live session did not complete exact physical text proof".into());
     }
     if config.expect_physical_pointer && (!pointer_pixel_change || physical_pointer_routed == 0) {
         return Err(format!(
@@ -592,7 +685,12 @@ fn run_session_loop(
             || runtime.native_scanout_in_flight()
             || runtime.native_cleanup_pending())
     {
-        return Err("persistent native scanout did not submit, retire, and drain cleanly".into());
+        return Err(format!(
+            "persistent native scanout did not submit, retire, and drain cleanly: overlap_rejections={} phase_rejections={}",
+            native_scanout.vsync_overlap_rejections,
+            native_scanout.page_flip_phase_rejections,
+        )
+        .into());
     }
     if let Some(native_scanout) = native_scanout.as_ref() {
         println!(
@@ -913,6 +1011,8 @@ struct PersistentNativeHead {
     submitted_at: Option<Instant>,
     pending_nonzero_pixel_bytes: usize,
     last_checksum: u64,
+    submitted_checksum: Option<u64>,
+    presented_checksum: u64,
     submissions: usize,
     retirements: usize,
     callback_accepted: usize,
@@ -944,7 +1044,46 @@ impl PersistentNativeScanout {
             )
             .into());
         }
-        let presentation = sophia_engine::OutputPresentationRegistry::from_outputs(&outputs);
+        let mut presentation_outputs = sophia_engine::DrmKmsOutputRegistry::new();
+        for session in &sessions.sessions {
+            for (selection, output_id) in session
+                .selections()
+                .iter()
+                .copied()
+                .zip(session.outputs().iter().copied())
+            {
+                let Some(descriptor) = outputs
+                    .outputs()
+                    .find(|descriptor| descriptor.connector_id == selection.connector_id())
+                    .copied()
+                else {
+                    return Err(format!(
+                        "persistent native output has no Engine connector match: connector={}",
+                        selection.connector_id(),
+                    )
+                    .into());
+                };
+                let descriptor = sophia_engine::DrmKmsOutputDescriptor {
+                    output: output_id,
+                    ..descriptor
+                };
+                if presentation_outputs.upsert(descriptor)
+                    == sophia_engine::DrmKmsOutputRegistryUpdate::CapacityExceeded
+                {
+                    return Err("persistent native presentation output capacity exceeded".into());
+                }
+            }
+        }
+        if presentation_outputs.len() != sessions.output_count {
+            return Err(format!(
+                "persistent native connector mapping is incomplete: mapped={} native={}",
+                presentation_outputs.len(),
+                sessions.output_count,
+            )
+            .into());
+        }
+        let presentation =
+            sophia_engine::OutputPresentationRegistry::from_outputs(&presentation_outputs);
         let mut groups = Vec::new();
         let mut heads = Vec::new();
         for session in sessions.sessions.drain(..) {
@@ -979,6 +1118,8 @@ impl PersistentNativeScanout {
                     submitted_at: None,
                     pending_nonzero_pixel_bytes: 0,
                     last_checksum: 0,
+                    submitted_checksum: None,
+                    presented_checksum: 0,
                     submissions: 0,
                     retirements: 0,
                     callback_accepted: 0,
@@ -1080,6 +1221,7 @@ impl PersistentNativeScanout {
                     self.submissions = self.submissions.saturating_add(1);
                     self.heads[index].submissions = self.heads[index].submissions.saturating_add(1);
                     self.heads[index].submitted_at = Some(Instant::now());
+                    self.heads[index].submitted_checksum = Some(self.heads[index].last_checksum);
                     let output = self.heads[index].output.id;
                     let _ = self.presentation.mark_damage(output);
                     match self.presentation.schedule(output) {
@@ -1153,6 +1295,9 @@ impl PersistentNativeScanout {
             .callback_accepted
             .saturating_add(report.accepted);
         if report.accepted > 0 {
+            if let Some(checksum) = self.heads[index].submitted_checksum.take() {
+                self.heads[index].presented_checksum = checksum;
+            }
             let output = self.heads[index].output.id;
             if let Some(kernel_sequence) = report
                 .last_accepted
@@ -1219,6 +1364,7 @@ impl PersistentNativeScanout {
         }
         self.submissions = self.submissions.saturating_add(1);
         head.submissions = head.submissions.saturating_add(1);
+        head.presented_checksum = head.last_checksum;
         Ok(())
     }
 
@@ -1479,6 +1625,7 @@ fn route_physical_input(
     input_sender: &SyncSender<XAuthorityInputEvent>,
     modifiers: &mut XCoreKeyboardMapper,
     pointer: &mut XCorePointerMapper,
+    mut physical_text_proof: Option<&mut PhysicalTextProof>,
 ) -> Result<PhysicalInputRouteReport, Box<dyn std::error::Error>> {
     let events = poller.poll_ready()?;
     let mut report = PhysicalInputRouteReport {
@@ -1498,6 +1645,29 @@ fn route_physical_input(
                 let Some((keycode, state)) = modifiers.map_evdev_key(keycode, pressed) else {
                     continue;
                 };
+                if let Some(proof) = physical_text_proof.as_deref_mut() {
+                    if proof.is_complete() {
+                        continue;
+                    }
+                    let observed = PhysicalTextProofEvent {
+                        keycode,
+                        pressed,
+                        state,
+                    };
+                    if let Err(mismatch) = proof.observe(observed) {
+                        return Err(format!(
+                            "physical text proof sequence mismatch at event {}: expected keycode={} pressed={} state={} observed keycode={} pressed={} state={}",
+                            mismatch.event_index,
+                            mismatch.expected.keycode,
+                            mismatch.expected.pressed,
+                            mismatch.expected.state,
+                            mismatch.observed.keycode,
+                            mismatch.observed.pressed,
+                            mismatch.observed.state,
+                        )
+                        .into());
+                    }
+                }
                 input_sender.try_send(
                     XAuthorityKeyEvent {
                         keycode,

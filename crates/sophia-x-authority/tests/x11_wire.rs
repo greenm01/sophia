@@ -2864,6 +2864,23 @@ fn x11_client_event_encoders_emit_32_byte_records() {
     assert_eq!(read_u16(XByteOrder::LittleEndian, &key[28..30]), 1);
     assert_eq!(key[30], 1);
 
+    let focus = encode_x_client_output(
+        XByteOrder::BigEndian,
+        XClientOutput::Event(XClientEvent::Focus {
+            sequence: 12,
+            focused: true,
+            detail: 3,
+            event: XResourceId::new(0x220003, 1),
+            mode: 0,
+        }),
+    );
+    assert_eq!(focus.len(), 32);
+    assert_eq!(focus[0], 9);
+    assert_eq!(focus[1], 3);
+    assert_eq!(read_u16(XByteOrder::BigEndian, &focus[2..4]), 12);
+    assert_eq!(read_u32(XByteOrder::BigEndian, &focus[4..8]), 0x220003);
+    assert_eq!(focus[8], 0);
+
     let motion = encode_x_client_output(
         XByteOrder::LittleEndian,
         XClientOutput::Event(XClientEvent::PointerMotion {

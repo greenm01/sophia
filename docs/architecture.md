@@ -80,14 +80,14 @@ composed frame to a GBM front buffer. TTY3 evidence now matches the requested
 and exported xterm-frame checksum through KMS submit and accepted page-flip
 retirement, proving terminal content replaces the old clear color.
 
-The active architecture step is joining native scanout ownership to the
-persistent X Authority/backend loop and closing focused physical keyboard
-evidence. Explicit libinput devices now
-reduce into Engine-owned seat focus and then core X events; operator typed-text
-evidence remains. The injected core-X event path already changes real xterm
-pixels. xmonad then enters through the isolated
-blind X11 WM bridge, whose bounded ID and configure/focus translation model now
-exists, never through the client-facing X Authority display.
+Native scanout ownership now lives in the persistent X Authority/backend loop.
+Explicit libinput devices reduce into Engine-owned seat focus, then X Authority
+selects the authority-private event-mask target, emits core focus/key events,
+and withholds readiness until the prompt checksum is page-flip-confirmed. Exact
+operator input changes presented xterm pixels on AMD hardware. Real xmonad enters
+through the isolated blind X11 WM bridge, never the client-facing Authority
+display. The active architecture gate is VRR hardware evidence; the current
+panel exposes the property contract but reports capability `0`.
 
 ## Load-Bearing Boundaries
 

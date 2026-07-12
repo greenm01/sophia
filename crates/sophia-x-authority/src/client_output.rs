@@ -12,6 +12,8 @@ const X_KEY_RELEASE: u8 = 3;
 const X_BUTTON_PRESS: u8 = 4;
 const X_BUTTON_RELEASE: u8 = 5;
 const X_MOTION_NOTIFY: u8 = 6;
+const X_FOCUS_IN: u8 = 9;
+const X_FOCUS_OUT: u8 = 10;
 const X_EXPOSE: u8 = 12;
 const X_MAP_NOTIFY: u8 = 19;
 const X_CONFIGURE_NOTIFY: u8 = 22;
@@ -64,6 +66,13 @@ pub enum XClientEvent {
         root: XResourceId,
         event: XResourceId,
         state: u16,
+    },
+    Focus {
+        sequence: u16,
+        focused: bool,
+        detail: u8,
+        event: XResourceId,
+        mode: u8,
     },
     PointerMotion {
         sequence: u16,
@@ -820,6 +829,23 @@ pub fn encode_x_client_event(
             put_i16(byte_order, &mut out[26..28], 0);
             put_u16(byte_order, &mut out[28..30], state);
             out[30] = 1;
+        }
+        XClientEvent::Focus {
+            sequence,
+            focused,
+            detail,
+            event,
+            mode,
+        } => {
+            write_event_header(
+                byte_order,
+                &mut out,
+                if focused { X_FOCUS_IN } else { X_FOCUS_OUT },
+                detail,
+                sequence,
+            );
+            put_resource(byte_order, &mut out[4..8], event);
+            out[8] = mode;
         }
         XClientEvent::PointerMotion {
             sequence,

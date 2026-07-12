@@ -222,19 +222,16 @@ Sophia is split by authority, not by convenience.
 
 ## Status
 
-Sophia is a research prototype. Its deterministic tests still protect the data
-model and authority boundaries, while opt-in TTY3 evidence now proves native
-GBM/KMS allocation, atomic submit, page-flip retirement, and cleanup. The active
-gap is integration: core X drawing now produces bounded XRGB8888 pixels, the
-CPU compositor consumes them, and injected core keys change real xterm pixels.
-TTY3 evidence now proves the exact composed xterm checksum is exported through
-native GL/GBM, submitted to KMS, and retired after page flip. The next operator
-milestone is closing the physical typed-text proof. An isolated headless QEMU
-virtio-gpu harness now passes 300 persistent native-session ticks without host
-DRM or VT ownership, including two independently owned outputs, distinct
-extended-desktop content, page-flip-paced fixed refresh, and routed keyboard
-and mouse input. The xmonad bridge translation core exists; its
-embedded X server and real xmonad smoke remain ahead of Wayland.
+Sophia is a research prototype. Deterministic tests protect the data model and
+authority boundaries, while AMD TTY evidence proves native GBM/KMS allocation,
+atomic submit, page-flip retirement, cleanup, and exact operator keyboard input
+changing presented xterm pixels. The isolated QEMU harness passes 300 persistent
+native-session ticks with two independently owned outputs, distinct content,
+page-flip-paced fixed refresh, and routed keyboard/pointer input. Real xmonad
+also passes as blind two-window layout policy. The active hardware gap is VRR:
+the current eDP connector exposes `vrr_capable` and its CRTC exposes
+`VRR_ENABLED`, but capability is `0`, so activation evidence requires a
+different display before the Wayland Authority milestone becomes active.
 
 ## License
 

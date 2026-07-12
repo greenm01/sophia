@@ -932,7 +932,7 @@ pub(crate) fn run_x_authority_xterm_input_smoke()
             "-e",
             "sh",
             "-c",
-            "read line; printf 'received:%s\\n' \"$line\"; sleep 3",
+            "printf 'type sophia then Return: '; read line; printf 'received:%s\\n' \"$line\"; sleep 3",
         ])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
