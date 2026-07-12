@@ -78,9 +78,10 @@ remain bounded and narrow: for example, xcalc admitted `AllocNamedColor`,
 `UnmapWindow`, padded one-character `PolyText8`, and normal client-disconnect
 teardown without turning Sophia X Authority into a broad X11 conformance
 project. xterm admitted `ConfigureWindow` and the bounded setup/drawing paths
-needed to reach committed `ImageText8` transactions. Core drawing now updates
-bounded XRGB8888 software buffers, including a compact fixed-cell text raster,
-and the real xterm proof observes nonzero pixels. A separate key-channel smoke
+needed to reach committed `ImageText8` transactions. Core drawing now applies
+GC colors and raster operations to bounded XRGB8888 software buffers, including
+a printable-ASCII fixed-cell raster. The real xterm proof locates the expected
+glyph sequence in materialized replacement/patch pixels. A separate key-channel smoke
 injects `sophia` plus Return and proves later xterm buffer generations change.
 zenity admitted selection-owner lookup, server grab/ungrab, root colormap
 creation, reduced `MIT-SHM`, additional `RANDR`, and `BIG-REQUESTS` startup paths,

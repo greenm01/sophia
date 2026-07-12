@@ -184,9 +184,14 @@ fn x11_core_decoder_maps_create_and_map_to_authority_packets() {
     )
     .unwrap();
 
-    let XWireRequest::Authority(create) = create else {
-        panic!("expected authority request");
+    let XWireRequest::CreateWindow {
+        packet: create,
+        background_pixel,
+    } = create
+    else {
+        panic!("expected create-window request");
     };
+    assert_eq!(background_pixel, None);
     assert_eq!(create.namespace, namespace);
     assert_eq!(
         create.kind,
@@ -323,6 +328,25 @@ fn x11_core_decoder_maps_create_and_map_to_authority_packets() {
             count: 4,
         }
     );
+}
+
+#[test]
+fn x11_core_decoder_preserves_window_background_pixel() {
+    let namespace = NamespaceId::from_raw(44);
+    for byte_order in [XByteOrder::LittleEndian, XByteOrder::BigEndian] {
+        let create = decode_x11_core_request(
+            context(namespace, 500, byte_order),
+            &create_window_background_request(byte_order, 0x220002, 10, 20, 320, 200, 0x0012_3456),
+        )
+        .unwrap();
+        let XWireRequest::CreateWindow {
+            background_pixel, ..
+        } = create
+        else {
+            panic!("expected create-window request");
+        };
+        assert_eq!(background_pixel, Some(0x0012_3456));
+    }
 }
 
 #[test]
@@ -616,6 +640,7 @@ fn x11_core_decoder_captures_create_gc_requests() {
         XWireRequest::CreateGraphicsContext {
             gc: XResourceId::new(0x220010, 1),
             drawable: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+            values: XGraphicsContextValues::default(),
         }
     );
 
@@ -654,6 +679,35 @@ fn x11_core_decoder_captures_create_gc_requests() {
             height: 30,
         }
     );
+}
+
+#[test]
+fn x11_core_decoder_preserves_gc_raster_values_in_both_byte_orders() {
+    let namespace = NamespaceId::from_raw(45);
+    for byte_order in [XByteOrder::LittleEndian, XByteOrder::BigEndian] {
+        let request = create_gc_values_request(
+            byte_order,
+            0x220020,
+            X_SETUP_DEFAULT_ROOT,
+            6,
+            0x00ff_00ff,
+            0x0012_3456,
+            0x0065_4321,
+            3,
+            0x220021,
+        );
+        let decoded =
+            decode_x11_core_request(context(namespace, 508, byte_order), &request).unwrap();
+        let XWireRequest::CreateGraphicsContext { values, .. } = decoded else {
+            panic!("expected CreateGC");
+        };
+        assert_eq!(values.function, 6);
+        assert_eq!(values.plane_mask, 0x00ff_00ff);
+        assert_eq!(values.foreground, 0x0012_3456);
+        assert_eq!(values.background, 0x0065_4321);
+        assert_eq!(values.line_width, 3);
+        assert_eq!(values.font, Some(XResourceId::new(0x220021, 1)));
+    }
 }
 
 #[test]
@@ -741,12 +795,11 @@ fn x11_core_decoder_captures_poly_fill_rectangle_requests() {
         XWireRequest::PolyLine {
             drawable: XResourceId::new(0x220010, 1),
             gc: XResourceId::new(0x220011, 1),
-            damage: Some(Rect {
-                x: 3,
-                y: 4,
-                width: 11,
-                height: 17,
-            }),
+            points: vec![
+                XPoint { x: 3, y: 4 },
+                XPoint { x: 13, y: 9 },
+                XPoint { x: 8, y: 20 },
+            ],
         }
     );
 
@@ -1844,9 +1897,21 @@ fn x11_image_text_updates_bounded_xrgb_cpu_pixels() {
         &mut atoms,
         &mut properties,
     );
+    let gc = decode_x11_core_request(
+        context(namespace, 533, XByteOrder::LittleEndian),
+        &create_gc_request(XByteOrder::LittleEndian, 0x220802, 0x220801),
+    )
+    .unwrap();
+    dispatch_x11_wire_request(
+        dispatch_context(namespace, 2, XByteOrder::LittleEndian, 55),
+        gc,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
 
     let text = decode_x11_core_request(
-        context(namespace, 533, XByteOrder::LittleEndian),
+        context(namespace, 534, XByteOrder::LittleEndian),
         &image_text8_request(
             XByteOrder::LittleEndian,
             0x220801,
@@ -1858,7 +1923,7 @@ fn x11_image_text_updates_bounded_xrgb_cpu_pixels() {
     )
     .unwrap();
     let result = dispatch_x11_wire_request(
-        dispatch_context(namespace, 2, XByteOrder::LittleEndian, 76),
+        dispatch_context(namespace, 3, XByteOrder::LittleEndian, 76),
         text,
         &mut runtime,
         &mut atoms,
@@ -1868,7 +1933,10 @@ fn x11_image_text_updates_bounded_xrgb_cpu_pixels() {
     let response = result.response.unwrap();
     assert_eq!(response.outcome, XAuthorityResponseOutcome::Accepted);
     assert_eq!(response.transactions.len(), 1);
-    let snapshot = runtime.take_cpu_buffer_update().unwrap();
+    let XAuthorityCpuBufferUpdate::Replace(snapshot) = runtime.take_cpu_buffer_update().unwrap()
+    else {
+        panic!("first CPU buffer update must replace the buffer");
+    };
     assert_eq!(snapshot.drawable, XResourceId::new(0x220801, 1));
     assert_eq!(
         snapshot.size,
@@ -3183,6 +3251,18 @@ fn x11_dispatch_poly_fill_rectangle_emits_core_draw_transaction() {
         &mut atoms,
         &mut properties,
     );
+    let gc = decode_x11_core_request(
+        context(namespace, 602, XByteOrder::LittleEndian),
+        &create_gc_request(XByteOrder::LittleEndian, 0x220102, 0x220101),
+    )
+    .unwrap();
+    dispatch_x11_wire_request(
+        dispatch_context(namespace, 2, XByteOrder::LittleEndian, 55),
+        gc,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
 
     let clear = decode_x11_core_request(
         context(namespace, 601, XByteOrder::LittleEndian),
@@ -3467,6 +3547,18 @@ fn x11_dispatch_pixmap_put_image_and_copy_area_emit_window_transaction() {
         &mut atoms,
         &mut properties,
     );
+    let gc = decode_x11_core_request(
+        context(namespace, 622, XByteOrder::LittleEndian),
+        &create_gc_request(XByteOrder::LittleEndian, 0x220123, 0x220121),
+    )
+    .unwrap();
+    dispatch_x11_wire_request(
+        dispatch_context(namespace, 2, XByteOrder::LittleEndian, 55),
+        gc,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
 
     let pixmap = decode_x11_core_request(
         context(namespace, 622, XByteOrder::LittleEndian),
@@ -3736,14 +3828,26 @@ fn x11_dispatch_poly_text8_emits_conservative_text_damage() {
         &mut atoms,
         &mut properties,
     );
+    let gc = decode_x11_core_request(
+        context(namespace, 647, XByteOrder::LittleEndian),
+        &create_gc_request(XByteOrder::LittleEndian, 0x220152, window),
+    )
+    .unwrap();
+    dispatch_x11_wire_request(
+        dispatch_context(namespace, 2, XByteOrder::LittleEndian, 55),
+        gc,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
 
     let text = decode_x11_core_request(
-        context(namespace, 647, XByteOrder::LittleEndian),
+        context(namespace, 648, XByteOrder::LittleEndian),
         &poly_text8_request(XByteOrder::LittleEndian, window, 0x220152, 5, 16, b"Hi"),
     )
     .unwrap();
     let text = dispatch_x11_wire_request(
-        dispatch_context(namespace, 2, XByteOrder::LittleEndian, 74),
+        dispatch_context(namespace, 3, XByteOrder::LittleEndian, 74),
         text,
         &mut runtime,
         &mut atoms,
@@ -3763,12 +3867,12 @@ fn x11_dispatch_poly_text8_emits_conservative_text_damage() {
     );
 
     let image_text = decode_x11_core_request(
-        context(namespace, 648, XByteOrder::LittleEndian),
+        context(namespace, 649, XByteOrder::LittleEndian),
         &image_text8_request(XByteOrder::LittleEndian, window, 0x220152, 9, 20, b"OK"),
     )
     .unwrap();
     let image_text = dispatch_x11_wire_request(
-        dispatch_context(namespace, 3, XByteOrder::LittleEndian, 76),
+        dispatch_context(namespace, 4, XByteOrder::LittleEndian, 76),
         image_text,
         &mut runtime,
         &mut atoms,
@@ -4531,6 +4635,29 @@ fn create_window_request(
     out
 }
 
+#[allow(clippy::too_many_arguments)]
+fn create_window_background_request(
+    byte_order: XByteOrder,
+    window: u32,
+    x: i16,
+    y: i16,
+    width: u16,
+    height: u16,
+    background_pixel: u32,
+) -> Vec<u8> {
+    let mut out = create_window_request(byte_order, window, x, y, width, height);
+    out[2..4].copy_from_slice(&match byte_order {
+        XByteOrder::LittleEndian => 9u16.to_le_bytes(),
+        XByteOrder::BigEndian => 9u16.to_be_bytes(),
+    });
+    out[28..32].copy_from_slice(&match byte_order {
+        XByteOrder::LittleEndian => 2u32.to_le_bytes(),
+        XByteOrder::BigEndian => 2u32.to_be_bytes(),
+    });
+    push_u32(&mut out, byte_order, background_pixel);
+    out
+}
+
 fn resource_request(byte_order: XByteOrder, opcode: u8, id: u32) -> Vec<u8> {
     let mut out = vec![opcode, 0];
     push_u16(&mut out, byte_order, 2);
@@ -4700,6 +4827,32 @@ fn create_gc_request(byte_order: XByteOrder, gc: u32, drawable: u32) -> Vec<u8> 
     push_u32(&mut out, byte_order, gc);
     push_u32(&mut out, byte_order, drawable);
     push_u32(&mut out, byte_order, 0);
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_gc_values_request(
+    byte_order: XByteOrder,
+    gc: u32,
+    drawable: u32,
+    function: u32,
+    plane_mask: u32,
+    foreground: u32,
+    background: u32,
+    line_width: u32,
+    font: u32,
+) -> Vec<u8> {
+    let value_mask = (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 14);
+    let mut out = vec![55, 0];
+    push_u16(&mut out, byte_order, 10);
+    push_u32(&mut out, byte_order, gc);
+    push_u32(&mut out, byte_order, drawable);
+    push_u32(&mut out, byte_order, value_mask);
+    for value in [
+        function, plane_mask, foreground, background, line_width, font,
+    ] {
+        push_u32(&mut out, byte_order, value);
+    }
     out
 }
 

@@ -319,6 +319,94 @@ fn engine_size_control_updates_authority_geometry_without_consuming_client_gener
 }
 
 #[test]
+fn cpu_buffer_patches_materialize_and_resize_replacements_keep_generation_order() {
+    let namespace = NamespaceId::from_raw(19);
+    let window = XResourceId::new(0x63, 1);
+    let mut runtime = XAuthorityRuntime::new();
+    runtime.apply(XAuthorityRequestPacket {
+        transaction: TransactionId::from_raw(20),
+        namespace,
+        kind: XAuthorityRequestKind::CreateWindow {
+            window,
+            surface: SurfaceId::new(19, 1),
+            geometry: Rect {
+                x: 0,
+                y: 0,
+                width: 80,
+                height: 40,
+            },
+            constraints: SurfaceConstraints {
+                min_size: None,
+                max_size: None,
+            },
+            generation: 1,
+        },
+    });
+
+    runtime.apply_core_draw(
+        TransactionId::from_raw(21),
+        namespace,
+        window,
+        Region::single(Rect {
+            x: 1,
+            y: 1,
+            width: 3,
+            height: 3,
+        }),
+    );
+    let first = runtime.take_cpu_buffer_update().unwrap();
+    assert!(matches!(first, XAuthorityCpuBufferUpdate::Replace(_)));
+    runtime.apply_core_draw(
+        TransactionId::from_raw(22),
+        namespace,
+        window,
+        Region::single(Rect {
+            x: 10,
+            y: 10,
+            width: 2,
+            height: 2,
+        }),
+    );
+    let second = runtime.take_cpu_buffer_update().unwrap();
+    assert!(matches!(second, XAuthorityCpuBufferUpdate::Patch(_)));
+
+    let mut materialized = std::collections::BTreeMap::new();
+    first.apply_to(&mut materialized).unwrap();
+    second.apply_to(&mut materialized).unwrap();
+    assert_eq!(materialized.len(), 1);
+    assert_eq!(materialized.values().next().unwrap().generation, 2);
+
+    runtime
+        .configure_window_size_from_engine(
+            namespace,
+            window,
+            Size {
+                width: 120,
+                height: 70,
+            },
+        )
+        .unwrap();
+    runtime.apply_core_draw(
+        TransactionId::from_raw(23),
+        namespace,
+        window,
+        Region::single(Rect {
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+        }),
+    );
+    let replacement = runtime.take_cpu_buffer_update().unwrap();
+    assert!(matches!(replacement, XAuthorityCpuBufferUpdate::Replace(_)));
+    assert_eq!(replacement.generation(), 3);
+    replacement.apply_to(&mut materialized).unwrap();
+    let resized = materialized.values().next().unwrap();
+    assert_eq!(resized.size.width, 120);
+    assert_eq!(resized.size.height, 70);
+}
+
+#[test]
 fn evdev_keyboard_mapping_preserves_x_modifier_event_order() {
     let mut keyboard = XCoreKeyboardMapper::new();
     assert_eq!(keyboard.map_evdev_key(42, true), Some((50, 0)));

@@ -131,11 +131,13 @@ tools/run_sophia_xmonad_session.sh
 
 It starts the generic bridge as `sophia-live-session`'s supervised WM process,
 uses xmonad only as the selected bridge client, and launches one ordinary real
-xterm. A bounded automated form can pass `--max-runtime-ms=10000`,
+xterm with a clean interactive `/bin/sh`. Stop it from another TTY with
+`tools/stop_sophia_xmonad_session.sh`. A bounded automated form can pass `--max-runtime-ms=10000`,
 `--inject-text=sophia`, and `--exit-after-input-proof`; passing evidence requires one
-WM request, one committed layout with a moved surface, and a later terminal
-pixel change. The final physical gate uses the wrapper without injection and
-requires operator-visible typing on the scanned-out xterm.
+WM request, one acknowledged resize, one committed layout with a moved surface,
+and a later terminal pixel change. The separate xterm raster smoke also requires
+an exact readable ASCII glyph match. The final physical gate uses the wrapper
+without injection and requires operator-visible typing on the scanned-out xterm.
 
 The keyboard helper presents `type sophia then Return:` inside the scanned-out
 xterm and waits up to 15 seconds for that exact press/release sequence. A fresh

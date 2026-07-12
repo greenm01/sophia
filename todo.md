@@ -59,13 +59,14 @@ Exit criteria:
 - [ ] Prove the existing xterm remains visible and operator input changes its
   presented pixels while xmonad supplies layout through the generic bridge.
   Xmonad remains a proof fixture and must not appear in Engine or live-session
-  policy branches. The headless real-xmonad/xterm path passes with a committed
-  move, focus, and injected-input pixel change; the dedicated-TTY physical gate
-  remains.
-- [ ] Remove the first-session fixed client-size constraint after X Authority's
-  core-drawing resize path can accept arbitrary xmonad sizes without an xterm
-  repaint loop. Keep the bounded configure/focus command and acknowledgement
-  seam keyed only by `SurfaceId`.
+  policy branches. The headless path now proves readable fixed-font ASCII,
+  damage-patch materialization, a real configure acknowledgement, resized
+  pixels, committed focus, and injected-input pixel change. The dedicated-TTY
+  visual gate remains.
+- [x] Remove the first-session fixed client-size constraint. X Authority now
+  publishes an ordered full replacement for a new size followed by bounded
+  damage patches, so xmonad can resize xterm without a full-buffer repaint
+  loop. The configure/focus seam remains keyed only by `SurfaceId`.
 - [ ] Add a second legacy X11 WM compatibility smoke through the same
   `--wm=PATH --wm-arg=ARG` launcher with no Engine changes.
 

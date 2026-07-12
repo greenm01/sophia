@@ -94,6 +94,13 @@ pub(crate) fn run_persistent_xterm_session(
                 "sophia-input-proof",
             ])
             .arg(proof_text);
+    } else if let Some(program) = config.terminal_exec.as_deref() {
+        terminal_command
+            .env_remove("ENV")
+            .env_remove("BASH_ENV")
+            .arg("-e")
+            .arg(program)
+            .args(&config.terminal_exec_args);
     }
     let child = terminal_command.spawn()?;
     let mut process = SessionProcessGuard::new(child, config.socket_path.clone());
@@ -160,6 +167,8 @@ struct PersistentXtermSessionConfig {
     display: String,
     socket_path: std::path::PathBuf,
     terminal: String,
+    terminal_exec: Option<String>,
+    terminal_exec_args: Vec<String>,
     max_runtime: Option<Duration>,
     max_ticks: Option<usize>,
     inject_text: Option<String>,
@@ -191,6 +200,22 @@ impl PersistentXtermSessionConfig {
         }
         let inject_text = arg_value(args, "--inject-text");
         let expect_physical_text = arg_value(args, "--expect-physical-text");
+        let terminal_exec = arg_value(args, "--terminal-exec");
+        let terminal_exec_args = args
+            .iter()
+            .filter_map(|arg| arg.strip_prefix("--terminal-exec-arg="))
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        if terminal_exec.is_none() && !terminal_exec_args.is_empty() {
+            return Err("--terminal-exec-arg requires --terminal-exec".into());
+        }
+        if terminal_exec_args.len() > 32
+            || terminal_exec_args
+                .iter()
+                .any(|argument| argument.len() > 4_096)
+        {
+            return Err("--terminal-exec accepts at most 32 bounded arguments".into());
+        }
         let expect_physical_pointer = args.iter().any(|arg| arg == "--expect-physical-pointer");
         let exit_after_input_proof = args.iter().any(|arg| arg == "--exit-after-input-proof");
         let native_scanout = args.iter().any(|arg| arg == "--native-scanout");
@@ -227,6 +252,9 @@ impl PersistentXtermSessionConfig {
         if inject_text.is_some() && expect_physical_text.is_some() {
             return Err("--inject-text and --expect-physical-text are mutually exclusive".into());
         }
+        if terminal_exec.is_some() && (inject_text.is_some() || expect_physical_text.is_some()) {
+            return Err("--terminal-exec cannot be combined with input-proof commands".into());
+        }
         if (inject_text.is_some() || expect_physical_text.is_some())
             && max_runtime.is_none()
             && max_ticks.is_none()
@@ -259,6 +287,8 @@ impl PersistentXtermSessionConfig {
             display,
             socket_path: std::path::PathBuf::from(format!("/tmp/.X11-unix/X{display_number}")),
             terminal: arg_value(args, "--terminal").unwrap_or_else(|| "xterm".to_owned()),
+            terminal_exec,
+            terminal_exec_args,
             max_runtime,
             max_ticks,
             inject_text,
@@ -785,10 +815,6 @@ fn output_bounds(output: sophia_engine::HeadlessOutput) -> Rect {
 }
 
 fn live_layout_node(layer: &LayerSnapshot, workspace: WorkspaceId) -> LayoutNodeSnapshot {
-    let live_size = Size {
-        width: layer.geometry.width,
-        height: layer.geometry.height,
-    };
     LayoutNodeSnapshot {
         surface: layer.surface,
         workspace,
@@ -796,8 +822,8 @@ fn live_layout_node(layer: &LayerSnapshot, workspace: WorkspaceId) -> LayoutNode
         capabilities: LayoutNodeCapabilities::STANDARD_TOPLEVEL,
         state: LayoutNodeState::NORMAL,
         constraints: SurfaceConstraints {
-            min_size: Some(live_size),
-            max_size: Some(live_size),
+            min_size: None,
+            max_size: None,
         },
         geometry: layer.geometry,
         generation: layer.generation,
@@ -994,7 +1020,7 @@ fn run_session_loop(
                     }
                 }
                 let batch = layout.projected_batch(&batch);
-                scene.observe(&batch);
+                scene.observe(&batch)?;
                 let report = scene.compose()?.clone();
                 let native_frames = native_scanout
                     .as_ref()
@@ -2130,14 +2156,17 @@ impl PersistentCpuScene {
         }
     }
 
-    fn observe(&mut self, batch: &XAuthorityObservedTransactionBatch) {
-        for buffer in &batch.cpu_buffers {
-            let replace = self
+    fn observe(
+        &mut self,
+        batch: &XAuthorityObservedTransactionBatch,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        for update in &batch.cpu_buffer_updates {
+            let stale = self
                 .buffers
-                .get(&buffer.handle)
-                .is_none_or(|current| buffer.generation >= current.generation);
-            if replace {
-                self.buffers.insert(buffer.handle, buffer.clone());
+                .get(&update.handle())
+                .is_some_and(|current| update.generation() < current.generation);
+            if !stale {
+                update.apply_to(&mut self.buffers)?;
             }
         }
         for transaction in &batch.transactions {
@@ -2146,6 +2175,7 @@ impl PersistentCpuScene {
                     .insert(transaction.surface, (transaction.target_geometry, handle));
             }
         }
+        Ok(())
     }
 
     fn compose(

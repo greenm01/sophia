@@ -17,7 +17,7 @@ use std::{
 #[cfg(unix)]
 use crate::{
     X_SETUP_CLIENT_PREFIX_LEN, X_SETUP_DEFAULT_ROOT, X_SETUP_MAX_AUTH_FIELD_LEN, XAtomTable,
-    XAuthorityCpuBufferSnapshot, XAuthorityObservedTransactionBatch, XAuthorityRuntime, XByteOrder,
+    XAuthorityCpuBufferUpdate, XAuthorityObservedTransactionBatch, XAuthorityRuntime, XByteOrder,
     XClientEvent, XDispatchContext, XDispatchResult, XPropertyTable, XResourceId, XSetupRequest,
     XSetupSuccess, XWireClientContext, decode_x11_core_request, dispatch_x11_parse_error,
     dispatch_x11_wire_request, encode_x_client_event, encode_x11_setup_success,
@@ -56,7 +56,7 @@ pub struct X11CoreDispatchTrace<'a> {
     pub request_detail: Option<String>,
     pub parse_error: Option<String>,
     pub result: &'a XDispatchResult,
-    pub cpu_buffer_update: Option<&'a XAuthorityCpuBufferSnapshot>,
+    pub cpu_buffer_update: Option<&'a XAuthorityCpuBufferUpdate>,
 }
 
 #[cfg(unix)]
@@ -624,13 +624,17 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 &request,
             ) {
                 Ok(request) => {
-                    if let crate::XWireRequest::Authority(crate::XAuthorityRequestPacket {
-                        kind:
-                            crate::XAuthorityRequestKind::CreateWindow {
-                                window, surface, ..
+                    if let crate::XWireRequest::CreateWindow {
+                        packet:
+                            crate::XAuthorityRequestPacket {
+                                kind:
+                                    crate::XAuthorityRequestKind::CreateWindow {
+                                        window, surface, ..
+                                    },
+                                ..
                             },
                         ..
-                    }) = &request
+                    } = &request
                     {
                         surface_windows
                             .lock()
@@ -1117,6 +1121,19 @@ fn is_x11_client_disconnect(error: &std::io::Error) -> bool {
 #[cfg(unix)]
 fn x11_core_request_trace_detail(request: &crate::XWireRequest) -> Option<String> {
     match request {
+        crate::XWireRequest::CreateWindow { packet, .. } => match &packet.kind {
+            crate::XAuthorityRequestKind::CreateWindow {
+                window, geometry, ..
+            } => Some(format!(
+                "CreateWindow:window={:#x}:{}x{}+{}+{}",
+                window.local.raw(),
+                geometry.width,
+                geometry.height,
+                geometry.x,
+                geometry.y
+            )),
+            _ => None,
+        },
         crate::XWireRequest::Authority(packet) => match &packet.kind {
             crate::XAuthorityRequestKind::CreateWindow {
                 window, geometry, ..
@@ -1174,7 +1191,7 @@ fn x11_core_request_trace_detail(request: &crate::XWireRequest) -> Option<String
             read.window.local.raw(),
             read.property
         )),
-        crate::XWireRequest::CreateGraphicsContext { gc, drawable } => Some(format!(
+        crate::XWireRequest::CreateGraphicsContext { gc, drawable, .. } => Some(format!(
             "CreateGC:gc={:#x}:drawable={:#x}",
             gc.local.raw(),
             drawable.local.raw()

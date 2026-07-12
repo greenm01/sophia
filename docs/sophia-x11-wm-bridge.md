@@ -167,10 +167,11 @@ the bridge rejects absolute paths and parent traversal.
 The Engine and live X Authority do not know whether this process is xmonad,
 dwm, i3, qtile, or another compatible WM. `sophia-live-session` can now
 supervise this adapter through generic `--wm-process` arguments and apply its
-opaque placement/focus proposal to the real xterm surface. The first live gate
-pins client size to the already rendered xterm buffer while xmonad controls
-position, stacking, and focus; arbitrary live client resizing remains a
-separate compatibility gate.
+opaque placement/focus proposal to the real xterm surface. The live gate now
+admits xmonad's requested xterm size through the `SurfaceId`-only control seam
+and preserves the previous layout until X Authority publishes a matching
+replacement buffer. Later glyph and core-drawing updates are bounded damage
+patches rather than fullscreen buffer clones.
 
 Run the real policy proof with:
 

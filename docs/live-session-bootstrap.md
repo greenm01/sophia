@@ -82,11 +82,23 @@ process. Xmonad sees only a synthetic private display; the real xterm remains
 connected to Sophia X Authority. Engine validates and applies xmonad placement,
 stacking, and focus, while physical input and scanout remain Sophia-owned.
 
-The first live compatibility gate intentionally pins xterm to its established
-client size and proves a real move from its initial offset to xmonad's tile
-origin. The Engine-to-Authority configure/acknowledgement seam exists, but
-arbitrary xterm resizing is not claimed until the core-drawing resize path no
-longer enters a repaint loop.
+The live compatibility gate allows xmonad to request a real client size. Sophia
+keeps the previous geometry and pixels until X Authority publishes the matching
+replacement buffer, then commits the resized pixels and placement together.
+Later drawing requests carry tightly packed damage patches instead of cloning a
+fullscreen CPU buffer for every glyph. The headless xmonad proof requires one
+configure acknowledgement before layout commits.
+
+The operator wrapper launches a clean interactive `/bin/sh` so this milestone
+tests deterministic fixed-font ASCII rather than user prompt/Xft compatibility.
+Exit the shell normally, or stop the session from another TTY with:
+
+```sh
+tools/stop_sophia_xmonad_session.sh
+```
+
+The wrapper owns the session process group and restores `keyd` during either
+shutdown path.
 
 On an exclusive TTY with no other DRM master, persistent native presentation is
 enabled by the gated `--native-scanout` flag. The bounded hardware wrapper

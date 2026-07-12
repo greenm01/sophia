@@ -230,8 +230,10 @@ native-session ticks with two independently owned outputs, distinct content,
 page-flip-paced fixed refresh, and routed keyboard/pointer input. Real xmonad
 also passes as blind two-window layout policy against synthetic windows; it is
 a compatibility proof, not a hard-coded Engine component. The generic live
-session now applies real xmonad placement/focus to one real xterm and proves an
-injected input pixel change headlessly; the dedicated-TTY operator gate remains.
+session now applies real xmonad placement, resize, and focus to one real xterm.
+Its headless gate requires a readable fixed-font ASCII marker, one acknowledged
+configure, and a later injected-input pixel change; the dedicated-TTY operator
+visual gate remains.
 The remaining hardware gap is VRR: the current eDP connector
 exposes `vrr_capable` and its CRTC exposes `VRR_ENABLED`, but capability is `0`,
 so activation evidence requires a different display.

@@ -44,6 +44,29 @@ pub fn dispatch_x11_wire_request(
 ) -> XDispatchResult {
     runtime.begin_dispatch();
     match request {
+        XWireRequest::CreateWindow {
+            packet,
+            background_pixel,
+        } => {
+            let kind = packet.kind.clone();
+            let namespace = packet.namespace;
+            let response = runtime.apply(packet);
+            if response.outcome == XAuthorityResponseOutcome::Accepted
+                && let XAuthorityRequestKind::CreateWindow { window, .. } = &kind
+            {
+                let _ = runtime.set_window_background_pixel(
+                    namespace,
+                    *window,
+                    background_pixel.unwrap_or(0),
+                );
+            }
+            let outputs = outputs_from_authority_response(context.clone(), &kind, &response);
+            XDispatchResult {
+                response: Some(response),
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::Authority(packet) => {
             let kind = packet.kind.clone();
             let response = runtime.apply(packet);
@@ -479,13 +502,70 @@ pub fn dispatch_x11_wire_request(
             outputs: Vec::new(),
             metadata_candidates: Vec::new(),
         },
-        XWireRequest::CreateGraphicsContext { .. }
-        | XWireRequest::SetClipRectangles { .. }
-        | XWireRequest::FreeGraphicsContext { .. } => XDispatchResult {
-            response: None,
-            outputs: Vec::new(),
-            metadata_candidates: Vec::new(),
-        },
+        XWireRequest::CreateGraphicsContext {
+            gc,
+            drawable,
+            values,
+        } => {
+            let outputs = runtime
+                .create_graphics_context(context.namespace, gc, drawable, values)
+                .err()
+                .map(|error| {
+                    XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(gc.local.raw()).unwrap_or(0),
+                    ))
+                })
+                .into_iter()
+                .collect();
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::SetClipRectangles { gc, rectangles } => {
+            let outputs = runtime
+                .set_graphics_context_clip_rectangles(context.namespace, gc, rectangles)
+                .err()
+                .map(|error| {
+                    XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(gc.local.raw()).unwrap_or(0),
+                    ))
+                })
+                .into_iter()
+                .collect();
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::FreeGraphicsContext { gc } => {
+            let outputs = runtime
+                .free_graphics_context(context.namespace, gc)
+                .err()
+                .map(|error| {
+                    XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(gc.local.raw()).unwrap_or(0),
+                    ))
+                })
+                .into_iter()
+                .collect();
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::ClearArea {
             window,
             x,
@@ -495,35 +575,36 @@ pub fn dispatch_x11_wire_request(
             ..
         } => {
             let transaction = TransactionId::from_raw(u64::from(context.sequence));
-            if width == 0 || height == 0 {
-                let outputs =
-                    if let Err(error) = runtime.validate_window_access(context.namespace, window) {
-                        vec![XClientOutput::Error(x_error_from_runtime(
-                            error,
-                            context.sequence,
-                            context.major_opcode,
-                            u32::try_from(window.local.raw()).unwrap_or(0),
-                        ))]
-                    } else {
-                        Vec::new()
-                    };
-                return XDispatchResult {
-                    response: Some(XAuthorityResponsePacket::accepted(transaction)),
-                    outputs,
-                    metadata_candidates: Vec::new(),
-                };
-            }
-            let response = runtime.apply_clear(
-                transaction,
-                context.namespace,
-                window,
-                Region::single(Rect {
-                    x: i32::from(x),
-                    y: i32::from(y),
-                    width: i32::from(width),
-                    height: i32::from(height),
-                }),
-            );
+            let geometry = runtime.window_geometry(context.namespace, window).ok();
+            let clear_width = if width == 0 {
+                geometry
+                    .map(|geometry| geometry.width.saturating_sub(i32::from(x)).max(0))
+                    .unwrap_or(0)
+            } else {
+                i32::from(width)
+            };
+            let clear_height = if height == 0 {
+                geometry
+                    .map(|geometry| geometry.height.saturating_sub(i32::from(y)).max(0))
+                    .unwrap_or(0)
+            } else {
+                i32::from(height)
+            };
+            let response = match runtime.window_background_pixel(context.namespace, window) {
+                Ok(pixel) => runtime.apply_clear_with_pixel(
+                    transaction,
+                    context.namespace,
+                    window,
+                    Region::single(Rect {
+                        x: i32::from(x),
+                        y: i32::from(y),
+                        width: clear_width,
+                        height: clear_height,
+                    }),
+                    pixel,
+                ),
+                Err(error) => XAuthorityResponsePacket::rejected(transaction, error),
+            };
             let outputs = if let XAuthorityResponseOutcome::Rejected(error) = response.outcome {
                 vec![XClientOutput::Error(x_error_from_runtime(
                     error,
@@ -1175,8 +1256,8 @@ pub fn dispatch_x11_wire_request(
         }
         XWireRequest::PolyFillRectangle {
             drawable,
+            gc,
             rectangles,
-            ..
         } => {
             let transaction = TransactionId::from_raw(u64::from(context.sequence));
             if runtime
@@ -1193,8 +1274,16 @@ pub fn dispatch_x11_wire_request(
             for rectangle in rectangles {
                 damage.push(rectangle);
             }
-            let response =
-                runtime.apply_core_draw(transaction, context.namespace, drawable, damage);
+            let response = match runtime.graphics_context_values(context.namespace, gc) {
+                Ok(values) => runtime.apply_core_draw_with_gc(
+                    transaction,
+                    context.namespace,
+                    drawable,
+                    damage,
+                    &values,
+                ),
+                Err(error) => XAuthorityResponsePacket::rejected(transaction, error),
+            };
             let outputs = if let XAuthorityResponseOutcome::Rejected(error) = response.outcome {
                 vec![XClientOutput::Error(x_error_from_runtime(
                     error,
@@ -1214,26 +1303,31 @@ pub fn dispatch_x11_wire_request(
         XWireRequest::CopyArea {
             source,
             destination,
+            gc,
+            src_x,
+            src_y,
             dst_x,
             dst_y,
             width,
             height,
-            ..
         } => {
             let transaction = TransactionId::from_raw(u64::from(context.sequence));
-            let damage = Region::single(Rect {
-                x: i32::from(dst_x),
-                y: i32::from(dst_y),
-                width: i32::from(width),
-                height: i32::from(height),
-            });
-            let response = runtime.apply_copy_area(
-                transaction,
-                context.namespace,
-                source,
-                destination,
-                damage,
-            );
+            let response = match runtime.graphics_context_values(context.namespace, gc) {
+                Ok(values) => runtime.apply_copy_area_with_gc(
+                    transaction,
+                    context.namespace,
+                    source,
+                    destination,
+                    src_x,
+                    src_y,
+                    dst_x,
+                    dst_y,
+                    width,
+                    height,
+                    &values,
+                ),
+                Err(error) => XAuthorityResponsePacket::rejected(transaction, error),
+            };
             let outputs = if let XAuthorityResponseOutcome::Rejected(error) = response.outcome {
                 vec![XClientOutput::Error(x_error_from_runtime(
                     error,
@@ -1251,10 +1345,12 @@ pub fn dispatch_x11_wire_request(
             }
         }
         XWireRequest::PolyLine {
-            drawable, damage, ..
+            drawable,
+            gc,
+            points,
         } => {
             let transaction = TransactionId::from_raw(u64::from(context.sequence));
-            if damage.is_none()
+            if points.len() < 2
                 || runtime
                     .validate_pixmap_access(context.namespace, drawable)
                     .is_ok()
@@ -1265,12 +1361,16 @@ pub fn dispatch_x11_wire_request(
                     metadata_candidates: Vec::new(),
                 };
             }
-            let response = runtime.apply_core_draw(
-                transaction,
-                context.namespace,
-                drawable,
-                Region::single(damage.unwrap()),
-            );
+            let response = match runtime.graphics_context_values(context.namespace, gc) {
+                Ok(values) => runtime.apply_line_draw(
+                    transaction,
+                    context.namespace,
+                    drawable,
+                    &points,
+                    &values,
+                ),
+                Err(error) => XAuthorityResponsePacket::rejected(transaction, error),
+            };
             let outputs = if let XAuthorityResponseOutcome::Rejected(error) = response.outcome {
                 vec![XClientOutput::Error(x_error_from_runtime(
                     error,
@@ -1361,18 +1461,18 @@ pub fn dispatch_x11_wire_request(
         }
         XWireRequest::PolyText8 {
             drawable,
+            gc,
             x,
             y,
             text,
-            ..
-        } => dispatch_text_draw(context, runtime, drawable, x, y, text, false),
+        } => dispatch_text_draw(context, runtime, drawable, gc, x, y, text, false),
         XWireRequest::ImageText8 {
             drawable,
+            gc,
             x,
             y,
             text,
-            ..
-        } => dispatch_text_draw(context, runtime, drawable, x, y, text, true),
+        } => dispatch_text_draw(context, runtime, drawable, gc, x, y, text, true),
         XWireRequest::FillPoly {
             drawable, damage, ..
         } => {
@@ -1517,6 +1617,7 @@ fn dispatch_text_draw(
     context: XDispatchContext,
     runtime: &mut XAuthorityRuntime,
     drawable: XResourceId,
+    gc: XResourceId,
     x: i16,
     y: i16,
     text: Vec<u8>,
@@ -1533,6 +1634,21 @@ fn dispatch_text_draw(
             metadata_candidates: Vec::new(),
         };
     }
+    let gc_values = match runtime.graphics_context_values(context.namespace, gc) {
+        Ok(values) => values,
+        Err(error) => {
+            return XDispatchResult {
+                response: None,
+                outputs: vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(gc.local.raw()).unwrap_or(0),
+                ))],
+                metadata_candidates: Vec::new(),
+            };
+        }
+    };
     let response = runtime.apply_text_draw(
         transaction,
         context.namespace,
@@ -1541,6 +1657,7 @@ fn dispatch_text_draw(
         y,
         &text,
         opaque,
+        &gc_values,
     );
     let outputs = if let XAuthorityResponseOutcome::Rejected(error) = response.outcome {
         vec![XClientOutput::Error(x_error_from_runtime(

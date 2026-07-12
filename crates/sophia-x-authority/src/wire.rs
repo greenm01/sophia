@@ -3,8 +3,9 @@ use sophia_protocol::{
 };
 
 use crate::{
-    XAtom, XAuthorityRequestKind, XAuthorityRequestPacket, XByteOrder, XPropertyChange,
-    XPropertyMode, XPropertyRead, XResourceId, XSelectionChangeKind, padded_len,
+    XAtom, XAuthorityRequestKind, XAuthorityRequestPacket, XByteOrder, XGraphicsContextValues,
+    XPoint, XPropertyChange, XPropertyMode, XPropertyRead, XResourceId, XSelectionChangeKind,
+    padded_len,
 };
 
 const X_CREATE_WINDOW: u8 = 1;
@@ -175,6 +176,10 @@ pub struct XWireClientContext {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum XWireRequest {
     Authority(XAuthorityRequestPacket),
+    CreateWindow {
+        packet: XAuthorityRequestPacket,
+        background_pixel: Option<u32>,
+    },
     ChangeWindowAttributes {
         window: XResourceId,
     },
@@ -236,6 +241,7 @@ pub enum XWireRequest {
     CreateGraphicsContext {
         gc: XResourceId,
         drawable: XResourceId,
+        values: XGraphicsContextValues,
     },
     SetClipRectangles {
         gc: XResourceId,
@@ -356,7 +362,7 @@ pub enum XWireRequest {
     PolyLine {
         drawable: XResourceId,
         gc: XResourceId,
-        damage: Option<Rect>,
+        points: Vec<XPoint>,
     },
     FillPoly {
         drawable: XResourceId,
@@ -1131,10 +1137,24 @@ fn decode_poly_line(
         });
     }
 
+    let mut points = Vec::with_capacity(point_bytes.len() / 4);
+    let mut previous = XPoint { x: 0, y: 0 };
+    for point in point_bytes.chunks_exact(4) {
+        let mut decoded = XPoint {
+            x: context.byte_order.i16(&point[0..2]),
+            y: context.byte_order.i16(&point[2..4]),
+        };
+        if bytes[1] == 1 && !points.is_empty() {
+            decoded.x = previous.x.saturating_add(decoded.x);
+            decoded.y = previous.y.saturating_add(decoded.y);
+        }
+        previous = decoded;
+        points.push(decoded);
+    }
     Ok(XWireRequest::PolyLine {
         drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
         gc: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
-        damage: point_damage_bounds(context, point_bytes),
+        points,
     })
 }
 
@@ -1558,9 +1578,52 @@ fn decode_create_gc(
     bytes: &[u8],
 ) -> Result<XWireRequest, XWireParseError> {
     require_len(X_CREATE_GC, X_CREATE_GC_REQ_LEN, bytes.len())?;
+    let value_mask = context.byte_order.u32(&bytes[12..16]);
+    if value_mask & !0x007f_ffff != 0 {
+        return Err(XWireParseError::InvalidLength {
+            opcode: X_CREATE_GC,
+            expected_at_least: X_CREATE_GC_REQ_LEN,
+            actual: bytes.len(),
+        });
+    }
+    let value_count = usize::try_from(value_mask.count_ones()).unwrap_or(usize::MAX);
+    let expected_len = X_CREATE_GC_REQ_LEN.saturating_add(value_count.saturating_mul(4));
+    if bytes.len() != expected_len {
+        return Err(XWireParseError::InvalidLength {
+            opcode: X_CREATE_GC,
+            expected_at_least: expected_len,
+            actual: bytes.len(),
+        });
+    }
+    let mut values = XGraphicsContextValues::default();
+    let mut cursor = X_CREATE_GC_REQ_LEN;
+    let mut next_value = || {
+        let value = context.byte_order.u32(&bytes[cursor..cursor + 4]);
+        cursor += 4;
+        value
+    };
+    for bit in 0..23 {
+        if value_mask & (1 << bit) == 0 {
+            continue;
+        }
+        let value = next_value();
+        match bit {
+            0 => values.function = u8::try_from(value).unwrap_or(u8::MAX),
+            1 => values.plane_mask = value,
+            2 => values.foreground = value,
+            3 => values.background = value,
+            4 => values.line_width = u16::try_from(value).unwrap_or(u16::MAX),
+            8 => values.fill_style = u8::try_from(value).unwrap_or(u8::MAX),
+            14 => values.font = (value != 0).then(|| XResourceId::new(u64::from(value), 1)),
+            17 => values.clip_x_origin = value as i16,
+            18 => values.clip_y_origin = value as i16,
+            _ => {}
+        }
+    }
     Ok(XWireRequest::CreateGraphicsContext {
         gc: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
         drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
+        values,
     })
 }
 
@@ -1688,27 +1751,54 @@ fn decode_create_window(
     bytes: &[u8],
 ) -> Result<XWireRequest, XWireParseError> {
     require_len(X_CREATE_WINDOW, X_CREATE_WINDOW_REQ_LEN, bytes.len())?;
+    let value_mask = context.byte_order.u32(&bytes[28..32]);
+    let value_count = usize::try_from(value_mask.count_ones()).unwrap_or(usize::MAX);
+    let expected_len = X_CREATE_WINDOW_REQ_LEN.saturating_add(value_count.saturating_mul(4));
+    if bytes.len() != expected_len {
+        return Err(XWireParseError::InvalidLength {
+            opcode: X_CREATE_WINDOW,
+            expected_at_least: expected_len,
+            actual: bytes.len(),
+        });
+    }
+    let mut value_cursor = X_CREATE_WINDOW_REQ_LEN;
+    let mut background_pixel = None;
+    for bit in 0..15 {
+        if value_mask & (1 << bit) == 0 {
+            continue;
+        }
+        let value = context
+            .byte_order
+            .u32(&bytes[value_cursor..value_cursor + 4]);
+        value_cursor += 4;
+        if bit == 1 {
+            background_pixel = Some(value);
+        }
+    }
     let window_raw = context.byte_order.u32(&bytes[4..8]);
     let window = XResourceId::new(u64::from(window_raw), 1);
-    Ok(XWireRequest::Authority(XAuthorityRequestPacket {
-        transaction: context.transaction,
-        namespace: context.namespace,
-        kind: XAuthorityRequestKind::CreateWindow {
-            window,
-            surface: SurfaceId::new(window_raw, 1),
-            geometry: Rect {
-                x: i32::from(context.byte_order.i16(&bytes[12..14])),
-                y: i32::from(context.byte_order.i16(&bytes[14..16])),
-                width: i32::from(context.byte_order.u16(&bytes[16..18])),
-                height: i32::from(context.byte_order.u16(&bytes[18..20])),
+    Ok(XWireRequest::CreateWindow {
+        packet: XAuthorityRequestPacket {
+            transaction: context.transaction,
+            namespace: context.namespace,
+            kind: XAuthorityRequestKind::CreateWindow {
+                window,
+                surface: SurfaceId::new(window_raw, 1),
+                geometry: Rect {
+                    x: i32::from(context.byte_order.i16(&bytes[12..14])),
+                    y: i32::from(context.byte_order.i16(&bytes[14..16])),
+                    width: i32::from(context.byte_order.u16(&bytes[16..18])),
+                    height: i32::from(context.byte_order.u16(&bytes[18..20])),
+                },
+                constraints: SurfaceConstraints {
+                    min_size: None,
+                    max_size: None,
+                },
+                generation: 1,
             },
-            constraints: SurfaceConstraints {
-                min_size: None,
-                max_size: None,
-            },
-            generation: 1,
         },
-    }))
+        background_pixel,
+    })
 }
 
 fn decode_map_window(

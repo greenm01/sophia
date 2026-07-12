@@ -2,7 +2,7 @@ use std::sync::mpsc::{SyncSender, TrySendError};
 
 use sophia_protocol::{SurfaceTransaction, TransactionId};
 
-use crate::{X11CoreDispatchTrace, XAuthorityCpuBufferSnapshot, XDispatchResult};
+use crate::{X11CoreDispatchTrace, XAuthorityCpuBufferUpdate, XDispatchResult};
 
 pub const X_AUTHORITY_OBSERVED_TRANSACTION_CHANNEL_CAPACITY: usize = 256;
 
@@ -10,7 +10,7 @@ pub const X_AUTHORITY_OBSERVED_TRANSACTION_CHANNEL_CAPACITY: usize = 256;
 pub struct XAuthorityObservedTransactionBatch {
     pub transaction: TransactionId,
     pub transactions: Vec<SurfaceTransaction>,
-    pub cpu_buffers: Vec<XAuthorityCpuBufferSnapshot>,
+    pub cpu_buffer_updates: Vec<XAuthorityCpuBufferUpdate>,
 }
 
 impl XAuthorityObservedTransactionBatch {
@@ -23,7 +23,7 @@ impl XAuthorityObservedTransactionBatch {
         Some(Self {
             transaction: response.transaction,
             transactions: response.transactions.clone(),
-            cpu_buffers: Vec::new(),
+            cpu_buffer_updates: Vec::new(),
         })
     }
 
@@ -35,7 +35,7 @@ impl XAuthorityObservedTransactionBatch {
         Some(Self {
             transaction: response.transaction,
             transactions: response.transactions.clone(),
-            cpu_buffers: trace.cpu_buffer_update.cloned().into_iter().collect(),
+            cpu_buffer_updates: trace.cpu_buffer_update.cloned().into_iter().collect(),
         })
     }
 }

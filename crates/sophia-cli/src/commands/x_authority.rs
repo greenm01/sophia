@@ -227,6 +227,7 @@ struct XAuthorityExternalProbeSmokeReport {
     cpu_buffers: usize,
     cpu_buffer_bytes: usize,
     nonzero_pixel_bytes: usize,
+    ascii_marker_match: bool,
     first_error: Option<String>,
     #[cfg_attr(not(feature = "atomic-scanout-live"), allow(dead_code))]
     observed_transactions: Vec<SurfaceTransaction>,
@@ -1014,8 +1015,8 @@ fn wait_for_xterm_cpu_state(
     while std::time::Instant::now() < deadline {
         match receiver.recv_timeout(Duration::from_millis(100)) {
             Ok(batch) => {
-                for buffer in batch.cpu_buffers {
-                    latest.insert(buffer.handle, buffer);
+                for update in batch.cpu_buffer_updates {
+                    update.apply_to(latest)?;
                 }
                 let generation = latest
                     .values()
@@ -1083,7 +1084,7 @@ fn print_external_probe_smoke_report(
     report: &XAuthorityExternalProbeSmokeReport,
 ) {
     println!(
-        "{} display={} outcome={} status={} stdout_bytes={} stderr_bytes={} requests={} opcode_count={} opcodes={} transactions={} runtime_committed={} runtime_surfaces={} cpu_buffers={} cpu_buffer_bytes={} nonzero_pixel_bytes={} first_error={}",
+        "{} display={} outcome={} status={} stdout_bytes={} stderr_bytes={} requests={} opcode_count={} opcodes={} transactions={} runtime_committed={} runtime_surfaces={} cpu_buffers={} cpu_buffer_bytes={} nonzero_pixel_bytes={} ascii_marker_match={} first_error={}",
         command_name,
         report.display,
         report.outcome,
@@ -1099,6 +1100,7 @@ fn print_external_probe_smoke_report(
         report.cpu_buffers,
         report.cpu_buffer_bytes,
         report.nonzero_pixel_bytes,
+        report.ascii_marker_match,
         report.first_error.as_deref().unwrap_or("none")
     );
 }
@@ -1116,7 +1118,10 @@ fn run_x_authority_external_probe_smoke(
     allow_client_failure_without_x_error: bool,
 ) -> Result<XAuthorityExternalProbeSmokeReport, Box<dyn std::error::Error>> {
     let server_path = socket_path.clone();
-    let (sender, receiver) = sync_channel(256);
+    // One X request can produce an opcode, detail, transaction, and buffer
+    // update. Keep the diagnostic channel large enough that a replacement
+    // update cannot be dropped while a later patch is retained.
+    let (sender, receiver) = sync_channel(4_096);
     let server = std::thread::spawn(move || {
         run_x11_core_socket_server_once_traced_with_idle_timeout(
             &server_path,
@@ -1149,7 +1154,8 @@ fn run_x_authority_external_probe_smoke(
                     }
                 }
                 if let Some(buffer) = trace.cpu_buffer_update {
-                    let _ = sender.try_send(ExternalProbeObservation::CpuBuffer(buffer.clone()));
+                    let _ =
+                        sender.try_send(ExternalProbeObservation::CpuBufferUpdate(buffer.clone()));
                 }
                 Ok(())
             },
@@ -1177,7 +1183,8 @@ fn run_x_authority_external_probe_smoke(
 
     let deadline = std::time::Instant::now() + Duration::from_secs(8);
     let mut transactions = Vec::new();
-    let mut cpu_buffers = Vec::new();
+    let mut cpu_buffers = std::collections::BTreeMap::new();
+    let mut cpu_buffer_updates = 0usize;
     let mut first_error = None;
     let mut opcodes = std::collections::BTreeSet::new();
     let mut details = std::collections::BTreeSet::new();
@@ -1191,7 +1198,10 @@ fn run_x_authority_external_probe_smoke(
                     opcodes.insert(opcode);
                 }
                 ExternalProbeObservation::Transactions(batch) => transactions.extend(batch),
-                ExternalProbeObservation::CpuBuffer(buffer) => cpu_buffers.push(buffer),
+                ExternalProbeObservation::CpuBufferUpdate(update) => {
+                    cpu_buffer_updates = cpu_buffer_updates.saturating_add(1);
+                    update.apply_to(&mut cpu_buffers)?;
+                }
                 ExternalProbeObservation::Detail(detail) => {
                     details.insert(detail);
                 }
@@ -1239,7 +1249,10 @@ fn run_x_authority_external_probe_smoke(
                 opcodes.insert(opcode);
             }
             ExternalProbeObservation::Transactions(batch) => transactions.extend(batch),
-            ExternalProbeObservation::CpuBuffer(buffer) => cpu_buffers.push(buffer),
+            ExternalProbeObservation::CpuBufferUpdate(update) => {
+                cpu_buffer_updates = cpu_buffer_updates.saturating_add(1);
+                update.apply_to(&mut cpu_buffers)?;
+            }
             ExternalProbeObservation::Detail(detail) => {
                 details.insert(detail);
             }
@@ -1300,12 +1313,19 @@ fn run_x_authority_external_probe_smoke(
         .as_ref()
         .map(|state| state.authority_surfaces_applied)
         .unwrap_or(0);
-    let cpu_buffer_bytes = cpu_buffers.iter().map(|buffer| buffer.bytes.len()).sum();
+    let cpu_buffer_bytes = cpu_buffers.values().map(|buffer| buffer.bytes.len()).sum();
     let nonzero_pixel_bytes = cpu_buffers
-        .iter()
+        .values()
         .flat_map(|buffer| buffer.bytes.iter())
         .filter(|byte| **byte != 0)
         .count();
+    let ascii_marker_match = cpu_buffers_contain_fixed_text(&cpu_buffers, b"Sophia");
+    if label == "xterm_render" && !ascii_marker_match {
+        return Err(format!(
+            "xterm render probe produced pixels but not the expected readable ASCII marker for {display}"
+        )
+        .into());
+    }
     if require_transactions && (runtime_committed == 0 || runtime_surfaces == 0) {
         return Err(format!(
             "{label} transactions did not commit through runtime for {display}: transactions={} committed={} surfaces={}",
@@ -1336,20 +1356,107 @@ fn run_x_authority_external_probe_smoke(
         transactions: transactions.len(),
         runtime_committed,
         runtime_surfaces,
-        cpu_buffers: cpu_buffers.len(),
+        cpu_buffers: cpu_buffer_updates,
         cpu_buffer_bytes,
         nonzero_pixel_bytes,
+        ascii_marker_match,
         first_error,
         observed_transactions: transactions,
-        observed_cpu_buffers: cpu_buffers,
+        observed_cpu_buffers: cpu_buffers.into_values().collect(),
     })
+}
+
+fn cpu_buffers_contain_fixed_text(
+    buffers: &std::collections::BTreeMap<u64, XAuthorityCpuBufferSnapshot>,
+    text: &[u8],
+) -> bool {
+    buffers.values().any(|buffer| {
+        let Ok(width) = usize::try_from(buffer.size.width) else {
+            return false;
+        };
+        let Ok(height) = usize::try_from(buffer.size.height) else {
+            return false;
+        };
+        let Some(text_width) = text.len().checked_mul(8) else {
+            return false;
+        };
+        if width < text_width || height < 12 {
+            return false;
+        }
+        (0..=height - 12).any(|top| {
+            (0..=width - text_width).any(|left| fixed_text_matches_at(buffer, left, top, text))
+        })
+    })
+}
+
+fn fixed_text_matches_at(
+    buffer: &XAuthorityCpuBufferSnapshot,
+    left: usize,
+    top: usize,
+    text: &[u8],
+) -> bool {
+    let Some(background) = xrgb_pixel(buffer, left, top) else {
+        return false;
+    };
+    let first_rows = x_fixed_glyph_rows(text[0]);
+    let Some((first_row, first_column)) = first_rows.iter().enumerate().find_map(|(row, bits)| {
+        (0..5)
+            .find(|column| bits & (1 << (4 - column)) != 0)
+            .map(|column| (row, column))
+    }) else {
+        return false;
+    };
+    let Some(foreground) = xrgb_pixel(
+        buffer,
+        left.saturating_add(first_column + 1),
+        top.saturating_add(first_row + 2),
+    ) else {
+        return false;
+    };
+    if foreground == background {
+        return false;
+    }
+    for (index, byte) in text.iter().copied().enumerate() {
+        let rows = x_fixed_glyph_rows(byte);
+        let cell_left = left.saturating_add(index.saturating_mul(8));
+        for (row, bits) in rows.into_iter().enumerate() {
+            for column in 0..5 {
+                let expected = if bits & (1 << (4 - column)) != 0 {
+                    foreground
+                } else {
+                    background
+                };
+                if xrgb_pixel(
+                    buffer,
+                    cell_left.saturating_add(column + 1),
+                    top.saturating_add(row + 2),
+                ) != Some(expected)
+                {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+fn xrgb_pixel(buffer: &XAuthorityCpuBufferSnapshot, x: usize, y: usize) -> Option<u32> {
+    let stride = usize::try_from(buffer.stride).ok()?;
+    let offset = y.checked_mul(stride)?.checked_add(x.checked_mul(4)?)?;
+    Some(u32::from_le_bytes(
+        buffer
+            .bytes
+            .get(offset..offset.checked_add(4)?)?
+            .try_into()
+            .ok()?,
+    ))
 }
 
 #[derive(Clone, Debug)]
 enum ExternalProbeObservation {
     Opcode(u8),
     Transactions(Vec<SurfaceTransaction>),
-    CpuBuffer(XAuthorityCpuBufferSnapshot),
+    CpuBufferUpdate(XAuthorityCpuBufferUpdate),
     Detail(String),
     Error(String),
 }

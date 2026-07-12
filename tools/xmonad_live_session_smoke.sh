@@ -39,7 +39,7 @@ if (( status != 0 )); then
     exit "$status"
 fi
 
-grep -Eq '^sophia_live_wm schema=1 status=layout_committed .* moved_surfaces=1 .* outcome=Committed$' "$EVIDENCE_FILE"
+grep -Eq '^sophia_live_wm schema=1 status=layout_committed .* moved_surfaces=1 configure_acks=1 outcome=Committed$' "$EVIDENCE_FILE"
 completion="$(grep -E '^sophia_live_session schema=7 status=bounded_complete ' "$EVIDENCE_FILE")"
 [[ " $completion " == *" input_pixel_change=true "* ]]
 [[ " $completion " == *" wm_policy=external "* ]]
