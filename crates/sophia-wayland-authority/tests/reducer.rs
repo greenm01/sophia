@@ -82,7 +82,7 @@ fn attach_damage_and_commit_reduce_to_protocol_neutral_transaction() {
 }
 
 #[test]
-fn configure_must_be_acknowledged_before_commit_is_ready() {
+fn unacknowledged_configure_keeps_previous_geometry_ready() {
     let mut reducer = WaylandAuthorityReducer::new();
     create(&mut reducer);
     reducer
@@ -111,7 +111,9 @@ fn configure_must_be_acknowledged_before_commit_is_ready() {
     let WaylandAuthorityAction::SurfaceTransaction(transaction) = &actions[0] else {
         panic!("expected transaction");
     };
-    assert_eq!(transaction.readiness, SurfaceTransactionReadiness::Pending);
+    assert_eq!(transaction.readiness, SurfaceTransactionReadiness::Ready);
+    assert_eq!(transaction.target_geometry.width, 800);
+    assert_eq!(transaction.target_geometry.height, 600);
 }
 
 #[test]
@@ -158,6 +160,8 @@ fn acknowledged_configure_commits_and_presentation_finishes_frame() {
         panic!("expected transaction");
     };
     assert_eq!(packet.readiness, SurfaceTransactionReadiness::Ready);
+    assert_eq!(packet.target_geometry.width, 1024);
+    assert_eq!(packet.target_geometry.height, 768);
     reducer
         .apply_feedback(commit_feedback(transaction))
         .unwrap();

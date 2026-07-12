@@ -12,7 +12,7 @@ use sophia_protocol::{
 use sophia_wayland_authority::{
     DmaBufRegistration, WaylandAuthorityAction, WaylandFrontend, WaylandFrontendEvent,
 };
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::process::{Child, Stdio};
 use std::time::{Duration, Instant};
 
@@ -44,6 +44,14 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
         .map(|value| value.parse::<u64>())
         .transpose()?
         .map(Duration::from_millis);
+    let resize = arg_value(args, "--resize")
+        .map(|value| parse_size(&value))
+        .transpose()?;
+    let resize_after = arg_value(args, "--resize-after-ms")
+        .map(|value| value.parse::<u64>())
+        .transpose()?
+        .map(Duration::from_millis)
+        .unwrap_or(Duration::from_millis(750));
     let input_devices = arg_value(args, "--input-devices")
         .map(|value| {
             value
@@ -55,6 +63,11 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
         .unwrap_or_default();
     let expect_input_pixel_change = args.iter().any(|arg| arg == "--expect-input-pixel-change");
     let expect_input_presentation = args.iter().any(|arg| arg == "--expect-input-presentation");
+    let expect_pointer_input = args.iter().any(|arg| arg == "--expect-pointer-input");
+    let expected_keycodes = arg_value(args, "--expect-keycodes")
+        .map(|value| parse_keycodes(&value))
+        .transpose()?
+        .unwrap_or_default();
     let max_input_latency = arg_value(args, "--max-input-latency-ms")
         .map(|value| value.parse::<u64>())
         .transpose()?
@@ -68,6 +81,15 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
         .as_ref()
         .map(super::live_session::WaylandNativeSession::primary_size)
         .unwrap_or(DEFAULT_OUTPUT_SIZE);
+    if resize.is_some_and(|size| {
+        size.width <= 0
+            || size.height <= 0
+            || size.width > output_size.width
+            || size.height > output_size.height
+            || size == output_size
+    }) {
+        return Err("--resize must be a positive size smaller than the output".into());
+    }
     let mut frontend = if native_scanout.is_some() {
         WaylandFrontend::bind_with_dmabuf(&display_name, output_size)?
     } else {
@@ -98,6 +120,9 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
     let mut pending_presented_input = VecDeque::new();
     let mut presentation_observations = BTreeMap::new();
     let mut routed_input = 0usize;
+    let mut routed_keys = 0usize;
+    let mut routed_pointer = 0usize;
+    let mut observed_keycodes = BTreeSet::new();
     let mut input_pixel_changes = 0usize;
     let mut input_presentations = 0usize;
     let mut max_observed_input_latency = Duration::ZERO;
@@ -107,6 +132,8 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
     let mut frames = 0usize;
     let mut shm_frames = 0usize;
     let mut dmabuf_frames = 0usize;
+    let mut resize_requested = false;
+    let mut resize_commits = 0usize;
 
     println!(
         "sophia_wayland_session schema=1 status=running display={} client={} x_server=disabled",
@@ -153,6 +180,22 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                 break;
             }
             return Err(format!("Wayland client exited with status {status}").into());
+        }
+        if !resize_requested
+            && resize.is_some()
+            && started.elapsed() >= resize_after
+            && let Some(surface) = committed.first().map(|state| state.surface)
+        {
+            let size = resize.expect("checked above");
+            if frontend.configure_toplevel(surface, size)? {
+                resize_requested = true;
+                println!(
+                    "sophia_wayland_resize schema=1 status=requested surface={} width={} height={}",
+                    surface.index(),
+                    size.width,
+                    size.height,
+                );
+            }
         }
 
         if let Some(input) = input.as_mut() {
@@ -205,10 +248,19 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                 let decision = frontend.route_input(&request);
                 if decision.outcome == sophia_protocol::RoutedInputOutcome::Accepted {
                     routed_input = routed_input.saturating_add(1);
-                    if matches!(request.kind, InputEventKind::Key { pressed: true, .. }) {
-                        let observed = Instant::now();
-                        pending_pixel_input.push_back((observed, last_checksum));
-                        pending_presented_input.push_back(observed);
+                    match request.kind {
+                        InputEventKind::Key { keycode, pressed } => {
+                            routed_keys = routed_keys.saturating_add(1);
+                            if pressed {
+                                observed_keycodes.insert(keycode);
+                                let observed = Instant::now();
+                                pending_pixel_input.push_back((observed, last_checksum));
+                                pending_presented_input.push_back(observed);
+                            }
+                        }
+                        InputEventKind::PointerMotion | InputEventKind::PointerButton { .. } => {
+                            routed_pointer = routed_pointer.saturating_add(1);
+                        }
                     }
                 }
             }
@@ -234,10 +286,24 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                         &mut committed,
                     );
                     transactions = transactions.saturating_add(1);
-                    let committed_generation = committed
-                        .iter()
-                        .find(|state| state.surface == surface)
-                        .map(|state| state.committed_generation);
+                    let committed_generation = (commit.outcome == TransactionOutcome::Committed
+                        && commit.applied_surfaces.contains(&surface))
+                    .then(|| {
+                        committed
+                            .iter()
+                            .find(|state| state.surface == surface)
+                            .map(|state| state.committed_generation)
+                    })
+                    .flatten();
+                    if committed_generation.is_some()
+                        && resize_requested
+                        && resize.is_some_and(|size| {
+                            transaction.target_geometry.width == size.width
+                                && transaction.target_geometry.height == size.height
+                        })
+                    {
+                        resize_commits = resize_commits.saturating_add(1);
+                    }
                     if focus.focused_surface(SeatId::from_raw(1)).is_none() {
                         let _ = focus.focus_surface(SeatId::from_raw(1), surface, &committed);
                     }
@@ -279,9 +345,11 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                             None => ("dmabuf", 0, 0),
                         };
                         println!(
-                            "sophia_wayland_frame schema=1 surface={} generation={} buffer={} checksum={} nonzero_pixel_bytes={}",
+                            "sophia_wayland_frame schema=1 surface={} generation={} width={} height={} buffer={} checksum={} nonzero_pixel_bytes={}",
                             surface.index(),
                             generation,
+                            transaction.target_geometry.width,
+                            transaction.target_geometry.height,
                             source,
                             checksum_value,
                             nonzero_pixel_bytes
@@ -351,6 +419,17 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
     if expect_input_presentation && (routed_input == 0 || input_presentations == 0) {
         return Err("Wayland input proof did not reach a presented client frame".into());
     }
+    let matched_keycodes = expected_keycodes.intersection(&observed_keycodes).count();
+    if matched_keycodes != expected_keycodes.len() {
+        return Err(format!(
+            "Wayland input proof matched {matched_keycodes}/{} required keycodes",
+            expected_keycodes.len()
+        )
+        .into());
+    }
+    if expect_pointer_input && routed_pointer == 0 {
+        return Err("Wayland input proof observed no routed pointer input".into());
+    }
     if (expect_input_pixel_change || expect_input_presentation)
         && max_observed_input_latency > Duration::from_millis(max_input_latency)
     {
@@ -362,18 +441,44 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
         .into());
     }
     println!(
-        "sophia_wayland_session schema=1 status=complete transactions={} frames={} shm_frames={} dmabuf_frames={} buffers={} routed_input={} input_presentations={} input_pixel_changes={} max_input_latency_msec={} x_server=disabled",
+        "sophia_wayland_session schema=1 status=complete transactions={} frames={} shm_frames={} dmabuf_frames={} resize_requested={} resize_commits={} buffers={} routed_input={} routed_keys={} routed_pointer={} expected_keycodes_matched={} expected_keycodes_total={} input_presentations={} input_pixel_changes={} max_input_latency_msec={} x_server=disabled",
         transactions,
         frames,
         shm_frames,
         dmabuf_frames,
+        usize::from(resize_requested),
+        resize_commits,
         scene.buffer_count(),
         routed_input,
+        routed_keys,
+        routed_pointer,
+        matched_keycodes,
+        expected_keycodes.len(),
         input_presentations,
         input_pixel_changes,
         max_observed_input_latency.as_millis(),
     );
     Ok(())
+}
+
+fn parse_size(value: &str) -> Result<Size, Box<dyn std::error::Error>> {
+    let (width, height) = value.split_once('x').ok_or("size must use WIDTHxHEIGHT")?;
+    Ok(Size {
+        width: width.parse()?,
+        height: height.parse()?,
+    })
+}
+
+fn parse_keycodes(value: &str) -> Result<BTreeSet<u32>, Box<dyn std::error::Error>> {
+    let keycodes = value
+        .split(',')
+        .filter(|item| !item.is_empty())
+        .map(str::parse)
+        .collect::<Result<BTreeSet<u32>, _>>()?;
+    if keycodes.is_empty() || keycodes.len() > 32 || keycodes.contains(&0) {
+        return Err("--expect-keycodes requires 1..32 nonzero evdev keycodes".into());
+    }
+    Ok(keycodes)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -423,6 +528,23 @@ fn input_layers(committed: &[CommittedSurfaceState]) -> Vec<LayerSnapshot> {
             resize_sync: ResizeSyncCapability::ImplicitOnly,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_keycodes, parse_size};
+
+    #[test]
+    fn parses_bounded_resize_and_keycode_proof_arguments() {
+        let size = parse_size("1024x640").unwrap();
+        assert_eq!(size.width, 1024);
+        assert_eq!(size.height, 640);
+        let keycodes = parse_keycodes("31,24,31,103").unwrap();
+        assert_eq!(keycodes.into_iter().collect::<Vec<_>>(), vec![24, 31, 103]);
+        assert!(parse_size("1024").is_err());
+        assert!(parse_keycodes("0").is_err());
+        assert!(parse_keycodes("").is_err());
+    }
 }
 
 fn spawn_client(

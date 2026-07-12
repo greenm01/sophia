@@ -347,22 +347,21 @@ impl WaylandAuthorityReducer {
             return Ok(vec![WaylandAuthorityAction::None]);
         }
 
-        let readiness = if state.required_configure.is_some()
-            && state.acked_configure < state.required_configure
-        {
-            SurfaceTransactionReadiness::Pending
-        } else {
-            SurfaceTransactionReadiness::Ready
-        };
+        let configure_acked =
+            state.required_configure.is_none() || state.acked_configure >= state.required_configure;
         let surface_transaction = SurfaceTransaction {
             transaction,
             authority: AuthorityKind::SophiaWayland,
             surface: state.surface,
             namespace: Some(state.namespace),
-            target_geometry: state.pending_geometry.unwrap_or(base_geometry),
+            target_geometry: if configure_acked {
+                state.pending_geometry.unwrap_or(base_geometry)
+            } else {
+                base_geometry
+            },
             target_buffer,
             damage: state.pending_damage.clone(),
-            readiness,
+            readiness: SurfaceTransactionReadiness::Ready,
             timeout_msec,
             previous_committed_generation,
         };
@@ -373,7 +372,9 @@ impl WaylandAuthorityReducer {
         };
         state.pending_buffer = None;
         state.pending_damage = Region::empty();
-        state.pending_geometry = None;
+        if configure_acked {
+            state.pending_geometry = None;
+        }
         state.in_flight.push(transaction);
         self.pending_commits.insert(transaction, pending);
         Ok(vec![WaylandAuthorityAction::SurfaceTransaction(

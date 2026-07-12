@@ -14,5 +14,7 @@ env XDG_RUNTIME_DIR="$RUNTIME_DIR" LIBGL_ALWAYS_SOFTWARE=1 \
     --client=/usr/bin/kitty \
     --client-arg=-o \
     --client-arg=linux_display_server=wayland \
+    --resize=1024x640 \
+    --resize-after-ms=750 \
     --max-runtime-ms=3000 2>&1 | tee "$EVIDENCE_FILE"
-tools/verify_wayland_kitty_evidence.sh "$EVIDENCE_FILE"
+SOPHIA_WAYLAND_REQUIRE_RESIZE=1 tools/verify_wayland_kitty_evidence.sh "$EVIDENCE_FILE"

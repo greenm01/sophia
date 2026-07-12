@@ -25,9 +25,12 @@ Current truth:
 
 Exit criteria:
 
-- [ ] Prove one software-rendered native Wayland Kitty toplevel can resize,
-  accept text/navigation/pointer input, meet the 100 ms presentation budget,
-  exit cleanly, and recover to its TTY.
+- [x] Prove a real software-rendered native Wayland Kitty toplevel handles a
+  compositor configure, keeps its old size live until ack, then commits changing
+  nonzero pixels at the requested size.
+- [ ] Prove the guarded native session accepts exact text/navigation and pointer
+  input, meets the 100 ms presentation budget, exits cleanly, and restores its
+  TTY and prior `keyd` state.
 - [x] Make the installed session launch an arbitrary Wayland client without an
   X server, keeping Kitty confined to acceptance tooling.
 - [x] Remove XLibre/Xorg launch paths and production dependencies; retain the

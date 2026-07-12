@@ -83,7 +83,10 @@ tools/wayland_kitty_hardware_proof.sh
 ```
 
 The native Wayland Kitty smoke is non-destructive: it uses a private Wayland
-socket, software rendering, and the headless CPU composition path. The runtime
+socket, software rendering, and the headless CPU composition path. It also
+requests a 1024x640 resize from the initial 1280x720 configure and requires
+Kitty to keep the old frame live until ack before committing changing nonzero
+pixels at the new size. The runtime
 audit proves the production CLI dependency graph and installed launcher do not
 select or start XLibre/Xorg. Historical XLibre latency and fallback artifacts
 are frozen under `research/xlibre` and are not release gates.
@@ -93,6 +96,14 @@ The native hardware proof advertises the bounded DMA-BUF path only while
 readback; frame callbacks and `wl_buffer.release` follow observed KMS
 presentation rather than transaction queueing. Run this gate only from a
 dedicated text TTY with an outside recovery path.
+
+For the hardware proof, set `SOPHIA_INPUT_DEVICES` to comma-separated keyboard
+and pointer event paths. The guarded launcher asks for its recovery chord before
+DRM takeover. In Kitty, type `sophia` plus Enter, press all four arrow keys,
+move/click the pointer, then type `exit` plus Enter. The verifier requires all
+eleven evdev keycodes, routed pointer input, DMA-BUF frames, a presented-input
+latency no greater than 100 ms, normal client completion, restored KD mode and
+`keyd`, and no surviving session process.
 
 The archived XLibre latency smoke used a dummy XLibre display,
 routes synthetic text over the compatibility XTEST connection, and requires a

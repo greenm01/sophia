@@ -239,6 +239,21 @@ impl WaylandFrontend {
     pub fn route_input(&mut self, request: &RoutedInputRequest) -> RoutedInputDecision {
         self.state.route_input(request)
     }
+
+    pub fn configure_toplevel(
+        &mut self,
+        surface: SurfaceId,
+        size: Size,
+    ) -> Result<bool, WaylandFrontendError> {
+        if size.width <= 0 || size.height <= 0 {
+            return Err(WaylandFrontendError::new("invalid toplevel size"));
+        }
+        let configured = self.state.configure_toplevel(surface, size)?;
+        self.display
+            .flush_clients()
+            .map_err(|error| WaylandFrontendError::new(error.to_string()))?;
+        Ok(configured)
+    }
 }
 
 struct FrontendState {
@@ -338,6 +353,39 @@ impl FrontendState {
             self.events
                 .push_back(WaylandFrontendEvent::Authority(action));
         }
+    }
+
+    fn configure_toplevel(
+        &mut self,
+        surface: SurfaceId,
+        size: Size,
+    ) -> Result<bool, WaylandFrontendError> {
+        let Some(toplevel) = self.toplevels.get(&surface).cloned() else {
+            return Ok(false);
+        };
+        let resource = self
+            .surface_resources
+            .get(&surface)
+            .ok_or_else(|| WaylandFrontendError::new("toplevel surface resource is missing"))?;
+        let local_id = self
+            .surface_by_object
+            .get(&resource.id().protocol_id())
+            .copied()
+            .ok_or_else(|| WaylandFrontendError::new("toplevel local ID is missing"))?;
+        toplevel.with_pending_state(|state| {
+            state.size = Some((size.width, size.height).into());
+        });
+        let serial = u32::from(toplevel.send_configure());
+        let actions = self
+            .reducer
+            .apply_xdg_event(WaylandXdgEvent::Configure {
+                local_id,
+                serial,
+                size,
+            })
+            .map_err(|error| WaylandFrontendError::new(format!("{error:?}")))?;
+        self.record_actions(actions);
+        Ok(true)
     }
 
     fn local_id(surface: &wl_surface::WlSurface) -> AuthorityLocalId {
