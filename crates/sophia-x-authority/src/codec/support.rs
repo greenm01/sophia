@@ -219,7 +219,6 @@ pub(super) fn encode_authority_kind(kind: AuthorityKind, out: &mut Vec<u8>) {
             AuthorityKind::SophiaX => 1,
             AuthorityKind::SophiaWayland => 2,
             AuthorityKind::SophiaNative => 3,
-            AuthorityKind::XLibrePrototype => 4,
         },
     );
 }
@@ -229,7 +228,6 @@ pub(super) fn decode_authority_kind(value: u16) -> Result<AuthorityKind, IpcCode
         1 => Ok(AuthorityKind::SophiaX),
         2 => Ok(AuthorityKind::SophiaWayland),
         3 => Ok(AuthorityKind::SophiaNative),
-        4 => Ok(AuthorityKind::XLibrePrototype),
         other => Err(IpcCodecError::InvalidEnum {
             field: "authority_kind",
             value: u32::from(other),

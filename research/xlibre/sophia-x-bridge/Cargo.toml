@@ -1,0 +1,14 @@
+[package]
+name = "sophia-x-bridge"
+version = "0.1.0"
+authors = ["Mason Austin Green"]
+edition = "2024"
+license = "BSD-3-Clause"
+rust-version = "1.96"
+
+[dependencies]
+sophia-portal = { path = "../../../crates/sophia-portal" }
+sophia-protocol = { path = "../../../crates/sophia-protocol" }
+x11rb = { version = "0.13.1", features = ["composite", "damage", "render", "shape", "shm", "xfixes", "xinput", "xtest"] }
+
+[workspace]

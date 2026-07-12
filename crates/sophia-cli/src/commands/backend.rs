@@ -58,11 +58,6 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
 
     #[cfg(feature = "atomic-scanout-live")]
     if args.iter().any(|arg| arg == "sophia-live-session") {
-        #[cfg(feature = "xlibre-research")]
-        if arg_value(args, "--client-backend").as_deref() == Some("xlibre-compat") {
-            super::live_session::xlibre_compat::run_persistent_xlibre_session(args)?;
-            return Ok(true);
-        }
         if args.iter().any(|arg| arg == "--proof") {
             run_sophia_live_session_bootstrap(args)?;
         } else if arg_value(args, "--client-backend").as_deref() == Some("wayland") {

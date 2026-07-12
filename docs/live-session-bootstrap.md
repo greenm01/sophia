@@ -140,7 +140,7 @@ Arm the guard as prompted, then type `sophia` followed by Enter once Kitty is
 visible. After the TTY is restored, verify the persistent evidence with:
 
 ```sh
-tools/verify_xlibre_kitty_latency_evidence.sh \
+research/xlibre/tools/verify_xlibre_kitty_latency_evidence.sh \
   "${XDG_STATE_HOME:-$HOME/.local/state}/sophia/kitty-session/session.log"
 ```
 

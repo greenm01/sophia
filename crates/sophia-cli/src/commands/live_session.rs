@@ -18,8 +18,6 @@ use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
 use std::time::{Duration, Instant};
 
 pub(super) mod input_guard;
-#[cfg(feature = "xlibre-research")]
-pub(super) mod xlibre_compat;
 
 const SESSION_AUTHORITY_CAPACITY: usize = 256;
 const SESSION_KEY_CAPACITY: usize = 64;
@@ -37,16 +35,12 @@ enum SessionPhysicalInput {
             sophia_backend_live::NativeLibinputEventReader,
         >,
     ),
-    #[cfg(feature = "xlibre-research")]
-    Threaded(sophia_backend_live::ThreadedNativeLibinputEventPoller),
 }
 
 impl NonBlockingInputPoller for SessionPhysicalInput {
     fn poll_ready(&mut self) -> std::io::Result<Vec<sophia_protocol::InputEventPacket>> {
         match self {
             Self::Direct(poller) => poller.poll_ready(),
-            #[cfg(feature = "xlibre-research")]
-            Self::Threaded(poller) => poller.poll_ready(),
         }
     }
 }
@@ -55,8 +49,6 @@ impl SessionPhysicalInput {
     fn stats(&self) -> sophia_backend_live::ThreadedNativeInputStats {
         match self {
             Self::Direct(_) => Default::default(),
-            #[cfg(feature = "xlibre-research")]
-            Self::Threaded(poller) => poller.stats(),
         }
     }
 }
@@ -1116,7 +1108,10 @@ fn run_session_loop(
             && focus_deadline_started_at
                 .is_some_and(|started: Instant| started.elapsed() >= Duration::from_secs(5))
         {
-            return Err("XLibre compatibility input focus was not ready within five seconds of the first presented frame".into());
+            return Err(
+                "live-session input focus was not ready within five seconds of the first presented frame"
+                    .into(),
+            );
         }
         let physical_sequence_complete = physical_text_proof
             .as_ref()
@@ -3053,14 +3048,6 @@ impl SessionProcessGuard {
         Self {
             child: Some(child),
             socket_path: Some(socket_path),
-        }
-    }
-
-    #[cfg(feature = "xlibre-research")]
-    fn child_only(child: Child) -> Self {
-        Self {
-            child: Some(child),
-            socket_path: None,
         }
     }
 

@@ -504,7 +504,7 @@ server log reported that access to the real root window was blocked. This keeps
 XLibre as the XID/resource authority while confirming that namespace credentials
 cannot perform global tree inspection.
 
-`tools/xlibre_namespace_smoke.sh` captures this manual proof as a repeatable
+`research/xlibre/tools/xlibre_namespace_smoke.sh` captures this manual proof as a repeatable
 smoke harness.
 
 The first external WM process boundary is now concrete. The `sophia-wm-demo`
@@ -532,18 +532,18 @@ unsupported until the flat path is proven against an XLibre extension.
 
 The protocol crate also carries a fixed wire request body for the future
 `SOPHIA-ROUTED-INPUT` extension. The patch target is documented in
-`docs/xlibre-routed-input-extension.md`, based on local XLibre touch points:
+`research/xlibre/docs/xlibre-routed-input-extension.md`, based on local XLibre touch points:
 `AddExtension` dispatch under `Xext`, namespace visibility/access hooks under
 `Xext/namespace`, and event delivery/grab/focus behavior under `dix/events.c`
 and `Xext/xinput/exevents.c`.
 
 The first XLibre patch artifact now lives at
-`patches/xlibre/0001-add-sophia-routed-input-extension.patch`. It adds a
+`research/xlibre/patches/0001-add-sophia-routed-input-extension.patch`. It adds a
 git-applyable `SOPHIA-ROUTED-INPUT` extension that registers with XLibre, hides
 the extension from non-superPower namespaces, validates `RouteEvent` packets,
 resolves the target window through normal DIX access checks, and enters normal
 pointer delivery with the compositor-supplied target window.
-`tools/check_xlibre_routed_input_patch.sh` applies the patch to a temporary
+`research/xlibre/tools/check_xlibre_routed_input_patch.sh` applies the patch to a temporary
 XLibre copy and builds `hw/vfb/Xvfb`.
 
 After creating the private `greenm01/sophia-xserver` fork, the extension was
@@ -563,7 +563,7 @@ normal XLibre authority and can redirect accepted routes according to X11 grab
 semantics.
 
 The runtime routed-input smoke is now wired into
-`tools/xlibre_namespace_smoke.sh`. The smoke runs against the private
+`research/xlibre/tools/xlibre_namespace_smoke.sh`. The smoke runs against the private
 `sophia-xserver` fork, creates a root-namespace target window, discovers the
 XInput master pointer with `XIQueryDevice(AllMaster)`, sends a raw
 `SOPHIA-ROUTED-INPUT RouteEvent`, and waits for the client-side core

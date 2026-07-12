@@ -144,7 +144,7 @@ fn ready_surface_transaction_commits_geometry_and_buffer_together() {
     });
     let transaction = next_layer.to_surface_transaction(
         TransactionId::from_raw(70),
-        AuthorityKind::XLibrePrototype,
+        AuthorityKind::SophiaNative,
         SurfaceTransactionReadiness::Ready,
         250,
         1,
@@ -555,7 +555,7 @@ fn pending_surface_transaction_preserves_committed_state() {
     next_layer.geometry.width = 500;
     let transaction = next_layer.to_surface_transaction(
         TransactionId::from_raw(71),
-        AuthorityKind::XLibrePrototype,
+        AuthorityKind::SophiaNative,
         SurfaceTransactionReadiness::Pending,
         250,
         1,

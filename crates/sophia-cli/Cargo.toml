@@ -19,7 +19,6 @@ sophia-runtime = { path = "../sophia-runtime" }
 sophia-wm-demo = { path = "../sophia-wm-demo" }
 sophia-wayland-authority = { path = "../sophia-wayland-authority" }
 sophia-x-authority = { path = "../sophia-x-authority" }
-sophia-x-bridge = { path = "../sophia-x-bridge", optional = true }
 tracing.workspace = true
 x11rb = "0.13.1"
 
@@ -27,7 +26,6 @@ x11rb = "0.13.1"
 default = []
 atomic-scanout-live = ["sophia-backend-live/gbm-probe", "sophia-backend-live/libdrm-events", "sophia-backend-live/libinput-events"]
 atomic-scanout-smoke-live = ["atomic-scanout-live"]
-xlibre-research = ["dep:sophia-x-bridge"]
 
 [lints]
 workspace = true

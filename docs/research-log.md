@@ -14,8 +14,8 @@ with `DISPLAY` removed, changing nonzero SHM frames, and no X server process.
 
 The installed launcher now uses the native Wayland/KMS session and retains the
 independent Ctrl-Alt-Backspace recovery interlock. XLibre is excluded from the
-production dependency graph and launcher, with its crate available only behind
-the `xlibre-research` feature as historical evidence.
+production dependency graph and launcher; its frozen crate, CLI, patches,
+scripts, fixtures, and notes live under `research/xlibre`.
 
 The native-scanout session advertises a bounded single-plane linear/implicit
 XRGB8888/ARGB8888 DMA-BUF subset. Accepted buffers cross the renderer boundary

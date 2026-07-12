@@ -14,7 +14,8 @@ next milestone becomes active.
 Current truth:
 
 - The production CLI and installed launcher no longer link, select, or start the
-  XLibre bridge. Historical probes require the opt-in `xlibre-research` feature.
+  XLibre bridge. Its frozen sources and evidence live outside the workspace in
+  `research/xlibre`.
 - A real Kitty 0.47.4 process connects over native Wayland with `DISPLAY`
   removed and software GL, commits SHM buffers, and produces changing nonzero
   pixels through Sophia's protocol-neutral Engine path.
@@ -30,7 +31,7 @@ Exit criteria:
 - [x] Make the installed session launch an arbitrary Wayland client without an
   X server, keeping Kitty confined to acceptance tooling.
 - [x] Remove XLibre/Xorg launch paths and production dependencies; retain the
-  bridge only as an opt-in historical workspace member.
+  bridge only as frozen source in the non-workspace research archive.
 - [x] Add native KMS presentation wiring for the Wayland session while
   preserving the existing independent TTY recovery guard.
 
@@ -44,12 +45,6 @@ Exit criteria:
   presentation retirement back to the Wayland authority before release.
 - [ ] Prove hardware Kitty remains within the presentation budget on that path
   while SHM remains available for software clients.
-
-## Following Milestone: Historical Bridge Archive
-
-- [ ] Move the opt-in XLibre bridge crate, patches, scripts, and fixtures into a
-  non-workspace research archive after its remaining architectural lessons are
-  represented by Sophia-owned regression tests.
 
 ## Deferred
 

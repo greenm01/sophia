@@ -119,9 +119,9 @@ fn authority_surface_carries_protocol_ownership_without_metadata() {
         resize_sync: ResizeSyncCapability::ExplicitSync,
     };
 
-    let authority_surface = surface.to_authority_surface(AuthorityKind::XLibrePrototype);
+    let authority_surface = surface.to_authority_surface(AuthorityKind::SophiaX);
 
-    assert_eq!(authority_surface.authority, AuthorityKind::XLibrePrototype);
+    assert_eq!(authority_surface.authority, AuthorityKind::SophiaX);
     assert_eq!(authority_surface.local_id, AuthorityLocalId::new(0x42, 5));
     assert_eq!(authority_surface.surface, SurfaceId::new(3, 1));
     assert_eq!(authority_surface.namespace, Some(NamespaceId::from_raw(2)));

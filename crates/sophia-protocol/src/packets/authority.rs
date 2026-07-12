@@ -6,7 +6,6 @@ pub enum AuthorityKind {
     SophiaX,
     SophiaWayland,
     SophiaNative,
-    XLibrePrototype,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

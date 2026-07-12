@@ -85,8 +85,8 @@ tools/wayland_kitty_hardware_proof.sh
 The native Wayland Kitty smoke is non-destructive: it uses a private Wayland
 socket, software rendering, and the headless CPU composition path. The runtime
 audit proves the production CLI dependency graph and installed launcher do not
-select or start XLibre/Xorg. Historical XLibre latency and fallback smokes remain
-available only with the `xlibre-research` feature and are not release gates.
+select or start XLibre/Xorg. Historical XLibre latency and fallback artifacts
+are frozen under `research/xlibre` and are not release gates.
 
 The native hardware proof advertises the bounded DMA-BUF path only while
 `--native-scanout` is active. Admitted buffers are imported by EGL without CPU
@@ -125,7 +125,7 @@ Ctrl-Alt-Backspace must arm the independent input guard before graphics
 takeover; normal typing must then change Kitty pixels. For the recovery half,
 stop the Sophia session process from the outside control plane, press
 Ctrl-Alt-Backspace again, and require return to the text TTY within five
-seconds with `keyd` restored and no surviving Sophia/XLibre process or DRM
+seconds with `keyd` restored and no surviving Sophia/Kitty process or DRM
 ownership. Inspect the persistent latest logs for every input-pipeline stage.
 
 `live-session-composition-smoke` is non-destructive. Its reduced output must

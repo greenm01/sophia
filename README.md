@@ -217,7 +217,8 @@ Sophia is split by authority, not by convenience.
 - `docs/research-log.md` captures early decisions and open research questions.
 - `docs/research-log-archive.md` preserves completed research and validation
   evidence.
-- `docs/xlibre-prototype-regression-map.md` classifies XLibre prototype checks.
+- `research/xlibre/docs/xlibre-prototype-regression-map.md` maps retired XLibre
+  checks to active Sophia-owned regressions.
 - `todo.md` tracks build phases and research milestones.
 
 ## Status
@@ -239,8 +240,8 @@ Real Kitty now connects to Sophia's private native Wayland authority with
 the native session additionally admits bounded linear DMA-BUFs and imports them
 into EGL without CPU readback before KMS presentation. The installed launcher
 uses this path and retains the independent Ctrl-Alt-Backspace recovery guard.
-XLibre is no longer a production dependency or launcher path; its bridge and
-smokes remain opt-in historical research. The remaining Kitty gate is a guarded
+XLibre is no longer a production dependency, feature, workspace member, or
+launcher path; its frozen sources live under `research/xlibre`. The remaining Kitty gate is a guarded
 hardware run proving resize, keyboard/navigation/pointer input, sub-100 ms
 presentation, and clean TTY recovery. VRR evidence still requires a display
 whose connector reports `vrr_capable=1`.

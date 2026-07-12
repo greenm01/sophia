@@ -18,7 +18,9 @@ validation evidence in `docs/research-log.md`.
 - [x] Made the installed Kitty launcher use the native Wayland authority and
   native KMS path while preserving the independent TTY recovery guard.
 - [x] Made the XLibre bridge an opt-in research feature excluded from the
-  production dependency graph and default workspace members.
+  production dependency graph and default workspace members, then moved the
+  crate, bridge-only CLI, patches, scripts, fixtures, and protocol notes into
+  the non-workspace `research/xlibre` archive.
 - [x] Added direct EGL DMA-BUF import with no CPU readback and delayed Wayland
   presentation feedback until the matching KMS submission is observed.
 
@@ -479,8 +481,8 @@ not the long-term target architecture.
   removed and software GL, submitted 16 changing nonzero SHM frames through the
   Sophia Wayland Authority, and completed without an X server process.
 - [x] XLibre runtime retirement: release builds and the installed launcher use
-  native Wayland; the XLibre bridge is optional behind `xlibre-research` and is
-  absent from the production dependency graph and default workspace members.
+  native Wayland; the XLibre bridge has no live feature and is isolated under
+  `research/xlibre`, outside the workspace and production dependency graph.
 
 - [x] Pointer and multi-output presentation: QEMU proved physical keyboard and
   pointer routing, independent content on two KMS outputs, per-output

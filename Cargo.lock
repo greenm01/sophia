@@ -727,7 +727,6 @@ dependencies = [
  "sophia-wayland-authority",
  "sophia-wm-demo",
  "sophia-x-authority",
- "sophia-x-bridge",
  "tracing",
  "x11rb",
 ]
@@ -803,15 +802,6 @@ version = "0.1.0"
 dependencies = [
  "sophia-portal",
  "sophia-protocol",
-]
-
-[[package]]
-name = "sophia-x-bridge"
-version = "0.1.0"
-dependencies = [
- "sophia-portal",
- "sophia-protocol",
- "x11rb",
 ]
 
 [[package]]

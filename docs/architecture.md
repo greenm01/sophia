@@ -350,7 +350,8 @@ the visual scene and supplied finite target-local coordinates. XLibre still
 receives the same target XID plus local-coordinate packet; it is not asked to
 understand compositor transforms.
 
-The patch target is tracked in `docs/xlibre-routed-input-extension.md`. This is
+The archived patch target is tracked in
+`research/xlibre/docs/xlibre-routed-input-extension.md`. This is
 historical/prototype work once Sophia owns its X authority: the same routed
 target-selection idea should become an internal Engine-to-Authority command
 instead of an XLibre extension.
