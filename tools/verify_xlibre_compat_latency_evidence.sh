@@ -17,7 +17,7 @@ if grep -q 'libinput error: .*event processing lagging' "$EVIDENCE_FILE"; then
     exit 1
 fi
 
-mapfile -t completion_lines < <(grep '^sophia_live_session schema=8 status=bounded_complete ' "$EVIDENCE_FILE" || true)
+mapfile -t completion_lines < <(grep '^sophia_live_session schema=9 status=bounded_complete ' "$EVIDENCE_FILE" || true)
 mapfile -t compat_lines < <(grep '^sophia_xlibre_compat schema=2 status=complete ' "$EVIDENCE_FILE" || true)
 if [[ "${#completion_lines[@]}" -ne 1 || "${#compat_lines[@]}" -ne 1 ]]; then
     echo "XLibre latency evidence requires one session and one compatibility completion line" >&2
@@ -36,7 +36,7 @@ for field in "${parts[@]:1}"; do
     session["$key"]="${field#*=}"
 done
 latency="${session[input_presented_latency_msec]:-}"
-if [[ "${session[schema]:-}" != "8" || "${session[status]:-}" != "bounded_complete" \
+if [[ "${session[schema]:-}" != "9" || "${session[status]:-}" != "bounded_complete" \
     || "${session[input_pixel_change]:-}" != "true" || ! "$latency" =~ ^[0-9]+$ ]]; then
     echo "XLibre latency evidence is missing a presented input pixel change" >&2
     exit 1

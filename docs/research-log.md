@@ -374,3 +374,25 @@ materialized one 925 KB nonzero Kitty surface. Capture checksum deduplication
 reduced a four-second run from 29 repeated batches to six actual pixel changes;
 injected `sophia` plus Return then changed the composed checksum and completed
 in 2.6 seconds. Native TTY presentation remains the operator gate.
+
+The first installed-session input proof then showed that capture correctness
+alone was insufficient: Kitty echoed typed characters several seconds late.
+The launcher had used a debug build, the session cloned and repeatedly scanned
+each 1280x720 frame, physical input was polled only after rendering, and native
+export recreated its EGL/GL setup for every frame. The launcher now runs the
+release binary; XLibre sessions acquire libinput on a bounded worker; the main
+loop drains input before waiting for X transactions and again before composing;
+CPU composition borrows source storage, row-copies clipped spans, and computes
+its checksum/nonzero count in one pass; and the native renderer reuses one EGL
+context and GL pipeline per output. KMS still receives a fully completed GL
+frame because the atomic path does not yet provide an explicit native fence.
+
+Schema 9 records the maximum composition, input-dispatch gap, queue depth and
+dwell, upload, and persistent-resource counts. The final Kitty dummy rerun
+presents input in 40 milliseconds with 8-millisecond CPU composition and
+11-millisecond MIT-SHM capture. The stricter QEMU final-key-to-primary-output
+measurement is 37 milliseconds. The dual-output QEMU proof
+creates exactly two native targets and pipelines with zero recreations, drains
+155 page flips without cleanup debt, and confirms that PRIME GEM cleanup treats
+the driver's already-closed `EINVAL` result as idempotent success. Degraded
+XGetImage remains operational but is rejected for interactive evidence.

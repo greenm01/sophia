@@ -112,8 +112,8 @@ tools/install_sophia_session.sh
 ```
 
 After that one-time install, switch to a dedicated TTY and run `sophia`. The
-launcher builds Sophia, verifies KMS ownership, and stops and later restores
-`keyd`. Before changing the TTY mode it starts an independent libinput guard and
+launcher builds Sophia in release mode, verifies KMS ownership, and stops and
+later restores `keyd`. Before changing the TTY mode it starts an independent libinput guard and
 requires one press-and-full-release of Ctrl-Alt-Backspace. That first chord
 proves the selected keyboard path and arms recovery. Once Kitty is visible,
 press Ctrl-Alt-Backspace again to end the session and restore the TTY, or close
@@ -149,6 +149,13 @@ window, and centers the first compatibility surface without scaling it. The
 gate requires an unfallbacked MIT-SHM capture path, no readback larger than
 1280x720 XRGB, no libinput processing-lag warning, clean native-scanout drain,
 and input pixels presented within 100 milliseconds of the final proof key.
+Physical events are collected on a bounded worker and drained before capture;
+CPU composition uses borrowed buffers and row copies, while native scanout
+retains its EGL context, shaders, texture, and vertex buffer across frames.
+Schema 9 additionally rejects composition above 25 milliseconds, MIT-SHM
+capture above 30 milliseconds, upload above 50 milliseconds, page-flip above
+100 milliseconds, queue dwell above 25 milliseconds, or native target/pipeline
+recreation at the fixed proof size.
 Ordinary XGetImage remains available as a degraded diagnostic path, but its
 evidence is intentionally rejected by this interactive gate.
 

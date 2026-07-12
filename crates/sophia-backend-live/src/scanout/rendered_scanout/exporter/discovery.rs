@@ -88,6 +88,13 @@ where
         self.context.is_some()
     }
 
+    pub fn persistent_render_stats(&self) -> sophia_renderer_live::LiveNativePersistentRenderStats {
+        self.context.as_ref().map_or_else(
+            sophia_renderer_live::LiveNativePersistentRenderStats::default,
+            NativeGbmRenderedScanoutContext::persistent_render_stats,
+        )
+    }
+
     pub fn discovery(&self) -> &R {
         &self.discovery
     }
@@ -97,7 +104,16 @@ where
     }
 
     pub fn set_pending_cpu_frame(&mut self, frame: LiveCpuComposedFrame) {
-        self.pending_cpu_frame_checksum = Some(cpu_frame_checksum(&frame));
+        let checksum = cpu_frame_checksum(&frame);
+        self.set_pending_cpu_frame_with_checksum(frame, checksum);
+    }
+
+    pub fn set_pending_cpu_frame_with_checksum(
+        &mut self,
+        frame: LiveCpuComposedFrame,
+        checksum: u64,
+    ) {
+        self.pending_cpu_frame_checksum = Some(checksum);
         self.pending_cpu_frame = Some(frame);
     }
 
@@ -156,7 +172,7 @@ where
             self.context = report.context;
         }
 
-        let Some(context) = &self.context else {
+        let Some(context) = &mut self.context else {
             let status = match self.context_status {
                 Some(NativeGbmRenderedScanoutContextStatus::Degraded) => {
                     LiveRendererScanoutBufferExportStatus::Degraded

@@ -4,6 +4,7 @@
 import json
 import socket
 import sys
+import time
 
 
 def fail(message: str) -> "NoReturn":
@@ -75,6 +76,9 @@ def main():
                 "input-send-event",
                 {"events": [key_event(qcode, True), key_event(qcode, False)]},
             )
+            # Pace transitions like an operator so the guest terminal and the
+            # compositor observe each key pair instead of one QMP burst.
+            time.sleep(0.2)
 
 
 if __name__ == "__main__":

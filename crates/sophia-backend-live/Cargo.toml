@@ -12,14 +12,14 @@ sophia-protocol = { path = "../sophia-protocol" }
 sophia-renderer-live = { path = "../sophia-renderer-live" }
 drm = { version = "0.15", optional = true, default-features = false }
 input = { version = "0.10", optional = true, default-features = false, features = ["libinput_1_19"] }
-rustix = { version = "1.1", optional = true, default-features = false, features = ["fs"] }
+rustix = { version = "1.1", optional = true, default-features = false, features = ["event", "fs", "std"] }
 
 [features]
 default = []
 gbm-probe = ["sophia-renderer-live/gbm-probe"]
 egl-probe = ["sophia-renderer-live/egl-probe"]
 libdrm-events = ["dep:drm", "dep:rustix"]
-libinput-events = ["dep:input"]
+libinput-events = ["dep:input", "dep:rustix"]
 
 [lints]
 workspace = true

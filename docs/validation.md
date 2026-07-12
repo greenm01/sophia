@@ -89,7 +89,14 @@ window; it requires each readback to remain within the 1280x720 XRGB budget.
 The fallback smoke disables MIT-SHM and proves that degraded XGetImage capture
 keeps the session operational while the interactive verifier rejects it. The
 guarded physical Kitty proof must meet the same latency limit without a
-libinput processing-lag warning and must drain native scanout cleanly.
+libinput processing-lag warning and must drain native scanout cleanly. Its
+schema 9 component gates require CPU composition at or below 25 milliseconds,
+MIT-SHM capture at or below 30 milliseconds, native upload at or below 50
+milliseconds, and submit-to-page-flip at or below 100 milliseconds. One native
+target and one GL pipeline must be created per output, with no size-triggered
+recreation during a fixed-size proof. The QEMU gate uses a 100-millisecond
+upload ceiling because its renderer is software-emulated, while retaining the
+same 100-millisecond presented-input and page-flip limits.
 
 The emergency-recovery QEMU scenario starts the independent input guard, sends
 one complete Ctrl-Alt-Backspace chord to arm it, waits for the live virtual

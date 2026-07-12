@@ -123,12 +123,19 @@ where
     let mut index = 0;
     while index < cleanup.imported_buffers.len() {
         if let Some(handle) = cleanup.imported_buffers[index] {
-            if device.close_scanout_buffer(handle).is_err() {
-                return LibdrmNativePrimaryPlaneResourceDestroyReport {
-                    status:
-                        LibdrmNativePrimaryPlaneResourceDestroyStatus::ImportedBufferCloseFailed,
-                    cleanup: Some(cleanup),
-                };
+            match device.close_scanout_buffer(handle) {
+                Ok(()) => {}
+                // PRIME imports may resolve to a GEM handle the driver already
+                // released while removing the framebuffer. GEM_CLOSE reports
+                // EINVAL for that idempotent-cleanup case.
+                Err(error) if error.kind() == io::ErrorKind::InvalidInput => {}
+                Err(_) => {
+                    return LibdrmNativePrimaryPlaneResourceDestroyReport {
+                        status:
+                            LibdrmNativePrimaryPlaneResourceDestroyStatus::ImportedBufferCloseFailed,
+                        cleanup: Some(cleanup),
+                    };
+                }
             }
             cleanup.imported_buffers[index] = None;
         }

@@ -239,7 +239,12 @@ Kitty through software GL and XComposite readback. Its headless gate produces
 readable nonzero Kitty pixels and proves injected text changes a later composed
 frame. The bridge uses reusable MIT-SHM readback, fixes Kitty at 1280x720, and
 rejects degraded XGetImage fallback for interactive-latency evidence; Sophia
-still owns input routing, composition, and scanout.
+still owns input routing, composition, and scanout. The installed launcher uses
+the release binary, polls physical input on a bounded worker independently of
+rendering, uses row-copy CPU composition, and reuses one EGL context and GL
+upload pipeline per native output. Schema 9 evidence gates the final proof key
+to presented pixels at 100 milliseconds and records capture, composition,
+input-queue, upload, page-flip, and native-resource-reuse costs separately.
 The remaining hardware gap is VRR: the current eDP connector
 exposes `vrr_capable` and its CRTC exposes `VRR_ENABLED`, but capability is `0`,
 so activation evidence requires a different display.

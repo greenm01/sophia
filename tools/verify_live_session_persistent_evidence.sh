@@ -52,7 +52,15 @@ expected_keys=(
 if [[ "${observed[schema]:-}" == "8" ]]; then
     expected_keys+=(input_presented_latency_msec)
 fi
-if [[ "${observed[schema]:-}" == "7" || "${observed[schema]:-}" == "8" ]]; then
+if [[ "${observed[schema]:-}" == "9" ]]; then
+    expected_keys+=(
+        cpu_max_compose_msec input_presented_latency_msec input_dispatch_max_gap_msec
+        input_queue_max_depth input_queue_dwell_max_msec native_max_upload_msec
+        native_target_creations native_target_recreations native_pipeline_creations
+        native_frame_uploads
+    )
+fi
+if [[ "${observed[schema]:-}" == "7" || "${observed[schema]:-}" == "8" || "${observed[schema]:-}" == "9" ]]; then
     expected_keys+=(wm_policy wm_requests wm_committed wm_restarts wm_degraded)
 fi
 if [[ "${#observed[@]}" -ne "${#expected_keys[@]}" ]]; then
@@ -66,7 +74,7 @@ for key in "${expected_keys[@]}"; do
     fi
 done
 
-[[ "${observed[schema]}" == "6" || "${observed[schema]}" == "7" || "${observed[schema]}" == "8" ]]
+[[ "${observed[schema]}" == "6" || "${observed[schema]}" == "7" || "${observed[schema]}" == "8" || "${observed[schema]}" == "9" ]]
 [[ "${observed[status]}" == "bounded_complete" ]]
 [[ "${observed[injected_input]}" == "true" || "${observed[injected_input]}" == "false" ]]
 [[ "${observed[input_pixel_change]}" == "true" ]]
@@ -91,7 +99,15 @@ numeric_keys=(
 if [[ "${observed[schema]}" == "8" ]]; then
     numeric_keys+=(input_presented_latency_msec)
 fi
-if [[ "${observed[schema]}" == "7" || "${observed[schema]}" == "8" ]]; then
+if [[ "${observed[schema]}" == "9" ]]; then
+    numeric_keys+=(
+        cpu_max_compose_msec input_presented_latency_msec input_dispatch_max_gap_msec
+        input_queue_max_depth input_queue_dwell_max_msec native_max_upload_msec
+        native_target_creations native_target_recreations native_pipeline_creations
+        native_frame_uploads
+    )
+fi
+if [[ "${observed[schema]}" == "7" || "${observed[schema]}" == "8" || "${observed[schema]}" == "9" ]]; then
     numeric_keys+=(wm_requests wm_committed wm_restarts)
     [[ "${observed[wm_policy]}" == "disabled" || "${observed[wm_policy]}" == "external" ]]
     [[ "${observed[wm_degraded]}" == "true" || "${observed[wm_degraded]}" == "false" ]]

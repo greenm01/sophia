@@ -5456,6 +5456,34 @@ fn native_libdrm_primary_plane_resources_keep_imported_handle_cleanup_retryable_
 }
 
 #[test]
+fn native_libdrm_primary_plane_resources_accept_already_closed_imported_handle() {
+    let selected = select_native_primary_plane_target(&full_kms_selection_device())
+        .selection
+        .expect("complete KMS path should select a target");
+    let created = create_native_primary_plane_resources_from_dma_bufs(
+        &full_prime_primary_plane_resource_device(),
+        selected,
+        scanout_descriptor(selected.size()),
+        test_dma_buf_plane_fds(),
+    );
+    let resources = created
+        .resources
+        .expect("created PRIME modeset resources should be destroyable");
+    let already_closed = FakePrimePrimaryPlaneResourceDevice {
+        close_buffer: Err(io::Error::from(io::ErrorKind::InvalidInput)),
+        ..full_prime_primary_plane_resource_device()
+    };
+
+    let destroyed = destroy_native_primary_plane_resources(&already_closed, resources);
+
+    assert_eq!(
+        destroyed.status,
+        LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed
+    );
+    assert!(destroyed.cleanup.is_none());
+}
+
+#[test]
 fn native_libdrm_primary_plane_selection_reduces_missing_resource_groups() {
     let disconnected = FakeNativeKmsSelectionDevice {
         connector_snapshot: Ok(LibdrmNativeConnectorSnapshot::new(

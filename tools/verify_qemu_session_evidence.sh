@@ -77,6 +77,10 @@ if [[ "$(grep -c '^sophia_qemu_pointer schema=1 status=sent source=qmp device=vi
 fi
 
 completion_line="$(grep -E '^sophia_live_session .*status=bounded_complete ' "$EVIDENCE_FILE")"
+if [[ ! " $completion_line " =~ " schema=9 " ]]; then
+    echo "QEMU evidence did not use the latency/resource schema" >&2
+    exit 1
+fi
 if [[ ! " $completion_line " =~ " session_ticks=300 " ]]; then
     echo "QEMU evidence did not complete exactly 300 session ticks" >&2
     exit 1
@@ -101,6 +105,28 @@ fi
 physical_pointer="$(sed -n 's/.* physical_pointer_routed=\([0-9][0-9]*\) .*/\1/p' <<< "$completion_line")"
 if [[ -z "$physical_pointer" ]] || (( physical_pointer == 0 )); then
     echo "QEMU evidence has no routed virtio mouse events" >&2
+    exit 1
+fi
+
+for field in input_presented_latency_msec cpu_max_compose_msec \
+    native_max_submit_to_page_flip_msec native_max_upload_msec \
+    native_target_creations native_target_recreations native_pipeline_creations \
+    native_frame_uploads; do
+    value="$(sed -n "s/.* ${field}=\([0-9][0-9]*\).*/\1/p" <<< "$completion_line")"
+    if [[ -z "$value" ]]; then
+        echo "QEMU evidence is missing numeric $field" >&2
+        exit 1
+    fi
+    printf -v "$field" '%s' "$value"
+done
+if (( input_presented_latency_msec > 100 || cpu_max_compose_msec > 25 \
+    || native_max_submit_to_page_flip_msec > 100 || native_max_upload_msec > 100 )); then
+    echo "QEMU evidence exceeded its input/rendering latency budget" >&2
+    exit 1
+fi
+if (( native_target_creations != 2 || native_target_recreations != 0 \
+    || native_pipeline_creations != 2 || native_frame_uploads < 2 )); then
+    echo "QEMU evidence did not reuse one native target and GL pipeline per output" >&2
     exit 1
 fi
 

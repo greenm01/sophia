@@ -6,6 +6,159 @@ use std::{
 
 use crate::NativeEglDrawSmokeStatus;
 
+#[cfg(feature = "gbm-platform")]
+pub(crate) struct PersistentXrgb8888GlPipeline {
+    gl: glow::Context,
+    program: glow::NativeProgram,
+    texture: glow::NativeTexture,
+    vertex_buffer: glow::NativeBuffer,
+    width: u32,
+    height: u32,
+}
+
+#[cfg(feature = "gbm-platform")]
+impl PersistentXrgb8888GlPipeline {
+    pub(crate) unsafe fn new(
+        gl: glow::Context,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, NativeEglDrawSmokeStatus> {
+        let result = unsafe { Self::new_inner(gl, width, height) };
+        result.map_err(|_| NativeEglDrawSmokeStatus::GlUnavailable)
+    }
+
+    unsafe fn new_inner(gl: glow::Context, width: u32, height: u32) -> Result<Self, String> {
+        let vertex_shader = unsafe { compile_shader(&gl, glow::VERTEX_SHADER, VERTEX_SHADER)? };
+        let fragment_shader =
+            unsafe { compile_shader(&gl, glow::FRAGMENT_SHADER, FRAGMENT_SHADER)? };
+        let program = unsafe { gl.create_program()? };
+        unsafe {
+            gl.attach_shader(program, vertex_shader);
+            gl.attach_shader(program, fragment_shader);
+            gl.bind_attrib_location(program, 0, "position");
+            gl.bind_attrib_location(program, 1, "texture_coordinate");
+            gl.link_program(program);
+        }
+        if !unsafe { gl.get_program_link_status(program) } {
+            return Err(unsafe { gl.get_program_info_log(program) });
+        }
+        unsafe {
+            gl.delete_shader(vertex_shader);
+            gl.delete_shader(fragment_shader);
+        }
+        let texture = unsafe { gl.create_texture()? };
+        let vertex_buffer = unsafe { gl.create_buffer()? };
+        let vertices: [f32; 16] = [
+            -1.0, -1.0, 0.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0,
+        ];
+        let vertex_bytes = unsafe {
+            std::slice::from_raw_parts(
+                vertices.as_ptr().cast::<u8>(),
+                vertices.len() * std::mem::size_of::<f32>(),
+            )
+        };
+        unsafe {
+            gl.viewport(0, 0, width as i32, height as i32);
+            gl.disable(glow::BLEND);
+            gl.active_texture(glow::TEXTURE0);
+            gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MIN_FILTER,
+                glow::NEAREST as i32,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MAG_FILTER,
+                glow::NEAREST as i32,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_WRAP_S,
+                glow::CLAMP_TO_EDGE as i32,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_WRAP_T,
+                glow::CLAMP_TO_EDGE as i32,
+            );
+            gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 4);
+            gl.tex_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                glow::RGBA as i32,
+                width as i32,
+                height as i32,
+                0,
+                glow::BGRA,
+                glow::UNSIGNED_BYTE,
+                glow::PixelUnpackData::Slice(None),
+            );
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer));
+            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::STATIC_DRAW);
+        }
+        Ok(Self {
+            gl,
+            program,
+            texture,
+            vertex_buffer,
+            width,
+            height,
+        })
+    }
+
+    pub(crate) fn upload(&self, pixels: &[u8]) -> Result<(), NativeEglDrawSmokeStatus> {
+        let expected = usize::try_from(self.width)
+            .ok()
+            .and_then(|width| width.checked_mul(4))
+            .and_then(|stride| stride.checked_mul(usize::try_from(self.height).ok()?))
+            .ok_or(NativeEglDrawSmokeStatus::GlUnavailable)?;
+        if pixels.len() != expected {
+            return Err(NativeEglDrawSmokeStatus::GlUnavailable);
+        }
+        unsafe {
+            self.gl
+                .viewport(0, 0, self.width as i32, self.height as i32);
+            self.gl.active_texture(glow::TEXTURE0);
+            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+            self.gl.tex_sub_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                0,
+                0,
+                self.width as i32,
+                self.height as i32,
+                glow::BGRA,
+                glow::UNSIGNED_BYTE,
+                glow::PixelUnpackData::Slice(Some(pixels)),
+            );
+            self.gl
+                .bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
+            self.gl.use_program(Some(self.program));
+            self.gl.uniform_1_i32(
+                self.gl.get_uniform_location(self.program, "frame").as_ref(),
+                0,
+            );
+            self.gl.enable_vertex_attrib_array(0);
+            self.gl
+                .vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, 16, 0);
+            self.gl.enable_vertex_attrib_array(1);
+            self.gl
+                .vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, 16, 8);
+            self.gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+            // The atomic path does not carry an EGL native fence into the KMS
+            // IN_FENCE_FD property yet. Complete rendering before exporting the
+            // GBM front buffer so scanout and framebuffer retirement cannot race
+            // outstanding GPU work.
+            self.gl.finish();
+            if self.gl.get_error() != glow::NO_ERROR {
+                return Err(NativeEglDrawSmokeStatus::GlUnavailable);
+            }
+        }
+        Ok(())
+    }
+}
+
 pub(crate) fn smoke_current_gl_context_with_loader<F>(
     mut loader: F,
 ) -> Result<(), NativeEglDrawSmokeStatus>

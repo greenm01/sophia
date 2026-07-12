@@ -74,13 +74,18 @@ pub(crate) fn run_persistent_xlibre_session(
     let mut physical_input = if config.input_devices.is_empty() {
         None
     } else {
-        Some(sophia_backend_live::open_native_libinput_path_poller(
-            &config.input_devices,
-            sophia_backend_live::NativeLibinputDeviceMap::new(SeatId::from_raw(SESSION_SEAT_RAW))
+        Some(SessionPhysicalInput::Threaded(
+            sophia_backend_live::open_threaded_native_libinput_path_poller(
+                &config.input_devices,
+                sophia_backend_live::NativeLibinputDeviceMap::new(SeatId::from_raw(
+                    SESSION_SEAT_RAW,
+                ))
                 .with_keyboard_device(DeviceId::from_raw(SESSION_KEYBOARD_DEVICE_RAW))
                 .with_pointer_device(DeviceId::from_raw(SESSION_POINTER_DEVICE_RAW)),
-            64,
-        )?)
+                64,
+                256,
+            )?,
+        ))
     };
     if !config.input_devices.is_empty() {
         println!(
@@ -118,7 +123,7 @@ pub(crate) fn run_persistent_xlibre_session(
     let child = command.spawn()?;
     let mut process = SessionProcessGuard::child_only(child);
     println!(
-        "sophia_live_session schema=8 status=running display={} client_backend=xlibre-compat client={} capture_msec={} native_presentation={} physical_input={}",
+        "sophia_live_session schema=9 status=running display={} client_backend=xlibre-compat client={} capture_msec={} native_presentation={} physical_input={}",
         display,
         client_name,
         COMPAT_CAPTURE_INTERVAL.as_millis(),

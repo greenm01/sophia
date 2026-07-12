@@ -1,11 +1,11 @@
-use std::{ffi::c_void, os::fd::OwnedFd, ptr};
+use std::{ffi::c_void, os::fd::OwnedFd, ptr, time::Duration, time::Instant};
 
 use crate::gbm_platform::{
     EGL_PLATFORM_GBM_KHR,
     config::{window_config_attributes, xrgb_window_config_attributes},
 };
 use crate::gl::{
-    context_attributes, draw_xrgb8888_current_gl_context_with_loader,
+    PersistentXrgb8888GlPipeline, context_attributes, draw_xrgb8888_current_gl_context_with_loader,
     smoke_current_gl_context_with_loader,
 };
 use crate::{
@@ -130,6 +130,27 @@ pub struct NativeGbmRenderedScanoutContext<T: std::os::fd::AsFd> {
     egl: khronos_egl::DynamicInstance<khronos_egl::EGL1_5>,
     display: khronos_egl::Display,
     gbm_device: gbm::Device<T>,
+    target: Option<PersistentNativeFrameTarget>,
+    stats: NativeGbmPersistentRenderStats,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct NativeGbmPersistentRenderStats {
+    pub target_creations: usize,
+    pub target_recreations: usize,
+    pub gl_pipeline_creations: usize,
+    pub frame_uploads: usize,
+    pub max_upload: Duration,
+}
+
+struct PersistentNativeFrameTarget {
+    width: u32,
+    height: u32,
+    preferred_modifiers: Vec<u64>,
+    config: khronos_egl::Config,
+    candidate: RenderedScanoutCandidate,
+    egl_context: khronos_egl::Context,
+    pipeline: PersistentXrgb8888GlPipeline,
 }
 
 impl<T> NativeGbmRenderedScanoutContext<T>
@@ -181,7 +202,13 @@ where
             egl,
             display,
             gbm_device,
+            target: None,
+            stats: NativeGbmPersistentRenderStats::default(),
         })
+    }
+
+    pub const fn persistent_render_stats(&self) -> NativeGbmPersistentRenderStats {
+        self.stats
     }
 
     pub fn export_rendered_owned_scanout_buffer(
@@ -221,7 +248,7 @@ where
     }
 
     pub fn export_xrgb8888_owned_scanout_buffer_with_modifiers(
-        &self,
+        &mut self,
         width: u32,
         height: u32,
         stride: u32,
@@ -236,18 +263,127 @@ where
             };
         }
 
-        match render_initialized_gbm_scanout_front_buffer(
-            &self.egl,
-            self.display,
-            &self.gbm_device,
-            width,
-            height,
-            preferred_modifiers,
-            Some(NativeXrgb8888Frame { stride, pixels }),
-        ) {
+        let expected_stride = width.saturating_mul(4);
+        let expected_len = usize::try_from(expected_stride)
+            .ok()
+            .and_then(|stride| stride.checked_mul(usize::try_from(height).ok()?));
+        if stride != expected_stride || expected_len != Some(pixels.len()) {
+            return NativeGbmOwnedScanoutBufferExportReport {
+                status: NativeGbmScanoutBufferExportStatus::InvalidTarget,
+                detail: NativeGbmScanoutBufferExportDetail::InvalidTarget,
+                buffer: None,
+            };
+        }
+        let started = Instant::now();
+        let result = self.render_persistent_xrgb8888(width, height, pixels, preferred_modifiers);
+        self.stats.max_upload = self.stats.max_upload.max(started.elapsed());
+        match result {
             Ok(buffer) => exported_scanout_buffer_report(buffer),
             Err(detail) => failed_scanout_buffer_report(detail),
         }
+    }
+
+    fn render_persistent_xrgb8888(
+        &mut self,
+        width: u32,
+        height: u32,
+        pixels: &[u8],
+        preferred_modifiers: &[u64],
+    ) -> Result<NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExportDetail> {
+        let preferred_modifiers = preferred_modifiers
+            .iter()
+            .copied()
+            .filter(|modifier| *modifier != u64::MAX)
+            .collect::<Vec<_>>();
+        let reusable = self.target.as_ref().is_some_and(|target| {
+            target.width == width
+                && target.height == height
+                && target.preferred_modifiers == preferred_modifiers
+        });
+        if !reusable && let Some(target) = self.target.take() {
+            self.destroy_persistent_target(target);
+            self.stats.target_recreations = self.stats.target_recreations.saturating_add(1);
+        }
+        if let Some(mut target) = self.target.take() {
+            let result = render_persistent_target_frame(
+                &self.egl,
+                self.display,
+                &self.gbm_device,
+                &mut target,
+                pixels,
+            );
+            if result.is_ok() {
+                self.stats.frame_uploads = self.stats.frame_uploads.saturating_add(1);
+                self.target = Some(target);
+            } else {
+                self.destroy_persistent_target(target);
+            }
+            return result;
+        }
+
+        self.egl
+            .bind_api(khronos_egl::OPENGL_API)
+            .map_err(|_| NativeGbmScanoutBufferExportDetail::EglBindApiFailed)?;
+        let reduced = reduced_gbm_scanout_modifiers(&preferred_modifiers);
+        let mut last_detail = NativeGbmScanoutBufferExportDetail::EglConfigUnavailable;
+        for candidate in rendered_scanout_candidates(&reduced) {
+            let Some(config) = choose_scanout_config_for_format(
+                &self.egl,
+                self.display,
+                candidate.config_attributes,
+                candidate.format,
+            ) else {
+                continue;
+            };
+            let target = create_persistent_target(
+                &self.egl,
+                self.display,
+                &self.gbm_device,
+                width,
+                height,
+                preferred_modifiers.clone(),
+                config,
+                candidate,
+            );
+            let mut target = match target {
+                Ok(target) => target,
+                Err(detail) => {
+                    last_detail = preferred_scanout_failure_detail(last_detail, detail);
+                    continue;
+                }
+            };
+            match render_persistent_target_frame(
+                &self.egl,
+                self.display,
+                &self.gbm_device,
+                &mut target,
+                pixels,
+            ) {
+                Ok(buffer) if is_supported_rendered_scanout_candidate_buffer(&buffer) => {
+                    self.stats.target_creations = self.stats.target_creations.saturating_add(1);
+                    self.stats.gl_pipeline_creations =
+                        self.stats.gl_pipeline_creations.saturating_add(1);
+                    self.stats.frame_uploads = self.stats.frame_uploads.saturating_add(1);
+                    self.target = Some(target);
+                    return Ok(buffer);
+                }
+                Ok(_) => {
+                    self.destroy_persistent_target(target);
+                    last_detail = NativeGbmScanoutBufferExportDetail::InvalidBufferDescriptor;
+                }
+                Err(detail) => {
+                    self.destroy_persistent_target(target);
+                    last_detail = preferred_scanout_failure_detail(last_detail, detail);
+                }
+            }
+        }
+        Err(last_detail)
+    }
+
+    fn destroy_persistent_target(&self, target: PersistentNativeFrameTarget) {
+        let _ = self.egl.make_current(self.display, None, None, None);
+        drop(target.pipeline);
+        let _ = self.egl.destroy_context(self.display, target.egl_context);
     }
 }
 
@@ -256,6 +392,9 @@ where
     T: std::os::fd::AsFd,
 {
     fn drop(&mut self) {
+        if let Some(target) = self.target.take() {
+            self.destroy_persistent_target(target);
+        }
         let _ = self.egl.terminate(self.display);
     }
 }
@@ -569,6 +708,133 @@ fn render_initialized_gbm_scanout_front_buffer<T: std::os::fd::AsFd>(
     }
 
     Err(last_detail)
+}
+
+fn create_persistent_target<T: std::os::fd::AsFd>(
+    egl: &khronos_egl::DynamicInstance<khronos_egl::EGL1_5>,
+    display: khronos_egl::Display,
+    gbm_device: &gbm::Device<T>,
+    width: u32,
+    height: u32,
+    preferred_modifiers: Vec<u64>,
+    config: khronos_egl::Config,
+    candidate: RenderedScanoutCandidate,
+) -> Result<PersistentNativeFrameTarget, NativeGbmScanoutBufferExportDetail> {
+    use gbm::AsRaw as _;
+
+    let gbm_surface = create_rendered_scanout_surface(
+        gbm_device,
+        width,
+        height,
+        candidate.format,
+        &candidate.modifiers,
+        candidate.usage,
+    )?;
+    let native_window = gbm_surface.as_raw() as khronos_egl::NativeWindowType;
+    let egl_surface = unsafe { egl.create_window_surface(display, config, native_window, None) }
+        .map_err(|_| NativeGbmScanoutBufferExportDetail::EglSurfaceUnavailable)?;
+    let egl_context = match egl.create_context(display, config, None, &context_attributes()) {
+        Ok(context) => context,
+        Err(_) => {
+            let _ = egl.destroy_surface(display, egl_surface);
+            return Err(NativeGbmScanoutBufferExportDetail::EglContextUnavailable);
+        }
+    };
+    if egl
+        .make_current(
+            display,
+            Some(egl_surface),
+            Some(egl_surface),
+            Some(egl_context),
+        )
+        .is_err()
+    {
+        let _ = egl.destroy_context(display, egl_context);
+        let _ = egl.destroy_surface(display, egl_surface);
+        return Err(NativeGbmScanoutBufferExportDetail::EglMakeCurrentFailed);
+    }
+    let loader = |name: &str| {
+        egl.get_proc_address(name)
+            .map_or(ptr::null(), |proc| proc as *const c_void)
+    };
+    let gl = unsafe { glow::Context::from_loader_function(loader) };
+    let pipeline = match unsafe { PersistentXrgb8888GlPipeline::new(gl, width, height) } {
+        Ok(pipeline) => pipeline,
+        Err(_) => {
+            let _ = egl.make_current(display, None, None, None);
+            let _ = egl.destroy_context(display, egl_context);
+            let _ = egl.destroy_surface(display, egl_surface);
+            return Err(NativeGbmScanoutBufferExportDetail::GlSmokeFailed);
+        }
+    };
+    let _ = egl.make_current(display, None, None, None);
+    let _ = egl.destroy_surface(display, egl_surface);
+    drop(gbm_surface);
+    Ok(PersistentNativeFrameTarget {
+        width,
+        height,
+        preferred_modifiers,
+        config,
+        candidate,
+        egl_context,
+        pipeline,
+    })
+}
+
+fn render_persistent_target_frame<T: std::os::fd::AsFd>(
+    egl: &khronos_egl::DynamicInstance<khronos_egl::EGL1_5>,
+    display: khronos_egl::Display,
+    gbm_device: &gbm::Device<T>,
+    target: &mut PersistentNativeFrameTarget,
+    pixels: &[u8],
+) -> Result<NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExportDetail> {
+    use gbm::AsRaw as _;
+
+    let gbm_surface = create_rendered_scanout_surface(
+        gbm_device,
+        target.width,
+        target.height,
+        target.candidate.format,
+        &target.candidate.modifiers,
+        target.candidate.usage,
+    )?;
+    let native_window = gbm_surface.as_raw() as khronos_egl::NativeWindowType;
+    let egl_surface =
+        unsafe { egl.create_window_surface(display, target.config, native_window, None) }
+            .map_err(|_| NativeGbmScanoutBufferExportDetail::EglSurfaceUnavailable)?;
+    if egl
+        .make_current(
+            display,
+            Some(egl_surface),
+            Some(egl_surface),
+            Some(target.egl_context),
+        )
+        .is_err()
+    {
+        let _ = egl.destroy_surface(display, egl_surface);
+        return Err(NativeGbmScanoutBufferExportDetail::EglMakeCurrentFailed);
+    }
+    let result = target
+        .pipeline
+        .upload(pixels)
+        .map_err(|_| NativeGbmScanoutBufferExportDetail::GlSmokeFailed)
+        .and_then(|()| {
+            egl.swap_buffers(display, egl_surface)
+                .map_err(|_| NativeGbmScanoutBufferExportDetail::EglSwapBuffersFailed)
+        })
+        .and_then(|()| {
+            let buffer = unsafe { gbm_surface.lock_front_buffer() }
+                .map_err(|_| NativeGbmScanoutBufferExportDetail::FrontBufferLockFailed)?;
+            native_owned_scanout_buffer_from_bo(
+                target.width,
+                target.height,
+                buffer,
+                Some(gbm_surface),
+            )
+        });
+    let _ = egl.make_current(display, None, None, None);
+    let _ = egl.destroy_surface(display, egl_surface);
+    result
 }
 
 fn render_initialized_gbm_scanout_front_buffer_with_config<T: std::os::fd::AsFd>(

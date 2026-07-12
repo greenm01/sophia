@@ -94,7 +94,7 @@ done
 rm -f "$GUARD_ARMED_FILE" "$GUARD_TRIGGERED_FILE"
 
 cd "$ROOT_DIR"
-cargo build --offline -p sophia-cli --features atomic-scanout-live
+cargo build --release --offline -p sophia-cli --features atomic-scanout-live
 tools/atomic_scanout_preflight.sh
 
 modeline="$(cvt 1280 720 60 | sed -n 's/^Modeline //p')"
@@ -203,7 +203,7 @@ if pgrep -x keyd >/dev/null 2>&1; then
     keyd_was_running=true
 fi
 
-target/debug/sophia sophia-session-input-guard \
+target/release/sophia sophia-session-input-guard \
     --input-devices="$keyboard" \
     --armed-file="$GUARD_ARMED_FILE" \
     --triggered-file="$GUARD_TRIGGERED_FILE" \
@@ -257,7 +257,7 @@ stty raw -echo
 setsid env \
     XAUTHORITY="$AUTH_FILE" \
     SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 \
-    target/debug/sophia sophia-live-session \
+    target/release/sophia sophia-live-session \
     --client-backend=xlibre-compat \
     --compat-display="$COMPAT_DISPLAY" \
     --client="${SOPHIA_KITTY_BIN:-kitty}" \

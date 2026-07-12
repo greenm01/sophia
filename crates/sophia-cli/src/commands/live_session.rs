@@ -30,6 +30,33 @@ const SESSION_SEAT_RAW: u64 = 1;
 const SESSION_KEYBOARD_DEVICE_RAW: u64 = 1;
 const SESSION_POINTER_DEVICE_RAW: u64 = 2;
 
+enum SessionPhysicalInput {
+    Direct(
+        sophia_backend_live::NativeLibinputEventPoller<
+            sophia_backend_live::NativeLibinputEventReader,
+        >,
+    ),
+    Threaded(sophia_backend_live::ThreadedNativeLibinputEventPoller),
+}
+
+impl NonBlockingInputPoller for SessionPhysicalInput {
+    fn poll_ready(&mut self) -> std::io::Result<Vec<sophia_protocol::InputEventPacket>> {
+        match self {
+            Self::Direct(poller) => poller.poll_ready(),
+            Self::Threaded(poller) => poller.poll_ready(),
+        }
+    }
+}
+
+impl SessionPhysicalInput {
+    fn stats(&self) -> sophia_backend_live::ThreadedNativeInputStats {
+        match self {
+            Self::Direct(_) => Default::default(),
+            Self::Threaded(poller) => poller.stats(),
+        }
+    }
+}
+
 pub(crate) fn run_persistent_xterm_session(
     args: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -43,13 +70,17 @@ pub(crate) fn run_persistent_xterm_session(
     let mut physical_input = if config.input_devices.is_empty() {
         None
     } else {
-        Some(sophia_backend_live::open_native_libinput_path_poller(
-            &config.input_devices,
-            sophia_backend_live::NativeLibinputDeviceMap::new(SeatId::from_raw(SESSION_SEAT_RAW))
+        Some(SessionPhysicalInput::Direct(
+            sophia_backend_live::open_native_libinput_path_poller(
+                &config.input_devices,
+                sophia_backend_live::NativeLibinputDeviceMap::new(SeatId::from_raw(
+                    SESSION_SEAT_RAW,
+                ))
                 .with_keyboard_device(DeviceId::from_raw(SESSION_KEYBOARD_DEVICE_RAW))
                 .with_pointer_device(DeviceId::from_raw(SESSION_POINTER_DEVICE_RAW)),
-            64,
-        )?)
+                64,
+            )?,
+        ))
     };
     if !config.input_devices.is_empty() {
         println!(
@@ -912,11 +943,7 @@ fn run_session_loop(
     control_sender: &SyncSender<XAuthorityControlCommand>,
     control_ack_receiver: &Receiver<XAuthorityControlAck>,
     child: &mut Child,
-    physical_input: &mut Option<
-        sophia_backend_live::NativeLibinputEventPoller<
-            sophia_backend_live::NativeLibinputEventReader,
-        >,
-    >,
+    physical_input: &mut Option<SessionPhysicalInput>,
     native_scanout: &mut Option<PersistentNativeScanout>,
     wm_session: &mut Option<LiveWmSession>,
     require_startup_focus: bool,
@@ -933,7 +960,7 @@ fn run_session_loop(
         wm_session.is_some(),
         require_startup_focus.then_some(output.size),
     );
-    let mut runtime = None;
+    let mut runtime: Option<PersistentBackendRuntime> = None;
     let mut last_authority_update = started;
     let mut injection_checksum = None;
     let mut physical_input_ready_at: Option<Instant> = None;
@@ -946,7 +973,7 @@ fn run_session_loop(
     let mut physical_input_completion_reported = false;
     let mut input_pixel_change = false;
     let mut input_proof_started_at = None;
-    let mut input_changed_checksum = None;
+    let mut input_change_submission_baseline = None;
     let mut input_presented_latency = None;
     let mut pointer_checksum = None;
     let mut pointer_phase_started_at = None;
@@ -968,10 +995,78 @@ fn run_session_loop(
     let seat = SeatId::from_raw(SESSION_SEAT_RAW);
     let mut focus_deadline_started_at = None;
     let mut focus_ready_reported = false;
+    let mut focus_ready_at: Option<Instant> = None;
     let mut key_observed_reported = false;
     let mut key_routed_reported = false;
+    let mut max_compose = Duration::ZERO;
 
-    loop {
+    macro_rules! drain_physical_input {
+        () => {{
+            let mut emergency_exit = false;
+            if let (Some(poller), Some(runtime)) = (physical_input.as_mut(), runtime.as_ref())
+                && (config.expect_physical_text.is_none() || physical_input_ready_at.is_some())
+            {
+                let report = route_physical_input(
+                    poller,
+                    &focus,
+                    runtime.committed_surfaces(),
+                    &runtime.input_layers(),
+                    input_sender,
+                    &mut modifiers,
+                    &mut emergency_chord,
+                    &mut pointer,
+                    physical_text_proof.as_mut(),
+                )?;
+                physical_events = physical_events.saturating_add(report.events);
+                physical_keys_routed = physical_keys_routed.saturating_add(report.keys_routed);
+                physical_pointer_events =
+                    physical_pointer_events.saturating_add(report.pointer_events);
+                physical_pointer_routed =
+                    physical_pointer_routed.saturating_add(report.pointer_routed);
+                if !key_observed_reported && report.keys_observed > 0 {
+                    println!("sophia_live_session_input_pipeline schema=1 status=key_observed");
+                    std::io::stdout().flush()?;
+                    key_observed_reported = true;
+                }
+                if !key_routed_reported && report.keys_routed > 0 {
+                    println!("sophia_live_session_input_pipeline schema=1 status=key_routed");
+                    std::io::stdout().flush()?;
+                    key_routed_reported = true;
+                }
+                if report.emergency_exit {
+                    println!("sophia_live_session_input_pipeline schema=1 status=emergency_exit");
+                    std::io::stdout().flush()?;
+                    emergency_exit = true;
+                }
+                if physical_sequence_completed_at.is_none()
+                    && physical_text_proof
+                        .as_ref()
+                        .is_some_and(|proof| proof.is_complete())
+                {
+                    let completed_at = Instant::now();
+                    physical_sequence_completed_at = Some(completed_at);
+                    input_proof_started_at = Some(completed_at);
+                    // Measure the final proof key against the latest frame that
+                    // existed when its complete physical sequence was routed.
+                    // Earlier letters must not satisfy the presented-latency
+                    // gate before Return reaches the client.
+                    injection_checksum = scene.last_report.as_ref().map(|report| report.checksum);
+                    input_pixel_change = false;
+                    input_change_submission_baseline = None;
+                }
+                if report.pointer_events > 0 {
+                    println!(
+                        "sophia_live_session_pointer schema=1 status=observed events={} routed={}",
+                        report.pointer_events, report.pointer_routed
+                    );
+                    std::io::stdout().flush()?;
+                }
+            }
+            emergency_exit
+        }};
+    }
+
+    'session: loop {
         if let Some(status) = child.try_wait()? {
             if status.success() {
                 break;
@@ -980,6 +1075,37 @@ fn run_session_loop(
         }
         if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             break;
+        }
+        if drain_physical_input!() {
+            break;
+        }
+        if let (Some(runtime), Some(native_scanout)) = (runtime.as_mut(), native_scanout.as_mut())
+            && (runtime.native_scanout_in_flight() || runtime.native_cleanup_pending())
+        {
+            runtime.retire_native_scanout(native_scanout)?;
+        }
+        let input_baseline_presented_before_wait =
+            scene.last_report.as_ref().is_some_and(|report| {
+                report.nonzero_pixel_bytes > 0
+                    && native_scanout.as_ref().is_none_or(|native| {
+                        native.heads.first().is_some_and(|head| {
+                            head.presented_checksum == report.checksum && head.nonzero_exports > 0
+                        })
+                    })
+            });
+        if input_presented_latency.is_none()
+            && input_pixel_change
+            && let Some(started) = input_proof_started_at
+            && native_scanout.as_ref().is_none_or(|native| {
+                input_change_submission_baseline.is_some_and(|baseline| {
+                    native
+                        .heads
+                        .first()
+                        .is_some_and(|head| head.presented_submissions > baseline)
+                })
+            })
+        {
+            input_presented_latency = Some(started.elapsed());
         }
         if require_startup_focus
             && focus.focused_surface(seat).is_none()
@@ -1045,6 +1171,9 @@ fn run_session_loop(
 
         match authority_receiver.recv_timeout(Duration::from_millis(25)) {
             Ok(batch) => {
+                if drain_physical_input!() {
+                    break 'session;
+                }
                 last_authority_update = Instant::now();
                 batches = batches.saturating_add(1);
                 transactions = transactions.saturating_add(batch.transactions.len());
@@ -1064,17 +1193,25 @@ fn run_session_loop(
                 }
                 let batch = layout.projected_batch(&batch);
                 scene.observe(&batch)?;
+                let compose_started = Instant::now();
                 let report = scene.compose()?.clone();
+                max_compose = max_compose.max(compose_started.elapsed());
                 let native_frames = native_scanout
                     .as_ref()
                     .map(|_| scene.frames_for_outputs(&outputs))
                     .transpose()?;
-                if let Some((before_frame, _)) = injection_checksum
+                if let Some(before_frame) = injection_checksum
                     && report.checksum != before_frame
-                    && (config.expect_physical_text.is_none() || physical_keys_routed > 0)
+                    && (config.expect_physical_text.is_none()
+                        || physical_sequence_completed_at.is_some())
                 {
                     input_pixel_change = true;
-                    input_changed_checksum.get_or_insert(report.checksum);
+                    input_change_submission_baseline.get_or_insert_with(|| {
+                        native_scanout
+                            .as_ref()
+                            .and_then(|native| native.heads.first())
+                            .map_or(0, |head| head.submissions)
+                    });
                 }
                 if let Some(before_frame) = pointer_checksum
                     && report.checksum != before_frame
@@ -1122,6 +1259,7 @@ fn run_session_loop(
                     println!("sophia_live_session_input_pipeline schema=1 status=focus_ready");
                     std::io::stdout().flush()?;
                     focus_ready_reported = true;
+                    focus_ready_at = Some(Instant::now());
                 }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
@@ -1149,7 +1287,7 @@ fn run_session_loop(
                 if let (Some(runtime), Some(native_scanout)) =
                     (runtime.as_mut(), native_scanout.as_mut())
                 {
-                    if runtime.native_scanout_in_flight() {
+                    if runtime.native_scanout_in_flight() || runtime.native_cleanup_pending() {
                         runtime.retire_native_scanout(native_scanout)?;
                     }
                     if !runtime.native_scanout_in_flight()
@@ -1175,57 +1313,6 @@ fn run_session_loop(
             }
         }
 
-        if let (Some(poller), Some(runtime)) = (physical_input.as_mut(), runtime.as_ref())
-            && (config.expect_physical_text.is_none() || physical_input_ready_at.is_some())
-        {
-            let report = route_physical_input(
-                poller,
-                &focus,
-                runtime.committed_surfaces(),
-                &runtime.input_layers(),
-                input_sender,
-                &mut modifiers,
-                &mut emergency_chord,
-                &mut pointer,
-                physical_text_proof.as_mut(),
-            )?;
-            physical_events = physical_events.saturating_add(report.events);
-            physical_keys_routed = physical_keys_routed.saturating_add(report.keys_routed);
-            physical_pointer_events = physical_pointer_events.saturating_add(report.pointer_events);
-            physical_pointer_routed = physical_pointer_routed.saturating_add(report.pointer_routed);
-            if !key_observed_reported && report.keys_observed > 0 {
-                println!("sophia_live_session_input_pipeline schema=1 status=key_observed");
-                std::io::stdout().flush()?;
-                key_observed_reported = true;
-            }
-            if !key_routed_reported && report.keys_routed > 0 {
-                println!("sophia_live_session_input_pipeline schema=1 status=key_routed");
-                std::io::stdout().flush()?;
-                key_routed_reported = true;
-            }
-            if report.emergency_exit {
-                println!("sophia_live_session_input_pipeline schema=1 status=emergency_exit");
-                std::io::stdout().flush()?;
-                break;
-            }
-            if physical_sequence_completed_at.is_none()
-                && physical_text_proof
-                    .as_ref()
-                    .is_some_and(PhysicalTextProof::is_complete)
-            {
-                let completed_at = Instant::now();
-                physical_sequence_completed_at = Some(completed_at);
-                input_proof_started_at = Some(completed_at);
-            }
-            if report.pointer_events > 0 {
-                println!(
-                    "sophia_live_session_pointer schema=1 status=observed events={} routed={}",
-                    report.pointer_events, report.pointer_routed
-                );
-                std::io::stdout().flush()?;
-            }
-        }
-
         if !physical_input_completion_reported
             && input_pixel_change
             && let (Some(text), Some(proof)) = (
@@ -1244,14 +1331,25 @@ fn run_session_loop(
             physical_input_completion_reported = true;
         }
 
-        let input_baseline_presented = scene.last_report.as_ref().is_some_and(|report| {
-            report.nonzero_pixel_bytes > 0
-                && native_scanout.as_ref().is_none_or(|native| {
-                    native.heads.first().is_some_and(|head| {
-                        head.presented_checksum == report.checksum && head.nonzero_exports > 0
+        let input_baseline_presented = input_baseline_presented_before_wait
+            || scene.last_report.as_ref().is_some_and(|report| {
+                report.nonzero_pixel_bytes > 0
+                    && native_scanout.as_ref().is_none_or(|native| {
+                        native.heads.first().is_some_and(|head| {
+                            head.presented_checksum != 0 && head.nonzero_exports > 0
+                        })
+                    })
+            });
+        let input_start_stable = if config.expect_physical_text.is_some() {
+            focus_ready_at.is_some_and(|ready| ready.elapsed() >= Duration::from_secs(2))
+        } else {
+            last_authority_update.elapsed() >= Duration::from_millis(config.input_quiet_msec)
+                || wm_session.as_ref().is_some_and(|wm| {
+                    wm.last_committed_at.is_some_and(|committed| {
+                        committed.elapsed() >= Duration::from_millis(config.input_quiet_msec)
                     })
                 })
-        });
+        };
         if require_startup_focus
             && physical_input.is_some()
             && input_baseline_presented
@@ -1262,17 +1360,9 @@ fn run_session_loop(
         if injection_checksum.is_none()
             && config.input_proof_requested()
             && input_baseline_presented
-            && (last_authority_update.elapsed() >= Duration::from_millis(config.input_quiet_msec)
-                || wm_session.as_ref().is_some_and(|wm| {
-                    wm.last_committed_at.is_some_and(|committed| {
-                        committed.elapsed() >= Duration::from_millis(config.input_quiet_msec)
-                    })
-                }))
+            && input_start_stable
         {
-            injection_checksum = scene
-                .last_report
-                .as_ref()
-                .map(|report| (report.checksum, scene.buffer_checksum()));
+            injection_checksum = scene.last_report.as_ref().map(|report| report.checksum);
             if let Some(text) = config.inject_text.as_deref() {
                 input_proof_started_at = Some(Instant::now());
                 let events = synthetic_text_input_events(text)?;
@@ -1332,13 +1422,14 @@ fn run_session_loop(
         }
         if input_presented_latency.is_none()
             && input_pixel_change
-            && let (Some(started), Some(changed_checksum)) =
-                (input_proof_started_at, input_changed_checksum)
+            && let Some(started) = input_proof_started_at
             && native_scanout.as_ref().is_none_or(|native| {
-                native
-                    .heads
-                    .first()
-                    .is_some_and(|head| head.presented_checksum == changed_checksum)
+                input_change_submission_baseline.is_some_and(|baseline| {
+                    native
+                        .heads
+                        .first()
+                        .is_some_and(|head| head.presented_submissions > baseline)
+                })
             })
         {
             input_presented_latency = Some(started.elapsed());
@@ -1369,7 +1460,22 @@ fn run_session_loop(
         .into());
     }
     if config.input_proof_requested() && input_presented_latency.is_none() {
-        return Err("persistent live session input pixels were not presented".into());
+        let native_heads = runtime.as_ref().map_or_else(
+            || "none".to_owned(),
+            PersistentBackendRuntime::native_diagnostic,
+        );
+        return Err(format!(
+            "persistent live session input pixels were not presented: change_submission_baseline={input_change_submission_baseline:?} primary_presented_submissions={} native_submissions={} native_callbacks={} native_heads={native_heads}",
+            native_scanout
+                .as_ref()
+                .and_then(|native| native.heads.first())
+                .map_or(0, |head| head.presented_submissions),
+            native_scanout.as_ref().map_or(0, |native| native.submissions),
+            native_scanout
+                .as_ref()
+                .map_or(0, |native| native.callback_accepted),
+        )
+        .into());
     }
     if config.expect_physical_text.is_some()
         && (!physical_text_proof
@@ -1390,8 +1496,21 @@ fn run_session_loop(
     {
         return Err("live session ended without a committed external WM layout".into());
     }
+    let input_stats = physical_input
+        .as_ref()
+        .map_or_else(Default::default, |input| input.stats());
+    let (
+        native_target_creations,
+        native_target_recreations,
+        native_pipeline_creations,
+        native_uploads,
+        native_max_upload,
+    ) = native_scanout.as_ref().map_or(
+        (0, 0, 0, 0, Duration::ZERO),
+        PersistentNativeScanout::persistent_render_metrics,
+    );
     println!(
-        "sophia_live_session schema=8 status=bounded_complete display={} elapsed_msec={} session_ticks={} authority_batches={} authority_transactions={} authority_queue_capacity={} authority_batches_dropped=0 backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_max_nonzero_pixel_bytes={} cpu_nonzero_frames={} cpu_checksum={} injected_input={} input_pixel_change={} input_presented_latency_msec={} physical_events={} physical_keys_routed={} pointer_pixel_change={} physical_pointer_events={} physical_pointer_routed={} pointer_proof={} native_presentation={} native_submissions={} native_submit_deferred={} native_submit_failures={} native_retirements={} native_retire_failures={} native_max_in_flight_ticks={} native_max_submit_to_page_flip_msec={} native_callback_accepted={} native_callback_rejected={} native_callback_queue_saturated={} native_nonzero_exports={} native_export_attempts={} native_in_flight={} native_cleanup_pending={} physical_input={} wm_policy={} wm_requests={} wm_committed={} wm_restarts={} wm_degraded={}",
+        "sophia_live_session schema=9 status=bounded_complete display={} elapsed_msec={} session_ticks={} authority_batches={} authority_transactions={} authority_queue_capacity={} authority_batches_dropped=0 backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_max_nonzero_pixel_bytes={} cpu_nonzero_frames={} cpu_checksum={} cpu_max_compose_msec={} injected_input={} input_pixel_change={} input_presented_latency_msec={} input_dispatch_max_gap_msec={} input_queue_max_depth={} input_queue_dwell_max_msec={} physical_events={} physical_keys_routed={} pointer_pixel_change={} physical_pointer_events={} physical_pointer_routed={} pointer_proof={} native_presentation={} native_submissions={} native_submit_deferred={} native_submit_failures={} native_retirements={} native_retire_failures={} native_max_in_flight_ticks={} native_max_submit_to_page_flip_msec={} native_max_upload_msec={} native_target_creations={} native_target_recreations={} native_pipeline_creations={} native_frame_uploads={} native_callback_accepted={} native_callback_rejected={} native_callback_queue_saturated={} native_nonzero_exports={} native_export_attempts={} native_in_flight={} native_cleanup_pending={} physical_input={} wm_policy={} wm_requests={} wm_committed={} wm_restarts={} wm_degraded={}",
         config.display,
         started.elapsed().as_millis(),
         session_ticks,
@@ -1406,11 +1525,15 @@ fn run_session_loop(
         scene.max_nonzero_pixel_bytes,
         scene.nonzero_frames,
         report.checksum,
+        max_compose.as_millis(),
         config.inject_text.is_some(),
         input_pixel_change,
         input_presented_latency
             .map(|latency| latency.as_millis().to_string())
             .unwrap_or_else(|| "none".to_owned()),
+        input_stats.max_dispatch_gap_msec,
+        input_stats.max_queue_depth,
+        input_stats.max_queue_dwell_msec,
         physical_events,
         physical_keys_routed,
         pointer_pixel_change,
@@ -1447,6 +1570,11 @@ fn run_session_loop(
         native_scanout
             .as_ref()
             .map_or(0, |native| native.max_submit_to_page_flip.as_millis()),
+        native_max_upload.as_millis(),
+        native_target_creations,
+        native_target_recreations,
+        native_pipeline_creations,
+        native_uploads,
         native_scanout
             .as_ref()
             .map_or(0, |native| native.callback_accepted),
@@ -1550,6 +1678,13 @@ struct PersistentOutputRuntime {
     authority_sender: SyncSender<AuthorityTransactionIntake>,
 }
 
+#[derive(Clone)]
+struct ObservedComposedFrame {
+    frame: sophia_backend_live::LiveCpuComposedFrame,
+    checksum: u64,
+    nonzero_pixel_bytes: usize,
+}
+
 struct PersistentBackendRuntime {
     outputs: BTreeMap<OutputId, PersistentOutputRuntime>,
     layers: BTreeMap<SurfaceId, SurfaceTransaction>,
@@ -1560,7 +1695,7 @@ impl PersistentBackendRuntime {
         outputs: &[sophia_engine::HeadlessOutput],
         first_transactions: &[SurfaceTransaction],
         mut native_scanout: Option<&mut PersistentNativeScanout>,
-        initial_native_frames: Option<Vec<sophia_backend_live::LiveCpuComposedFrame>>,
+        initial_native_frames: Option<Vec<ObservedComposedFrame>>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         if outputs.is_empty() || outputs.len() > sophia_backend_live::LIVE_RENDERED_OUTPUT_CAPACITY
         {
@@ -1625,7 +1760,7 @@ impl PersistentBackendRuntime {
         &mut self,
         batch: &XAuthorityObservedTransactionBatch,
         mut native_scanout: Option<&mut PersistentNativeScanout>,
-        native_frames: Option<Vec<sophia_backend_live::LiveCpuComposedFrame>>,
+        native_frames: Option<Vec<ObservedComposedFrame>>,
         wm_update: Option<WmTransactionUpdate>,
     ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
         for transaction in &batch.transactions {
@@ -1652,7 +1787,11 @@ impl PersistentBackendRuntime {
                     if let Some(frame) = native_frames.next() {
                         native_scanout.queue_frame(index, frame);
                     }
-                    native_scanout.run_tick(index, &mut output.runtime, input)?
+                    if output.runtime.rendered_primary_plane_scanout_in_flight() {
+                        output.runtime.run_tick(input)?
+                    } else {
+                        native_scanout.run_tick(index, &mut output.runtime, input)?
+                    }
                 }
                 None => output.runtime.run_tick(input)?,
             };
@@ -1747,6 +1886,20 @@ impl PersistentBackendRuntime {
     ) -> Result<(), Box<dyn std::error::Error>> {
         for (index, output) in self.outputs.values_mut().enumerate() {
             native_scanout.retire_ready(index, &mut output.runtime)?;
+            if output
+                .runtime
+                .rendered_primary_plane_scanout_cleanup_pending()
+            {
+                let cleanup = output
+                    .runtime
+                    .retry_tracked_rendered_primary_plane_scanout_cleanup(
+                        native_scanout.card(index),
+                    );
+                if !cleanup.cleanup_pending {
+                    native_scanout.retire_failures =
+                        native_scanout.retire_failures.saturating_sub(1);
+                }
+            }
         }
         Ok(())
     }
@@ -1763,6 +1916,26 @@ impl PersistentBackendRuntime {
                 .runtime
                 .rendered_primary_plane_scanout_cleanup_pending()
         })
+    }
+
+    fn native_diagnostic(&self) -> String {
+        self.outputs
+            .iter()
+            .map(|(output, state)| {
+                format!(
+                    "{}:in_flight={}:ticks={}:cleanup={}",
+                    output.raw(),
+                    state.runtime.rendered_primary_plane_scanout_in_flight(),
+                    state
+                        .runtime
+                        .rendered_primary_plane_scanout_in_flight_ticks(),
+                    state
+                        .runtime
+                        .rendered_primary_plane_scanout_cleanup_pending(),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",")
     }
 }
 
@@ -1826,7 +1999,9 @@ struct PersistentNativeHead {
     pending_nonzero_pixel_bytes: usize,
     last_checksum: u64,
     submitted_checksum: Option<u64>,
+    submitted_sequence: Option<usize>,
     presented_checksum: u64,
+    presented_submissions: usize,
     submissions: usize,
     retirements: usize,
     callback_accepted: usize,
@@ -1933,7 +2108,9 @@ impl PersistentNativeScanout {
                     pending_nonzero_pixel_bytes: 0,
                     last_checksum: 0,
                     submitted_checksum: None,
+                    submitted_sequence: None,
                     presented_checksum: 0,
+                    presented_submissions: 0,
                     submissions: 0,
                     retirements: 0,
                     callback_accepted: 0,
@@ -2036,6 +2213,7 @@ impl PersistentNativeScanout {
                     self.heads[index].submissions = self.heads[index].submissions.saturating_add(1);
                     self.heads[index].submitted_at = Some(Instant::now());
                     self.heads[index].submitted_checksum = Some(self.heads[index].last_checksum);
+                    self.heads[index].submitted_sequence = Some(self.heads[index].submissions);
                     let output = self.heads[index].output.id;
                     let _ = self.presentation.mark_damage(output);
                     match self.presentation.schedule(output) {
@@ -2112,6 +2290,9 @@ impl PersistentNativeScanout {
             if let Some(checksum) = self.heads[index].submitted_checksum.take() {
                 self.heads[index].presented_checksum = checksum;
             }
+            if let Some(submission) = self.heads[index].submitted_sequence.take() {
+                self.heads[index].presented_submissions = submission;
+            }
             let output = self.heads[index].output.id;
             if let Some(kernel_sequence) = report
                 .last_accepted
@@ -2150,7 +2331,7 @@ impl PersistentNativeScanout {
         &mut self,
         index: usize,
         runtime: &mut sophia_backend_live::LiveBackendRuntimeAssembly,
-        frame: sophia_backend_live::LiveCpuComposedFrame,
+        frame: ObservedComposedFrame,
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.queue_frame(index, frame);
         let group = self.heads[index].group;
@@ -2179,19 +2360,16 @@ impl PersistentNativeScanout {
         self.submissions = self.submissions.saturating_add(1);
         head.submissions = head.submissions.saturating_add(1);
         head.presented_checksum = head.last_checksum;
+        head.presented_submissions = head.submissions;
         Ok(())
     }
 
-    fn queue_frame(&mut self, index: usize, frame: sophia_backend_live::LiveCpuComposedFrame) {
+    fn queue_frame(&mut self, index: usize, frame: ObservedComposedFrame) {
         let head = &mut self.heads[index];
-        head.pending_nonzero_pixel_bytes = frame.bytes.iter().filter(|byte| **byte != 0).count();
-        head.last_checksum = frame
-            .bytes
-            .iter()
-            .fold(0xcbf2_9ce4_8422_2325u64, |hash, byte| {
-                (hash ^ u64::from(*byte)).wrapping_mul(0x100_0000_01b3)
-            });
-        head.exporter.set_pending_cpu_frame(frame);
+        head.pending_nonzero_pixel_bytes = frame.nonzero_pixel_bytes;
+        head.last_checksum = frame.checksum;
+        head.exporter
+            .set_pending_cpu_frame_with_checksum(frame.frame, frame.checksum);
     }
 
     fn pending_frame(&self, index: usize) -> bool {
@@ -2203,6 +2381,22 @@ impl PersistentNativeScanout {
             .iter()
             .map(|head| head.exporter.cpu_frame_export_attempts())
             .sum()
+    }
+
+    fn persistent_render_metrics(&self) -> (usize, usize, usize, usize, Duration) {
+        self.heads.iter().fold(
+            (0, 0, 0, 0, Duration::ZERO),
+            |(targets, recreations, pipelines, uploads, max_upload), head| {
+                let stats = head.exporter.persistent_render_stats();
+                (
+                    targets.saturating_add(stats.target_creations),
+                    recreations.saturating_add(stats.target_recreations),
+                    pipelines.saturating_add(stats.gl_pipeline_creations),
+                    uploads.saturating_add(stats.frame_uploads),
+                    max_upload.max(stats.max_upload),
+                )
+            },
+        )
     }
 
     fn poll_group_callbacks(&mut self, group: usize) -> Result<(), Box<dyn std::error::Error>> {
@@ -2309,21 +2503,21 @@ impl PersistentCpuScene {
             .values()
             .filter_map(|(geometry, handle)| {
                 let buffer = self.buffers.get(handle)?;
-                Some(sophia_backend_live::LiveCpuCompositionLayer {
+                Some(sophia_backend_live::LiveCpuCompositionLayerRef {
                     geometry: *geometry,
-                    buffer: sophia_backend_live::LiveCpuBufferSource {
+                    buffer: sophia_backend_live::LiveCpuBufferSourceRef {
                         handle: buffer.handle,
                         size: buffer.size,
                         stride: buffer.stride,
                         format: buffer.format,
                         generation: buffer.generation,
-                        bytes: buffer.bytes.clone(),
+                        bytes: &buffer.bytes,
                     },
                 })
             })
             .collect::<Vec<_>>();
         self.last_report = Some(
-            sophia_backend_live::compose_live_cpu_frame(self.output_size, &layers)
+            sophia_backend_live::compose_live_cpu_frame_ref(self.output_size, &layers)
                 .map_err(|error| format!("persistent CPU composition failed: {error:?}"))?,
         );
         let nonzero_pixel_bytes = self
@@ -2351,7 +2545,7 @@ impl PersistentCpuScene {
     fn frames_for_outputs(
         &self,
         outputs: &[sophia_engine::HeadlessOutput],
-    ) -> Result<Vec<sophia_backend_live::LiveCpuComposedFrame>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<ObservedComposedFrame>, Box<dyn std::error::Error>> {
         let primary = self
             .last_report
             .as_ref()
@@ -2359,7 +2553,11 @@ impl PersistentCpuScene {
         let mut frames = Vec::with_capacity(outputs.len());
         for (index, output) in outputs.iter().enumerate() {
             if index == 0 && output.size == primary.frame.size {
-                frames.push(primary.frame.clone());
+                frames.push(ObservedComposedFrame {
+                    frame: primary.frame.clone(),
+                    checksum: primary.checksum,
+                    nonzero_pixel_bytes: primary.nonzero_pixel_bytes,
+                });
                 continue;
             }
             let marker_size = Size {
@@ -2388,11 +2586,13 @@ impl PersistentCpuScene {
                     bytes: vec![marker_byte; marker_stride.saturating_mul(marker_height)],
                 },
             };
-            frames.push(
-                sophia_backend_live::compose_live_cpu_frame(output.size, &[marker])
-                    .map_err(|error| format!("secondary output composition failed: {error:?}"))?
-                    .frame,
-            );
+            let report = sophia_backend_live::compose_live_cpu_frame(output.size, &[marker])
+                .map_err(|error| format!("secondary output composition failed: {error:?}"))?;
+            frames.push(ObservedComposedFrame {
+                frame: report.frame,
+                checksum: report.checksum,
+                nonzero_pixel_bytes: report.nonzero_pixel_bytes,
+            });
         }
         Ok(frames)
     }
@@ -2442,10 +2642,8 @@ struct PhysicalInputRouteReport {
     emergency_exit: bool,
 }
 
-fn route_physical_input(
-    poller: &mut sophia_backend_live::NativeLibinputEventPoller<
-        sophia_backend_live::NativeLibinputEventReader,
-    >,
+fn route_physical_input<P: NonBlockingInputPoller>(
+    poller: &mut P,
     focus: &InputFocusState,
     committed_surfaces: &[CommittedSurfaceState],
     input_layers: &[LayerSnapshot],

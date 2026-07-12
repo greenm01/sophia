@@ -18,7 +18,7 @@ if grep -q 'libinput error: .*event processing lagging' "$EVIDENCE_FILE"; then
     exit 1
 fi
 
-mapfile -t completion_lines < <(grep '^sophia_live_session schema=8 status=bounded_complete ' "$EVIDENCE_FILE" || true)
+mapfile -t completion_lines < <(grep '^sophia_live_session schema=9 status=bounded_complete ' "$EVIDENCE_FILE" || true)
 mapfile -t compat_lines < <(grep '^sophia_xlibre_compat schema=2 status=complete ' "$EVIDENCE_FILE" || true)
 if [[ "${#completion_lines[@]}" -ne 1 || "${#compat_lines[@]}" -ne 1 ]]; then
     echo "Kitty latency evidence requires one session and one compatibility completion line" >&2
@@ -34,13 +34,21 @@ for field in "${parts[@]:1}"; do
     session["$key"]="${field#*=}"
 done
 latency="${session[input_presented_latency_msec]:-}"
-if [[ "${session[schema]:-}" != "8" || "${session[status]:-}" != "bounded_complete" \
+if [[ "${session[schema]:-}" != "9" || "${session[status]:-}" != "bounded_complete" \
     || "${session[input_pixel_change]:-}" != "true" || ! "$latency" =~ ^[0-9]+$ ]]; then
     echo "Kitty latency evidence is missing a presented input pixel change" >&2
     exit 1
 fi
 if (( latency > MAX_LATENCY_MSEC )); then
     echo "Kitty presented input latency ${latency}ms exceeds ${MAX_LATENCY_MSEC}ms" >&2
+    exit 1
+fi
+session_timing=(cpu_max_compose_msec input_dispatch_max_gap_msec input_queue_max_depth input_queue_dwell_max_msec)
+for key in "${session_timing[@]}"; do
+    [[ "${session[$key]:-}" =~ ^[0-9]+$ ]] || { echo "invalid session timing field: $key" >&2; exit 1; }
+done
+if (( session[cpu_max_compose_msec] > 25 )); then
+    echo "Kitty CPU composition exceeded 25ms" >&2
     exit 1
 fi
 
@@ -70,18 +78,33 @@ if (( compat[max_readback_bytes] > MAX_READBACK_BYTES )); then
     echo "Kitty readback ${compat[max_readback_bytes]} bytes exceeds the 1280x720 XRGB budget" >&2
     exit 1
 fi
+if (( compat[max_capture_msec] > 30 )); then
+    echo "Kitty MIT-SHM capture exceeded 30ms" >&2
+    exit 1
+fi
 
 if [[ "${session[native_presentation]:-disabled}" == "enabled" ]]; then
-    native_numeric=(native_submissions native_submit_failures native_retirements native_retire_failures native_callback_rejected native_callback_queue_saturated)
+    native_numeric=(native_submissions native_submit_failures native_retirements native_retire_failures native_callback_rejected native_callback_queue_saturated native_max_submit_to_page_flip_msec native_max_upload_msec native_target_creations native_target_recreations native_pipeline_creations native_frame_uploads)
     for key in "${native_numeric[@]}"; do
         [[ "${session[$key]:-}" =~ ^[0-9]+$ ]] || { echo "invalid native field: $key" >&2; exit 1; }
     done
     if (( session[native_submissions] == 0 || session[native_retirements] == 0 \
         || session[native_submit_failures] != 0 || session[native_retire_failures] != 0 \
-        || session[native_callback_rejected] != 0 || session[native_callback_queue_saturated] != 0 )) \
+        || session[native_callback_rejected] != 0 || session[native_callback_queue_saturated] != 0 \
+        || session[native_max_submit_to_page_flip_msec] > 100 \
+        || session[native_max_upload_msec] > 50 \
+        || session[native_target_creations] != 1 \
+        || session[native_target_recreations] != 0 \
+        || session[native_pipeline_creations] != 1 \
+        || session[native_frame_uploads] == 0 )) \
         || [[ "${session[native_in_flight]:-}" != "false" \
             || "${session[native_cleanup_pending]:-}" != "false" ]]; then
         echo "Kitty native scanout evidence did not finish cleanly" >&2
+        exit 1
+    fi
+    if (( session[input_dispatch_max_gap_msec] > 20 \
+        || session[input_queue_dwell_max_msec] > 25 )); then
+        echo "Kitty physical input acquisition exceeded its latency budget" >&2
         exit 1
     fi
 fi

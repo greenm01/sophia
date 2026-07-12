@@ -44,6 +44,10 @@ impl NativeLibinputEventReader {
         &mut self.libinput
     }
 
+    pub(crate) fn libinput_mut_ref(&self) -> &input::Libinput {
+        &self.libinput
+    }
+
     fn next_serial(&mut self) -> u64 {
         let serial = self.next_serial;
         self.next_serial = self.next_serial.saturating_add(1);

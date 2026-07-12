@@ -89,10 +89,30 @@ pub struct NativeGbmRenderedScanoutContext<T: AsFd> {
     inner: sophia_renderer_native_egl::NativeGbmRenderedScanoutContext<T>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct LiveNativePersistentRenderStats {
+    pub target_creations: usize,
+    pub target_recreations: usize,
+    pub gl_pipeline_creations: usize,
+    pub frame_uploads: usize,
+    pub max_upload: std::time::Duration,
+}
+
 impl<T> NativeGbmRenderedScanoutContext<T>
 where
     T: AsFd,
 {
+    pub fn persistent_render_stats(&self) -> LiveNativePersistentRenderStats {
+        let stats = self.inner.persistent_render_stats();
+        LiveNativePersistentRenderStats {
+            target_creations: stats.target_creations,
+            target_recreations: stats.target_recreations,
+            gl_pipeline_creations: stats.gl_pipeline_creations,
+            frame_uploads: stats.frame_uploads,
+            max_upload: stats.max_upload,
+        }
+    }
+
     pub fn from_backend_device_result(
         device: std::io::Result<T>,
     ) -> NativeGbmRenderedScanoutContextReport<T> {
@@ -149,7 +169,7 @@ where
     }
 
     pub fn export_xrgb8888_owned_scanout_buffer_with_modifiers(
-        &self,
+        &mut self,
         target: LiveGbmEglFrameTargetRecord,
         frame: &crate::LiveCpuComposedFrame,
         preferred_modifiers: &[u64],
