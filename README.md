@@ -237,7 +237,9 @@ visual gate remains.
 An explicitly temporary XLibre compatibility provider can also run unmodified
 Kitty through software GL and XComposite readback. Its headless gate produces
 readable nonzero Kitty pixels and proves injected text changes a later composed
-frame; Sophia still owns input routing, composition, and scanout.
+frame. The bridge uses reusable MIT-SHM readback, fixes Kitty at 1280x720, and
+rejects degraded XGetImage fallback for interactive-latency evidence; Sophia
+still owns input routing, composition, and scanout.
 The remaining hardware gap is VRR: the current eDP connector
 exposes `vrr_capable` and its CRTC exposes `VRR_ENABLED`, but capability is `0`,
 so activation evidence requires a different display.

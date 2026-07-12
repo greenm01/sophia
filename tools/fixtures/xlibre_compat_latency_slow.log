@@ -1,2 +1,2 @@
 sophia_live_session schema=8 status=bounded_complete input_pixel_change=true input_presented_latency_msec=101
-sophia_xlibre_compat schema=1 status=complete full_readbacks=1 patch_readbacks=3 bytes_read=4100000 max_capture_msec=18 keys_injected=14 max_inject_msec=1
+sophia_xlibre_compat schema=2 status=complete capture_path=mit_shm shm_fallbacks=0 full_readbacks=1 patch_readbacks=3 bytes_read=4100000 max_readback_bytes=3686400 max_capture_msec=18 keys_injected=14 max_inject_msec=1

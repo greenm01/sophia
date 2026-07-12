@@ -263,6 +263,12 @@ setsid env \
     --client="${SOPHIA_KITTY_BIN:-kitty}" \
     --client-arg=-o \
     --client-arg=linux_display_server=x11 \
+    --client-arg=-o \
+    --client-arg=remember_window_size=no \
+    --client-arg=-o \
+    --client-arg=initial_window_width=1280 \
+    --client-arg=-o \
+    --client-arg=initial_window_height=720 \
     --native-scanout \
     --input-devices="$keyboard" \
     "$@" >"$SESSION_LOG" 2>&1 &

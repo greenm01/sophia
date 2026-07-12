@@ -11,7 +11,7 @@ use sophia_protocol::{AuthorityKind, SurfaceTransactionReadiness};
 use sophia_x_authority::{
     XAuthorityControlAck, XAuthorityControlCommand, XAuthorityControlOutcome, XAuthorityInputEvent,
 };
-use sophia_x_bridge::{LiveCompositeCapture, LiveXTestInput};
+use sophia_x_bridge::{LiveCompositeCapture, LiveReadbackPath, LiveXTestInput};
 
 const COMPAT_CAPTURE_INTERVAL: Duration = Duration::from_millis(16);
 
@@ -21,12 +21,29 @@ struct CompatInputStats {
     max_inject: Duration,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 struct CompatCaptureStats {
     full_readbacks: usize,
     patch_readbacks: usize,
     bytes_read: usize,
     max_capture: Duration,
+    readback_path: LiveReadbackPath,
+    shm_fallbacks: usize,
+    max_readback_bytes: usize,
+}
+
+impl Default for CompatCaptureStats {
+    fn default() -> Self {
+        Self {
+            full_readbacks: 0,
+            patch_readbacks: 0,
+            bytes_read: 0,
+            max_capture: Duration::ZERO,
+            readback_path: LiveReadbackPath::GetImageDegraded,
+            shm_fallbacks: 0,
+            max_readback_bytes: 0,
+        }
+    }
 }
 
 pub(crate) fn run_persistent_xlibre_session(
@@ -188,10 +205,13 @@ fn run_compat_provider(
     let capture_stats = capture_result?;
     let input_stats = input_result?;
     println!(
-        "sophia_xlibre_compat schema=1 status=complete full_readbacks={} patch_readbacks={} bytes_read={} max_capture_msec={} keys_injected={} max_inject_msec={}",
+        "sophia_xlibre_compat schema=2 status=complete capture_path={} shm_fallbacks={} full_readbacks={} patch_readbacks={} bytes_read={} max_readback_bytes={} max_capture_msec={} keys_injected={} max_inject_msec={}",
+        capture_stats.readback_path.evidence_name(),
+        capture_stats.shm_fallbacks,
         capture_stats.full_readbacks,
         capture_stats.patch_readbacks,
         capture_stats.bytes_read,
+        capture_stats.max_readback_bytes,
         capture_stats.max_capture.as_millis(),
         input_stats.keys_injected,
         input_stats.max_inject.as_millis(),
@@ -273,6 +293,9 @@ fn run_compat_capture_provider(
         let capture_started = Instant::now();
         let captured = capture.capture()?;
         stats.max_capture = stats.max_capture.max(capture_started.elapsed());
+        stats.readback_path = captured.readback_path;
+        stats.shm_fallbacks = captured.shm_fallbacks;
+        stats.max_readback_bytes = captured.max_readback_bytes;
         for update in &captured.updates {
             stats.bytes_read = stats.bytes_read.saturating_add(update.byte_len());
             match update {

@@ -9,10 +9,9 @@ use x11rb::protocol::xtest::ConnectionExt as _;
 use x11rb::rust_connection::RustConnection;
 
 use super::{
-    create_damage_trackers, detect_client_hints, import_root_window_tree_from_connection,
-    intern_client_hint_atoms, layers_from_surfaces, map_surface_cpu_buffers,
-    name_composite_pixmaps, readback_composite_pixmap, readback_composite_pixmap_patch,
-    redirect_composite_targets,
+    LiveReadbackBackend, create_damage_trackers, detect_client_hints,
+    import_root_window_tree_from_connection, intern_client_hint_atoms, layers_from_surfaces,
+    map_surface_cpu_buffers, name_composite_pixmaps, redirect_composite_targets,
 };
 use crate::prelude::{Rect, XWindowId};
 use crate::{
@@ -37,6 +36,7 @@ pub struct LiveCompositeCapture {
     surfaces: SurfaceIdMap,
     buffers: CpuBufferStore,
     focused_window: Option<u32>,
+    readback: LiveReadbackBackend,
 }
 
 pub struct LiveXTestInput {
@@ -96,6 +96,7 @@ impl LiveCompositeCapture {
             x11rb::connect(display_name).map_err(|error| XBridgeError::Connect {
                 message: error.to_string(),
             })?;
+        let readback = LiveReadbackBackend::negotiate(&connection);
         Ok(Self {
             connection,
             screen_num,
@@ -106,6 +107,7 @@ impl LiveCompositeCapture {
             surfaces: SurfaceIdMap::default(),
             buffers: CpuBufferStore::default(),
             focused_window: None,
+            readback,
         })
     }
 
@@ -242,13 +244,13 @@ impl LiveCompositeCapture {
             let replace_for_damage =
                 damage_rect.is_some_and(|rect| damage_requires_full_replacement(rect, geometry));
             if full_replacement || replace_for_damage {
-                updates.push(LiveCpuBufferUpdate::Replace(readback_composite_pixmap(
+                updates.push(LiveCpuBufferUpdate::Replace(self.readback.read_full(
                     &self.connection,
                     pixmap,
                     &mut self.buffers,
                 )?));
             } else if let Some(rect) = damage_rect {
-                updates.push(LiveCpuBufferUpdate::Patch(readback_composite_pixmap_patch(
+                updates.push(LiveCpuBufferUpdate::Patch(self.readback.read_patch(
                     &self.connection,
                     pixmap,
                     rect,
@@ -272,7 +274,16 @@ impl LiveCompositeCapture {
             surfaces,
             layers,
             updates,
+            readback_path: self.readback.path(),
+            shm_fallbacks: self.readback.shm_fallbacks(),
+            max_readback_bytes: self.readback.max_readback_bytes(),
         })
+    }
+}
+
+impl Drop for LiveCompositeCapture {
+    fn drop(&mut self) {
+        self.readback.detach(&self.connection);
     }
 }
 

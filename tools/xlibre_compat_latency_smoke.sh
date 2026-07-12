@@ -8,6 +8,9 @@ XORG_BIN="${SOPHIA_XLIBRE_XORG:-/usr/libexec/Xorg}"
 MODULE_PATH="${SOPHIA_XLIBRE_MODULE_PATH:-/usr/lib/xorg/modules/xlibre-25}"
 STATE_DIR="$(mktemp -d /tmp/sophia-xlibre-latency.XXXXXX)"
 XORG_PID=""
+CLIENT_KIND="${SOPHIA_XLIBRE_LATENCY_CLIENT:-xterm}"
+VERIFIER="${SOPHIA_XLIBRE_LATENCY_VERIFIER:-tools/verify_xlibre_compat_latency_evidence.sh}"
+EXPECT_VERIFIER_REJECTION="${SOPHIA_XLIBRE_EXPECT_VERIFIER_REJECTION:-0}"
 
 cleanup() {
     if [[ -n "$XORG_PID" ]] && kill -0 "$XORG_PID" 2>/dev/null; then
@@ -22,7 +25,7 @@ if [[ ! "$DISPLAY_NAME" =~ ^:[0-9]+$ ]]; then
     echo "SOPHIA_XLIBRE_LATENCY_DISPLAY must have the form :NUMBER" >&2
     exit 1
 fi
-for command in cargo cvt xdpyinfo xterm; do
+for command in cargo cvt xdpyinfo "$CLIENT_KIND"; do
     if ! command -v "$command" >/dev/null 2>&1; then
         echo "missing required command: $command" >&2
         exit 1
@@ -72,10 +75,15 @@ EOF
 cd "$ROOT_DIR"
 cargo build --release --offline -q -p sophia-cli --features atomic-scanout-live
 
+xorg_extension_args=()
+if [[ "${SOPHIA_XLIBRE_DISABLE_SHM:-0}" == "1" ]]; then
+    xorg_extension_args=(-extension MIT-SHM)
+fi
 "$XORG_BIN" "$DISPLAY_NAME" \
     -config "$STATE_DIR/xorg.conf" \
     -ac -nolisten tcp -novtswitch -sharevts \
     -modulepath "$MODULE_PATH" \
+    "${xorg_extension_args[@]}" \
     -logfile "$STATE_DIR/Xorg.log" >"$STATE_DIR/Xorg.stdout.log" 2>&1 &
 XORG_PID=$!
 ready=false
@@ -96,11 +104,25 @@ if [[ "$ready" != true ]]; then
 fi
 
 mkdir -p "$(dirname "$EVIDENCE_FILE")"
+client_args=()
+if [[ "$CLIENT_KIND" == "kitty" ]]; then
+    client_args=(
+        --client-arg=-o
+        --client-arg=linux_display_server=x11
+        --client-arg=-o
+        --client-arg=remember_window_size=no
+        --client-arg=-o
+        --client-arg=initial_window_width=1280
+        --client-arg=-o
+        --client-arg=initial_window_height=720
+    )
+fi
 set +e
 target/release/sophia sophia-live-session \
     --client-backend=xlibre-compat \
     --compat-display="$DISPLAY_NAME" \
-    --client=xterm \
+    --client="$CLIENT_KIND" \
+    "${client_args[@]}" \
     --max-runtime-ms=6000 \
     --inject-text=sophia \
     --exit-after-input-proof 2>&1 | tee "$EVIDENCE_FILE"
@@ -110,4 +132,13 @@ if [[ "$status" -ne 0 ]]; then
     exit "$status"
 fi
 
-tools/verify_xlibre_compat_latency_evidence.sh "$EVIDENCE_FILE"
+if [[ "$EXPECT_VERIFIER_REJECTION" == "1" ]]; then
+    if "$VERIFIER" "$EVIDENCE_FILE" >/dev/null 2>&1; then
+        echo "interactive verifier unexpectedly accepted degraded capture evidence" >&2
+        exit 1
+    fi
+    grep -q '^sophia_xlibre_compat schema=2 status=complete capture_path=get_image_degraded ' "$EVIDENCE_FILE"
+    echo "XLibre degraded GetImage fallback remained operational and was rejected for interactive latency"
+else
+    "$VERIFIER" "$EVIDENCE_FILE"
+fi

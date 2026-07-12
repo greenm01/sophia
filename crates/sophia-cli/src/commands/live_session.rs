@@ -607,12 +607,14 @@ struct PersistentLiveLayout {
     pending: Option<PendingLiveWmLayout>,
     focus_to_apply: Option<(TransactionId, SurfaceId)>,
     stage_new_surfaces_offset: bool,
+    center_first_surface_in: Option<Size>,
 }
 
 impl PersistentLiveLayout {
-    fn new(stage_new_surfaces_offset: bool) -> Self {
+    fn new(stage_new_surfaces_offset: bool, center_first_surface_in: Option<Size>) -> Self {
         Self {
             stage_new_surfaces_offset,
+            center_first_surface_in,
             ..Self::default()
         }
     }
@@ -641,6 +643,8 @@ impl PersistentLiveLayout {
                     if self.stage_new_surfaces_offset {
                         geometry.x = geometry.x.saturating_add(80);
                         geometry.y = geometry.y.saturating_add(60);
+                    } else if let Some(output) = self.center_first_surface_in.take() {
+                        geometry = center_geometry_without_scaling(geometry, output);
                     }
                     self.layers.insert(
                         transaction.surface,
@@ -819,6 +823,12 @@ impl PersistentLiveLayout {
     }
 }
 
+fn center_geometry_without_scaling(mut geometry: Rect, output: Size) -> Rect {
+    geometry.x = output.width.saturating_sub(geometry.width).max(0) / 2;
+    geometry.y = output.height.saturating_sub(geometry.height).max(0) / 2;
+    geometry
+}
+
 fn output_bounds(output: sophia_engine::HeadlessOutput) -> Rect {
     Rect {
         x: 0,
@@ -919,7 +929,10 @@ fn run_session_loop(
         .unwrap_or_else(|| vec![sophia_engine::HeadlessOutput::deterministic()]);
     let output = outputs[0];
     let mut scene = PersistentCpuScene::new(output.size);
-    let mut layout = PersistentLiveLayout::new(wm_session.is_some());
+    let mut layout = PersistentLiveLayout::new(
+        wm_session.is_some(),
+        require_startup_focus.then_some(output.size),
+    );
     let mut runtime = None;
     let mut last_authority_update = started;
     let mut injection_checksum = None;
@@ -2629,5 +2642,50 @@ impl SessionProcessGuard {
 impl Drop for SessionProcessGuard {
     fn drop(&mut self) {
         let _ = self.terminate();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Rect, Size, center_geometry_without_scaling};
+
+    #[test]
+    fn compatibility_surface_is_centered_without_resizing() {
+        let geometry = center_geometry_without_scaling(
+            Rect {
+                x: 19,
+                y: 27,
+                width: 800,
+                height: 600,
+            },
+            Size {
+                width: 1280,
+                height: 720,
+            },
+        );
+        assert_eq!(geometry.x, 240);
+        assert_eq!(geometry.y, 60);
+        assert_eq!(geometry.width, 800);
+        assert_eq!(geometry.height, 600);
+    }
+
+    #[test]
+    fn oversized_compatibility_surface_keeps_size_and_anchors_at_origin() {
+        let geometry = center_geometry_without_scaling(
+            Rect {
+                x: 19,
+                y: 27,
+                width: 1920,
+                height: 1080,
+            },
+            Size {
+                width: 1280,
+                height: 720,
+            },
+        );
+        assert_eq!(geometry.x, 0);
+        assert_eq!(geometry.y, 0);
+        assert_eq!(geometry.width, 1920);
+        assert_eq!(geometry.height, 1080);
     }
 }

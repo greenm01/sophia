@@ -18,7 +18,7 @@ if grep -q 'libinput error: .*event processing lagging' "$EVIDENCE_FILE"; then
 fi
 
 mapfile -t completion_lines < <(grep '^sophia_live_session schema=8 status=bounded_complete ' "$EVIDENCE_FILE" || true)
-mapfile -t compat_lines < <(grep '^sophia_xlibre_compat schema=1 status=complete ' "$EVIDENCE_FILE" || true)
+mapfile -t compat_lines < <(grep '^sophia_xlibre_compat schema=2 status=complete ' "$EVIDENCE_FILE" || true)
 if [[ "${#completion_lines[@]}" -ne 1 || "${#compat_lines[@]}" -ne 1 ]]; then
     echo "XLibre latency evidence requires one session and one compatibility completion line" >&2
     exit 1
@@ -57,15 +57,16 @@ for field in "${parts[@]:1}"; do
     fi
     compat["$key"]="${field#*=}"
 done
-numeric=(full_readbacks patch_readbacks bytes_read max_capture_msec keys_injected max_inject_msec)
+numeric=(shm_fallbacks full_readbacks patch_readbacks bytes_read max_readback_bytes max_capture_msec keys_injected max_inject_msec)
 for key in "${numeric[@]}"; do
     if [[ ! "${compat[$key]:-}" =~ ^[0-9]+$ ]]; then
         echo "XLibre latency evidence has invalid $key" >&2
         exit 1
     fi
 done
-if [[ "${compat[schema]:-}" != "1" || "${compat[status]:-}" != "complete" \
-    || "${#compat[@]}" -ne 8 ]]; then
+if [[ "${compat[schema]:-}" != "2" || "${compat[status]:-}" != "complete" \
+    || "${compat[capture_path]:-}" != "mit_shm" || "${compat[shm_fallbacks]}" != "0" \
+    || "${#compat[@]}" -ne 11 ]]; then
     echo "XLibre latency evidence has unknown or missing compatibility fields" >&2
     exit 1
 fi

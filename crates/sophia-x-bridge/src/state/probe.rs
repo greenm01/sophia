@@ -135,6 +135,24 @@ pub struct LiveCompositeCaptureFrame {
     pub surfaces: Vec<SurfaceSnapshot>,
     pub layers: Vec<LayerSnapshot>,
     pub updates: Vec<LiveCpuBufferUpdate>,
+    pub readback_path: LiveReadbackPath,
+    pub shm_fallbacks: usize,
+    pub max_readback_bytes: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveReadbackPath {
+    MitShm,
+    GetImageDegraded,
+}
+
+impl LiveReadbackPath {
+    pub const fn evidence_name(self) -> &'static str {
+        match self {
+            Self::MitShm => "mit_shm",
+            Self::GetImageDegraded => "get_image_degraded",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

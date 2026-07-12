@@ -77,13 +77,19 @@ tools/build_qemu_session_initramfs.sh
 tools/qemu_session_harness.sh
 SOPHIA_QEMU_SCENARIO=emergency-recovery tools/qemu_session_harness.sh
 tools/xlibre_compat_latency_smoke.sh
+tools/xlibre_kitty_latency_smoke.sh
+tools/xlibre_compat_shm_fallback_smoke.sh
 ```
 
 The XLibre latency smoke is non-destructive: it uses a dummy XLibre display,
 routes synthetic text over the compatibility XTEST connection, and requires a
 damage patch plus presented pixel latency of at most 100 milliseconds. The
+Kitty variant uses software GL, reusable MIT-SHM readback, and a fixed 1280x720
+window; it requires each readback to remain within the 1280x720 XRGB budget.
+The fallback smoke disables MIT-SHM and proves that degraded XGetImage capture
+keeps the session operational while the interactive verifier rejects it. The
 guarded physical Kitty proof must meet the same latency limit without a
-libinput processing-lag warning.
+libinput processing-lag warning and must drain native scanout cleanly.
 
 The emergency-recovery QEMU scenario starts the independent input guard, sends
 one complete Ctrl-Alt-Backspace chord to arm it, waits for the live virtual

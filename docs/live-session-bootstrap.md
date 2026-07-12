@@ -140,12 +140,17 @@ Arm the guard as prompted, then type `sophia` followed by Enter once Kitty is
 visible. After the TTY is restored, verify the persistent evidence with:
 
 ```sh
-tools/verify_xlibre_compat_latency_evidence.sh \
+tools/verify_xlibre_kitty_latency_evidence.sh \
   "${XDG_STATE_HOME:-$HOME/.local/state}/sophia/kitty-session/session.log"
 ```
 
-The gate requires damage-patch capture, no libinput processing-lag warning,
+The launcher disables Kitty's remembered window size, requests a 1280x720 X11
+window, and centers the first compatibility surface without scaling it. The
+gate requires an unfallbacked MIT-SHM capture path, no readback larger than
+1280x720 XRGB, no libinput processing-lag warning, clean native-scanout drain,
 and input pixels presented within 100 milliseconds of the final proof key.
+Ordinary XGetImage remains available as a degraded diagnostic path, but its
+evidence is intentionally rejected by this interactive gate.
 
 XLibre receives no physical devices and does not own scanout. Engine routes
 physical keys to the focused opaque surface; the compatibility adapter delivers
