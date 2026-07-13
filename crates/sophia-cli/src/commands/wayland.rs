@@ -20,6 +20,7 @@ const DEFAULT_OUTPUT_SIZE: Size = Size {
     width: 1280,
     height: 720,
 };
+const WAYLAND_EVENT_LOOP_IDLE_SLEEP: Duration = Duration::from_millis(1);
 
 pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
     if !args.iter().any(|arg| arg == "sophia-wayland-session") {
@@ -507,7 +508,7 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                 }
             }
         }
-        std::thread::sleep(Duration::from_millis(2));
+        std::thread::sleep(WAYLAND_EVENT_LOOP_IDLE_SLEEP);
     }
 
     terminate_client(&mut child)?;
