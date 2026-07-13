@@ -109,3 +109,57 @@ fn borrowed_composition_clips_negative_geometry_by_rows() {
     assert_eq!(&report.frame.bytes[..8], &[0x33; 8]);
     assert!(report.frame.bytes[8..16].iter().all(|byte| *byte == 0));
 }
+
+#[test]
+fn cpu_composition_checksum_changes_with_a_single_byte() {
+    let size = Size {
+        width: 2,
+        height: 1,
+    };
+    let baseline = [0x5a; 8];
+    let mut changed = baseline;
+    changed[7] ^= 0xff;
+    let first = compose_live_cpu_frame_ref(
+        size,
+        &[LiveCpuCompositionLayerRef {
+            geometry: Rect {
+                x: 0,
+                y: 0,
+                width: 2,
+                height: 1,
+            },
+            buffer: LiveCpuBufferSourceRef {
+                handle: 13,
+                size,
+                stride: 8,
+                format: LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+                generation: 1,
+                bytes: &baseline,
+            },
+        }],
+    )
+    .unwrap();
+    let second = compose_live_cpu_frame_ref(
+        size,
+        &[LiveCpuCompositionLayerRef {
+            geometry: Rect {
+                x: 0,
+                y: 0,
+                width: 2,
+                height: 1,
+            },
+            buffer: LiveCpuBufferSourceRef {
+                handle: 13,
+                size,
+                stride: 8,
+                format: LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+                generation: 1,
+                bytes: &changed,
+            },
+        }],
+    )
+    .unwrap();
+    assert_eq!(first.nonzero_pixel_bytes, 8);
+    assert_eq!(second.nonzero_pixel_bytes, 8);
+    assert_ne!(first.checksum, second.checksum);
+}

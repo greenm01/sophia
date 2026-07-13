@@ -129,15 +129,7 @@ pub fn compose_live_cpu_frame_ref(
             }
         }
     }
-    let (nonzero_pixel_bytes, checksum) = frame.bytes.iter().fold(
-        (0usize, 0xcbf2_9ce4_8422_2325u64),
-        |(nonzero, hash), byte| {
-            (
-                nonzero.saturating_add(usize::from(*byte != 0)),
-                (hash ^ u64::from(*byte)).wrapping_mul(0x100_0000_01b3),
-            )
-        },
-    );
+    let (nonzero_pixel_bytes, checksum) = cpu_frame_metrics(&frame.bytes);
     Ok(LiveCpuCompositionReport {
         frame,
         layers_input: layers.len(),
@@ -145,6 +137,31 @@ pub fn compose_live_cpu_frame_ref(
         nonzero_pixel_bytes,
         checksum,
     })
+}
+
+fn cpu_frame_metrics(bytes: &[u8]) -> (usize, u64) {
+    // The checksum is an in-process change detector, not a wire format. Hash
+    // whole pixels' storage words so full-screen terminal frames do not pay a
+    // serial multiply for every byte. Keep the exact nonzero-byte count for
+    // the existing presentation evidence.
+    let mut checksum = 0xcbf2_9ce4_8422_2325u64;
+    let mut nonzero_pixel_bytes = 0usize;
+    let mut words = bytes.chunks_exact(std::mem::size_of::<u64>());
+    for word_bytes in words.by_ref() {
+        nonzero_pixel_bytes = nonzero_pixel_bytes.saturating_add(
+            word_bytes
+                .iter()
+                .map(|byte| usize::from(*byte != 0))
+                .sum::<usize>(),
+        );
+        let word = u64::from_le_bytes(word_bytes.try_into().expect("exact u64 chunk"));
+        checksum = (checksum ^ word).wrapping_mul(0x100_0000_01b3);
+    }
+    for byte in words.remainder() {
+        nonzero_pixel_bytes = nonzero_pixel_bytes.saturating_add(usize::from(*byte != 0));
+        checksum = (checksum ^ u64::from(*byte)).wrapping_mul(0x100_0000_01b3);
+    }
+    (nonzero_pixel_bytes, checksum)
 }
 
 fn compose_layer(frame: &mut LiveCpuComposedFrame, layer: &LiveCpuCompositionLayerRef<'_>) -> bool {
