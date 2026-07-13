@@ -130,6 +130,11 @@ discovers the stable keyboard and pointer aliases, runs the three-frame and
 Use `--dry-run` from any shell to inspect discovery without opening input or DRM
 devices.
 
+On Void Linux, `tools/setup_void_dmabuf_promotion.sh` installs the required
+development packages and then starts that operator entry point. Use
+`--dry-run` to install dependencies and inspect device discovery only, or
+`--skip-install` when the packages are already present.
+
 The archived XLibre latency smoke used a dummy XLibre display,
 routes synthetic text over the compatibility XTEST connection, and requires a
 damage patch plus presented pixel latency of at most 100 milliseconds. The

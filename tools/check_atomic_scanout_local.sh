@@ -31,6 +31,7 @@ bash -n tools/finish_wayland_kitty_milestones.sh
 bash -n tools/build_wayland_dmabuf_producer.sh
 bash -n tools/wayland_dmabuf_first_frame_hardware_proof.sh
 bash -n tools/wayland_kitty_dmabuf_promotion_gate.sh
+bash -n tools/setup_void_dmabuf_promotion.sh
 bash -n tools/verify_wayland_kitty_evidence.sh
 bash -n tools/install_sophia_session.sh
 dmabuf_producer_check="$(mktemp /tmp/sophia-wayland-dmabuf-producer-check.XXXXXX)"
