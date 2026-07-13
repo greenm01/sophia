@@ -11,7 +11,7 @@ export SOPHIA_LIVE_SESSION_PERSISTENT_EVIDENCE="$EVIDENCE_FILE"
 export SOPHIA_LIVE_SESSION_RUNTIME_MSEC
 "$ROOT_DIR/tools/live_session_persistent_hardware_proof.sh" --secondary-terminal "$@"
 
-line="$(grep -E '^sophia_live_session schema=9 status=bounded_complete ' "$EVIDENCE_FILE" | tail -n 1 || true)"
+line="$(grep -E '^sophia_live_session schema=10 status=bounded_complete ' "$EVIDENCE_FILE" | tail -n 1 || true)"
 if [[ -z "$line" ]]; then
     echo "two-xterm proof is missing the persistent-session completion record" >&2
     exit 1
@@ -28,4 +28,18 @@ if [[ ! "$cpu_layers" =~ ^[0-9]+$ ]] || (( cpu_layers < 2 )); then
     exit 1
 fi
 
-echo "sophia_two_xterm_hardware_proof status=passed cpu_layers=$cpu_layers evidence=$EVIDENCE_FILE"
+expected=""
+flushed=""
+for field in ${line}; do
+    case "$field" in
+        input_events_expected=*) expected="${field#input_events_expected=}" ;;
+        input_events_flushed=*) flushed="${field#input_events_flushed=}" ;;
+    esac
+done
+if [[ ! "$expected" =~ ^[0-9]+$ ]] || [[ ! "$flushed" =~ ^[0-9]+$ ]] \
+    || (( expected == 0 || flushed != expected )); then
+    echo "two-xterm proof expected every injected X11 event to flush, got expected=${expected:-missing} flushed=${flushed:-missing}" >&2
+    exit 1
+fi
+
+echo "sophia_two_xterm_hardware_proof status=passed cpu_layers=$cpu_layers input_events_flushed=$flushed evidence=$EVIDENCE_FILE"

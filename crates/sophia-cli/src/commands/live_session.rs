@@ -7,8 +7,9 @@ use sophia_engine::{
 };
 use sophia_protocol::{DeviceId, OutputId, SeatId, WmManageSurface};
 use sophia_x_authority::{
-    XAuthorityClientControlAck, XAuthorityClientControlCommand, XAuthorityClientInputEvent,
-    XAuthorityClientSurfaceRoutes, XAuthorityControlCommand, XAuthorityControlOutcome,
+    XAuthorityClientControlAck, XAuthorityClientControlCommand, XAuthorityClientInputDelivery,
+    XAuthorityClientInputEvent, XAuthorityClientSurfaceRoutes, XAuthorityControlCommand,
+    XAuthorityControlOutcome, XAuthorityInputDeliveryId, XAuthorityInputDeliveryOutcome,
     XAuthorityInputEvent, XAuthorityPointerEvent, XAuthorityPointerEventKind, XCoreKeyboardMapper,
     XCorePointerMapper, XServerFrontendRouteBroker, XServerFrontendServiceCommand,
     run_x11_core_socket_server_routed_until_stopped,
@@ -29,6 +30,7 @@ const SESSION_CONTROL_CAPACITY: usize = 32;
 const SESSION_INPUT_QUIET_MSEC: u64 = 500;
 const SESSION_PHYSICAL_SEQUENCE_TIMEOUT_MSEC: u64 = 15_000;
 const SESSION_PHYSICAL_PIXEL_TIMEOUT_MSEC: u64 = 5_000;
+const SESSION_INPUT_DELIVERY_TIMEOUT_MSEC: u64 = 1_000;
 const SESSION_SEAT_RAW: u64 = 1;
 const SESSION_KEYBOARD_DEVICE_RAW: u64 = 1;
 const SESSION_POINTER_DEVICE_RAW: u64 = 2;
@@ -94,9 +96,11 @@ pub(crate) fn run_persistent_xterm_session(
     let server_path = config.socket_path.clone();
     let (authority_sender, authority_receiver) = sync_channel(SESSION_AUTHORITY_CAPACITY);
     let (control_ack_sender, control_ack_receiver) = sync_channel(SESSION_CONTROL_CAPACITY);
-    let broker = XServerFrontendRouteBroker::with_control_ack_sender(
+    let (input_delivery_sender, input_delivery_receiver) = sync_channel(SESSION_KEY_CAPACITY);
+    let broker = XServerFrontendRouteBroker::with_control_and_input_delivery_senders(
         NonZeroUsize::new(SESSION_KEY_CAPACITY).expect("session route capacity is nonzero"),
         control_ack_sender,
+        input_delivery_sender,
     );
     let input_sender = broker.input_sender();
     let control_sender = broker.control_sender();
@@ -209,6 +213,7 @@ pub(crate) fn run_persistent_xterm_session(
         &input_sender,
         &control_sender,
         &control_ack_receiver,
+        &input_delivery_receiver,
         primary_child,
         secondary_children,
         &mut physical_input,
@@ -1089,6 +1094,7 @@ fn run_session_loop(
     input_sender: &SyncSender<XAuthorityClientInputEvent>,
     control_sender: &SyncSender<XAuthorityClientControlCommand>,
     control_ack_receiver: &Receiver<XAuthorityClientControlAck>,
+    input_delivery_receiver: &Receiver<XAuthorityClientInputDelivery>,
     child: &mut Child,
     secondary_children: &mut [Child],
     physical_input: &mut Option<SessionPhysicalInput>,
@@ -1150,6 +1156,17 @@ fn run_session_loop(
     let mut key_observed_reported = false;
     let mut key_routed_reported = false;
     let mut max_compose = Duration::ZERO;
+    let mut next_input_delivery = 1u64;
+    let mut pending_input_deliveries = BTreeSet::new();
+    let mut input_events_expected = 0usize;
+    let mut input_events_flushed = 0usize;
+    let mut input_delivery_wait_started_at: Option<Instant> = None;
+    let mut input_delivery_source: Option<&'static str> = None;
+    let mut input_flush_latency: Option<Duration> = None;
+    let mut post_input_deadline: Option<Instant> = None;
+    let mut terminal_content_baseline: Option<u64> = None;
+    let mut terminal_content_ready = false;
+    let mut terminal_content_ready_reported = false;
 
     macro_rules! drain_physical_input {
         () => {{
@@ -1167,6 +1184,7 @@ fn run_session_loop(
                     &mut modifiers,
                     &mut emergency_chord,
                     &mut pointer,
+                    &mut next_input_delivery,
                     physical_text_proof.as_mut(),
                 )?;
                 physical_events = physical_events.saturating_add(report.events);
@@ -1175,6 +1193,9 @@ fn run_session_loop(
                     physical_pointer_events.saturating_add(report.pointer_events);
                 physical_pointer_routed =
                     physical_pointer_routed.saturating_add(report.pointer_routed);
+                input_events_expected =
+                    input_events_expected.saturating_add(report.deliveries.len());
+                pending_input_deliveries.extend(report.deliveries.iter().copied());
                 if !key_observed_reported && report.keys_observed > 0 {
                     println!("sophia_live_session_input_pipeline schema=1 status=key_observed");
                     std::io::stdout().flush()?;
@@ -1197,7 +1218,8 @@ fn run_session_loop(
                 {
                     let completed_at = Instant::now();
                     physical_sequence_completed_at = Some(completed_at);
-                    input_proof_started_at = Some(completed_at);
+                    input_delivery_wait_started_at = Some(completed_at);
+                    input_delivery_source = Some("physical");
                     // Measure the final proof key against the latest frame that
                     // existed when its complete physical sequence was routed.
                     // Earlier letters must not satisfy the presented-latency
@@ -1218,6 +1240,59 @@ fn run_session_loop(
         }};
     }
 
+    macro_rules! drain_input_deliveries {
+        () => {{
+            while let Ok(delivery) = input_delivery_receiver.try_recv() {
+                if !pending_input_deliveries.remove(&delivery.delivery) {
+                    continue;
+                }
+                match delivery.outcome {
+                    XAuthorityInputDeliveryOutcome::Flushed => {
+                        input_events_flushed = input_events_flushed.saturating_add(1);
+                    }
+                    XAuthorityInputDeliveryOutcome::RouteRejected
+                    | XAuthorityInputDeliveryOutcome::WriteFailed => {
+                        return Err(format!(
+                            "persistent live session X11 input delivery failed: outcome={:?} client={}",
+                            delivery.outcome,
+                            delivery.client.raw(),
+                        )
+                        .into());
+                    }
+                }
+            }
+            if let Some(wait_started) = input_delivery_wait_started_at
+                && !pending_input_deliveries.is_empty()
+                && wait_started.elapsed() >= Duration::from_millis(SESSION_INPUT_DELIVERY_TIMEOUT_MSEC)
+            {
+                return Err(format!(
+                    "persistent live session timed out waiting for X11 input delivery: expected={input_events_expected} flushed={input_events_flushed} pending={}",
+                    pending_input_deliveries.len(),
+                )
+                .into());
+            }
+            if input_delivery_wait_started_at.is_some()
+                && pending_input_deliveries.is_empty()
+                && input_proof_started_at.is_none()
+            {
+                let flushed_at = Instant::now();
+                input_flush_latency = input_delivery_wait_started_at
+                    .map(|started| flushed_at.saturating_duration_since(started));
+                input_proof_started_at = Some(flushed_at);
+                post_input_deadline = Some(
+                    flushed_at + Duration::from_millis(SESSION_PHYSICAL_PIXEL_TIMEOUT_MSEC),
+                );
+                println!(
+                    "sophia_live_session_input_pipeline schema=2 status=key_flushed source={} expected={} flushed={}",
+                    input_delivery_source.unwrap_or("unknown"),
+                    input_events_expected,
+                    input_events_flushed,
+                );
+                std::io::stdout().flush()?;
+            }
+        }};
+    }
+
     'session: loop {
         if let Some(status) = child.try_wait()? {
             if status.success() {
@@ -1234,7 +1309,29 @@ fn run_session_loop(
                 .into());
             }
         }
-        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+        drain_input_deliveries!();
+        if input_presented_latency.is_none()
+            && let Some(post_input_deadline) = post_input_deadline
+            && Instant::now() >= post_input_deadline
+        {
+            if !input_pixel_change {
+                return Err(format!(
+                    "persistent live session timed out waiting for pixels after flushed X11 input: expected={input_events_expected} flushed={input_events_flushed} final_checksum={:?}",
+                    scene.last_report.as_ref().map(|report| report.checksum),
+                )
+                .into());
+            }
+            return Err("persistent live session input pixels were not presented within the post-flush proof window".into());
+        }
+        if (post_input_deadline.is_none() || input_presented_latency.is_some())
+            && deadline.is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            if config.input_proof_requested() && injection_checksum.is_none() {
+                return Err(
+                    "persistent live session startup budget elapsed before a focused terminal frame was ready for input proof"
+                        .into(),
+                );
+            }
             break;
         }
         if drain_physical_input!() {
@@ -1323,7 +1420,9 @@ fn run_session_loop(
                 )
                 .into());
             }
-        } else {
+        } else if input_delivery_wait_started_at.is_none()
+            && (input_proof_started_at.is_none() || input_presented_latency.is_some())
+        {
             if config
                 .max_ticks
                 .is_some_and(|max_ticks| session_ticks >= max_ticks)
@@ -1361,6 +1460,18 @@ fn run_session_loop(
                 let compose_started = Instant::now();
                 let report = scene.compose()?.clone();
                 max_compose = max_compose.max(compose_started.elapsed());
+                if terminal_content_baseline.is_some_and(|baseline| {
+                    report.nonzero_pixel_bytes > 0 && report.checksum != baseline
+                }) {
+                    terminal_content_ready = true;
+                    if !terminal_content_ready_reported {
+                        println!(
+                            "sophia_live_session_input_pipeline schema=1 status=terminal_content_ready"
+                        );
+                        std::io::stdout().flush()?;
+                        terminal_content_ready_reported = true;
+                    }
+                }
                 let native_frames = native_scanout
                     .as_ref()
                     .map(|_| scene.frames_for_outputs(&outputs))
@@ -1438,6 +1549,7 @@ fn run_session_loop(
                                 }
                             })?;
                         focused_client_control = Some((transaction, surface.surface));
+                        terminal_content_baseline = Some(report.checksum);
                     }
                 }
                 if let Some((transaction, surface)) = layout.focus_to_apply.take()
@@ -1450,6 +1562,7 @@ fn run_session_loop(
                     );
                 }
                 if !focus_ready_reported && focus.focused_surface(seat).is_some() {
+                    terminal_content_baseline.get_or_insert(report.checksum);
                     println!("sophia_live_session_input_pipeline schema=1 status=focus_ready");
                     std::io::stdout().flush()?;
                     focus_ready_reported = true;
@@ -1582,10 +1695,10 @@ fn run_session_loop(
             && input_baseline_presented
             && input_start_stable
             && focused_client_ready
+            && terminal_content_ready
         {
             injection_checksum = scene.last_report.as_ref().map(|report| report.checksum);
             if let Some(text) = config.inject_text.as_deref() {
-                input_proof_started_at = Some(Instant::now());
                 let events = synthetic_text_input_events(text)?;
                 let expected = events.len();
                 let runtime = runtime
@@ -1601,6 +1714,7 @@ fn run_session_loop(
                     &mut modifiers,
                     &mut emergency_chord,
                     &mut pointer,
+                    &mut next_input_delivery,
                     None,
                 )?;
                 if report.keys_routed != expected {
@@ -1610,6 +1724,11 @@ fn run_session_loop(
                     )
                     .into());
                 }
+                input_events_expected =
+                    input_events_expected.saturating_add(report.deliveries.len());
+                pending_input_deliveries.extend(report.deliveries.iter().copied());
+                input_delivery_wait_started_at = Some(Instant::now());
+                input_delivery_source = Some("synthetic");
                 if !key_routed_reported {
                     println!(
                         "sophia_live_session_input_pipeline schema=1 status=key_routed source=synthetic"
@@ -1656,7 +1775,7 @@ fn run_session_loop(
         {
             input_presented_latency = Some(started.elapsed());
         }
-        if config.exit_after_input_proof
+        if (config.exit_after_input_proof || config.inject_text.is_some())
             && input_presented_latency.is_some()
             && (config.expect_physical_text.is_none() || physical_input_completion_reported)
             && (!config.expect_physical_pointer || pointer_pixel_change)
@@ -1673,6 +1792,16 @@ fn run_session_loop(
         .last_report
         .as_ref()
         .ok_or("persistent live session received no composable X pixels")?;
+    if config.input_proof_requested() && input_events_expected != input_events_flushed {
+        return Err(format!(
+            "persistent live session completed with unflushed X11 input: expected={input_events_expected} flushed={input_events_flushed} pending={}",
+            pending_input_deliveries.len(),
+        )
+        .into());
+    }
+    if config.input_proof_requested() && input_flush_latency.is_none() {
+        return Err("persistent live session input proof never observed flushed X11 input".into());
+    }
     if config.input_proof_requested() && !input_pixel_change {
         return Err(format!(
             "persistent live session input did not change composed terminal pixels: baseline={injection_checksum:?} final_frame={} final_buffers={} batches={batches} transactions={transactions}",
@@ -1732,7 +1861,7 @@ fn run_session_loop(
         PersistentNativeScanout::persistent_render_metrics,
     );
     println!(
-        "sophia_live_session schema=9 status=bounded_complete display={} elapsed_msec={} session_ticks={} authority_batches={} authority_transactions={} authority_queue_capacity={} authority_batches_dropped=0 backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_max_nonzero_pixel_bytes={} cpu_nonzero_frames={} cpu_checksum={} cpu_max_compose_msec={} injected_input={} input_pixel_change={} input_presented_latency_msec={} input_dispatch_max_gap_msec={} input_queue_max_depth={} input_queue_dwell_max_msec={} physical_events={} physical_keys_routed={} pointer_pixel_change={} physical_pointer_events={} physical_pointer_routed={} pointer_proof={} native_presentation={} native_submissions={} native_submit_deferred={} native_submit_failures={} native_retirements={} native_retire_failures={} native_max_in_flight_ticks={} native_max_submit_to_page_flip_msec={} native_max_upload_msec={} native_target_creations={} native_target_recreations={} native_pipeline_creations={} native_frame_uploads={} native_callback_accepted={} native_callback_rejected={} native_callback_queue_saturated={} native_nonzero_exports={} native_export_attempts={} native_in_flight={} native_cleanup_pending={} physical_input={} wm_policy={} wm_requests={} wm_committed={} wm_restarts={} wm_degraded={}",
+        "sophia_live_session schema=10 status=bounded_complete display={} elapsed_msec={} session_ticks={} authority_batches={} authority_transactions={} authority_queue_capacity={} authority_batches_dropped=0 backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_max_nonzero_pixel_bytes={} cpu_nonzero_frames={} cpu_checksum={} cpu_max_compose_msec={} injected_input={} input_events_expected={} input_events_flushed={} input_flush_latency_msec={} input_pixel_change={} input_presented_latency_msec={} input_dispatch_max_gap_msec={} input_queue_max_depth={} input_queue_dwell_max_msec={} physical_events={} physical_keys_routed={} pointer_pixel_change={} physical_pointer_events={} physical_pointer_routed={} pointer_proof={} native_presentation={} native_submissions={} native_submit_deferred={} native_submit_failures={} native_retirements={} native_retire_failures={} native_max_in_flight_ticks={} native_max_submit_to_page_flip_msec={} native_max_upload_msec={} native_target_creations={} native_target_recreations={} native_pipeline_creations={} native_frame_uploads={} native_callback_accepted={} native_callback_rejected={} native_callback_queue_saturated={} native_nonzero_exports={} native_export_attempts={} native_in_flight={} native_cleanup_pending={} physical_input={} wm_policy={} wm_requests={} wm_committed={} wm_restarts={} wm_degraded={}",
         config.display,
         started.elapsed().as_millis(),
         session_ticks,
@@ -1749,6 +1878,9 @@ fn run_session_loop(
         report.checksum,
         max_compose.as_millis(),
         config.inject_text.is_some(),
+        input_events_expected,
+        input_events_flushed,
+        input_flush_latency.map_or(0, |duration| duration.as_millis()),
         input_pixel_change,
         input_presented_latency
             .map(|latency| latency.as_millis().to_string())
@@ -3474,13 +3606,14 @@ fn synthetic_text_input_events(
     Ok(events)
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct PhysicalInputRouteReport {
     events: usize,
     keys_observed: usize,
     keys_routed: usize,
     pointer_events: usize,
     pointer_routed: usize,
+    deliveries: Vec<XAuthorityInputDeliveryId>,
     emergency_exit: bool,
 }
 
@@ -3494,6 +3627,7 @@ fn route_physical_input<P: NonBlockingInputPoller>(
     modifiers: &mut XCoreKeyboardMapper,
     emergency_chord: &mut EmergencyChordState,
     pointer: &mut XCorePointerMapper,
+    next_input_delivery: &mut u64,
     physical_text_proof: Option<&mut PhysicalTextProof>,
 ) -> Result<PhysicalInputRouteReport, Box<dyn std::error::Error>> {
     let events = poller.poll_ready()?;
@@ -3507,6 +3641,7 @@ fn route_physical_input<P: NonBlockingInputPoller>(
         modifiers,
         emergency_chord,
         pointer,
+        next_input_delivery,
         physical_text_proof,
     )
 }
@@ -3522,6 +3657,7 @@ fn route_input_events(
     modifiers: &mut XCoreKeyboardMapper,
     emergency_chord: &mut EmergencyChordState,
     pointer: &mut XCorePointerMapper,
+    next_input_delivery: &mut u64,
     mut physical_text_proof: Option<&mut PhysicalTextProof>,
 ) -> Result<PhysicalInputRouteReport, Box<dyn std::error::Error>> {
     let mut report = PhysicalInputRouteReport {
@@ -3530,6 +3666,7 @@ fn route_input_events(
         keys_routed: 0,
         pointer_events: 0,
         pointer_routed: 0,
+        deliveries: Vec::new(),
         emergency_exit: false,
     };
     for event in events {
@@ -3577,6 +3714,10 @@ fn route_input_events(
                         .into());
                     }
                 }
+                let delivery = XAuthorityInputDeliveryId::from_raw(*next_input_delivery);
+                *next_input_delivery = next_input_delivery
+                    .checked_add(1)
+                    .ok_or("live-session input delivery ID exhausted")?;
                 input_sender.try_send(XAuthorityClientInputEvent {
                     client,
                     event: XAuthorityKeyEvent {
@@ -3586,8 +3727,10 @@ fn route_input_events(
                         time_msec: u32::try_from(event.time_msec).unwrap_or(u32::MAX),
                     }
                     .into(),
+                    delivery: Some(delivery),
                 })?;
                 report.keys_routed = report.keys_routed.saturating_add(1);
+                report.deliveries.push(delivery);
             }
             kind @ (sophia_protocol::InputEventKind::PointerMotion
             | sophia_protocol::InputEventKind::PointerButton { .. }) => {
@@ -3622,6 +3765,10 @@ fn route_input_events(
                     }
                     sophia_protocol::InputEventKind::Key { .. } => unreachable!(),
                 };
+                let delivery = XAuthorityInputDeliveryId::from_raw(*next_input_delivery);
+                *next_input_delivery = next_input_delivery
+                    .checked_add(1)
+                    .ok_or("live-session input delivery ID exhausted")?;
                 input_sender.try_send(XAuthorityClientInputEvent {
                     client,
                     event: XAuthorityInputEvent::Pointer(XAuthorityPointerEvent {
@@ -3634,8 +3781,10 @@ fn route_input_events(
                         state,
                         time_msec: u32::try_from(event.time_msec).unwrap_or(u32::MAX),
                     }),
+                    delivery: Some(delivery),
                 })?;
                 report.pointer_routed = report.pointer_routed.saturating_add(1);
+                report.deliveries.push(delivery);
             }
         }
     }

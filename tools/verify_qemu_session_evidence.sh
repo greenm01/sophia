@@ -77,7 +77,7 @@ if [[ "$(grep -c '^sophia_qemu_pointer schema=1 status=sent source=qmp device=vi
 fi
 
 completion_line="$(grep -E '^sophia_live_session .*status=bounded_complete ' "$EVIDENCE_FILE")"
-if [[ ! " $completion_line " =~ " schema=9 " ]]; then
+if [[ ! " $completion_line " =~ " schema=10 " ]]; then
     echo "QEMU evidence did not use the latency/resource schema" >&2
     exit 1
 fi
@@ -92,6 +92,17 @@ fi
 if [[ ! " $completion_line " =~ " injected_input=false " ]]; then
     echo "QEMU evidence used the internal X11 injection path" >&2
     exit 1
+fi
+if [[ "${SOPHIA_QEMU_REQUIRE_TWO_XTERM:-0}" == "1" ]]; then
+    cpu_layers="$(sed -n 's/.* cpu_layers=\([0-9][0-9]*\) .*/\1/p' <<< "$completion_line")"
+    if [[ ! "$cpu_layers" =~ ^[0-9]+$ ]] || (( cpu_layers < 2 )); then
+        echo "QEMU two-xterm evidence did not compose two terminal layers" >&2
+        exit 1
+    fi
+    if ! grep -Eq '^sophia_live_session schema=7 status=running .* secondary_terminal=enabled ' "$EVIDENCE_FILE"; then
+        echo "QEMU two-xterm evidence did not enable the secondary terminal" >&2
+        exit 1
+    fi
 fi
 physical_keys="$(sed -n 's/.* physical_keys_routed=\([0-9][0-9]*\) .*/\1/p' <<< "$completion_line")"
 if [[ -z "$physical_keys" ]] || (( physical_keys != 14 )); then

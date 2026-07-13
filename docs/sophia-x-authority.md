@@ -353,6 +353,18 @@ The frontend then applies X semantics:
 The authority returns reduced accept/reject outcomes. It must not expose raw
 client streams or general event injection capability back to Sophia Engine.
 
+For the persistent X11 session, each Engine-addressed input event also carries
+an opaque delivery token. The owning client worker acknowledges that token only
+after it has serialized and flushed the corresponding X11 event; route rejection
+and socket-write failure are distinct reduced outcomes. The live proof waits for
+every final keyboard token before it starts its bounded redraw/presentation
+window. Tokens contain no XID, keycode, text, or device identity.
+
+The persistent xterm proof also waits for a changed CPU-composed terminal frame
+after focus instead of treating its initial background fill as application
+readiness. This prevents synthetic proof keys from racing the proof shell's
+first prompt.
+
 ## Phoenix Strategic Direction
 
 Sophia adopts Phoenix’s strategic direction, not its code: build a modern X

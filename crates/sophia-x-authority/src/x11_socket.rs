@@ -602,6 +602,47 @@ pub enum XAuthorityInputEvent {
 pub struct XAuthorityClientInputEvent {
     pub client: XServerFrontendClientId,
     pub event: XAuthorityInputEvent,
+    /// Opaque Engine-assigned token used to prove that the owning X11 worker
+    /// flushed this event to its client socket. It deliberately carries no
+    /// X11 resource, key, or text identity.
+    pub delivery: Option<XAuthorityInputDeliveryId>,
+}
+
+/// Opaque per-session identifier for one routed input event.
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct XAuthorityInputDeliveryId(u64);
+
+#[cfg(unix)]
+impl XAuthorityInputDeliveryId {
+    pub const fn from_raw(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    pub const fn raw(self) -> u64 {
+        self.0
+    }
+}
+
+/// Reduced outcome for one Engine-addressed input event.
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum XAuthorityInputDeliveryOutcome {
+    /// The owning worker serialized and flushed the event to the X11 client.
+    Flushed,
+    /// The route could not reach its private client queue.
+    RouteRejected,
+    /// The owning worker could not write or flush the event.
+    WriteFailed,
+}
+
+/// Delivery result returned from a routed X11 worker to the Engine.
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XAuthorityClientInputDelivery {
+    pub client: XServerFrontendClientId,
+    pub delivery: XAuthorityInputDeliveryId,
+    pub outcome: XAuthorityInputDeliveryOutcome,
 }
 
 #[cfg(unix)]
@@ -686,6 +727,7 @@ pub enum XServerFrontendRouteError {
     ClientQueueFull { client: XServerFrontendClientId },
     ClientQueueDisconnected { client: XServerFrontendClientId },
     DuplicateClient { client: XServerFrontendClientId },
+    InputDeliveryQueueFull,
     RegistryPoisoned,
 }
 
@@ -719,6 +761,9 @@ impl core::fmt::Display for XServerFrontendRouteError {
                     client.raw()
                 )
             }
+            Self::InputDeliveryQueueFull => {
+                formatter.write_str("X11 input delivery acknowledgement queue is full")
+            }
             Self::RegistryPoisoned => formatter.write_str("X11 route registry lock poisoned"),
         }
     }
@@ -750,10 +795,11 @@ impl XServerFrontendRouteBroker {
     pub fn new(queue_capacity: NonZeroUsize) -> Self {
         let capacity = queue_capacity.get();
         let (acknowledgement_sender, acknowledgement_receiver) = sync_channel(capacity);
-        Self::with_acknowledgement_transport(
+        Self::with_transports(
             queue_capacity,
             acknowledgement_sender,
             Some(acknowledgement_receiver),
+            None,
         )
     }
 
@@ -763,13 +809,29 @@ impl XServerFrontendRouteBroker {
         queue_capacity: NonZeroUsize,
         acknowledgement_sender: SyncSender<XAuthorityClientControlAck>,
     ) -> Self {
-        Self::with_acknowledgement_transport(queue_capacity, acknowledgement_sender, None)
+        Self::with_transports(queue_capacity, acknowledgement_sender, None, None)
     }
 
-    fn with_acknowledgement_transport(
+    /// Creates a broker whose focus/configure and input-flush acknowledgements
+    /// return through Engine-owned bounded queues.
+    pub fn with_control_and_input_delivery_senders(
+        queue_capacity: NonZeroUsize,
+        acknowledgement_sender: SyncSender<XAuthorityClientControlAck>,
+        input_delivery_sender: SyncSender<XAuthorityClientInputDelivery>,
+    ) -> Self {
+        Self::with_transports(
+            queue_capacity,
+            acknowledgement_sender,
+            None,
+            Some(input_delivery_sender),
+        )
+    }
+
+    fn with_transports(
         queue_capacity: NonZeroUsize,
         acknowledgement_sender: SyncSender<XAuthorityClientControlAck>,
         acknowledgement_receiver: Option<Receiver<XAuthorityClientControlAck>>,
+        input_delivery_sender: Option<SyncSender<XAuthorityClientInputDelivery>>,
     ) -> Self {
         let capacity = queue_capacity.get();
         let (input_sender, input_receiver) = sync_channel(capacity);
@@ -778,6 +840,7 @@ impl XServerFrontendRouteBroker {
             registry: XServerFrontendRouteRegistry {
                 clients: Arc::new(Mutex::new(BTreeMap::new())),
                 acknowledgement_sender,
+                input_delivery_sender,
                 per_client_queue_capacity: queue_capacity,
             },
             input_sender,
@@ -813,7 +876,14 @@ impl XServerFrontendRouteBroker {
             let mut progressed = false;
             match self.input_receiver.try_recv() {
                 Ok(route) => {
-                    self.registry.route_input(route)?;
+                    if let Err(error) = self.registry.route_input(route) {
+                        self.registry.send_input_delivery(
+                            route.client,
+                            route.delivery,
+                            XAuthorityInputDeliveryOutcome::RouteRejected,
+                        )?;
+                        return Err(error);
+                    }
                     routed = routed.saturating_add(1);
                     progressed = true;
                 }
@@ -843,19 +913,20 @@ impl XServerFrontendRouteBroker {
 struct XServerFrontendRouteRegistry {
     clients: Arc<Mutex<BTreeMap<XServerFrontendClientId, XServerFrontendClientRouteSenders>>>,
     acknowledgement_sender: SyncSender<XAuthorityClientControlAck>,
+    input_delivery_sender: Option<SyncSender<XAuthorityClientInputDelivery>>,
     per_client_queue_capacity: NonZeroUsize,
 }
 
 #[cfg(unix)]
 #[derive(Clone)]
 struct XServerFrontendClientRouteSenders {
-    input: SyncSender<XAuthorityInputEvent>,
+    input: SyncSender<XAuthorityClientInputEvent>,
     control: SyncSender<XAuthorityControlCommand>,
 }
 
 #[cfg(unix)]
 struct XServerFrontendClientRouteChannels {
-    input: Receiver<XAuthorityInputEvent>,
+    input: Receiver<XAuthorityClientInputEvent>,
     control: Receiver<XAuthorityControlCommand>,
 }
 
@@ -908,7 +979,7 @@ impl XServerFrontendRouteRegistry {
         route: XAuthorityClientInputEvent,
     ) -> Result<(), XServerFrontendRouteError> {
         let sender = self.client_senders(route.client)?.input;
-        self.route_to_client(route.client, sender, route.event)
+        self.route_to_client(route.client, sender, route)
     }
 
     fn route_control(
@@ -958,6 +1029,28 @@ impl XServerFrontendRouteRegistry {
             .map(|clients| clients.len())
             .unwrap_or(0)
     }
+
+    fn send_input_delivery(
+        &self,
+        client: XServerFrontendClientId,
+        delivery: Option<XAuthorityInputDeliveryId>,
+        outcome: XAuthorityInputDeliveryOutcome,
+    ) -> Result<(), XServerFrontendRouteError> {
+        let Some(delivery) = delivery else {
+            return Ok(());
+        };
+        let Some(sender) = self.input_delivery_sender.as_ref() else {
+            return Ok(());
+        };
+        match sender.try_send(XAuthorityClientInputDelivery {
+            client,
+            delivery,
+            outcome,
+        }) {
+            Ok(()) | Err(TrySendError::Disconnected(_)) => Ok(()),
+            Err(TrySendError::Full(_)) => Err(XServerFrontendRouteError::InputDeliveryQueueFull),
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -972,7 +1065,10 @@ impl Drop for XServerFrontendClientRouteRegistration {
 #[cfg(unix)]
 enum X11InputEventReceiver {
     Plain(Receiver<XAuthorityInputEvent>),
-    Routed(Receiver<XAuthorityClientInputEvent>),
+    Routed {
+        receiver: Receiver<XAuthorityClientInputEvent>,
+        deliveries: Option<SyncSender<XAuthorityClientInputDelivery>>,
+    },
 }
 
 #[cfg(unix)]
@@ -980,18 +1076,54 @@ impl X11InputEventReceiver {
     fn recv_timeout(
         &self,
         client: XServerFrontendClientId,
-    ) -> Result<XAuthorityInputEvent, RecvTimeoutError> {
+    ) -> Result<(XAuthorityInputEvent, Option<XAuthorityInputDeliveryId>), RecvTimeoutError> {
         loop {
             match self {
-                Self::Plain(receiver) => return receiver.recv_timeout(Duration::from_millis(10)),
-                Self::Routed(receiver) => match receiver.recv_timeout(Duration::from_millis(10)) {
-                    Ok(route) if route.client == client => return Ok(route.event),
-                    // Drop one misaddressed route, then let the writer loop
-                    // observe its stop flag before it receives again.
-                    Ok(_) => return Err(RecvTimeoutError::Timeout),
-                    Err(error) => return Err(error),
-                },
+                Self::Plain(receiver) => {
+                    return receiver
+                        .recv_timeout(Duration::from_millis(10))
+                        .map(|event| (event, None));
+                }
+                Self::Routed { receiver, .. } => {
+                    match receiver.recv_timeout(Duration::from_millis(10)) {
+                        Ok(route) if route.client == client => {
+                            return Ok((route.event, route.delivery));
+                        }
+                        // Drop one misaddressed route, then let the writer loop
+                        // observe its stop flag before it receives again.
+                        Ok(_) => return Err(RecvTimeoutError::Timeout),
+                        Err(error) => return Err(error),
+                    }
+                }
             }
+        }
+    }
+
+    fn send_delivery(
+        &self,
+        client: XServerFrontendClientId,
+        delivery: Option<XAuthorityInputDeliveryId>,
+        outcome: XAuthorityInputDeliveryOutcome,
+    ) -> Result<(), X11SetupSocketError> {
+        let Some(delivery) = delivery else {
+            return Ok(());
+        };
+        let Self::Routed {
+            deliveries: Some(sender),
+            ..
+        } = self
+        else {
+            return Ok(());
+        };
+        match sender.try_send(XAuthorityClientInputDelivery {
+            client,
+            delivery,
+            outcome,
+        }) {
+            Ok(()) | Err(TrySendError::Disconnected(_)) => Ok(()),
+            Err(TrySendError::Full(_)) => Err(X11SetupSocketError::new(
+                "X11 input delivery acknowledgement channel is full",
+            )),
         }
     }
 }
@@ -1395,7 +1527,10 @@ pub fn run_x11_core_socket_server_once_session_channels(
         &mut stream,
         namespace,
         &mut state,
-        Some(X11InputEventReceiver::Routed(input_receiver)),
+        Some(X11InputEventReceiver::Routed {
+            receiver: input_receiver,
+            deliveries: None,
+        }),
         Some(X11ControlChannels::Routed {
             receiver: control_receiver,
             acknowledgements: control_ack_sender,
@@ -1882,7 +2017,10 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
             };
             (
                 Some(registration),
-                Some(X11InputEventReceiver::Plain(channels.input)),
+                Some(X11InputEventReceiver::Routed {
+                    receiver: channels.input,
+                    deliveries: routing.input_delivery_sender.clone(),
+                }),
                 Some(X11ControlChannels::ClientBound {
                     receiver: channels.control,
                     acknowledgements: routing.acknowledgement_sender.clone(),
@@ -2339,7 +2477,7 @@ fn spawn_x11_input_event_writer(
     let thread = std::thread::spawn(move || {
         let mut focus_sent_to = None;
         while !writer_stop.load(Ordering::Acquire) {
-            let event = match receiver.recv_timeout(client) {
+            let (event, delivery) = match receiver.recv_timeout(client) {
                 Ok(event) => event,
                 Err(RecvTimeoutError::Timeout) => continue,
                 Err(RecvTimeoutError::Disconnected) => return Ok(()),
@@ -2419,38 +2557,52 @@ fn spawn_x11_input_event_writer(
                     },
                 },
             );
-            let mut stream = stream
-                .lock()
-                .map_err(|_| X11SetupSocketError::new("X11 output socket lock poisoned"))?;
-            if matches!(event, XAuthorityInputEvent::Key(_))
-                && focus_sent_to != Some(focused_window)
-            {
-                let focus = encode_x_client_event(
-                    byte_order,
-                    XClientEvent::Focus {
-                        sequence,
-                        focused: true,
-                        detail: 3,
-                        event: focused_window,
-                        mode: 0,
-                    },
-                );
-                stream.write_all(&focus).map_err(|error| {
-                    X11SetupSocketError::new(format!("failed to write X11 focus event: {error}"))
-                })?;
-                focus_sent_to = Some(focused_window);
-            }
-            if let Err(error) = stream.write_all(&record) {
-                if is_x11_client_disconnect(&error) {
-                    return Ok(());
+            let write_result = (|| -> Result<(), X11SetupSocketError> {
+                let mut stream = stream
+                    .lock()
+                    .map_err(|_| X11SetupSocketError::new("X11 output socket lock poisoned"))?;
+                if matches!(event, XAuthorityInputEvent::Key(_))
+                    && focus_sent_to != Some(focused_window)
+                {
+                    let focus = encode_x_client_event(
+                        byte_order,
+                        XClientEvent::Focus {
+                            sequence,
+                            focused: true,
+                            detail: 3,
+                            event: focused_window,
+                            mode: 0,
+                        },
+                    );
+                    stream.write_all(&focus).map_err(|error| {
+                        X11SetupSocketError::new(format!(
+                            "failed to write X11 focus event: {error}"
+                        ))
+                    })?;
+                    focus_sent_to = Some(focused_window);
                 }
-                return Err(X11SetupSocketError::new(format!(
-                    "failed to write X11 input event: {error}"
-                )));
+                stream.write_all(&record).map_err(|error| {
+                    X11SetupSocketError::new(format!("failed to write X11 input event: {error}"))
+                })?;
+                stream.flush().map_err(|error| {
+                    X11SetupSocketError::new(format!("failed to flush X11 input event: {error}"))
+                })
+            })();
+            match write_result {
+                Ok(()) => receiver.send_delivery(
+                    client,
+                    delivery,
+                    XAuthorityInputDeliveryOutcome::Flushed,
+                )?,
+                Err(error) => {
+                    let _ = receiver.send_delivery(
+                        client,
+                        delivery,
+                        XAuthorityInputDeliveryOutcome::WriteFailed,
+                    );
+                    return Err(error);
+                }
             }
-            stream.flush().map_err(|error| {
-                X11SetupSocketError::new(format!("failed to flush X11 input event: {error}"))
-            })?;
         }
         Ok(())
     });
@@ -2485,6 +2637,7 @@ mod routing_tests {
                     time_msec: 1,
                 }
                 .into(),
+                delivery: None,
             })
             .unwrap();
         sender
@@ -2497,19 +2650,26 @@ mod routing_tests {
                     time_msec: 2,
                 }
                 .into(),
+                delivery: None,
             })
             .unwrap();
 
-        let receiver = X11InputEventReceiver::Routed(receiver);
+        let receiver = X11InputEventReceiver::Routed {
+            receiver,
+            deliveries: None,
+        };
         assert_eq!(receiver.recv_timeout(first), Err(RecvTimeoutError::Timeout));
         assert_eq!(
             receiver.recv_timeout(first).unwrap(),
-            XAuthorityInputEvent::Key(XAuthorityKeyEvent {
-                keycode: 25,
-                pressed: true,
-                state: 0,
-                time_msec: 2,
-            })
+            (
+                XAuthorityInputEvent::Key(XAuthorityKeyEvent {
+                    keycode: 25,
+                    pressed: true,
+                    state: 0,
+                    time_msec: 2,
+                }),
+                None,
+            )
         );
     }
 
@@ -2579,6 +2739,7 @@ mod routing_tests {
             .send(XAuthorityClientInputEvent {
                 client,
                 event: input,
+                delivery: None,
             })
             .unwrap();
         broker
@@ -2587,7 +2748,14 @@ mod routing_tests {
             .unwrap();
 
         assert_eq!(broker.route_pending(), Ok(2));
-        assert_eq!(channels.input.recv().unwrap(), input);
+        assert_eq!(
+            channels.input.recv().unwrap(),
+            XAuthorityClientInputEvent {
+                client,
+                event: input,
+                delivery: None,
+            }
+        );
         assert_eq!(channels.control.recv().unwrap(), command);
         let acknowledgement = XAuthorityControlAck {
             transaction: command.transaction(),
@@ -2617,6 +2785,7 @@ mod routing_tests {
             .send(XAuthorityClientInputEvent {
                 client,
                 event: input,
+                delivery: None,
             })
             .unwrap();
         assert_eq!(
@@ -2642,6 +2811,7 @@ mod routing_tests {
                         time_msec,
                     }
                     .into(),
+                    delivery: None,
                 })
                 .unwrap();
             if time_msec == 4 {
@@ -2652,6 +2822,46 @@ mod routing_tests {
         assert_eq!(
             broker.route_pending(),
             Err(XServerFrontendRouteError::ClientQueueFull { client })
+        );
+    }
+
+    #[test]
+    fn route_broker_reports_rejected_delivery_for_an_unknown_client() {
+        let client = XServerFrontendClientId(12);
+        let (control_ack_sender, _control_ack_receiver) = sync_channel(1);
+        let (delivery_sender, delivery_receiver) = sync_channel(1);
+        let mut broker = XServerFrontendRouteBroker::with_control_and_input_delivery_senders(
+            NonZeroUsize::new(1).unwrap(),
+            control_ack_sender,
+            delivery_sender,
+        );
+        let delivery = XAuthorityInputDeliveryId::from_raw(7);
+        broker
+            .input_sender()
+            .send(XAuthorityClientInputEvent {
+                client,
+                event: XAuthorityKeyEvent {
+                    keycode: 38,
+                    pressed: true,
+                    state: 0,
+                    time_msec: 1,
+                }
+                .into(),
+                delivery: Some(delivery),
+            })
+            .unwrap();
+
+        assert_eq!(
+            broker.route_pending(),
+            Err(XServerFrontendRouteError::UnknownClient { client })
+        );
+        assert_eq!(
+            delivery_receiver.recv().unwrap(),
+            XAuthorityClientInputDelivery {
+                client,
+                delivery,
+                outcome: XAuthorityInputDeliveryOutcome::RouteRejected,
+            }
         );
     }
 }

@@ -7,8 +7,17 @@ KERNEL_VERSION="${SOPHIA_QEMU_KERNEL_VERSION:-$(uname -r)}"
 KERNEL_IMAGE="${SOPHIA_QEMU_KERNEL:-/boot/vmlinuz-$KERNEL_VERSION}"
 INITRAMFS="${SOPHIA_QEMU_INITRAMFS:-$OUT_DIR/sophia-$KERNEL_VERSION.img}"
 SCENARIO="${SOPHIA_QEMU_SCENARIO:-session}"
+TWO_XTERM="${SOPHIA_QEMU_TWO_XTERM:-0}"
 if [[ "$SCENARIO" != "session" && "$SCENARIO" != "emergency-recovery" ]]; then
     echo "SOPHIA_QEMU_SCENARIO must be session or emergency-recovery" >&2
+    exit 1
+fi
+if [[ "$TWO_XTERM" != "0" && "$TWO_XTERM" != "1" ]]; then
+    echo "SOPHIA_QEMU_TWO_XTERM must be 0 or 1" >&2
+    exit 1
+fi
+if [[ "$SCENARIO" == "emergency-recovery" && "$TWO_XTERM" != "0" ]]; then
+    echo "SOPHIA_QEMU_TWO_XTERM is only supported by the session scenario" >&2
     exit 1
 fi
 if [[ "$SCENARIO" == "emergency-recovery" ]]; then
@@ -95,7 +104,7 @@ LOGGER_PID=$!
     -device virtio-mouse-pci \
     -kernel "$KERNEL_IMAGE" \
     -initrd "$INITRAMFS" \
-    -append "console=ttyS0 quiet loglevel=3 rdinit=/sbin/sophia-qemu-init rd.driver.pre=virtio_pci rd.driver.pre=virtio_gpu rd.driver.pre=virtio_input panic=-1 sophia.scenario=$SCENARIO" \
+    -append "console=ttyS0 quiet loglevel=3 rdinit=/sbin/sophia-qemu-init rd.driver.pre=virtio_pci rd.driver.pre=virtio_gpu rd.driver.pre=virtio_input panic=-1 sophia.scenario=$SCENARIO sophia.two_xterm=$TWO_XTERM" \
     > "$SERIAL_FIFO" 2>&1 &
 QEMU_PID=$!
 
@@ -234,4 +243,9 @@ if [[ "$logger_status" -ne 0 ]]; then
 fi
 
 echo "sophia_qemu_session schema=3 status=complete qemu_exit=0" | tee -a "$EVIDENCE_FILE"
-"$ROOT_DIR/tools/verify_qemu_session_evidence.sh" "$EVIDENCE_FILE"
+if [[ "$TWO_XTERM" == "1" ]]; then
+    SOPHIA_QEMU_REQUIRE_TWO_XTERM=1 \
+        "$ROOT_DIR/tools/verify_qemu_session_evidence.sh" "$EVIDENCE_FILE"
+else
+    "$ROOT_DIR/tools/verify_qemu_session_evidence.sh" "$EVIDENCE_FILE"
+fi

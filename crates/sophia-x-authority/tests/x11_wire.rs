@@ -5289,6 +5289,7 @@ fn routed_service_delivers_brokered_control_to_two_workers_and_drains() {
                     time_msec: 10 + index as u32,
                 }
                 .into(),
+                delivery: None,
             })
             .unwrap();
     }

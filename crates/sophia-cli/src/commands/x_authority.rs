@@ -1,8 +1,8 @@
 use super::prelude::*;
 use sophia_x_authority::{
-    XAuthorityClientInputEvent, XAuthorityClientSurfaceRoutes, XServerFrontendConfig,
-    XServerFrontendRouteBroker, XServerFrontendServiceCommand,
-    run_x_server_frontend_routed_until_stopped,
+    XAuthorityClientInputEvent, XAuthorityClientSurfaceRoutes, XAuthorityInputDeliveryId,
+    XAuthorityInputDeliveryOutcome, XServerFrontendConfig, XServerFrontendRouteBroker,
+    XServerFrontendServiceCommand, run_x_server_frontend_routed_until_stopped,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroUsize;
@@ -1052,7 +1052,13 @@ pub(crate) fn run_x_authority_xterm_two_client_smoke()
     let (display, socket_path) = temp_xauthority_display(152)?;
     let server_path = socket_path.clone();
     let (transaction_sender, transaction_receiver) = sync_channel(256);
-    let broker = XServerFrontendRouteBroker::new(NonZeroUsize::new(64).unwrap());
+    let (control_ack_sender, _control_ack_receiver) = sync_channel(64);
+    let (input_delivery_sender, input_delivery_receiver) = sync_channel(64);
+    let broker = XServerFrontendRouteBroker::with_control_and_input_delivery_senders(
+        NonZeroUsize::new(64).unwrap(),
+        control_ack_sender,
+        input_delivery_sender,
+    );
     let input_sender = broker.input_sender();
     let (service_command_sender, service_command_receiver) = sync_channel(1);
     let config = XServerFrontendConfig::new(&server_path, NamespaceId::from_raw(53))?
@@ -1089,8 +1095,15 @@ pub(crate) fn run_x_authority_xterm_two_client_smoke()
         }
 
         let mut time_msec = 1u32;
-        let first_keys =
-            send_xterm_text_to_client(&input_sender, clients[0], b"alpha", &mut time_msec)?;
+        let mut next_delivery = 1u64;
+        let first_deliveries = send_xterm_text_to_client(
+            &input_sender,
+            clients[0],
+            b"alpha",
+            &mut time_msec,
+            &mut next_delivery,
+        )?;
+        wait_for_xterm_input_deliveries(&input_delivery_receiver, &first_deliveries)?;
         let after_first = wait_for_two_xterm_change(
             &transaction_receiver,
             &mut first,
@@ -1099,8 +1112,14 @@ pub(crate) fn run_x_authority_xterm_two_client_smoke()
             initial,
             &mut state,
         )?;
-        let second_keys =
-            send_xterm_text_to_client(&input_sender, clients[1], b"bravo", &mut time_msec)?;
+        let second_deliveries = send_xterm_text_to_client(
+            &input_sender,
+            clients[1],
+            b"bravo",
+            &mut time_msec,
+            &mut next_delivery,
+        )?;
+        wait_for_xterm_input_deliveries(&input_delivery_receiver, &second_deliveries)?;
         let final_state = wait_for_two_xterm_change(
             &transaction_receiver,
             &mut first,
@@ -1113,7 +1132,7 @@ pub(crate) fn run_x_authority_xterm_two_client_smoke()
         Ok(XAuthorityXtermTwoClientSmokeReport {
             display: display.clone(),
             clients: clients.len(),
-            routed_keys: first_keys + second_keys,
+            routed_keys: first_deliveries.len() + second_deliveries.len(),
             initial_generation: initial.0,
             final_generation: final_state.0,
             initial_checksum: initial.1,
@@ -1292,8 +1311,9 @@ fn send_xterm_text_to_client(
     client: sophia_x_authority::XServerFrontendClientId,
     text: &[u8],
     time_msec: &mut u32,
-) -> Result<usize, Box<dyn std::error::Error>> {
-    let mut events = 0usize;
+    next_delivery: &mut u64,
+) -> Result<Vec<XAuthorityInputDeliveryId>, Box<dyn std::error::Error>> {
+    let mut deliveries = Vec::new();
     for keycode in text
         .iter()
         .copied()
@@ -1302,6 +1322,10 @@ fn send_xterm_text_to_client(
     {
         let keycode = keycode.ok_or("two-client input smoke character has no X keycode")?;
         for pressed in [true, false] {
+            let delivery = XAuthorityInputDeliveryId::from_raw(*next_delivery);
+            *next_delivery = next_delivery
+                .checked_add(1)
+                .ok_or("two-client xterm smoke exhausted input delivery IDs")?;
             sender.send(XAuthorityClientInputEvent {
                 client,
                 event: XAuthorityKeyEvent {
@@ -1311,12 +1335,48 @@ fn send_xterm_text_to_client(
                     time_msec: *time_msec,
                 }
                 .into(),
+                delivery: Some(delivery),
             })?;
             *time_msec = time_msec.saturating_add(1);
-            events = events.saturating_add(1);
+            deliveries.push(delivery);
         }
     }
-    Ok(events)
+    Ok(deliveries)
+}
+
+fn wait_for_xterm_input_deliveries(
+    receiver: &std::sync::mpsc::Receiver<sophia_x_authority::XAuthorityClientInputDelivery>,
+    deliveries: &[XAuthorityInputDeliveryId],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut pending = deliveries.iter().copied().collect::<BTreeSet<_>>();
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    while !pending.is_empty() && std::time::Instant::now() < deadline {
+        match receiver.recv_timeout(Duration::from_millis(50)) {
+            Ok(delivery) if pending.remove(&delivery.delivery) => {
+                if delivery.outcome != XAuthorityInputDeliveryOutcome::Flushed {
+                    return Err(format!(
+                        "two-client xterm input delivery failed for client {}: {:?}",
+                        delivery.client.raw(),
+                        delivery.outcome,
+                    )
+                    .into());
+                }
+            }
+            Ok(_) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("two-client xterm input delivery channel disconnected".into());
+            }
+        }
+    }
+    if pending.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "two-client xterm input delivery timed out with {} pending events",
+            pending.len(),
+        )
+        .into())
+    }
 }
 
 fn wait_for_xterm_cpu_state(

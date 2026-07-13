@@ -201,6 +201,17 @@ tools/build_qemu_session_initramfs.sh
 tools/qemu_session_harness.sh
 ```
 
+To exercise the same two-xterm routing shape as the physical KMS gate, rebuild
+the initramfs after a Sophia change and run:
+
+```sh
+SOPHIA_QEMU_TWO_XTERM=1 tools/qemu_session_harness.sh
+```
+
+That optional mode requires two composed terminal layers and complete reduced
+X11 input-flush evidence; it does not replace the final physical DRM-master
+proof.
+
 The guest has no disk and no network device. QEMU stays headless, exposes its
 display only to an unconnected Unix-domain VNC sink, and emulates virtio-gpu
 and a virtio keyboard. It does not pass through or open host DRM/input devices

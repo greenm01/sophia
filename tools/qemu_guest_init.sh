@@ -17,10 +17,14 @@ mount -t tmpfs tmpfs /run 2>/dev/null || true
 chmod 700 "$XDG_RUNTIME_DIR"
 
 scenario="session"
+two_xterm=false
 cmdline=""
 IFS= read -r cmdline < /proc/cmdline || true
 case " $cmdline " in
     *" sophia.scenario=emergency-recovery "*) scenario="emergency-recovery" ;;
+esac
+case " $cmdline " in
+    *" sophia.two_xterm=1 "*) two_xterm=true ;;
 esac
 
 if [ "$scenario" = "emergency-recovery" ]; then
@@ -115,6 +119,9 @@ if [ "$scenario" = "emergency-recovery" ]; then
 else
     set -- sophia-live-session --display=:181 --native-scanout --max-ticks=300 \
         --expect-physical-text=sophia --expect-physical-pointer
+    if [ "$two_xterm" = true ]; then
+        set -- "$@" --secondary-terminal
+    fi
 fi
 
 if [ -n "$input_devices" ]; then
