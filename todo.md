@@ -112,9 +112,9 @@ engineering reason.
 - [x] Define the X11 session profiles: classic shared-X behavior for trusted
   sessions, plus explicit confined namespaces/capabilities where requested.
   The confined profile remains gated on client-aware connection routing.
-- [ ] Establish an application-driven compatibility matrix and make every new
+- [x] Establish an application-driven compatibility matrix and make every new
   X11 request, reply, event, or extension earn its implementation through a
-  reproducible real-client probe.
+  reproducible real-client probe. See `docs/x11-compatibility-matrix.md`.
 
 ### Milestone 2: Modern X11 Input and Graphics
 

@@ -17,7 +17,10 @@ cargo test --workspace --offline
 ```
 
 For Sophia X Authority compatibility changes, also run the focused wire suite
-and the real-client smoke that exercises the touched path:
+and the real-client smoke that exercises the touched path. The
+[X11 compatibility matrix](x11-compatibility-matrix.md) identifies each
+probe's precise proven surface and next gate; do not treat this list as a full
+X server conformance suite:
 
 ```sh
 cargo test --offline -q -p sophia-x-authority --test x11_wire

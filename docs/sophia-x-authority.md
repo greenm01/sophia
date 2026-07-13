@@ -127,6 +127,11 @@ introspection (`xrandr --query`), Athena widget behavior (`xcalc`), and
 terminal setup/lifecycle and drawing-transaction behavior (`xterm`), and GTK
 startup behavior (`zenity`).
 
+The maintained [X11 compatibility matrix](x11-compatibility-matrix.md) records
+the exact command, evidence level, narrow proven behavior, and next gate for
+each client class. It is the source of truth for admitting new X11 work; the
+historical prose below explains why individual compatibility slices exist.
+
 Each external smoke must keep `first_error=none`. New compatibility code should
 remain bounded and narrow: for example, xcalc admitted `AllocNamedColor`,
 `UnmapWindow`, padded one-character `PolyText8`, and normal client-disconnect

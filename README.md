@@ -230,6 +230,8 @@ Sophia is split by authority, not by convenience.
 - `docs/dod.md` defines Sophia's data-oriented design rules.
 - `docs/sophia-x-authority.md` defines the long-term Sophia X Server Frontend
   and its X11 compatibility boundary.
+- `docs/x11-compatibility-matrix.md` records the real-client evidence that
+  admits each native X11 compatibility slice.
 - `docs/style-guide.md` records implementation discipline.
 - `docs/research-log.md` captures early decisions and open research questions.
 - `docs/research-log-archive.md` preserves completed research and validation
