@@ -6,6 +6,7 @@ EVIDENCE_FILE="${SOPHIA_DMABUF_FIRST_FRAME_EVIDENCE:-/tmp/sophia-wayland-dmabuf-
 FRAME_COUNT="${SOPHIA_DMABUF_PRODUCER_FRAMES:-3}"
 RENDER_NODE="${SOPHIA_DMABUF_RENDER_NODE:-}"
 DIAGNOSTIC="${SOPHIA_DMABUF_DIAGNOSTIC:-0}"
+TRACE="${SOPHIA_DMABUF_TRACE:-0}"
 
 if [[ ! -t 0 ]]; then
     echo "Run the DMA-BUF first-frame proof from a dedicated local text TTY." >&2
@@ -21,6 +22,14 @@ if [[ ! "$FRAME_COUNT" =~ ^[0-9]+$ ]] || (( FRAME_COUNT < 2 || FRAME_COUNT > 100
 fi
 if [[ "$DIAGNOSTIC" != 0 && "$DIAGNOSTIC" != 1 ]]; then
     echo "SOPHIA_DMABUF_DIAGNOSTIC must be 0 or 1." >&2
+    exit 1
+fi
+if [[ "$TRACE" != 0 && "$TRACE" != 1 ]]; then
+    echo "SOPHIA_DMABUF_TRACE must be 0 or 1." >&2
+    exit 1
+fi
+if [[ "$DIAGNOSTIC" == 1 && "$TRACE" == 1 ]]; then
+    echo "SOPHIA_DMABUF_DIAGNOSTIC and SOPHIA_DMABUF_TRACE are mutually exclusive." >&2
     exit 1
 fi
 if [[ -z "$RENDER_NODE" ]]; then
@@ -49,6 +58,8 @@ echo "  frames:      $FRAME_COUNT"
 echo "  evidence:    $EVIDENCE_FILE"
 if [[ "$DIAGNOSTIC" == 1 ]]; then
     echo "  diagnostic: GDB allocator/lifecycle capture"
+elif [[ "$TRACE" == 1 ]]; then
+    echo "  diagnostic: release-timing lifecycle trace"
 fi
 
 if [[ "$DIAGNOSTIC" == 1 ]]; then
@@ -94,7 +105,12 @@ if [[ "$DIAGNOSTIC" == 1 ]]; then
         exit "$status"
     fi
 else
+    trace_env=()
+    if [[ "$TRACE" == 1 ]]; then
+        trace_env=(SOPHIA_WAYLAND_DMABUF_DIAGNOSTIC=1 MALLOC_CHECK_=3 MESA_DEBUG=1)
+    fi
     env XDG_RUNTIME_DIR="$RUNTIME_DIR" SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 \
+        "${trace_env[@]}" \
         timeout --foreground 30s "${SESSION[@]}" >"$EVIDENCE_FILE" 2>&1
 fi
 

@@ -33,9 +33,10 @@ Current truth:
   native renderer/exporter heap on hardware. Isolate that ownership fault before
   attempting further latency reductions.
 - DMA-BUF is admitted but remains experimental. The repaired controlled
-  three-frame and 300-frame hardware proofs now import, submit, retire, and
-  reuse full-size 1920x1200 buffers only after release, without allocator
-  diagnostics; SHM remains the production fallback.
+  three-frame hardware proof passes, and the GDB-backed 300-frame diagnostic
+  completes; the normal release 300-frame run still corrupts the heap after a
+  small, timing-sensitive number of frames. SHM remains the production
+  fallback, and no Kitty DMA-BUF run may begin until the normal proof passes.
 
 Exit criteria:
 
@@ -82,10 +83,12 @@ Exit criteria:
   `tools/wayland_dmabuf_first_frame_hardware_proof.sh`: experimental enablement,
   three imports, KMS presentation retirement, no cleanup debt, and 14 ms maximum
   submit-to-page-flip latency.
-- [x] Pass the controlled 300-frame lifecycle run with the same tool. The
-  verifier must see experimental enablement, imports, KMS presentation
-  retirement, no cleanup debt, and no more than 100 ms submit-to-page-flip
-  latency.
+- [ ] Pass the controlled 300-frame lifecycle run with the same tool. The
+  GDB diagnostic passes 300 frames, but the normal release execution currently
+  aborts with `corrupted size vs. prev_size` after frame 8 (and previously frame
+  13). Reproduce it with the release-timing trace, isolate the ownership error,
+  then require experimental enablement, imports, KMS presentation retirement,
+  no cleanup debt, and no more than 100 ms submit-to-page-flip latency.
 - [ ] Pass three independent guarded real-Kitty DMA-BUF runs with
   `tools/wayland_kitty_dmabuf_promotion_gate.sh`: exact text/navigation and
   pointer input, resize, clean normal exit, TTY/`keyd` restoration, DMA-BUF

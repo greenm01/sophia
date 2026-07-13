@@ -6,15 +6,22 @@ STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/sophia"
 EVIDENCE_DIR="$STATE_DIR/dmabuf-promotion"
 EVIDENCE_FILE="$EVIDENCE_DIR/controlled-lifecycle.log"
 DIAGNOSTIC=false
+TRACE=false
+TRACE_ENV=0
 
 usage() {
-    echo "usage: $0 [--diagnostic]" >&2
+    echo "usage: $0 [--diagnostic|--trace]" >&2
 }
 
 while (( $# > 0 )); do
     case "$1" in
         --diagnostic)
             DIAGNOSTIC=true
+            ;;
+        --trace)
+            TRACE=true
+            TRACE_ENV=1
+            EVIDENCE_FILE="$EVIDENCE_DIR/controlled-lifecycle-trace.log"
             ;;
         -h|--help)
             usage
@@ -27,6 +34,11 @@ while (( $# > 0 )); do
     esac
     shift
 done
+
+if [[ "$DIAGNOSTIC" == true && "$TRACE" == true ]]; then
+    echo "--diagnostic and --trace cannot be used together." >&2
+    exit 2
+fi
 
 if [[ ! -r /etc/os-release ]] || ! grep -Eq '^ID="?void"?$' /etc/os-release; then
     echo "This helper supports Void Linux only." >&2
@@ -50,7 +62,12 @@ if [[ "$DIAGNOSTIC" == true ]]; then
         tools/diagnose_void_dmabuf_heap.sh
 fi
 
+if [[ "$TRACE" == true ]]; then
+    echo "  mode:     release-timing lifecycle trace"
+fi
+
 exec env \
     SOPHIA_DMABUF_PRODUCER_FRAMES=300 \
     SOPHIA_DMABUF_FIRST_FRAME_EVIDENCE="$EVIDENCE_FILE" \
+    SOPHIA_DMABUF_TRACE="$TRACE_ENV" \
     tools/wayland_dmabuf_first_frame_hardware_proof.sh

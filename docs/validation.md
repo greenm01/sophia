@@ -114,19 +114,23 @@ Current hardware status: after explicitly detaching the EGLImage from its GL
 texture before destruction, the GDB-backed controlled three-frame run passes.
 It imports, submits, page-flips, retires, and releases three full-size 1920x1200
 DMA-BUF frames with no allocator diagnostic and a 14 ms maximum
-submit-to-page-flip interval. The GDB-backed 300-frame lifetime proof also
+submit-to-page-flip interval. The GDB-backed 300-frame lifetime diagnostic also
 passes: 300 imports, submissions, page flips, and retirements, with no cleanup
-debt and the same 14 ms maximum submit-to-page-flip interval. The next gate is
-the three guarded real-Kitty DMA-BUF runs.
+debt and the same 14 ms maximum submit-to-page-flip interval. That does not
+clear the gate: normal release execution currently aborts with `corrupted size
+vs. prev_size` after a timing-sensitive small frame count (most recently frame
+8). Capture the release-timing lifecycle trace before another Kitty attempt.
 
-On Void Linux, run that next gate from a dedicated text TTY with:
+On Void Linux, run the release-timing trace from a dedicated text TTY with:
 
 ```bash
-tools/run_void_dmabuf_lifetime_proof.sh
+tools/run_void_dmabuf_lifetime_proof.sh --trace
 ```
 
-Use `tools/run_void_dmabuf_lifetime_proof.sh --diagnostic` to capture the same
-300-frame run under GDB after a failure.
+It retains release scheduling and records ordered renderer, KMS, page-flip,
+retirement, and client-release stages in
+`~/.local/state/sophia/dmabuf-promotion/controlled-lifecycle-trace.log`. Use
+`tools/run_void_dmabuf_lifetime_proof.sh --diagnostic` for the GDB comparison.
 
 To capture the native allocator stack from a dedicated text TTY, install `gdb`
 if needed and rerun the controlled three-frame proof in diagnostic mode:
@@ -143,8 +147,8 @@ not use it for the interactive Kitty gate. To diagnose a lifetime failure, set
 For the real-Kitty gate, set `SOPHIA_INPUT_DEVICES` to comma-separated keyboard
 and pointer event paths. The guarded launcher asks for its recovery chord before
 DRM takeover. In Kitty, type `sophia` plus Enter, press all four arrow keys,
-move/click the pointer, then type `exit` plus Enter. After the controlled
-300-frame proof passes, run:
+move/click the pointer, then type `exit` plus Enter. Only after the normal
+controlled 300-frame proof passes, run:
 
 ```bash
 tools/wayland_kitty_dmabuf_promotion_gate.sh
