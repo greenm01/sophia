@@ -28,6 +28,30 @@ if [[ "${SOPHIA_WAYLAND_REQUIRE_DMABUF:-0}" == 1 ]] \
     echo "Wayland Kitty hardware evidence did not exercise DMA-BUF import" >&2
     exit 1
 fi
+if [[ "${SOPHIA_WAYLAND_REQUIRE_DMABUF:-0}" == 1 ]]; then
+    native="$(grep '^sophia_wayland_native schema=1 status=complete ' "$EVIDENCE_FILE" || true)"
+    if [[ "$(grep -c '^sophia_wayland_native schema=1 status=complete ' "$EVIDENCE_FILE" || true)" -ne 1 ]]; then
+        echo "Wayland Kitty evidence requires one native completion record" >&2
+        exit 1
+    fi
+    native_outputs="$(sed -n 's/.*outputs=\([0-9][0-9]*\).*/\1/p' <<<"$native")"
+    native_submissions="$(sed -n 's/.*submissions=\([0-9][0-9]*\).*/\1/p' <<<"$native")"
+    native_retirements="$(sed -n 's/.*retirements=\([0-9][0-9]*\).*/\1/p' <<<"$native")"
+    native_callbacks="$(sed -n 's/.*callbacks=\([0-9][0-9]*\).*/\1/p' <<<"$native")"
+    import_attempts="$(sed -n 's/.*dmabuf_import_attempts=\([0-9][0-9]*\).*/\1/p' <<<"$native")"
+    imports="$(sed -n 's/.*dmabuf_imports=\([0-9][0-9]*\).*/\1/p' <<<"$native")"
+    submit_latency="$(sed -n 's/.*max_submit_to_page_flip_msec=\([0-9][0-9]*\).*/\1/p' <<<"$native")"
+    if [[ "${native_outputs:-0}" -eq 0 || "${native_submissions:-0}" -lt 2 \
+        || "${native_retirements:-0}" -eq 0 || "${native_callbacks:-0}" -eq 0 \
+        || "${import_attempts:-0}" -eq 0 || "$import_attempts" != "$imports" \
+        || -z "$submit_latency" || "$submit_latency" -gt "$MAX_LATENCY_MSEC" \
+        || "$native" != *"submit_failures=0"* || "$native" != *"retire_failures=0"* \
+        || "$native" != *"callback_rejected=0"* || "$native" != *"in_flight=false"* \
+        || "$native" != *"cleanup_pending=false"* ]]; then
+        echo "Wayland Kitty native DMA/KMS completion evidence is not clean" >&2
+        exit 1
+    fi
+fi
 resize_commits="$(sed -n 's/.*resize_commits=\([0-9][0-9]*\).*/\1/p' <<<"$complete")"
 if [[ "${SOPHIA_WAYLAND_REQUIRE_RESIZE:-0}" == 1 && "${resize_commits:-0}" -eq 0 ]]; then
     echo "Wayland Kitty evidence did not commit the requested resize" >&2

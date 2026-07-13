@@ -28,6 +28,8 @@ where
     pending_dmabuf_frame: Option<sophia_renderer_live::LiveOwnedDmaBufFrame>,
     pending_cpu_frame_checksum: Option<u64>,
     cpu_frame_export_attempts: usize,
+    dmabuf_frame_export_attempts: usize,
+    dmabuf_frame_exports: usize,
     last_cpu_frame_checksum: Option<u64>,
     last_cpu_frame_export_status: Option<LiveRendererScanoutBufferExportStatus>,
 }
@@ -52,6 +54,8 @@ where
             pending_dmabuf_frame: None,
             pending_cpu_frame_checksum: None,
             cpu_frame_export_attempts: 0,
+            dmabuf_frame_export_attempts: 0,
+            dmabuf_frame_exports: 0,
             last_cpu_frame_checksum: None,
             last_cpu_frame_export_status: None,
         }
@@ -135,6 +139,14 @@ where
         self.cpu_frame_export_attempts
     }
 
+    pub const fn dmabuf_frame_export_attempts(&self) -> usize {
+        self.dmabuf_frame_export_attempts
+    }
+
+    pub const fn dmabuf_frame_exports(&self) -> usize {
+        self.dmabuf_frame_exports
+    }
+
     pub const fn last_cpu_frame_checksum(&self) -> Option<u64> {
         self.last_cpu_frame_checksum
     }
@@ -204,11 +216,19 @@ where
         };
 
         let report = match self.pending_dmabuf_frame.take() {
-            Some(frame) => context.export_dmabuf_owned_scanout_buffer_with_modifiers(
-                target,
-                frame.as_frame(),
-                &self.preferred_modifiers,
-            ),
+            Some(frame) => {
+                self.dmabuf_frame_export_attempts =
+                    self.dmabuf_frame_export_attempts.saturating_add(1);
+                let report = context.export_dmabuf_owned_scanout_buffer_with_modifiers(
+                    target,
+                    frame.as_frame(),
+                    &self.preferred_modifiers,
+                );
+                if report.status == LiveRendererScanoutBufferExportStatus::Exported {
+                    self.dmabuf_frame_exports = self.dmabuf_frame_exports.saturating_add(1);
+                }
+                report
+            }
             None => match self.pending_cpu_frame.take() {
                 Some(frame) => {
                     self.cpu_frame_export_attempts =

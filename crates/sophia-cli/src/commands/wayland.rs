@@ -422,6 +422,7 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
     terminate_client(&mut child)?;
     if let Some(native_scanout) = native_scanout.as_mut() {
         native_scanout.shutdown()?;
+        println!("{}", native_scanout.completion_evidence());
     }
     if expect_input_pixel_change && (routed_input == 0 || input_pixel_changes == 0) {
         return Err("Wayland input proof did not produce a presented pixel change".into());

@@ -97,6 +97,11 @@ readback; frame callbacks and `wl_buffer.release` follow observed KMS
 presentation rather than transaction queueing. Run this gate only from a
 dedicated text TTY with an outside recovery path.
 
+Its native completion record must show at least one successful DMA-BUF import,
+multiple KMS submissions, accepted callbacks and retirement, no import loss,
+submit/retire/callback failures, in-flight ownership, or cleanup debt, and a
+maximum submit-to-page-flip interval no greater than 100 ms.
+
 For the hardware proof, set `SOPHIA_INPUT_DEVICES` to comma-separated keyboard
 and pointer event paths. The guarded launcher asks for its recovery chord before
 DRM takeover. In Kitty, type `sophia` plus Enter, press all four arrow keys,

@@ -2112,6 +2112,44 @@ impl WaylandNativeSession {
         Ok(())
     }
 
+    pub(super) fn completion_evidence(&self) -> String {
+        let dmabuf_import_attempts = self
+            .scanout
+            .heads
+            .iter()
+            .map(|head| head.exporter.dmabuf_frame_export_attempts())
+            .sum::<usize>();
+        let dmabuf_imports = self
+            .scanout
+            .heads
+            .iter()
+            .map(|head| head.exporter.dmabuf_frame_exports())
+            .sum::<usize>();
+        let in_flight = self
+            .runtime
+            .as_ref()
+            .is_some_and(PersistentBackendRuntime::native_scanout_in_flight);
+        let cleanup_pending = self
+            .runtime
+            .as_ref()
+            .is_some_and(PersistentBackendRuntime::native_cleanup_pending);
+        format!(
+            "sophia_wayland_native schema=1 status=complete outputs={} submissions={} retirements={} callbacks={} submit_failures={} retire_failures={} callback_rejected={} dmabuf_import_attempts={} dmabuf_imports={} max_submit_to_page_flip_msec={} in_flight={} cleanup_pending={}",
+            self.scanout.heads.len(),
+            self.scanout.submissions,
+            self.scanout.retirements,
+            self.scanout.callback_accepted,
+            self.scanout.submit_failures,
+            self.scanout.retire_failures,
+            self.scanout.callback_rejected,
+            dmabuf_import_attempts,
+            dmabuf_imports,
+            self.scanout.max_submit_to_page_flip.as_millis(),
+            in_flight,
+            cleanup_pending,
+        )
+    }
+
     pub(super) fn cancel_surface(&mut self, surface: SurfaceId) {
         self.pending_presentations
             .retain(|(candidate, _, _)| *candidate != surface);
