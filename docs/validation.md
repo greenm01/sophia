@@ -132,7 +132,8 @@ tools/diagnose_void_dmabuf_heap.sh
 
 The normal evidence file and a sibling `.gdb.log` retain the process stack and
 ordered DMA-BUF stages. Diagnostic mode is only for the controlled proof; do
-not use it for the interactive Kitty gate.
+not use it for the interactive Kitty gate. To diagnose a lifetime failure, set
+`SOPHIA_DMABUF_DIAGNOSTIC_FRAMES=300` before running the same helper.
 
 For the real-Kitty gate, set `SOPHIA_INPUT_DEVICES` to comma-separated keyboard
 and pointer event paths. The guarded launcher asks for its recovery chord before

@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/sophia"
 EVIDENCE_DIR="$STATE_DIR/dmabuf-promotion"
 INSTALL_LOG="$STATE_DIR/void-dmabuf-diagnostic-install.log"
-EVIDENCE_FILE="$EVIDENCE_DIR/controlled-first-frame-diagnostic.log"
+FRAME_COUNT="${SOPHIA_DMABUF_DIAGNOSTIC_FRAMES:-3}"
 REQUIRED_PACKAGES=(
     gcc
     pkg-config
@@ -46,6 +46,10 @@ if [[ ! -t 0 ]] || [[ -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" ]]; then
     echo "Run this diagnostic from a dedicated local text TTY." >&2
     exit 1
 fi
+if [[ ! "$FRAME_COUNT" =~ ^[0-9]+$ ]] || (( FRAME_COUNT < 2 || FRAME_COUNT > 1000 )); then
+    echo "SOPHIA_DMABUF_DIAGNOSTIC_FRAMES must be an integer from 2 to 1000." >&2
+    exit 1
+fi
 
 mkdir -p "$STATE_DIR" "$EVIDENCE_DIR"
 chmod 700 "$STATE_DIR" "$EVIDENCE_DIR"
@@ -79,14 +83,20 @@ if ! command -v gdb >/dev/null; then
     exit 1
 fi
 
-echo "Sophia DMA-BUF heap diagnostic"
+if (( FRAME_COUNT == 3 )); then
+    EVIDENCE_FILE="$EVIDENCE_DIR/controlled-first-frame-diagnostic.log"
+else
+    EVIDENCE_FILE="$EVIDENCE_DIR/controlled-${FRAME_COUNT}-frame-diagnostic.log"
+fi
+
+echo "Sophia DMA-BUF heap diagnostic (${FRAME_COUNT} frames)"
 echo "  evidence: $EVIDENCE_FILE"
 echo "  GDB log:  $EVIDENCE_FILE.gdb.log"
-echo "  scope:    one controlled three-frame run only"
+echo "  scope:    one controlled DMA-BUF run only"
 
 cd "$ROOT_DIR"
 exec env \
     SOPHIA_DMABUF_DIAGNOSTIC=1 \
-    SOPHIA_DMABUF_PRODUCER_FRAMES=3 \
+    SOPHIA_DMABUF_PRODUCER_FRAMES="$FRAME_COUNT" \
     SOPHIA_DMABUF_FIRST_FRAME_EVIDENCE="$EVIDENCE_FILE" \
     tools/wayland_dmabuf_first_frame_hardware_proof.sh
