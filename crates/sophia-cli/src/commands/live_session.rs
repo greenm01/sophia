@@ -2035,6 +2035,7 @@ pub(super) struct WaylandNativeSession {
     outputs: Vec<sophia_engine::HeadlessOutput>,
     pending_cpu_presentations: BTreeMap<SurfaceId, u64>,
     awaiting_presentations: BTreeMap<SurfaceId, (u64, usize)>,
+    last_cpu_checksum: Option<u64>,
 }
 
 pub(super) struct WaylandCpuFrameSubmission {
@@ -2055,6 +2056,7 @@ impl WaylandNativeSession {
             outputs,
             pending_cpu_presentations: BTreeMap::new(),
             awaiting_presentations: BTreeMap::new(),
+            last_cpu_checksum: None,
         })
     }
 
@@ -2103,6 +2105,19 @@ impl WaylandNativeSession {
         if presentations.is_empty() {
             return Err("native CPU composition had no queued presentation".into());
         }
+        if cpu_frame_matches_visible_output(
+            self.outputs.len(),
+            self.runtime.is_some(),
+            self.last_cpu_checksum,
+            report.checksum,
+        ) {
+            self.pending_cpu_presentations.clear();
+            return Ok(WaylandCpuFrameSubmission {
+                presentations,
+                immediate: true,
+                frame_scheduled: false,
+            });
+        }
         let frames = self
             .outputs
             .iter()
@@ -2116,6 +2131,7 @@ impl WaylandNativeSession {
                 Some(frames),
             )?);
             self.pending_cpu_presentations.clear();
+            self.last_cpu_checksum = Some(report.checksum);
             return Ok(WaylandCpuFrameSubmission {
                 presentations,
                 immediate: true,
@@ -2140,6 +2156,7 @@ impl WaylandNativeSession {
                 required_submission,
             );
         }
+        self.last_cpu_checksum = Some(report.checksum);
         Ok(WaylandCpuFrameSubmission {
             presentations,
             immediate: false,
@@ -2154,6 +2171,9 @@ impl WaylandNativeSession {
         generation: u64,
         frame: &sophia_backend_live::LiveOwnedDmaBufFrame,
     ) -> Result<bool, Box<dyn std::error::Error>> {
+        // Direct client scanout replaces the visible CPU-composed output, so a
+        // later SHM frame cannot be elided against an older CPU checksum.
+        self.last_cpu_checksum = None;
         if self.runtime.is_none() {
             let blank = sophia_backend_live::compose_live_cpu_frame(self.primary_size(), &[])
                 .map_err(|error| format!("native DMA-BUF bootstrap failed: {error:?}"))?;
@@ -2341,6 +2361,15 @@ fn cpu_frame_submission_ready(
         && !native_scanout_in_flight
         && !native_cleanup_pending
         && !native_frame_pending
+}
+
+fn cpu_frame_matches_visible_output(
+    output_count: usize,
+    runtime_exists: bool,
+    last_cpu_checksum: Option<u64>,
+    candidate_checksum: u64,
+) -> bool {
+    output_count == 1 && runtime_exists && last_cpu_checksum == Some(candidate_checksum)
 }
 
 fn required_wayland_presentation_submission(
@@ -3357,9 +3386,9 @@ impl Drop for SessionProcessGuard {
 mod tests {
     use super::{
         BufferSource, CommittedSurfaceState, PersistentBackendRuntime, Rect, Region, Size,
-        center_geometry_without_scaling, cpu_frame_submission_ready,
-        layer_snapshots_from_committed, required_wayland_presentation_submission,
-        retain_latest_wayland_presentation,
+        center_geometry_without_scaling, cpu_frame_matches_visible_output,
+        cpu_frame_submission_ready, layer_snapshots_from_committed,
+        required_wayland_presentation_submission, retain_latest_wayland_presentation,
     };
     use std::collections::BTreeMap;
 
@@ -3432,6 +3461,15 @@ mod tests {
         assert!(!cpu_frame_submission_ready(true, true, false, false));
         assert!(!cpu_frame_submission_ready(true, false, true, false));
         assert!(!cpu_frame_submission_ready(true, false, false, true));
+    }
+
+    #[test]
+    fn unchanged_cpu_frame_can_complete_without_another_scanout_submission() {
+        assert!(cpu_frame_matches_visible_output(1, true, Some(7), 7));
+        assert!(!cpu_frame_matches_visible_output(2, true, Some(7), 7));
+        assert!(!cpu_frame_matches_visible_output(1, false, Some(7), 7));
+        assert!(!cpu_frame_matches_visible_output(1, true, Some(7), 8));
+        assert!(!cpu_frame_matches_visible_output(1, true, None, 7));
     }
 
     #[test]
