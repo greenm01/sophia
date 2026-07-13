@@ -133,6 +133,7 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
     let mut pending_pixel_input = VecDeque::new();
     let mut pending_presented_input = VecDeque::new();
     let mut pending_presented_pointer = VecDeque::new();
+    let mut input_latency = InputLatencyMetrics::default();
     let mut presentation_observations = BTreeMap::new();
     let mut routed_input = 0usize;
     let mut routed_keys = 0usize;
@@ -179,6 +180,7 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                 &mut input_presentations,
                 &mut pointer_presentations,
                 &mut max_observed_input_latency,
+                &mut input_latency,
             );
             apply_wayland_feedback(
                 &mut frontend,
@@ -356,6 +358,7 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                             &mut pending_pixel_input,
                             &mut pending_presented_input,
                             &mut pending_presented_pointer,
+                            &mut input_latency,
                         );
                         let presented = match transaction.target_buffer {
                             BufferSource::DmaBuf { handle } => {
@@ -402,6 +405,7 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                                         &mut input_presentations,
                                         &mut pointer_presentations,
                                         &mut max_observed_input_latency,
+                                        &mut input_latency,
                                     );
                                     apply_wayland_feedback(
                                         &mut frontend,
@@ -438,6 +442,7 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                                 &mut input_presentations,
                                 &mut pointer_presentations,
                                 &mut max_observed_input_latency,
+                                &mut input_latency,
                             );
                             apply_wayland_feedback(
                                 &mut frontend,
@@ -509,6 +514,7 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                         &mut input_presentations,
                         &mut pointer_presentations,
                         &mut max_observed_input_latency,
+                        &mut input_latency,
                     );
                     apply_wayland_feedback(
                         &mut frontend,
@@ -576,7 +582,7 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
         .map(sophia_backend_live::ThreadedNativeLibinputEventPoller::stats)
         .unwrap_or_default();
     println!(
-        "sophia_wayland_session schema=1 status=complete transactions={} frames={} shm_frames={} dmabuf_frames={} resize_requested={} resize_commits={} buffers={} routed_input={} routed_keys={} routed_pointer={} expected_keycodes_observed={} expected_keycodes_matched={} expected_keycodes_total={} input_presentations={} pointer_presentations={} input_pixel_changes={} max_input_latency_msec={} cpu_max_compose_msec={} input_dispatch_max_gap_msec={} input_queue_max_depth={} input_queue_dwell_max_msec={} emergency_exit={} x_server=disabled",
+        "sophia_wayland_session schema=1 status=complete transactions={} frames={} shm_frames={} dmabuf_frames={} resize_requested={} resize_commits={} buffers={} routed_input={} routed_keys={} routed_pointer={} expected_keycodes_observed={} expected_keycodes_matched={} expected_keycodes_total={} input_presentations={} pointer_presentations={} input_pixel_changes={} max_input_latency_msec={} input_route_to_commit_max_msec={} input_commit_to_presentation_max_msec={} cpu_max_compose_msec={} input_dispatch_max_gap_msec={} input_queue_max_depth={} input_queue_dwell_max_msec={} emergency_exit={} x_server=disabled",
         transactions,
         frames,
         shm_frames,
@@ -594,6 +600,8 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
         pointer_presentations,
         input_pixel_changes,
         max_observed_input_latency.as_millis(),
+        input_latency.max_route_to_commit.as_millis(),
+        input_latency.max_commit_to_presentation.as_millis(),
         max_cpu_compose.as_millis(),
         input_stats.max_dispatch_gap_msec,
         input_stats.max_queue_depth,
@@ -651,17 +659,22 @@ fn associate_input_with_surface_commit(
     surface: sophia_protocol::SurfaceId,
     awaiting_surface_input: &mut VecDeque<(Instant, sophia_protocol::SurfaceId, u32, Option<u64>)>,
     awaiting_surface_pointer: &mut VecDeque<(Instant, sophia_protocol::SurfaceId)>,
-    pending_pixel_input: &mut VecDeque<(Instant, Option<u64>)>,
-    pending_presented_input: &mut VecDeque<(Instant, u32)>,
-    pending_presented_pointer: &mut VecDeque<Instant>,
+    pending_pixel_input: &mut VecDeque<(Instant, Instant, Option<u64>)>,
+    pending_presented_input: &mut VecDeque<(Instant, Instant, u32)>,
+    pending_presented_pointer: &mut VecDeque<(Instant, Instant)>,
+    input_latency: &mut InputLatencyMetrics,
 ) {
+    let committed_at = Instant::now();
     let mut other_surface_input = VecDeque::new();
     while let Some((started, target_surface, keycode, baseline)) =
         awaiting_surface_input.pop_front()
     {
         if target_surface == surface {
-            pending_pixel_input.push_back((started, baseline));
-            pending_presented_input.push_back((started, keycode));
+            input_latency.max_route_to_commit = input_latency
+                .max_route_to_commit
+                .max(committed_at.saturating_duration_since(started));
+            pending_pixel_input.push_back((started, committed_at, baseline));
+            pending_presented_input.push_back((started, committed_at, keycode));
         } else {
             other_surface_input.push_back((started, target_surface, keycode, baseline));
         }
@@ -671,7 +684,10 @@ fn associate_input_with_surface_commit(
     let mut other_surface_pointer = VecDeque::new();
     while let Some((started, target_surface)) = awaiting_surface_pointer.pop_front() {
         if target_surface == surface {
-            pending_presented_pointer.push_back(started);
+            input_latency.max_route_to_commit = input_latency
+                .max_route_to_commit
+                .max(committed_at.saturating_duration_since(started));
+            pending_presented_pointer.push_back((started, committed_at));
         } else {
             other_surface_pointer.push_back((started, target_surface));
         }
@@ -679,25 +695,38 @@ fn associate_input_with_surface_commit(
     *awaiting_surface_pointer = other_surface_pointer;
 }
 
+#[derive(Default)]
+struct InputLatencyMetrics {
+    max_route_to_commit: Duration,
+    max_commit_to_presentation: Duration,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn observe_input_presentation(
     checksum: Option<u64>,
-    pending_pixel_input: &mut VecDeque<(Instant, Option<u64>)>,
-    pending_presented_input: &mut VecDeque<(Instant, u32)>,
-    pending_presented_pointer: &mut VecDeque<Instant>,
+    pending_pixel_input: &mut VecDeque<(Instant, Instant, Option<u64>)>,
+    pending_presented_input: &mut VecDeque<(Instant, Instant, u32)>,
+    pending_presented_pointer: &mut VecDeque<(Instant, Instant)>,
     presented_keycodes: &mut BTreeSet<u32>,
     input_pixel_changes: &mut usize,
     input_presentations: &mut usize,
     pointer_presentations: &mut usize,
     max_observed_input_latency: &mut Duration,
+    input_latency: &mut InputLatencyMetrics,
 ) {
-    while let Some((started, keycode)) = pending_presented_input.pop_front() {
+    while let Some((started, committed_at, keycode)) = pending_presented_input.pop_front() {
         *max_observed_input_latency = (*max_observed_input_latency).max(started.elapsed());
+        input_latency.max_commit_to_presentation = input_latency
+            .max_commit_to_presentation
+            .max(committed_at.elapsed());
         *input_presentations = input_presentations.saturating_add(1);
         presented_keycodes.insert(keycode);
     }
-    while let Some(started) = pending_presented_pointer.pop_front() {
+    while let Some((started, committed_at)) = pending_presented_pointer.pop_front() {
         *max_observed_input_latency = (*max_observed_input_latency).max(started.elapsed());
+        input_latency.max_commit_to_presentation = input_latency
+            .max_commit_to_presentation
+            .max(committed_at.elapsed());
         *pointer_presentations = pointer_presentations.saturating_add(1);
     }
     let Some(checksum) = checksum else {
@@ -705,12 +734,15 @@ fn observe_input_presentation(
     };
     if !pending_pixel_input
         .front()
-        .is_some_and(|(_, baseline)| baseline.is_none_or(|baseline| baseline != checksum))
+        .is_some_and(|(_, _, baseline)| baseline.is_none_or(|baseline| baseline != checksum))
     {
         return;
     }
-    while let Some((started, _)) = pending_pixel_input.pop_front() {
+    while let Some((started, committed_at, _)) = pending_pixel_input.pop_front() {
         *max_observed_input_latency = (*max_observed_input_latency).max(started.elapsed());
+        input_latency.max_commit_to_presentation = input_latency
+            .max_commit_to_presentation
+            .max(committed_at.elapsed());
         *input_pixel_changes = input_pixel_changes.saturating_add(1);
     }
 }
