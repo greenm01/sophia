@@ -193,6 +193,18 @@ pub struct XWireClientContext {
     pub resource_id_range: Option<XWireClientResourceRange>,
 }
 
+impl XWireClientContext {
+    fn validate_new_resource_id(self, resource_id: u32) -> Result<(), XWireParseError> {
+        if self
+            .resource_id_range
+            .is_some_and(|range| !range.owns_new_resource(resource_id))
+        {
+            return Err(XWireParseError::ResourceIdOutsideClientRange { resource_id });
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum XWireRequest {
     Authority(XAuthorityRequestPacket),
@@ -730,8 +742,10 @@ fn decode_mit_shm(
                 X_MIT_SHM_ATTACH_REQ_LEN,
                 bytes.len(),
             )?;
+            let segment = context.byte_order.u32(&bytes[4..8]);
+            context.validate_new_resource_id(segment)?;
             Ok(XWireRequest::ShmAttach {
-                segment: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+                segment: XResourceId::new(u64::from(segment), 1),
                 shmid: context.byte_order.u32(&bytes[8..12]),
                 read_only: bytes[12] != 0,
             })
@@ -1104,8 +1118,10 @@ fn decode_create_colormap(
     bytes: &[u8],
 ) -> Result<XWireRequest, XWireParseError> {
     require_exact_len(X_CREATE_COLORMAP, X_CREATE_COLORMAP_REQ_LEN, bytes.len())?;
+    let colormap = context.byte_order.u32(&bytes[4..8]);
+    context.validate_new_resource_id(colormap)?;
     Ok(XWireRequest::CreateColormap {
-        colormap: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        colormap: XResourceId::new(u64::from(colormap), 1),
         window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
         visual: context.byte_order.u32(&bytes[12..16]),
     })
@@ -1320,9 +1336,11 @@ fn decode_create_glyph_cursor(
         X_CREATE_GLYPH_CURSOR_REQ_LEN,
         bytes.len(),
     )?;
+    let cursor = context.byte_order.u32(&bytes[4..8]);
+    context.validate_new_resource_id(cursor)?;
     let mask_font = context.byte_order.u32(&bytes[12..16]);
     Ok(XWireRequest::CreateGlyphCursor {
-        cursor: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        cursor: XResourceId::new(u64::from(cursor), 1),
         source_font: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
         mask_font: (mask_font != 0).then(|| XResourceId::new(u64::from(mask_font), 1)),
     })
@@ -1434,9 +1452,11 @@ fn decode_create_pixmap(
     bytes: &[u8],
 ) -> Result<XWireRequest, XWireParseError> {
     require_exact_len(X_CREATE_PIXMAP, X_CREATE_PIXMAP_REQ_LEN, bytes.len())?;
+    let pixmap = context.byte_order.u32(&bytes[4..8]);
+    context.validate_new_resource_id(pixmap)?;
     Ok(XWireRequest::CreatePixmap {
         depth: bytes[1],
-        pixmap: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        pixmap: XResourceId::new(u64::from(pixmap), 1),
         drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
         width: context.byte_order.u16(&bytes[12..14]),
         height: context.byte_order.u16(&bytes[14..16]),
@@ -1463,8 +1483,10 @@ fn decode_open_font(
             expected_at_least: expected_len,
             actual: bytes.len(),
         })?;
+    let font = context.byte_order.u32(&bytes[4..8]);
+    context.validate_new_resource_id(font)?;
     Ok(XWireRequest::OpenFont {
-        font: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        font: XResourceId::new(u64::from(font), 1),
         name: name.to_owned(),
     })
 }
@@ -1601,6 +1623,8 @@ fn decode_create_gc(
     bytes: &[u8],
 ) -> Result<XWireRequest, XWireParseError> {
     require_len(X_CREATE_GC, X_CREATE_GC_REQ_LEN, bytes.len())?;
+    let gc = context.byte_order.u32(&bytes[4..8]);
+    context.validate_new_resource_id(gc)?;
     let value_mask = context.byte_order.u32(&bytes[12..16]);
     if value_mask & !0x007f_ffff != 0 {
         return Err(XWireParseError::InvalidLength {
@@ -1644,7 +1668,7 @@ fn decode_create_gc(
         }
     }
     Ok(XWireRequest::CreateGraphicsContext {
-        gc: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        gc: XResourceId::new(u64::from(gc), 1),
         drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
         values,
     })
@@ -1799,13 +1823,7 @@ fn decode_create_window(
         }
     }
     let window_raw = context.byte_order.u32(&bytes[4..8]);
-    if let Some(range) = context.resource_id_range
-        && !range.owns_new_resource(window_raw)
-    {
-        return Err(XWireParseError::ResourceIdOutsideClientRange {
-            resource_id: window_raw,
-        });
-    }
+    context.validate_new_resource_id(window_raw)?;
     let window = XResourceId::new(u64::from(window_raw), 1);
     Ok(XWireRequest::CreateWindow {
         packet: XAuthorityRequestPacket {

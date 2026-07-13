@@ -965,6 +965,60 @@ fn x11_core_decoder_captures_put_image_requests() {
 }
 
 #[test]
+fn x11_core_decoder_rejects_out_of_range_client_resource_creators() {
+    let namespace = NamespaceId::from_raw(45);
+    let context = XWireClientContext {
+        byte_order: XByteOrder::LittleEndian,
+        namespace,
+        transaction: TransactionId::from_raw(509),
+        resource_id_range: Some(XWireClientResourceRange {
+            base: X_SETUP_DEFAULT_RESOURCE_ID_BASE,
+            mask: X_SETUP_DEFAULT_RESOURCE_ID_MASK,
+        }),
+    };
+    let outside_range = 0x0040_0001;
+    let requests = [
+        create_window_request(XByteOrder::LittleEndian, outside_range, 1, 2, 300, 200),
+        create_gc_request(
+            XByteOrder::LittleEndian,
+            outside_range,
+            X_SETUP_DEFAULT_ROOT,
+        ),
+        create_pixmap_request(
+            XByteOrder::LittleEndian,
+            24,
+            outside_range,
+            X_SETUP_DEFAULT_ROOT,
+            32,
+            16,
+        ),
+        open_font_request(XByteOrder::LittleEndian, outside_range, "fixed"),
+        create_colormap_request(
+            XByteOrder::LittleEndian,
+            outside_range,
+            X_SETUP_DEFAULT_ROOT,
+            X_SETUP_DEFAULT_VISUAL,
+        ),
+        create_glyph_cursor_request(
+            XByteOrder::LittleEndian,
+            outside_range,
+            0x0020_0040,
+            0x0020_0041,
+        ),
+        mit_shm_attach_request(XByteOrder::LittleEndian, outside_range, 77, false),
+    ];
+
+    for request in requests {
+        assert_eq!(
+            decode_x11_core_request(context, &request),
+            Err(XWireParseError::ResourceIdOutsideClientRange {
+                resource_id: outside_range,
+            })
+        );
+    }
+}
+
+#[test]
 fn x11_core_decoder_captures_pixmap_and_copy_area_requests() {
     let namespace = NamespaceId::from_raw(45);
     let create = decode_x11_core_request(

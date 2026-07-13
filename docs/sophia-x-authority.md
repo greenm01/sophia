@@ -67,10 +67,11 @@ focus/configure commands back to that client. Its persistent socket listener
 also reuses authority state across *sequential* clients. It is not yet a
 production multi-client server: root/output facts are fixed setup values, and
 simultaneous-client dispatch is still required. Each accepted client now gets
-a disjoint X11 setup resource-ID range. The `CreateWindow` wire path rejects an
-XID outside that range with X11 `BadIDChoice` before it reaches runtime state;
-the other XID-creating requests, resource cleanup, and durable client identity
-are not implemented yet.
+a disjoint X11 setup resource-ID range. Every currently supported XID-creating
+wire path—window, pixmap, GC, font, colormap, glyph cursor, and reduced
+MIT-SHM segment—rejects an XID outside that range with X11 `BadIDChoice` before
+it reaches runtime state. Resource cleanup, ownership checks on references to
+existing resources, and durable client identity are still required.
 `XServerFrontendConfig`/`XServerFrontend` make the local socket path and
 namespace explicit, reject invalid namespaces, restrict the socket to its
 owner, and refuse to replace a non-socket path. The configuration can now
