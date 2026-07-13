@@ -140,9 +140,18 @@ engineering reason.
   `--secondary-terminal` and `tools/live_session_two_xterm_hardware_proof.sh`
   now provide the KMS multi-app operator gate, requiring two composed layers in
   addition to the existing persistent hardware evidence. The focus handshake
-  and monotonic X11 pixel generations are covered headlessly; next, collect
-  fresh KMS evidence with the guarded two-xterm tool and expose configurable
-  client admission/auth policy to the launcher.
+  and monotonic X11 pixel generations are covered headlessly. Dedicated-KMS
+  correctness passed with both clients and all 14 input events flushed, but the
+  debug proof took 10,784 milliseconds and exposed a 120-millisecond maximum
+  composition. The harness now builds before DRM takeover, runs the optimized
+  binary, and requires the complete two-xterm startup-through-echo path within
+  2,000 milliseconds with composition at or below 25 milliseconds. Primary
+  admission and focused-surface stacking are deterministic so optimized client
+  startup cannot route visible proof input behind the overlapping secondary
+  surface. Optimized dedicated-KMS evidence passes in 1,487 milliseconds with
+  a 10-millisecond maximum composition, 23-millisecond input-to-presentation
+  latency, all 14 X11 events flushed, and no scanout cleanup debt. The next
+  frontend task is configurable client admission/auth policy.
 - [x] Define the X11 session profiles: classic shared-X behavior for trusted
   sessions, plus explicit confined namespaces/capabilities where requested.
   The confined profile remains gated on client-aware connection routing.

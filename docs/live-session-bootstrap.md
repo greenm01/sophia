@@ -186,6 +186,27 @@ page flips for steady updates. Both the bounded proof and a 30-second TTY3 run
 pass. Use an isolated QEMU `virtio-gpu` guest for repeated development and keep
 the physical TTY proof for final driver evidence.
 
+Persistent hardware proofs compile an optimized binary before taking DRM/KMS
+ownership and then invoke `target/release/sophia` directly. This keeps compiler
+time off the native display and prevents the debug CPU compositor from turning
+xterm's incremental startup draws into a long white screen. The identical
+headless two-xterm workload measured 605 milliseconds end to end with a
+4-millisecond maximum composition after optimization; the earlier debug KMS run
+needed 10,784 milliseconds and reached 120 milliseconds per composition.
+The optimized two-client launch also admits one primary transaction before the
+secondary client starts and composes the Engine-focused surface above
+overlapping clients. This prevents faster startup from making initial focus or
+visible input evidence depend on client scheduling and surface-ID order.
+Dedicated-KMS evidence now passes in 1,487 milliseconds with a 10-millisecond
+maximum composition, 23-millisecond input-to-presentation latency, and all 14
+X11 input events flushed.
+`tools/live_session_two_xterm_hardware_proof.sh` applies a stricter specialized
+gate: the complete startup-through-echo proof must finish within 2,000
+milliseconds and no CPU composition may exceed 25 milliseconds. Positive
+integer overrides are available through
+`SOPHIA_TWO_XTERM_STARTUP_BUDGET_MSEC` and
+`SOPHIA_TWO_XTERM_COMPOSE_BUDGET_MSEC`; do not raise them to admit a regression.
+
 The isolated guest harness is now the default repeated native-session path.
 On Void, install QEMU once if it is missing:
 

@@ -154,6 +154,20 @@ pub(crate) fn run_persistent_xterm_session(
     }
     let child = terminal_command.spawn()?;
     let mut process = SessionProcessGuard::new(child, Vec::new(), config.socket_path.clone());
+    // Admit one primary-client transaction before launching the secondary
+    // proof client. Otherwise optimized startup lets both xterms race for the
+    // first committed surface, making initial focus nondeterministic.
+    let initial_authority_batch = if config.secondary_terminal {
+        Some(
+            authority_receiver
+                .recv_timeout(Duration::from_secs(5))
+                .map_err(|error| {
+                    format!("primary xterm did not publish a startup frame: {error}")
+                })?,
+        )
+    } else {
+        None
+    };
     if config.secondary_terminal {
         process.add_secondary_child(spawn_secondary_xterm(
             &terminal,
@@ -220,6 +234,7 @@ pub(crate) fn run_persistent_xterm_session(
         &mut native_scanout,
         &mut wm_session,
         false,
+        initial_authority_batch,
     );
     process.terminate()?;
     let _ = service_command_sender.send(XServerFrontendServiceCommand::StopAccepting);
@@ -1101,6 +1116,7 @@ fn run_session_loop(
     native_scanout: &mut Option<PersistentNativeScanout>,
     wm_session: &mut Option<LiveWmSession>,
     require_startup_focus: bool,
+    mut initial_authority_batch: Option<XAuthorityObservedTransactionBatch>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let started = Instant::now();
     let deadline = config.max_runtime.map(|duration| started + duration);
@@ -1126,6 +1142,9 @@ fn run_session_loop(
     let mut physical_sequence_completed_at: Option<Instant> = None;
     let mut physical_input_completion_reported = false;
     let mut input_pixel_change = false;
+    let mut input_surface = None;
+    let mut input_surface_generation = None;
+    let mut input_surface_pixel_change = false;
     let mut input_proof_started_at = None;
     let mut input_change_submission_baseline = None;
     let mut input_presented_latency = None;
@@ -1224,7 +1243,11 @@ fn run_session_loop(
                     // Earlier letters must not satisfy the presented-latency
                     // gate before Return reaches the client.
                     injection_checksum = scene.last_report.as_ref().map(|report| report.checksum);
+                    input_surface = focus.focused_surface(seat);
+                    input_surface_generation =
+                        input_surface.and_then(|surface| scene.surface_buffer_generation(surface));
                     input_pixel_change = false;
+                    input_surface_pixel_change = false;
                     input_change_submission_baseline = None;
                 }
                 if report.pointer_events > 0 {
@@ -1315,7 +1338,7 @@ fn run_session_loop(
         {
             if !input_pixel_change {
                 return Err(format!(
-                    "persistent live session timed out waiting for pixels after flushed X11 input: expected={input_events_expected} flushed={input_events_flushed} final_checksum={:?}",
+                    "persistent live session timed out waiting for pixels after flushed X11 input: expected={input_events_expected} flushed={input_events_flushed} final_checksum={:?} input_surface={input_surface:?} input_surface_pixel_change={input_surface_pixel_change}",
                     scene.last_report.as_ref().map(|report| report.checksum),
                 )
                 .into());
@@ -1431,7 +1454,11 @@ fn run_session_loop(
             session_ticks = session_ticks.saturating_add(1);
         }
 
-        match authority_receiver.recv_timeout(Duration::from_millis(25)) {
+        let authority_batch = initial_authority_batch.take().map_or_else(
+            || authority_receiver.recv_timeout(Duration::from_millis(25)),
+            Ok,
+        );
+        match authority_batch {
             Ok(batch) => {
                 if drain_physical_input!() {
                     break 'session;
@@ -1459,6 +1486,14 @@ fn run_session_loop(
                 let compose_started = Instant::now();
                 let report = scene.compose()?.clone();
                 max_compose = max_compose.max(compose_started.elapsed());
+                if let (Some(surface), Some(before_surface)) =
+                    (input_surface, input_surface_generation)
+                    && scene
+                        .surface_buffer_generation(surface)
+                        .is_some_and(|generation| generation != before_surface)
+                {
+                    input_surface_pixel_change = true;
+                }
                 let native_frames = native_scanout
                     .as_ref()
                     .map(|_| scene.frames_for_outputs(&outputs))
@@ -1536,12 +1571,14 @@ fn run_session_loop(
                                 }
                             })?;
                         focused_client_control = Some((transaction, surface.surface));
+                        scene.raise_surface(surface.surface);
                     }
                 }
                 if let Some((transaction, surface)) = layout.focus_to_apply.take()
                     && focus.focus_surface(seat, surface, runtime.committed_surfaces())
                         == InputFocusDecision::Focused
                 {
+                    scene.raise_surface(surface);
                     println!(
                         "sophia_live_wm schema=1 status=focus_committed transaction={} target=surface",
                         transaction.raw()
@@ -1696,6 +1733,9 @@ fn run_session_loop(
             && terminal_content_ready
         {
             injection_checksum = scene.last_report.as_ref().map(|report| report.checksum);
+            input_surface = focus.focused_surface(seat);
+            input_surface_generation =
+                input_surface.and_then(|surface| scene.surface_buffer_generation(surface));
             if let Some(text) = config.inject_text.as_deref() {
                 let events = synthetic_text_input_events(text)?;
                 let expected = events.len();
@@ -1802,7 +1842,7 @@ fn run_session_loop(
     }
     if config.input_proof_requested() && !input_pixel_change {
         return Err(format!(
-            "persistent live session input did not change composed terminal pixels: baseline={injection_checksum:?} final_frame={} final_buffers={} batches={batches} transactions={transactions}",
+            "persistent live session input did not change composed terminal pixels: baseline={injection_checksum:?} final_frame={} final_buffers={} input_surface={input_surface:?} input_surface_pixel_change={input_surface_pixel_change} batches={batches} transactions={transactions}",
             report.checksum,
             scene.buffer_checksum(),
         )
@@ -3421,6 +3461,7 @@ struct PersistentCpuScene {
     output_size: Size,
     buffers: BTreeMap<u64, XAuthorityCpuBufferSnapshot>,
     surfaces: BTreeMap<SurfaceId, (Rect, u64)>,
+    raised_surface: Option<SurfaceId>,
     last_report: Option<sophia_backend_live::LiveCpuCompositionReport>,
     max_nonzero_pixel_bytes: usize,
     nonzero_frames: usize,
@@ -3432,6 +3473,7 @@ impl PersistentCpuScene {
             output_size,
             buffers: BTreeMap::new(),
             surfaces: BTreeMap::new(),
+            raised_surface: None,
             last_report: None,
             max_nonzero_pixel_bytes: 0,
             nonzero_frames: 0,
@@ -3444,6 +3486,9 @@ impl PersistentCpuScene {
     ) -> Result<(), Box<dyn std::error::Error>> {
         for surface in &batch.removed_surfaces {
             self.surfaces.remove(surface);
+            if self.raised_surface == Some(*surface) {
+                self.raised_surface = None;
+            }
         }
         self.buffers.retain(|handle, _| {
             self.surfaces
@@ -3468,13 +3513,30 @@ impl PersistentCpuScene {
         Ok(())
     }
 
+    fn raise_surface(&mut self, surface: SurfaceId) {
+        if self.surfaces.contains_key(&surface) {
+            self.raised_surface = Some(surface);
+        }
+    }
+
     fn compose(
         &mut self,
     ) -> Result<&sophia_backend_live::LiveCpuCompositionReport, Box<dyn std::error::Error>> {
-        let layers = self
+        let mut surface_order = self
             .surfaces
-            .values()
-            .filter_map(|(geometry, handle)| {
+            .keys()
+            .copied()
+            .filter(|surface| Some(*surface) != self.raised_surface)
+            .collect::<Vec<_>>();
+        if let Some(surface) = self.raised_surface
+            && self.surfaces.contains_key(&surface)
+        {
+            surface_order.push(surface);
+        }
+        let layers = surface_order
+            .iter()
+            .filter_map(|surface| {
+                let (geometry, handle) = self.surfaces.get(surface)?;
                 let buffer = self.buffers.get(handle)?;
                 Some(sophia_backend_live::LiveCpuCompositionLayerRef {
                     geometry: *geometry,
@@ -3513,6 +3575,12 @@ impl PersistentCpuScene {
                     (hash ^ u64::from(*byte)).wrapping_mul(0x100_0000_01b3)
                 })
             })
+    }
+
+    fn surface_buffer_generation(&self, surface: SurfaceId) -> Option<u64> {
+        let (_, handle) = self.surfaces.get(&surface)?;
+        let buffer = self.buffers.get(handle)?;
+        Some(buffer.generation)
     }
 
     /// Returns true only when the focused surface contains at least two
@@ -4040,6 +4108,40 @@ mod tests {
             test_cpu_buffer(1, [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0xff]),
         );
         assert!(scene.surface_has_visual_detail(focused));
+    }
+
+    #[test]
+    fn focused_surface_is_composed_above_an_overlapping_client() {
+        let focused = SurfaceId::new(31, 1);
+        let secondary = SurfaceId::new(32, 1);
+        let geometry = Rect {
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 1,
+        };
+        let mut scene = PersistentCpuScene::new(Size {
+            width: 2,
+            height: 1,
+        });
+        scene.surfaces.insert(focused, (geometry, 1));
+        scene.surfaces.insert(secondary, (geometry, 2));
+        let focused_pixels = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+        let secondary_pixels = [0, 0, 0, 0xff, 0, 0, 0, 0xff];
+        scene.buffers.insert(1, test_cpu_buffer(1, focused_pixels));
+        scene
+            .buffers
+            .insert(2, test_cpu_buffer(2, secondary_pixels));
+
+        assert_eq!(
+            scene.compose().unwrap().frame.bytes,
+            secondary_pixels.to_vec()
+        );
+        scene.raise_surface(focused);
+        assert_eq!(
+            scene.compose().unwrap().frame.bytes,
+            focused_pixels.to_vec()
+        );
     }
 
     fn test_cpu_buffer(handle: u64, bytes: [u8; 8]) -> XAuthorityCpuBufferSnapshot {
