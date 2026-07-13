@@ -38,11 +38,10 @@ The live renderer boundary does not own:
 ## Current Admission Rule
 
 CPU-backed uploads are the only always-accepted path. `XPixmap` and `DmaBuf`
-sources are reduced records today, not proof that a real GPU import path exists.
-They stay deferred unless the live renderer boundary explicitly declares support.
-Live backend startup therefore defaults to CPU fallback. Native import-capable
-rendering must be selected through startup configuration; it is not implied by
-discovering a DRM/KMS output.
+sources are reduced records at the Engine boundary; their raw handles never
+leave the native renderer boundary. Live backend startup therefore defaults to
+the CPU path. Native import-capable rendering must be selected through startup
+configuration; it is not implied by discovering a DRM/KMS output.
 
 Startup reports expose only reduced renderer import health: CPU fallback, native
 import capable, or degraded. Per-path status is reduced to disabled, enabled, or
@@ -58,21 +57,26 @@ the session is using CPU fallback or a native import-capable renderer.
 Degraded renderer health has two sources. Startup capability probes can mark a
 path degraded before the session starts, and per-frame import failures can
 degrade runtime observation after startup. Both are modeled through deterministic
-fake paths in `sophia-renderer-live`, which lets Sophia exercise reduced failure
-shape before adding GBM, EGL, DMA-BUF, explicit sync, or renderer-private
-resource caches.
+fake paths in `sophia-renderer-live`, while the native scanout adapter owns the
+experimental GBM/EGL DMA-BUF implementation and its renderer-private resource
+caches.
 
 Real MIT-SHM mapping remains outside this boundary until Sophia has a bounded
 shared-memory upload path with size checks, namespace validation, lifetime
 tracking, and fail-closed errors.
 
-The first real renderer implementation lives behind the `sophia-renderer-live`
-crate boundary. Today that crate has no GBM, EGL, DMA-BUF, MIT-SHM, or explicit
-sync dependencies; it only models reduced import admission, startup health, and
-runtime observation shape. Future renderer-private resource caches and native
-imports should land there, while `sophia-backend-live` remains the session
-assembly boundary that wires discovery, input, renderer admission, and startup
-health together.
+The initial native DMA-BUF route accepts only a bounded single-plane linear
+XRGB8888/ARGB8888 descriptor and stays behind `--experimental-dmabuf`. It is
+not a general renderer contract and has no passing real-hardware evidence yet.
+Its lifecycle is explicit:
+
+`admitted descriptor → renderer-private import/submission → observed page flip
+→ frame callback and wl_buffer.release → renderer resource retirement`.
+
+The controlled GBM producer and three-run real-Kitty gate exercise that exact
+ordering before any DMA-BUF opt-in may be promoted. `sophia-backend-live`
+remains the session assembly boundary that wires discovery, input, renderer
+admission, and startup health together.
 
 ## Native Dependency Admission
 

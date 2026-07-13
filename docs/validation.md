@@ -93,29 +93,42 @@ are frozen under `research/xlibre` and are not release gates.
 
 The native session defaults to its proven SHM path even with `--native-scanout`.
 The bounded DMA-BUF path requires the explicit experimental
-`--experimental-dmabuf` flag while its first-frame KMS submission and
-presentation-retirement path is hardened. Admitted buffers are imported by EGL
-without CPU readback; frame callbacks and `wl_buffer.release` follow observed
-KMS presentation rather than transaction queueing. Run this experimental gate
-only from a dedicated text TTY with an outside recovery path.
+`--experimental-dmabuf` flag. It has no passing real-hardware evidence yet.
+Run the controlled external producer first, from a dedicated text TTY with an
+outside recovery path:
 
-Its native completion record must show at least one successful DMA-BUF import,
-multiple KMS submissions, accepted callbacks and retirement, no import loss,
-submit/retire/callback failures, in-flight ownership, or cleanup debt, and a
-maximum submit-to-page-flip interval no greater than 100 ms.
+```bash
+# First-frame admission and retirement:
+SOPHIA_DMABUF_PRODUCER_FRAMES=3 tools/wayland_dmabuf_first_frame_hardware_proof.sh
 
-For the hardware proof, set `SOPHIA_INPUT_DEVICES` to comma-separated keyboard
+# Reuse/lifetime stress after the first frame passes:
+SOPHIA_DMABUF_PRODUCER_FRAMES=300 tools/wayland_dmabuf_first_frame_hardware_proof.sh
+```
+
+The proof requires explicit experimental enablement, at least one DMA-BUF
+import, multiple KMS submissions, accepted callbacks and retirement, no import
+loss, submit/retire/callback failures, in-flight ownership, or cleanup debt,
+and a maximum submit-to-page-flip interval no greater than 100 ms.
+
+For the real-Kitty gate, set `SOPHIA_INPUT_DEVICES` to comma-separated keyboard
 and pointer event paths. The guarded launcher asks for its recovery chord before
 DRM takeover. In Kitty, type `sophia` plus Enter, press all four arrow keys,
-move/click the pointer, then type `exit` plus Enter. The verifier requires all
-eleven evdev keycodes, routed pointer input, DMA-BUF frames, a presented-input
-latency no greater than 100 ms, normal client completion, restored KD mode and
-termios state and `keyd`, and no surviving session or input-guard process.
+move/click the pointer, then type `exit` plus Enter. After the controlled
+300-frame proof passes, run:
 
-`tools/finish_wayland_kitty_milestones.sh` is the operator entry point. It
-discovers the stable keyboard and pointer event aliases, prints the selected
-configuration, and runs the guarded proof. Use `--dry-run` from any shell to
-inspect discovery without opening input or DRM devices.
+```bash
+tools/wayland_kitty_dmabuf_promotion_gate.sh
+```
+
+It requires exactly three independent Kitty logs. Every one must show all
+eleven evdev keycodes, routed pointer input, DMA-BUF frames, presented-input
+latency no greater than 100 ms, normal client completion, restored KD mode,
+termios state and `keyd`, and no surviving session or input-guard process.
+`tools/finish_wayland_kitty_milestones.sh` is the operator entry point: it
+discovers the stable keyboard and pointer aliases, runs the three-frame and
+300-frame controlled proofs, and then runs those three guarded Kitty proofs.
+Use `--dry-run` from any shell to inspect discovery without opening input or DRM
+devices.
 
 The archived XLibre latency smoke used a dummy XLibre display,
 routes synthetic text over the compatibility XTEST connection, and requires a

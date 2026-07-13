@@ -45,6 +45,7 @@ echo "then type 'exit' and Enter. Do not use the emergency chord for a passing p
 SOPHIA_OPERATOR_KEYBOARD="$KEYBOARD" \
 SOPHIA_INPUT_DEVICES="$INPUT_DEVICES" \
     tools/run_sophia_kitty_session.sh \
+        --experimental-dmabuf \
         --expect-keycodes="$EXPECTED_KEYCODES" \
         --expect-pointer-input \
         --expect-input-presentation \

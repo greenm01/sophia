@@ -78,13 +78,16 @@ protocol-neutral `SurfaceTransaction` and `RoutedInputRequest` records serve
 the Wayland and modern-X authorities; Engine contains no XLibre window or wire
 identity.
 
-The native session admits a narrow linear XRGB/ARGB DMA-BUF subset and imports
-it directly into EGL without CPU readback. KMS submission remains owned by the
-backend, and Wayland frame/buffer feedback waits for the matching observed
-presentation. The production CLI and installed Kitty launcher neither link nor
-start XLibre; its bridge remains an opt-in research fixture. The active gate is
-operator hardware evidence for native Kitty input, resize, latency, and TTY
-recovery, followed by DMA-BUF performance evidence.
+The native session admits a narrow linear XRGB/ARGB DMA-BUF subset, but its
+import/presentation route remains experimental until hardware evidence proves
+it. SHM is the current verified path. When the experimental route is enabled,
+KMS submission remains backend-owned and Wayland frame/buffer feedback waits
+for the matching observed presentation. The production CLI and installed Kitty
+launcher neither link nor start XLibre; its bridge remains an opt-in research
+fixture. The active gates are native renderer lifetime safety, a controlled
+DMA-BUF first-frame and 300-frame lifecycle proof, then three guarded real
+Kitty runs covering input, resize, latency, TTY recovery, and DMA-BUF
+presentation.
 
 ## Load-Bearing Boundaries
 

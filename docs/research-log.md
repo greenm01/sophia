@@ -3,6 +3,28 @@
 This file records decisions and unresolved questions for the active milestone.
 Completed evidence is archived in `research-log-archive.md`.
 
+## 2026-07-12: DMA-BUF Performance Gate and Renderer Safety Boundary
+
+The current native Wayland/Kitty presentation route is SHM-backed and stable
+enough to serve as the production fallback, but the latest hardware result was
+about 110 ms input-to-presentation and therefore missed the 100 ms budget.
+DMA-BUF descriptors are admitted only as a bounded single-plane linear subset;
+their native import and presentation path remains explicitly experimental.
+There is no passing real-hardware DMA-BUF result at this point.
+
+A controlled external Wayland producer now allocates linear XRGB8888 GBM
+buffers, alternates them only after `wl_buffer.release`, and waits for each
+frame callback. The first hardware gate uses three frames; the second uses 300
+frames to exercise import, presentation, feedback, and retirement lifetime.
+Only after both pass may the three independent guarded real-Kitty runs begin.
+DMA-BUF stays non-default until every real-Kitty log proves input, recovery,
+presentation, and the 100 ms budget.
+
+The current CPU composition copy and 2 ms native idle cadence are a safety
+boundary, not merely a tuning choice. Removing the copy or tightening that loop
+has reproduced native renderer/exporter heap corruption on hardware. Further
+latency work must isolate that ownership fault before changing either setting.
+
 ## 2026-07-12: Native Wayland Replaces The Kitty Compatibility Runtime
 
 Sophia's production Kitty path now terminates a private Wayland socket through
@@ -19,11 +41,13 @@ scripts, fixtures, and notes live under `research/xlibre`.
 
 The native-scanout session advertises a bounded single-plane linear/implicit
 XRGB8888/ARGB8888 DMA-BUF subset. Accepted buffers cross the renderer boundary
-as owned descriptors, become EGL images without CPU readback, and render into
-the persistent GBM target. Wayland presentation and buffer-release feedback is
-withheld until the matching KMS submission is observed as presented. The next
-evidence gate is the guarded hardware run: text, navigation, pointer, resize,
-sub-100 ms presentation, clean exit, and TTY recovery.
+as owned descriptors. Their experimental native import/presentation route is
+now gated by the controlled first-frame/lifetime proof and three real-Kitty
+runs; it is not yet recorded as passing hardware evidence. Wayland
+presentation and buffer-release feedback must remain withheld until the
+matching KMS submission is observed as presented. The next evidence gate is the
+controlled proof, followed by text, navigation, pointer, resize, sub-100 ms
+presentation, clean exit, and TTY recovery in real Kitty.
 
 ## 2026-07-12: Installed-Session Input Recovery Interlock
 

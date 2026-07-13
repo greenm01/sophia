@@ -71,13 +71,15 @@ also advertises a deliberately narrow linux-dmabuf global: one linear or
 implicit XRGB8888/ARGB8888 plane with bounded dimensions and validated stride.
 
 SHM contents are copied into immutable CPU registrations before entering the
-Engine. Admitted DMA-BUFs remain opaque outside the renderer boundary, are
-imported as EGL images without CPU readback, and receive `wl_buffer.release`
-only after Sophia observes presentation of the corresponding KMS submission.
-Their admission metadata remains available so the client can legally reattach
-the same buffer after release. Clipboard,
-drag-and-drop, popups, explicit synchronization, decorations, and broader
-optional protocols remain future slices.
+Engine and are the currently verified presentation route. Admitted DMA-BUFs
+remain opaque outside the renderer boundary. Their native import and KMS
+presentation route is experimental, enabled only with `--experimental-dmabuf`
+until controlled and real-Kitty hardware proofs pass. That route must withhold
+`wl_buffer.release` until Sophia observes presentation of the matching KMS
+submission; admission metadata remains available so the client can legally
+reattach the same buffer after release. Clipboard, drag-and-drop, popups,
+explicit synchronization, decorations, and broader optional protocols remain
+future slices.
 
 ## `wl_surface` Transaction Mapping
 

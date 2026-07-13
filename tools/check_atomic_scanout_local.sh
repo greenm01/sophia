@@ -28,8 +28,14 @@ bash -n tools/stop_sophia_kitty_session.sh
 bash -n tools/wayland_kitty_smoke.sh
 bash -n tools/wayland_kitty_hardware_proof.sh
 bash -n tools/finish_wayland_kitty_milestones.sh
+bash -n tools/build_wayland_dmabuf_producer.sh
+bash -n tools/wayland_dmabuf_first_frame_hardware_proof.sh
+bash -n tools/wayland_kitty_dmabuf_promotion_gate.sh
 bash -n tools/verify_wayland_kitty_evidence.sh
 bash -n tools/install_sophia_session.sh
+dmabuf_producer_check="$(mktemp /tmp/sophia-wayland-dmabuf-producer-check.XXXXXX)"
+trap 'rm -f "$dmabuf_producer_check"' EXIT
+tools/build_wayland_dmabuf_producer.sh "$dmabuf_producer_check"
 python3 -c 'compile(open("tools/sophia_tty_mode.py", encoding="utf-8").read(), "tools/sophia_tty_mode.py", "exec")'
 
 echo "atomic scanout local checks passed"

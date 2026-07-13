@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-EVIDENCE_FILE="${SOPHIA_WAYLAND_KITTY_EVIDENCE:-/tmp/sophia-wayland-kitty-hardware.log}"
+EVIDENCE_DIR="${SOPHIA_DMABUF_PROMOTION_EVIDENCE_DIR:-${XDG_STATE_HOME:-${HOME}/.local/state}/sophia/dmabuf-promotion}"
 DRY_RUN=false
 
 if [[ "${1:-}" == "--dry-run" ]]; then
@@ -84,7 +84,7 @@ done
 echo "Sophia native Wayland Kitty milestone proof"
 echo "  keyboard: $keyboard"
 echo "  devices:  $input_devices"
-echo "  evidence: $EVIDENCE_FILE"
+echo "  evidence: $EVIDENCE_DIR"
 
 if [[ "$DRY_RUN" == true ]]; then
     echo "Discovery passed; rerun without --dry-run from a dedicated text TTY."
@@ -92,16 +92,17 @@ if [[ "$DRY_RUN" == true ]]; then
 fi
 
 echo
-echo "The proof will ask you to arm Ctrl-Alt-Backspace before DRM takeover."
-echo "Inside Kitty, follow the displayed input sequence and exit normally."
+echo "The promotion gate runs controlled three-frame and 300-frame DMA-BUF proofs."
+echo "It then asks you to complete the guarded Kitty input sequence three times."
+echo "Exit Kitty normally; do not use the emergency chord for a passing proof."
 echo
 
 cd "$ROOT_DIR"
 SOPHIA_OPERATOR_KEYBOARD="$keyboard" \
 SOPHIA_INPUT_DEVICES="$input_devices" \
-SOPHIA_WAYLAND_KITTY_EVIDENCE="$EVIDENCE_FILE" \
-    tools/wayland_kitty_hardware_proof.sh
+SOPHIA_DMABUF_PROMOTION_EVIDENCE_DIR="$EVIDENCE_DIR" \
+    tools/wayland_kitty_dmabuf_promotion_gate.sh
 
 echo
 echo "All native Wayland Kitty hardware gates passed."
-echo "Evidence: $EVIDENCE_FILE"
+echo "Evidence: $EVIDENCE_DIR"

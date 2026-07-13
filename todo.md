@@ -9,7 +9,7 @@ next milestone becomes active.
 
 ---
 
-## Active Milestone: Native Kitty Presentation Architecture
+## Active Milestone: Native Renderer Stability and DMA-BUF Performance
 
 Current truth:
 
@@ -20,16 +20,20 @@ Current truth:
   removed and software GL, commits SHM buffers, and produces changing nonzero
   pixels through Sophia's protocol-neutral Engine path.
 - The live authority supports ordered pipelined commits, xdg configure/ack,
-  frame callbacks, buffer release, keyboard/pointer seat delivery, SHM, and
-  bounded linear DMA-BUF admission.
+  frame callbacks, buffer release, keyboard/pointer seat delivery, the proven
+  SHM path, and bounded linear DMA-BUF admission.
 - The non-modesetting hardware preflight finds one openable atomic-capable card
   with a connected scanout target and the required atomic properties.
 - The guarded native SHM session now exits cleanly on hardware with keyboard
   routing, real KMS submissions, page-flip retirement, and no recovery debt.
+- The current hardware Kitty result is about 110 ms input-to-presentation, so
+  the 100 ms budget is not yet met.
 - Keep the native loop at its 2 ms idle cadence and retain the owned CPU-frame
   copy for now: tighter polling or zero-copy handoff reproducibly corrupts the
   native renderer/exporter heap on hardware. Isolate that ownership fault before
   attempting further latency reductions.
+- DMA-BUF is admitted but remains experimental. No real hardware DMA-BUF run
+  has passed yet, and SHM remains the production fallback.
 
 Exit criteria:
 
@@ -41,8 +45,9 @@ Exit criteria:
   per surface, explicit page-flip-to-release ownership, and normal teardown
   ordering. Verified on hardware with 26 Kitty transactions coalesced into 14
   SHM frames, clean native teardown, and no scanout failures.
-- [ ] Retain SHM-backed composition resources and coalesce damage so the
-  guarded hardware path remains below 100 ms input-to-presentation latency.
+- [ ] Establish a lifetime-stress baseline for the persistent native renderer:
+  no heap corruption at the 2 ms cadence, no ownership debt, and no attempt to
+  remove the CPU-frame copy before its fault is isolated.
 - [x] Prove a real software-rendered native Wayland Kitty toplevel handles a
   compositor configure, keeps its old size live until ack, then commits changing
   nonzero pixels at the requested size.
@@ -56,21 +61,33 @@ Exit criteria:
 - [x] Add native KMS presentation wiring for the Wayland session while
   preserving the existing independent TTY recovery guard.
 
-## Next Milestone: Native DMA-BUF Hardware Evidence
+## DMA-BUF Performance Gates
 
 - [x] Advertise only bounded single-plane XRGB/ARGB linear formats and validate
   dimensions, modifier, plane count, and stride before admitting an opaque
   `DmaBuf` handle.
-- [ ] Validate and harden native EGL import of admitted DMA-BUFs on hardware;
-  it stays isolated behind `--experimental-dmabuf` until the single-authority
-  presentation scheduler has a passing first-frame KMS proof.
-- [ ] Prove hardware Kitty remains within the presentation budget on that path
-  while SHM remains available for software clients.
+- [x] Add a controlled, external Wayland DMA-BUF producer that allocates only
+  linear XRGB8888 GBM buffers and waits for both frame and buffer-release
+  feedback before reuse.
+- [ ] Pass the controlled first-frame proof, then its 300-frame lifecycle run,
+  with `tools/wayland_dmabuf_first_frame_hardware_proof.sh`. The verifier must
+  see experimental enablement, imports, KMS presentation retirement, no cleanup
+  debt, and no more than 100 ms submit-to-page-flip latency.
+- [ ] Pass three independent guarded real-Kitty DMA-BUF runs with
+  `tools/wayland_kitty_dmabuf_promotion_gate.sh`: exact text/navigation and
+  pointer input, resize, clean normal exit, TTY/`keyd` restoration, DMA-BUF
+  presentation, and the 100 ms presentation budget in every log.
+- [ ] After those gates pass, expose DMA-BUF as an explicit non-default `--dmabuf`
+  opt-in. Keep SHM as the default and fallback until broader compatibility and
+  recovery evidence exists.
 
 ## Deferred
 
 - VRR activation evidence waits for hardware reporting `vrr_capable=1`; the
   current panel cannot prove it.
+- Multi-plane/modifier DMA-BUFs, explicit synchronization, and multi-client
+  DMA-BUF scheduling wait for the single-plane lifetime and three-run Kitty
+  gates.
 - Dedicated-TTY xmonad visual evidence and a second legacy-WM smoke no longer
   block the protocol-authority path.
 - GTK/XInput2/zenity, clipboard, drag-and-drop, optional Wayland protocols,

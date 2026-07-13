@@ -29,6 +29,16 @@ if [[ "${SOPHIA_WAYLAND_REQUIRE_DMABUF:-0}" == 1 ]] \
     exit 1
 fi
 if [[ "${SOPHIA_WAYLAND_REQUIRE_DMABUF:-0}" == 1 ]]; then
+    if ! grep -q '^sophia_wayland_session schema=1 status=running .*dmabuf_experimental=true$' "$EVIDENCE_FILE"; then
+        echo "Wayland Kitty DMA-BUF proof did not explicitly enable the experimental path" >&2
+        exit 1
+    fi
+    dmabuf_frames="$(sed -n 's/.*dmabuf_frames=\([0-9][0-9]*\).*/\1/p' <<<"$complete")"
+    emergency_exit="$(sed -n 's/.*emergency_exit=\(true\|false\).*/\1/p' <<<"$complete")"
+    if [[ "${dmabuf_frames:-0}" -eq 0 || "$emergency_exit" != false ]]; then
+        echo "Wayland Kitty DMA-BUF proof did not complete normally through DMA-BUF presentation" >&2
+        exit 1
+    fi
     native="$(grep '^sophia_wayland_native schema=1 status=complete ' "$EVIDENCE_FILE" || true)"
     if [[ "$(grep -c '^sophia_wayland_native schema=1 status=complete ' "$EVIDENCE_FILE" || true)" -ne 1 ]]; then
         echo "Wayland Kitty evidence requires one native completion record" >&2

@@ -237,14 +237,17 @@ configure, and a later injected-input pixel change; the dedicated-TTY operator
 visual gate remains.
 Real Kitty now connects to Sophia's private native Wayland authority with
 `DISPLAY` removed. SHM frames pass through the protocol-neutral Engine path;
-the native session additionally admits bounded linear DMA-BUFs and imports them
-into EGL without CPU readback before KMS presentation. The installed launcher
-uses this path and retains the independent Ctrl-Alt-Backspace recovery guard.
-XLibre is no longer a production dependency, feature, workspace member, or
-launcher path; its frozen sources live under `research/xlibre`. The remaining Kitty gate is a guarded
-hardware run proving resize, keyboard/navigation/pointer input, sub-100 ms
-presentation, and clean TTY recovery. VRR evidence still requires a display
-whose connector reports `vrr_capable=1`.
+the native session additionally admits a bounded linear DMA-BUF subset behind
+an experimental flag. SHM is the verified default. The DMA-BUF importer now has
+a controlled first-frame/lifetime proof and a three-run real-Kitty promotion
+gate, but no real hardware DMA-BUF pass has been recorded yet. The installed
+launcher uses the native Wayland path and retains the independent
+Ctrl-Alt-Backspace recovery guard. XLibre is no longer a production dependency,
+feature, workspace member, or launcher path; its frozen sources live under
+`research/xlibre`. The remaining Kitty gates prove resize,
+keyboard/navigation/pointer input, sub-100 ms presentation, clean TTY recovery,
+and then DMA-BUF performance. VRR evidence still requires a display whose
+connector reports `vrr_capable=1`.
 
 ## License
 
