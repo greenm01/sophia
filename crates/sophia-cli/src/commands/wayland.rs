@@ -134,6 +134,7 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
     let mut pending_presented_input = VecDeque::new();
     let mut pending_presented_pointer = VecDeque::new();
     let mut input_latency = InputLatencyMetrics::default();
+    let input_trace = std::env::var_os("SOPHIA_WAYLAND_INPUT_TRACE").is_some();
     let mut presentation_observations = BTreeMap::new();
     let mut routed_input = 0usize;
     let mut routed_keys = 0usize;
@@ -181,6 +182,8 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                 &mut pointer_presentations,
                 &mut max_observed_input_latency,
                 &mut input_latency,
+                input_trace,
+                started,
             );
             apply_wayland_feedback(
                 &mut frontend,
@@ -275,18 +278,42 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                             routed_keys = routed_keys.saturating_add(1);
                             if pressed {
                                 observed_keycodes.insert(keycode);
+                                trace_input_stage(
+                                    input_trace,
+                                    "routed",
+                                    started,
+                                    request.serial,
+                                    "key",
+                                    keycode,
+                                    None,
+                                    None,
+                                );
                                 awaiting_surface_input.push_back((
                                     Instant::now(),
                                     request.target_surface,
                                     keycode,
                                     last_checksum,
+                                    request.serial,
                                 ));
                             }
                         }
                         InputEventKind::PointerMotion | InputEventKind::PointerButton { .. } => {
                             routed_pointer = routed_pointer.saturating_add(1);
-                            awaiting_surface_pointer
-                                .push_back((Instant::now(), request.target_surface));
+                            trace_input_stage(
+                                input_trace,
+                                "routed",
+                                started,
+                                request.serial,
+                                "pointer",
+                                0,
+                                None,
+                                None,
+                            );
+                            awaiting_surface_pointer.push_back((
+                                Instant::now(),
+                                request.target_surface,
+                                request.serial,
+                            ));
                         }
                     }
                 }
@@ -359,6 +386,8 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                             &mut pending_presented_input,
                             &mut pending_presented_pointer,
                             &mut input_latency,
+                            input_trace,
+                            started,
                         );
                         let presented = match transaction.target_buffer {
                             BufferSource::DmaBuf { handle } => {
@@ -406,6 +435,8 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                                         &mut pointer_presentations,
                                         &mut max_observed_input_latency,
                                         &mut input_latency,
+                                        input_trace,
+                                        started,
                                     );
                                     apply_wayland_feedback(
                                         &mut frontend,
@@ -443,6 +474,8 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                                 &mut pointer_presentations,
                                 &mut max_observed_input_latency,
                                 &mut input_latency,
+                                input_trace,
+                                started,
                             );
                             apply_wayland_feedback(
                                 &mut frontend,
@@ -516,6 +549,8 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                         &mut pointer_presentations,
                         &mut max_observed_input_latency,
                         &mut input_latency,
+                        input_trace,
+                        started,
                     );
                     apply_wayland_feedback(
                         &mut frontend,
@@ -673,39 +708,67 @@ fn parse_keycodes(value: &str) -> Result<BTreeSet<u32>, Box<dyn std::error::Erro
 
 fn associate_input_with_surface_commit(
     surface: sophia_protocol::SurfaceId,
-    awaiting_surface_input: &mut VecDeque<(Instant, sophia_protocol::SurfaceId, u32, Option<u64>)>,
-    awaiting_surface_pointer: &mut VecDeque<(Instant, sophia_protocol::SurfaceId)>,
+    awaiting_surface_input: &mut VecDeque<(
+        Instant,
+        sophia_protocol::SurfaceId,
+        u32,
+        Option<u64>,
+        u64,
+    )>,
+    awaiting_surface_pointer: &mut VecDeque<(Instant, sophia_protocol::SurfaceId, u64)>,
     pending_pixel_input: &mut VecDeque<(Instant, Instant, Option<u64>)>,
-    pending_presented_input: &mut VecDeque<(Instant, Instant, u32)>,
-    pending_presented_pointer: &mut VecDeque<(Instant, Instant)>,
+    pending_presented_input: &mut VecDeque<(Instant, Instant, u32, u64)>,
+    pending_presented_pointer: &mut VecDeque<(Instant, Instant, u64)>,
     input_latency: &mut InputLatencyMetrics,
+    input_trace: bool,
+    session_started: Instant,
 ) {
     let committed_at = Instant::now();
     let mut other_surface_input = VecDeque::new();
-    while let Some((started, target_surface, keycode, baseline)) =
+    while let Some((started, target_surface, keycode, baseline, serial)) =
         awaiting_surface_input.pop_front()
     {
         if target_surface == surface {
-            input_latency.max_route_to_commit = input_latency
-                .max_route_to_commit
-                .max(committed_at.saturating_duration_since(started));
+            let route_to_commit = committed_at.saturating_duration_since(started);
+            input_latency.max_route_to_commit =
+                input_latency.max_route_to_commit.max(route_to_commit);
+            trace_input_stage(
+                input_trace,
+                "client_commit",
+                session_started,
+                serial,
+                "key",
+                keycode,
+                Some(route_to_commit),
+                None,
+            );
             pending_pixel_input.push_back((started, committed_at, baseline));
-            pending_presented_input.push_back((started, committed_at, keycode));
+            pending_presented_input.push_back((started, committed_at, keycode, serial));
         } else {
-            other_surface_input.push_back((started, target_surface, keycode, baseline));
+            other_surface_input.push_back((started, target_surface, keycode, baseline, serial));
         }
     }
     *awaiting_surface_input = other_surface_input;
 
     let mut other_surface_pointer = VecDeque::new();
-    while let Some((started, target_surface)) = awaiting_surface_pointer.pop_front() {
+    while let Some((started, target_surface, serial)) = awaiting_surface_pointer.pop_front() {
         if target_surface == surface {
-            input_latency.max_route_to_commit = input_latency
-                .max_route_to_commit
-                .max(committed_at.saturating_duration_since(started));
-            pending_presented_pointer.push_back((started, committed_at));
+            let route_to_commit = committed_at.saturating_duration_since(started);
+            input_latency.max_route_to_commit =
+                input_latency.max_route_to_commit.max(route_to_commit);
+            trace_input_stage(
+                input_trace,
+                "client_commit",
+                session_started,
+                serial,
+                "pointer",
+                0,
+                Some(route_to_commit),
+                None,
+            );
+            pending_presented_pointer.push_back((started, committed_at, serial));
         } else {
-            other_surface_pointer.push_back((started, target_surface));
+            other_surface_pointer.push_back((started, target_surface, serial));
         }
     }
     *awaiting_surface_pointer = other_surface_pointer;
@@ -721,28 +784,54 @@ struct InputLatencyMetrics {
 fn observe_input_presentation(
     checksum: Option<u64>,
     pending_pixel_input: &mut VecDeque<(Instant, Instant, Option<u64>)>,
-    pending_presented_input: &mut VecDeque<(Instant, Instant, u32)>,
-    pending_presented_pointer: &mut VecDeque<(Instant, Instant)>,
+    pending_presented_input: &mut VecDeque<(Instant, Instant, u32, u64)>,
+    pending_presented_pointer: &mut VecDeque<(Instant, Instant, u64)>,
     presented_keycodes: &mut BTreeSet<u32>,
     input_pixel_changes: &mut usize,
     input_presentations: &mut usize,
     pointer_presentations: &mut usize,
     max_observed_input_latency: &mut Duration,
     input_latency: &mut InputLatencyMetrics,
+    input_trace: bool,
+    session_started: Instant,
 ) {
-    while let Some((started, committed_at, keycode)) = pending_presented_input.pop_front() {
+    while let Some((started, committed_at, keycode, serial)) = pending_presented_input.pop_front() {
+        let route_to_commit = committed_at.saturating_duration_since(started);
+        let commit_to_presentation = committed_at.elapsed();
         *max_observed_input_latency = (*max_observed_input_latency).max(started.elapsed());
         input_latency.max_commit_to_presentation = input_latency
             .max_commit_to_presentation
-            .max(committed_at.elapsed());
+            .max(commit_to_presentation);
+        trace_input_stage(
+            input_trace,
+            "presented",
+            session_started,
+            serial,
+            "key",
+            keycode,
+            Some(route_to_commit),
+            Some(commit_to_presentation),
+        );
         *input_presentations = input_presentations.saturating_add(1);
         presented_keycodes.insert(keycode);
     }
-    while let Some((started, committed_at)) = pending_presented_pointer.pop_front() {
+    while let Some((started, committed_at, serial)) = pending_presented_pointer.pop_front() {
+        let route_to_commit = committed_at.saturating_duration_since(started);
+        let commit_to_presentation = committed_at.elapsed();
         *max_observed_input_latency = (*max_observed_input_latency).max(started.elapsed());
         input_latency.max_commit_to_presentation = input_latency
             .max_commit_to_presentation
-            .max(committed_at.elapsed());
+            .max(commit_to_presentation);
+        trace_input_stage(
+            input_trace,
+            "presented",
+            session_started,
+            serial,
+            "pointer",
+            0,
+            Some(route_to_commit),
+            Some(commit_to_presentation),
+        );
         *pointer_presentations = pointer_presentations.saturating_add(1);
     }
     let Some(checksum) = checksum else {
@@ -761,6 +850,27 @@ fn observe_input_presentation(
             .max(committed_at.elapsed());
         *input_pixel_changes = input_pixel_changes.saturating_add(1);
     }
+}
+
+fn trace_input_stage(
+    enabled: bool,
+    stage: &str,
+    session_started: Instant,
+    serial: u64,
+    kind: &str,
+    keycode: u32,
+    route_to_commit: Option<Duration>,
+    commit_to_presentation: Option<Duration>,
+) {
+    if !enabled {
+        return;
+    }
+    println!(
+        "sophia_wayland_input_trace schema=1 stage={stage} serial={serial} kind={kind} keycode={keycode} elapsed_msec={} route_to_commit_msec={} commit_to_presentation_msec={}",
+        session_started.elapsed().as_millis(),
+        route_to_commit.map_or(0, |duration| duration.as_millis()),
+        commit_to_presentation.map_or(0, |duration| duration.as_millis()),
+    );
 }
 
 fn input_layers(committed: &[CommittedSurfaceState]) -> Vec<LayerSnapshot> {
@@ -807,12 +917,15 @@ mod tests {
         let first = sophia_protocol::SurfaceId::new(1, 1);
         let second = sophia_protocol::SurfaceId::new(2, 1);
         let now = Instant::now();
-        let mut awaiting_input =
-            VecDeque::from([(now, first, 30, Some(10)), (now, second, 31, Some(11))]);
-        let mut awaiting_pointer = VecDeque::from([(now, first), (now, second)]);
+        let mut awaiting_input = VecDeque::from([
+            (now, first, 30, Some(10), 1),
+            (now, second, 31, Some(11), 2),
+        ]);
+        let mut awaiting_pointer = VecDeque::from([(now, first, 3), (now, second, 4)]);
         let mut pending_pixel = VecDeque::new();
         let mut pending_key = VecDeque::new();
         let mut pending_pointer = VecDeque::new();
+        let mut metrics = super::InputLatencyMetrics::default();
 
         associate_input_with_surface_commit(
             first,
@@ -821,10 +934,18 @@ mod tests {
             &mut pending_pixel,
             &mut pending_key,
             &mut pending_pointer,
+            &mut metrics,
+            false,
+            now,
         );
 
         assert_eq!(pending_pixel.len(), 1);
-        assert_eq!(pending_key.pop_back().map(|(_, keycode)| keycode), Some(30));
+        assert_eq!(
+            pending_key
+                .pop_back()
+                .map(|(_, _, keycode, serial)| (keycode, serial)),
+            Some((30, 1))
+        );
         assert_eq!(pending_pointer.len(), 1);
         assert_eq!(awaiting_input.len(), 1);
         assert_eq!(awaiting_pointer.len(), 1);
