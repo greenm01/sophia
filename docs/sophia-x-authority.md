@@ -86,8 +86,11 @@ cleanly. `x-authority-xterm-two-client-smoke` now launches two independent
 real xterms against a two-worker frontend, waits for both client routes and CPU
 surfaces, routes distinct key sequences by client ID, and proves two successive
 pixel changes before draining the service. The live launcher still starts one
-xterm; KMS-backed multi-app session evidence is the next integration step.
-Root/output facts are still fixed setup values. Each accepted
+xterm by default, but `--secondary-terminal` starts and supervises a second
+xterm on the same bounded frontend. `tools/live_session_two_xterm_hardware_proof.sh`
+is the operator gate for KMS-backed evidence: it requires normal persistent
+session validation plus at least two composed CPU layers. Root/output facts are
+still fixed setup values. Each accepted
 client now gets
 a disjoint X11 setup resource-ID range. Every currently supported XID-creating
 wire path—window, pixmap, GC, font, colormap, glyph cursor, and reduced

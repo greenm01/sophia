@@ -137,8 +137,11 @@ engineering reason.
   teardown end to end. `x-authority-xterm-two-client-smoke` now proves that two
   real xterms receive distinct client-targeted input and change separate CPU
   pixel state before the service drains. The launcher still starts one xterm;
-  next, add KMS-backed multi-app session evidence and expose configurable
-  client admission/auth policy to the launcher.
+  `--secondary-terminal` and `tools/live_session_two_xterm_hardware_proof.sh`
+  now provide the KMS multi-app operator gate, requiring two composed layers in
+  addition to the existing persistent hardware evidence. Next, collect that
+  hardware evidence and expose configurable client admission/auth policy to the
+  launcher.
 - [x] Define the X11 session profiles: classic shared-X behavior for trusted
   sessions, plus explicit confined namespaces/capabilities where requested.
   The confined profile remains gated on client-aware connection routing.

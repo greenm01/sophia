@@ -101,7 +101,7 @@ pub(crate) fn run_persistent_xterm_session(
     let input_sender = broker.input_sender();
     let control_sender = broker.control_sender();
     let (service_command_sender, service_command_receiver) = sync_channel(1);
-    let server = std::thread::spawn(move || {
+    let mut server = Some(std::thread::spawn(move || {
         run_x11_core_socket_server_routed_until_stopped(
             &server_path,
             NamespaceId::from_raw(50),
@@ -109,10 +109,10 @@ pub(crate) fn run_persistent_xterm_session(
             broker,
             service_command_receiver,
         )
-    });
-    super::x_authority::wait_for_socket_path(&config.socket_path)?;
+    }));
+    wait_for_x_server_socket(&config.socket_path, &mut server)?;
 
-    let mut terminal_command = std::process::Command::new(terminal);
+    let mut terminal_command = std::process::Command::new(&terminal);
     terminal_command
         .env("DISPLAY", &config.display)
         .args([
@@ -149,10 +149,13 @@ pub(crate) fn run_persistent_xterm_session(
             .args(&config.terminal_exec_args);
     }
     let child = terminal_command.spawn()?;
-    let mut process = SessionProcessGuard::new(child, config.socket_path.clone());
+    let mut process = SessionProcessGuard::new(child, Vec::new(), config.socket_path.clone());
+    if config.secondary_terminal {
+        process.add_secondary_child(spawn_secondary_xterm(&terminal, &config.display)?);
+    }
 
     println!(
-        "sophia_live_session schema=7 status=running display={} terminal=xterm runtime=persistent authority_capacity={} input_capacity={} control_capacity={} native_presentation={} physical_input={} pointer_proof={} wm_policy={}",
+        "sophia_live_session schema=7 status=running display={} terminal=xterm runtime=persistent authority_capacity={} input_capacity={} control_capacity={} native_presentation={} physical_input={} pointer_proof={} secondary_terminal={} wm_policy={}",
         config.display,
         SESSION_AUTHORITY_CAPACITY,
         SESSION_KEY_CAPACITY,
@@ -172,6 +175,11 @@ pub(crate) fn run_persistent_xterm_session(
         } else {
             "disabled"
         },
+        if config.secondary_terminal {
+            "enabled"
+        } else {
+            "disabled"
+        },
         if wm_session.is_some() {
             "external"
         } else {
@@ -187,13 +195,15 @@ pub(crate) fn run_persistent_xterm_session(
         );
     }
 
+    let (primary_child, secondary_children) = process.children_mut()?;
     let result = run_session_loop(
         &config,
         &authority_receiver,
         &input_sender,
         &control_sender,
         &control_ack_receiver,
-        process.child_mut()?,
+        primary_child,
+        secondary_children,
         &mut physical_input,
         &mut native_scanout,
         &mut wm_session,
@@ -204,6 +214,8 @@ pub(crate) fn run_persistent_xterm_session(
     drop(input_sender);
     drop(control_sender);
     let server_result = server
+        .take()
+        .expect("X Server Frontend handle is retained after startup")
         .join()
         .map_err(|_| "persistent X authority server thread panicked")?;
     server_result.map_err(|error| format!("persistent X authority server failed: {error}"))?;
@@ -217,6 +229,7 @@ struct PersistentXtermSessionConfig {
     terminal: String,
     terminal_exec: Option<String>,
     terminal_exec_args: Vec<String>,
+    secondary_terminal: bool,
     max_runtime: Option<Duration>,
     max_ticks: Option<usize>,
     inject_text: Option<String>,
@@ -266,6 +279,7 @@ impl PersistentXtermSessionConfig {
             return Err("--terminal-exec accepts at most 32 bounded arguments".into());
         }
         let expect_physical_pointer = args.iter().any(|arg| arg == "--expect-physical-pointer");
+        let secondary_terminal = args.iter().any(|arg| arg == "--secondary-terminal");
         let exit_after_input_proof = args.iter().any(|arg| arg == "--exit-after-input-proof");
         let native_scanout = args.iter().any(|arg| arg == "--native-scanout");
         let wm_process = arg_value(args, "--wm-process");
@@ -338,6 +352,7 @@ impl PersistentXtermSessionConfig {
             terminal: arg_value(args, "--terminal").unwrap_or_else(|| "xterm".to_owned()),
             terminal_exec,
             terminal_exec_args,
+            secondary_terminal,
             max_runtime,
             max_ticks,
             inject_text,
@@ -359,6 +374,30 @@ impl PersistentXtermSessionConfig {
     fn input_proof_requested(&self) -> bool {
         self.inject_text.is_some() || self.expect_physical_text.is_some()
     }
+}
+
+fn spawn_secondary_xterm(
+    terminal: &std::path::Path,
+    display: &str,
+) -> Result<Child, Box<dyn std::error::Error>> {
+    Ok(std::process::Command::new(terminal)
+        .env("DISPLAY", display)
+        .args([
+            "-cm",
+            "-dc",
+            "-geometry",
+            "100x28+420+90",
+            "-title",
+            "Sophia Secondary Terminal",
+            "-e",
+            "sh",
+            "-c",
+            "printf 'Sophia secondary terminal\\n'; sleep 300",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()?)
 }
 
 fn parse_display_number(display: &str) -> Result<u32, Box<dyn std::error::Error>> {
@@ -383,6 +422,40 @@ fn prepare_display_socket(path: &std::path::Path) -> Result<(), Box<dyn std::err
     }
     std::fs::remove_file(path)?;
     Ok(())
+}
+
+fn wait_for_x_server_socket(
+    path: &std::path::Path,
+    server: &mut Option<
+        std::thread::JoinHandle<Result<(), sophia_x_authority::X11SetupSocketError>>,
+    >,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        if path.exists() {
+            return Ok(());
+        }
+        if server
+            .as_ref()
+            .is_some_and(std::thread::JoinHandle::is_finished)
+        {
+            return match server.take().expect("checked above").join() {
+                Ok(Ok(())) => Err("X Server Frontend exited before creating its socket".into()),
+                Ok(Err(error)) => Err(format!(
+                    "X Server Frontend failed before creating {}: {error}",
+                    path.display()
+                )
+                .into()),
+                Err(_) => Err("X Server Frontend panicked before creating its socket".into()),
+            };
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    Err(format!(
+        "timed out waiting for X authority socket {}",
+        path.display()
+    )
+    .into())
 }
 
 struct LiveWmSession {
@@ -994,6 +1067,7 @@ fn run_session_loop(
     control_sender: &SyncSender<XAuthorityClientControlCommand>,
     control_ack_receiver: &Receiver<XAuthorityClientControlAck>,
     child: &mut Child,
+    secondary_children: &mut [Child],
     physical_input: &mut Option<SessionPhysicalInput>,
     native_scanout: &mut Option<PersistentNativeScanout>,
     wm_session: &mut Option<LiveWmSession>,
@@ -1124,6 +1198,15 @@ fn run_session_loop(
                 break;
             }
             return Err(format!("xterm exited during live session with status {status}").into());
+        }
+        for (index, secondary) in secondary_children.iter_mut().enumerate() {
+            if let Some(status) = secondary.try_wait()? {
+                return Err(format!(
+                    "secondary xterm {} exited during live session with status {status}",
+                    index + 1
+                )
+                .into());
+            }
         }
         if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             break;
@@ -1888,6 +1971,23 @@ impl PersistentBackendRuntime {
         let intake = AuthorityTransactionIntake::new(transaction_id, transactions.to_vec())
             .with_surface_removals(removed_surfaces.to_vec());
         let active_transactions = self.layers.values().cloned().collect::<Vec<_>>();
+
+        // The runtime is initialized from the first authority batch.  A later
+        // X client therefore needs a committed-state handoff before its first
+        // incremental transaction can be replayed.  Without this barrier the
+        // engine sees the new surface at generation zero and rejects every
+        // update that raced ahead of the next compositor tick as stale.
+        if transactions.iter().any(|transaction| {
+            !self
+                .committed_surfaces()
+                .iter()
+                .any(|committed| committed.surface == transaction.surface)
+        }) {
+            let committed_surfaces =
+                seed_missing_committed_surfaces(self.committed_surfaces(), &active_transactions);
+            self.prime_committed_surfaces(&committed_surfaces);
+        }
+
         let mut native_frames = native_frames.unwrap_or_default().into_iter();
         let mut first_report = None;
         for (index, output) in self.outputs.values_mut().enumerate() {
@@ -1919,6 +2019,20 @@ impl PersistentBackendRuntime {
             }
         }
         first_report.ok_or_else(|| "persistent backend runtime has no outputs".into())
+    }
+
+    /// Seeds a newly discovered authority surface at the generation immediately
+    /// before its first observed update. The caller must then replay that update
+    /// through the normal authority inbox so the authority generation chain
+    /// remains contiguous.
+    fn prime_committed_surfaces(&mut self, committed_surfaces: &[CommittedSurfaceState]) {
+        self.committed_snapshot_layers = None;
+        for output in self.outputs.values_mut() {
+            output
+                .runtime
+                .assembly_mut()
+                .replace_committed_surfaces(committed_surfaces.to_vec());
+        }
     }
 
     fn run_committed_snapshot(
@@ -3068,7 +3182,18 @@ impl PersistentNativeScanout {
 }
 
 fn seed_committed_surfaces(transactions: &[SurfaceTransaction]) -> Vec<CommittedSurfaceState> {
-    let mut surfaces = BTreeMap::new();
+    seed_missing_committed_surfaces(&[], transactions)
+}
+
+fn seed_missing_committed_surfaces(
+    existing: &[CommittedSurfaceState],
+    transactions: &[SurfaceTransaction],
+) -> Vec<CommittedSurfaceState> {
+    let mut surfaces = existing
+        .iter()
+        .cloned()
+        .map(|surface| (surface.surface, surface))
+        .collect::<BTreeMap<_, _>>();
     for transaction in transactions {
         surfaces
             .entry(transaction.surface)
@@ -3449,25 +3574,39 @@ fn pointer_coordinate(value: f64) -> i16 {
 
 struct SessionProcessGuard {
     child: Option<Child>,
+    secondary_children: Vec<Child>,
     socket_path: Option<std::path::PathBuf>,
 }
 
 impl SessionProcessGuard {
-    fn new(child: Child, socket_path: std::path::PathBuf) -> Self {
+    fn new(child: Child, secondary_children: Vec<Child>, socket_path: std::path::PathBuf) -> Self {
         Self {
             child: Some(child),
+            secondary_children,
             socket_path: Some(socket_path),
         }
     }
 
-    fn child_mut(&mut self) -> Result<&mut Child, Box<dyn std::error::Error>> {
-        self.child
+    fn children_mut(&mut self) -> Result<(&mut Child, &mut [Child]), Box<dyn std::error::Error>> {
+        let child = self
+            .child
             .as_mut()
-            .ok_or_else(|| "xterm child missing".into())
+            .ok_or_else(|| -> Box<dyn std::error::Error> { "xterm child missing".into() })?;
+        Ok((child, self.secondary_children.as_mut_slice()))
+    }
+
+    fn add_secondary_child(&mut self, child: Child) {
+        self.secondary_children.push(child);
     }
 
     fn terminate(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(mut child) = self.child.take() {
+            if child.try_wait()?.is_none() {
+                child.kill()?;
+            }
+            child.wait()?;
+        }
+        for mut child in self.secondary_children.drain(..) {
             if child.try_wait()?.is_none() {
                 child.kill()?;
             }
@@ -3497,7 +3636,9 @@ mod tests {
         center_geometry_without_scaling, cpu_frame_matches_visible_output,
         cpu_frame_submission_ready, layer_snapshots_from_committed,
         required_wayland_presentation_submission, retain_latest_wayland_presentation,
+        seed_missing_committed_surfaces,
     };
+    use sophia_protocol::{AuthorityKind, SurfaceTransaction, SurfaceTransactionReadiness};
     use std::collections::BTreeMap;
 
     #[test]
@@ -3603,6 +3744,54 @@ mod tests {
         assert_eq!(layers.len(), 1);
         assert_eq!(layers[0].generation, 4);
         assert_eq!(layers[0].source, BufferSource::CpuBuffer { handle: 99 });
+    }
+
+    #[test]
+    fn newly_observed_surface_seed_preserves_existing_generations() {
+        let primary = sophia_protocol::SurfaceId::new(11, 1);
+        let secondary = sophia_protocol::SurfaceId::new(12, 1);
+        let existing = vec![CommittedSurfaceState {
+            surface: primary,
+            committed_generation: 7,
+            geometry: Rect {
+                x: 0,
+                y: 0,
+                width: 640,
+                height: 480,
+            },
+            buffer: BufferSource::CpuBuffer { handle: 11 },
+            damage: Region::empty(),
+        }];
+        let new_surface_transaction = SurfaceTransaction {
+            transaction: sophia_protocol::TransactionId::from_raw(29),
+            authority: AuthorityKind::SophiaX,
+            surface: secondary,
+            namespace: None,
+            target_geometry: Rect {
+                x: 20,
+                y: 30,
+                width: 320,
+                height: 200,
+            },
+            target_buffer: BufferSource::CpuBuffer { handle: 12 },
+            damage: Region::single(Rect {
+                x: 0,
+                y: 0,
+                width: 320,
+                height: 200,
+            }),
+            readiness: SurfaceTransactionReadiness::Ready,
+            timeout_msec: 250,
+            previous_committed_generation: 3,
+        };
+
+        let seeded = seed_missing_committed_surfaces(&existing, &[new_surface_transaction]);
+
+        assert_eq!(seeded.len(), 2);
+        assert_eq!(seeded[0].surface, primary);
+        assert_eq!(seeded[0].committed_generation, 7);
+        assert_eq!(seeded[1].surface, secondary);
+        assert_eq!(seeded[1].committed_generation, 3);
     }
 
     #[test]
