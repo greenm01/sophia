@@ -439,38 +439,68 @@ impl WaylandAuthorityReducer {
             return Err(WaylandAuthorityError::StalePresentation);
         }
 
-        let mut actions = state
-            .committed_callbacks
-            .remove(&feedback.generation)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|callback| WaylandAuthorityAction::FrameDone {
-                callback,
-                presentation_msec: feedback.presentation_msec,
-            })
-            .collect::<Vec<_>>();
-
         let source = state
             .committed_buffers
             .get(&feedback.generation)
             .copied()
             .ok_or(WaylandAuthorityError::StalePresentation)?;
-        if let Some(previous) = state.presented.replace(PresentedBuffer {
+
+        // A page flip may coalesce several client commits. Complete every frame
+        // callback up to the frame that actually reached scanout and release all
+        // superseded buffers, rather than retaining skipped generations forever.
+        let completed_callback_generations = state
+            .committed_callbacks
+            .keys()
+            .copied()
+            .filter(|generation| *generation <= feedback.generation)
+            .collect::<Vec<_>>();
+        let mut actions = Vec::new();
+        for generation in completed_callback_generations {
+            for callback in state
+                .committed_callbacks
+                .remove(&generation)
+                .unwrap_or_default()
+            {
+                actions.push(WaylandAuthorityAction::FrameDone {
+                    callback,
+                    presentation_msec: feedback.presentation_msec,
+                });
+            }
+        }
+
+        let superseded_sources = state
+            .committed_buffers
+            .iter()
+            .filter(|(generation, candidate)| {
+                **generation < feedback.generation
+                    && **candidate != source
+                    && !matches!(candidate, BufferSource::None)
+            })
+            .map(|(_, candidate)| *candidate)
+            .collect::<Vec<_>>();
+        state.presented = Some(PresentedBuffer {
             generation: feedback.generation,
             source,
-        }) && previous.source != source
-            && !matches!(previous.source, BufferSource::None)
-        {
-            actions.push(WaylandAuthorityAction::BufferReleased(
-                BufferReleaseFeedback {
-                    surface: state.surface,
-                    source: previous.source,
-                },
-            ));
-        }
+        });
         state
             .committed_buffers
             .retain(|generation, _| *generation >= feedback.generation);
+        for source in superseded_sources {
+            if actions.iter().any(|action| {
+                matches!(
+                    action,
+                    WaylandAuthorityAction::BufferReleased(release) if release.source == source
+                )
+            }) {
+                continue;
+            }
+            actions.push(WaylandAuthorityAction::BufferReleased(
+                BufferReleaseFeedback {
+                    surface: state.surface,
+                    source,
+                },
+            ));
+        }
         Ok(actions)
     }
 

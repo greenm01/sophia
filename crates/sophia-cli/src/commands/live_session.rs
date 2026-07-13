@@ -2033,7 +2033,7 @@ pub(super) struct WaylandNativeSession {
     scanout: PersistentNativeScanout,
     runtime: Option<PersistentBackendRuntime>,
     outputs: Vec<sophia_engine::HeadlessOutput>,
-    pending_presentations: Vec<(SurfaceId, u64, usize)>,
+    pending_presentations: BTreeMap<SurfaceId, (u64, usize)>,
 }
 
 impl WaylandNativeSession {
@@ -2044,7 +2044,7 @@ impl WaylandNativeSession {
             scanout,
             runtime: None,
             outputs,
-            pending_presentations: Vec::new(),
+            pending_presentations: BTreeMap::new(),
         })
     }
 
@@ -2143,18 +2143,14 @@ impl WaylandNativeSession {
             .heads
             .first()
             .map_or(0, |head| head.presented_submissions);
-        let mut ready = Vec::new();
-        let mut waiting = Vec::new();
-        for (surface, generation, required_submission) in
-            std::mem::take(&mut self.pending_presentations)
-        {
-            if required_submission <= presented_submissions {
-                ready.push((surface, generation));
-            } else {
-                waiting.push((surface, generation, required_submission));
-            }
-        }
-        self.pending_presentations = waiting;
+        let ready = self
+            .pending_presentations
+            .iter()
+            .filter(|(_, (_, required_submission))| *required_submission <= presented_submissions)
+            .map(|(surface, (generation, _))| (*surface, *generation))
+            .collect::<Vec<_>>();
+        self.pending_presentations
+            .retain(|_, (_, required_submission)| *required_submission > presented_submissions);
         Ok(ready)
     }
 
@@ -2170,8 +2166,12 @@ impl WaylandNativeSession {
             head.submissions,
             head.exporter.pending_cpu_frame() || head.exporter.pending_dmabuf_frame(),
         )?;
-        self.pending_presentations
-            .push((surface, generation, required_submission));
+        retain_latest_wayland_presentation(
+            &mut self.pending_presentations,
+            surface,
+            generation,
+            required_submission,
+        );
         Ok(())
     }
 
@@ -2221,9 +2221,17 @@ impl WaylandNativeSession {
     }
 
     pub(super) fn cancel_surface(&mut self, surface: SurfaceId) {
-        self.pending_presentations
-            .retain(|(candidate, _, _)| *candidate != surface);
+        self.pending_presentations.remove(&surface);
     }
+}
+
+fn retain_latest_wayland_presentation(
+    pending: &mut BTreeMap<SurfaceId, (u64, usize)>,
+    surface: SurfaceId,
+    generation: u64,
+    required_submission: usize,
+) {
+    pending.insert(surface, (generation, required_submission));
 }
 
 fn required_wayland_presentation_submission(
@@ -3232,8 +3240,9 @@ mod tests {
     use super::{
         BufferSource, CommittedSurfaceState, PersistentBackendRuntime, Rect, Region, Size,
         center_geometry_without_scaling, layer_snapshots_from_committed,
-        required_wayland_presentation_submission,
+        required_wayland_presentation_submission, retain_latest_wayland_presentation,
     };
+    use std::collections::BTreeMap;
 
     #[test]
     fn compatibility_surface_is_centered_without_resizing() {
@@ -3280,6 +3289,21 @@ mod tests {
         assert_eq!(required_wayland_presentation_submission(3, 4, false), Ok(4));
         assert_eq!(required_wayland_presentation_submission(4, 4, true), Ok(5));
         assert!(required_wayland_presentation_submission(4, 4, false).is_err());
+    }
+
+    #[test]
+    fn wayland_presentation_retains_only_the_latest_generation_per_surface() {
+        let first = sophia_protocol::SurfaceId::new(1, 1);
+        let second = sophia_protocol::SurfaceId::new(2, 1);
+        let mut pending = BTreeMap::new();
+
+        retain_latest_wayland_presentation(&mut pending, first, 3, 8);
+        retain_latest_wayland_presentation(&mut pending, second, 4, 8);
+        retain_latest_wayland_presentation(&mut pending, first, 5, 9);
+
+        assert_eq!(pending.len(), 2);
+        assert_eq!(pending.get(&first), Some(&(5, 9)));
+        assert_eq!(pending.get(&second), Some(&(4, 8)));
     }
 
     #[test]

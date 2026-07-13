@@ -182,6 +182,71 @@ fn acknowledged_configure_commits_and_presentation_finishes_frame() {
 }
 
 #[test]
+fn presenting_latest_generation_releases_coalesced_buffers_and_callbacks() {
+    let mut reducer = WaylandAuthorityReducer::new();
+    create(&mut reducer);
+
+    for (index, (buffer, callback)) in [(45, 90), (46, 91), (47, 92)].into_iter().enumerate() {
+        reducer
+            .apply_surface_event(WaylandSurfaceEvent::Attach {
+                local_id: local(),
+                buffer: BufferSource::CpuBuffer { handle: buffer },
+            })
+            .unwrap();
+        reducer
+            .apply_surface_event(WaylandSurfaceEvent::RequestFrame {
+                local_id: local(),
+                callback,
+            })
+            .unwrap();
+        let transaction = TransactionId::from_raw(20 + index as u64);
+        reducer
+            .apply_surface_event(WaylandSurfaceEvent::Commit {
+                local_id: local(),
+                transaction,
+                timeout_msec: 250,
+            })
+            .unwrap();
+        reducer
+            .apply_feedback(commit_feedback(transaction))
+            .unwrap();
+    }
+
+    let actions = reducer
+        .apply_feedback(AuthorityFeedback::Presented(SurfacePresentationFeedback {
+            surface: surface(),
+            generation: 3,
+            presentation_msec: 500,
+        }))
+        .unwrap();
+    assert_eq!(
+        actions,
+        vec![
+            WaylandAuthorityAction::FrameDone {
+                callback: 90,
+                presentation_msec: 500,
+            },
+            WaylandAuthorityAction::FrameDone {
+                callback: 91,
+                presentation_msec: 500,
+            },
+            WaylandAuthorityAction::FrameDone {
+                callback: 92,
+                presentation_msec: 500,
+            },
+            WaylandAuthorityAction::BufferReleased(BufferReleaseFeedback {
+                surface: surface(),
+                source: BufferSource::CpuBuffer { handle: 45 },
+            }),
+            WaylandAuthorityAction::BufferReleased(BufferReleaseFeedback {
+                surface: surface(),
+                source: BufferSource::CpuBuffer { handle: 46 },
+            }),
+        ]
+    );
+}
+
+#[test]
 fn detach_after_mapping_emits_null_buffer_unmap_transaction() {
     let mut reducer = WaylandAuthorityReducer::new();
     create(&mut reducer);

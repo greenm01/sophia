@@ -29,9 +29,10 @@ Current truth:
 
 Exit criteria:
 
-- [ ] Make Engine's committed surface snapshot the single authority: native
+- [x] Make Engine's committed surface snapshot the single authority: native
   presentation must consume it directly and must not replay Wayland authority
-  transactions into a second Engine state.
+  transactions into a second Engine state. Verified on hardware with a clean
+  native Kitty exit after transaction and surface-destruction teardown.
 - [ ] Add a bounded presentation scheduler: at most one retained pending frame
   per surface, explicit page-flip-to-release ownership, and normal teardown
   ordering.
