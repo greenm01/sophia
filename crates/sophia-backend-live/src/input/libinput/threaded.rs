@@ -10,7 +10,7 @@ use crate::prelude::*;
 
 use super::{NativeLibinputDeviceMap, NativeLibinputOpenError, open_native_libinput_path_poller};
 
-const INPUT_THREAD_POLL_MSEC: i64 = 5;
+const INPUT_THREAD_POLL_MSEC: i64 = 1;
 
 struct QueuedInputEvent {
     packet: InputEventPacket,

@@ -2273,6 +2273,13 @@ impl WaylandNativeSession {
             .iter()
             .map(|head| head.exporter.dmabuf_frame_exports())
             .sum::<usize>();
+        let (
+            native_target_creations,
+            native_target_recreations,
+            native_pipeline_creations,
+            native_uploads,
+            native_max_upload,
+        ) = self.scanout.persistent_render_metrics();
         let in_flight = self
             .runtime
             .as_ref()
@@ -2282,7 +2289,7 @@ impl WaylandNativeSession {
             .as_ref()
             .is_some_and(PersistentBackendRuntime::native_cleanup_pending);
         format!(
-            "sophia_wayland_native schema=1 status=complete outputs={} submissions={} retirements={} callbacks={} submit_failures={} retire_failures={} callback_rejected={} dmabuf_import_attempts={} dmabuf_imports={} max_submit_to_page_flip_msec={} in_flight={} cleanup_pending={}",
+            "sophia_wayland_native schema=1 status=complete outputs={} submissions={} retirements={} callbacks={} submit_failures={} retire_failures={} callback_rejected={} dmabuf_import_attempts={} dmabuf_imports={} max_submit_to_page_flip_msec={} native_max_upload_msec={} native_target_creations={} native_target_recreations={} native_pipeline_creations={} native_frame_uploads={} in_flight={} cleanup_pending={}",
             self.scanout.heads.len(),
             self.scanout.submissions,
             self.scanout.retirements,
@@ -2293,6 +2300,11 @@ impl WaylandNativeSession {
             dmabuf_import_attempts,
             dmabuf_imports,
             self.scanout.max_submit_to_page_flip.as_millis(),
+            native_max_upload.as_millis(),
+            native_target_creations,
+            native_target_recreations,
+            native_pipeline_creations,
+            native_uploads,
             in_flight,
             cleanup_pending,
         )

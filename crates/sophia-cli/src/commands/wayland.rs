@@ -143,6 +143,7 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
     let mut input_presentations = 0usize;
     let mut pointer_presentations = 0usize;
     let mut max_observed_input_latency = Duration::ZERO;
+    let mut max_cpu_compose = Duration::ZERO;
     let mut last_checksum = None;
     let started = Instant::now();
     let mut transactions = 0usize;
@@ -376,7 +377,10 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                                     continue;
                                 } else {
                                     shm_frames = shm_frames.saturating_add(1);
+                                    let compose_started = Instant::now();
                                     let report = scene.compose()?;
+                                    max_cpu_compose =
+                                        max_cpu_compose.max(compose_started.elapsed());
                                     frames = frames.saturating_add(1);
                                     last_checksum = Some(report.checksum);
                                     println!(
@@ -473,7 +477,9 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
         if let Some(native_scanout) = native_scanout.as_mut()
             && native_scanout.should_compose_cpu_frame()
         {
+            let compose_started = Instant::now();
             let report = scene.compose()?;
+            max_cpu_compose = max_cpu_compose.max(compose_started.elapsed());
             let checksum = Some(report.checksum);
             let submission = native_scanout.submit_cpu_frame(&committed, &report)?;
             last_checksum = checksum;
@@ -570,7 +576,7 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
         .map(sophia_backend_live::ThreadedNativeLibinputEventPoller::stats)
         .unwrap_or_default();
     println!(
-        "sophia_wayland_session schema=1 status=complete transactions={} frames={} shm_frames={} dmabuf_frames={} resize_requested={} resize_commits={} buffers={} routed_input={} routed_keys={} routed_pointer={} expected_keycodes_observed={} expected_keycodes_matched={} expected_keycodes_total={} input_presentations={} pointer_presentations={} input_pixel_changes={} max_input_latency_msec={} input_dispatch_max_gap_msec={} input_queue_max_depth={} input_queue_dwell_max_msec={} emergency_exit={} x_server=disabled",
+        "sophia_wayland_session schema=1 status=complete transactions={} frames={} shm_frames={} dmabuf_frames={} resize_requested={} resize_commits={} buffers={} routed_input={} routed_keys={} routed_pointer={} expected_keycodes_observed={} expected_keycodes_matched={} expected_keycodes_total={} input_presentations={} pointer_presentations={} input_pixel_changes={} max_input_latency_msec={} cpu_max_compose_msec={} input_dispatch_max_gap_msec={} input_queue_max_depth={} input_queue_dwell_max_msec={} emergency_exit={} x_server=disabled",
         transactions,
         frames,
         shm_frames,
@@ -588,6 +594,7 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
         pointer_presentations,
         input_pixel_changes,
         max_observed_input_latency.as_millis(),
+        max_cpu_compose.as_millis(),
         input_stats.max_dispatch_gap_msec,
         input_stats.max_queue_depth,
         input_stats.max_queue_dwell_msec,
