@@ -124,6 +124,8 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
         )?)
     };
     let mut emergency_chord = EmergencyChordState::armed();
+    let mut awaiting_surface_input = VecDeque::new();
+    let mut awaiting_surface_pointer = VecDeque::new();
     let mut pending_pixel_input = VecDeque::new();
     let mut pending_presented_input = VecDeque::new();
     let mut pending_presented_pointer = VecDeque::new();
@@ -266,14 +268,18 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                             routed_keys = routed_keys.saturating_add(1);
                             if pressed {
                                 observed_keycodes.insert(keycode);
-                                let observed = Instant::now();
-                                pending_pixel_input.push_back((observed, last_checksum));
-                                pending_presented_input.push_back((observed, keycode));
+                                awaiting_surface_input.push_back((
+                                    Instant::now(),
+                                    request.target_surface,
+                                    keycode,
+                                    last_checksum,
+                                ));
                             }
                         }
                         InputEventKind::PointerMotion | InputEventKind::PointerButton { .. } => {
                             routed_pointer = routed_pointer.saturating_add(1);
-                            pending_presented_pointer.push_back(Instant::now());
+                            awaiting_surface_pointer
+                                .push_back((Instant::now(), request.target_surface));
                         }
                     }
                 }
@@ -330,6 +336,14 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                         AuthorityFeedback::Transaction(commit),
                     )?;
                     if let Some(generation) = committed_generation {
+                        associate_input_with_surface_commit(
+                            surface,
+                            &mut awaiting_surface_input,
+                            &mut awaiting_surface_pointer,
+                            &mut pending_pixel_input,
+                            &mut pending_presented_input,
+                            &mut pending_presented_pointer,
+                        );
                         let presented = match transaction.target_buffer {
                             BufferSource::DmaBuf { handle } => {
                                 dmabuf_frames = dmabuf_frames.saturating_add(1);
@@ -598,6 +612,38 @@ fn parse_keycodes(value: &str) -> Result<BTreeSet<u32>, Box<dyn std::error::Erro
     Ok(keycodes)
 }
 
+fn associate_input_with_surface_commit(
+    surface: sophia_protocol::SurfaceId,
+    awaiting_surface_input: &mut VecDeque<(Instant, sophia_protocol::SurfaceId, u32, Option<u64>)>,
+    awaiting_surface_pointer: &mut VecDeque<(Instant, sophia_protocol::SurfaceId)>,
+    pending_pixel_input: &mut VecDeque<(Instant, Option<u64>)>,
+    pending_presented_input: &mut VecDeque<(Instant, u32)>,
+    pending_presented_pointer: &mut VecDeque<Instant>,
+) {
+    let mut other_surface_input = VecDeque::new();
+    while let Some((started, target_surface, keycode, baseline)) =
+        awaiting_surface_input.pop_front()
+    {
+        if target_surface == surface {
+            pending_pixel_input.push_back((started, baseline));
+            pending_presented_input.push_back((started, keycode));
+        } else {
+            other_surface_input.push_back((started, target_surface, keycode, baseline));
+        }
+    }
+    *awaiting_surface_input = other_surface_input;
+
+    let mut other_surface_pointer = VecDeque::new();
+    while let Some((started, target_surface)) = awaiting_surface_pointer.pop_front() {
+        if target_surface == surface {
+            pending_presented_pointer.push_back(started);
+        } else {
+            other_surface_pointer.push_back((started, target_surface));
+        }
+    }
+    *awaiting_surface_pointer = other_surface_pointer;
+}
+
 #[allow(clippy::too_many_arguments)]
 fn observe_input_presentation(
     checksum: Option<u64>,
@@ -657,7 +703,9 @@ fn input_layers(committed: &[CommittedSurfaceState]) -> Vec<LayerSnapshot> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_keycodes, parse_size};
+    use super::{associate_input_with_surface_commit, parse_keycodes, parse_size};
+    use std::collections::VecDeque;
+    use std::time::Instant;
 
     #[test]
     fn parses_bounded_resize_and_keycode_proof_arguments() {
@@ -669,6 +717,34 @@ mod tests {
         assert!(parse_size("1024").is_err());
         assert!(parse_keycodes("0").is_err());
         assert!(parse_keycodes("").is_err());
+    }
+
+    #[test]
+    fn input_latency_starts_only_after_the_target_surface_commits() {
+        let first = sophia_protocol::SurfaceId::new(1, 1);
+        let second = sophia_protocol::SurfaceId::new(2, 1);
+        let now = Instant::now();
+        let mut awaiting_input =
+            VecDeque::from([(now, first, 30, Some(10)), (now, second, 31, Some(11))]);
+        let mut awaiting_pointer = VecDeque::from([(now, first), (now, second)]);
+        let mut pending_pixel = VecDeque::new();
+        let mut pending_key = VecDeque::new();
+        let mut pending_pointer = VecDeque::new();
+
+        associate_input_with_surface_commit(
+            first,
+            &mut awaiting_input,
+            &mut awaiting_pointer,
+            &mut pending_pixel,
+            &mut pending_key,
+            &mut pending_pointer,
+        );
+
+        assert_eq!(pending_pixel.len(), 1);
+        assert_eq!(pending_key.pop_back().map(|(_, keycode)| keycode), Some(30));
+        assert_eq!(pending_pointer.len(), 1);
+        assert_eq!(awaiting_input.len(), 1);
+        assert_eq!(awaiting_pointer.len(), 1);
     }
 }
 
