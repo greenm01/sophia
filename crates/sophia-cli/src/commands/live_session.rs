@@ -2033,7 +2033,13 @@ pub(super) struct WaylandNativeSession {
     scanout: PersistentNativeScanout,
     runtime: Option<PersistentBackendRuntime>,
     outputs: Vec<sophia_engine::HeadlessOutput>,
-    pending_presentations: BTreeMap<SurfaceId, (u64, usize)>,
+    pending_cpu_presentations: BTreeMap<SurfaceId, u64>,
+    awaiting_presentations: BTreeMap<SurfaceId, (u64, usize)>,
+}
+
+pub(super) struct WaylandCpuFrameSubmission {
+    pub(super) presentations: Vec<(SurfaceId, u64)>,
+    pub(super) immediate: bool,
 }
 
 impl WaylandNativeSession {
@@ -2044,7 +2050,8 @@ impl WaylandNativeSession {
             scanout,
             runtime: None,
             outputs,
-            pending_presentations: BTreeMap::new(),
+            pending_cpu_presentations: BTreeMap::new(),
+            awaiting_presentations: BTreeMap::new(),
         })
     }
 
@@ -2056,13 +2063,43 @@ impl WaylandNativeSession {
         Ok(self.scanout.card(0).try_clone_file()?.metadata()?.rdev())
     }
 
-    pub(super) fn present(
+    pub(super) fn enqueue_cpu_presentation(&mut self, surface: SurfaceId, generation: u64) {
+        self.pending_cpu_presentations.insert(surface, generation);
+    }
+
+    pub(super) fn should_compose_cpu_frame(&self) -> bool {
+        let (in_flight, cleanup_pending) =
+            self.runtime.as_ref().map_or((false, false), |runtime| {
+                (
+                    runtime.native_scanout_in_flight(),
+                    runtime.native_cleanup_pending(),
+                )
+            });
+        cpu_frame_submission_ready(
+            !self.pending_cpu_presentations.is_empty(),
+            in_flight,
+            cleanup_pending,
+            self.scanout
+                .heads
+                .iter()
+                .enumerate()
+                .any(|(index, _)| self.scanout.pending_frame(index)),
+        )
+    }
+
+    pub(super) fn submit_cpu_frame(
         &mut self,
         committed_surfaces: &[CommittedSurfaceState],
-        transaction: &SurfaceTransaction,
-        generation: u64,
         report: &sophia_backend_live::LiveCpuCompositionReport,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    ) -> Result<WaylandCpuFrameSubmission, Box<dyn std::error::Error>> {
+        let presentations = self
+            .pending_cpu_presentations
+            .iter()
+            .map(|(surface, generation)| (*surface, *generation))
+            .collect::<Vec<_>>();
+        if presentations.is_empty() {
+            return Err("native CPU composition had no queued presentation".into());
+        }
         let frames = self
             .outputs
             .iter()
@@ -2075,7 +2112,11 @@ impl WaylandNativeSession {
                 Some(&mut self.scanout),
                 Some(frames),
             )?);
-            return Ok(true);
+            self.pending_cpu_presentations.clear();
+            return Ok(WaylandCpuFrameSubmission {
+                presentations,
+                immediate: true,
+            });
         }
         let runtime = self.runtime.as_mut().expect("checked above");
         let submissions_before = self.scanout.heads[0].submissions;
@@ -2084,8 +2125,20 @@ impl WaylandNativeSession {
             Some(&mut self.scanout),
             Some(frames),
         )?;
-        self.queue_presentation(transaction.surface, generation, submissions_before)?;
-        Ok(false)
+        let required_submission = self.required_presentation_submission(submissions_before)?;
+        self.pending_cpu_presentations.clear();
+        for (surface, generation) in &presentations {
+            retain_latest_wayland_presentation(
+                &mut self.awaiting_presentations,
+                *surface,
+                *generation,
+                required_submission,
+            );
+        }
+        Ok(WaylandCpuFrameSubmission {
+            presentations,
+            immediate: false,
+        })
     }
 
     pub(super) fn present_dmabuf(
@@ -2144,12 +2197,12 @@ impl WaylandNativeSession {
             .first()
             .map_or(0, |head| head.presented_submissions);
         let ready = self
-            .pending_presentations
+            .awaiting_presentations
             .iter()
             .filter(|(_, (_, required_submission))| *required_submission <= presented_submissions)
             .map(|(surface, (generation, _))| (*surface, *generation))
             .collect::<Vec<_>>();
-        self.pending_presentations
+        self.awaiting_presentations
             .retain(|_, (_, required_submission)| *required_submission > presented_submissions);
         Ok(ready)
     }
@@ -2160,19 +2213,27 @@ impl WaylandNativeSession {
         generation: u64,
         submissions_before: usize,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        let required_submission = self.required_presentation_submission(submissions_before)?;
+        retain_latest_wayland_presentation(
+            &mut self.awaiting_presentations,
+            surface,
+            generation,
+            required_submission,
+        );
+        Ok(())
+    }
+
+    fn required_presentation_submission(
+        &self,
+        submissions_before: usize,
+    ) -> Result<usize, Box<dyn std::error::Error>> {
         let head = &self.scanout.heads[0];
         let required_submission = required_wayland_presentation_submission(
             submissions_before,
             head.submissions,
             head.exporter.pending_cpu_frame() || head.exporter.pending_dmabuf_frame(),
         )?;
-        retain_latest_wayland_presentation(
-            &mut self.pending_presentations,
-            surface,
-            generation,
-            required_submission,
-        );
-        Ok(())
+        Ok(required_submission)
     }
 
     pub(super) fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -2221,7 +2282,8 @@ impl WaylandNativeSession {
     }
 
     pub(super) fn cancel_surface(&mut self, surface: SurfaceId) {
-        self.pending_presentations.remove(&surface);
+        self.pending_cpu_presentations.remove(&surface);
+        self.awaiting_presentations.remove(&surface);
     }
 }
 
@@ -2232,6 +2294,18 @@ fn retain_latest_wayland_presentation(
     required_submission: usize,
 ) {
     pending.insert(surface, (generation, required_submission));
+}
+
+fn cpu_frame_submission_ready(
+    has_pending_cpu_presentation: bool,
+    native_scanout_in_flight: bool,
+    native_cleanup_pending: bool,
+    native_frame_pending: bool,
+) -> bool {
+    has_pending_cpu_presentation
+        && !native_scanout_in_flight
+        && !native_cleanup_pending
+        && !native_frame_pending
 }
 
 fn required_wayland_presentation_submission(
@@ -3239,8 +3313,9 @@ impl Drop for SessionProcessGuard {
 mod tests {
     use super::{
         BufferSource, CommittedSurfaceState, PersistentBackendRuntime, Rect, Region, Size,
-        center_geometry_without_scaling, layer_snapshots_from_committed,
-        required_wayland_presentation_submission, retain_latest_wayland_presentation,
+        center_geometry_without_scaling, cpu_frame_submission_ready,
+        layer_snapshots_from_committed, required_wayland_presentation_submission,
+        retain_latest_wayland_presentation,
     };
     use std::collections::BTreeMap;
 
@@ -3304,6 +3379,15 @@ mod tests {
         assert_eq!(pending.len(), 2);
         assert_eq!(pending.get(&first), Some(&(5, 9)));
         assert_eq!(pending.get(&second), Some(&(4, 8)));
+    }
+
+    #[test]
+    fn wayland_cpu_composition_waits_for_a_free_scanout_slot() {
+        assert!(cpu_frame_submission_ready(true, false, false, false));
+        assert!(!cpu_frame_submission_ready(false, false, false, false));
+        assert!(!cpu_frame_submission_ready(true, true, false, false));
+        assert!(!cpu_frame_submission_ready(true, false, true, false));
+        assert!(!cpu_frame_submission_ready(true, false, false, true));
     }
 
     #[test]

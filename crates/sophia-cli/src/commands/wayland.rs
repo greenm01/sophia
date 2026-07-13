@@ -325,12 +325,6 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                         AuthorityFeedback::Transaction(commit),
                     )?;
                     if let Some(generation) = committed_generation {
-                        let report =
-                            if matches!(transaction.target_buffer, BufferSource::DmaBuf { .. }) {
-                                None
-                            } else {
-                                Some(scene.compose()?)
-                            };
                         let presented = match transaction.target_buffer {
                             BufferSource::DmaBuf { handle } => {
                                 dmabuf_frames = dmabuf_frames.saturating_add(1);
@@ -346,42 +340,61 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                                 )?
                             }
                             _ => {
-                                shm_frames = shm_frames.saturating_add(1);
-                                let report = report.as_ref().expect("CPU report created above");
                                 if let Some(native_scanout) = native_scanout.as_mut() {
-                                    native_scanout.present(
-                                        &committed,
-                                        &transaction,
-                                        generation,
-                                        &report,
-                                    )?
+                                    native_scanout.enqueue_cpu_presentation(surface, generation);
+                                    continue;
                                 } else {
-                                    true
+                                    shm_frames = shm_frames.saturating_add(1);
+                                    let report = scene.compose()?;
+                                    frames = frames.saturating_add(1);
+                                    last_checksum = Some(report.checksum);
+                                    println!(
+                                        "sophia_wayland_frame schema=1 surface={} generation={} width={} height={} buffer=shm checksum={} nonzero_pixel_bytes={}",
+                                        surface.index(),
+                                        generation,
+                                        transaction.target_geometry.width,
+                                        transaction.target_geometry.height,
+                                        report.checksum,
+                                        report.nonzero_pixel_bytes,
+                                    );
+                                    observe_input_presentation(
+                                        Some(report.checksum),
+                                        &mut pending_pixel_input,
+                                        &mut pending_presented_input,
+                                        &mut pending_presented_pointer,
+                                        &mut presented_keycodes,
+                                        &mut input_pixel_changes,
+                                        &mut input_presentations,
+                                        &mut pointer_presentations,
+                                        &mut max_observed_input_latency,
+                                    );
+                                    apply_wayland_feedback(
+                                        &mut frontend,
+                                        &mut scene,
+                                        AuthorityFeedback::Presented(SurfacePresentationFeedback {
+                                            surface,
+                                            generation,
+                                            presentation_msec: u64::try_from(
+                                                started.elapsed().as_millis(),
+                                            )
+                                            .unwrap_or(u64::MAX),
+                                        }),
+                                    )?;
+                                    continue;
                                 }
                             }
                         };
                         frames = frames.saturating_add(1);
-                        let checksum = report.as_ref().map(|report| report.checksum);
-                        if let Some(checksum) = checksum {
-                            last_checksum = Some(checksum);
-                        }
-                        let (source, checksum_value, nonzero_pixel_bytes) = match report.as_ref() {
-                            Some(report) => ("shm", report.checksum, report.nonzero_pixel_bytes),
-                            None => ("dmabuf", 0, 0),
-                        };
                         println!(
-                            "sophia_wayland_frame schema=1 surface={} generation={} width={} height={} buffer={} checksum={} nonzero_pixel_bytes={}",
+                            "sophia_wayland_frame schema=1 surface={} generation={} width={} height={} buffer=dmabuf checksum=0 nonzero_pixel_bytes=0",
                             surface.index(),
                             generation,
                             transaction.target_geometry.width,
                             transaction.target_geometry.height,
-                            source,
-                            checksum_value,
-                            nonzero_pixel_bytes
                         );
                         if presented {
                             observe_input_presentation(
-                                checksum,
+                                None,
                                 &mut pending_pixel_input,
                                 &mut pending_presented_input,
                                 &mut pending_presented_pointer,
@@ -402,7 +415,7 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                                 }),
                             )?;
                         } else {
-                            presentation_observations.insert((surface, generation), checksum);
+                            presentation_observations.insert((surface, generation), None);
                         }
                     }
                 }
@@ -424,6 +437,55 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                     return Err(format!("Wayland protocol authority failed: {error}").into());
                 }
                 _ => {}
+            }
+        }
+        if let Some(native_scanout) = native_scanout.as_mut()
+            && native_scanout.should_compose_cpu_frame()
+        {
+            let report = scene.compose()?;
+            let submission = native_scanout.submit_cpu_frame(&committed, &report)?;
+            let checksum = Some(report.checksum);
+            last_checksum = checksum;
+            frames = frames.saturating_add(submission.presentations.len());
+            shm_frames = shm_frames.saturating_add(submission.presentations.len());
+            for (surface, generation) in submission.presentations {
+                let Some(state) = committed.iter().find(|state| state.surface == surface) else {
+                    continue;
+                };
+                println!(
+                    "sophia_wayland_frame schema=1 surface={} generation={} width={} height={} buffer=shm checksum={} nonzero_pixel_bytes={}",
+                    surface.index(),
+                    generation,
+                    state.geometry.width,
+                    state.geometry.height,
+                    report.checksum,
+                    report.nonzero_pixel_bytes,
+                );
+                if submission.immediate {
+                    observe_input_presentation(
+                        checksum,
+                        &mut pending_pixel_input,
+                        &mut pending_presented_input,
+                        &mut pending_presented_pointer,
+                        &mut presented_keycodes,
+                        &mut input_pixel_changes,
+                        &mut input_presentations,
+                        &mut pointer_presentations,
+                        &mut max_observed_input_latency,
+                    );
+                    apply_wayland_feedback(
+                        &mut frontend,
+                        &mut scene,
+                        AuthorityFeedback::Presented(SurfacePresentationFeedback {
+                            surface,
+                            generation,
+                            presentation_msec: u64::try_from(started.elapsed().as_millis())
+                                .unwrap_or(u64::MAX),
+                        }),
+                    )?;
+                } else {
+                    presentation_observations.insert((surface, generation), checksum);
+                }
             }
         }
         std::thread::sleep(Duration::from_millis(2));
