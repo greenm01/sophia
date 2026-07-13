@@ -482,6 +482,22 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
         if let Some(native_scanout) = native_scanout.as_mut()
             && native_scanout.should_compose_cpu_frame()
         {
+            // Claiming a pending frame is the earliest bounded point at which
+            // the client may prepare its successor: the scheduler retains at
+            // most one newer generation per surface, while `Presented` still
+            // releases the claimed client buffer only after KMS retirement.
+            for (surface, generation) in native_scanout.cpu_presentation_candidates() {
+                apply_wayland_feedback(
+                    &mut frontend,
+                    &mut scene,
+                    AuthorityFeedback::FrameScheduled(SurfacePresentationFeedback {
+                        surface,
+                        generation,
+                        presentation_msec: u64::try_from(started.elapsed().as_millis())
+                            .unwrap_or(u64::MAX),
+                    }),
+                )?;
+            }
             let compose_started = Instant::now();
             let report = scene.compose()?;
             max_cpu_compose = max_cpu_compose.max(compose_started.elapsed());
@@ -490,7 +506,6 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
             last_checksum = checksum;
             frames = frames.saturating_add(submission.presentations.len());
             shm_frames = shm_frames.saturating_add(submission.presentations.len());
-            let frame_scheduled = submission.frame_scheduled;
             for (surface, generation) in submission.presentations {
                 let Some(state) = committed.iter().find(|state| state.surface == surface) else {
                     continue;
@@ -528,21 +543,6 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                         }),
                     )?;
                 } else {
-                    if frame_scheduled {
-                        // Unblock the client as soon as KMS has accepted the
-                        // composition. Buffer release still waits for the
-                        // page-flip feedback below.
-                        apply_wayland_feedback(
-                            &mut frontend,
-                            &mut scene,
-                            AuthorityFeedback::FrameScheduled(SurfacePresentationFeedback {
-                                surface,
-                                generation,
-                                presentation_msec: u64::try_from(started.elapsed().as_millis())
-                                    .unwrap_or(u64::MAX),
-                            }),
-                        )?;
-                    }
                     presentation_observations.insert((surface, generation), checksum);
                 }
             }

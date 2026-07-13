@@ -182,7 +182,7 @@ fn acknowledged_configure_commits_and_presentation_finishes_frame() {
 }
 
 #[test]
-fn scheduled_frame_completes_callback_before_page_flip_without_releasing_buffer() {
+fn claimed_frame_completes_callback_before_page_flip_without_releasing_buffer() {
     let mut reducer = WaylandAuthorityReducer::new();
     create(&mut reducer);
     reducer
