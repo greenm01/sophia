@@ -64,9 +64,18 @@ The existing implementation covers the second and third rows for the
 single-client live-session prototype: the X11 socket dispatch emits bounded
 transaction batches, and the Engine can route key/pointer events plus
 focus/configure commands back to that client. Its persistent socket listener
-also reuses authority state across *sequential* clients. It is not yet a
-production multi-client server: root/output facts are fixed setup values, and
-simultaneous-client dispatch is still required. Each accepted client now gets
+also reuses authority state across *sequential* clients. The frontend now also
+offers an opt-in bounded concurrent worker API: callers use
+`serve_next_concurrently[_traced]` to accept independent clients and
+`wait_for_clients` to reap the accepted batch. It shares only independently
+synchronized runtime, atom, property, and connection-lease state; the default
+cap is 16 clients and `XServerFrontendConfig::with_max_concurrent_clients`
+sets a different nonzero cap. A simultaneous-client regression holds one
+client live while a second maps its window, then proves cleanup returns the
+lease count to zero. The live session deliberately does not use this API yet:
+its input and control channels select one client, so client-aware Engine
+routing remains the next integration step. Root/output facts are still fixed
+setup values. Each accepted client now gets
 a disjoint X11 setup resource-ID range. Every currently supported XID-creating
 wire path—window, pixmap, GC, font, colormap, glyph cursor, and reduced
 MIT-SHM segment—rejects an XID outside that range with X11 `BadIDChoice` before
@@ -74,9 +83,11 @@ it reaches runtime state. Every successful setup also receives a monotonic
 frontend client identity and retains an XID-range lease until its connection
 ends. The lease is the cleanup ledger key; it does not restrict ordinary
 same-namespace references in the classic shared-X profile. Resource cleanup
-now reaches an Engine-visible surface-removal path; ownership checks on
-references to existing resources are still required before simultaneous-client
-dispatch.
+now reaches an Engine-visible surface-removal path. The classic shared-X
+existing-resource policy is explicit: an authenticated client may refer to,
+mutate, or destroy an existing resource in its shared namespace, even when a
+different connection created its XID. XID-range checks apply only to resource
+creation; the lease remains a teardown ledger, not an access-control list.
 `XServerFrontendConfig`/`XServerFrontend` make the local socket path and
 namespace explicit, reject invalid namespaces, restrict the socket to its
 owner, and refuse to replace a non-socket path. The configuration can now
@@ -84,9 +95,9 @@ require a session-scoped `MIT-MAGIC-COOKIE-1` value: a bad setup receives a
 normal X11 setup-failure reply and the listener remains available for the next
 client. The legacy smoke helpers and the configuration default deliberately
 remain unauthenticated local sockets. Xauthority-file management, peer-
-credential policy, cookie rotation, session launch policy, request-level XID
-ownership, resource cleanup, and confined-client routing are still required
-before treating the listener as a general local X server.
+credential policy, cookie rotation, session launch policy, Engine-backed
+multi-client input/control routing, and confined-client routing are still
+required before treating the listener as a general local X server.
 
 ### Connection Lifecycle
 
@@ -108,18 +119,21 @@ state. A sequential-client proof confirms that a later client receives
 `BadWindow` for the former client's window while resources from a different
 XID range remain intact.
 
-The next lifecycle rule is distinct: existing-resource operations need an
-explicit per-request ownership policy. The cleanup ledger establishes who
-created a resource, but classic shared-X must still define which cross-client
-references, mutations, and destructive operations are permitted before the
-listener dispatches simultaneous clients.
+The existing-resource policy is deliberately profile-specific. The cleanup
+ledger establishes which resources disconnect teardown must reclaim, but it is
+not an access-control list in the classic profile. The regression suite proves
+that a peer with a disjoint creation range can map an existing window in the
+same namespace. A confined profile must instead add connection routing and
+capability checks before it can permit any cross-client resource operation.
 
 The two session profiles have these precise semantics:
 
 - **Classic shared-X:** one trusted local session assigns all participating
   clients the same namespace. Ordinary X11 inspection, coordination,
   selections, and window-manager interaction remain available within that
-  session.
+  session. Any authenticated client in that namespace can use existing X11
+  resources; XID allocation remains per-connection solely to prevent creation
+  collisions and make disconnect cleanup precise.
 - **Confined:** the launch/authentication layer assigns a distinct namespace
   and explicit capabilities for a client group. Cross-namespace discovery,
   properties, selections, and input are denied unless a narrow portal grants a

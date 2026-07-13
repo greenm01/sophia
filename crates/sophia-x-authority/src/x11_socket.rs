@@ -3,11 +3,13 @@ use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 #[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 #[cfg(unix)]
-use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError, TrySendError};
 #[cfg(unix)]
 use std::{
     collections::BTreeMap,
     io::{ErrorKind, Read, Write},
+    num::NonZeroUsize,
+    panic::{AssertUnwindSafe, catch_unwind},
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
@@ -34,6 +36,11 @@ use sophia_protocol::{NamespaceId, Size, SurfaceId, TransactionId};
 const X11_CLIENT_RESOURCE_RANGE_SIZE: u32 = X_SETUP_DEFAULT_RESOURCE_ID_MASK + 1;
 #[cfg(unix)]
 const X11_MAX_CLIENT_RESOURCE_RANGES: u16 = (u32::MAX / X11_CLIENT_RESOURCE_RANGE_SIZE) as u16;
+#[cfg(unix)]
+const X_SERVER_FRONTEND_DEFAULT_MAX_CONCURRENT_CLIENTS: NonZeroUsize = match NonZeroUsize::new(16) {
+    Some(value) => value,
+    None => unreachable!(),
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct X11SetupSocketError {
@@ -81,6 +88,7 @@ impl XServerFrontendClientId {
 #[cfg(unix)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct XServerFrontendClientLease {
+    client: XServerFrontendClientId,
     resource_id_range: crate::XWireClientResourceRange,
 }
 
@@ -151,6 +159,7 @@ pub struct XServerFrontendConfig {
     socket_path: PathBuf,
     namespace: NamespaceId,
     setup_authorization: XServerFrontendSetupAuthorization,
+    max_concurrent_clients: NonZeroUsize,
 }
 
 #[cfg(unix)]
@@ -174,6 +183,7 @@ impl XServerFrontendConfig {
             socket_path,
             namespace,
             setup_authorization: XServerFrontendSetupAuthorization::default(),
+            max_concurrent_clients: X_SERVER_FRONTEND_DEFAULT_MAX_CONCURRENT_CLIENTS,
         })
     }
 
@@ -182,6 +192,16 @@ impl XServerFrontendConfig {
         setup_authorization: XServerFrontendSetupAuthorization,
     ) -> Self {
         self.setup_authorization = setup_authorization;
+        self
+    }
+
+    /// Sets the upper bound for simultaneously dispatched X11 clients.
+    ///
+    /// The default allows sixteen connections. This bound applies only to the
+    /// opt-in concurrent dispatcher; the existing sequential APIs still serve
+    /// one connection at a time.
+    pub fn with_max_concurrent_clients(mut self, max_concurrent_clients: NonZeroUsize) -> Self {
+        self.max_concurrent_clients = max_concurrent_clients;
         self
     }
 
@@ -196,31 +216,43 @@ impl XServerFrontendConfig {
     pub const fn setup_authorization(&self) -> &XServerFrontendSetupAuthorization {
         &self.setup_authorization
     }
+
+    pub const fn max_concurrent_clients(&self) -> NonZeroUsize {
+        self.max_concurrent_clients
+    }
 }
 
-/// A long-running, local X11 listener owned by the Sophia X Server Frontend.
+/// A local X11 listener owned by the Sophia X Server Frontend.
 ///
 /// The frontend owns only X11 protocol state. It has no DRM/KMS, physical-input,
-/// scene-graph, or layout ownership. Current dispatch is intentionally
-/// sequential; sharing the resource state across simultaneously live clients
-/// requires client-specific XID allocation and is tracked as a separate
-/// compatibility milestone.
+/// scene-graph, or layout ownership. Its established APIs serve one client at
+/// a time. The explicit concurrent APIs use bounded workers that share the
+/// independently synchronized frontend state.
 #[cfg(unix)]
 #[derive(Debug)]
 pub struct XServerFrontend {
     config: XServerFrontendConfig,
     listener: UnixListener,
     state: X11CoreSocketServerState,
+    workers: BTreeMap<u64, std::thread::JoinHandle<()>>,
+    worker_completions: Receiver<X11CoreClientWorkerCompletion>,
+    worker_completion_sender: Sender<X11CoreClientWorkerCompletion>,
+    next_worker_id: u64,
 }
 
 #[cfg(unix)]
 impl XServerFrontend {
     pub fn bind(config: XServerFrontendConfig) -> Result<Self, X11SetupSocketError> {
         let listener = bind_x11_core_socket_server(config.socket_path())?;
+        let (worker_completion_sender, worker_completions) = std::sync::mpsc::channel();
         Ok(Self {
             config,
             listener,
             state: X11CoreSocketServerState::new(),
+            workers: BTreeMap::new(),
+            worker_completions,
+            worker_completion_sender,
+            next_worker_id: 1,
         })
     }
 
@@ -231,17 +263,69 @@ impl XServerFrontend {
     /// Number of X11 clients currently holding a frontend connection lease.
     ///
     /// With the present sequential dispatcher this is normally zero between
-    /// `serve_next` calls. The value is retained for lifecycle supervision and
-    /// the upcoming simultaneous-client dispatcher.
+    /// `serve_next` calls. Concurrent workers retain their lease until stream
+    /// teardown finishes, so the value is also useful for supervision.
     pub fn active_client_count(&self) -> usize {
         self.state.active_client_count()
+    }
+
+    /// Starts one client worker, if the configured concurrency limit permits
+    /// it, and returns as soon as that connection is accepted.
+    ///
+    /// Call [`Self::wait_for_clients`] before releasing a manually supervised
+    /// frontend so every accepted connection is reaped. The observer must be
+    /// thread-safe because worker callbacks may run concurrently.
+    pub fn serve_next_concurrently(&mut self) -> Result<(), X11SetupSocketError> {
+        let observer: Arc<X11CoreTraceObserver> = Arc::new(|_| Ok(()));
+        self.serve_next_concurrently_traced(observer)
+    }
+
+    /// Like [`Self::serve_next_concurrently`], with an observer for each
+    /// completed X11 dispatch.
+    pub fn serve_next_concurrently_traced(
+        &mut self,
+        observer: Arc<X11CoreTraceObserver>,
+    ) -> Result<(), X11SetupSocketError> {
+        self.reap_finished_client_workers()?;
+        let limit = self.config.max_concurrent_clients().get();
+        if self.workers.len() >= limit {
+            return Err(X11SetupSocketError::new(format!(
+                "Sophia X Server Frontend concurrent-client limit ({limit}) reached"
+            )));
+        }
+        let (stream, _) = self.listener.accept().map_err(|error| {
+            X11SetupSocketError::new(format!("failed to accept X11 core client: {error}"))
+        })?;
+        self.spawn_client_worker(stream, observer)
+    }
+
+    /// Reaps every connection worker started by the concurrent APIs.
+    ///
+    /// This is the explicit supervision boundary for a caller that accepts a
+    /// bounded batch of local clients. It waits only for already accepted
+    /// clients; it does not accept another connection.
+    pub fn wait_for_clients(&mut self) -> Result<(), X11SetupSocketError> {
+        let mut first_error = self.reap_finished_client_workers().err();
+        while !self.workers.is_empty() {
+            let completion = self.worker_completions.recv().map_err(|_| {
+                X11SetupSocketError::new(
+                    "Sophia X Server Frontend concurrent worker supervisor disconnected",
+                )
+            })?;
+            if let Err(error) = self.reap_client_worker(completion)
+                && first_error.is_none()
+            {
+                first_error = Some(error);
+            }
+        }
+        first_error.map_or(Ok(()), Err)
     }
 
     pub fn serve_next(&mut self) -> Result<(), X11SetupSocketError> {
         serve_x11_core_socket_listener_once_with_setup_authorization(
             &self.listener,
             self.config.namespace(),
-            &mut self.state,
+            &self.state,
             self.config.setup_authorization(),
             None,
             |_| Ok(()),
@@ -255,7 +339,7 @@ impl XServerFrontend {
         serve_x11_core_socket_listener_once_with_setup_authorization(
             &self.listener,
             self.config.namespace(),
-            &mut self.state,
+            &self.state,
             self.config.setup_authorization(),
             None,
             observer,
@@ -273,11 +357,91 @@ impl XServerFrontend {
         serve_x11_core_socket_listener_with_setup_authorization(
             &self.listener,
             self.config.namespace(),
-            &mut self.state,
+            &self.state,
             self.config.setup_authorization(),
             observer,
         )
     }
+
+    fn spawn_client_worker(
+        &mut self,
+        mut stream: UnixStream,
+        observer: Arc<X11CoreTraceObserver>,
+    ) -> Result<(), X11SetupSocketError> {
+        let worker_id = self.next_worker_id;
+        self.next_worker_id = self.next_worker_id.checked_add(1).ok_or_else(|| {
+            X11SetupSocketError::new("Sophia X Server Frontend exhausted worker identities")
+        })?;
+        let state = self.state.clone();
+        let namespace = self.config.namespace();
+        let authorization = self.config.setup_authorization().clone();
+        let completion_sender = self.worker_completion_sender.clone();
+        let worker = std::thread::Builder::new()
+            .name(format!("sophia-x11-client-{worker_id}"))
+            .spawn(move || {
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    serve_x11_core_socket_client_with_trace_observer_and_setup_authorization(
+                        &mut stream,
+                        namespace,
+                        &state,
+                        &authorization,
+                        move |trace| observer(trace),
+                    )
+                }))
+                .unwrap_or_else(|_| {
+                    Err(X11SetupSocketError::new(
+                        "Sophia X Server Frontend client worker panicked",
+                    ))
+                });
+                let _ = completion_sender.send(X11CoreClientWorkerCompletion { worker_id, result });
+            })
+            .map_err(|error| {
+                X11SetupSocketError::new(format!("failed to start X11 client worker: {error}"))
+            })?;
+        self.workers.insert(worker_id, worker);
+        Ok(())
+    }
+
+    fn reap_finished_client_workers(&mut self) -> Result<(), X11SetupSocketError> {
+        loop {
+            match self.worker_completions.try_recv() {
+                Ok(completion) => self.reap_client_worker(completion)?,
+                Err(TryRecvError::Empty) => return Ok(()),
+                Err(TryRecvError::Disconnected) if self.workers.is_empty() => return Ok(()),
+                Err(TryRecvError::Disconnected) => {
+                    return Err(X11SetupSocketError::new(
+                        "Sophia X Server Frontend concurrent worker supervisor disconnected",
+                    ));
+                }
+            }
+        }
+    }
+
+    fn reap_client_worker(
+        &mut self,
+        completion: X11CoreClientWorkerCompletion,
+    ) -> Result<(), X11SetupSocketError> {
+        let worker = self.workers.remove(&completion.worker_id).ok_or_else(|| {
+            X11SetupSocketError::new("Sophia X Server Frontend lost a concurrent client worker")
+        })?;
+        worker.join().map_err(|_| {
+            X11SetupSocketError::new("Sophia X Server Frontend client worker panicked")
+        })?;
+        completion.result
+    }
+}
+
+/// A trace callback used by a bounded concurrent frontend worker.
+#[cfg(unix)]
+pub type X11CoreTraceObserver = dyn for<'trace> Fn(X11CoreDispatchTrace<'trace>) -> Result<(), X11SetupSocketError>
+    + Send
+    + Sync
+    + 'static;
+
+#[cfg(unix)]
+struct X11CoreClientWorkerCompletion {
+    worker_id: u64,
+    result: Result<(), X11SetupSocketError>,
 }
 
 #[cfg(unix)]
@@ -387,11 +551,20 @@ impl From<XAuthorityKeyEvent> for XAuthorityInputEvent {
 /// Authority-owned state shared by every client accepted by one X11 socket
 /// listener. Client sequence numbers remain connection-local.
 #[cfg(unix)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct X11CoreSocketServerState {
     runtime: Arc<Mutex<XAuthorityRuntime>>,
-    atoms: XAtomTable,
-    properties: XPropertyTable,
+    atoms: Arc<Mutex<XAtomTable>>,
+    properties: Arc<Mutex<XPropertyTable>>,
+    clients: Arc<Mutex<X11CoreClientLeaseState>>,
+}
+
+/// The small part of socket state that must be serialized across connection
+/// setup and teardown. Protocol dispatch itself uses the independent runtime,
+/// atom, and property locks above.
+#[cfg(unix)]
+#[derive(Debug)]
+struct X11CoreClientLeaseState {
     next_client_resource_range: u16,
     next_client_id: u64,
     client_leases: BTreeMap<XServerFrontendClientId, XServerFrontendClientLease>,
@@ -404,9 +577,11 @@ impl Default for X11CoreSocketServerState {
             runtime: Default::default(),
             atoms: Default::default(),
             properties: Default::default(),
-            next_client_resource_range: 1,
-            next_client_id: 1,
-            client_leases: Default::default(),
+            clients: Arc::new(Mutex::new(X11CoreClientLeaseState {
+                next_client_resource_range: 1,
+                next_client_id: 1,
+                client_leases: Default::default(),
+            })),
         }
     }
 }
@@ -417,38 +592,52 @@ impl X11CoreSocketServerState {
         Self::default()
     }
 
-    fn next_client_setup_success(&mut self) -> Result<XSetupSuccess, X11SetupSocketError> {
-        if self.next_client_resource_range > X11_MAX_CLIENT_RESOURCE_RANGES {
+    fn next_client_setup_success(
+        &self,
+    ) -> Result<(XServerFrontendClientLease, XSetupSuccess), X11SetupSocketError> {
+        let mut clients = self
+            .clients
+            .lock()
+            .map_err(|_| X11SetupSocketError::new("X11 client lease lock poisoned"))?;
+        if clients.next_client_resource_range > X11_MAX_CLIENT_RESOURCE_RANGES {
             return Err(X11SetupSocketError::new(
                 "Sophia X Server Frontend exhausted X11 client resource ranges",
             ));
         }
         let resource_id_base =
-            u32::from(self.next_client_resource_range) * X11_CLIENT_RESOURCE_RANGE_SIZE;
-        self.next_client_resource_range = self.next_client_resource_range.saturating_add(1);
-        Ok(XSetupSuccess {
-            resource_id_base,
-            resource_id_mask: X_SETUP_DEFAULT_RESOURCE_ID_MASK,
-            ..XSetupSuccess::client_compatible()
-        })
-    }
-
-    fn next_client_id(&mut self) -> Result<XServerFrontendClientId, X11SetupSocketError> {
-        let client = XServerFrontendClientId(self.next_client_id);
-        self.next_client_id = self.next_client_id.checked_add(1).ok_or_else(|| {
+            u32::from(clients.next_client_resource_range) * X11_CLIENT_RESOURCE_RANGE_SIZE;
+        clients.next_client_resource_range = clients.next_client_resource_range.saturating_add(1);
+        let client = XServerFrontendClientId(clients.next_client_id);
+        clients.next_client_id = clients.next_client_id.checked_add(1).ok_or_else(|| {
             X11SetupSocketError::new("Sophia X Server Frontend exhausted client identities")
         })?;
-        Ok(client)
+        let resource_id_range = crate::XWireClientResourceRange {
+            base: resource_id_base,
+            mask: X_SETUP_DEFAULT_RESOURCE_ID_MASK,
+        };
+        Ok((
+            XServerFrontendClientLease {
+                client,
+                resource_id_range,
+            },
+            XSetupSuccess {
+                resource_id_base,
+                resource_id_mask: X_SETUP_DEFAULT_RESOURCE_ID_MASK,
+                ..XSetupSuccess::client_compatible()
+            },
+        ))
     }
 
     fn register_client(
-        &mut self,
-        client: XServerFrontendClientId,
-        resource_id_range: crate::XWireClientResourceRange,
+        &self,
+        lease: XServerFrontendClientLease,
     ) -> Result<(), X11SetupSocketError> {
         if self
+            .clients
+            .lock()
+            .map_err(|_| X11SetupSocketError::new("X11 client lease lock poisoned"))?
             .client_leases
-            .insert(client, XServerFrontendClientLease { resource_id_range })
+            .insert(lease.client, lease)
             .is_some()
         {
             return Err(X11SetupSocketError::new(
@@ -459,35 +648,52 @@ impl X11CoreSocketServerState {
     }
 
     fn release_client(
-        &mut self,
+        &self,
         client: XServerFrontendClientId,
     ) -> Result<XServerFrontendClientLease, X11SetupSocketError> {
-        self.client_leases.remove(&client).ok_or_else(|| {
-            X11SetupSocketError::new("Sophia X Server Frontend lost a client connection lease")
-        })
+        self.clients
+            .lock()
+            .map_err(|_| X11SetupSocketError::new("X11 client lease lock poisoned"))?
+            .client_leases
+            .remove(&client)
+            .ok_or_else(|| {
+                X11SetupSocketError::new("Sophia X Server Frontend lost a client connection lease")
+            })
     }
 
     fn active_client_count(&self) -> usize {
-        self.client_leases.len()
+        self.clients
+            .lock()
+            .map(|clients| clients.client_leases.len())
+            .unwrap_or(0)
     }
 }
 
 #[cfg(unix)]
 fn release_x11_client_lease(
-    state: &mut X11CoreSocketServerState,
+    state: &X11CoreSocketServerState,
     namespace: NamespaceId,
     lease: XServerFrontendClientLease,
 ) -> Result<crate::XAuthorityClientResourceRelease, X11SetupSocketError> {
-    let release = state
+    // Keep authority resource destruction and property removal together. X11
+    // request dispatch acquires the runtime lock before the property lock, so
+    // this prevents another client observing a destroyed window with stale
+    // properties between the two cleanup steps.
+    let mut runtime = state
         .runtime
         .lock()
-        .map_err(|_| X11SetupSocketError::new("X11 authority runtime lock poisoned"))?
+        .map_err(|_| X11SetupSocketError::new("X11 authority runtime lock poisoned"))?;
+    let release = runtime
         .release_client_resource_range(namespace, lease.resource_id_range)
         .map_err(|error| {
             X11SetupSocketError::new(format!("failed to release X11 client resources: {error:?}"))
         })?;
+    let mut properties = state
+        .properties
+        .lock()
+        .map_err(|_| X11SetupSocketError::new("X11 property table lock poisoned"))?;
     for window in &release.destroyed_windows {
-        state.properties.remove_window(namespace, *window);
+        properties.remove_window(namespace, *window);
     }
     Ok(release)
 }
@@ -761,7 +967,7 @@ pub fn bind_x11_core_socket_server(
 pub fn serve_x11_core_socket_listener_once(
     listener: &UnixListener,
     namespace: NamespaceId,
-    state: &mut X11CoreSocketServerState,
+    state: &X11CoreSocketServerState,
 ) -> Result<(), X11SetupSocketError> {
     serve_x11_core_socket_listener_once_traced(listener, namespace, state, |_| Ok(()))
 }
@@ -770,7 +976,7 @@ pub fn serve_x11_core_socket_listener_once(
 pub fn serve_x11_core_socket_listener_once_traced(
     listener: &UnixListener,
     namespace: NamespaceId,
-    state: &mut X11CoreSocketServerState,
+    state: &X11CoreSocketServerState,
     observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
     let authorization = XServerFrontendSetupAuthorization::default();
@@ -788,7 +994,7 @@ pub fn serve_x11_core_socket_listener_once_traced(
 pub fn serve_x11_core_socket_listener(
     listener: &UnixListener,
     namespace: NamespaceId,
-    state: &mut X11CoreSocketServerState,
+    state: &X11CoreSocketServerState,
 ) -> Result<(), X11SetupSocketError> {
     serve_x11_core_socket_listener_traced(listener, namespace, state, |_| Ok(()))
 }
@@ -797,7 +1003,7 @@ pub fn serve_x11_core_socket_listener(
 pub fn serve_x11_core_socket_listener_traced(
     listener: &UnixListener,
     namespace: NamespaceId,
-    state: &mut X11CoreSocketServerState,
+    state: &X11CoreSocketServerState,
     observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
     let authorization = XServerFrontendSetupAuthorization::default();
@@ -814,7 +1020,7 @@ pub fn serve_x11_core_socket_listener_traced(
 fn serve_x11_core_socket_listener_with_setup_authorization(
     listener: &UnixListener,
     namespace: NamespaceId,
-    state: &mut X11CoreSocketServerState,
+    state: &X11CoreSocketServerState,
     authorization: &XServerFrontendSetupAuthorization,
     mut observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
@@ -834,7 +1040,7 @@ fn serve_x11_core_socket_listener_with_setup_authorization(
 fn serve_x11_core_socket_listener_once_with_setup_authorization(
     listener: &UnixListener,
     namespace: NamespaceId,
-    state: &mut X11CoreSocketServerState,
+    state: &X11CoreSocketServerState,
     authorization: &XServerFrontendSetupAuthorization,
     idle_timeout: Option<Duration>,
     observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
@@ -920,7 +1126,7 @@ pub fn serve_x11_core_socket_client(
 pub fn serve_x11_core_socket_client_with_state(
     stream: &mut UnixStream,
     namespace: NamespaceId,
-    state: &mut X11CoreSocketServerState,
+    state: &X11CoreSocketServerState,
 ) -> Result<(), X11SetupSocketError> {
     serve_x11_core_socket_client_with_trace_observer(stream, namespace, state, |_| Ok(()))
 }
@@ -942,7 +1148,7 @@ pub fn serve_x11_core_socket_client_observed(
 pub fn serve_x11_core_socket_client_with_state_observed(
     stream: &mut UnixStream,
     namespace: NamespaceId,
-    state: &mut X11CoreSocketServerState,
+    state: &X11CoreSocketServerState,
     mut observer: impl FnMut(&XDispatchResult) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
     serve_x11_core_socket_client_with_trace_observer(stream, namespace, state, move |trace| {
@@ -954,7 +1160,7 @@ pub fn serve_x11_core_socket_client_with_state_observed(
 fn serve_x11_core_socket_client_with_trace_observer(
     stream: &mut UnixStream,
     namespace: NamespaceId,
-    state: &mut X11CoreSocketServerState,
+    state: &X11CoreSocketServerState,
     observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
     let authorization = XServerFrontendSetupAuthorization::default();
@@ -971,7 +1177,7 @@ fn serve_x11_core_socket_client_with_trace_observer(
 fn serve_x11_core_socket_client_with_trace_observer_and_setup_authorization(
     stream: &mut UnixStream,
     namespace: NamespaceId,
-    state: &mut X11CoreSocketServerState,
+    state: &X11CoreSocketServerState,
     authorization: &XServerFrontendSetupAuthorization,
     observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
@@ -990,7 +1196,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_setup_authorization(
 fn serve_x11_core_socket_client_with_trace_observer_and_input(
     stream: &mut UnixStream,
     namespace: NamespaceId,
-    state: &mut X11CoreSocketServerState,
+    state: &X11CoreSocketServerState,
     input_receiver: Option<Receiver<XAuthorityInputEvent>>,
     control_channels: Option<(
         Receiver<XAuthorityControlCommand>,
@@ -999,18 +1205,21 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
     authorization: &XServerFrontendSetupAuthorization,
     mut observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
-    let Some((setup, setup_success)) =
+    let mut setup_lease = None;
+    let Some((setup, _setup_success)) =
         serve_x11_setup_socket_client_with_setup_authorization(stream, authorization, || {
-            state.next_client_setup_success()
+            let (lease, setup_success) = state.next_client_setup_success()?;
+            setup_lease = Some(lease);
+            Ok(setup_success)
         })?
     else {
         return Ok(());
     };
-    let client = state.next_client_id()?;
-    let resource_id_range = crate::XWireClientResourceRange {
-        base: setup_success.resource_id_base,
-        mask: setup_success.resource_id_mask,
-    };
+    let client_lease = setup_lease.ok_or_else(|| {
+        X11SetupSocketError::new("Sophia X Server Frontend did not retain a setup client lease")
+    })?;
+    let client = client_lease.client;
+    let resource_id_range = client_lease.resource_id_range;
     let mut sequence = 0u16;
     let event_sequence = Arc::new(AtomicU16::new(0));
     let focused_window = Arc::new(AtomicU64::new(u64::from(X_SETUP_DEFAULT_ROOT)));
@@ -1046,7 +1255,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
             )
         })
         .transpose()?;
-    state.register_client(client, resource_id_range)?;
+    state.register_client(client_lease)?;
 
     let result = (|| {
         while let Some((major_opcode, request)) = read_x11_core_request(stream, setup.byte_order)? {
@@ -1064,7 +1273,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
             };
             let mut parse_error = None;
             let mut request_detail = None;
-            let output = match decode_x11_core_request(
+            let (output, cpu_buffer_update) = match decode_x11_core_request(
                 XWireClientContext {
                     byte_order: setup.byte_order,
                     namespace,
@@ -1105,13 +1314,25 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                     let mut runtime = state.runtime.lock().map_err(|_| {
                         X11SetupSocketError::new("X11 authority runtime lock poisoned")
                     })?;
-                    dispatch_x11_wire_request(
+                    let mut atoms = state
+                        .atoms
+                        .lock()
+                        .map_err(|_| X11SetupSocketError::new("X11 atom table lock poisoned"))?;
+                    let mut properties = state.properties.lock().map_err(|_| {
+                        X11SetupSocketError::new("X11 property table lock poisoned")
+                    })?;
+                    let output = dispatch_x11_wire_request(
                         dispatch_context,
                         request,
                         &mut runtime,
-                        &mut state.atoms,
-                        &mut state.properties,
-                    )
+                        &mut atoms,
+                        &mut properties,
+                    );
+                    // The CPU update belongs to this dispatch. Keep it under
+                    // the runtime lock so a simultaneous client cannot take
+                    // an update generated by this request.
+                    let cpu_buffer_update = runtime.take_cpu_buffer_update();
+                    (output, cpu_buffer_update)
                 }
                 Err(error) => {
                     let head = request
@@ -1121,14 +1342,9 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                         .collect::<Vec<_>>()
                         .join("");
                     parse_error = Some(format!("{error:?}:len={}:head={head}", request.len()));
-                    dispatch_x11_parse_error(dispatch_context, error)
+                    (dispatch_x11_parse_error(dispatch_context, error), None)
                 }
             };
-            let cpu_buffer_update = state
-                .runtime
-                .lock()
-                .map_err(|_| X11SetupSocketError::new("X11 authority runtime lock poisoned"))?
-                .take_cpu_buffer_update();
             if std::env::var_os("SOPHIA_X11_AUTHORITY_TRACE").is_some() {
                 eprintln!(
                     "sophia-x-authority: seq={} opcode={}",

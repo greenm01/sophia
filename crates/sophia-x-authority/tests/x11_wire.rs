@@ -1019,6 +1019,66 @@ fn x11_core_decoder_rejects_out_of_range_client_resource_creators() {
 }
 
 #[test]
+fn x11_classic_shared_x_allows_peer_operations_on_existing_resources() {
+    let namespace = NamespaceId::from_raw(45);
+    let creator = XWireClientContext {
+        byte_order: XByteOrder::LittleEndian,
+        namespace,
+        transaction: TransactionId::from_raw(510),
+        resource_id_range: Some(XWireClientResourceRange {
+            base: X_SETUP_DEFAULT_RESOURCE_ID_BASE,
+            mask: X_SETUP_DEFAULT_RESOURCE_ID_MASK,
+        }),
+    };
+    let peer = XWireClientContext {
+        byte_order: XByteOrder::LittleEndian,
+        namespace,
+        transaction: TransactionId::from_raw(511),
+        resource_id_range: Some(XWireClientResourceRange {
+            base: 0x0040_0000,
+            mask: X_SETUP_DEFAULT_RESOURCE_ID_MASK,
+        }),
+    };
+    let window = 0x0020_0001;
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+
+    let create = decode_x11_core_request(
+        creator,
+        &create_window_request(XByteOrder::LittleEndian, window, 10, 20, 640, 480),
+    )
+    .unwrap();
+    dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 1),
+        create,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    // The peer cannot create in the creator's range, but classic shared-X
+    // deliberately permits it to operate on an existing same-namespace XID.
+    let map = decode_x11_core_request(peer, &resource_request(XByteOrder::LittleEndian, 8, window))
+        .unwrap();
+    let mapped = dispatch_x11_wire_request(
+        dispatch_context(namespace, 2, XByteOrder::LittleEndian, 8),
+        map,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+
+    assert!(mapped.outputs.iter().any(|output| {
+        matches!(
+            output,
+            XClientOutput::Event(XClientEvent::MapNotify { window: notified, .. })
+                if *notified == XResourceId::new(u64::from(window), 1)
+        )
+    }));
+}
+
+#[test]
 fn x11_core_decoder_captures_pixmap_and_copy_area_requests() {
     let namespace = NamespaceId::from_raw(45);
     let create = decode_x11_core_request(
@@ -4113,6 +4173,7 @@ fn x_server_frontend_config_requires_a_socket_path_and_namespace() {
         std::path::Path::new("/tmp/sophia-x11.sock")
     );
     assert_eq!(config.namespace(), NamespaceId::from_raw(812));
+    assert_eq!(config.max_concurrent_clients().get(), 16);
 }
 
 #[cfg(unix)]
@@ -4336,6 +4397,100 @@ fn x_server_frontend_assigns_distinct_connection_identities() {
             ],
             0,
         )
+    );
+    std::fs::remove_file(&socket_path).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn x_server_frontend_dispatches_two_live_clients_with_shared_x_state() {
+    use std::{
+        io::{Read, Write},
+        num::NonZeroUsize,
+        os::unix::net::UnixStream,
+        sync::{Arc, Mutex},
+        thread,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    let socket_path = std::env::temp_dir().join(format!(
+        "sophia-x-server-frontend-concurrent-clients-test-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let config = XServerFrontendConfig::new(&socket_path, NamespaceId::from_raw(820))
+        .unwrap()
+        .with_max_concurrent_clients(NonZeroUsize::new(2).unwrap());
+    let observations = Arc::new(Mutex::new(Vec::new()));
+    let server_observations = observations.clone();
+    let server = thread::spawn(move || {
+        let mut frontend = XServerFrontend::bind(config).unwrap();
+        let observer: Arc<X11CoreTraceObserver> = Arc::new(move |trace| {
+            server_observations
+                .lock()
+                .unwrap()
+                .push((trace.client.raw(), trace.major_opcode));
+            Ok(())
+        });
+        frontend
+            .serve_next_concurrently_traced(observer.clone())
+            .unwrap();
+        frontend.serve_next_concurrently_traced(observer).unwrap();
+        assert_eq!(
+            frontend.serve_next_concurrently().unwrap_err().to_string(),
+            "Sophia X Server Frontend concurrent-client limit (2) reached"
+        );
+        frontend.wait_for_clients().unwrap();
+        frontend.active_client_count()
+    });
+
+    wait_for_socket(&socket_path);
+    let mut first = UnixStream::connect(&socket_path).unwrap();
+    first
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    assert_eq!(
+        read_setup_resource_id_base(&mut first, XByteOrder::LittleEndian),
+        X_SETUP_DEFAULT_RESOURCE_ID_BASE
+    );
+    let first_window = 0x0020_0001;
+    first
+        .write_all(&create_window_request(
+            XByteOrder::LittleEndian,
+            first_window,
+            0,
+            0,
+            160,
+            90,
+        ))
+        .unwrap();
+    assert_eq!(read_x_record(&mut first)[0], 22);
+
+    let mut second = UnixStream::connect(&socket_path).unwrap();
+    second
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    assert_eq!(
+        read_setup_resource_id_base(&mut second, XByteOrder::LittleEndian),
+        0x0040_0000
+    );
+    second
+        .write_all(&resource_request(XByteOrder::LittleEndian, 8, first_window))
+        .unwrap();
+    let mut map_notify = [0; 32];
+    second.read_exact(&mut map_notify).unwrap();
+    assert_eq!(map_notify[0], 19);
+
+    drop(first);
+    drop(second);
+
+    assert_eq!(server.join().unwrap(), 0);
+    assert_eq!(
+        observations.lock().unwrap().as_slice(),
+        &[(1, 1), (2, 8), (1, 0)]
     );
     std::fs::remove_file(&socket_path).unwrap();
 }

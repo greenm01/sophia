@@ -109,8 +109,8 @@ engineering reason.
   `XServerFrontendConfig`/`XServerFrontend` listener with owner-only socket
   permissions, safe stale-socket handling, and optional MIT-MAGIC-COOKIE-1
   setup validation; Xauthority-file/credential policy, Engine-backed session
-  supervision, existing-resource ownership checks, and simultaneous clients
-  remain. Accepted
+  supervision, client-aware input/control routing, output facts, and confined
+  routing remain. Accepted
   clients now receive disjoint XID ranges at setup, and every currently
   supported XID-creating request rejects out-of-range IDs with `BadIDChoice`.
   Each accepted connection now also receives a monotonic client identity and
@@ -118,8 +118,14 @@ engineering reason.
   disconnect now reclaim that lease's supported windows, buffers, pixmaps,
   GCs, fonts, cursors, SHM segments, properties, and selection ownership;
   surface removals flow through Engine's committed snapshot, the live layout,
-  CPU scene, and input focus. Next, define ownership checks for existing
-  resources, then enable concurrent clients.
+  CPU scene, and input focus. The classic shared-X policy now explicitly
+  permits authenticated same-namespace clients to operate on existing
+  resources; XID ranges apply only to creation and cleanup attribution. The
+  frontend now provides a capped, supervised
+  concurrent-worker API over independently synchronized runtime/atom/property
+  and lease state; a two-live-client regression proves shared-X coordination
+  and cleanup. The live session remains sequential until Engine input/control
+  channels can choose a target client, and that routing is now the next step.
 - [x] Define the X11 session profiles: classic shared-X behavior for trusted
   sessions, plus explicit confined namespaces/capabilities where requested.
   The confined profile remains gated on client-aware connection routing.
