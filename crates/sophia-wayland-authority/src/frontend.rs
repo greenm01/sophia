@@ -914,10 +914,9 @@ fn validate_dmabuf(
 fn supported_dmabuf_formats() -> Vec<Format> {
     [Fourcc::Xrgb8888, Fourcc::Argb8888]
         .into_iter()
-        .flat_map(|code| {
-            [Modifier::Invalid, Modifier::Linear]
-                .into_iter()
-                .map(move |modifier| Format { code, modifier })
+        .map(|code| Format {
+            code,
+            modifier: Modifier::Linear,
         })
         .collect()
 }
@@ -975,16 +974,16 @@ mod tests {
     }
 
     #[test]
-    fn advertises_implicit_and_linear_client_dmabufs() {
+    fn advertises_only_explicit_linear_client_dmabufs() {
         let formats = supported_dmabuf_formats();
         for code in [Fourcc::Xrgb8888, Fourcc::Argb8888] {
             assert!(formats.contains(&smithay::backend::allocator::Format {
                 code,
-                modifier: Modifier::Invalid,
-            }));
-            assert!(formats.contains(&smithay::backend::allocator::Format {
-                code,
                 modifier: Modifier::Linear,
+            }));
+            assert!(!formats.contains(&smithay::backend::allocator::Format {
+                code,
+                modifier: Modifier::Invalid,
             }));
         }
     }
