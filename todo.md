@@ -26,6 +26,10 @@ Current truth:
   with a connected scanout target and the required atomic properties.
 - The guarded native SHM session now exits cleanly on hardware with keyboard
   routing, real KMS submissions, page-flip retirement, and no recovery debt.
+- Keep the native loop at its 2 ms idle cadence and retain the owned CPU-frame
+  copy for now: tighter polling or zero-copy handoff reproducibly corrupts the
+  native renderer/exporter heap on hardware. Isolate that ownership fault before
+  attempting further latency reductions.
 
 Exit criteria:
 
