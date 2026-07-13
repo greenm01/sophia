@@ -145,6 +145,7 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
     let mut dmabuf_frames = 0usize;
     let mut resize_requested = false;
     let mut resize_commits = 0usize;
+    let mut emergency_exit = false;
 
     println!(
         "sophia_wayland_session schema=1 status=running display={} client={} x_server=disabled dmabuf_experimental={}",
@@ -216,7 +217,8 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                 {
                     terminate_client(&mut child)?;
                     println!("sophia_wayland_input schema=1 status=emergency_exit");
-                    return Ok(());
+                    emergency_exit = true;
+                    break;
                 }
                 let request = match event.kind {
                     InputEventKind::Key { .. } => {
@@ -276,6 +278,9 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                     }
                 }
             }
+        }
+        if emergency_exit {
+            break;
         }
 
         let events = frontend.dispatch()?;
@@ -496,28 +501,35 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
         native_scanout.shutdown()?;
         println!("{}", native_scanout.completion_evidence());
     }
-    if expect_input_pixel_change && (routed_input == 0 || input_pixel_changes == 0) {
+    if !emergency_exit
+        && expect_input_pixel_change
+        && (routed_input == 0 || input_pixel_changes == 0)
+    {
         return Err("Wayland input proof did not produce a presented pixel change".into());
     }
-    if expect_input_presentation && (routed_input == 0 || input_presentations == 0) {
+    if !emergency_exit
+        && expect_input_presentation
+        && (routed_input == 0 || input_presentations == 0)
+    {
         return Err("Wayland input proof did not reach a presented client frame".into());
     }
     let observed_required_keycodes = expected_keycodes.intersection(&observed_keycodes).count();
     let matched_keycodes = expected_keycodes.intersection(&presented_keycodes).count();
-    if matched_keycodes != expected_keycodes.len() {
+    if !emergency_exit && matched_keycodes != expected_keycodes.len() {
         return Err(format!(
             "Wayland input proof matched {matched_keycodes}/{} required keycodes",
             expected_keycodes.len()
         )
         .into());
     }
-    if expect_pointer_input && routed_pointer == 0 {
+    if !emergency_exit && expect_pointer_input && routed_pointer == 0 {
         return Err("Wayland input proof observed no routed pointer input".into());
     }
-    if expect_pointer_input && pointer_presentations == 0 {
+    if !emergency_exit && expect_pointer_input && pointer_presentations == 0 {
         return Err("Wayland pointer input did not reach a presented client frame".into());
     }
-    if (expect_input_pixel_change || expect_input_presentation)
+    if !emergency_exit
+        && (expect_input_pixel_change || expect_input_presentation)
         && max_observed_input_latency > Duration::from_millis(max_input_latency)
     {
         return Err(format!(
@@ -528,7 +540,7 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
         .into());
     }
     println!(
-        "sophia_wayland_session schema=1 status=complete transactions={} frames={} shm_frames={} dmabuf_frames={} resize_requested={} resize_commits={} buffers={} routed_input={} routed_keys={} routed_pointer={} expected_keycodes_observed={} expected_keycodes_matched={} expected_keycodes_total={} input_presentations={} pointer_presentations={} input_pixel_changes={} max_input_latency_msec={} x_server=disabled",
+        "sophia_wayland_session schema=1 status=complete transactions={} frames={} shm_frames={} dmabuf_frames={} resize_requested={} resize_commits={} buffers={} routed_input={} routed_keys={} routed_pointer={} expected_keycodes_observed={} expected_keycodes_matched={} expected_keycodes_total={} input_presentations={} pointer_presentations={} input_pixel_changes={} max_input_latency_msec={} emergency_exit={} x_server=disabled",
         transactions,
         frames,
         shm_frames,
@@ -546,6 +558,7 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
         pointer_presentations,
         input_pixel_changes,
         max_observed_input_latency.as_millis(),
+        emergency_exit,
     );
     Ok(())
 }
