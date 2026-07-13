@@ -4192,6 +4192,56 @@ fn x_server_frontend_assigns_disjoint_setup_resource_ranges_to_clients() {
 
 #[cfg(unix)]
 #[test]
+fn x_server_frontend_rejects_create_window_outside_client_resource_range() {
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let socket_path = std::env::temp_dir().join(format!(
+        "sophia-x-server-frontend-resource-owner-test-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let config = XServerFrontendConfig::new(&socket_path, NamespaceId::from_raw(817)).unwrap();
+    let server = thread::spawn(move || {
+        let mut frontend = XServerFrontend::bind(config).unwrap();
+        frontend.serve_next().unwrap();
+    });
+
+    wait_for_socket(&socket_path);
+    let mut stream = UnixStream::connect(&socket_path).unwrap();
+    stream
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    assert_eq!(
+        read_setup_resource_id_base(&mut stream, XByteOrder::LittleEndian),
+        X_SETUP_DEFAULT_RESOURCE_ID_BASE
+    );
+    stream
+        .write_all(&create_window_request(
+            XByteOrder::LittleEndian,
+            0x0040_0001,
+            1,
+            2,
+            300,
+            200,
+        ))
+        .unwrap();
+    let error = read_x_record(&mut stream);
+    assert_eq!(error[0], 0);
+    assert_eq!(error[1], 14);
+
+    drop(stream);
+    server.join().unwrap();
+    std::fs::remove_file(&socket_path).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
 fn x11_setup_socket_smoke_completes_handshake() {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
@@ -4777,6 +4827,7 @@ fn context(namespace: NamespaceId, transaction: u64, byte_order: XByteOrder) -> 
         byte_order,
         namespace,
         transaction: TransactionId::from_raw(transaction),
+        resource_id_range: None,
     }
 }
 

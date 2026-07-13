@@ -109,8 +109,10 @@ engineering reason.
   `XServerFrontendConfig`/`XServerFrontend` listener with owner-only socket
   permissions, safe stale-socket handling, and optional MIT-MAGIC-COOKIE-1
   setup validation; Xauthority-file/credential policy, Engine-backed session
-  supervision, request-level XID ownership/cleanup, and simultaneous clients
-  remain. Accepted clients now receive disjoint XID ranges at setup.
+  supervision, resource cleanup, and simultaneous clients remain. Accepted
+  clients now receive disjoint XID ranges at setup, and `CreateWindow` rejects
+  out-of-range XIDs with `BadIDChoice`; extend that ownership check to every
+  XID-creating request before enabling concurrent clients.
 - [x] Define the X11 session profiles: classic shared-X behavior for trusted
   sessions, plus explicit confined namespaces/capabilities where requested.
   The confined profile remains gated on client-aware connection routing.

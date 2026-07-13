@@ -166,11 +166,31 @@ pub const X_POLY_TEXT8_MAX_BYTES: usize = crate::X_PROPERTY_MAX_VALUE_BYTES;
 pub const X_IMAGE_TEXT8_MAX_BYTES: usize = crate::X_PROPERTY_MAX_VALUE_BYTES;
 pub const X_ALLOC_NAMED_COLOR_MAX_NAME_BYTES: usize = 256;
 
+/// The XID range granted to one X11 client during connection setup.
+///
+/// Server-owned resources such as the root window are intentionally outside
+/// this range. It therefore applies only when a request creates a new client
+/// resource, not when it references an existing drawable.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XWireClientResourceRange {
+    pub base: u32,
+    pub mask: u32,
+}
+
+impl XWireClientResourceRange {
+    pub const fn owns_new_resource(self, resource_id: u32) -> bool {
+        resource_id != 0 && (resource_id & !self.mask) == self.base
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct XWireClientContext {
     pub byte_order: XByteOrder,
     pub namespace: NamespaceId,
     pub transaction: TransactionId,
+    /// `None` preserves deterministic decoder fixtures that are not attached
+    /// to a live X11 setup. Socket clients must always provide their range.
+    pub resource_id_range: Option<XWireClientResourceRange>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -473,6 +493,9 @@ pub enum XWireParseError {
     PropertyValueTooLarge {
         len: usize,
         max: usize,
+    },
+    ResourceIdOutsideClientRange {
+        resource_id: u32,
     },
 }
 
@@ -1776,6 +1799,13 @@ fn decode_create_window(
         }
     }
     let window_raw = context.byte_order.u32(&bytes[4..8]);
+    if let Some(range) = context.resource_id_range
+        && !range.owns_new_resource(window_raw)
+    {
+        return Err(XWireParseError::ResourceIdOutsideClientRange {
+            resource_id: window_raw,
+        });
+    }
     let window = XResourceId::new(u64::from(window_raw), 1);
     Ok(XWireRequest::CreateWindow {
         packet: XAuthorityRequestPacket {

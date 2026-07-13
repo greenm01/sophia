@@ -29,6 +29,7 @@ pub enum XErrorCode {
     BadWindow,
     BadAtom,
     BadAccess,
+    BadIdChoice,
     BadLength,
     BadImplementation,
 }
@@ -41,6 +42,7 @@ impl XErrorCode {
             Self::BadWindow => 3,
             Self::BadAtom => 5,
             Self::BadAccess => 10,
+            Self::BadIdChoice => 14,
             Self::BadLength => 16,
             Self::BadImplementation => 17,
         }
@@ -1032,6 +1034,7 @@ pub fn x_error_from_wire_parse(
         XWireParseError::InvalidPropertyMode(_)
         | XWireParseError::InvalidPropertyFormat(_)
         | XWireParseError::PropertyValueTooLarge { .. } => XErrorCode::BadValue,
+        XWireParseError::ResourceIdOutsideClientRange { .. } => XErrorCode::BadIdChoice,
     };
 
     XClientError {

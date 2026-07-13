@@ -763,6 +763,7 @@ pub fn serve_x11_setup_socket_client(
     serve_x11_setup_socket_client_with_setup_authorization(stream, &authorization, || {
         Ok(XSetupSuccess::client_compatible())
     })?
+    .map(|(request, _)| request)
     .ok_or_else(|| {
         X11SetupSocketError::new("default X11 setup authorization unexpectedly rejected")
     })
@@ -773,7 +774,7 @@ fn serve_x11_setup_socket_client_with_setup_authorization(
     stream: &mut UnixStream,
     authorization: &XServerFrontendSetupAuthorization,
     setup_success: impl FnOnce() -> Result<XSetupSuccess, X11SetupSocketError>,
-) -> Result<Option<XSetupRequest>, X11SetupSocketError> {
+) -> Result<Option<(XSetupRequest, XSetupSuccess)>, X11SetupSocketError> {
     let request = read_x11_setup_request(stream)?;
     if !authorization.permits(&request) {
         let response = encode_x11_setup_failure(
@@ -791,8 +792,9 @@ fn serve_x11_setup_socket_client_with_setup_authorization(
         })?;
         return Ok(None);
     }
+    let setup_success = setup_success()?;
     let response =
-        encode_x11_setup_success(request.byte_order, &setup_success()?).map_err(|error| {
+        encode_x11_setup_success(request.byte_order, &setup_success).map_err(|error| {
             X11SetupSocketError::new(format!("failed to encode X11 setup success: {error}"))
         })?;
     stream
@@ -801,7 +803,7 @@ fn serve_x11_setup_socket_client_with_setup_authorization(
     stream
         .flush()
         .map_err(|error| X11SetupSocketError::new(format!("failed to flush X11 setup: {error}")))?;
-    Ok(Some(request))
+    Ok(Some((request, setup_success)))
 }
 
 #[cfg(unix)]
@@ -896,7 +898,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
     authorization: &XServerFrontendSetupAuthorization,
     mut observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
-    let Some(setup) =
+    let Some((setup, setup_success)) =
         serve_x11_setup_socket_client_with_setup_authorization(stream, authorization, || {
             state.next_client_setup_success()
         })?
@@ -960,6 +962,10 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                     byte_order: setup.byte_order,
                     namespace,
                     transaction: TransactionId::from_raw(u64::from(sequence)),
+                    resource_id_range: Some(crate::XWireClientResourceRange {
+                        base: setup_success.resource_id_base,
+                        mask: setup_success.resource_id_mask,
+                    }),
                 },
                 &request,
             ) {
