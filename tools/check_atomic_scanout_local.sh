@@ -40,6 +40,10 @@ if ! grep -q 'SOPHIA_KITTY_REQUIRE_DMABUF=0' tools/wayland_kitty_hardware_proof.
     echo "Interactive Kitty proof must not enable output-sized direct DMA-BUF scanout." >&2
     exit 1
 fi
+if ! grep -q 'No stable pointer event path was found.' tools/wayland_kitty_hardware_proof.sh; then
+    echo "Focused Kitty proof must discover stable input devices when none are supplied." >&2
+    exit 1
+fi
 if ! rg -q 'open_threaded_native_libinput_path_poller' crates/sophia-cli/src/commands/wayland.rs; then
     echo "Native Wayland Kitty must keep input acquisition off the render thread." >&2
     exit 1

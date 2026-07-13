@@ -16,17 +16,56 @@ if [[ -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" ]]; then
     echo "Run the native Wayland Kitty proof from a dedicated text TTY." >&2
     exit 1
 fi
-if [[ -z "$INPUT_DEVICES" ]]; then
-    echo "Set SOPHIA_INPUT_DEVICES to comma-separated keyboard and pointer event paths." >&2
-    exit 1
-fi
 if [[ -z "$KEYBOARD" ]]; then
-    IFS=',' read -r KEYBOARD _ <<<"$INPUT_DEVICES"
+    if [[ -n "$INPUT_DEVICES" ]]; then
+        IFS=',' read -r KEYBOARD _ <<<"$INPUT_DEVICES"
+    else
+        keyboards=()
+        for directory in /dev/input/by-id /dev/input/by-path; do
+            [[ -d "$directory" ]] || continue
+            mapfile -t keyboards < <(
+                find "$directory" -maxdepth 1 -type l -name '*-event-kbd' -print 2>/dev/null \
+                    | sort -u
+            )
+            (( ${#keyboards[@]} > 0 )) && break
+        done
+        if (( ${#keyboards[@]} != 1 )); then
+            echo "Expected exactly one stable keyboard event path, found ${#keyboards[@]}." >&2
+            echo "Set SOPHIA_OPERATOR_KEYBOARD explicitly." >&2
+            exit 1
+        fi
+        KEYBOARD="${keyboards[0]}"
+    fi
+fi
+if [[ -z "$INPUT_DEVICES" ]]; then
+    pointers=()
+    for directory in /dev/input/by-id /dev/input/by-path; do
+        [[ -d "$directory" ]] || continue
+        mapfile -t pointers < <(
+            find "$directory" -maxdepth 1 -type l -name '*-event-mouse' -print 2>/dev/null \
+                | sort -u
+        )
+        (( ${#pointers[@]} > 0 )) && break
+    done
+    if (( ${#pointers[@]} == 0 )); then
+        echo "No stable pointer event path was found." >&2
+        echo "Set SOPHIA_INPUT_DEVICES to keyboard,pointer paths explicitly." >&2
+        exit 1
+    fi
+    devices=("$KEYBOARD" "${pointers[@]}")
+    INPUT_DEVICES="$(IFS=,; echo "${devices[*]}")"
 fi
 if [[ ! -r "$KEYBOARD" ]]; then
     echo "Keyboard is not readable: $KEYBOARD" >&2
     exit 1
 fi
+IFS=',' read -r -a devices <<<"$INPUT_DEVICES"
+for device in "${devices[@]}"; do
+    if [[ "$device" != /dev/input/* || ! -e "$device" || ! -r "$device" ]]; then
+        echo "Invalid or unreadable input event path: $device" >&2
+        exit 1
+    fi
+done
 
 cd "$ROOT_DIR"
 echo "[1/2] Proving real software-rendered Kitty resize without taking DRM ownership."
