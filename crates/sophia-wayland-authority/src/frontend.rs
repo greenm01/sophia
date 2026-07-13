@@ -539,11 +539,14 @@ impl FrontendState {
         let time = u32::try_from(request.time_msec).unwrap_or(u32::MAX);
         match request.kind {
             InputEventKind::Key { keycode, pressed } => {
+                let Some(keycode) = xkb_keycode_from_evdev(keycode) else {
+                    return RoutedInputOutcome::RejectedUnsupportedEvent;
+                };
                 let keyboard = self.keyboard.clone();
                 keyboard.set_focus(self, Some(surface), serial);
                 keyboard.input::<(), _>(
                     self,
-                    Keycode::from(keycode),
+                    keycode,
                     if pressed {
                         KeyState::Pressed
                     } else {
@@ -735,6 +738,14 @@ impl XdgShellHandler for FrontendState {
     }
 }
 
+/// Smithay's keyboard handler consumes XKB keycodes, while Sophia's input
+/// protocol deliberately carries Linux evdev codes. XKB's evdev keymap uses
+/// the historical X11 offset; Smithay removes it again before emitting the
+/// `wl_keyboard.key` event to the client.
+fn xkb_keycode_from_evdev(keycode: u32) -> Option<Keycode> {
+    keycode.checked_add(8).map(Keycode::from)
+}
+
 impl ShmHandler for FrontendState {
     fn shm_state(&self) -> &ShmState {
         &self.shm_state
@@ -913,7 +924,7 @@ mod tests {
     use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufFlags};
     use smithay::backend::allocator::{Fourcc, Modifier};
 
-    use super::{WaylandFrontendError, validate_dmabuf};
+    use super::{WaylandFrontendError, validate_dmabuf, xkb_keycode_from_evdev};
 
     fn dmabuf(stride: u32) -> Dmabuf {
         let file = tempfile::tempfile().unwrap();
@@ -940,5 +951,12 @@ mod tests {
     fn rejects_short_dmabuf_stride() {
         let error = validate_dmabuf(&dmabuf(64), 7).unwrap_err();
         assert_eq!(error, WaylandFrontendError::new("invalid DMA-BUF stride"));
+    }
+
+    #[test]
+    fn offsets_evdev_codes_for_smithay_xkb_processing() {
+        let keycode = xkb_keycode_from_evdev(30).unwrap();
+        assert_eq!(keycode.raw(), 38);
+        assert!(xkb_keycode_from_evdev(u32::MAX).is_none());
     }
 }
