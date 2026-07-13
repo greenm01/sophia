@@ -78,9 +78,10 @@ protocol-neutral `SurfaceTransaction` and `RoutedInputRequest` records serve
 the Wayland and modern-X authorities; Engine contains no XLibre window or wire
 identity.
 
-The native session admits a narrow linear XRGB/ARGB DMA-BUF subset, but its
-import/presentation route remains experimental until hardware evidence proves
-it. SHM is the current verified path. When the experimental route is enabled,
+The native session admits a narrow linear XRGB/ARGB DMA-BUF subset. Its repaired
+three-frame controlled hardware proof passes, but the route remains experimental
+until the 300-frame lifetime and real-Kitty hardware evidence passes. SHM is the
+current verified path. When the experimental route is enabled,
 KMS submission remains backend-owned and Wayland frame/buffer feedback waits
 for the matching observed presentation. The production CLI and installed Kitty
 launcher neither link nor start XLibre; its bridge remains an opt-in research

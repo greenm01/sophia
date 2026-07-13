@@ -110,11 +110,12 @@ import, multiple KMS submissions, accepted callbacks and retirement, no import
 loss, submit/retire/callback failures, in-flight ownership, or cleanup debt,
 and a maximum submit-to-page-flip interval no greater than 100 ms.
 
-Current hardware status: the controlled three-frame run reaches its first
-full-size 1920x1200 DMA-BUF submission, then aborts with
-`corrupted size vs. prev_size`. This is a renderer/resource-ownership safety
-failure, not a passing first-frame result. Preserve the evidence log and do not
-run the 300-frame or Kitty promotion steps until it is isolated.
+Current hardware status: after explicitly detaching the EGLImage from its GL
+texture before destruction, the GDB-backed controlled three-frame run passes.
+It imports, submits, page-flips, retires, and releases three full-size 1920x1200
+DMA-BUF frames with no allocator diagnostic and a 14 ms maximum
+submit-to-page-flip interval. The 300-frame lifetime proof remains the next
+gate; do not start the Kitty promotion sequence yet.
 
 To capture the native allocator stack from a dedicated text TTY, install `gdb`
 if needed and rerun the controlled three-frame proof in diagnostic mode:

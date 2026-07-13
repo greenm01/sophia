@@ -32,12 +32,10 @@ Current truth:
   copy for now: tighter polling or zero-copy handoff reproducibly corrupts the
   native renderer/exporter heap on hardware. Isolate that ownership fault before
   attempting further latency reductions.
-- DMA-BUF is admitted but remains experimental. No real hardware DMA-BUF run
-  has passed yet, and SHM remains the production fallback.
-- The controlled DMA-BUF producer now reaches a full-size 1920x1200 first-frame
-  submission on hardware, then the native process aborts with
-  `corrupted size vs. prev_size`. Do not run the 300-frame or Kitty promotion
-  gates until that renderer/resource-ownership fault is isolated.
+- DMA-BUF is admitted but remains experimental. The repaired controlled
+  three-frame hardware proof now imports, submits, retires, and releases three
+  full-size 1920x1200 buffers without allocator diagnostics; SHM remains the
+  production fallback.
 
 Exit criteria:
 
@@ -52,9 +50,10 @@ Exit criteria:
 - [ ] Establish a lifetime-stress baseline for the persistent native renderer:
   no heap corruption at the 2 ms cadence, no ownership debt, and no attempt to
   remove the CPU-frame copy before its fault is isolated.
-- [ ] Isolate the controlled DMA-BUF first-frame heap corruption with allocator
-  evidence and resource-lifetime tracing, then demonstrate a clean full-size
-  import, KMS submission, page-flip retirement, and client buffer release.
+- [x] Isolate the controlled DMA-BUF first-frame heap corruption with allocator
+  evidence and resource-lifetime tracing. The repaired diagnostic proof records
+  clean import, KMS submission, page-flip retirement, and client buffer release
+  for three full-size frames.
 - [x] Add a dedicated-TTY GDB diagnostic mode that records allocator backtraces
   and ordered DMA-BUF import, scanout, page-flip, retirement, and client-release
   stages without changing the production SHM path.
@@ -79,10 +78,14 @@ Exit criteria:
 - [x] Add a controlled, external Wayland DMA-BUF producer that allocates only
   linear XRGB8888 GBM buffers and waits for both frame and buffer-release
   feedback before reuse.
-- [ ] Pass the controlled first-frame proof, then its 300-frame lifecycle run,
-  with `tools/wayland_dmabuf_first_frame_hardware_proof.sh`. The verifier must
-  see experimental enablement, imports, KMS presentation retirement, no cleanup
-  debt, and no more than 100 ms submit-to-page-flip latency.
+- [x] Pass the controlled three-frame first-frame proof with
+  `tools/wayland_dmabuf_first_frame_hardware_proof.sh`: experimental enablement,
+  three imports, KMS presentation retirement, no cleanup debt, and 14 ms maximum
+  submit-to-page-flip latency.
+- [ ] Pass the controlled 300-frame lifecycle run with the same tool. The
+  verifier must see experimental enablement, imports, KMS presentation
+  retirement, no cleanup debt, and no more than 100 ms submit-to-page-flip
+  latency.
 - [ ] Pass three independent guarded real-Kitty DMA-BUF runs with
   `tools/wayland_kitty_dmabuf_promotion_gate.sh`: exact text/navigation and
   pointer input, resize, clean normal exit, TTY/`keyd` restoration, DMA-BUF

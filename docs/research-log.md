@@ -22,7 +22,14 @@ The next controlled rerun uses a GDB-backed diagnostic mode with explicit
 DMA-BUF stages. The importer now detaches the EGLImage from its GL texture and
 finishes that detach before destroying the EGLImage and dropping the imported
 client FD. This makes input-image teardown independent from the retained GBM
-front-buffer owner; it is a candidate fix until the controlled proof passes.
+front-buffer owner.
+
+The GDB-backed three-frame rerun passed: each 1920x1200 frame completed EGL
+image creation, rendering, texture detach, image destruction, KMS submission,
+page-flip observation, scanout retirement, and client buffer release. The
+session exited normally with three imports, three retirements, three callbacks,
+no cleanup debt, and a 14 ms maximum submit-to-page-flip interval. The
+300-frame lifetime proof remains the next required safety gate.
 
 ## 2026-07-12: DMA-BUF Performance Gate and Renderer Safety Boundary
 
