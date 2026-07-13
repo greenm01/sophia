@@ -134,9 +134,11 @@ engineering reason.
   service, which stops accepting on supervision command and then drains live
   workers without killing client processes. A two-client socket regression
   proves client-targeted keyboard input, configure acknowledgements, and
-  teardown end to end. The launcher still starts one xterm; next, add a
-  real-client multi-app session proof and configurable client admission/auth
-  policy.
+  teardown end to end. `x-authority-xterm-two-client-smoke` now proves that two
+  real xterms receive distinct client-targeted input and change separate CPU
+  pixel state before the service drains. The launcher still starts one xterm;
+  next, add KMS-backed multi-app session evidence and expose configurable
+  client admission/auth policy to the launcher.
 - [x] Define the X11 session profiles: classic shared-X behavior for trusted
   sessions, plus explicit confined namespaces/capabilities where requested.
   The confined profile remains gated on client-aware connection routing.

@@ -1455,14 +1455,12 @@ pub fn run_x11_core_socket_server_once_routed(
 /// already exist. The caller remains responsible for its session process
 /// policy and should stop producing Engine routes before sending that command.
 #[cfg(unix)]
-pub fn run_x11_core_socket_server_routed_until_stopped(
-    path: impl AsRef<Path>,
-    namespace: NamespaceId,
+pub fn run_x_server_frontend_routed_until_stopped(
+    config: XServerFrontendConfig,
     transaction_sender: SyncSender<XAuthorityObservedTransactionBatch>,
     mut broker: XServerFrontendRouteBroker,
     service_commands: Receiver<XServerFrontendServiceCommand>,
 ) -> Result<(), X11SetupSocketError> {
-    let config = XServerFrontendConfig::new(path.as_ref().to_path_buf(), namespace)?;
     let mut frontend = XServerFrontend::bind(config)?;
     let observer: Arc<X11CoreTraceObserver> = Arc::new(move |trace| {
         try_emit_x_authority_trace(&transaction_sender, &trace)
@@ -1504,6 +1502,24 @@ pub fn run_x11_core_socket_server_routed_until_stopped(
             std::thread::sleep(Duration::from_millis(1));
         }
     }
+}
+
+/// Convenience form of [`run_x_server_frontend_routed_until_stopped`] for an
+/// unauthenticated local socket using the default frontend configuration.
+#[cfg(unix)]
+pub fn run_x11_core_socket_server_routed_until_stopped(
+    path: impl AsRef<Path>,
+    namespace: NamespaceId,
+    transaction_sender: SyncSender<XAuthorityObservedTransactionBatch>,
+    broker: XServerFrontendRouteBroker,
+    service_commands: Receiver<XServerFrontendServiceCommand>,
+) -> Result<(), X11SetupSocketError> {
+    run_x_server_frontend_routed_until_stopped(
+        XServerFrontendConfig::new(path.as_ref().to_path_buf(), namespace)?,
+        transaction_sender,
+        broker,
+        service_commands,
+    )
 }
 
 #[cfg(unix)]

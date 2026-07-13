@@ -82,9 +82,12 @@ service loop: it admits and reaps routed workers up to the configured cap, and
 on shutdown it stops admission before draining connected workers. A two-client
 socket regression proves each worker receives only its own routed key and
 configure request, returns a client-labeled acknowledgement, and tears down
-cleanly. The live launcher still starts one xterm; a real multi-client session
-proof is the next integration step. Root/output facts are still fixed setup
-values. Each accepted
+cleanly. `x-authority-xterm-two-client-smoke` now launches two independent
+real xterms against a two-worker frontend, waits for both client routes and CPU
+surfaces, routes distinct key sequences by client ID, and proves two successive
+pixel changes before draining the service. The live launcher still starts one
+xterm; KMS-backed multi-app session evidence is the next integration step.
+Root/output facts are still fixed setup values. Each accepted
 client now gets
 a disjoint X11 setup resource-ID range. Every currently supported XID-creating
 wire path—window, pixmap, GC, font, colormap, glyph cursor, and reduced
@@ -207,6 +210,10 @@ GC colors and raster operations to bounded XRGB8888 software buffers, including
 a printable-ASCII fixed-cell raster. The real xterm proof locates the expected
 glyph sequence in materialized replacement/patch pixels. A separate key-channel smoke
 injects `sophia` plus Return and proves later xterm buffer generations change.
+The two-client xterm smoke repeats that proof for two separate client IDs with
+distinct `alpha` and `bravo` input sequences, proving the broker does not
+broadcast those Engine routes. It remains CPU-buffer evidence, not KMS-backed
+multi-app session promotion evidence.
 zenity admitted selection-owner lookup, server grab/ungrab, root colormap
 creation, reduced `MIT-SHM`, additional `RANDR`, and `BIG-REQUESTS` startup paths,
 but the current TTY/DBus environment and missing XInput2 support still prevent a

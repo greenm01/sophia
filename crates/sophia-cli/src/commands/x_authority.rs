@@ -1,6 +1,32 @@
 use super::prelude::*;
+use sophia_x_authority::{
+    XAuthorityClientInputEvent, XAuthorityClientSurfaceRoutes, XServerFrontendConfig,
+    XServerFrontendRouteBroker, XServerFrontendServiceCommand,
+    run_x_server_frontend_routed_until_stopped,
+};
+use std::collections::{BTreeMap, BTreeSet};
+use std::num::NonZeroUsize;
 
 pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
+    if args
+        .iter()
+        .any(|arg| arg == "x-authority-xterm-two-client-smoke")
+    {
+        let report = run_x_authority_xterm_two_client_smoke()?;
+        println!(
+            "x-authority-xterm-two-client-smoke display={} clients={} routed_keys={} initial_generation={} final_generation={} initial_checksum={} final_checksum={} pixel_change={}",
+            report.display,
+            report.clients,
+            report.routed_keys,
+            report.initial_generation,
+            report.final_generation,
+            report.initial_checksum,
+            report.final_checksum,
+            report.initial_checksum != report.final_checksum,
+        );
+        return Ok(true);
+    }
+
     if args
         .iter()
         .any(|arg| arg == "x-authority-xterm-input-smoke")
@@ -269,6 +295,17 @@ struct XAuthorityRuntimeSmokeReport {
 pub(crate) struct XAuthorityXtermInputSmokeReport {
     pub display: String,
     pub keys: usize,
+    pub initial_generation: u64,
+    pub final_generation: u64,
+    pub initial_checksum: u64,
+    pub final_checksum: u64,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct XAuthorityXtermTwoClientSmokeReport {
+    pub display: String,
+    pub clients: usize,
+    pub routed_keys: usize,
     pub initial_generation: u64,
     pub final_generation: u64,
     pub initial_checksum: u64,
@@ -1002,6 +1039,284 @@ pub(crate) fn run_x_authority_xterm_input_smoke()
         initial_checksum: initial.1,
         final_checksum: final_state.1,
     })
+}
+
+/// Launches two independent real xterms against the bounded routed frontend.
+///
+/// Each terminal receives different Engine-addressed keystrokes only after the
+/// authority has observed both clients' surface routes. This is intentionally a
+/// compatibility proof, not the normal persistent-session launcher.
+pub(crate) fn run_x_authority_xterm_two_client_smoke()
+-> Result<XAuthorityXtermTwoClientSmokeReport, Box<dyn std::error::Error>> {
+    let command = resolve_external_probe_binary("xterm", "xterm")?;
+    let (display, socket_path) = temp_xauthority_display(152)?;
+    let server_path = socket_path.clone();
+    let (transaction_sender, transaction_receiver) = sync_channel(256);
+    let broker = XServerFrontendRouteBroker::new(NonZeroUsize::new(64).unwrap());
+    let input_sender = broker.input_sender();
+    let (service_command_sender, service_command_receiver) = sync_channel(1);
+    let config = XServerFrontendConfig::new(&server_path, NamespaceId::from_raw(53))?
+        .with_max_concurrent_clients(NonZeroUsize::new(2).unwrap());
+    let server = std::thread::spawn(move || {
+        run_x_server_frontend_routed_until_stopped(
+            config,
+            transaction_sender,
+            broker,
+            service_command_receiver,
+        )
+    });
+    wait_for_socket_path(&socket_path)?;
+
+    let mut first = spawn_xterm_two_client_probe(&command, &display, "first", "40x8+40+40")?;
+    let mut second = spawn_xterm_two_client_probe(&command, &display, "second", "40x8+420+40")?;
+    let mut state = XtermTwoClientState::default();
+    let result = (|| {
+        wait_for_two_xterm_routes(
+            &transaction_receiver,
+            &mut first,
+            &mut second,
+            std::time::Instant::now() + Duration::from_secs(8),
+            &mut state,
+        )?;
+        let initial = state.fingerprint();
+        let clients = state.clients.iter().copied().collect::<Vec<_>>();
+        if clients.len() != 2 {
+            return Err(format!(
+                "two-client xterm smoke observed {} routed clients",
+                clients.len()
+            )
+            .into());
+        }
+
+        let mut time_msec = 1u32;
+        let first_keys =
+            send_xterm_text_to_client(&input_sender, clients[0], b"alpha", &mut time_msec)?;
+        let after_first = wait_for_two_xterm_change(
+            &transaction_receiver,
+            &mut first,
+            &mut second,
+            std::time::Instant::now() + Duration::from_secs(5),
+            initial,
+            &mut state,
+        )?;
+        let second_keys =
+            send_xterm_text_to_client(&input_sender, clients[1], b"bravo", &mut time_msec)?;
+        let final_state = wait_for_two_xterm_change(
+            &transaction_receiver,
+            &mut first,
+            &mut second,
+            std::time::Instant::now() + Duration::from_secs(5),
+            after_first,
+            &mut state,
+        )?;
+
+        Ok(XAuthorityXtermTwoClientSmokeReport {
+            display: display.clone(),
+            clients: clients.len(),
+            routed_keys: first_keys + second_keys,
+            initial_generation: initial.0,
+            final_generation: final_state.0,
+            initial_checksum: initial.1,
+            final_checksum: final_state.1,
+        })
+    })();
+
+    let first_output = stop_xterm_two_client_probe(&mut first)?;
+    let second_output = stop_xterm_two_client_probe(&mut second)?;
+    let _ = service_command_sender.send(XServerFrontendServiceCommand::StopAccepting);
+    drop(service_command_sender);
+    drop(input_sender);
+    let server_result = server
+        .join()
+        .map_err(|_| "two-client xterm authority server thread panicked")?;
+    let _ = std::fs::remove_file(&socket_path);
+    server_result.map_err(|error| format!("two-client X authority server failed: {error}"))?;
+    result.map_err(|error: Box<dyn std::error::Error>| {
+        format!("{error}; first_status={first_output} second_status={second_output}",).into()
+    })
+}
+
+#[derive(Default)]
+struct XtermTwoClientState {
+    routes: XAuthorityClientSurfaceRoutes,
+    clients: BTreeSet<sophia_x_authority::XServerFrontendClientId>,
+    buffers: BTreeMap<u64, XAuthorityCpuBufferSnapshot>,
+}
+
+impl XtermTwoClientState {
+    fn observe(
+        &mut self,
+        batch: XAuthorityObservedTransactionBatch,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(client) = batch.client
+            && (!batch.transactions.is_empty() || !batch.cpu_buffer_updates.is_empty())
+        {
+            self.clients.insert(client);
+        }
+        self.routes.observe(&batch);
+        for update in batch.cpu_buffer_updates {
+            update.apply_to(&mut self.buffers)?;
+        }
+        Ok(())
+    }
+
+    fn has_two_live_cpu_routes(&self) -> bool {
+        self.clients.len() == 2
+            && self.routes.len() >= 2
+            && self
+                .buffers
+                .values()
+                .filter(|buffer| buffer.bytes.iter().any(|byte| *byte != 0))
+                .count()
+                >= 2
+    }
+
+    fn fingerprint(&self) -> (u64, u64) {
+        let generation = self
+            .buffers
+            .values()
+            .map(|buffer| buffer.generation)
+            .max()
+            .unwrap_or(0);
+        let checksum = self
+            .buffers
+            .values()
+            .fold(0xcbf2_9ce4_8422_2325u64, |hash, buffer| {
+                buffer.bytes.iter().fold(hash, |hash, byte| {
+                    (hash ^ u64::from(*byte)).wrapping_mul(0x100_0000_01b3)
+                })
+            });
+        (generation, checksum)
+    }
+}
+
+fn spawn_xterm_two_client_probe(
+    command: &std::path::Path,
+    display: &str,
+    label: &str,
+    geometry: &str,
+) -> Result<std::process::Child, Box<dyn std::error::Error>> {
+    let script = format!(
+        "printf '{label}: '; IFS= read -r line; printf '{label}-received:%s\\n' \"$line\"; sleep 3"
+    );
+    Ok(std::process::Command::new(command)
+        .env("DISPLAY", display)
+        .args(["-cm", "-dc", "-geometry", geometry, "-e", "sh", "-c"])
+        .arg(script)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?)
+}
+
+fn stop_xterm_two_client_probe(
+    child: &mut std::process::Child,
+) -> Result<std::process::ExitStatus, Box<dyn std::error::Error>> {
+    if child.try_wait()?.is_none() {
+        let _ = child.kill();
+    }
+    Ok(child.wait()?)
+}
+
+fn wait_for_two_xterm_routes(
+    receiver: &std::sync::mpsc::Receiver<XAuthorityObservedTransactionBatch>,
+    first: &mut std::process::Child,
+    second: &mut std::process::Child,
+    deadline: std::time::Instant,
+    state: &mut XtermTwoClientState,
+) -> Result<(), Box<dyn std::error::Error>> {
+    while std::time::Instant::now() < deadline {
+        match receiver.recv_timeout(Duration::from_millis(100)) {
+            Ok(batch) => {
+                state.observe(batch)?;
+                if state.has_two_live_cpu_routes() {
+                    return Ok(());
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("two-client xterm transaction channel disconnected".into());
+            }
+        }
+        ensure_xterm_two_client_alive(first, "first")?;
+        ensure_xterm_two_client_alive(second, "second")?;
+    }
+    Err(format!(
+        "timed out waiting for two routed xterm CPU surfaces: clients={} routes={} buffers={}",
+        state.clients.len(),
+        state.routes.len(),
+        state.buffers.len(),
+    )
+    .into())
+}
+
+fn wait_for_two_xterm_change(
+    receiver: &std::sync::mpsc::Receiver<XAuthorityObservedTransactionBatch>,
+    first: &mut std::process::Child,
+    second: &mut std::process::Child,
+    deadline: std::time::Instant,
+    previous: (u64, u64),
+    state: &mut XtermTwoClientState,
+) -> Result<(u64, u64), Box<dyn std::error::Error>> {
+    while std::time::Instant::now() < deadline {
+        match receiver.recv_timeout(Duration::from_millis(100)) {
+            Ok(batch) => {
+                state.observe(batch)?;
+                let current = state.fingerprint();
+                if current.0 > previous.0 && current.1 != previous.1 {
+                    return Ok(current);
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("two-client xterm transaction channel disconnected".into());
+            }
+        }
+        ensure_xterm_two_client_alive(first, "first")?;
+        ensure_xterm_two_client_alive(second, "second")?;
+    }
+    Err("timed out waiting for targeted xterm input to change CPU pixels".into())
+}
+
+fn ensure_xterm_two_client_alive(
+    child: &mut std::process::Child,
+    label: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(status) = child.try_wait()? {
+        return Err(format!("{label} xterm exited before two-client pixel proof: {status}").into());
+    }
+    Ok(())
+}
+
+fn send_xterm_text_to_client(
+    sender: &std::sync::mpsc::SyncSender<XAuthorityClientInputEvent>,
+    client: sophia_x_authority::XServerFrontendClientId,
+    text: &[u8],
+    time_msec: &mut u32,
+) -> Result<usize, Box<dyn std::error::Error>> {
+    let mut events = 0usize;
+    for keycode in text
+        .iter()
+        .copied()
+        .map(x11_keycode_for_ascii)
+        .chain(std::iter::once(Some(36)))
+    {
+        let keycode = keycode.ok_or("two-client input smoke character has no X keycode")?;
+        for pressed in [true, false] {
+            sender.send(XAuthorityClientInputEvent {
+                client,
+                event: XAuthorityKeyEvent {
+                    keycode,
+                    pressed,
+                    state: 0,
+                    time_msec: *time_msec,
+                }
+                .into(),
+            })?;
+            *time_msec = time_msec.saturating_add(1);
+            events = events.saturating_add(1);
+        }
+    }
+    Ok(events)
 }
 
 fn wait_for_xterm_cpu_state(
