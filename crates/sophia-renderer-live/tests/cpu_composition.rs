@@ -1,8 +1,8 @@
-use sophia_protocol::{Rect, Size};
+use sophia_protocol::{Point, Rect, Size};
 use sophia_renderer_live::{
     LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888, LiveCpuBufferSource, LiveCpuBufferSourceRef,
     LiveCpuCompositionLayer, LiveCpuCompositionLayerRef, compose_live_cpu_frame,
-    compose_live_cpu_frame_ref,
+    compose_live_cpu_frame_ref, compose_live_cpu_frame_ref_with_cursor,
 };
 
 #[test]
@@ -162,4 +162,39 @@ fn cpu_composition_checksum_changes_with_a_single_byte() {
     assert_eq!(first.nonzero_pixel_bytes, 8);
     assert_eq!(second.nonzero_pixel_bytes, 8);
     assert_ne!(first.checksum, second.checksum);
+}
+
+#[test]
+fn borrowed_composition_draws_a_high_contrast_software_cursor() {
+    let size = Size {
+        width: 16,
+        height: 20,
+    };
+    let pixels = vec![0x22; 16 * 20 * 4];
+    let layer = LiveCpuCompositionLayerRef {
+        geometry: Rect {
+            x: 0,
+            y: 0,
+            width: 16,
+            height: 20,
+        },
+        buffer: LiveCpuBufferSourceRef {
+            handle: 17,
+            size,
+            stride: 16 * 4,
+            format: LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+            generation: 1,
+            bytes: &pixels,
+        },
+    };
+    let baseline = compose_live_cpu_frame_ref(size, &[layer]).unwrap();
+    let report =
+        compose_live_cpu_frame_ref_with_cursor(size, &[layer], Some(Point { x: 2.8, y: 3.2 }))
+            .unwrap();
+
+    let white = (3 * 16 + 2) * 4;
+    let outline = (3 * 16 + 1) * 4;
+    assert_eq!(&report.frame.bytes[white..white + 4], &[0xff; 4]);
+    assert_eq!(&report.frame.bytes[outline..outline + 4], &[0, 0, 0, 0xff]);
+    assert_ne!(report.checksum, baseline.checksum);
 }

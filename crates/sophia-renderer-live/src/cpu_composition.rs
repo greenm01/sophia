@@ -1,4 +1,4 @@
-use sophia_protocol::{Rect, Size};
+use sophia_protocol::{Point, Rect, Size};
 
 use crate::LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888;
 
@@ -82,6 +82,17 @@ pub fn compose_live_cpu_frame_ref(
     output_size: Size,
     layers: &[LiveCpuCompositionLayerRef<'_>],
 ) -> Result<LiveCpuCompositionReport, LiveCpuCompositionError> {
+    compose_live_cpu_frame_ref_with_cursor(output_size, layers, None)
+}
+
+/// Composes CPU-backed client layers and, when present, a compositor-owned
+/// software cursor. The cursor is part of the scanout frame, so moving it
+/// produces a frame even when the client itself has not committed new pixels.
+pub fn compose_live_cpu_frame_ref_with_cursor(
+    output_size: Size,
+    layers: &[LiveCpuCompositionLayerRef<'_>],
+    cursor_position: Option<Point>,
+) -> Result<LiveCpuCompositionReport, LiveCpuCompositionError> {
     let width = usize::try_from(output_size.width)
         .ok()
         .filter(|width| *width > 0)
@@ -129,6 +140,9 @@ pub fn compose_live_cpu_frame_ref(
             }
         }
     }
+    if let Some(position) = cursor_position {
+        compose_software_cursor(&mut frame, position);
+    }
     let (nonzero_pixel_bytes, checksum) = cpu_frame_metrics(&frame.bytes);
     Ok(LiveCpuCompositionReport {
         frame,
@@ -137,6 +151,89 @@ pub fn compose_live_cpu_frame_ref(
         nonzero_pixel_bytes,
         checksum,
     })
+}
+
+const SOFTWARE_CURSOR_SHAPE: [&[u8]; 14] = [
+    b"#.........",
+    b"##........",
+    b"###.......",
+    b"####......",
+    b"#####.....",
+    b"######....",
+    b"#######...",
+    b"########..",
+    b"#########.",
+    b"####......",
+    b"###.#.....",
+    b"##..#.....",
+    b"#...#.....",
+    b"....#.....",
+];
+
+fn compose_software_cursor(frame: &mut LiveCpuComposedFrame, position: Point) {
+    if !position.x.is_finite()
+        || !position.y.is_finite()
+        || position.x < f64::from(i32::MIN)
+        || position.x > f64::from(i32::MAX)
+        || position.y < f64::from(i32::MIN)
+        || position.y > f64::from(i32::MAX)
+    {
+        return;
+    }
+    let origin_x = position.x.floor() as i32;
+    let origin_y = position.y.floor() as i32;
+
+    // Draw the outline first so the white pointer remains legible over both
+    // Kitty's dark terminal background and a light client surface.
+    for (row, pixels) in SOFTWARE_CURSOR_SHAPE.iter().enumerate() {
+        for (column, pixel) in pixels.iter().enumerate() {
+            if *pixel != b'#' {
+                continue;
+            }
+            let x = origin_x.saturating_add(i32::try_from(column).unwrap_or(i32::MAX));
+            let y = origin_y.saturating_add(i32::try_from(row).unwrap_or(i32::MAX));
+            for outline_y in y.saturating_sub(1)..=y.saturating_add(1) {
+                for outline_x in x.saturating_sub(1)..=x.saturating_add(1) {
+                    put_pixel(frame, outline_x, outline_y, [0, 0, 0, 0xff]);
+                }
+            }
+        }
+    }
+    for (row, pixels) in SOFTWARE_CURSOR_SHAPE.iter().enumerate() {
+        for (column, pixel) in pixels.iter().enumerate() {
+            if *pixel != b'#' {
+                continue;
+            }
+            let x = origin_x.saturating_add(i32::try_from(column).unwrap_or(i32::MAX));
+            let y = origin_y.saturating_add(i32::try_from(row).unwrap_or(i32::MAX));
+            put_pixel(frame, x, y, [0xff, 0xff, 0xff, 0xff]);
+        }
+    }
+}
+
+fn put_pixel(frame: &mut LiveCpuComposedFrame, x: i32, y: i32, pixel: [u8; 4]) {
+    let Ok(x) = usize::try_from(x) else {
+        return;
+    };
+    let Ok(y) = usize::try_from(y) else {
+        return;
+    };
+    let width = usize::try_from(frame.size.width).unwrap_or(0);
+    let height = usize::try_from(frame.size.height).unwrap_or(0);
+    let stride = usize::try_from(frame.stride).unwrap_or(0);
+    if x >= width || y >= height {
+        return;
+    }
+    let Some(offset) = y
+        .checked_mul(stride)
+        .and_then(|offset| offset.checked_add(x.saturating_mul(4)))
+    else {
+        return;
+    };
+    let Some(target) = frame.bytes.get_mut(offset..offset.saturating_add(4)) else {
+        return;
+    };
+    target.copy_from_slice(&pixel);
 }
 
 fn cpu_frame_metrics(bytes: &[u8]) -> (usize, u64) {

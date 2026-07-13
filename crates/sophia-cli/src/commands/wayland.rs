@@ -300,6 +300,12 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                             }
                         }
                         InputEventKind::PointerMotion | InputEventKind::PointerButton { .. } => {
+                            scene.observe_pointer(request.global_position);
+                            if scene.can_compose_cursor()
+                                && let Some(native_scanout) = native_scanout.as_mut()
+                            {
+                                native_scanout.request_cpu_cursor_repaint();
+                            }
                             routed_pointer = routed_pointer.saturating_add(1);
                             trace_input_stage(
                                 input_trace,
@@ -1004,6 +1010,7 @@ fn terminate_client(child: &mut Child) -> Result<(), Box<dyn std::error::Error>>
 
 struct WaylandCpuScene {
     output_size: Size,
+    cursor_position: Option<Point>,
     buffers: BTreeMap<u64, CpuBufferRegistration>,
     dmabufs: BTreeMap<u64, DmaBufRegistration>,
     committed: Vec<CommittedSurfaceState>,
@@ -1013,6 +1020,7 @@ impl WaylandCpuScene {
     fn new(output_size: Size) -> Self {
         Self {
             output_size,
+            cursor_position: None,
             buffers: BTreeMap::new(),
             dmabufs: BTreeMap::new(),
             committed: Vec::new(),
@@ -1031,6 +1039,18 @@ impl WaylandCpuScene {
 
     fn observe_committed(&mut self, committed: &[CommittedSurfaceState]) {
         self.committed = committed.to_vec();
+    }
+
+    fn observe_pointer(&mut self, position: Point) {
+        self.cursor_position = Some(position);
+    }
+
+    fn can_compose_cursor(&self) -> bool {
+        !self.committed.is_empty()
+            && self
+                .committed
+                .iter()
+                .all(|surface| matches!(surface.buffer, BufferSource::CpuBuffer { .. }))
     }
 
     fn register_dmabuf(&mut self, buffer: DmaBufRegistration) {
@@ -1103,8 +1123,12 @@ impl WaylandCpuScene {
                 })
             })
             .collect::<Vec<_>>();
-        sophia_backend_live::compose_live_cpu_frame_ref(self.output_size, &layers)
-            .map_err(|error| format!("Wayland CPU composition failed: {error:?}").into())
+        sophia_backend_live::compose_live_cpu_frame_ref_with_cursor(
+            self.output_size,
+            &layers,
+            self.cursor_position,
+        )
+        .map_err(|error| format!("Wayland CPU composition failed: {error:?}").into())
     }
 
     fn buffer_count(&self) -> usize {

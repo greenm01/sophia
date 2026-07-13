@@ -2034,6 +2034,7 @@ pub(super) struct WaylandNativeSession {
     runtime: Option<PersistentBackendRuntime>,
     outputs: Vec<sophia_engine::HeadlessOutput>,
     pending_cpu_presentations: BTreeMap<SurfaceId, u64>,
+    cursor_repaint_pending: bool,
     awaiting_presentations: BTreeMap<SurfaceId, (u64, usize)>,
     last_cpu_checksum: Option<u64>,
 }
@@ -2055,6 +2056,7 @@ impl WaylandNativeSession {
             runtime: None,
             outputs,
             pending_cpu_presentations: BTreeMap::new(),
+            cursor_repaint_pending: false,
             awaiting_presentations: BTreeMap::new(),
             last_cpu_checksum: None,
         })
@@ -2072,6 +2074,12 @@ impl WaylandNativeSession {
         self.pending_cpu_presentations.insert(surface, generation);
     }
 
+    /// A compositor-owned cursor has changed. Unlike a client commit, this
+    /// repaint must not create presentation feedback for any client surface.
+    pub(super) fn request_cpu_cursor_repaint(&mut self) {
+        self.cursor_repaint_pending = true;
+    }
+
     pub(super) fn should_compose_cpu_frame(&self) -> bool {
         let (in_flight, cleanup_pending) =
             self.runtime.as_ref().map_or((false, false), |runtime| {
@@ -2081,7 +2089,7 @@ impl WaylandNativeSession {
                 )
             });
         cpu_frame_submission_ready(
-            !self.pending_cpu_presentations.is_empty(),
+            !self.pending_cpu_presentations.is_empty() || self.cursor_repaint_pending,
             in_flight,
             cleanup_pending,
             self.scanout
@@ -2102,8 +2110,10 @@ impl WaylandNativeSession {
             .iter()
             .map(|(surface, generation)| (*surface, *generation))
             .collect::<Vec<_>>();
-        if presentations.is_empty() {
-            return Err("native CPU composition had no queued presentation".into());
+        if presentations.is_empty() && !self.cursor_repaint_pending {
+            return Err(
+                "native CPU composition had no queued presentation or cursor repaint".into(),
+            );
         }
         if cpu_frame_matches_visible_output(
             self.outputs.len(),
@@ -2112,6 +2122,7 @@ impl WaylandNativeSession {
             report.checksum,
         ) {
             self.pending_cpu_presentations.clear();
+            self.cursor_repaint_pending = false;
             return Ok(WaylandCpuFrameSubmission {
                 presentations,
                 immediate: true,
@@ -2131,6 +2142,7 @@ impl WaylandNativeSession {
                 Some(frames),
             )?);
             self.pending_cpu_presentations.clear();
+            self.cursor_repaint_pending = false;
             self.last_cpu_checksum = Some(report.checksum);
             return Ok(WaylandCpuFrameSubmission {
                 presentations,
@@ -2148,6 +2160,7 @@ impl WaylandNativeSession {
         let frame_scheduled = self.scanout.heads[0].submissions > submissions_before;
         let required_submission = self.required_presentation_submission(submissions_before)?;
         self.pending_cpu_presentations.clear();
+        self.cursor_repaint_pending = false;
         for (surface, generation) in &presentations {
             retain_latest_wayland_presentation(
                 &mut self.awaiting_presentations,
@@ -2174,6 +2187,9 @@ impl WaylandNativeSession {
         // Direct client scanout replaces the visible CPU-composed output, so a
         // later SHM frame cannot be elided against an older CPU checksum.
         self.last_cpu_checksum = None;
+        // CPU cursor composition cannot safely overlay a directly scanned-out
+        // DMA-BUF. The next CPU-backed commit will re-enable cursor repaints.
+        self.cursor_repaint_pending = false;
         if self.runtime.is_none() {
             let blank = sophia_backend_live::compose_live_cpu_frame(self.primary_size(), &[])
                 .map_err(|error| format!("native DMA-BUF bootstrap failed: {error:?}"))?;
