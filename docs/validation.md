@@ -117,6 +117,12 @@ DMA-BUF frames with no allocator diagnostic and a 14 ms maximum
 submit-to-page-flip interval. The 300-frame lifetime proof remains the next
 gate; do not start the Kitty promotion sequence yet.
 
+On Void Linux, run that next gate from a dedicated text TTY with:
+
+```bash
+tools/run_void_dmabuf_lifetime_proof.sh
+```
+
 To capture the native allocator stack from a dedicated text TTY, install `gdb`
 if needed and rerun the controlled three-frame proof in diagnostic mode:
 
