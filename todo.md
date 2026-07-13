@@ -9,7 +9,7 @@ next milestone becomes active.
 
 ---
 
-## Active Milestone: Native Kitty Hardware Proof
+## Active Milestone: Native Kitty Presentation Architecture
 
 Current truth:
 
@@ -24,9 +24,19 @@ Current truth:
   bounded linear DMA-BUF admission.
 - The non-modesetting hardware preflight finds one openable atomic-capable card
   with a connected scanout target and the required atomic properties.
+- The guarded native SHM session now exits cleanly on hardware with keyboard
+  routing, real KMS submissions, page-flip retirement, and no recovery debt.
 
 Exit criteria:
 
+- [ ] Make Engine's committed surface snapshot the single authority: native
+  presentation must consume it directly and must not replay Wayland authority
+  transactions into a second Engine state.
+- [ ] Add a bounded presentation scheduler: at most one retained pending frame
+  per surface, explicit page-flip-to-release ownership, and normal teardown
+  ordering.
+- [ ] Retain SHM-backed composition resources and coalesce damage so the
+  guarded hardware path remains below 100 ms input-to-presentation latency.
 - [x] Prove a real software-rendered native Wayland Kitty toplevel handles a
   compositor configure, keeps its old size live until ack, then commits changing
   nonzero pixels at the requested size.
@@ -46,8 +56,8 @@ Exit criteria:
   dimensions, modifier, plane count, and stride before admitting an opaque
   `DmaBuf` handle.
 - [ ] Validate and harden native EGL import of admitted DMA-BUFs on hardware;
-  it is isolated behind `--experimental-dmabuf` until the first-frame KMS
-  submission and presentation-retirement path is proven.
+  it stays isolated behind `--experimental-dmabuf` until the single-authority
+  presentation scheduler has a passing first-frame KMS proof.
 - [ ] Prove hardware Kitty remains within the presentation budget on that path
   while SHM remains available for software clients.
 

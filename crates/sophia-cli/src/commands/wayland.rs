@@ -338,13 +338,23 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                                 let native_scanout = native_scanout
                                     .as_mut()
                                     .ok_or("DMA-BUF client buffers require --native-scanout")?;
-                                native_scanout.present_dmabuf(&transaction, generation, &frame)?
+                                native_scanout.present_dmabuf(
+                                    &committed,
+                                    &transaction,
+                                    generation,
+                                    &frame,
+                                )?
                             }
                             _ => {
                                 shm_frames = shm_frames.saturating_add(1);
                                 let report = report.as_ref().expect("CPU report created above");
                                 if let Some(native_scanout) = native_scanout.as_mut() {
-                                    native_scanout.present(&transaction, generation, &report)?
+                                    native_scanout.present(
+                                        &committed,
+                                        &transaction,
+                                        generation,
+                                        &report,
+                                    )?
                                 } else {
                                     true
                                 }

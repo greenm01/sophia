@@ -126,6 +126,33 @@ fn headless_backend_assembly_drains_input_commits_authority_and_renders_cpu_fram
 }
 
 #[test]
+fn headless_backend_assembly_accepts_an_authoritative_committed_snapshot() {
+    let output = HeadlessOutput::deterministic();
+    let mut assembly = HeadlessCompositorBackendAssembly::new(output);
+    let snapshot = CommittedSurfaceState {
+        surface: SurfaceId::new(71, 1),
+        committed_generation: 9,
+        geometry: Rect {
+            x: 12,
+            y: 24,
+            width: 320,
+            height: 200,
+        },
+        buffer: BufferSource::CpuBuffer { handle: 710 },
+        damage: Region::single(Rect {
+            x: 0,
+            y: 0,
+            width: 320,
+            height: 200,
+        }),
+    };
+
+    assembly.replace_committed_surfaces(vec![snapshot.clone()]);
+
+    assert_eq!(assembly.committed_surfaces(), [snapshot]);
+}
+
+#[test]
 fn headless_backend_tick_keeps_physical_input_separate_from_routed_input() {
     let output = HeadlessOutput::deterministic();
     let mut source = LibinputEventSource::new();

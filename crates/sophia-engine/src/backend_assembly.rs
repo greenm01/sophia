@@ -256,6 +256,13 @@ where
         &self.committed_surfaces
     }
 
+    /// Replaces the committed snapshot when an external authority has already
+    /// accepted the transaction. This lets a presentation backend consume the
+    /// single authoritative state without replaying the authority transaction.
+    pub fn replace_committed_surfaces(&mut self, committed_surfaces: Vec<CommittedSurfaceState>) {
+        self.committed_surfaces = committed_surfaces;
+    }
+
     pub fn run_tick(
         &mut self,
         input: CompositorBackendTickInput,

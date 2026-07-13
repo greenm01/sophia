@@ -1688,12 +1688,44 @@ struct ObservedComposedFrame {
 struct PersistentBackendRuntime {
     outputs: BTreeMap<OutputId, PersistentOutputRuntime>,
     layers: BTreeMap<SurfaceId, SurfaceTransaction>,
+    committed_snapshot_layers: Option<Vec<LayerSnapshot>>,
 }
 
 impl PersistentBackendRuntime {
     fn new(
         outputs: &[sophia_engine::HeadlessOutput],
         first_transactions: &[SurfaceTransaction],
+        native_scanout: Option<&mut PersistentNativeScanout>,
+        initial_native_frames: Option<Vec<ObservedComposedFrame>>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::new_with_committed_surfaces(
+            outputs,
+            seed_committed_surfaces(first_transactions),
+            native_scanout,
+            initial_native_frames,
+        )
+    }
+
+    fn new_from_committed_surfaces(
+        outputs: &[sophia_engine::HeadlessOutput],
+        committed_surfaces: &[CommittedSurfaceState],
+        native_scanout: Option<&mut PersistentNativeScanout>,
+        initial_native_frames: Option<Vec<ObservedComposedFrame>>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut runtime = Self::new_with_committed_surfaces(
+            outputs,
+            committed_surfaces.to_vec(),
+            native_scanout,
+            initial_native_frames,
+        )?;
+        runtime.committed_snapshot_layers =
+            Some(layer_snapshots_from_committed(committed_surfaces));
+        Ok(runtime)
+    }
+
+    fn new_with_committed_surfaces(
+        outputs: &[sophia_engine::HeadlessOutput],
+        committed_surfaces: Vec<CommittedSurfaceState>,
         mut native_scanout: Option<&mut PersistentNativeScanout>,
         initial_native_frames: Option<Vec<ObservedComposedFrame>>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
@@ -1706,7 +1738,7 @@ impl PersistentBackendRuntime {
         for (index, output) in outputs.iter().copied().enumerate() {
             let (authority_sender, authority_receiver) = sync_channel(SESSION_AUTHORITY_CAPACITY);
             let assembly = HeadlessCompositorBackendAssembly::new(output)
-                .with_committed_surfaces(seed_committed_surfaces(first_transactions))
+                .with_committed_surfaces(committed_surfaces.clone())
                 .with_authority_inbox(AuthorityTransactionInbox::new(
                     authority_receiver,
                     SESSION_AUTHORITY_CAPACITY,
@@ -1753,6 +1785,7 @@ impl PersistentBackendRuntime {
         Ok(Self {
             outputs: output_runtimes,
             layers: BTreeMap::new(),
+            committed_snapshot_layers: None,
         })
     }
 
@@ -1800,6 +1833,42 @@ impl PersistentBackendRuntime {
                     }
                 })?;
             let input = compositor_tick_input(&active_transactions, event_count, wm_update.clone());
+            let report = match native_scanout.as_deref_mut() {
+                Some(native_scanout) => {
+                    if let Some(frame) = native_frames.next() {
+                        native_scanout.queue_frame(index, frame);
+                    }
+                    if output.runtime.rendered_primary_plane_scanout_in_flight() {
+                        output.runtime.run_tick(input)?
+                    } else {
+                        native_scanout.run_tick(index, &mut output.runtime, input)?
+                    }
+                }
+                None => output.runtime.run_tick(input)?,
+            };
+            if first_report.is_none() {
+                first_report = Some(report);
+            }
+        }
+        first_report.ok_or_else(|| "persistent backend runtime has no outputs".into())
+    }
+
+    fn run_committed_snapshot(
+        &mut self,
+        committed_surfaces: &[CommittedSurfaceState],
+        mut native_scanout: Option<&mut PersistentNativeScanout>,
+        native_frames: Option<Vec<ObservedComposedFrame>>,
+    ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
+        let layers = layer_snapshots_from_committed(committed_surfaces);
+        self.committed_snapshot_layers = Some(layers.clone());
+        let mut native_frames = native_frames.unwrap_or_default().into_iter();
+        let mut first_report = None;
+        for (index, output) in self.outputs.values_mut().enumerate() {
+            output
+                .runtime
+                .assembly_mut()
+                .replace_committed_surfaces(committed_surfaces.to_vec());
+            let input = compositor_tick_input_from_layers(layers.clone());
             let report = match native_scanout.as_deref_mut() {
                 Some(native_scanout) => {
                     if let Some(frame) = native_frames.next() {
@@ -1889,7 +1958,10 @@ impl PersistentBackendRuntime {
             let report = native_scanout.run_tick(
                 index,
                 &mut output.runtime,
-                compositor_tick_input(&transactions, 0, None),
+                self.committed_snapshot_layers.as_ref().map_or_else(
+                    || compositor_tick_input(&transactions, 0, None),
+                    |layers| compositor_tick_input_from_layers(layers.clone()),
+                ),
             )?;
             if first_report.is_none() {
                 first_report = Some(report);
@@ -1986,6 +2058,7 @@ impl WaylandNativeSession {
 
     pub(super) fn present(
         &mut self,
+        committed_surfaces: &[CommittedSurfaceState],
         transaction: &SurfaceTransaction,
         generation: u64,
         report: &sophia_backend_live::LiveCpuCompositionReport,
@@ -1996,9 +2069,9 @@ impl WaylandNativeSession {
             .map(|output| native_frame_for_output(report, output.size))
             .collect::<Vec<_>>();
         if self.runtime.is_none() {
-            self.runtime = Some(PersistentBackendRuntime::new(
+            self.runtime = Some(PersistentBackendRuntime::new_from_committed_surfaces(
                 &self.outputs,
-                std::slice::from_ref(transaction),
+                committed_surfaces,
                 Some(&mut self.scanout),
                 Some(frames),
             )?);
@@ -2006,13 +2079,10 @@ impl WaylandNativeSession {
         }
         let runtime = self.runtime.as_mut().expect("checked above");
         let submissions_before = self.scanout.heads[0].submissions;
-        let _ = runtime.run_authority_transactions(
-            transaction.transaction,
-            std::slice::from_ref(transaction),
-            1,
+        let _ = runtime.run_committed_snapshot(
+            committed_surfaces,
             Some(&mut self.scanout),
             Some(frames),
-            None,
         )?;
         self.queue_presentation(transaction.surface, generation, submissions_before)?;
         Ok(false)
@@ -2020,6 +2090,7 @@ impl WaylandNativeSession {
 
     pub(super) fn present_dmabuf(
         &mut self,
+        committed_surfaces: &[CommittedSurfaceState],
         transaction: &SurfaceTransaction,
         generation: u64,
         frame: &sophia_backend_live::LiveOwnedDmaBufFrame,
@@ -2032,9 +2103,9 @@ impl WaylandNativeSession {
                 .iter()
                 .map(|output| native_frame_for_output(&blank, output.size))
                 .collect::<Vec<_>>();
-            self.runtime = Some(PersistentBackendRuntime::new(
+            self.runtime = Some(PersistentBackendRuntime::new_from_committed_surfaces(
                 &self.outputs,
-                std::slice::from_ref(transaction),
+                committed_surfaces,
                 Some(&mut self.scanout),
                 Some(frames),
             )?);
@@ -2044,14 +2115,8 @@ impl WaylandNativeSession {
         }
         let runtime = self.runtime.as_mut().expect("initialized above");
         let submissions_before = self.scanout.heads[0].submissions;
-        let _ = runtime.run_authority_transactions(
-            transaction.transaction,
-            std::slice::from_ref(transaction),
-            1,
-            Some(&mut self.scanout),
-            None,
-            None,
-        )?;
+        let _ =
+            runtime.run_committed_snapshot(committed_surfaces, Some(&mut self.scanout), None)?;
         self.queue_presentation(transaction.surface, generation, submissions_before)?;
         Ok(false)
     }
@@ -2244,6 +2309,44 @@ fn compositor_tick_input(
         scanout_submit_state: None,
         scanout_lifecycle_states: Vec::new(),
     }
+}
+
+fn compositor_tick_input_from_layers(
+    layer_templates: Vec<LayerSnapshot>,
+) -> CompositorBackendTickInput {
+    CompositorBackendTickInput {
+        x_event_count: 0,
+        authority_batches: Vec::new(),
+        wm_update: None,
+        portal_commands: Vec::new(),
+        chrome_command_count: 0,
+        layer_templates,
+        scanout_submit_state: None,
+        scanout_lifecycle_states: Vec::new(),
+    }
+}
+
+fn layer_snapshots_from_committed(
+    committed_surfaces: &[CommittedSurfaceState],
+) -> Vec<LayerSnapshot> {
+    committed_surfaces
+        .iter()
+        .enumerate()
+        .map(|(stack_rank, surface)| LayerSnapshot {
+            surface: surface.surface,
+            authority_local_id: None,
+            namespace: None,
+            stack_rank: u32::try_from(stack_rank).unwrap_or(u32::MAX),
+            geometry: surface.geometry,
+            source: surface.buffer,
+            damage: surface.damage.clone(),
+            opacity: 1.0,
+            crop: None,
+            transform: Transform::IDENTITY,
+            generation: surface.committed_generation,
+            resize_sync: ResizeSyncCapability::ImplicitOnly,
+        })
+        .collect()
 }
 
 struct PersistentNativeScanout {
@@ -3127,7 +3230,9 @@ impl Drop for SessionProcessGuard {
 #[cfg(test)]
 mod tests {
     use super::{
-        Rect, Size, center_geometry_without_scaling, required_wayland_presentation_submission,
+        BufferSource, CommittedSurfaceState, PersistentBackendRuntime, Rect, Region, Size,
+        center_geometry_without_scaling, layer_snapshots_from_committed,
+        required_wayland_presentation_submission,
     };
 
     #[test]
@@ -3175,5 +3280,80 @@ mod tests {
         assert_eq!(required_wayland_presentation_submission(3, 4, false), Ok(4));
         assert_eq!(required_wayland_presentation_submission(4, 4, true), Ok(5));
         assert!(required_wayland_presentation_submission(4, 4, false).is_err());
+    }
+
+    #[test]
+    fn committed_wayland_snapshot_preserves_surface_generation_in_render_layers() {
+        let layers = layer_snapshots_from_committed(&[CommittedSurfaceState {
+            surface: sophia_protocol::SurfaceId::new(9, 1),
+            committed_generation: 4,
+            geometry: Rect {
+                x: 10,
+                y: 20,
+                width: 300,
+                height: 200,
+            },
+            buffer: BufferSource::CpuBuffer { handle: 99 },
+            damage: Region::single(Rect {
+                x: 0,
+                y: 0,
+                width: 300,
+                height: 200,
+            }),
+        }]);
+
+        assert_eq!(layers.len(), 1);
+        assert_eq!(layers[0].generation, 4);
+        assert_eq!(layers[0].source, BufferSource::CpuBuffer { handle: 99 });
+    }
+
+    #[test]
+    fn committed_snapshot_runtime_does_not_replay_authority_transactions() {
+        let output = sophia_engine::HeadlessOutput {
+            id: sophia_protocol::OutputId::from_raw(17),
+            size: Size {
+                width: 640,
+                height: 480,
+            },
+            scale: 1,
+        };
+        let committed = vec![CommittedSurfaceState {
+            surface: sophia_protocol::SurfaceId::new(17, 1),
+            committed_generation: 5,
+            geometry: Rect {
+                x: 0,
+                y: 0,
+                width: 640,
+                height: 480,
+            },
+            buffer: BufferSource::CpuBuffer { handle: 17 },
+            damage: Region::single(Rect {
+                x: 0,
+                y: 0,
+                width: 640,
+                height: 480,
+            }),
+        }];
+        let mut runtime = PersistentBackendRuntime::new_from_committed_surfaces(
+            &[output],
+            &committed,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let report = runtime
+            .run_committed_snapshot(&committed, None, None)
+            .unwrap();
+
+        assert_eq!(runtime.committed_surfaces(), committed);
+        assert_eq!(
+            report
+                .engine
+                .runtime
+                .runtime_state
+                .authority_transactions_committed,
+            0
+        );
     }
 }
