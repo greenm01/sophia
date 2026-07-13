@@ -33,11 +33,12 @@ Current truth:
   native renderer/exporter heap on hardware. Isolate that ownership fault before
   attempting further latency reductions.
 - DMA-BUF is admitted but remains experimental. The repaired controlled
-  three-frame hardware proof, release-timing trace, and four normal 300-frame
-  lifetime runs pass. The three preserved normal runs each import, submit,
-  retire, and reuse full-size 1920x1200 buffers without allocator failure;
-  SHM remains the production fallback until guarded Kitty DMA-BUF evidence
-  passes.
+  proofs produced several 300-frame passes, but the latest uninstrumented
+  promotion preflight aborted on its first DMA-BUF frame with `free(): invalid
+  pointer`. The persistent CPU-upload texture is no longer reused as an
+  EGLImage sibling; each imported frame now owns a transient texture. SHM
+  remains the production fallback until that revised ownership boundary passes
+  controlled and guarded Kitty evidence.
 
 Exit criteria:
 
@@ -80,15 +81,15 @@ Exit criteria:
 - [x] Add a controlled, external Wayland DMA-BUF producer that allocates only
   linear XRGB8888 GBM buffers and waits for both frame and buffer-release
   feedback before reuse.
-- [x] Pass the controlled three-frame first-frame proof with
-  `tools/wayland_dmabuf_first_frame_hardware_proof.sh`: experimental enablement,
-  three imports, KMS presentation retirement, no cleanup debt, and 14 ms maximum
-  submit-to-page-flip latency.
-- [x] Pass the controlled 300-frame lifecycle run with the same tool. The
-  GDB diagnostic, release-timing trace, and four normal release runs pass;
-  three separately retained normal logs each prove experimental enablement,
-  300 imports, KMS presentation retirement, no cleanup debt, and a 14 ms
-  maximum submit-to-page-flip latency.
+- [ ] Pass the controlled three-frame first-frame proof with
+  `tools/wayland_dmabuf_first_frame_hardware_proof.sh`: the latest promotion
+  preflight aborted after its first frame with `free(): invalid pointer`.
+  Validate the transient EGLImage texture lifetime boundary before counting new
+  imports, KMS presentation retirement, cleanup debt, or latency evidence.
+- [ ] Pass the controlled 300-frame lifecycle run with the same tool. Earlier
+  GDB, traced, and normal runs are diagnostic samples only because the latest
+  uninstrumented three-frame preflight still aborts. Require three independent
+  normal 300-frame passes after the transient-texture repair.
 - [ ] Pass three independent guarded real-Kitty DMA-BUF runs with
   `tools/wayland_kitty_dmabuf_promotion_gate.sh`: exact text/navigation and
   pointer input, resize, clean normal exit, TTY/`keyd` restoration, DMA-BUF

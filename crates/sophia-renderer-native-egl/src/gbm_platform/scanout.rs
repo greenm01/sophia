@@ -1074,6 +1074,7 @@ fn render_persistent_target_dmabuf<T: std::os::fd::AsFd>(
                         .map_err(|_| NativeGbmScanoutBufferExportDetail::DmaBufImportFailed)
                 })
                 .and_then(|()| {
+                    trace_dmabuf_lifecycle("egl_image_texture_released");
                     trace_dmabuf_lifecycle("egl_image_rendered");
                     egl.swap_buffers(display, egl_surface)
                         .map_err(|_| NativeGbmScanoutBufferExportDetail::EglSwapBuffersFailed)
@@ -1090,16 +1091,12 @@ fn render_persistent_target_dmabuf<T: std::os::fd::AsFd>(
                         Some(gbm_surface),
                     )
                 });
-            let detached = target.pipeline.detach_egl_image().is_ok();
-            if detached {
-                trace_dmabuf_lifecycle("egl_image_detached");
-            }
             let image_destroyed = egl.destroy_image(display, image).is_ok();
             if image_destroyed {
                 trace_dmabuf_lifecycle("egl_image_destroyed");
             }
             match result {
-                Ok(buffer) if detached && image_destroyed => {
+                Ok(buffer) if image_destroyed => {
                     trace_dmabuf_lifecycle("scanout_owner_returned");
                     Ok(buffer)
                 }

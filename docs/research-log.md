@@ -40,8 +40,14 @@ with ordered ownership stages and an 18 ms maximum submit-to-page-flip interval.
 One uninstrumented rerun and then three separately retained uninstrumented
 300-frame runs all completed normally: each reported 300 imports, 300 callbacks
 and retirements, no cleanup debt, no surviving process, and a 14 ms maximum
-submit-to-page-flip interval. The controlled lifecycle gate is now complete;
-the next required evidence is the three guarded real-Kitty DMA-BUF runs.
+submit-to-page-flip interval. The next full promotion preflight nevertheless
+aborted on its first uninstrumented DMA-BUF frame with `free(): invalid pointer`,
+before Kitty started. Therefore the prior samples are diagnostic evidence, not a
+completed lifecycle gate. The likely unsound seam was rebinding the persistent
+CPU-upload texture to each short-lived EGLImage; imports now use a transient
+per-frame texture that is deleted after `glFinish` before EGLImage destruction.
+The next required evidence is a fresh controlled first-frame proof, then the
+three-run lifecycle gate; no Kitty DMA-BUF run may start first.
 
 ## 2026-07-12: DMA-BUF Performance Gate and Renderer Safety Boundary
 

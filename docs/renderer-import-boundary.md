@@ -68,8 +68,11 @@ tracking, and fail-closed errors.
 The initial native DMA-BUF route accepts only a bounded single-plane linear
 XRGB8888/ARGB8888 descriptor and stays behind `--experimental-dmabuf`. It is
 not a general renderer contract. Its repaired three-frame controlled hardware
-proof, GDB-backed 300-frame diagnostic, release-timing trace, and three retained
-normal 300-frame lifetime proofs pass. The real-Kitty gate remains open. Its
+proof previously produced GDB, traced, and normal passing samples, but the
+latest uninstrumented promotion preflight aborted with `free(): invalid pointer`
+on its first frame. Imported EGLImages now use transient per-frame GL textures
+instead of the persistent CPU-upload texture; both the controlled and real-Kitty
+gates remain open until that boundary is re-proven. Its
 lifecycle is explicit:
 
 `admitted descriptor → renderer-private import/submission → observed page flip
