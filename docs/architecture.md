@@ -79,12 +79,12 @@ the Wayland and modern-X authorities; Engine contains no XLibre window or wire
 identity.
 
 The native session admits a narrow linear XRGB/ARGB DMA-BUF subset. Its repaired
-GDB-backed diagnostic, release-timing trace, and normal lifetime samples passed,
-but the latest uninstrumented promotion preflight aborted with `free(): invalid
-pointer` on its first frame. The importer now gives each EGLImage a transient GL
-texture rather than reusing the persistent CPU-upload texture. The route remains
-experimental until the controlled proof and real-Kitty hardware evidence pass.
-SHM is the current verified path. When the experimental route is enabled,
+three-frame proof, core-mode 300-frame run, and three normal 300-frame lifetime
+proofs pass after the importer gave each EGLImage a transient GL texture rather
+than reusing the persistent CPU-upload texture. An earlier post-repair normal
+run did abort after frame 2, so the normal-stability wrapper remains required.
+The route stays experimental until the real-Kitty hardware evidence passes. SHM
+is the current verified path. When the experimental route is enabled,
 KMS submission remains backend-owned and Wayland frame/buffer feedback waits
 for the matching observed presentation. The production CLI and installed Kitty
 launcher neither link nor start XLibre; its bridge remains an opt-in research

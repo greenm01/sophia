@@ -240,10 +240,12 @@ Real Kitty now connects to Sophia's private native Wayland authority with
 the native session additionally admits a bounded linear DMA-BUF subset behind
 an experimental flag. SHM is the verified default. The DMA-BUF importer now has
 a controlled first-frame/lifetime proof and a three-run real-Kitty promotion
-gate. Prior GDB, traced, and normal controlled lifetime samples passed, but the
-latest uninstrumented three-frame promotion preflight aborted with `free():
-invalid pointer`. DMA-BUF remains blocked while the EGLImage lifetime boundary
-is repaired and re-proven, before any Kitty promotion attempt. The installed launcher
+gate. The persistent CPU-upload texture is no longer reused as an EGLImage
+sibling; the repaired three-frame proof, core-mode 300-frame run, and three
+preserved normal 300-frame runs pass. An earlier post-repair run still aborted
+after frame 2, so the normal-stability proof remains a regression gate. DMA-BUF
+stays blocked before Kitty promotion until the three guarded real-Kitty runs
+pass. The installed launcher
 uses the native Wayland path and retains the independent
 Ctrl-Alt-Backspace recovery guard. XLibre is no longer a production dependency,
 feature, workspace member, or launcher path; its frozen sources live under

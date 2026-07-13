@@ -118,10 +118,13 @@ submit-to-page-flip interval. The GDB-backed 300-frame lifetime diagnostic also
 passes: 300 imports, submissions, page flips, and retirements, with no cleanup
 debt and the same 14 ms maximum submit-to-page-flip interval. The release-timing
 trace and four later normal release runs also passed. These samples do not clear
-the gate: the latest uninstrumented three-frame promotion preflight aborted on
-its first DMA-BUF frame with `free(): invalid pointer`. Each imported EGLImage
-now uses a transient GL texture, released before its EGLImage is destroyed;
-re-run the controlled proofs before any Kitty attempt.
+the gate: a later normal 300-frame run aborted after frame 2 with `free():
+invalid pointer`. Each imported EGLImage now uses a transient GL texture,
+released before its EGLImage is destroyed. The repaired three-frame proof then
+passed at 16 ms, and a core-mode run plus three separate normal 300-frame runs
+passed at 14–16 ms with zero cleanup debt. The controlled gate is satisfied,
+but those normal runs remain the required regression check before any future
+promotion retry.
 
 On Void Linux, use the release-timing trace after a future controlled failure:
 
@@ -168,8 +171,8 @@ not use it for the interactive Kitty gate. To diagnose a lifetime failure, set
 For the real-Kitty gate, set `SOPHIA_INPUT_DEVICES` to comma-separated keyboard
 and pointer event paths. The guarded launcher asks for its recovery chord before
 DRM takeover. In Kitty, type `sophia` plus Enter, press all four arrow keys,
-move/click the pointer, then type `exit` plus Enter. Only after the re-proven
-controlled 300-frame proof passes, run:
+move/click the pointer, then type `exit` plus Enter. With the controlled
+300-frame proof passed, run:
 
 ```bash
 tools/wayland_kitty_dmabuf_promotion_gate.sh

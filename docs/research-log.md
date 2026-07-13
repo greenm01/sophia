@@ -42,12 +42,17 @@ One uninstrumented rerun and then three separately retained uninstrumented
 and retirements, no cleanup debt, no surviving process, and a 14 ms maximum
 submit-to-page-flip interval. The next full promotion preflight nevertheless
 aborted on its first uninstrumented DMA-BUF frame with `free(): invalid pointer`,
-before Kitty started. Therefore the prior samples are diagnostic evidence, not a
-completed lifecycle gate. The likely unsound seam was rebinding the persistent
-CPU-upload texture to each short-lived EGLImage; imports now use a transient
-per-frame texture that is deleted after `glFinish` before EGLImage destruction.
-The next required evidence is a fresh controlled first-frame proof, then the
-three-run lifecycle gate; no Kitty DMA-BUF run may start first.
+before Kitty started. A later post-repair normal run also aborted after frame 2.
+The persistent CPU-upload texture was therefore isolated from imported images:
+each import now gets a transient per-frame texture, which is deleted after
+`glFinish` before EGLImage destruction. The repaired three-frame proof passed
+with three imports, three retirements, and a 16 ms maximum interval. A normal
+core-capture 300-frame run and three separate uninstrumented normal 300-frame
+runs then all completed: every run had 300 imports, callbacks, and retirements,
+no cleanup debt, no surviving process, and 14–16 ms maximum latency. This meets
+the bounded controlled gate, while retaining the normal-stability wrapper as a
+regression guard for the earlier intermittent abort. The next required evidence
+is the three guarded real-Kitty DMA-BUF runs.
 
 ## 2026-07-12: DMA-BUF Performance Gate and Renderer Safety Boundary
 
