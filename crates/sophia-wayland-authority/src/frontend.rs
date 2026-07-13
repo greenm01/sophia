@@ -21,7 +21,7 @@ use smithay::wayland::compositor::{
     SurfaceAttributes, with_states,
 };
 use smithay::wayland::dmabuf::{
-    DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier, get_dmabuf,
+    DmabufFeedbackBuilder, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier, get_dmabuf,
 };
 use smithay::wayland::output::OutputHandler;
 use smithay::wayland::shell::xdg::{
@@ -96,20 +96,21 @@ pub struct WaylandFrontend {
 
 impl WaylandFrontend {
     pub fn bind(display_name: &str, output_size: Size) -> Result<Self, WaylandFrontendError> {
-        Self::bind_with_imports(display_name, output_size, false)
+        Self::bind_with_imports(display_name, output_size, None)
     }
 
     pub fn bind_with_dmabuf(
         display_name: &str,
         output_size: Size,
+        main_device: u64,
     ) -> Result<Self, WaylandFrontendError> {
-        Self::bind_with_imports(display_name, output_size, true)
+        Self::bind_with_imports(display_name, output_size, Some(main_device))
     }
 
     fn bind_with_imports(
         display_name: &str,
         output_size: Size,
-        enable_dmabuf: bool,
+        dmabuf_main_device: Option<u64>,
     ) -> Result<Self, WaylandFrontendError> {
         if display_name.is_empty() || output_size.width <= 0 || output_size.height <= 0 {
             return Err(WaylandFrontendError::new(
@@ -132,18 +133,18 @@ impl WaylandFrontend {
             .map_err(|error| WaylandFrontendError::new(error.to_string()))?;
         let pointer = seat.add_pointer();
         let mut dmabuf_state = DmabufState::new();
-        let dmabuf_formats = vec![
-            Format {
-                code: Fourcc::Xrgb8888,
-                modifier: Modifier::Linear,
-            },
-            Format {
-                code: Fourcc::Argb8888,
-                modifier: Modifier::Linear,
-            },
-        ];
-        let dmabuf_global = enable_dmabuf
-            .then(|| dmabuf_state.create_global::<FrontendState>(&handle, dmabuf_formats));
+        let dmabuf_formats = supported_dmabuf_formats();
+        let dmabuf_feedback = dmabuf_main_device
+            .map(|main_device| {
+                DmabufFeedbackBuilder::new(main_device as _, dmabuf_formats.clone()).build()
+            })
+            .transpose()
+            .map_err(|error| {
+                WaylandFrontendError::new(format!("DMA-BUF feedback creation failed: {error}"))
+            })?;
+        let dmabuf_global = dmabuf_feedback.as_ref().map(|feedback| {
+            dmabuf_state.create_global_with_default_feedback::<FrontendState>(&handle, feedback)
+        });
         let output = Output::new(
             "SOPHIA-1".to_owned(),
             PhysicalProperties {
@@ -910,6 +911,17 @@ fn validate_dmabuf(
     })
 }
 
+fn supported_dmabuf_formats() -> Vec<Format> {
+    [Fourcc::Xrgb8888, Fourcc::Argb8888]
+        .into_iter()
+        .flat_map(|code| {
+            [Modifier::Invalid, Modifier::Linear]
+                .into_iter()
+                .map(move |modifier| Format { code, modifier })
+        })
+        .collect()
+}
+
 delegate_compositor!(FrontendState);
 delegate_xdg_shell!(FrontendState);
 delegate_shm!(FrontendState);
@@ -924,7 +936,9 @@ mod tests {
     use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufFlags};
     use smithay::backend::allocator::{Fourcc, Modifier};
 
-    use super::{WaylandFrontendError, validate_dmabuf, xkb_keycode_from_evdev};
+    use super::{
+        WaylandFrontendError, supported_dmabuf_formats, validate_dmabuf, xkb_keycode_from_evdev,
+    };
 
     fn dmabuf(stride: u32) -> Dmabuf {
         let file = tempfile::tempfile().unwrap();
@@ -958,5 +972,20 @@ mod tests {
         let keycode = xkb_keycode_from_evdev(30).unwrap();
         assert_eq!(keycode.raw(), 38);
         assert!(xkb_keycode_from_evdev(u32::MAX).is_none());
+    }
+
+    #[test]
+    fn advertises_implicit_and_linear_client_dmabufs() {
+        let formats = supported_dmabuf_formats();
+        for code in [Fourcc::Xrgb8888, Fourcc::Argb8888] {
+            assert!(formats.contains(&smithay::backend::allocator::Format {
+                code,
+                modifier: Modifier::Invalid,
+            }));
+            assert!(formats.contains(&smithay::backend::allocator::Format {
+                code,
+                modifier: Modifier::Linear,
+            }));
+        }
     }
 }

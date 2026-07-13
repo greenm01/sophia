@@ -13,6 +13,7 @@ use sophia_x_authority::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
+use std::os::unix::fs::MetadataExt;
 use std::process::{Child, Stdio};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
 use std::time::{Duration, Instant};
@@ -1979,6 +1980,10 @@ impl WaylandNativeSession {
         self.outputs[0].size
     }
 
+    pub(super) fn dmabuf_main_device(&self) -> Result<u64, Box<dyn std::error::Error>> {
+        Ok(self.scanout.card(0).try_clone_file()?.metadata()?.rdev())
+    }
+
     pub(super) fn present(
         &mut self,
         transaction: &SurfaceTransaction,
@@ -1991,13 +1996,24 @@ impl WaylandNativeSession {
             .map(|output| native_frame_for_output(report, output.size))
             .collect::<Vec<_>>();
         if self.runtime.is_none() {
-            self.runtime = Some(PersistentBackendRuntime::new(
+            let submissions_before = self.scanout.heads[0].submissions;
+            let mut runtime = PersistentBackendRuntime::new(
                 &self.outputs,
                 std::slice::from_ref(transaction),
                 Some(&mut self.scanout),
                 Some(frames),
-            )?);
-            return Ok(true);
+            )?;
+            let _ = runtime.run_authority_transactions(
+                transaction.transaction,
+                std::slice::from_ref(transaction),
+                1,
+                Some(&mut self.scanout),
+                None,
+                None,
+            )?;
+            self.runtime = Some(runtime);
+            self.queue_presentation(transaction.surface, generation, submissions_before)?;
+            return Ok(false);
         }
         let runtime = self.runtime.as_mut().expect("checked above");
         let submissions_before = self.scanout.heads[0].submissions;

@@ -91,7 +91,14 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
         return Err("--resize must be a positive size smaller than the output".into());
     }
     let mut frontend = if native_scanout.is_some() {
-        WaylandFrontend::bind_with_dmabuf(&display_name, output_size)?
+        WaylandFrontend::bind_with_dmabuf(
+            &display_name,
+            output_size,
+            native_scanout
+                .as_ref()
+                .expect("checked above")
+                .dmabuf_main_device()?,
+        )?
     } else {
         WaylandFrontend::bind(&display_name, output_size)?
     };

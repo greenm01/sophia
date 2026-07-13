@@ -19,4 +19,16 @@ fn frontend_binds_private_socket_and_dispatches_without_clients() {
     assert_eq!(frontend.display_name(), Some("sophia-test-0"));
     assert!(frontend.dispatch().unwrap().is_empty());
     assert!(runtime.path().join("sophia-test-0").exists());
+
+    let mut dmabuf_frontend = WaylandFrontend::bind_with_dmabuf(
+        "sophia-test-dmabuf-0",
+        Size {
+            width: 800,
+            height: 600,
+        },
+        0,
+    )
+    .unwrap();
+    assert_eq!(dmabuf_frontend.display_name(), Some("sophia-test-dmabuf-0"));
+    assert!(dmabuf_frontend.dispatch().unwrap().is_empty());
 }
