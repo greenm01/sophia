@@ -44,12 +44,13 @@ echo "In Kitty: type 'sophia' and Enter, press all four arrow keys, move/click t
 echo "then type 'exit' and Enter. Do not use the emergency chord for a passing proof."
 SOPHIA_OPERATOR_KEYBOARD="$KEYBOARD" \
 SOPHIA_INPUT_DEVICES="$INPUT_DEVICES" \
+SOPHIA_KITTY_REQUIRE_DMABUF=1 \
+SOPHIA_KITTY_EXPECT_KEYCODES="$EXPECTED_KEYCODES" \
+SOPHIA_KITTY_EXPECT_POINTER_INPUT=1 \
+SOPHIA_KITTY_EXPECT_INPUT_PRESENTATION=1 \
+SOPHIA_KITTY_MAX_INPUT_LATENCY_MS=100 \
     tools/run_sophia_kitty_session.sh \
-        --experimental-dmabuf \
-        --expect-keycodes="$EXPECTED_KEYCODES" \
-        --expect-pointer-input \
-        --expect-input-presentation \
-        --max-input-latency-ms=100
+        "$@"
 
 if [[ ! -s "$SESSION_LOG" ]]; then
     echo "Native Kitty session evidence is missing: $SESSION_LOG" >&2

@@ -65,6 +65,22 @@ if [[ ! -r "$keyboard" ]]; then
     exit 1
 fi
 input_devices="${SOPHIA_INPUT_DEVICES:-$keyboard}"
+require_dmabuf="${SOPHIA_KITTY_REQUIRE_DMABUF:-0}"
+expected_keycodes="${SOPHIA_KITTY_EXPECT_KEYCODES:-}"
+expect_pointer_input="${SOPHIA_KITTY_EXPECT_POINTER_INPUT:-0}"
+expect_input_presentation="${SOPHIA_KITTY_EXPECT_INPUT_PRESENTATION:-0}"
+max_input_latency_ms="${SOPHIA_KITTY_MAX_INPUT_LATENCY_MS:-}"
+
+for value in "$require_dmabuf" "$expect_pointer_input" "$expect_input_presentation"; do
+    if [[ "$value" != 0 && "$value" != 1 ]]; then
+        echo "Sophia Kitty policy booleans must be 0 or 1." >&2
+        exit 1
+    fi
+done
+if [[ -n "$max_input_latency_ms" && ! "$max_input_latency_ms" =~ ^[0-9]+$ ]]; then
+    echo "SOPHIA_KITTY_MAX_INPUT_LATENCY_MS must be an integer." >&2
+    exit 1
+fi
 
 for log in "$SESSION_LOG" "$GUARD_LOG"; do
     if [[ -f "$log" ]]; then
@@ -169,17 +185,44 @@ echo "Type exit normally, press Ctrl-Alt-Backspace for emergency recovery, or ru
 kd_mode="$(python3 "$ROOT_DIR/tools/sophia_tty_mode.py" get)"
 python3 "$ROOT_DIR/tools/sophia_tty_mode.py" graphics
 stty raw -echo
-setsid env \
-    SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 \
-    target/release/sophia sophia-wayland-session \
-    --client="${SOPHIA_KITTY_BIN:-kitty}" \
-    --client-arg=-o \
-    --client-arg=linux_display_server=wayland \
-    --client-arg=-o \
-    --client-arg=remember_window_size=no \
-    --native-scanout \
-    --input-devices="$input_devices" \
-    "$@" >"$SESSION_LOG" 2>&1 &
+session_command=(
+    target/release/sophia sophia-wayland-session
+    --client="${SOPHIA_KITTY_BIN:-kitty}"
+    --client-arg=-o
+    --client-arg=linux_display_server=wayland
+    --client-arg=-o
+    --client-arg=remember_window_size=no
+    --native-scanout
+    --input-devices="$input_devices"
+)
+session_command+=("$@")
+if [[ "$require_dmabuf" == 1 ]]; then
+    session_command+=(--experimental-dmabuf)
+fi
+if [[ -n "$expected_keycodes" ]]; then
+    session_command+=("--expect-keycodes=$expected_keycodes")
+fi
+if [[ "$expect_pointer_input" == 1 ]]; then
+    session_command+=(--expect-pointer-input)
+fi
+if [[ "$expect_input_presentation" == 1 ]]; then
+    session_command+=(--expect-input-presentation)
+fi
+if [[ -n "$max_input_latency_ms" ]]; then
+    session_command+=("--max-input-latency-ms=$max_input_latency_ms")
+fi
+dmabuf_requested=false
+for argument in "${session_command[@]}"; do
+    if [[ "$argument" == --experimental-dmabuf ]]; then
+        dmabuf_requested=true
+        break
+    fi
+done
+printf 'sophia_wayland_wrapper schema=1 dmabuf_requested=%s expected_keycodes=%s expect_pointer_input=%s expect_input_presentation=%s arguments=%q\n' \
+    "$dmabuf_requested" "${expected_keycodes:-none}" "$expect_pointer_input" \
+    "$expect_input_presentation" "${session_command[*]}" >>"$SESSION_LOG"
+setsid env SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 \
+    "${session_command[@]}" >>"$SESSION_LOG" 2>&1 &
 session_pid=$!
 set +e
 wait -n "$session_pid" "$guard_pid"
