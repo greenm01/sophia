@@ -35,9 +35,13 @@ debt, and the same 14 ms maximum submit-to-page-flip interval. A subsequent
 normal release 300-frame run nevertheless aborted with `corrupted size vs.
 prev_size` after frame 8 (an earlier normal run reached frame 13). This makes
 the fault timing-sensitive: the GDB result is diagnostic evidence, not a
-completed lifecycle gate. The release-timing trace is now the required next
-evidence; no real-Kitty DMA-BUF run may start until it produces a normal
-300-frame pass.
+completed lifecycle gate. A release-timing trace then completed all 300 frames
+with ordered ownership stages and an 18 ms maximum submit-to-page-flip interval.
+One uninstrumented rerun and then three separately retained uninstrumented
+300-frame runs all completed normally: each reported 300 imports, 300 callbacks
+and retirements, no cleanup debt, no surviving process, and a 14 ms maximum
+submit-to-page-flip interval. The controlled lifecycle gate is now complete;
+the next required evidence is the three guarded real-Kitty DMA-BUF runs.
 
 ## 2026-07-12: DMA-BUF Performance Gate and Renderer Safety Boundary
 

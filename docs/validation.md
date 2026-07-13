@@ -116,12 +116,14 @@ It imports, submits, page-flips, retires, and releases three full-size 1920x1200
 DMA-BUF frames with no allocator diagnostic and a 14 ms maximum
 submit-to-page-flip interval. The GDB-backed 300-frame lifetime diagnostic also
 passes: 300 imports, submissions, page flips, and retirements, with no cleanup
-debt and the same 14 ms maximum submit-to-page-flip interval. That does not
-clear the gate: normal release execution currently aborts with `corrupted size
-vs. prev_size` after a timing-sensitive small frame count (most recently frame
-8). Capture the release-timing lifecycle trace before another Kitty attempt.
+debt and the same 14 ms maximum submit-to-page-flip interval. The release-timing
+trace then passed 300 frames at 18 ms maximum latency. Four subsequent normal
+release runs passed; three separately retained logs each completed 300 imports,
+submissions, callbacks, page flips, and retirements with no cleanup debt and a
+14 ms maximum submit-to-page-flip interval. The controlled lifecycle gate is
+therefore satisfied; the next gate is the three guarded real-Kitty DMA-BUF runs.
 
-On Void Linux, run the release-timing trace from a dedicated text TTY with:
+On Void Linux, use the release-timing trace after a future controlled failure:
 
 ```bash
 tools/run_void_dmabuf_lifetime_proof.sh --trace
@@ -132,9 +134,9 @@ retirement, and client-release stages in
 `~/.local/state/sophia/dmabuf-promotion/controlled-lifecycle-trace.log`. Use
 `tools/run_void_dmabuf_lifetime_proof.sh --diagnostic` for the GDB comparison.
 
-After a normal 300-frame pass following an allocator failure, require three
-independent uninstrumented passes before clearing the lifecycle gate. This
-preserves each evidence file instead of overwriting it:
+After a future normal 300-frame failure, require three independent
+uninstrumented passes before clearing the lifecycle gate. This preserves each
+evidence file instead of overwriting it:
 
 ```bash
 tools/run_void_dmabuf_lifetime_proof.sh --runs 3
@@ -155,8 +157,8 @@ not use it for the interactive Kitty gate. To diagnose a lifetime failure, set
 For the real-Kitty gate, set `SOPHIA_INPUT_DEVICES` to comma-separated keyboard
 and pointer event paths. The guarded launcher asks for its recovery chord before
 DRM takeover. In Kitty, type `sophia` plus Enter, press all four arrow keys,
-move/click the pointer, then type `exit` plus Enter. Only after the normal
-controlled 300-frame proof passes, run:
+move/click the pointer, then type `exit` plus Enter. With the controlled
+300-frame proof passed, run:
 
 ```bash
 tools/wayland_kitty_dmabuf_promotion_gate.sh

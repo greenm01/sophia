@@ -79,11 +79,10 @@ the Wayland and modern-X authorities; Engine contains no XLibre window or wire
 identity.
 
 The native session admits a narrow linear XRGB/ARGB DMA-BUF subset. Its repaired
-three-frame controlled hardware proof passes and the GDB-backed 300-frame
-diagnostic passes, but normal release lifetime execution still has a
-timing-sensitive heap-corruption fault. The route remains experimental until
-that proof and the real-Kitty hardware evidence pass. SHM is the current
-verified path. When the experimental route is enabled,
+three-frame controlled hardware proof, GDB-backed 300-frame diagnostic,
+release-timing trace, and three retained normal 300-frame lifetime proofs pass.
+The route remains experimental until the real-Kitty hardware evidence passes.
+SHM is the current verified path. When the experimental route is enabled,
 KMS submission remains backend-owned and Wayland frame/buffer feedback waits
 for the matching observed presentation. The production CLI and installed Kitty
 launcher neither link nor start XLibre; its bridge remains an opt-in research

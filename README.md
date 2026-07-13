@@ -241,9 +241,9 @@ the native session additionally admits a bounded linear DMA-BUF subset behind
 an experimental flag. SHM is the verified default. The DMA-BUF importer now has
 a controlled first-frame/lifetime proof and a three-run real-Kitty promotion
 gate. Its repaired controlled three-frame hardware proof and GDB-backed
-300-frame diagnostic pass, but the normal release 300-frame lifetime proof still
-has timing-sensitive heap corruption. DMA-BUF stays blocked before Kitty
-promotion until that normal proof passes. The installed launcher
+300-frame diagnostic pass; a release-timing trace and four normal 300-frame
+lifetime runs now also pass. DMA-BUF stays blocked before Kitty promotion until
+the three guarded real-Kitty runs pass. The installed launcher
 uses the native Wayland path and retains the independent
 Ctrl-Alt-Backspace recovery guard. XLibre is no longer a production dependency,
 feature, workspace member, or launcher path; its frozen sources live under

@@ -33,10 +33,11 @@ Current truth:
   native renderer/exporter heap on hardware. Isolate that ownership fault before
   attempting further latency reductions.
 - DMA-BUF is admitted but remains experimental. The repaired controlled
-  three-frame hardware proof passes, and the GDB-backed 300-frame diagnostic
-  completes; the normal release 300-frame run still corrupts the heap after a
-  small, timing-sensitive number of frames. SHM remains the production
-  fallback, and no Kitty DMA-BUF run may begin until the normal proof passes.
+  three-frame hardware proof, release-timing trace, and four normal 300-frame
+  lifetime runs pass. The three preserved normal runs each import, submit,
+  retire, and reuse full-size 1920x1200 buffers without allocator failure;
+  SHM remains the production fallback until guarded Kitty DMA-BUF evidence
+  passes.
 
 Exit criteria:
 
@@ -83,13 +84,11 @@ Exit criteria:
   `tools/wayland_dmabuf_first_frame_hardware_proof.sh`: experimental enablement,
   three imports, KMS presentation retirement, no cleanup debt, and 14 ms maximum
   submit-to-page-flip latency.
-- [ ] Pass the controlled 300-frame lifecycle run with the same tool. The
-  GDB diagnostic and one subsequent normal release run pass 300 frames, but
-  earlier normal executions aborted with `corrupted size vs. prev_size` after
-  frames 8 and 13. Preserve three independent uninstrumented 300-frame passes
-  with `tools/run_void_dmabuf_lifetime_proof.sh --runs 3`, then require
-  experimental enablement, imports, KMS presentation retirement, no cleanup
-  debt, and no more than 100 ms submit-to-page-flip latency.
+- [x] Pass the controlled 300-frame lifecycle run with the same tool. The
+  GDB diagnostic, release-timing trace, and four normal release runs pass;
+  three separately retained normal logs each prove experimental enablement,
+  300 imports, KMS presentation retirement, no cleanup debt, and a 14 ms
+  maximum submit-to-page-flip latency.
 - [ ] Pass three independent guarded real-Kitty DMA-BUF runs with
   `tools/wayland_kitty_dmabuf_promotion_gate.sh`: exact text/navigation and
   pointer input, resize, clean normal exit, TTY/`keyd` restoration, DMA-BUF
