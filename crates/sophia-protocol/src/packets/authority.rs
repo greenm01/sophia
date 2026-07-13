@@ -11,6 +11,7 @@ pub enum AuthorityKind {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AuthorityFeedback {
     Transaction(TransactionCommit),
+    FrameScheduled(SurfacePresentationFeedback),
     Presented(SurfacePresentationFeedback),
 }
 

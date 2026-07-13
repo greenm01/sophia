@@ -2040,6 +2040,9 @@ pub(super) struct WaylandNativeSession {
 pub(super) struct WaylandCpuFrameSubmission {
     pub(super) presentations: Vec<(SurfaceId, u64)>,
     pub(super) immediate: bool,
+    /// `true` when this composition pass reached KMS submission.  The
+    /// corresponding client buffer remains held until the later page flip.
+    pub(super) frame_scheduled: bool,
 }
 
 impl WaylandNativeSession {
@@ -2116,6 +2119,7 @@ impl WaylandNativeSession {
             return Ok(WaylandCpuFrameSubmission {
                 presentations,
                 immediate: true,
+                frame_scheduled: false,
             });
         }
         let runtime = self.runtime.as_mut().expect("checked above");
@@ -2125,6 +2129,7 @@ impl WaylandNativeSession {
             Some(&mut self.scanout),
             Some(frames),
         )?;
+        let frame_scheduled = self.scanout.heads[0].submissions > submissions_before;
         let required_submission = self.required_presentation_submission(submissions_before)?;
         self.pending_cpu_presentations.clear();
         for (surface, generation) in &presentations {
@@ -2138,6 +2143,7 @@ impl WaylandNativeSession {
         Ok(WaylandCpuFrameSubmission {
             presentations,
             immediate: false,
+            frame_scheduled,
         })
     }
 

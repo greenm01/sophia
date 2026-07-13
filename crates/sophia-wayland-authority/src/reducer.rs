@@ -296,6 +296,7 @@ impl WaylandAuthorityReducer {
     ) -> Result<Vec<WaylandAuthorityAction>, WaylandAuthorityError> {
         match feedback {
             AuthorityFeedback::Transaction(commit) => self.apply_transaction_commit(commit),
+            AuthorityFeedback::FrameScheduled(scheduled) => self.apply_frame_scheduled(scheduled),
             AuthorityFeedback::Presented(presented) => self.apply_presented(presented),
         }
     }
@@ -500,6 +501,42 @@ impl WaylandAuthorityReducer {
                     source,
                 },
             ));
+        }
+        Ok(actions)
+    }
+
+    fn apply_frame_scheduled(
+        &mut self,
+        feedback: SurfacePresentationFeedback,
+    ) -> Result<Vec<WaylandAuthorityAction>, WaylandAuthorityError> {
+        let Some(local_id) = self.surface_to_local.get(&feedback.surface).copied() else {
+            return Err(WaylandAuthorityError::UnknownSurface);
+        };
+        let state = self.surface_mut(local_id)?;
+        if feedback.generation == 0 || feedback.generation > state.committed_generation {
+            return Err(WaylandAuthorityError::StalePresentation);
+        }
+        // A callback lets the client prepare a subsequent frame. Unlike
+        // `Presented`, it must not release the current client buffer before
+        // the corresponding KMS page flip retires.
+        let scheduled_generations = state
+            .committed_callbacks
+            .keys()
+            .copied()
+            .filter(|generation| *generation <= feedback.generation)
+            .collect::<Vec<_>>();
+        let mut actions = Vec::new();
+        for generation in scheduled_generations {
+            for callback in state
+                .committed_callbacks
+                .remove(&generation)
+                .unwrap_or_default()
+            {
+                actions.push(WaylandAuthorityAction::FrameDone {
+                    callback,
+                    presentation_msec: feedback.presentation_msec,
+                });
+            }
         }
         Ok(actions)
     }

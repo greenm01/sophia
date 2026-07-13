@@ -182,6 +182,63 @@ fn acknowledged_configure_commits_and_presentation_finishes_frame() {
 }
 
 #[test]
+fn scheduled_frame_completes_callback_before_page_flip_without_releasing_buffer() {
+    let mut reducer = WaylandAuthorityReducer::new();
+    create(&mut reducer);
+    reducer
+        .apply_surface_event(WaylandSurfaceEvent::Attach {
+            local_id: local(),
+            buffer: BufferSource::CpuBuffer { handle: 45 },
+        })
+        .unwrap();
+    reducer
+        .apply_surface_event(WaylandSurfaceEvent::RequestFrame {
+            local_id: local(),
+            callback: 99,
+        })
+        .unwrap();
+    let transaction = TransactionId::from_raw(14);
+    reducer
+        .apply_surface_event(WaylandSurfaceEvent::Commit {
+            local_id: local(),
+            transaction,
+            timeout_msec: 250,
+        })
+        .unwrap();
+    reducer
+        .apply_feedback(commit_feedback(transaction))
+        .unwrap();
+
+    let scheduled = SurfacePresentationFeedback {
+        surface: surface(),
+        generation: 1,
+        presentation_msec: 400,
+    };
+    assert_eq!(
+        reducer
+            .apply_feedback(AuthorityFeedback::FrameScheduled(scheduled))
+            .unwrap(),
+        vec![WaylandAuthorityAction::FrameDone {
+            callback: 99,
+            presentation_msec: 400,
+        }]
+    );
+
+    // Retirement does not issue the callback again, and does not release the
+    // buffer that is still displayed.
+    assert_eq!(
+        reducer
+            .apply_feedback(AuthorityFeedback::Presented(SurfacePresentationFeedback {
+                surface: surface(),
+                generation: 1,
+                presentation_msec: 500,
+            }))
+            .unwrap(),
+        Vec::new()
+    );
+}
+
+#[test]
 fn presenting_latest_generation_releases_coalesced_buffers_and_callbacks() {
     let mut reducer = WaylandAuthorityReducer::new();
     create(&mut reducer);

@@ -490,6 +490,7 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
             last_checksum = checksum;
             frames = frames.saturating_add(submission.presentations.len());
             shm_frames = shm_frames.saturating_add(submission.presentations.len());
+            let frame_scheduled = submission.frame_scheduled;
             for (surface, generation) in submission.presentations {
                 let Some(state) = committed.iter().find(|state| state.surface == surface) else {
                     continue;
@@ -527,6 +528,21 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                         }),
                     )?;
                 } else {
+                    if frame_scheduled {
+                        // Unblock the client as soon as KMS has accepted the
+                        // composition. Buffer release still waits for the
+                        // page-flip feedback below.
+                        apply_wayland_feedback(
+                            &mut frontend,
+                            &mut scene,
+                            AuthorityFeedback::FrameScheduled(SurfacePresentationFeedback {
+                                surface,
+                                generation,
+                                presentation_msec: u64::try_from(started.elapsed().as_millis())
+                                    .unwrap_or(u64::MAX),
+                            }),
+                        )?;
+                    }
                     presentation_observations.insert((surface, generation), checksum);
                 }
             }
