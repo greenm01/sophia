@@ -29,7 +29,10 @@ image creation, rendering, texture detach, image destruction, KMS submission,
 page-flip observation, scanout retirement, and client buffer release. The
 session exited normally with three imports, three retirements, three callbacks,
 no cleanup debt, and a 14 ms maximum submit-to-page-flip interval. The
-300-frame lifetime proof remains the next required safety gate.
+GDB-backed 300-frame lifetime proof then completed with 300 imports,
+submissions, page flips, and retirements, no allocator diagnostic or cleanup
+debt, and the same 14 ms maximum submit-to-page-flip interval. The next required
+evidence is the three guarded real-Kitty DMA-BUF runs.
 
 ## 2026-07-12: DMA-BUF Performance Gate and Renderer Safety Boundary
 

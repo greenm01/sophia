@@ -33,9 +33,9 @@ Current truth:
   native renderer/exporter heap on hardware. Isolate that ownership fault before
   attempting further latency reductions.
 - DMA-BUF is admitted but remains experimental. The repaired controlled
-  three-frame hardware proof now imports, submits, retires, and releases three
-  full-size 1920x1200 buffers without allocator diagnostics; SHM remains the
-  production fallback.
+  three-frame and 300-frame hardware proofs now import, submit, retire, and
+  reuse full-size 1920x1200 buffers only after release, without allocator
+  diagnostics; SHM remains the production fallback.
 
 Exit criteria:
 
@@ -82,7 +82,7 @@ Exit criteria:
   `tools/wayland_dmabuf_first_frame_hardware_proof.sh`: experimental enablement,
   three imports, KMS presentation retirement, no cleanup debt, and 14 ms maximum
   submit-to-page-flip latency.
-- [ ] Pass the controlled 300-frame lifecycle run with the same tool. The
+- [x] Pass the controlled 300-frame lifecycle run with the same tool. The
   verifier must see experimental enablement, imports, KMS presentation
   retirement, no cleanup debt, and no more than 100 ms submit-to-page-flip
   latency.

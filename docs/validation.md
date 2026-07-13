@@ -114,8 +114,10 @@ Current hardware status: after explicitly detaching the EGLImage from its GL
 texture before destruction, the GDB-backed controlled three-frame run passes.
 It imports, submits, page-flips, retires, and releases three full-size 1920x1200
 DMA-BUF frames with no allocator diagnostic and a 14 ms maximum
-submit-to-page-flip interval. The 300-frame lifetime proof remains the next
-gate; do not start the Kitty promotion sequence yet.
+submit-to-page-flip interval. The GDB-backed 300-frame lifetime proof also
+passes: 300 imports, submissions, page flips, and retirements, with no cleanup
+debt and the same 14 ms maximum submit-to-page-flip interval. The next gate is
+the three guarded real-Kitty DMA-BUF runs.
 
 On Void Linux, run that next gate from a dedicated text TTY with:
 

@@ -68,7 +68,7 @@ tracking, and fail-closed errors.
 The initial native DMA-BUF route accepts only a bounded single-plane linear
 XRGB8888/ARGB8888 descriptor and stays behind `--experimental-dmabuf`. It is
 not a general renderer contract. Its repaired three-frame controlled hardware
-proof passes; the 300-frame lifetime and real-Kitty gates remain open. Its
+proof and 300-frame lifetime proof pass; the real-Kitty gate remains open. Its
 lifecycle is explicit:
 
 `admitted descriptor → renderer-private import/submission → observed page flip
