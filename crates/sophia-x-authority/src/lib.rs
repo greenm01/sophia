@@ -1,7 +1,9 @@
-//! Passive Sophia X Authority resource model.
+//! Sophia X Server Frontend implementation seed.
 //!
-//! This crate intentionally starts without a live socket parser. It models the
-//! authority-owned tables that later X protocol dispatch will mutate.
+//! This crate terminates a bounded, modern X11 subset and translates its
+//! authority-owned resource state into Sophia transactions. It does not own
+//! physical input, compositor policy, rendering, or DRM/KMS. The current crate
+//! name remains `sophia-x-authority` while the source layout matures.
 
 mod atom;
 mod client_output;

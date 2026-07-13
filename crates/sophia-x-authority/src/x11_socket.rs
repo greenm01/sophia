@@ -1,4 +1,6 @@
 #[cfg(unix)]
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+#[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 #[cfg(unix)]
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError};
@@ -6,7 +8,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::{
     collections::BTreeMap,
     io::{ErrorKind, Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering},
@@ -47,6 +49,118 @@ impl core::fmt::Display for X11SetupSocketError {
 }
 
 impl std::error::Error for X11SetupSocketError {}
+
+/// Configuration owned by one local Sophia X Server Frontend listener.
+///
+/// This deliberately describes only the boundary that exists today: one
+/// owner-only Unix socket and one Sophia namespace. Authentication policy,
+/// output/RandR facts, and multi-client resource allocation are explicit
+/// follow-up work rather than implicit defaults hidden in a smoke helper.
+#[cfg(unix)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct XServerFrontendConfig {
+    socket_path: PathBuf,
+    namespace: NamespaceId,
+}
+
+#[cfg(unix)]
+impl XServerFrontendConfig {
+    pub fn new(
+        socket_path: impl Into<PathBuf>,
+        namespace: NamespaceId,
+    ) -> Result<Self, X11SetupSocketError> {
+        let socket_path = socket_path.into();
+        if socket_path.as_os_str().is_empty() {
+            return Err(X11SetupSocketError::new(
+                "Sophia X Server Frontend socket path must not be empty",
+            ));
+        }
+        if !namespace.is_valid() {
+            return Err(X11SetupSocketError::new(
+                "Sophia X Server Frontend namespace must be valid",
+            ));
+        }
+        Ok(Self {
+            socket_path,
+            namespace,
+        })
+    }
+
+    pub fn socket_path(&self) -> &Path {
+        &self.socket_path
+    }
+
+    pub const fn namespace(&self) -> NamespaceId {
+        self.namespace
+    }
+}
+
+/// A long-running, local X11 listener owned by the Sophia X Server Frontend.
+///
+/// The frontend owns only X11 protocol state. It has no DRM/KMS, physical-input,
+/// scene-graph, or layout ownership. Current dispatch is intentionally
+/// sequential; sharing the resource state across simultaneously live clients
+/// requires client-specific XID allocation and is tracked as a separate
+/// compatibility milestone.
+#[cfg(unix)]
+#[derive(Debug)]
+pub struct XServerFrontend {
+    config: XServerFrontendConfig,
+    listener: UnixListener,
+    state: X11CoreSocketServerState,
+}
+
+#[cfg(unix)]
+impl XServerFrontend {
+    pub fn bind(config: XServerFrontendConfig) -> Result<Self, X11SetupSocketError> {
+        let listener = bind_x11_core_socket_server(config.socket_path())?;
+        Ok(Self {
+            config,
+            listener,
+            state: X11CoreSocketServerState::new(),
+        })
+    }
+
+    pub fn config(&self) -> &XServerFrontendConfig {
+        &self.config
+    }
+
+    pub fn serve_next(&mut self) -> Result<(), X11SetupSocketError> {
+        serve_x11_core_socket_listener_once(
+            &self.listener,
+            self.config.namespace(),
+            &mut self.state,
+        )
+    }
+
+    pub fn serve_next_traced(
+        &mut self,
+        observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
+    ) -> Result<(), X11SetupSocketError> {
+        serve_x11_core_socket_listener_once_traced(
+            &self.listener,
+            self.config.namespace(),
+            &mut self.state,
+            observer,
+        )
+    }
+
+    pub fn serve_forever(&mut self) -> Result<(), X11SetupSocketError> {
+        self.serve_forever_traced(|_| Ok(()))
+    }
+
+    pub fn serve_forever_traced(
+        &mut self,
+        observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
+    ) -> Result<(), X11SetupSocketError> {
+        serve_x11_core_socket_listener_traced(
+            &self.listener,
+            self.config.namespace(),
+            &mut self.state,
+            observer,
+        )
+    }
+}
 
 #[cfg(unix)]
 #[derive(Clone, Debug)]
@@ -235,9 +349,9 @@ pub fn run_x11_core_socket_server_traced(
     namespace: NamespaceId,
     observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
-    let listener = bind_x11_core_socket_server(path)?;
-    let mut state = X11CoreSocketServerState::new();
-    serve_x11_core_socket_listener_traced(&listener, namespace, &mut state, observer)
+    let config = XServerFrontendConfig::new(path.as_ref(), namespace)?;
+    let mut frontend = XServerFrontend::bind(config)?;
+    frontend.serve_forever_traced(observer)
 }
 
 #[cfg(unix)]
@@ -389,23 +503,43 @@ pub fn bind_x11_core_socket_server(
     path: impl AsRef<Path>,
 ) -> Result<UnixListener, X11SetupSocketError> {
     let path = path.as_ref();
-    match std::fs::remove_file(path) {
-        Ok(()) => {}
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_socket() => {
+            std::fs::remove_file(path).map_err(|error| {
+                X11SetupSocketError::new(format!(
+                    "failed to remove stale X11 core socket {}: {error}",
+                    path.display()
+                ))
+            })?;
+        }
+        Ok(_) => {
+            return Err(X11SetupSocketError::new(format!(
+                "refusing to replace non-socket X11 core path {}",
+                path.display()
+            )));
+        }
         Err(error) if error.kind() == ErrorKind::NotFound => {}
         Err(error) => {
             return Err(X11SetupSocketError::new(format!(
-                "failed to remove stale X11 core socket {}: {error}",
+                "failed to inspect X11 core socket {}: {error}",
                 path.display()
             )));
         }
     }
 
-    UnixListener::bind(path).map_err(|error| {
+    let listener = UnixListener::bind(path).map_err(|error| {
         X11SetupSocketError::new(format!(
             "failed to bind X11 core socket {}: {error}",
             path.display()
         ))
-    })
+    })?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|error| {
+        X11SetupSocketError::new(format!(
+            "failed to restrict X11 core socket {} to its owner: {error}",
+            path.display()
+        ))
+    })?;
+    Ok(listener)
 }
 
 #[cfg(unix)]

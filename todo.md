@@ -98,14 +98,20 @@ engineering reason.
 - [x] Establish the first X11 setup/socket/resource prototype and reduce
   bounded X lifecycle, property, core-draw, and private-present facts into
   Engine transactions.
-- [ ] Specify the production X Server Frontend boundary: client connection and
+- [x] Specify the production X Server Frontend boundary: client connection and
   authentication ownership, X resource lifecycle, Engine transaction intake,
-  output/RandR facts, routed-input decisions, and presentation feedback.
+  output/RandR facts, routed-input decisions, and presentation feedback. The
+  current implementation and explicit remaining gaps are documented in
+  `docs/sophia-x-authority.md`.
 - [ ] Turn the temporary socket smoke into a supervised, configurable,
   long-running local X server frontend without giving it DRM/KMS or physical
-  input ownership.
-- [ ] Define the X11 session profiles: classic shared-X behavior for trusted
+  input ownership. The first slice now has an explicit
+  `XServerFrontendConfig`/`XServerFrontend` listener with owner-only socket
+  permissions and safe stale-socket handling; authentication, Engine-backed
+  session supervision, and simultaneous clients remain.
+- [x] Define the X11 session profiles: classic shared-X behavior for trusted
   sessions, plus explicit confined namespaces/capabilities where requested.
+  The confined profile remains gated on client-aware connection routing.
 - [ ] Establish an application-driven compatibility matrix and make every new
   X11 request, reply, event, or extension earn its implementation through a
   reproducible real-client probe.

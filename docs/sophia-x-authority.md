@@ -47,6 +47,44 @@ The frontend must not own:
 - portal policy decisions;
 - renderer imports, frame scheduling, or scanout.
 
+## Production Boundary And Current Implementation Status
+
+The production boundary is deliberately a small, bidirectional contract. It
+keeps X11 semantics in the frontend and all physical display authority in
+Sophia Engine:
+
+| Direction | Contract | Owner and rule |
+| --- | --- | --- |
+| X11 client → frontend | local Unix connection, setup authentication, X11 requests, and X resource lifetime | The frontend owns parsing, client identity, XIDs, atoms, windows, properties, selections, grabs, and client-visible replies/events. Production setup authentication must be explicit; an owner-only socket is a transport guard, not a replacement for X11 authorization. |
+| Frontend → Engine | `XAuthorityObservedTransactionBatch` containing `SurfaceTransaction` values and any CPU buffer update | This is the only visual ingress. The batch is bounded; backpressure is an error rather than an unbounded queue. Engine receives Sophia surface data, never raw X11 request parsing or XID ownership. |
+| Engine → frontend | `XAuthorityInputEvent` and `XAuthorityControlCommand` | Engine selects the physical-input target, owns coordinates/hit-testing, and requests X-visible focus or configure results. The frontend applies X delivery rules and returns `XAuthorityControlAck`. |
+| Engine → frontend (next) | output/RandR snapshot and presentation/buffer-release feedback | Engine remains the source of physical output facts, frame retirement, and buffer lifetime. The frontend turns those facts into RandR/configure/present-visible X11 state; it must never infer scanout completion itself. |
+
+The existing implementation covers the second and third rows for the
+single-client live-session prototype: the X11 socket dispatch emits bounded
+transaction batches, and the Engine can route key/pointer events plus
+focus/configure commands back to that client. Its persistent socket listener
+also reuses authority state across *sequential* clients. It is not yet a
+production multi-client server: X11 setup authentication is currently accepted
+without validation, root/output facts are fixed setup values, and per-client
+XID allocation plus simultaneous-client dispatch are still required. The new
+`XServerFrontendConfig`/`XServerFrontend` listener primitive makes the local
+socket path and namespace explicit, rejects invalid namespaces, restricts the
+socket to its owner, and refuses to replace a non-socket path. It does not
+claim to solve those remaining compatibility requirements.
+
+The two session profiles have these precise semantics:
+
+- **Classic shared-X:** one trusted local session assigns all participating
+  clients the same namespace. Ordinary X11 inspection, coordination,
+  selections, and window-manager interaction remain available within that
+  session.
+- **Confined:** the launch/authentication layer assigns a distinct namespace
+  and explicit capabilities for a client group. Cross-namespace discovery,
+  properties, selections, and input are denied unless a narrow portal grants a
+  transfer. This profile needs client-aware connection routing before it can be
+  enabled; it is not an alias for the current shared listener.
+
 ## Modern X11 Compatibility Subset
 
 The first practical target is not all of X11. It is enough protocol to run real

@@ -4023,6 +4023,59 @@ fn x_authority_transaction_emitter_reports_backpressure() {
 
 #[cfg(unix)]
 #[test]
+fn x_server_frontend_config_requires_a_socket_path_and_namespace() {
+    assert!(XServerFrontendConfig::new("", NamespaceId::from_raw(1)).is_err());
+    assert!(XServerFrontendConfig::new("/tmp/sophia-x11.sock", NamespaceId::INVALID).is_err());
+
+    let config =
+        XServerFrontendConfig::new("/tmp/sophia-x11.sock", NamespaceId::from_raw(812)).unwrap();
+    assert_eq!(
+        config.socket_path(),
+        std::path::Path::new("/tmp/sophia-x11.sock")
+    );
+    assert_eq!(config.namespace(), NamespaceId::from_raw(812));
+}
+
+#[cfg(unix)]
+#[test]
+fn x_server_frontend_binds_an_owner_only_socket_and_preserves_regular_files() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let path = std::env::temp_dir().join(format!(
+        "sophia-x-server-frontend-test-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let config = XServerFrontendConfig::new(&path, NamespaceId::from_raw(813)).unwrap();
+    let frontend = XServerFrontend::bind(config).unwrap();
+    assert_eq!(frontend.config().socket_path(), path.as_path());
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    drop(frontend);
+    std::fs::remove_file(&path).unwrap();
+
+    std::fs::write(&path, b"do not replace regular files").unwrap();
+    let config = XServerFrontendConfig::new(&path, NamespaceId::from_raw(814)).unwrap();
+    let error = match XServerFrontend::bind(config) {
+        Ok(_) => panic!("frontend must not replace a regular file"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("refusing to replace non-socket"));
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        b"do not replace regular files"
+    );
+    std::fs::remove_file(&path).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
 fn x11_setup_socket_smoke_completes_handshake() {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
