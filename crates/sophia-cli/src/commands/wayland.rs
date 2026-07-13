@@ -172,19 +172,16 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                 &mut pointer_presentations,
                 &mut max_observed_input_latency,
             );
-            let item = AuthorityFeedback::Presented(SurfacePresentationFeedback {
-                surface,
-                generation,
-                presentation_msec: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
-            });
-            for event in frontend.apply_feedback(item)? {
-                if let WaylandFrontendEvent::Authority(WaylandAuthorityAction::BufferReleased(
-                    release,
-                )) = event
-                {
-                    scene.release(release.source);
-                }
-            }
+            apply_wayland_feedback(
+                &mut frontend,
+                &mut scene,
+                AuthorityFeedback::Presented(SurfacePresentationFeedback {
+                    surface,
+                    generation,
+                    presentation_msec: u64::try_from(started.elapsed().as_millis())
+                        .unwrap_or(u64::MAX),
+                }),
+            )?;
         }
         if max_runtime.is_some_and(|limit| started.elapsed() >= limit) {
             break;
@@ -282,7 +279,6 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
         }
 
         let events = frontend.dispatch()?;
-        let mut feedback = Vec::new();
         for event in events {
             match event {
                 WaylandFrontendEvent::CpuBufferRegistered(buffer) => scene.register(buffer),
@@ -323,7 +319,11 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                         let _ = focus.focus_surface(SeatId::from_raw(1), surface, &committed);
                     }
                     scene.observe_committed(&committed);
-                    feedback.push(AuthorityFeedback::Transaction(commit));
+                    apply_wayland_feedback(
+                        &mut frontend,
+                        &mut scene,
+                        AuthorityFeedback::Transaction(commit),
+                    )?;
                     if let Some(generation) = committed_generation {
                         let report =
                             if matches!(transaction.target_buffer, BufferSource::DmaBuf { .. }) {
@@ -381,14 +381,16 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                                 &mut pointer_presentations,
                                 &mut max_observed_input_latency,
                             );
-                            feedback.push(AuthorityFeedback::Presented(
-                                SurfacePresentationFeedback {
+                            apply_wayland_feedback(
+                                &mut frontend,
+                                &mut scene,
+                                AuthorityFeedback::Presented(SurfacePresentationFeedback {
                                     surface,
                                     generation,
                                     presentation_msec: u64::try_from(started.elapsed().as_millis())
                                         .unwrap_or(u64::MAX),
-                                },
-                            ));
+                                }),
+                            )?;
                         } else {
                             presentation_observations.insert((surface, generation), checksum);
                         }
@@ -412,16 +414,6 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                     return Err(format!("Wayland protocol authority failed: {error}").into());
                 }
                 _ => {}
-            }
-        }
-        for item in feedback {
-            for event in frontend.apply_feedback(item)? {
-                if let WaylandFrontendEvent::Authority(WaylandAuthorityAction::BufferReleased(
-                    release,
-                )) = event
-                {
-                    scene.release(release.source);
-                }
             }
         }
         std::thread::sleep(Duration::from_millis(2));
@@ -483,6 +475,21 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
         input_pixel_changes,
         max_observed_input_latency.as_millis(),
     );
+    Ok(())
+}
+
+fn apply_wayland_feedback(
+    frontend: &mut WaylandFrontend,
+    scene: &mut WaylandCpuScene,
+    feedback: AuthorityFeedback,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for event in frontend.apply_feedback(feedback)? {
+        if let WaylandFrontendEvent::Authority(WaylandAuthorityAction::BufferReleased(release)) =
+            event
+        {
+            scene.release(release.source);
+        }
+    }
     Ok(())
 }
 
