@@ -89,8 +89,11 @@ pixel changes before draining the service. The live launcher still starts one
 xterm by default, but `--secondary-terminal` starts and supervises a second
 xterm on the same bounded frontend. `tools/live_session_two_xterm_hardware_proof.sh`
 is the operator gate for KMS-backed evidence: it requires normal persistent
-session validation plus at least two composed CPU layers. Root/output facts are
-still fixed setup values. Each accepted
+session validation plus at least two composed CPU layers. Initial Engine focus
+is now acknowledged by the owning X11 client before the input proof begins, so
+either focused terminal can demonstrate delivery. X11 map/configure lifecycle
+updates no longer overwrite a surface's committed-pixel generation. Root/output
+facts are still fixed setup values. Each accepted
 client now gets
 a disjoint X11 setup resource-ID range. Every currently supported XID-creating
 wire path—window, pixmap, GC, font, colormap, glyph cursor, and reduced

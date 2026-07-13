@@ -139,9 +139,10 @@ engineering reason.
   pixel state before the service drains. The launcher still starts one xterm;
   `--secondary-terminal` and `tools/live_session_two_xterm_hardware_proof.sh`
   now provide the KMS multi-app operator gate, requiring two composed layers in
-  addition to the existing persistent hardware evidence. Next, collect that
-  hardware evidence and expose configurable client admission/auth policy to the
-  launcher.
+  addition to the existing persistent hardware evidence. The focus handshake
+  and monotonic X11 pixel generations are covered headlessly; next, collect
+  fresh KMS evidence with the guarded two-xterm tool and expose configurable
+  client admission/auth policy to the launcher.
 - [x] Define the X11 session profiles: classic shared-X behavior for trusted
   sessions, plus explicit confined namespaces/capabilities where requested.
   The confined profile remains gated on client-aware connection routing.

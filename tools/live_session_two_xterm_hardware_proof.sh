@@ -7,7 +7,7 @@ EVIDENCE_FILE="${SOPHIA_LIVE_SESSION_PERSISTENT_EVIDENCE:-/tmp/sophia-live-sessi
 export SOPHIA_LIVE_SESSION_PERSISTENT_EVIDENCE="$EVIDENCE_FILE"
 # Two X clients need time to complete their independent startup and establish
 # a stable frame before the input proof begins. Keep an explicit user override.
-: "${SOPHIA_LIVE_SESSION_RUNTIME_MSEC:=12000}"
+: "${SOPHIA_LIVE_SESSION_RUNTIME_MSEC:=20000}"
 export SOPHIA_LIVE_SESSION_RUNTIME_MSEC
 "$ROOT_DIR/tools/live_session_persistent_hardware_proof.sh" --secondary-terminal "$@"
 

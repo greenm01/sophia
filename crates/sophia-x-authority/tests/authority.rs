@@ -106,7 +106,7 @@ fn window_lifecycle_creates_authority_surface_records() {
         .expect("mapped window should emit authority surface");
 
     assert!(mapped.mapped);
-    assert_eq!(mapped.generation, 2);
+    assert_eq!(mapped.generation, 1);
 
     let destroyed = windows
         .apply(XWindowLifecycleEvent::Destroyed { id: window })
@@ -251,7 +251,19 @@ fn repeated_runtime_draws_advance_surface_generations() {
         window,
         damage.clone(),
     );
-    let second = runtime.apply_core_draw(TransactionId::from_raw(14), namespace, window, damage);
+    let mapped = runtime.apply(XAuthorityRequestPacket {
+        transaction: TransactionId::from_raw(14),
+        namespace,
+        kind: XAuthorityRequestKind::MapWindow {
+            window,
+            generation: 99,
+        },
+    });
+    assert_eq!(mapped.outcome, XAuthorityResponseOutcome::Accepted);
+    runtime
+        .configure_window_geometry(namespace, window, None, None, None, None, 100)
+        .unwrap();
+    let second = runtime.apply_core_draw(TransactionId::from_raw(15), namespace, window, damage);
 
     assert_eq!(first.transactions[0].previous_committed_generation, 5);
     assert_eq!(second.transactions[0].previous_committed_generation, 6);
@@ -795,7 +807,7 @@ fn x_authority_response_codec_round_trips_runtime_outputs() {
                 width: 3,
                 height: 4,
             }),
-            previous_committed_generation: 2,
+            previous_committed_generation: 1,
             timeout_msec: 250,
         },
     });

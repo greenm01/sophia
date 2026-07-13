@@ -109,22 +109,24 @@ impl XWindowTable {
                 self.windows.insert(id, record);
                 Ok(Some(authority_surface))
             }
-            XWindowLifecycleEvent::Mapped { id, generation } => {
+            // Mapping changes the X11 lifecycle state but does not create a
+            // compositor transaction.  In particular, its X11 request
+            // sequence must not overwrite the generation used as the
+            // predecessor of the next pixel transaction.
+            XWindowLifecycleEvent::Mapped { id, generation: _ } => {
                 let record = self
                     .windows
                     .get_mut(&id)
                     .ok_or(XAuthorityAccessError::UnknownResource)?;
                 record.map_state = XMapState::Mapped;
-                record.generation = generation;
                 Ok(Some(record.authority_surface()))
             }
-            XWindowLifecycleEvent::Unmapped { id, generation } => {
+            XWindowLifecycleEvent::Unmapped { id, generation: _ } => {
                 let record = self
                     .windows
                     .get_mut(&id)
                     .ok_or(XAuthorityAccessError::UnknownResource)?;
                 record.map_state = XMapState::Unmapped;
-                record.generation = generation;
                 Ok(Some(record.authority_surface()))
             }
             XWindowLifecycleEvent::Configured {
@@ -133,7 +135,7 @@ impl XWindowTable {
                 y,
                 width,
                 height,
-                generation,
+                generation: _,
             } => {
                 let record = self
                     .windows
@@ -151,7 +153,6 @@ impl XWindowTable {
                 if let Some(height) = height {
                     record.geometry.height = i32::from(height);
                 }
-                record.generation = generation;
                 Ok(Some(record.authority_surface()))
             }
             XWindowLifecycleEvent::Destroyed { id } => {

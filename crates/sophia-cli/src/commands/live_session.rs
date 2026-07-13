@@ -151,7 +151,14 @@ pub(crate) fn run_persistent_xterm_session(
     let child = terminal_command.spawn()?;
     let mut process = SessionProcessGuard::new(child, Vec::new(), config.socket_path.clone());
     if config.secondary_terminal {
-        process.add_secondary_child(spawn_secondary_xterm(&terminal, &config.display)?);
+        process.add_secondary_child(spawn_secondary_xterm(
+            &terminal,
+            &config.display,
+            config
+                .inject_text
+                .as_deref()
+                .or(config.expect_physical_text.as_deref()),
+        )?);
     }
 
     println!(
@@ -379,8 +386,10 @@ impl PersistentXtermSessionConfig {
 fn spawn_secondary_xterm(
     terminal: &std::path::Path,
     display: &str,
+    input_proof: Option<&str>,
 ) -> Result<Child, Box<dyn std::error::Error>> {
-    Ok(std::process::Command::new(terminal)
+    let mut command = std::process::Command::new(terminal);
+    command
         .env("DISPLAY", display)
         .args([
             "-cm",
@@ -389,15 +398,29 @@ fn spawn_secondary_xterm(
             "100x28+420+90",
             "-title",
             "Sophia Secondary Terminal",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    if let Some(text) = input_proof {
+        command
+            .args([
+                "-e",
+                "sh",
+                "-c",
+                "printf 'secondary: type %s then Return: ' \"$1\"; IFS= read -r line; printf '\\nsecondary received:%s\\n' \"$line\"; sleep 300",
+                "sophia-secondary-input-proof",
+            ])
+            .arg(text);
+    } else {
+        command.args([
             "-e",
             "sh",
             "-c",
             "printf 'Sophia secondary terminal\\n'; sleep 300",
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()?)
+        ]);
+    }
+    Ok(command.spawn()?)
 }
 
 fn parse_display_number(display: &str) -> Result<u32, Box<dyn std::error::Error>> {
@@ -1121,6 +1144,9 @@ fn run_session_loop(
     let mut focus_deadline_started_at = None;
     let mut focus_ready_reported = false;
     let mut focus_ready_at: Option<Instant> = None;
+    let mut focused_client_ready = wm_session.is_some();
+    let mut focused_client_control: Option<(TransactionId, SurfaceId)> = None;
+    let mut next_focus_control_transaction = 1_000_000u64;
     let mut key_observed_reported = false;
     let mut key_routed_reported = false;
     let mut max_compose = Duration::ZERO;
@@ -1385,8 +1411,34 @@ fn run_session_loop(
                 if focus.focused_surface(seat).is_none()
                     && let Some(surface) = runtime.committed_surfaces().first()
                 {
-                    let _ =
-                        focus.focus_surface(seat, surface.surface, runtime.committed_surfaces());
+                    if focus.focus_surface(seat, surface.surface, runtime.committed_surfaces())
+                        == InputFocusDecision::Focused
+                        && wm_session.is_none()
+                    {
+                        let client = layout
+                            .client_routes
+                            .client_for_surface(surface.surface)
+                            .ok_or("initial X11 focus has no client route")?;
+                        let transaction = TransactionId::from_raw(next_focus_control_transaction);
+                        next_focus_control_transaction = next_focus_control_transaction
+                            .checked_add(1)
+                            .ok_or("initial X11 focus transaction exhausted")?;
+                        control_sender
+                            .try_send(XAuthorityClientControlCommand {
+                                client,
+                                command: XAuthorityControlCommand::FocusSurface {
+                                    transaction,
+                                    surface: surface.surface,
+                                },
+                            })
+                            .map_err(|error| match error {
+                                TrySendError::Full(_) => "initial X11 focus control queue is full",
+                                TrySendError::Disconnected(_) => {
+                                    "initial X11 focus control queue is disconnected"
+                                }
+                            })?;
+                        focused_client_control = Some((transaction, surface.surface));
+                    }
                 }
                 if let Some((transaction, surface)) = layout.focus_to_apply.take()
                     && focus.focus_surface(seat, surface, runtime.committed_surfaces())
@@ -1473,6 +1525,32 @@ fn run_session_loop(
             physical_input_completion_reported = true;
         }
 
+        if wm_session.is_none() {
+            while let Ok(acknowledgement) = control_ack_receiver.try_recv() {
+                let Some((transaction, surface)) = focused_client_control else {
+                    continue;
+                };
+                if acknowledgement.acknowledgement.transaction != transaction
+                    || acknowledgement.acknowledgement.surface != surface
+                {
+                    continue;
+                }
+                if acknowledgement.acknowledgement.outcome != XAuthorityControlOutcome::Applied {
+                    return Err(format!(
+                        "initial X11 focus control was rejected: {:?}",
+                        acknowledgement.acknowledgement.outcome
+                    )
+                    .into());
+                }
+                focused_client_control = None;
+                focused_client_ready = true;
+                println!(
+                    "sophia_live_session_input_pipeline schema=1 status=focus_applied source=x11-control"
+                );
+                std::io::stdout().flush()?;
+            }
+        }
+
         let input_baseline_presented = input_baseline_presented_before_wait
             || scene.last_report.as_ref().is_some_and(|report| {
                 report.nonzero_pixel_bytes > 0
@@ -1503,6 +1581,7 @@ fn run_session_loop(
             && config.input_proof_requested()
             && input_baseline_presented
             && input_start_stable
+            && focused_client_ready
         {
             injection_checksum = scene.last_report.as_ref().map(|report| report.checksum);
             if let Some(text) = config.inject_text.as_deref() {
