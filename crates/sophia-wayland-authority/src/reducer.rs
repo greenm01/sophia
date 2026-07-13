@@ -389,7 +389,13 @@ impl WaylandAuthorityReducer {
         let Some(pending) = self.pending_commits.remove(&commit.transaction) else {
             return Err(WaylandAuthorityError::UnknownTransaction);
         };
-        let state = self.surface_mut(pending.local_id)?;
+        // `wl_surface.destroy` can be handled in the same Wayland dispatch batch
+        // as its final commit.  The frontend has already emitted that commit to
+        // the engine, so let its completion drain quietly after destruction rather
+        // than turning normal client teardown into a fatal protocol error.
+        let Some(state) = self.surfaces.get_mut(&pending.local_id) else {
+            return Ok(Vec::new());
+        };
         if state.in_flight.first().copied() != Some(commit.transaction) {
             return Err(WaylandAuthorityError::OutOfOrderTransaction);
         }
@@ -484,7 +490,7 @@ impl WaylandAuthorityReducer {
             buffers.push(source);
         }
         for transaction in state.in_flight {
-            if let Some(pending) = self.pending_commits.remove(&transaction) {
+            if let Some(pending) = self.pending_commits.get(&transaction) {
                 buffers.push(pending.transaction.target_buffer);
             }
         }

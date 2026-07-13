@@ -308,4 +308,15 @@ fn destroying_a_surface_releases_committed_and_pipelined_buffers_once() {
             WaylandAuthorityAction::SurfaceDestroyed { surface: surface() },
         ]
     );
+
+    assert_eq!(
+        reducer
+            .apply_feedback(commit_feedback(TransactionId::from_raw(41)))
+            .unwrap(),
+        Vec::new()
+    );
+    assert_eq!(
+        reducer.apply_feedback(commit_feedback(TransactionId::from_raw(41))),
+        Err(WaylandAuthorityError::UnknownTransaction)
+    );
 }
