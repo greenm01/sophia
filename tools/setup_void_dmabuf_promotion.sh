@@ -2,6 +2,16 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/sophia"
+INSTALL_LOG="$STATE_DIR/void-dmabuf-install.log"
+REQUIRED_PACKAGES=(
+    gcc
+    pkg-config
+    wayland-devel
+    wayland-protocols
+    MesaLib-devel
+    libdrm-devel
+)
 SKIP_INSTALL=false
 DRY_RUN=false
 
@@ -43,14 +53,29 @@ if [[ "$SKIP_INSTALL" != true ]]; then
         echo "Missing required command: xbps-install" >&2
         exit 1
     }
-    echo "Installing Void Linux DMA-BUF proof dependencies..."
-    sudo xbps-install -S \
-        gcc \
-        pkg-config \
-        wayland-devel \
-        wayland-protocols \
-        MesaLib-devel \
-        libdrm-devel
+    command -v xbps-query >/dev/null || {
+        echo "Missing required command: xbps-query" >&2
+        exit 1
+    }
+    missing_packages=()
+    for package in "${REQUIRED_PACKAGES[@]}"; do
+        if ! xbps-query -p pkgver "$package" >/dev/null 2>&1; then
+            missing_packages+=("$package")
+        fi
+    done
+    if (( ${#missing_packages[@]} == 0 )); then
+        echo "All Void Linux DMA-BUF proof dependencies are already installed."
+    else
+        echo "Installing missing Void Linux DMA-BUF proof dependencies..."
+        printf '  %s\n' "${missing_packages[@]}"
+        mkdir -p "$STATE_DIR"
+        chmod 700 "$STATE_DIR"
+        if ! sudo xbps-install -S "${missing_packages[@]}" 2>&1 | tee "$INSTALL_LOG"; then
+            echo "Dependency installation failed; full log: $INSTALL_LOG" >&2
+            echo "Void does not support partial upgrades. Run 'sudo xbps-install -Syu', then rerun this helper." >&2
+            exit 1
+        fi
+    fi
 fi
 
 cd "$ROOT_DIR"

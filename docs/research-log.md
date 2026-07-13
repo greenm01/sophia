@@ -3,6 +3,21 @@
 This file records decisions and unresolved questions for the active milestone.
 Completed evidence is archived in `research-log-archive.md`.
 
+## 2026-07-12: Controlled DMA-BUF First-Frame Heap Corruption
+
+The first real controlled DMA-BUF run reached Sophia's full-size 1920x1200
+client frame and recorded `sophia_wayland_frame` with `buffer=dmabuf`. The
+native process then aborted with `corrupted size vs. prev_size`, disconnecting
+the producer before presentation retirement or buffer release could be proven.
+This is a renderer/resource-ownership safety failure, not DMA-BUF evidence.
+
+The producer itself now follows the compositor's initial xdg configure rather
+than assuming 640x480, and uses a driver-supported explicit linear GBM
+allocation. Those corrections moved the test past allocation and target-size
+rejection; they did not make the native import/presentation path safe. The
+300-frame lifecycle and three-Kitty promotion gates remain blocked pending
+allocator/lifetime diagnosis.
+
 ## 2026-07-12: DMA-BUF Performance Gate and Renderer Safety Boundary
 
 The current native Wayland/Kitty presentation route is SHM-backed and stable

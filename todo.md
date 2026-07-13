@@ -34,6 +34,10 @@ Current truth:
   attempting further latency reductions.
 - DMA-BUF is admitted but remains experimental. No real hardware DMA-BUF run
   has passed yet, and SHM remains the production fallback.
+- The controlled DMA-BUF producer now reaches a full-size 1920x1200 first-frame
+  submission on hardware, then the native process aborts with
+  `corrupted size vs. prev_size`. Do not run the 300-frame or Kitty promotion
+  gates until that renderer/resource-ownership fault is isolated.
 
 Exit criteria:
 
@@ -48,6 +52,9 @@ Exit criteria:
 - [ ] Establish a lifetime-stress baseline for the persistent native renderer:
   no heap corruption at the 2 ms cadence, no ownership debt, and no attempt to
   remove the CPU-frame copy before its fault is isolated.
+- [ ] Isolate the controlled DMA-BUF first-frame heap corruption with allocator
+  evidence and resource-lifetime tracing, then demonstrate a clean full-size
+  import, KMS submission, page-flip retirement, and client buffer release.
 - [x] Prove a real software-rendered native Wayland Kitty toplevel handles a
   compositor configure, keeps its old size live until ack, then commits changing
   nonzero pixels at the requested size.

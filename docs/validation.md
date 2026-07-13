@@ -110,6 +110,12 @@ import, multiple KMS submissions, accepted callbacks and retirement, no import
 loss, submit/retire/callback failures, in-flight ownership, or cleanup debt,
 and a maximum submit-to-page-flip interval no greater than 100 ms.
 
+Current hardware status: the controlled three-frame run reaches its first
+full-size 1920x1200 DMA-BUF submission, then aborts with
+`corrupted size vs. prev_size`. This is a renderer/resource-ownership safety
+failure, not a passing first-frame result. Preserve the evidence log and do not
+run the 300-frame or Kitty promotion steps until it is isolated.
+
 For the real-Kitty gate, set `SOPHIA_INPUT_DEVICES` to comma-separated keyboard
 and pointer event paths. The guarded launcher asks for its recovery chord before
 DRM takeover. In Kitty, type `sophia` plus Enter, press all four arrow keys,
@@ -133,7 +139,8 @@ devices.
 On Void Linux, `tools/setup_void_dmabuf_promotion.sh` installs the required
 development packages and then starts that operator entry point. Use
 `--dry-run` to install dependencies and inspect device discovery only, or
-`--skip-install` when the packages are already present.
+`--skip-install` when the packages are already present. Its installer transcript
+is retained at `~/.local/state/sophia/void-dmabuf-install.log`.
 
 The archived XLibre latency smoke used a dummy XLibre display,
 routes synthetic text over the compatibility XTEST connection, and requires a

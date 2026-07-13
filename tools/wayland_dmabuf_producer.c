@@ -19,8 +19,7 @@
 enum {
     BUFFER_COUNT = 2,
     FRAME_LIMIT = 1000,
-    WIDTH = 640,
-    HEIGHT = 480,
+    MAX_DIMENSION = 8192,
 };
 
 struct producer;
@@ -42,6 +41,8 @@ struct producer {
     struct xdg_toplevel *toplevel;
     struct gbm_device *gbm;
     int render_fd;
+    uint32_t width;
+    uint32_t height;
     bool configured;
     bool closed;
     bool failed;
@@ -93,11 +94,15 @@ static void xdg_toplevel_configure(
     int32_t height,
     struct wl_array *states
 ) {
-    (void)data;
+    struct producer *producer = data;
     (void)toplevel;
-    (void)width;
-    (void)height;
     (void)states;
+    if (width <= 0 || height <= 0 || width > MAX_DIMENSION || height > MAX_DIMENSION) {
+        fail(producer, "compositor configured an unsupported DMA-BUF size");
+        return;
+    }
+    producer->width = (uint32_t)width;
+    producer->height = (uint32_t)height;
 }
 
 static void xdg_toplevel_close(void *data, struct xdg_toplevel *toplevel) {
@@ -211,8 +216,8 @@ static int paint_buffer(
         buffer->bo,
         0,
         0,
-        WIDTH,
-        HEIGHT,
+        producer->width,
+        producer->height,
         GBM_BO_TRANSFER_WRITE,
         &stride,
         &map_data
@@ -221,8 +226,8 @@ static int paint_buffer(
         fail(producer, "could not map linear GBM buffer");
         return -1;
     }
-    for (uint32_t y = 0; y < HEIGHT; y++) {
-        for (uint32_t x = 0; x < WIDTH; x++) {
+    for (uint32_t y = 0; y < producer->height; y++) {
+        for (uint32_t x = 0; x < producer->width; x++) {
             const uint32_t red = (uint32_t)((frame * 29U + x) & 0xffU);
             const uint32_t green = (uint32_t)((frame * 17U + y) & 0xffU);
             pixels[(y * stride / 4U) + x] = 0xff000000U | (red << 16U) | (green << 8U) | 0x55U;
@@ -240,15 +245,22 @@ static int create_buffer(
     const uint64_t linear_modifier = DRM_FORMAT_MOD_LINEAR;
     buffer->bo = gbm_bo_create_with_modifiers2(
         producer->gbm,
-        WIDTH,
-        HEIGHT,
+        producer->width,
+        producer->height,
         DRM_FORMAT_XRGB8888,
         &linear_modifier,
         1,
-        GBM_BO_USE_LINEAR | GBM_BO_USE_RENDERING
+        0
     );
     if (buffer->bo == NULL) {
-        fail(producer, "could not allocate linear XRGB GBM buffer");
+        char message[160];
+        snprintf(
+            message,
+            sizeof(message),
+            "could not allocate linear XRGB GBM buffer: %s",
+            strerror(errno)
+        );
+        fail(producer, message);
         return -1;
     }
     if (gbm_bo_get_modifier(buffer->bo) != DRM_FORMAT_MOD_LINEAR) {
@@ -279,8 +291,8 @@ static int create_buffer(
     close(dma_fd);
     buffer->buffer = zwp_linux_buffer_params_v1_create_immed(
         params,
-        WIDTH,
-        HEIGHT,
+        producer->width,
+        producer->height,
         DRM_FORMAT_XRGB8888,
         0
     );
@@ -313,7 +325,14 @@ static int initialize_wayland(struct producer *producer) {
     xdg_toplevel_set_title(producer->toplevel, "Sophia DMA-BUF producer");
     xdg_toplevel_set_app_id(producer->toplevel, "org.sophia.dmabuf-producer");
     wl_surface_commit(producer->surface);
-    return dispatch_until(producer, &producer->configured);
+    if (dispatch_until(producer, &producer->configured) != 0) {
+        return -1;
+    }
+    if (producer->width == 0 || producer->height == 0) {
+        fail(producer, "compositor did not provide a DMA-BUF size");
+        return -1;
+    }
+    return 0;
 }
 
 static int run_frames(struct producer *producer, unsigned int frame_count) {
@@ -330,7 +349,13 @@ static int run_frames(struct producer *producer, unsigned int frame_count) {
         struct wl_callback *callback = wl_surface_frame(producer->surface);
         wl_callback_add_listener(callback, &FRAME_LISTENER, &wait);
         wl_surface_attach(producer->surface, buffer->buffer, 0, 0);
-        wl_surface_damage_buffer(producer->surface, 0, 0, WIDTH, HEIGHT);
+        wl_surface_damage_buffer(
+            producer->surface,
+            0,
+            0,
+            (int32_t)producer->width,
+            (int32_t)producer->height
+        );
         wl_surface_commit(producer->surface);
         if (wl_display_flush(producer->display) < 0 && errno != EAGAIN) {
             fail(producer, "could not flush Wayland DMA-BUF frame");
