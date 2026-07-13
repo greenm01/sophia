@@ -4144,6 +4144,54 @@ fn x_server_frontend_rejects_bad_cookie_then_accepts_the_configured_cookie() {
 
 #[cfg(unix)]
 #[test]
+fn x_server_frontend_assigns_disjoint_setup_resource_ranges_to_clients() {
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let socket_path = std::env::temp_dir().join(format!(
+        "sophia-x-server-frontend-resource-ranges-test-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let config = XServerFrontendConfig::new(&socket_path, NamespaceId::from_raw(816)).unwrap();
+    let server = thread::spawn(move || {
+        let mut frontend = XServerFrontend::bind(config).unwrap();
+        frontend.serve_next().unwrap();
+        frontend.serve_next().unwrap();
+    });
+
+    wait_for_socket(&socket_path);
+    let mut first = UnixStream::connect(&socket_path).unwrap();
+    first
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    let first_base = read_setup_resource_id_base(&mut first, XByteOrder::LittleEndian);
+    drop(first);
+
+    let mut second = UnixStream::connect(&socket_path).unwrap();
+    second
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    let second_base = read_setup_resource_id_base(&mut second, XByteOrder::LittleEndian);
+    drop(second);
+
+    assert_eq!(first_base, X_SETUP_DEFAULT_RESOURCE_ID_BASE);
+    assert_eq!(second_base, 0x0040_0000);
+    assert_eq!(
+        second_base - first_base,
+        X_SETUP_DEFAULT_RESOURCE_ID_MASK + 1
+    );
+    server.join().unwrap();
+    std::fs::remove_file(&socket_path).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
 fn x11_setup_socket_smoke_completes_handshake() {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
@@ -5635,6 +5683,14 @@ fn wait_for_socket(path: &std::path::Path) {
 
 #[cfg(unix)]
 fn read_setup_success(stream: &mut std::os::unix::net::UnixStream, byte_order: XByteOrder) {
+    let _ = read_setup_resource_id_base(stream, byte_order);
+}
+
+#[cfg(unix)]
+fn read_setup_resource_id_base(
+    stream: &mut std::os::unix::net::UnixStream,
+    byte_order: XByteOrder,
+) -> u32 {
     use std::io::Read;
 
     let mut prefix = [0; X_SETUP_REPLY_PREFIX_LEN];
@@ -5643,6 +5699,7 @@ fn read_setup_success(stream: &mut std::os::unix::net::UnixStream, byte_order: X
     let body_len = usize::from(read_u16(byte_order, &prefix[6..8])) * 4;
     let mut body = vec![0; body_len];
     stream.read_exact(&mut body).unwrap();
+    read_u32(byte_order, &body[4..8])
 }
 
 #[cfg(unix)]

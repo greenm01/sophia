@@ -18,16 +18,22 @@ use std::{
 
 #[cfg(unix)]
 use crate::{
-    X_SETUP_CLIENT_PREFIX_LEN, X_SETUP_DEFAULT_ROOT, X_SETUP_MAX_AUTH_FIELD_LEN, XAtomTable,
-    XAuthorityCpuBufferUpdate, XAuthorityObservedTransactionBatch, XAuthorityRuntime, XByteOrder,
-    XClientEvent, XDispatchContext, XDispatchResult, XPropertyTable, XResourceId, XSetupFailure,
-    XSetupRequest, XSetupSuccess, XWireClientContext, decode_x11_core_request,
-    dispatch_x11_parse_error, dispatch_x11_wire_request, encode_x_client_event,
-    encode_x11_setup_failure, encode_x11_setup_success, parse_x11_setup_request,
-    try_emit_x_authority_trace, try_emit_x_authority_transactions, x11_setup_request_total_len,
+    X_SETUP_CLIENT_PREFIX_LEN, X_SETUP_DEFAULT_RESOURCE_ID_MASK, X_SETUP_DEFAULT_ROOT,
+    X_SETUP_MAX_AUTH_FIELD_LEN, XAtomTable, XAuthorityCpuBufferUpdate,
+    XAuthorityObservedTransactionBatch, XAuthorityRuntime, XByteOrder, XClientEvent,
+    XDispatchContext, XDispatchResult, XPropertyTable, XResourceId, XSetupFailure, XSetupRequest,
+    XSetupSuccess, XWireClientContext, decode_x11_core_request, dispatch_x11_parse_error,
+    dispatch_x11_wire_request, encode_x_client_event, encode_x11_setup_failure,
+    encode_x11_setup_success, parse_x11_setup_request, try_emit_x_authority_trace,
+    try_emit_x_authority_transactions, x11_setup_request_total_len,
 };
 #[cfg(unix)]
 use sophia_protocol::{NamespaceId, Size, SurfaceId, TransactionId};
+
+#[cfg(unix)]
+const X11_CLIENT_RESOURCE_RANGE_SIZE: u32 = X_SETUP_DEFAULT_RESOURCE_ID_MASK + 1;
+#[cfg(unix)]
+const X11_MAX_CLIENT_RESOURCE_RANGES: u16 = (u32::MAX / X11_CLIENT_RESOURCE_RANGE_SIZE) as u16;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct X11SetupSocketError {
@@ -342,17 +348,46 @@ impl From<XAuthorityKeyEvent> for XAuthorityInputEvent {
 /// Authority-owned state shared by every client accepted by one X11 socket
 /// listener. Client sequence numbers remain connection-local.
 #[cfg(unix)]
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct X11CoreSocketServerState {
     runtime: Arc<Mutex<XAuthorityRuntime>>,
     atoms: XAtomTable,
     properties: XPropertyTable,
+    next_client_resource_range: u16,
+}
+
+#[cfg(unix)]
+impl Default for X11CoreSocketServerState {
+    fn default() -> Self {
+        Self {
+            runtime: Default::default(),
+            atoms: Default::default(),
+            properties: Default::default(),
+            next_client_resource_range: 1,
+        }
+    }
 }
 
 #[cfg(unix)]
 impl X11CoreSocketServerState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn next_client_setup_success(&mut self) -> Result<XSetupSuccess, X11SetupSocketError> {
+        if self.next_client_resource_range > X11_MAX_CLIENT_RESOURCE_RANGES {
+            return Err(X11SetupSocketError::new(
+                "Sophia X Server Frontend exhausted X11 client resource ranges",
+            ));
+        }
+        let resource_id_base =
+            u32::from(self.next_client_resource_range) * X11_CLIENT_RESOURCE_RANGE_SIZE;
+        self.next_client_resource_range = self.next_client_resource_range.saturating_add(1);
+        Ok(XSetupSuccess {
+            resource_id_base,
+            resource_id_mask: X_SETUP_DEFAULT_RESOURCE_ID_MASK,
+            ..XSetupSuccess::client_compatible()
+        })
     }
 }
 
@@ -725,15 +760,19 @@ pub fn serve_x11_setup_socket_client(
     stream: &mut UnixStream,
 ) -> Result<XSetupRequest, X11SetupSocketError> {
     let authorization = XServerFrontendSetupAuthorization::default();
-    serve_x11_setup_socket_client_with_setup_authorization(stream, &authorization)?.ok_or_else(
-        || X11SetupSocketError::new("default X11 setup authorization unexpectedly rejected"),
-    )
+    serve_x11_setup_socket_client_with_setup_authorization(stream, &authorization, || {
+        Ok(XSetupSuccess::client_compatible())
+    })?
+    .ok_or_else(|| {
+        X11SetupSocketError::new("default X11 setup authorization unexpectedly rejected")
+    })
 }
 
 #[cfg(unix)]
 fn serve_x11_setup_socket_client_with_setup_authorization(
     stream: &mut UnixStream,
     authorization: &XServerFrontendSetupAuthorization,
+    setup_success: impl FnOnce() -> Result<XSetupSuccess, X11SetupSocketError>,
 ) -> Result<Option<XSetupRequest>, X11SetupSocketError> {
     let request = read_x11_setup_request(stream)?;
     if !authorization.permits(&request) {
@@ -753,11 +792,9 @@ fn serve_x11_setup_socket_client_with_setup_authorization(
         return Ok(None);
     }
     let response =
-        encode_x11_setup_success(request.byte_order, &XSetupSuccess::client_compatible()).map_err(
-            |error| {
-                X11SetupSocketError::new(format!("failed to encode X11 setup success: {error}"))
-            },
-        )?;
+        encode_x11_setup_success(request.byte_order, &setup_success()?).map_err(|error| {
+            X11SetupSocketError::new(format!("failed to encode X11 setup success: {error}"))
+        })?;
     stream
         .write_all(&response)
         .map_err(|error| X11SetupSocketError::new(format!("failed to write X11 setup: {error}")))?;
@@ -860,7 +897,9 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
     mut observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
     let Some(setup) =
-        serve_x11_setup_socket_client_with_setup_authorization(stream, authorization)?
+        serve_x11_setup_socket_client_with_setup_authorization(stream, authorization, || {
+            state.next_client_setup_success()
+        })?
     else {
         return Ok(());
     };
