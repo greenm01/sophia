@@ -126,9 +126,14 @@ engineering reason.
   and lease state; a two-live-client regression proves shared-X coordination
   and cleanup. Observed transaction batches now retain their source client,
   and the live session resolves focused/hit-tested surfaces into targeted input
-  and control routes; a frontend worker discards another client's route and
-  labels its acknowledgement. The live session remains single-client until a
-  broker attaches those targeted queues to the bounded concurrent workers.
+  and control routes. `XServerFrontendRouteBroker` now provides bounded
+  Engine-facing ingress and attaches private input/control queues to routed
+  concurrent workers; stale, disconnected, and backpressured client routes
+  fail closed, and worker teardown unregisters its route before cleanup is
+  observed. The persistent one-xterm session now uses this brokered worker
+  transport. It remains single-client until its service loop can accept/reap
+  bounded concurrent workers and prove two-client input, control, and teardown
+  end to end.
 - [x] Define the X11 session profiles: classic shared-X behavior for trusted
   sessions, plus explicit confined namespaces/capabilities where requested.
   The confined profile remains gated on client-aware connection routing.

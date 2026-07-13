@@ -5156,6 +5156,110 @@ fn x11_core_socket_channel_sees_sophia_present_transaction_batch() {
     assert!(routes.is_empty());
 }
 
+#[cfg(unix)]
+#[test]
+fn routed_socket_server_delivers_brokered_control_to_its_worker() {
+    use std::io::Write;
+    use std::num::NonZeroUsize;
+    use std::os::unix::net::UnixStream;
+    use std::thread;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    let socket_path = std::env::temp_dir().join(format!(
+        "sophia-x11-routed-worker-test-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let server_path = socket_path.clone();
+    let (transaction_sender, transaction_receiver) =
+        std::sync::mpsc::sync_channel(X_AUTHORITY_OBSERVED_TRANSACTION_CHANNEL_CAPACITY);
+    let (acknowledgement_sender, acknowledgement_receiver) = std::sync::mpsc::sync_channel(2);
+    let broker = XServerFrontendRouteBroker::with_control_ack_sender(
+        NonZeroUsize::new(2).unwrap(),
+        acknowledgement_sender,
+    );
+    let control_sender = broker.control_sender();
+    let server = thread::spawn(move || {
+        run_x11_core_socket_server_once_routed(
+            &server_path,
+            NamespaceId::from_raw(52),
+            transaction_sender,
+            broker,
+        )
+        .unwrap();
+    });
+
+    wait_for_socket(&socket_path);
+    let mut stream = UnixStream::connect(&socket_path).unwrap();
+    stream
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    read_setup_success(&mut stream, XByteOrder::LittleEndian);
+    stream
+        .write_all(&create_window_request(
+            XByteOrder::LittleEndian,
+            0x220701,
+            1,
+            2,
+            300,
+            200,
+        ))
+        .unwrap();
+    assert_eq!(read_x_record(&mut stream)[0], 22);
+    stream
+        .write_all(&sophia_present_pixmap_request(
+            XByteOrder::LittleEndian,
+            0x220701,
+            0x992,
+            (0, 0, 16, 16),
+            1,
+            1,
+        ))
+        .unwrap();
+
+    let batch = transaction_receiver
+        .recv_timeout(Duration::from_secs(1))
+        .unwrap();
+    let client = batch
+        .client
+        .expect("routed worker must identify its client");
+    let surface = batch.transactions[0].surface;
+    let command = XAuthorityControlCommand::ConfigureSurface {
+        transaction: TransactionId::from_raw(88),
+        surface,
+        size: Size {
+            width: 301,
+            height: 201,
+        },
+    };
+    control_sender
+        .send(XAuthorityClientControlCommand { client, command })
+        .unwrap();
+    assert_eq!(
+        acknowledgement_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap(),
+        XAuthorityClientControlAck {
+            client,
+            acknowledgement: XAuthorityControlAck {
+                transaction: command.transaction(),
+                surface,
+                outcome: XAuthorityControlOutcome::Applied,
+            },
+        }
+    );
+    assert_eq!(read_x_record(&mut stream)[0], 22);
+    assert_eq!(read_x_record(&mut stream)[0], 12);
+
+    drop(stream);
+    drop(control_sender);
+    server.join().unwrap();
+    std::fs::remove_file(&socket_path).unwrap();
+}
+
 fn present_dispatch_result(transaction: TransactionId) -> XDispatchResult {
     let namespace = NamespaceId::from_raw(45);
     let mut runtime = XAuthorityRuntime::new();

@@ -3,7 +3,9 @@ use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 #[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 #[cfg(unix)]
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError, TrySendError};
+use std::sync::mpsc::{
+    Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError, TrySendError, sync_channel,
+};
 #[cfg(unix)]
 use std::{
     collections::BTreeMap,
@@ -269,6 +271,20 @@ impl XServerFrontend {
         self.state.active_client_count()
     }
 
+    /// Number of worker threads currently supervised by the concurrent APIs.
+    ///
+    /// This includes a worker while it is completing X11 setup, before that
+    /// connection receives its client lease.
+    pub fn active_client_worker_count(&self) -> usize {
+        self.workers.len()
+    }
+
+    /// Reaps every concurrent worker that has already completed without
+    /// waiting for an active client.
+    pub fn poll_client_workers(&mut self) -> Result<(), X11SetupSocketError> {
+        self.reap_finished_client_workers()
+    }
+
     /// Starts one client worker, if the configured concurrency limit permits
     /// it, and returns as soon as that connection is accepted.
     ///
@@ -286,6 +302,34 @@ impl XServerFrontend {
         &mut self,
         observer: Arc<X11CoreTraceObserver>,
     ) -> Result<(), X11SetupSocketError> {
+        self.serve_next_concurrently_with_routing(observer, None)
+    }
+
+    /// Starts one concurrent client worker with the Engine-facing route broker
+    /// attached to its private input and control queues.
+    pub fn serve_next_concurrently_routed(
+        &mut self,
+        broker: &XServerFrontendRouteBroker,
+    ) -> Result<(), X11SetupSocketError> {
+        let observer: Arc<X11CoreTraceObserver> = Arc::new(|_| Ok(()));
+        self.serve_next_concurrently_routed_traced(broker, observer)
+    }
+
+    /// Like [`Self::serve_next_concurrently_routed`], with a thread-safe
+    /// observer for each completed X11 dispatch.
+    pub fn serve_next_concurrently_routed_traced(
+        &mut self,
+        broker: &XServerFrontendRouteBroker,
+        observer: Arc<X11CoreTraceObserver>,
+    ) -> Result<(), X11SetupSocketError> {
+        self.serve_next_concurrently_with_routing(observer, Some(broker.registry.clone()))
+    }
+
+    fn serve_next_concurrently_with_routing(
+        &mut self,
+        observer: Arc<X11CoreTraceObserver>,
+        routing: Option<XServerFrontendRouteRegistry>,
+    ) -> Result<(), X11SetupSocketError> {
         self.reap_finished_client_workers()?;
         let limit = self.config.max_concurrent_clients().get();
         if self.workers.len() >= limit {
@@ -296,7 +340,7 @@ impl XServerFrontend {
         let (stream, _) = self.listener.accept().map_err(|error| {
             X11SetupSocketError::new(format!("failed to accept X11 core client: {error}"))
         })?;
-        self.spawn_client_worker(stream, observer)
+        self.spawn_client_worker(stream, observer, routing)
     }
 
     /// Reaps every connection worker started by the concurrent APIs.
@@ -367,6 +411,7 @@ impl XServerFrontend {
         &mut self,
         mut stream: UnixStream,
         observer: Arc<X11CoreTraceObserver>,
+        routing: Option<XServerFrontendRouteRegistry>,
     ) -> Result<(), X11SetupSocketError> {
         let worker_id = self.next_worker_id;
         self.next_worker_id = self.next_worker_id.checked_add(1).ok_or_else(|| {
@@ -380,11 +425,12 @@ impl XServerFrontend {
             .name(format!("sophia-x11-client-{worker_id}"))
             .spawn(move || {
                 let result = catch_unwind(AssertUnwindSafe(|| {
-                    serve_x11_core_socket_client_with_trace_observer_and_setup_authorization(
+                    serve_x11_core_socket_client_with_trace_observer_and_setup_authorization_and_routing(
                         &mut stream,
                         namespace,
                         &state,
                         &authorization,
+                        routing,
                         move |trace| observer(trace),
                     )
                 }))
@@ -570,6 +616,298 @@ pub struct XAuthorityClientControlAck {
     pub acknowledgement: XAuthorityControlAck,
 }
 
+/// Routing failure between the Engine-facing ingress queues and a live X11
+/// client worker.
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum XServerFrontendRouteError {
+    UnknownClient { client: XServerFrontendClientId },
+    ClientQueueFull { client: XServerFrontendClientId },
+    ClientQueueDisconnected { client: XServerFrontendClientId },
+    DuplicateClient { client: XServerFrontendClientId },
+    RegistryPoisoned,
+}
+
+#[cfg(unix)]
+impl core::fmt::Display for XServerFrontendRouteError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::UnknownClient { client } => {
+                write!(
+                    formatter,
+                    "X11 route targets unknown client {}",
+                    client.raw()
+                )
+            }
+            Self::ClientQueueFull { client } => {
+                write!(
+                    formatter,
+                    "X11 route queue is full for client {}",
+                    client.raw()
+                )
+            }
+            Self::ClientQueueDisconnected { client } => write!(
+                formatter,
+                "X11 route queue disconnected for client {}",
+                client.raw()
+            ),
+            Self::DuplicateClient { client } => {
+                write!(
+                    formatter,
+                    "X11 route client {} is already registered",
+                    client.raw()
+                )
+            }
+            Self::RegistryPoisoned => formatter.write_str("X11 route registry lock poisoned"),
+        }
+    }
+}
+
+#[cfg(unix)]
+impl std::error::Error for XServerFrontendRouteError {}
+
+/// Engine-facing ingress and per-client queue registry for a routed X11
+/// session.
+///
+/// Engine code sends client-addressed input and control values to the bounded
+/// ingress queues, then its session loop calls [`Self::route_pending`] to move
+/// them into the registered worker's private queues. The broker never
+/// broadcasts a route and fails closed when its target has disappeared or is
+/// backpressured.
+#[cfg(unix)]
+pub struct XServerFrontendRouteBroker {
+    registry: XServerFrontendRouteRegistry,
+    input_sender: SyncSender<XAuthorityClientInputEvent>,
+    input_receiver: Receiver<XAuthorityClientInputEvent>,
+    control_sender: SyncSender<XAuthorityClientControlCommand>,
+    control_receiver: Receiver<XAuthorityClientControlCommand>,
+    acknowledgement_receiver: Option<Receiver<XAuthorityClientControlAck>>,
+}
+
+#[cfg(unix)]
+impl XServerFrontendRouteBroker {
+    pub fn new(queue_capacity: NonZeroUsize) -> Self {
+        let capacity = queue_capacity.get();
+        let (acknowledgement_sender, acknowledgement_receiver) = sync_channel(capacity);
+        Self::with_acknowledgement_transport(
+            queue_capacity,
+            acknowledgement_sender,
+            Some(acknowledgement_receiver),
+        )
+    }
+
+    /// Creates a broker whose control acknowledgements return to the supplied
+    /// Engine-owned bounded queue.
+    pub fn with_control_ack_sender(
+        queue_capacity: NonZeroUsize,
+        acknowledgement_sender: SyncSender<XAuthorityClientControlAck>,
+    ) -> Self {
+        Self::with_acknowledgement_transport(queue_capacity, acknowledgement_sender, None)
+    }
+
+    fn with_acknowledgement_transport(
+        queue_capacity: NonZeroUsize,
+        acknowledgement_sender: SyncSender<XAuthorityClientControlAck>,
+        acknowledgement_receiver: Option<Receiver<XAuthorityClientControlAck>>,
+    ) -> Self {
+        let capacity = queue_capacity.get();
+        let (input_sender, input_receiver) = sync_channel(capacity);
+        let (control_sender, control_receiver) = sync_channel(capacity);
+        Self {
+            registry: XServerFrontendRouteRegistry {
+                clients: Arc::new(Mutex::new(BTreeMap::new())),
+                acknowledgement_sender,
+                per_client_queue_capacity: queue_capacity,
+            },
+            input_sender,
+            input_receiver,
+            control_sender,
+            control_receiver,
+            acknowledgement_receiver,
+        }
+    }
+
+    pub fn input_sender(&self) -> SyncSender<XAuthorityClientInputEvent> {
+        self.input_sender.clone()
+    }
+
+    pub fn control_sender(&self) -> SyncSender<XAuthorityClientControlCommand> {
+        self.control_sender.clone()
+    }
+
+    pub fn recv_control_ack_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<XAuthorityClientControlAck, RecvTimeoutError> {
+        self.acknowledgement_receiver
+            .as_ref()
+            .ok_or(RecvTimeoutError::Disconnected)?
+            .recv_timeout(timeout)
+    }
+
+    /// Routes every value currently available at the bounded ingress.
+    pub fn route_pending(&mut self) -> Result<usize, XServerFrontendRouteError> {
+        let mut routed = 0usize;
+        loop {
+            let mut progressed = false;
+            match self.input_receiver.try_recv() {
+                Ok(route) => {
+                    self.registry.route_input(route)?;
+                    routed = routed.saturating_add(1);
+                    progressed = true;
+                }
+                Err(TryRecvError::Empty | TryRecvError::Disconnected) => {}
+            }
+            match self.control_receiver.try_recv() {
+                Ok(route) => {
+                    self.registry.route_control(route)?;
+                    routed = routed.saturating_add(1);
+                    progressed = true;
+                }
+                Err(TryRecvError::Empty | TryRecvError::Disconnected) => {}
+            }
+            if !progressed {
+                return Ok(routed);
+            }
+        }
+    }
+
+    pub fn registered_client_count(&self) -> usize {
+        self.registry.registered_client_count()
+    }
+}
+
+#[cfg(unix)]
+#[derive(Clone)]
+struct XServerFrontendRouteRegistry {
+    clients: Arc<Mutex<BTreeMap<XServerFrontendClientId, XServerFrontendClientRouteSenders>>>,
+    acknowledgement_sender: SyncSender<XAuthorityClientControlAck>,
+    per_client_queue_capacity: NonZeroUsize,
+}
+
+#[cfg(unix)]
+#[derive(Clone)]
+struct XServerFrontendClientRouteSenders {
+    input: SyncSender<XAuthorityInputEvent>,
+    control: SyncSender<XAuthorityControlCommand>,
+}
+
+#[cfg(unix)]
+struct XServerFrontendClientRouteChannels {
+    input: Receiver<XAuthorityInputEvent>,
+    control: Receiver<XAuthorityControlCommand>,
+}
+
+#[cfg(unix)]
+struct XServerFrontendClientRouteRegistration {
+    client: XServerFrontendClientId,
+    clients: Arc<Mutex<BTreeMap<XServerFrontendClientId, XServerFrontendClientRouteSenders>>>,
+}
+
+#[cfg(unix)]
+impl XServerFrontendRouteRegistry {
+    fn register_client(
+        &self,
+        client: XServerFrontendClientId,
+    ) -> Result<
+        (
+            XServerFrontendClientRouteRegistration,
+            XServerFrontendClientRouteChannels,
+        ),
+        XServerFrontendRouteError,
+    > {
+        let capacity = self.per_client_queue_capacity.get();
+        let (input_sender, input) = sync_channel(capacity);
+        let (control_sender, control) = sync_channel(capacity);
+        let mut clients = self
+            .clients
+            .lock()
+            .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?;
+        if clients.contains_key(&client) {
+            return Err(XServerFrontendRouteError::DuplicateClient { client });
+        }
+        clients.insert(
+            client,
+            XServerFrontendClientRouteSenders {
+                input: input_sender,
+                control: control_sender,
+            },
+        );
+        Ok((
+            XServerFrontendClientRouteRegistration {
+                client,
+                clients: self.clients.clone(),
+            },
+            XServerFrontendClientRouteChannels { input, control },
+        ))
+    }
+
+    fn route_input(
+        &self,
+        route: XAuthorityClientInputEvent,
+    ) -> Result<(), XServerFrontendRouteError> {
+        let sender = self.client_senders(route.client)?.input;
+        self.route_to_client(route.client, sender, route.event)
+    }
+
+    fn route_control(
+        &self,
+        route: XAuthorityClientControlCommand,
+    ) -> Result<(), XServerFrontendRouteError> {
+        let sender = self.client_senders(route.client)?.control;
+        self.route_to_client(route.client, sender, route.command)
+    }
+
+    fn client_senders(
+        &self,
+        client: XServerFrontendClientId,
+    ) -> Result<XServerFrontendClientRouteSenders, XServerFrontendRouteError> {
+        self.clients
+            .lock()
+            .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
+            .get(&client)
+            .cloned()
+            .ok_or(XServerFrontendRouteError::UnknownClient { client })
+    }
+
+    fn route_to_client<T>(
+        &self,
+        client: XServerFrontendClientId,
+        sender: SyncSender<T>,
+        value: T,
+    ) -> Result<(), XServerFrontendRouteError> {
+        match sender.try_send(value) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(_)) => {
+                Err(XServerFrontendRouteError::ClientQueueFull { client })
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                self.clients
+                    .lock()
+                    .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
+                    .remove(&client);
+                Err(XServerFrontendRouteError::ClientQueueDisconnected { client })
+            }
+        }
+    }
+
+    fn registered_client_count(&self) -> usize {
+        self.clients
+            .lock()
+            .map(|clients| clients.len())
+            .unwrap_or(0)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for XServerFrontendClientRouteRegistration {
+    fn drop(&mut self) {
+        if let Ok(mut clients) = self.clients.lock() {
+            clients.remove(&self.client);
+        }
+    }
+}
+
 #[cfg(unix)]
 enum X11InputEventReceiver {
     Plain(Receiver<XAuthorityInputEvent>),
@@ -603,6 +941,10 @@ enum X11ControlChannels {
         receiver: Receiver<XAuthorityClientControlCommand>,
         acknowledgements: SyncSender<XAuthorityClientControlAck>,
     },
+    ClientBound {
+        receiver: Receiver<XAuthorityControlCommand>,
+        acknowledgements: SyncSender<XAuthorityClientControlAck>,
+    },
 }
 
 #[cfg(unix)]
@@ -622,6 +964,9 @@ impl X11ControlChannels {
                         Err(error) => return Err(error),
                     }
                 }
+                Self::ClientBound { receiver, .. } => {
+                    return receiver.recv_timeout(Duration::from_millis(10));
+                }
             }
         }
     }
@@ -633,6 +978,9 @@ impl X11ControlChannels {
     ) -> Result<(), X11SetupSocketError> {
         match self {
             Self::Routed {
+                acknowledgements, ..
+            }
+            | Self::ClientBound {
                 acknowledgements, ..
             } => match acknowledgements.try_send(XAuthorityClientControlAck {
                 client,
@@ -958,6 +1306,7 @@ pub fn run_x11_core_socket_server_once_channels(
         &mut state,
         Some(X11InputEventReceiver::Plain(input_receiver)),
         None,
+        None,
         &XServerFrontendSetupAuthorization::default(),
         move |trace| {
             try_emit_x_authority_trace(&transaction_sender, &trace)
@@ -990,6 +1339,7 @@ pub fn run_x11_core_socket_server_once_session_channels(
             receiver: control_receiver,
             acknowledgements: control_ack_sender,
         }),
+        None,
         &XServerFrontendSetupAuthorization::default(),
         move |trace| {
             try_emit_x_authority_trace(&transaction_sender, &trace)
@@ -997,6 +1347,41 @@ pub fn run_x11_core_socket_server_once_session_channels(
             Ok(())
         },
     )
+}
+
+/// Runs one routed concurrent X11 client until it disconnects.
+///
+/// The caller owns the broker's input/control senders and must stop producing
+/// routes before joining this helper. This is the migration bridge from the
+/// single-client live-session transport to the general bounded concurrent
+/// frontend service: the connection uses the same private worker queues as a
+/// multi-client frontend, while this helper intentionally accepts only one
+/// client.
+#[cfg(unix)]
+pub fn run_x11_core_socket_server_once_routed(
+    path: impl AsRef<Path>,
+    namespace: NamespaceId,
+    transaction_sender: SyncSender<XAuthorityObservedTransactionBatch>,
+    mut broker: XServerFrontendRouteBroker,
+) -> Result<(), X11SetupSocketError> {
+    let config = XServerFrontendConfig::new(path.as_ref().to_path_buf(), namespace)?;
+    let mut frontend = XServerFrontend::bind(config)?;
+    let observer: Arc<X11CoreTraceObserver> = Arc::new(move |trace| {
+        try_emit_x_authority_trace(&transaction_sender, &trace)
+            .map(|_| ())
+            .map_err(|error| X11SetupSocketError::new(error.to_string()))
+    });
+    frontend.serve_next_concurrently_routed_traced(&broker, observer)?;
+    while frontend.active_client_worker_count() != 0 {
+        let routed = broker
+            .route_pending()
+            .map_err(|error| X11SetupSocketError::new(error.to_string()))?;
+        frontend.poll_client_workers()?;
+        if routed == 0 && frontend.active_client_worker_count() != 0 {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -1281,12 +1666,32 @@ fn serve_x11_core_socket_client_with_trace_observer_and_setup_authorization(
     authorization: &XServerFrontendSetupAuthorization,
     observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
+    serve_x11_core_socket_client_with_trace_observer_and_setup_authorization_and_routing(
+        stream,
+        namespace,
+        state,
+        authorization,
+        None,
+        observer,
+    )
+}
+
+#[cfg(unix)]
+fn serve_x11_core_socket_client_with_trace_observer_and_setup_authorization_and_routing(
+    stream: &mut UnixStream,
+    namespace: NamespaceId,
+    state: &X11CoreSocketServerState,
+    authorization: &XServerFrontendSetupAuthorization,
+    client_routing: Option<XServerFrontendRouteRegistry>,
+    observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
+) -> Result<(), X11SetupSocketError> {
     serve_x11_core_socket_client_with_trace_observer_and_input(
         stream,
         namespace,
         state,
         None,
         None,
+        client_routing,
         authorization,
         observer,
     )
@@ -1299,6 +1704,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
     state: &X11CoreSocketServerState,
     input_receiver: Option<X11InputEventReceiver>,
     control_channels: Option<X11ControlChannels>,
+    client_routing: Option<XServerFrontendRouteRegistry>,
     authorization: &XServerFrontendSetupAuthorization,
     mut observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
@@ -1325,6 +1731,28 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
     let output_stream = Arc::new(Mutex::new(stream.try_clone().map_err(|error| {
         X11SetupSocketError::new(format!("failed to clone X11 output socket: {error}"))
     })?));
+    let (route_registration, input_receiver, control_channels) =
+        if let Some(routing) = client_routing {
+            let (registration, channels) = match routing.register_client(client) {
+                Ok(registration) => registration,
+                Err(error) => {
+                    let _ = state.release_client(client);
+                    return Err(X11SetupSocketError::new(format!(
+                        "failed to register X11 client route: {error}"
+                    )));
+                }
+            };
+            (
+                Some(registration),
+                Some(X11InputEventReceiver::Plain(channels.input)),
+                Some(X11ControlChannels::ClientBound {
+                    receiver: channels.control,
+                    acknowledgements: routing.acknowledgement_sender.clone(),
+                }),
+            )
+        } else {
+            (None, input_receiver, control_channels)
+        };
     let input_writer = input_receiver
         .map(|receiver| {
             spawn_x11_input_event_writer(
@@ -1506,6 +1934,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
     let client_lease = state.release_client(client)?;
     debug_assert_eq!(client_lease.resource_id_range, resource_id_range);
     let release = release_x11_client_lease(state, namespace, client_lease)?;
+    drop(route_registration);
     let cleanup_observer_result = if release.removed_surfaces.is_empty() {
         Ok(())
     } else {
@@ -1988,6 +2417,103 @@ mod routing_tests {
                 client: first,
                 acknowledgement,
             }
+        );
+    }
+
+    #[test]
+    fn route_broker_delivers_to_the_registered_client_only() {
+        let client = XServerFrontendClientId(9);
+        let mut broker = XServerFrontendRouteBroker::new(NonZeroUsize::new(2).unwrap());
+        let (registration, channels) = broker.registry.register_client(client).unwrap();
+        let input = XAuthorityInputEvent::Key(XAuthorityKeyEvent {
+            keycode: 38,
+            pressed: true,
+            state: 0,
+            time_msec: 3,
+        });
+        let command = XAuthorityControlCommand::FocusSurface {
+            transaction: TransactionId::from_raw(8),
+            surface: SurfaceId::new(45, 1),
+        };
+
+        broker
+            .input_sender()
+            .send(XAuthorityClientInputEvent {
+                client,
+                event: input,
+            })
+            .unwrap();
+        broker
+            .control_sender()
+            .send(XAuthorityClientControlCommand { client, command })
+            .unwrap();
+
+        assert_eq!(broker.route_pending(), Ok(2));
+        assert_eq!(channels.input.recv().unwrap(), input);
+        assert_eq!(channels.control.recv().unwrap(), command);
+        let acknowledgement = XAuthorityControlAck {
+            transaction: command.transaction(),
+            surface: command.surface(),
+            outcome: XAuthorityControlOutcome::Applied,
+        };
+        let channels = X11ControlChannels::ClientBound {
+            receiver: channels.control,
+            acknowledgements: broker.registry.acknowledgement_sender.clone(),
+        };
+        channels.send_ack(client, acknowledgement).unwrap();
+        assert_eq!(
+            broker
+                .recv_control_ack_timeout(Duration::from_millis(1))
+                .unwrap(),
+            XAuthorityClientControlAck {
+                client,
+                acknowledgement,
+            }
+        );
+        assert_eq!(broker.registered_client_count(), 1);
+
+        drop(registration);
+        assert_eq!(broker.registered_client_count(), 0);
+        broker
+            .input_sender()
+            .send(XAuthorityClientInputEvent {
+                client,
+                event: input,
+            })
+            .unwrap();
+        assert_eq!(
+            broker.route_pending(),
+            Err(XServerFrontendRouteError::UnknownClient { client })
+        );
+    }
+
+    #[test]
+    fn route_broker_fails_closed_when_a_client_queue_is_backpressured() {
+        let client = XServerFrontendClientId(10);
+        let mut broker = XServerFrontendRouteBroker::new(NonZeroUsize::new(1).unwrap());
+        let (_registration, _channels) = broker.registry.register_client(client).unwrap();
+        for time_msec in [4, 5] {
+            broker
+                .input_sender()
+                .send(XAuthorityClientInputEvent {
+                    client,
+                    event: XAuthorityKeyEvent {
+                        keycode: 39,
+                        pressed: true,
+                        state: 0,
+                        time_msec,
+                    }
+                    .into(),
+                })
+                .unwrap();
+            if time_msec == 4 {
+                assert_eq!(broker.route_pending(), Ok(1));
+            }
+        }
+
+        assert_eq!(
+            broker.route_pending(),
+            Err(XServerFrontendRouteError::ClientQueueFull { client })
         );
     }
 }

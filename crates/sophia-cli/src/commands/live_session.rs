@@ -10,10 +10,11 @@ use sophia_x_authority::{
     XAuthorityClientControlAck, XAuthorityClientControlCommand, XAuthorityClientInputEvent,
     XAuthorityClientSurfaceRoutes, XAuthorityControlCommand, XAuthorityControlOutcome,
     XAuthorityInputEvent, XAuthorityPointerEvent, XAuthorityPointerEventKind, XCoreKeyboardMapper,
-    XCorePointerMapper, run_x11_core_socket_server_once_session_channels,
+    XCorePointerMapper, XServerFrontendRouteBroker, run_x11_core_socket_server_once_routed,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
+use std::num::NonZeroUsize;
 use std::os::unix::fs::MetadataExt;
 use std::process::{Child, Stdio};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
@@ -91,17 +92,19 @@ pub(crate) fn run_persistent_xterm_session(
 
     let server_path = config.socket_path.clone();
     let (authority_sender, authority_receiver) = sync_channel(SESSION_AUTHORITY_CAPACITY);
-    let (input_sender, input_receiver) = sync_channel(SESSION_KEY_CAPACITY);
-    let (control_sender, control_receiver) = sync_channel(SESSION_CONTROL_CAPACITY);
     let (control_ack_sender, control_ack_receiver) = sync_channel(SESSION_CONTROL_CAPACITY);
+    let broker = XServerFrontendRouteBroker::with_control_ack_sender(
+        NonZeroUsize::new(SESSION_KEY_CAPACITY).expect("session route capacity is nonzero"),
+        control_ack_sender,
+    );
+    let input_sender = broker.input_sender();
+    let control_sender = broker.control_sender();
     let server = std::thread::spawn(move || {
-        run_x11_core_socket_server_once_session_channels(
+        run_x11_core_socket_server_once_routed(
             &server_path,
             NamespaceId::from_raw(50),
             authority_sender,
-            input_receiver,
-            control_receiver,
-            control_ack_sender,
+            broker,
         )
     });
     super::x_authority::wait_for_socket_path(&config.socket_path)?;

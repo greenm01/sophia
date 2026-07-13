@@ -72,12 +72,15 @@ synchronized runtime, atom, property, and connection-lease state; the default
 cap is 16 clients and `XServerFrontendConfig::with_max_concurrent_clients`
 sets a different nonzero cap. A simultaneous-client regression holds one
 client live while a second maps its window, then proves cleanup returns the
-lease count to zero. The live session still accepts one client, but its
-input/control boundary is now client-addressed: it derives a surface-to-client
-table from observed batches and the frontend drops events or commands addressed
-to another connection. The bounded worker dispatcher does not yet attach those
-routed queues, so brokering them to simultaneous live clients is the next
-integration step. Root/output facts are still fixed setup values. Each accepted
+lease count to zero. `XServerFrontendRouteBroker` is now the explicit bounded
+Engine-facing ingress for simultaneous workers: callers enqueue client-addressed
+input or control, call `route_pending`, and each connected routed worker owns
+only its private queues. Unknown, disconnected, and backpressured client routes
+fail closed; worker teardown unregisters the client route before its cleanup
+batch is observed. The persistent live session now uses that brokered worker
+transport while it still intentionally accepts one xterm. General concurrent
+accept/reap service supervision is the next integration step. Root/output facts
+are still fixed setup values. Each accepted
 client now gets
 a disjoint X11 setup resource-ID range. Every currently supported XID-creating
 wire path—window, pixmap, GC, font, colormap, glyph cursor, and reduced
@@ -502,6 +505,19 @@ buffer or silently dropping visual facts. If the receiver has gone away, the
 authority reports `Disconnected`; supervision can then restart the authority
 process. This keeps the X11 client stream separate from Sophia Runtime's
 transaction intake while preserving the fail-closed rule.
+
+The reciprocal routed-worker transport is also bounded.
+`XServerFrontendRouteBroker` owns input and control ingress plus a registration
+table for live routed workers. `serve_next_concurrently_routed[_traced]`
+registers a connection only after successful X11 setup, gives it one private
+input queue and one private control queue, and unregisters those queues before
+the release cleanup is reported. The Engine-side loop calls `route_pending`;
+it never broadcasts an event and it receives an explicit error for an unknown,
+disconnected, or full client queue. Control acknowledgements return through the
+same broker labeled with the worker client identity. This is an in-process
+contract that now carries the persistent one-client live session; it becomes a
+general service only when the session owns bounded concurrent accept/reap
+supervision.
 
 The callback observer helpers remain for focused tests and smoke probes. They
 are not the production transport shape.
