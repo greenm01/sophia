@@ -72,6 +72,7 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
         .map(|value| value.parse::<u64>())
         .transpose()?
         .unwrap_or(100);
+    let experimental_dmabuf = args.iter().any(|arg| arg == "--experimental-dmabuf");
     let mut native_scanout = args
         .iter()
         .any(|arg| arg == "--native-scanout")
@@ -90,7 +91,7 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
     }) {
         return Err("--resize must be a positive size smaller than the output".into());
     }
-    let mut frontend = if native_scanout.is_some() {
+    let mut frontend = if native_scanout.is_some() && experimental_dmabuf {
         WaylandFrontend::bind_with_dmabuf(
             &display_name,
             output_size,
@@ -146,8 +147,8 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
     let mut resize_commits = 0usize;
 
     println!(
-        "sophia_wayland_session schema=1 status=running display={} client={} x_server=disabled",
-        display_name, client
+        "sophia_wayland_session schema=1 status=running display={} client={} x_server=disabled dmabuf_experimental={}",
+        display_name, client, experimental_dmabuf
     );
 
     loop {

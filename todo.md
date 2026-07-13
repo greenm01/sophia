@@ -45,9 +45,9 @@ Exit criteria:
 - [x] Advertise only bounded single-plane XRGB/ARGB linear formats and validate
   dimensions, modifier, plane count, and stride before admitting an opaque
   `DmaBuf` handle.
-- [x] Import admitted DMA-BUFs into the native EGL renderer without CPU
-  readback, preserve reusable `wl_buffer` admission, and feed actual KMS
-  presentation retirement back to the Wayland authority before release.
+- [ ] Validate and harden native EGL import of admitted DMA-BUFs on hardware;
+  it is isolated behind `--experimental-dmabuf` until the first-frame KMS
+  submission and presentation-retirement path is proven.
 - [ ] Prove hardware Kitty remains within the presentation budget on that path
   while SHM remains available for software clients.
 

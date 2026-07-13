@@ -91,11 +91,13 @@ audit proves the production CLI dependency graph and installed launcher do not
 select or start XLibre/Xorg. Historical XLibre latency and fallback artifacts
 are frozen under `research/xlibre` and are not release gates.
 
-The native hardware proof advertises the bounded DMA-BUF path only while
-`--native-scanout` is active. Admitted buffers are imported by EGL without CPU
-readback; frame callbacks and `wl_buffer.release` follow observed KMS
-presentation rather than transaction queueing. Run this gate only from a
-dedicated text TTY with an outside recovery path.
+The native session defaults to its proven SHM path even with `--native-scanout`.
+The bounded DMA-BUF path requires the explicit experimental
+`--experimental-dmabuf` flag while its first-frame KMS submission and
+presentation-retirement path is hardened. Admitted buffers are imported by EGL
+without CPU readback; frame callbacks and `wl_buffer.release` follow observed
+KMS presentation rather than transaction queueing. Run this experimental gate
+only from a dedicated text TTY with an outside recovery path.
 
 Its native completion record must show at least one successful DMA-BUF import,
 multiple KMS submissions, accepted callbacks and retirement, no import loss,
