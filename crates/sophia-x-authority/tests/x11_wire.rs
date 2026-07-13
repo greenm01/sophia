@@ -3399,6 +3399,7 @@ fn x11_dispatch_accepts_destroy_window_for_known_namespace_window() {
     assert_eq!(
         XAuthorityObservedTransactionBatch::from_dispatch_result(&destroy),
         Some(XAuthorityObservedTransactionBatch {
+            client: None,
             transaction: TransactionId::from_raw(2),
             transactions: Vec::new(),
             removed_surfaces: vec![surface],
@@ -5129,12 +5130,30 @@ fn x11_core_socket_channel_sees_sophia_present_transaction_batch() {
     let _ = std::fs::remove_file(&socket_path);
     server.join().unwrap();
     let batch = receiver.try_recv().unwrap();
+    assert_eq!(batch.client.map(XServerFrontendClientId::raw), Some(1));
     assert_eq!(batch.transaction, TransactionId::from_raw(2));
     assert_eq!(batch.transactions.len(), 1);
     assert_eq!(
         batch.transactions[0].transaction,
         TransactionId::from_raw(2)
     );
+    let surface = batch.transactions[0].surface;
+    let mut routes = XAuthorityClientSurfaceRoutes::default();
+    routes.observe(&batch);
+    assert_eq!(
+        routes
+            .client_for_surface(surface)
+            .map(XServerFrontendClientId::raw),
+        Some(1)
+    );
+    routes.observe(&XAuthorityObservedTransactionBatch {
+        client: None,
+        transaction: TransactionId::from_raw(3),
+        transactions: Vec::new(),
+        removed_surfaces: vec![surface],
+        cpu_buffer_updates: Vec::new(),
+    });
+    assert!(routes.is_empty());
 }
 
 fn present_dispatch_result(transaction: TransactionId) -> XDispatchResult {

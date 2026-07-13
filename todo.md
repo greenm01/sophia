@@ -124,8 +124,11 @@ engineering reason.
   frontend now provides a capped, supervised
   concurrent-worker API over independently synchronized runtime/atom/property
   and lease state; a two-live-client regression proves shared-X coordination
-  and cleanup. The live session remains sequential until Engine input/control
-  channels can choose a target client, and that routing is now the next step.
+  and cleanup. Observed transaction batches now retain their source client,
+  and the live session resolves focused/hit-tested surfaces into targeted input
+  and control routes; a frontend worker discards another client's route and
+  labels its acknowledgement. The live session remains single-client until a
+  broker attaches those targeted queues to the bounded concurrent workers.
 - [x] Define the X11 session profiles: classic shared-X behavior for trusted
   sessions, plus explicit confined namespaces/capabilities where requested.
   The confined profile remains gated on client-aware connection routing.

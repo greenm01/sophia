@@ -395,8 +395,10 @@ fn run_compat_capture_provider(
         }
         if sender
             .send(XAuthorityObservedTransactionBatch {
+                client: None,
                 transaction: transaction_id,
                 transactions,
+                removed_surfaces: Vec::new(),
                 cpu_buffer_updates: updates,
             })
             .is_err()

@@ -7,9 +7,10 @@ use sophia_engine::{
 };
 use sophia_protocol::{DeviceId, OutputId, SeatId, WmManageSurface};
 use sophia_x_authority::{
-    XAuthorityControlAck, XAuthorityControlCommand, XAuthorityControlOutcome, XAuthorityInputEvent,
-    XAuthorityPointerEvent, XAuthorityPointerEventKind, XCoreKeyboardMapper, XCorePointerMapper,
-    run_x11_core_socket_server_once_session_channels,
+    XAuthorityClientControlAck, XAuthorityClientControlCommand, XAuthorityClientInputEvent,
+    XAuthorityClientSurfaceRoutes, XAuthorityControlCommand, XAuthorityControlOutcome,
+    XAuthorityInputEvent, XAuthorityPointerEvent, XAuthorityPointerEventKind, XCoreKeyboardMapper,
+    XCorePointerMapper, run_x11_core_socket_server_once_session_channels,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
@@ -631,6 +632,7 @@ struct PendingLiveWmLayout {
 struct PersistentLiveLayout {
     layers: BTreeMap<SurfaceId, LayerSnapshot>,
     authority_sizes: BTreeMap<SurfaceId, Size>,
+    client_routes: XAuthorityClientSurfaceRoutes,
     unmanaged_surfaces: BTreeSet<SurfaceId>,
     pending: Option<PendingLiveWmLayout>,
     focus_to_apply: Option<(TransactionId, SurfaceId)>,
@@ -651,6 +653,7 @@ impl PersistentLiveLayout {
         &mut self,
         batch: &XAuthorityObservedTransactionBatch,
     ) -> Vec<SurfaceId> {
+        self.client_routes.observe(batch);
         self.remove_surfaces(&batch.removed_surfaces);
         let mut new_surfaces = Vec::new();
         for (index, transaction) in batch.transactions.iter().enumerate() {
@@ -739,29 +742,40 @@ impl PersistentLiveLayout {
     fn stage(
         &mut self,
         mut proposal: LiveWmProposal,
-        control_sender: &SyncSender<XAuthorityControlCommand>,
-        control_ack_receiver: &Receiver<XAuthorityControlAck>,
+        control_sender: &SyncSender<XAuthorityClientControlCommand>,
+        control_ack_receiver: &Receiver<XAuthorityClientControlAck>,
     ) -> Result<Option<WmTransactionUpdate>, Box<dyn std::error::Error>> {
         proposal
             .requested_sizes
             .retain(|surface, size| self.authority_sizes.get(surface) != Some(size));
         for (surface, size) in &proposal.requested_sizes {
-            control_sender.try_send(XAuthorityControlCommand::ConfigureSurface {
-                transaction: proposal.transaction,
-                surface: *surface,
-                size: *size,
+            let client = self
+                .client_routes
+                .client_for_surface(*surface)
+                .ok_or("live WM configure has no X11 client route for its surface")?;
+            control_sender.try_send(XAuthorityClientControlCommand {
+                client,
+                command: XAuthorityControlCommand::ConfigureSurface {
+                    transaction: proposal.transaction,
+                    surface: *surface,
+                    size: *size,
+                },
             })?;
         }
         for _ in 0..proposal.requested_sizes.len() {
             let acknowledgement = control_ack_receiver.recv_timeout(Duration::from_millis(500))?;
-            if acknowledgement.transaction != proposal.transaction
-                || acknowledgement.outcome != XAuthorityControlOutcome::Applied
+            let expected_client = self
+                .client_routes
+                .client_for_surface(acknowledgement.acknowledgement.surface);
+            if acknowledgement.acknowledgement.transaction != proposal.transaction
+                || acknowledgement.acknowledgement.outcome != XAuthorityControlOutcome::Applied
+                || expected_client != Some(acknowledgement.client)
             {
                 return Err(format!(
                     "X Authority rejected WM configure transaction {} for surface {:?}: {:?}",
-                    acknowledgement.transaction.raw(),
-                    acknowledgement.surface,
-                    acknowledgement.outcome
+                    acknowledgement.acknowledgement.transaction.raw(),
+                    acknowledgement.acknowledgement.surface,
+                    acknowledgement.acknowledgement.outcome
                 )
                 .into());
             }
@@ -969,9 +983,9 @@ fn rect_is_within(bounds: Rect, geometry: Rect) -> bool {
 fn run_session_loop(
     config: &PersistentXtermSessionConfig,
     authority_receiver: &Receiver<XAuthorityObservedTransactionBatch>,
-    input_sender: &SyncSender<XAuthorityInputEvent>,
-    control_sender: &SyncSender<XAuthorityControlCommand>,
-    control_ack_receiver: &Receiver<XAuthorityControlAck>,
+    input_sender: &SyncSender<XAuthorityClientInputEvent>,
+    control_sender: &SyncSender<XAuthorityClientControlCommand>,
+    control_ack_receiver: &Receiver<XAuthorityClientControlAck>,
     child: &mut Child,
     physical_input: &mut Option<SessionPhysicalInput>,
     native_scanout: &mut Option<PersistentNativeScanout>,
@@ -1041,6 +1055,7 @@ fn run_session_loop(
                     &focus,
                     runtime.committed_surfaces(),
                     &runtime.input_layers(),
+                    &layout.client_routes,
                     input_sender,
                     &mut modifiers,
                     &mut emergency_chord,
@@ -1412,6 +1427,7 @@ fn run_session_loop(
                     &focus,
                     runtime.committed_surfaces(),
                     &runtime.input_layers(),
+                    &layout.client_routes,
                     input_sender,
                     &mut modifiers,
                     &mut emergency_chord,
@@ -3262,7 +3278,8 @@ fn route_physical_input<P: NonBlockingInputPoller>(
     focus: &InputFocusState,
     committed_surfaces: &[CommittedSurfaceState],
     input_layers: &[LayerSnapshot],
-    input_sender: &SyncSender<XAuthorityInputEvent>,
+    client_routes: &XAuthorityClientSurfaceRoutes,
+    input_sender: &SyncSender<XAuthorityClientInputEvent>,
     modifiers: &mut XCoreKeyboardMapper,
     emergency_chord: &mut EmergencyChordState,
     pointer: &mut XCorePointerMapper,
@@ -3274,6 +3291,7 @@ fn route_physical_input<P: NonBlockingInputPoller>(
         focus,
         committed_surfaces,
         input_layers,
+        client_routes,
         input_sender,
         modifiers,
         emergency_chord,
@@ -3288,7 +3306,8 @@ fn route_input_events(
     focus: &InputFocusState,
     committed_surfaces: &[CommittedSurfaceState],
     input_layers: &[LayerSnapshot],
-    input_sender: &SyncSender<XAuthorityInputEvent>,
+    client_routes: &XAuthorityClientSurfaceRoutes,
+    input_sender: &SyncSender<XAuthorityClientInputEvent>,
     modifiers: &mut XCoreKeyboardMapper,
     emergency_chord: &mut EmergencyChordState,
     pointer: &mut XCorePointerMapper,
@@ -3312,6 +3331,12 @@ fn route_input_events(
                 }
                 let FocusedInputRoute::Routed(event) =
                     focus.route_keyboard_event(event, committed_surfaces)
+                else {
+                    continue;
+                };
+                let Some(client) = event
+                    .target_surface
+                    .and_then(|surface| client_routes.client_for_surface(surface))
                 else {
                     continue;
                 };
@@ -3341,15 +3366,16 @@ fn route_input_events(
                         .into());
                     }
                 }
-                input_sender.try_send(
-                    XAuthorityKeyEvent {
+                input_sender.try_send(XAuthorityClientInputEvent {
+                    client,
+                    event: XAuthorityKeyEvent {
                         keycode,
                         pressed,
                         state,
                         time_msec: u32::try_from(event.time_msec).unwrap_or(u32::MAX),
                     }
                     .into(),
-                )?;
+                })?;
                 report.keys_routed = report.keys_routed.saturating_add(1);
             }
             kind @ (sophia_protocol::InputEventKind::PointerMotion
@@ -3364,6 +3390,9 @@ fn route_input_events(
                     continue;
                 };
                 let Some(surface) = route.target_surface else {
+                    continue;
+                };
+                let Some(client) = client_routes.client_for_surface(surface) else {
                     continue;
                 };
                 let (event_kind, state) = match kind {
@@ -3382,16 +3411,19 @@ fn route_input_events(
                     }
                     sophia_protocol::InputEventKind::Key { .. } => unreachable!(),
                 };
-                input_sender.try_send(XAuthorityInputEvent::Pointer(XAuthorityPointerEvent {
-                    kind: event_kind,
-                    surface,
-                    root_x: pointer_coordinate(global.x),
-                    root_y: pointer_coordinate(global.y),
-                    event_x: pointer_coordinate(local.x),
-                    event_y: pointer_coordinate(local.y),
-                    state,
-                    time_msec: u32::try_from(event.time_msec).unwrap_or(u32::MAX),
-                }))?;
+                input_sender.try_send(XAuthorityClientInputEvent {
+                    client,
+                    event: XAuthorityInputEvent::Pointer(XAuthorityPointerEvent {
+                        kind: event_kind,
+                        surface,
+                        root_x: pointer_coordinate(global.x),
+                        root_y: pointer_coordinate(global.y),
+                        event_x: pointer_coordinate(local.x),
+                        event_y: pointer_coordinate(local.y),
+                        state,
+                        time_msec: u32::try_from(event.time_msec).unwrap_or(u32::MAX),
+                    }),
+                })?;
                 report.pointer_routed = report.pointer_routed.saturating_add(1);
             }
         }

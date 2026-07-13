@@ -56,8 +56,8 @@ Sophia Engine:
 | Direction | Contract | Owner and rule |
 | --- | --- | --- |
 | X11 client → frontend | local Unix connection, setup authentication, X11 requests, and X resource lifetime | The frontend owns parsing, client identity, XIDs, atoms, windows, properties, selections, grabs, and client-visible replies/events. Production setup authentication must be explicit; an owner-only socket is a transport guard, not a replacement for X11 authorization. |
-| Frontend → Engine | `XAuthorityObservedTransactionBatch` containing `SurfaceTransaction` values, surface removals, and any CPU buffer update | This is the only visual ingress. The batch is bounded; backpressure is an error rather than an unbounded queue. Engine receives Sophia surface data, never raw X11 request parsing or XID ownership. |
-| Engine → frontend | `XAuthorityInputEvent` and `XAuthorityControlCommand` | Engine selects the physical-input target, owns coordinates/hit-testing, and requests X-visible focus or configure results. The frontend applies X delivery rules and returns `XAuthorityControlAck`. |
+| Frontend → Engine | `XAuthorityObservedTransactionBatch` containing the originating frontend client when available, `SurfaceTransaction` values, surface removals, and any CPU buffer update | This is the only visual ingress. The batch is bounded; backpressure is an error rather than an unbounded queue. Engine receives Sophia surface data, never raw X11 request parsing or XID ownership. |
+| Engine → frontend | `XAuthorityClientInputEvent` and `XAuthorityClientControlCommand` | Engine selects the physical-input target, owns coordinates/hit-testing, resolves that surface to its frontend client from observed transactions, and requests X-visible focus or configure results. The frontend applies only routes addressed to that connection and returns `XAuthorityClientControlAck`. |
 | Engine → frontend (next) | output/RandR snapshot and presentation/buffer-release feedback | Engine remains the source of physical output facts, frame retirement, and buffer lifetime. The frontend turns those facts into RandR/configure/present-visible X11 state; it must never infer scanout completion itself. |
 
 The existing implementation covers the second and third rows for the
@@ -72,10 +72,13 @@ synchronized runtime, atom, property, and connection-lease state; the default
 cap is 16 clients and `XServerFrontendConfig::with_max_concurrent_clients`
 sets a different nonzero cap. A simultaneous-client regression holds one
 client live while a second maps its window, then proves cleanup returns the
-lease count to zero. The live session deliberately does not use this API yet:
-its input and control channels select one client, so client-aware Engine
-routing remains the next integration step. Root/output facts are still fixed
-setup values. Each accepted client now gets
+lease count to zero. The live session still accepts one client, but its
+input/control boundary is now client-addressed: it derives a surface-to-client
+table from observed batches and the frontend drops events or commands addressed
+to another connection. The bounded worker dispatcher does not yet attach those
+routed queues, so brokering them to simultaneous live clients is the next
+integration step. Root/output facts are still fixed setup values. Each accepted
+client now gets
 a disjoint X11 setup resource-ID range. Every currently supported XID-creating
 wire path—window, pixmap, GC, font, colormap, glyph cursor, and reduced
 MIT-SHM segment—rejects an XID outside that range with X11 `BadIDChoice` before

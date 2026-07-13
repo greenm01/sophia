@@ -1,13 +1,20 @@
+use std::collections::BTreeMap;
 use std::sync::mpsc::{SyncSender, TrySendError};
 
 use sophia_protocol::{SurfaceId, SurfaceTransaction, TransactionId};
 
-use crate::{X11CoreDispatchTrace, XAuthorityCpuBufferUpdate, XDispatchResult};
+use crate::{
+    X11CoreDispatchTrace, XAuthorityCpuBufferUpdate, XDispatchResult, XServerFrontendClientId,
+};
 
 pub const X_AUTHORITY_OBSERVED_TRANSACTION_CHANNEL_CAPACITY: usize = 256;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct XAuthorityObservedTransactionBatch {
+    /// The frontend connection that caused this batch, when the source is an
+    /// X11 socket dispatch. Direct authority dispatches have no connection and
+    /// therefore retain `None`.
+    pub client: Option<XServerFrontendClientId>,
     pub transaction: TransactionId,
     pub transactions: Vec<SurfaceTransaction>,
     /// Frontend-confirmed surface lifetimes that ended in this batch.
@@ -23,6 +30,7 @@ impl XAuthorityObservedTransactionBatch {
         }
 
         Some(Self {
+            client: None,
             transaction: response.transaction,
             transactions: response.transactions.clone(),
             removed_surfaces: response.removed_surfaces.clone(),
@@ -36,11 +44,50 @@ impl XAuthorityObservedTransactionBatch {
             return None;
         }
         Some(Self {
+            client: Some(trace.client),
             transaction: response.transaction,
             transactions: response.transactions.clone(),
             removed_surfaces: response.removed_surfaces.clone(),
             cpu_buffer_updates: trace.cpu_buffer_update.cloned().into_iter().collect(),
         })
+    }
+}
+
+/// Maps Engine-visible X11 surfaces back to the frontend client that created
+/// or last updated them.
+///
+/// The Engine owns focus and hit testing; this table gives it the connection
+/// identity required to turn that surface decision into an X11 input or
+/// control route. A direct authority batch has no client identity and cannot
+/// establish a route. Surface removals always clear a prior route.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct XAuthorityClientSurfaceRoutes {
+    clients: BTreeMap<SurfaceId, XServerFrontendClientId>,
+}
+
+impl XAuthorityClientSurfaceRoutes {
+    pub fn observe(&mut self, batch: &XAuthorityObservedTransactionBatch) {
+        for surface in &batch.removed_surfaces {
+            self.clients.remove(surface);
+        }
+        let Some(client) = batch.client else {
+            return;
+        };
+        for transaction in &batch.transactions {
+            self.clients.insert(transaction.surface, client);
+        }
+    }
+
+    pub fn client_for_surface(&self, surface: SurfaceId) -> Option<XServerFrontendClientId> {
+        self.clients.get(&surface).copied()
+    }
+
+    pub fn len(&self) -> usize {
+        self.clients.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.clients.is_empty()
     }
 }
 

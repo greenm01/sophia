@@ -27,7 +27,7 @@ use crate::{
     XSetupRequest, XSetupSuccess, XWireClientContext, decode_x11_core_request,
     dispatch_x11_parse_error, dispatch_x11_wire_request, encode_x_client_event,
     encode_x11_setup_failure, encode_x11_setup_success, parse_x11_setup_request,
-    try_emit_x_authority_trace, try_emit_x_authority_transactions, x11_setup_request_total_len,
+    try_emit_x_authority_trace, x11_setup_request_total_len,
 };
 #[cfg(unix)]
 use sophia_protocol::{NamespaceId, Size, SurfaceId, TransactionId};
@@ -493,6 +493,18 @@ pub enum XAuthorityInputEvent {
     Pointer(XAuthorityPointerEvent),
 }
 
+/// An Engine-selected input event addressed to one live X11 connection.
+///
+/// The Engine chooses the target surface from its committed scene and uses the
+/// transaction-side surface route table to select this client. The frontend
+/// refuses to deliver a route addressed to another connection.
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XAuthorityClientInputEvent {
+    pub client: XServerFrontendClientId,
+    pub event: XAuthorityInputEvent,
+}
+
 #[cfg(unix)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum XAuthorityControlCommand {
@@ -505,6 +517,15 @@ pub enum XAuthorityControlCommand {
         transaction: TransactionId,
         surface: SurfaceId,
     },
+}
+
+/// An Engine control request addressed to the frontend connection that owns
+/// the referenced X11 surface.
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XAuthorityClientControlCommand {
+    pub client: XServerFrontendClientId,
+    pub command: XAuthorityControlCommand,
 }
 
 #[cfg(unix)]
@@ -539,6 +560,91 @@ pub struct XAuthorityControlAck {
     pub transaction: TransactionId,
     pub surface: SurfaceId,
     pub outcome: XAuthorityControlOutcome,
+}
+
+/// A control acknowledgement bound to the connection that applied it.
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XAuthorityClientControlAck {
+    pub client: XServerFrontendClientId,
+    pub acknowledgement: XAuthorityControlAck,
+}
+
+#[cfg(unix)]
+enum X11InputEventReceiver {
+    Plain(Receiver<XAuthorityInputEvent>),
+    Routed(Receiver<XAuthorityClientInputEvent>),
+}
+
+#[cfg(unix)]
+impl X11InputEventReceiver {
+    fn recv_timeout(
+        &self,
+        client: XServerFrontendClientId,
+    ) -> Result<XAuthorityInputEvent, RecvTimeoutError> {
+        loop {
+            match self {
+                Self::Plain(receiver) => return receiver.recv_timeout(Duration::from_millis(10)),
+                Self::Routed(receiver) => match receiver.recv_timeout(Duration::from_millis(10)) {
+                    Ok(route) if route.client == client => return Ok(route.event),
+                    // Drop one misaddressed route, then let the writer loop
+                    // observe its stop flag before it receives again.
+                    Ok(_) => return Err(RecvTimeoutError::Timeout),
+                    Err(error) => return Err(error),
+                },
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+enum X11ControlChannels {
+    Routed {
+        receiver: Receiver<XAuthorityClientControlCommand>,
+        acknowledgements: SyncSender<XAuthorityClientControlAck>,
+    },
+}
+
+#[cfg(unix)]
+impl X11ControlChannels {
+    fn recv_timeout(
+        &self,
+        client: XServerFrontendClientId,
+    ) -> Result<XAuthorityControlCommand, RecvTimeoutError> {
+        loop {
+            match self {
+                Self::Routed { receiver, .. } => {
+                    match receiver.recv_timeout(Duration::from_millis(10)) {
+                        Ok(route) if route.client == client => return Ok(route.command),
+                        // Drop one misaddressed route, then let the writer
+                        // loop observe its stop flag before it receives again.
+                        Ok(_) => return Err(RecvTimeoutError::Timeout),
+                        Err(error) => return Err(error),
+                    }
+                }
+            }
+        }
+    }
+
+    fn send_ack(
+        &self,
+        client: XServerFrontendClientId,
+        acknowledgement: XAuthorityControlAck,
+    ) -> Result<(), X11SetupSocketError> {
+        match self {
+            Self::Routed {
+                acknowledgements, ..
+            } => match acknowledgements.try_send(XAuthorityClientControlAck {
+                client,
+                acknowledgement,
+            }) {
+                Ok(()) | Err(TrySendError::Disconnected(_)) => Ok(()),
+                Err(TrySendError::Full(_)) => Err(X11SetupSocketError::new(
+                    "X11 control acknowledgement channel is full",
+                )),
+            },
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -827,8 +933,10 @@ pub fn run_x11_core_socket_server_once_channel(
     namespace: NamespaceId,
     sender: SyncSender<XAuthorityObservedTransactionBatch>,
 ) -> Result<(), X11SetupSocketError> {
-    run_x11_core_socket_server_once_with_observer(path, namespace, move |result| {
-        Ok(try_emit_x_authority_transactions(&sender, result).map(|_| ())?)
+    run_x11_core_socket_server_once_with_trace_observer(path, namespace, None, move |trace| {
+        try_emit_x_authority_trace(&sender, &trace)
+            .map_err(|error| X11SetupSocketError::new(error.to_string()))?;
+        Ok(())
     })
 }
 
@@ -848,7 +956,7 @@ pub fn run_x11_core_socket_server_once_channels(
         &mut stream,
         namespace,
         &mut state,
-        Some(input_receiver),
+        Some(X11InputEventReceiver::Plain(input_receiver)),
         None,
         &XServerFrontendSetupAuthorization::default(),
         move |trace| {
@@ -864,9 +972,9 @@ pub fn run_x11_core_socket_server_once_session_channels(
     path: impl AsRef<Path>,
     namespace: NamespaceId,
     transaction_sender: SyncSender<XAuthorityObservedTransactionBatch>,
-    input_receiver: Receiver<XAuthorityInputEvent>,
-    control_receiver: Receiver<XAuthorityControlCommand>,
-    control_ack_sender: SyncSender<XAuthorityControlAck>,
+    input_receiver: Receiver<XAuthorityClientInputEvent>,
+    control_receiver: Receiver<XAuthorityClientControlCommand>,
+    control_ack_sender: SyncSender<XAuthorityClientControlAck>,
 ) -> Result<(), X11SetupSocketError> {
     let listener = bind_x11_core_socket_server(path)?;
     let (mut stream, _) = listener.accept().map_err(|error| {
@@ -877,8 +985,11 @@ pub fn run_x11_core_socket_server_once_session_channels(
         &mut stream,
         namespace,
         &mut state,
-        Some(input_receiver),
-        Some((control_receiver, control_ack_sender)),
+        Some(X11InputEventReceiver::Routed(input_receiver)),
+        Some(X11ControlChannels::Routed {
+            receiver: control_receiver,
+            acknowledgements: control_ack_sender,
+        }),
         &XServerFrontendSetupAuthorization::default(),
         move |trace| {
             try_emit_x_authority_trace(&transaction_sender, &trace)
@@ -886,17 +997,6 @@ pub fn run_x11_core_socket_server_once_session_channels(
             Ok(())
         },
     )
-}
-
-#[cfg(unix)]
-fn run_x11_core_socket_server_once_with_observer(
-    path: impl AsRef<Path>,
-    namespace: NamespaceId,
-    mut observer: impl FnMut(&XDispatchResult) -> Result<(), X11SetupSocketError>,
-) -> Result<(), X11SetupSocketError> {
-    run_x11_core_socket_server_once_with_trace_observer(path, namespace, None, move |trace| {
-        observer(trace.result)
-    })
 }
 
 #[cfg(unix)]
@@ -1197,11 +1297,8 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
     stream: &mut UnixStream,
     namespace: NamespaceId,
     state: &X11CoreSocketServerState,
-    input_receiver: Option<Receiver<XAuthorityInputEvent>>,
-    control_channels: Option<(
-        Receiver<XAuthorityControlCommand>,
-        SyncSender<XAuthorityControlAck>,
-    )>,
+    input_receiver: Option<X11InputEventReceiver>,
+    control_channels: Option<X11ControlChannels>,
     authorization: &XServerFrontendSetupAuthorization,
     mut observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
@@ -1236,12 +1333,13 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 event_sequence.clone(),
                 focused_window.clone(),
                 surface_windows.clone(),
+                client,
                 receiver,
             )
         })
         .transpose()?;
     let control_writer = control_channels
-        .map(|(receiver, acknowledgements)| {
+        .map(|channels| {
             spawn_x11_control_writer(
                 output_stream.clone(),
                 setup.byte_order,
@@ -1250,8 +1348,8 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 surface_windows.clone(),
                 state.runtime.clone(),
                 namespace,
-                receiver,
-                acknowledgements,
+                client,
+                channels,
             )
         })
         .transpose()?;
@@ -1489,14 +1587,14 @@ fn spawn_x11_control_writer(
     surface_windows: Arc<Mutex<BTreeMap<SurfaceId, XResourceId>>>,
     runtime: Arc<Mutex<XAuthorityRuntime>>,
     namespace: NamespaceId,
-    receiver: Receiver<XAuthorityControlCommand>,
-    acknowledgements: SyncSender<XAuthorityControlAck>,
+    client: XServerFrontendClientId,
+    channels: X11ControlChannels,
 ) -> Result<X11ControlWriter, X11SetupSocketError> {
     let stop = Arc::new(AtomicBool::new(false));
     let writer_stop = stop.clone();
     let thread = std::thread::spawn(move || {
         while !writer_stop.load(Ordering::Acquire) {
-            let command = match receiver.recv_timeout(Duration::from_millis(10)) {
+            let command = match channels.recv_timeout(client) {
                 Ok(command) => command,
                 Err(RecvTimeoutError::Timeout) => continue,
                 Err(RecvTimeoutError::Disconnected) => return Ok(()),
@@ -1509,8 +1607,8 @@ fn spawn_x11_control_writer(
                 .get(&surface)
                 .copied();
             let Some(window) = window else {
-                send_x11_control_ack(
-                    &acknowledgements,
+                channels.send_ack(
+                    client,
                     XAuthorityControlAck {
                         transaction,
                         surface,
@@ -1528,8 +1626,8 @@ fn spawn_x11_control_writer(
                         || size.width > i32::from(u16::MAX)
                         || size.height > i32::from(u16::MAX)
                     {
-                        send_x11_control_ack(
-                            &acknowledgements,
+                        channels.send_ack(
+                            client,
                             XAuthorityControlAck {
                                 transaction,
                                 surface,
@@ -1547,8 +1645,8 @@ fn spawn_x11_control_writer(
                     {
                         Ok(geometry) => geometry,
                         Err(_) => {
-                            send_x11_control_ack(
-                                &acknowledgements,
+                            channels.send_ack(
+                                client,
                                 XAuthorityControlAck {
                                     transaction,
                                     surface,
@@ -1640,8 +1738,8 @@ fn spawn_x11_control_writer(
                 X11SetupSocketError::new(format!("failed to flush X11 control event: {error}"))
             })?;
             drop(stream);
-            send_x11_control_ack(
-                &acknowledgements,
+            channels.send_ack(
+                client,
                 XAuthorityControlAck {
                     transaction,
                     surface,
@@ -1652,19 +1750,6 @@ fn spawn_x11_control_writer(
         Ok(())
     });
     Ok(X11ControlWriter { stop, thread })
-}
-
-#[cfg(unix)]
-fn send_x11_control_ack(
-    sender: &SyncSender<XAuthorityControlAck>,
-    acknowledgement: XAuthorityControlAck,
-) -> Result<(), X11SetupSocketError> {
-    match sender.try_send(acknowledgement) {
-        Ok(()) | Err(TrySendError::Disconnected(_)) => Ok(()),
-        Err(TrySendError::Full(_)) => Err(X11SetupSocketError::new(
-            "X11 control acknowledgement channel is full",
-        )),
-    }
 }
 
 #[cfg(unix)]
@@ -1679,14 +1764,15 @@ fn spawn_x11_input_event_writer(
     sequence: Arc<AtomicU16>,
     focused_window: Arc<AtomicU64>,
     surface_windows: Arc<Mutex<BTreeMap<SurfaceId, XResourceId>>>,
-    receiver: Receiver<XAuthorityInputEvent>,
+    client: XServerFrontendClientId,
+    receiver: X11InputEventReceiver,
 ) -> Result<X11InputEventWriter, X11SetupSocketError> {
     let stop = Arc::new(AtomicBool::new(false));
     let writer_stop = stop.clone();
     let thread = std::thread::spawn(move || {
         let mut focus_sent_to = None;
         while !writer_stop.load(Ordering::Acquire) {
-            let event = match receiver.recv_timeout(Duration::from_millis(10)) {
+            let event = match receiver.recv_timeout(client) {
                 Ok(event) => event,
                 Err(RecvTimeoutError::Timeout) => continue,
                 Err(RecvTimeoutError::Disconnected) => return Ok(()),
@@ -1810,6 +1896,100 @@ fn is_x11_client_disconnect(error: &std::io::Error) -> bool {
         error.kind(),
         ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::UnexpectedEof
     )
+}
+
+#[cfg(all(test, unix))]
+mod routing_tests {
+    use super::*;
+    use std::sync::mpsc::sync_channel;
+
+    #[test]
+    fn routed_input_discards_another_clients_event() {
+        let first = XServerFrontendClientId(1);
+        let second = XServerFrontendClientId(2);
+        let (sender, receiver) = sync_channel(2);
+        sender
+            .send(XAuthorityClientInputEvent {
+                client: second,
+                event: XAuthorityKeyEvent {
+                    keycode: 24,
+                    pressed: true,
+                    state: 0,
+                    time_msec: 1,
+                }
+                .into(),
+            })
+            .unwrap();
+        sender
+            .send(XAuthorityClientInputEvent {
+                client: first,
+                event: XAuthorityKeyEvent {
+                    keycode: 25,
+                    pressed: true,
+                    state: 0,
+                    time_msec: 2,
+                }
+                .into(),
+            })
+            .unwrap();
+
+        let receiver = X11InputEventReceiver::Routed(receiver);
+        assert_eq!(receiver.recv_timeout(first), Err(RecvTimeoutError::Timeout));
+        assert_eq!(
+            receiver.recv_timeout(first).unwrap(),
+            XAuthorityInputEvent::Key(XAuthorityKeyEvent {
+                keycode: 25,
+                pressed: true,
+                state: 0,
+                time_msec: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn routed_control_discards_another_clients_command_and_labels_its_ack() {
+        let first = XServerFrontendClientId(1);
+        let second = XServerFrontendClientId(2);
+        let surface = SurfaceId::new(44, 1);
+        let (command_sender, command_receiver) = sync_channel(2);
+        let (ack_sender, ack_receiver) = sync_channel(1);
+        let command = XAuthorityControlCommand::FocusSurface {
+            transaction: TransactionId::from_raw(7),
+            surface,
+        };
+        command_sender
+            .send(XAuthorityClientControlCommand {
+                client: second,
+                command,
+            })
+            .unwrap();
+        command_sender
+            .send(XAuthorityClientControlCommand {
+                client: first,
+                command,
+            })
+            .unwrap();
+
+        let channels = X11ControlChannels::Routed {
+            receiver: command_receiver,
+            acknowledgements: ack_sender,
+        };
+        assert_eq!(channels.recv_timeout(first), Err(RecvTimeoutError::Timeout));
+        assert_eq!(channels.recv_timeout(first).unwrap(), command);
+        let acknowledgement = XAuthorityControlAck {
+            transaction: command.transaction(),
+            surface: command.surface(),
+            outcome: XAuthorityControlOutcome::Applied,
+        };
+        channels.send_ack(first, acknowledgement).unwrap();
+        assert_eq!(
+            ack_receiver.recv().unwrap(),
+            XAuthorityClientControlAck {
+                client: first,
+                acknowledgement,
+            }
+        );
+    }
 }
 
 #[cfg(unix)]
