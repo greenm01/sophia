@@ -35,7 +35,7 @@ desktop.
 
 | Client or class | Reproducible command | Proven X11 surface | Evidence | Current status and next gate |
 | --- | --- | --- | --- | --- |
-| Setup parser | `cargo test --offline -q -p sophia-x-authority --test x11_wire` | byte order, bounded setup fields, setup success/failure encoding | `wire` | `proven`; setup authorization data is parsed but not validated. Add explicit Xauthority or peer-credential policy before a general local session. |
+| Setup parser | `cargo test --offline -q -p sophia-x-authority --test x11_wire` | byte order, bounded setup fields, setup success/failure encoding, configured MIT-MAGIC-COOKIE-1 acceptance/rejection | `wire` | `proven`; Xauthority-file management, peer credentials, cookie rotation, and launch policy remain before a general local session. |
 | Raw core protocol | `cargo run --offline -q -p sophia-cli -- x-authority-x11-smoke` | atoms, property read/write, create/map window, core events | `client` | `proven`; grow only from a captured missing request. |
 | Rust X11 client | `cargo run --offline -q -p sophia-cli -- x-authority-x11rb-smoke` | client-compatible setup, root/visual facts, atom/property/window flow | `client` | `proven`; add multi-client XID allocation before using this as a shared-desktop proof. |
 | `xdpyinfo` | `cargo run --offline -q -p sophia-cli -- x-authority-xdpyinfo-smoke` | root screen, extension discovery, root properties, focus, GC cleanup | `client` | `proven`; do not turn its empty extension list into an extension-completeness claim. |

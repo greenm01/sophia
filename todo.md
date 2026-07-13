@@ -107,8 +107,9 @@ engineering reason.
   long-running local X server frontend without giving it DRM/KMS or physical
   input ownership. The first slice now has an explicit
   `XServerFrontendConfig`/`XServerFrontend` listener with owner-only socket
-  permissions and safe stale-socket handling; authentication, Engine-backed
-  session supervision, and simultaneous clients remain.
+  permissions, safe stale-socket handling, and optional MIT-MAGIC-COOKIE-1
+  setup validation; Xauthority-file/credential policy, Engine-backed session
+  supervision, and simultaneous clients remain.
 - [x] Define the X11 session profiles: classic shared-X behavior for trusted
   sessions, plus explicit confined namespaces/capabilities where requested.
   The confined profile remains gated on client-aware connection routing.

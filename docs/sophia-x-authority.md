@@ -65,13 +65,18 @@ single-client live-session prototype: the X11 socket dispatch emits bounded
 transaction batches, and the Engine can route key/pointer events plus
 focus/configure commands back to that client. Its persistent socket listener
 also reuses authority state across *sequential* clients. It is not yet a
-production multi-client server: X11 setup authentication is currently accepted
-without validation, root/output facts are fixed setup values, and per-client
-XID allocation plus simultaneous-client dispatch are still required. The new
-`XServerFrontendConfig`/`XServerFrontend` listener primitive makes the local
-socket path and namespace explicit, rejects invalid namespaces, restricts the
-socket to its owner, and refuses to replace a non-socket path. It does not
-claim to solve those remaining compatibility requirements.
+production multi-client server: root/output facts are fixed setup values, and
+per-client XID allocation plus simultaneous-client dispatch are still required.
+`XServerFrontendConfig`/`XServerFrontend` make the local socket path and
+namespace explicit, reject invalid namespaces, restrict the socket to its
+owner, and refuse to replace a non-socket path. The configuration can now
+require a session-scoped `MIT-MAGIC-COOKIE-1` value: a bad setup receives a
+normal X11 setup-failure reply and the listener remains available for the next
+client. The legacy smoke helpers and the configuration default deliberately
+remain unauthenticated local sockets. Xauthority-file management, peer-
+credential policy, cookie rotation, session launch policy, and confined-client
+routing are still required before treating the listener as a general local X
+server.
 
 The two session profiles have these precise semantics:
 

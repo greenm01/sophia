@@ -20,11 +20,11 @@ use std::{
 use crate::{
     X_SETUP_CLIENT_PREFIX_LEN, X_SETUP_DEFAULT_ROOT, X_SETUP_MAX_AUTH_FIELD_LEN, XAtomTable,
     XAuthorityCpuBufferUpdate, XAuthorityObservedTransactionBatch, XAuthorityRuntime, XByteOrder,
-    XClientEvent, XDispatchContext, XDispatchResult, XPropertyTable, XResourceId, XSetupRequest,
-    XSetupSuccess, XWireClientContext, decode_x11_core_request, dispatch_x11_parse_error,
-    dispatch_x11_wire_request, encode_x_client_event, encode_x11_setup_success,
-    parse_x11_setup_request, try_emit_x_authority_trace, try_emit_x_authority_transactions,
-    x11_setup_request_total_len,
+    XClientEvent, XDispatchContext, XDispatchResult, XPropertyTable, XResourceId, XSetupFailure,
+    XSetupRequest, XSetupSuccess, XWireClientContext, decode_x11_core_request,
+    dispatch_x11_parse_error, dispatch_x11_wire_request, encode_x_client_event,
+    encode_x11_setup_failure, encode_x11_setup_success, parse_x11_setup_request,
+    try_emit_x_authority_trace, try_emit_x_authority_transactions, x11_setup_request_total_len,
 };
 #[cfg(unix)]
 use sophia_protocol::{NamespaceId, Size, SurfaceId, TransactionId};
@@ -50,17 +50,73 @@ impl core::fmt::Display for X11SetupSocketError {
 
 impl std::error::Error for X11SetupSocketError {}
 
+/// The X11 setup authorization policy for one local frontend listener.
+///
+/// `UnauthenticatedLocal` retains the bounded smoke-helper behavior and relies
+/// on the listener's owner-only Unix-socket permissions. Production callers
+/// should instead provide a session-scoped MIT-MAGIC-COOKIE-1 value.
+#[cfg(unix)]
+#[derive(Clone, Eq, PartialEq)]
+pub enum XServerFrontendSetupAuthorization {
+    UnauthenticatedLocal,
+    MitMagicCookie([u8; 16]),
+}
+
+#[cfg(unix)]
+impl Default for XServerFrontendSetupAuthorization {
+    fn default() -> Self {
+        Self::UnauthenticatedLocal
+    }
+}
+
+#[cfg(unix)]
+impl core::fmt::Debug for XServerFrontendSetupAuthorization {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::UnauthenticatedLocal => formatter.write_str("UnauthenticatedLocal"),
+            Self::MitMagicCookie(_) => formatter.write_str("MitMagicCookie([redacted])"),
+        }
+    }
+}
+
+#[cfg(unix)]
+impl XServerFrontendSetupAuthorization {
+    fn permits(&self, request: &XSetupRequest) -> bool {
+        match self {
+            Self::UnauthenticatedLocal => true,
+            Self::MitMagicCookie(expected) => {
+                request.authorization_protocol_name == b"MIT-MAGIC-COOKIE-1"
+                    && x11_authorization_data_eq(&request.authorization_data, expected)
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+fn x11_authorization_data_eq(actual: &[u8], expected: &[u8]) -> bool {
+    actual.len() == expected.len()
+        && actual
+            .iter()
+            .zip(expected)
+            .fold(0u8, |difference, (actual, expected)| {
+                difference | (actual ^ expected)
+            })
+            == 0
+}
+
 /// Configuration owned by one local Sophia X Server Frontend listener.
 ///
 /// This deliberately describes only the boundary that exists today: one
-/// owner-only Unix socket and one Sophia namespace. Authentication policy,
-/// output/RandR facts, and multi-client resource allocation are explicit
-/// follow-up work rather than implicit defaults hidden in a smoke helper.
+/// owner-only Unix socket, one Sophia namespace, and explicit setup
+/// authorization. Output/RandR facts and multi-client resource allocation are
+/// explicit follow-up work rather than implicit defaults hidden in a smoke
+/// helper.
 #[cfg(unix)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct XServerFrontendConfig {
     socket_path: PathBuf,
     namespace: NamespaceId,
+    setup_authorization: XServerFrontendSetupAuthorization,
 }
 
 #[cfg(unix)]
@@ -83,7 +139,16 @@ impl XServerFrontendConfig {
         Ok(Self {
             socket_path,
             namespace,
+            setup_authorization: XServerFrontendSetupAuthorization::default(),
         })
+    }
+
+    pub fn with_setup_authorization(
+        mut self,
+        setup_authorization: XServerFrontendSetupAuthorization,
+    ) -> Self {
+        self.setup_authorization = setup_authorization;
+        self
     }
 
     pub fn socket_path(&self) -> &Path {
@@ -92,6 +157,10 @@ impl XServerFrontendConfig {
 
     pub const fn namespace(&self) -> NamespaceId {
         self.namespace
+    }
+
+    pub const fn setup_authorization(&self) -> &XServerFrontendSetupAuthorization {
+        &self.setup_authorization
     }
 }
 
@@ -126,10 +195,13 @@ impl XServerFrontend {
     }
 
     pub fn serve_next(&mut self) -> Result<(), X11SetupSocketError> {
-        serve_x11_core_socket_listener_once(
+        serve_x11_core_socket_listener_once_with_setup_authorization(
             &self.listener,
             self.config.namespace(),
             &mut self.state,
+            self.config.setup_authorization(),
+            None,
+            |_| Ok(()),
         )
     }
 
@@ -137,10 +209,12 @@ impl XServerFrontend {
         &mut self,
         observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
     ) -> Result<(), X11SetupSocketError> {
-        serve_x11_core_socket_listener_once_traced(
+        serve_x11_core_socket_listener_once_with_setup_authorization(
             &self.listener,
             self.config.namespace(),
             &mut self.state,
+            self.config.setup_authorization(),
+            None,
             observer,
         )
     }
@@ -153,10 +227,11 @@ impl XServerFrontend {
         &mut self,
         observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
     ) -> Result<(), X11SetupSocketError> {
-        serve_x11_core_socket_listener_traced(
+        serve_x11_core_socket_listener_with_setup_authorization(
             &self.listener,
             self.config.namespace(),
             &mut self.state,
+            self.config.setup_authorization(),
             observer,
         )
     }
@@ -433,6 +508,7 @@ pub fn run_x11_core_socket_server_once_channels(
         &mut state,
         Some(input_receiver),
         None,
+        &XServerFrontendSetupAuthorization::default(),
         move |trace| {
             try_emit_x_authority_trace(&transaction_sender, &trace)
                 .map_err(|error| X11SetupSocketError::new(error.to_string()))?;
@@ -461,6 +537,7 @@ pub fn run_x11_core_socket_server_once_session_channels(
         &mut state,
         Some(input_receiver),
         Some((control_receiver, control_ack_sender)),
+        &XServerFrontendSetupAuthorization::default(),
         move |trace| {
             try_emit_x_authority_trace(&transaction_sender, &trace)
                 .map_err(|error| X11SetupSocketError::new(error.to_string()))?;
@@ -489,10 +566,12 @@ fn run_x11_core_socket_server_once_with_trace_observer(
 ) -> Result<(), X11SetupSocketError> {
     let listener = bind_x11_core_socket_server(path)?;
     let mut state = X11CoreSocketServerState::new();
-    serve_x11_core_socket_listener_once_with_trace_observer(
+    let authorization = XServerFrontendSetupAuthorization::default();
+    serve_x11_core_socket_listener_once_with_setup_authorization(
         &listener,
         namespace,
         &mut state,
+        &authorization,
         idle_timeout,
         observer,
     )
@@ -558,8 +637,14 @@ pub fn serve_x11_core_socket_listener_once_traced(
     state: &mut X11CoreSocketServerState,
     observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
-    serve_x11_core_socket_listener_once_with_trace_observer(
-        listener, namespace, state, None, observer,
+    let authorization = XServerFrontendSetupAuthorization::default();
+    serve_x11_core_socket_listener_once_with_setup_authorization(
+        listener,
+        namespace,
+        state,
+        &authorization,
+        None,
+        observer,
     )
 }
 
@@ -577,13 +662,32 @@ pub fn serve_x11_core_socket_listener_traced(
     listener: &UnixListener,
     namespace: NamespaceId,
     state: &mut X11CoreSocketServerState,
+    observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
+) -> Result<(), X11SetupSocketError> {
+    let authorization = XServerFrontendSetupAuthorization::default();
+    serve_x11_core_socket_listener_with_setup_authorization(
+        listener,
+        namespace,
+        state,
+        &authorization,
+        observer,
+    )
+}
+
+#[cfg(unix)]
+fn serve_x11_core_socket_listener_with_setup_authorization(
+    listener: &UnixListener,
+    namespace: NamespaceId,
+    state: &mut X11CoreSocketServerState,
+    authorization: &XServerFrontendSetupAuthorization,
     mut observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
     loop {
-        serve_x11_core_socket_listener_once_with_trace_observer(
+        serve_x11_core_socket_listener_once_with_setup_authorization(
             listener,
             namespace,
             state,
+            authorization,
             None,
             &mut observer,
         )?;
@@ -591,10 +695,11 @@ pub fn serve_x11_core_socket_listener_traced(
 }
 
 #[cfg(unix)]
-fn serve_x11_core_socket_listener_once_with_trace_observer(
+fn serve_x11_core_socket_listener_once_with_setup_authorization(
     listener: &UnixListener,
     namespace: NamespaceId,
     state: &mut X11CoreSocketServerState,
+    authorization: &XServerFrontendSetupAuthorization,
     idle_timeout: Option<Duration>,
     observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
@@ -606,14 +711,47 @@ fn serve_x11_core_socket_listener_once_with_trace_observer(
             X11SetupSocketError::new(format!("failed to set X11 core read timeout: {error}"))
         })?;
     }
-    serve_x11_core_socket_client_with_trace_observer(&mut stream, namespace, state, observer)
+    serve_x11_core_socket_client_with_trace_observer_and_setup_authorization(
+        &mut stream,
+        namespace,
+        state,
+        authorization,
+        observer,
+    )
 }
 
 #[cfg(unix)]
 pub fn serve_x11_setup_socket_client(
     stream: &mut UnixStream,
 ) -> Result<XSetupRequest, X11SetupSocketError> {
+    let authorization = XServerFrontendSetupAuthorization::default();
+    serve_x11_setup_socket_client_with_setup_authorization(stream, &authorization)?.ok_or_else(
+        || X11SetupSocketError::new("default X11 setup authorization unexpectedly rejected"),
+    )
+}
+
+#[cfg(unix)]
+fn serve_x11_setup_socket_client_with_setup_authorization(
+    stream: &mut UnixStream,
+    authorization: &XServerFrontendSetupAuthorization,
+) -> Result<Option<XSetupRequest>, X11SetupSocketError> {
     let request = read_x11_setup_request(stream)?;
+    if !authorization.permits(&request) {
+        let response = encode_x11_setup_failure(
+            request.byte_order,
+            &XSetupFailure::new(b"Sophia X11 authorization failed"),
+        )
+        .map_err(|error| {
+            X11SetupSocketError::new(format!("failed to encode X11 setup failure: {error}"))
+        })?;
+        stream.write_all(&response).map_err(|error| {
+            X11SetupSocketError::new(format!("failed to write X11 setup failure: {error}"))
+        })?;
+        stream.flush().map_err(|error| {
+            X11SetupSocketError::new(format!("failed to flush X11 setup failure: {error}"))
+        })?;
+        return Ok(None);
+    }
     let response =
         encode_x11_setup_success(request.byte_order, &XSetupSuccess::client_compatible()).map_err(
             |error| {
@@ -626,7 +764,7 @@ pub fn serve_x11_setup_socket_client(
     stream
         .flush()
         .map_err(|error| X11SetupSocketError::new(format!("failed to flush X11 setup: {error}")))?;
-    Ok(request)
+    Ok(Some(request))
 }
 
 #[cfg(unix)]
@@ -679,8 +817,32 @@ fn serve_x11_core_socket_client_with_trace_observer(
     state: &mut X11CoreSocketServerState,
     observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
+    let authorization = XServerFrontendSetupAuthorization::default();
+    serve_x11_core_socket_client_with_trace_observer_and_setup_authorization(
+        stream,
+        namespace,
+        state,
+        &authorization,
+        observer,
+    )
+}
+
+#[cfg(unix)]
+fn serve_x11_core_socket_client_with_trace_observer_and_setup_authorization(
+    stream: &mut UnixStream,
+    namespace: NamespaceId,
+    state: &mut X11CoreSocketServerState,
+    authorization: &XServerFrontendSetupAuthorization,
+    observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
+) -> Result<(), X11SetupSocketError> {
     serve_x11_core_socket_client_with_trace_observer_and_input(
-        stream, namespace, state, None, None, observer,
+        stream,
+        namespace,
+        state,
+        None,
+        None,
+        authorization,
+        observer,
     )
 }
 
@@ -694,9 +856,14 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
         Receiver<XAuthorityControlCommand>,
         SyncSender<XAuthorityControlAck>,
     )>,
+    authorization: &XServerFrontendSetupAuthorization,
     mut observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
-    let setup = serve_x11_setup_socket_client(stream)?;
+    let Some(setup) =
+        serve_x11_setup_socket_client_with_setup_authorization(stream, authorization)?
+    else {
+        return Ok(());
+    };
     let mut sequence = 0u16;
     let event_sequence = Arc::new(AtomicU16::new(0));
     let focused_window = Arc::new(AtomicU64::new(u64::from(X_SETUP_DEFAULT_ROOT)));

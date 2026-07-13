@@ -4076,6 +4076,74 @@ fn x_server_frontend_binds_an_owner_only_socket_and_preserves_regular_files() {
 
 #[cfg(unix)]
 #[test]
+fn x_server_frontend_rejects_bad_cookie_then_accepts_the_configured_cookie() {
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let socket_path = std::env::temp_dir().join(format!(
+        "sophia-x-server-frontend-cookie-test-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let cookie = [0x3c; 16];
+    let config = XServerFrontendConfig::new(&socket_path, NamespaceId::from_raw(815))
+        .unwrap()
+        .with_setup_authorization(XServerFrontendSetupAuthorization::MitMagicCookie(cookie));
+    assert_eq!(
+        format!("{:?}", config.setup_authorization()),
+        "MitMagicCookie([redacted])"
+    );
+    let server = thread::spawn(move || {
+        let mut frontend = XServerFrontend::bind(config).unwrap();
+        frontend.serve_next().unwrap();
+        frontend.serve_next().unwrap();
+    });
+
+    wait_for_socket(&socket_path);
+    let mut rejected = UnixStream::connect(&socket_path).unwrap();
+    rejected
+        .write_all(&setup_request(
+            XByteOrder::LittleEndian,
+            11,
+            0,
+            b"MIT-MAGIC-COOKIE-1",
+            b"wrong-cookie-data",
+        ))
+        .unwrap();
+    let mut rejected_prefix = [0; X_SETUP_REPLY_PREFIX_LEN];
+    rejected.read_exact(&mut rejected_prefix).unwrap();
+    assert_eq!(rejected_prefix[0], 0);
+    let rejected_body_len =
+        usize::from(read_u16(XByteOrder::LittleEndian, &rejected_prefix[6..8])) * 4;
+    let mut rejected_body = vec![0; rejected_body_len];
+    rejected.read_exact(&mut rejected_body).unwrap();
+    assert!(String::from_utf8_lossy(&rejected_body).contains("authorization failed"));
+    drop(rejected);
+
+    let mut accepted = UnixStream::connect(&socket_path).unwrap();
+    accepted
+        .write_all(&setup_request(
+            XByteOrder::LittleEndian,
+            11,
+            0,
+            b"MIT-MAGIC-COOKIE-1",
+            &cookie,
+        ))
+        .unwrap();
+    read_setup_success(&mut accepted, XByteOrder::LittleEndian);
+    drop(accepted);
+
+    server.join().unwrap();
+    std::fs::remove_file(&socket_path).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
 fn x11_setup_socket_smoke_completes_handshake() {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
