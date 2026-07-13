@@ -1996,7 +1996,6 @@ impl WaylandNativeSession {
             .map(|output| native_frame_for_output(report, output.size))
             .collect::<Vec<_>>();
         if self.runtime.is_none() {
-            let submissions_before = self.scanout.heads[0].submissions;
             let mut runtime = PersistentBackendRuntime::new(
                 &self.outputs,
                 std::slice::from_ref(transaction),
@@ -2012,8 +2011,7 @@ impl WaylandNativeSession {
                 None,
             )?;
             self.runtime = Some(runtime);
-            self.queue_presentation(transaction.surface, generation, submissions_before)?;
-            return Ok(false);
+            return Ok(true);
         }
         let runtime = self.runtime.as_mut().expect("checked above");
         let submissions_before = self.scanout.heads[0].submissions;
