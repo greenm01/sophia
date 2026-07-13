@@ -22,6 +22,8 @@ Current truth:
 - The live authority supports ordered pipelined commits, xdg configure/ack,
   frame callbacks, buffer release, keyboard/pointer seat delivery, SHM, and
   bounded linear DMA-BUF admission.
+- The non-modesetting hardware preflight finds one openable atomic-capable card
+  with a connected scanout target and the required atomic properties.
 
 Exit criteria:
 

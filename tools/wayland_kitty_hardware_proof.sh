@@ -33,6 +33,7 @@ echo "[1/2] Proving real software-rendered Kitty resize without taking DRM owner
 tools/wayland_kitty_smoke.sh
 
 initial_kd_mode="$(python3 tools/sophia_tty_mode.py get)"
+initial_termios="$(stty -g)"
 keyd_was_running=0
 if pgrep -x keyd >/dev/null 2>&1; then
     keyd_was_running=1
@@ -53,6 +54,7 @@ if [[ ! -s "$SESSION_LOG" ]]; then
     echo "Native Kitty session evidence is missing: $SESSION_LOG" >&2
     exit 1
 fi
+mkdir -p "$(dirname "$EVIDENCE_FILE")"
 install -m 600 "$SESSION_LOG" "$EVIDENCE_FILE"
 
 restored_kd_mode="$(python3 tools/sophia_tty_mode.py get)"
@@ -60,15 +62,21 @@ if [[ "$restored_kd_mode" != "$initial_kd_mode" ]]; then
     echo "TTY KD mode was not restored: before=$initial_kd_mode after=$restored_kd_mode" >&2
     exit 1
 fi
+restored_termios="$(stty -g)"
+if [[ "$restored_termios" != "$initial_termios" ]]; then
+    echo "TTY termios state was not restored" >&2
+    exit 1
+fi
 keyd_restored=1
 if [[ "$keyd_was_running" == 1 ]] && ! pgrep -x keyd >/dev/null 2>&1; then
     keyd_restored=0
 fi
-if pgrep -af 'target/release/sophia sophia-wayland-session' >/dev/null 2>&1; then
-    echo "Sophia Wayland session survived wrapper cleanup" >&2
+if pgrep -af 'target/release/sophia (sophia-wayland-session|sophia-session-input-guard)' \
+    >/dev/null 2>&1; then
+    echo "Sophia Wayland session or input guard survived wrapper cleanup" >&2
     exit 1
 fi
-printf 'sophia_wayland_recovery schema=1 status=complete kd_mode=%s keyd_restored=%s processes=0\n' \
+printf 'sophia_wayland_recovery schema=1 status=complete kd_mode=%s termios_restored=1 keyd_restored=%s processes=0\n' \
     "$restored_kd_mode" "$keyd_restored" >>"$EVIDENCE_FILE"
 
 SOPHIA_WAYLAND_REQUIRE_DMABUF=1 \

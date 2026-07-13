@@ -103,7 +103,7 @@ DRM takeover. In Kitty, type `sophia` plus Enter, press all four arrow keys,
 move/click the pointer, then type `exit` plus Enter. The verifier requires all
 eleven evdev keycodes, routed pointer input, DMA-BUF frames, a presented-input
 latency no greater than 100 ms, normal client completion, restored KD mode and
-`keyd`, and no surviving session process.
+termios state and `keyd`, and no surviving session or input-guard process.
 
 The archived XLibre latency smoke used a dummy XLibre display,
 routes synthetic text over the compatibility XTEST connection, and requires a

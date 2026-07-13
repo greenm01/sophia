@@ -56,7 +56,7 @@ if [[ "${SOPHIA_WAYLAND_REQUIRE_INPUT:-0}" == 1 ]]; then
     fi
 fi
 if [[ "${SOPHIA_WAYLAND_REQUIRE_RECOVERY:-0}" == 1 ]] \
-    && ! grep -q '^sophia_wayland_recovery schema=1 status=complete .*keyd_restored=1 processes=0$' "$EVIDENCE_FILE"; then
+    && ! grep -q '^sophia_wayland_recovery schema=1 status=complete .*termios_restored=1 keyd_restored=1 processes=0$' "$EVIDENCE_FILE"; then
     echo "Wayland Kitty TTY recovery evidence is missing" >&2
     exit 1
 fi
