@@ -325,11 +325,42 @@ impl XServerFrontend {
         self.serve_next_concurrently_with_routing(observer, Some(broker.registry.clone()))
     }
 
+    /// Attempts to accept one routed concurrent client without blocking.
+    ///
+    /// `Ok(false)` means no connection is ready. The configured worker limit
+    /// remains enforced as an error, so a service must reap completed workers
+    /// before attempting another accept.
+    pub fn try_serve_next_concurrently_routed_traced(
+        &mut self,
+        broker: &XServerFrontendRouteBroker,
+        observer: Arc<X11CoreTraceObserver>,
+    ) -> Result<bool, X11SetupSocketError> {
+        self.try_serve_next_concurrently_with_routing(observer, Some(broker.registry.clone()))
+    }
+
     fn serve_next_concurrently_with_routing(
         &mut self,
         observer: Arc<X11CoreTraceObserver>,
         routing: Option<XServerFrontendRouteRegistry>,
     ) -> Result<(), X11SetupSocketError> {
+        self.accept_next_concurrently_with_routing(observer, routing, false)
+            .map(|_| ())
+    }
+
+    fn try_serve_next_concurrently_with_routing(
+        &mut self,
+        observer: Arc<X11CoreTraceObserver>,
+        routing: Option<XServerFrontendRouteRegistry>,
+    ) -> Result<bool, X11SetupSocketError> {
+        self.accept_next_concurrently_with_routing(observer, routing, true)
+    }
+
+    fn accept_next_concurrently_with_routing(
+        &mut self,
+        observer: Arc<X11CoreTraceObserver>,
+        routing: Option<XServerFrontendRouteRegistry>,
+        nonblocking: bool,
+    ) -> Result<bool, X11SetupSocketError> {
         self.reap_finished_client_workers()?;
         let limit = self.config.max_concurrent_clients().get();
         if self.workers.len() >= limit {
@@ -337,10 +368,32 @@ impl XServerFrontend {
                 "Sophia X Server Frontend concurrent-client limit ({limit}) reached"
             )));
         }
-        let (stream, _) = self.listener.accept().map_err(|error| {
-            X11SetupSocketError::new(format!("failed to accept X11 core client: {error}"))
-        })?;
-        self.spawn_client_worker(stream, observer, routing)
+        let accepted = if nonblocking {
+            self.listener.set_nonblocking(true).map_err(|error| {
+                X11SetupSocketError::new(format!(
+                    "failed to make X11 core listener nonblocking: {error}"
+                ))
+            })?;
+            let accepted = self.listener.accept();
+            self.listener.set_nonblocking(false).map_err(|error| {
+                X11SetupSocketError::new(format!(
+                    "failed to restore blocking X11 core listener: {error}"
+                ))
+            })?;
+            accepted
+        } else {
+            self.listener.accept()
+        };
+        match accepted {
+            Ok((stream, _)) => {
+                self.spawn_client_worker(stream, observer, routing)?;
+                Ok(true)
+            }
+            Err(error) if nonblocking && error.kind() == ErrorKind::WouldBlock => Ok(false),
+            Err(error) => Err(X11SetupSocketError::new(format!(
+                "failed to accept X11 core client: {error}"
+            ))),
+        }
     }
 
     /// Reaps every connection worker started by the concurrent APIs.
@@ -614,6 +667,14 @@ pub struct XAuthorityControlAck {
 pub struct XAuthorityClientControlAck {
     pub client: XServerFrontendClientId,
     pub acknowledgement: XAuthorityControlAck,
+}
+
+/// Service-supervision command for a long-running routed X11 frontend.
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum XServerFrontendServiceCommand {
+    /// Stop accepting new clients and drain workers that are already connected.
+    StopAccepting,
 }
 
 /// Routing failure between the Engine-facing ingress queues and a live X11
@@ -1382,6 +1443,67 @@ pub fn run_x11_core_socket_server_once_routed(
         }
     }
     Ok(())
+}
+
+/// Runs a bounded routed X11 frontend until supervision stops accepting.
+///
+/// While accepting, the service starts every ready local connection up to the
+/// configured worker limit, routes all pending Engine input/control into the
+/// owning worker's private queues, and reaps completed workers. A
+/// [`XServerFrontendServiceCommand::StopAccepting`] command closes admission
+/// without closing client streams; the service then drains the workers that
+/// already exist. The caller remains responsible for its session process
+/// policy and should stop producing Engine routes before sending that command.
+#[cfg(unix)]
+pub fn run_x11_core_socket_server_routed_until_stopped(
+    path: impl AsRef<Path>,
+    namespace: NamespaceId,
+    transaction_sender: SyncSender<XAuthorityObservedTransactionBatch>,
+    mut broker: XServerFrontendRouteBroker,
+    service_commands: Receiver<XServerFrontendServiceCommand>,
+) -> Result<(), X11SetupSocketError> {
+    let config = XServerFrontendConfig::new(path.as_ref().to_path_buf(), namespace)?;
+    let mut frontend = XServerFrontend::bind(config)?;
+    let observer: Arc<X11CoreTraceObserver> = Arc::new(move |trace| {
+        try_emit_x_authority_trace(&transaction_sender, &trace)
+            .map(|_| ())
+            .map_err(|error| X11SetupSocketError::new(error.to_string()))
+    });
+    let mut accepting = true;
+    loop {
+        match service_commands.try_recv() {
+            Ok(XServerFrontendServiceCommand::StopAccepting) | Err(TryRecvError::Disconnected) => {
+                accepting = false
+            }
+            Err(TryRecvError::Empty) => {}
+        }
+
+        let mut progressed = false;
+        if accepting {
+            while frontend.active_client_worker_count()
+                < frontend.config().max_concurrent_clients().get()
+            {
+                if !frontend.try_serve_next_concurrently_routed_traced(&broker, observer.clone())? {
+                    break;
+                }
+                progressed = true;
+            }
+            let routed = broker
+                .route_pending()
+                .map_err(|error| X11SetupSocketError::new(error.to_string()))?;
+            progressed |= routed != 0;
+        }
+        let workers_before_reap = frontend.active_client_worker_count();
+        frontend.poll_client_workers()?;
+        progressed |= workers_before_reap != frontend.active_client_worker_count();
+
+        if !accepting && frontend.active_client_worker_count() == 0 {
+            return Ok(());
+        }
+        if !progressed {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
 }
 
 #[cfg(unix)]

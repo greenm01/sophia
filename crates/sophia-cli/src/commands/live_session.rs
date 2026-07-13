@@ -10,7 +10,8 @@ use sophia_x_authority::{
     XAuthorityClientControlAck, XAuthorityClientControlCommand, XAuthorityClientInputEvent,
     XAuthorityClientSurfaceRoutes, XAuthorityControlCommand, XAuthorityControlOutcome,
     XAuthorityInputEvent, XAuthorityPointerEvent, XAuthorityPointerEventKind, XCoreKeyboardMapper,
-    XCorePointerMapper, XServerFrontendRouteBroker, run_x11_core_socket_server_once_routed,
+    XCorePointerMapper, XServerFrontendRouteBroker, XServerFrontendServiceCommand,
+    run_x11_core_socket_server_routed_until_stopped,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
@@ -99,12 +100,14 @@ pub(crate) fn run_persistent_xterm_session(
     );
     let input_sender = broker.input_sender();
     let control_sender = broker.control_sender();
+    let (service_command_sender, service_command_receiver) = sync_channel(1);
     let server = std::thread::spawn(move || {
-        run_x11_core_socket_server_once_routed(
+        run_x11_core_socket_server_routed_until_stopped(
             &server_path,
             NamespaceId::from_raw(50),
             authority_sender,
             broker,
+            service_command_receiver,
         )
     });
     super::x_authority::wait_for_socket_path(&config.socket_path)?;
@@ -197,6 +200,7 @@ pub(crate) fn run_persistent_xterm_session(
         false,
     );
     process.terminate()?;
+    let _ = service_command_sender.send(XServerFrontendServiceCommand::StopAccepting);
     drop(input_sender);
     drop(control_sender);
     let server_result = server

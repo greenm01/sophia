@@ -5158,7 +5158,7 @@ fn x11_core_socket_channel_sees_sophia_present_transaction_batch() {
 
 #[cfg(unix)]
 #[test]
-fn routed_socket_server_delivers_brokered_control_to_its_worker() {
+fn routed_service_delivers_brokered_control_to_two_workers_and_drains() {
     use std::io::Write;
     use std::num::NonZeroUsize;
     use std::os::unix::net::UnixStream;
@@ -5176,43 +5176,53 @@ fn routed_socket_server_delivers_brokered_control_to_its_worker() {
     let server_path = socket_path.clone();
     let (transaction_sender, transaction_receiver) =
         std::sync::mpsc::sync_channel(X_AUTHORITY_OBSERVED_TRANSACTION_CHANNEL_CAPACITY);
-    let (acknowledgement_sender, acknowledgement_receiver) = std::sync::mpsc::sync_channel(2);
+    let (acknowledgement_sender, acknowledgement_receiver) = std::sync::mpsc::sync_channel(4);
     let broker = XServerFrontendRouteBroker::with_control_ack_sender(
-        NonZeroUsize::new(2).unwrap(),
+        NonZeroUsize::new(4).unwrap(),
         acknowledgement_sender,
     );
+    let input_sender = broker.input_sender();
     let control_sender = broker.control_sender();
+    let (service_command_sender, service_command_receiver) = std::sync::mpsc::sync_channel(1);
     let server = thread::spawn(move || {
-        run_x11_core_socket_server_once_routed(
+        run_x11_core_socket_server_routed_until_stopped(
             &server_path,
             NamespaceId::from_raw(52),
             transaction_sender,
             broker,
+            service_command_receiver,
         )
         .unwrap();
     });
 
     wait_for_socket(&socket_path);
-    let mut stream = UnixStream::connect(&socket_path).unwrap();
-    stream
+    let mut first = UnixStream::connect(&socket_path).unwrap();
+    first
         .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
         .unwrap();
-    read_setup_success(&mut stream, XByteOrder::LittleEndian);
-    stream
+    read_setup_success(&mut first, XByteOrder::LittleEndian);
+    first
         .write_all(&create_window_request(
             XByteOrder::LittleEndian,
-            0x220701,
+            0x0020_0701,
             1,
             2,
             300,
             200,
         ))
         .unwrap();
-    assert_eq!(read_x_record(&mut stream)[0], 22);
-    stream
+    assert_eq!(read_x_record(&mut first)[0], 22);
+    first
+        .write_all(&change_window_event_mask_request(
+            XByteOrder::LittleEndian,
+            0x0020_0701,
+            0b11,
+        ))
+        .unwrap();
+    first
         .write_all(&sophia_present_pixmap_request(
             XByteOrder::LittleEndian,
-            0x220701,
+            0x0020_0701,
             0x992,
             (0, 0, 16, 16),
             1,
@@ -5220,41 +5230,121 @@ fn routed_socket_server_delivers_brokered_control_to_its_worker() {
         ))
         .unwrap();
 
-    let batch = transaction_receiver
-        .recv_timeout(Duration::from_secs(1))
+    let mut second = UnixStream::connect(&socket_path).unwrap();
+    second
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
         .unwrap();
-    let client = batch
-        .client
-        .expect("routed worker must identify its client");
-    let surface = batch.transactions[0].surface;
-    let command = XAuthorityControlCommand::ConfigureSurface {
-        transaction: TransactionId::from_raw(88),
-        surface,
-        size: Size {
-            width: 301,
-            height: 201,
-        },
-    };
-    control_sender
-        .send(XAuthorityClientControlCommand { client, command })
+    read_setup_success(&mut second, XByteOrder::LittleEndian);
+    second
+        .write_all(&create_window_request(
+            XByteOrder::LittleEndian,
+            0x0040_0702,
+            3,
+            4,
+            300,
+            200,
+        ))
         .unwrap();
-    assert_eq!(
-        acknowledgement_receiver
+    assert_eq!(read_x_record(&mut second)[0], 22);
+    second
+        .write_all(&change_window_event_mask_request(
+            XByteOrder::LittleEndian,
+            0x0040_0702,
+            0b11,
+        ))
+        .unwrap();
+    second
+        .write_all(&sophia_present_pixmap_request(
+            XByteOrder::LittleEndian,
+            0x0040_0702,
+            0x993,
+            (0, 0, 16, 16),
+            1,
+            1,
+        ))
+        .unwrap();
+
+    let mut routes = Vec::new();
+    for _ in 0..2 {
+        let batch = transaction_receiver
             .recv_timeout(Duration::from_secs(1))
-            .unwrap(),
-        XAuthorityClientControlAck {
+            .unwrap();
+        routes.push((
+            batch
+                .client
+                .expect("routed worker must identify its client"),
+            batch.transactions[0].surface,
+        ));
+    }
+    routes.sort_by_key(|(client, _)| client.raw());
+    assert_ne!(routes[0].0, routes[1].0);
+    for (index, (client, _)) in routes.iter().copied().enumerate() {
+        input_sender
+            .send(XAuthorityClientInputEvent {
+                client,
+                event: XAuthorityKeyEvent {
+                    keycode: 38 + index as u8,
+                    pressed: true,
+                    state: 0,
+                    time_msec: 10 + index as u32,
+                }
+                .into(),
+            })
+            .unwrap();
+    }
+    assert_eq!(read_x_record(&mut first)[0], 9);
+    let first_key = read_x_record(&mut first);
+    assert_eq!(first_key[0], 2);
+    assert_eq!(first_key[1], 38);
+    assert_eq!(read_x_record(&mut second)[0], 9);
+    let second_key = read_x_record(&mut second);
+    assert_eq!(second_key[0], 2);
+    assert_eq!(second_key[1], 39);
+    for (index, (client, surface)) in routes.iter().copied().enumerate() {
+        control_sender
+            .send(XAuthorityClientControlCommand {
+                client,
+                command: XAuthorityControlCommand::ConfigureSurface {
+                    transaction: TransactionId::from_raw(88 + index as u64),
+                    surface,
+                    size: Size {
+                        width: 301 + index as i32,
+                        height: 201 + index as i32,
+                    },
+                },
+            })
+            .unwrap();
+    }
+    let mut acknowledgements = Vec::new();
+    for _ in 0..2 {
+        acknowledgements.push(
+            acknowledgement_receiver
+                .recv_timeout(Duration::from_secs(1))
+                .unwrap(),
+        );
+    }
+    for (index, (client, surface)) in routes.iter().copied().enumerate() {
+        assert!(acknowledgements.contains(&XAuthorityClientControlAck {
             client,
             acknowledgement: XAuthorityControlAck {
-                transaction: command.transaction(),
+                transaction: TransactionId::from_raw(88 + index as u64),
                 surface,
                 outcome: XAuthorityControlOutcome::Applied,
             },
-        }
-    );
-    assert_eq!(read_x_record(&mut stream)[0], 22);
-    assert_eq!(read_x_record(&mut stream)[0], 12);
+        }));
+    }
+    assert_eq!(read_x_record(&mut first)[0], 22);
+    assert_eq!(read_x_record(&mut first)[0], 12);
+    assert_eq!(read_x_record(&mut second)[0], 22);
+    assert_eq!(read_x_record(&mut second)[0], 12);
 
-    drop(stream);
+    drop(first);
+    drop(second);
+    service_command_sender
+        .send(XServerFrontendServiceCommand::StopAccepting)
+        .unwrap();
+    drop(service_command_sender);
+    drop(input_sender);
     drop(control_sender);
     server.join().unwrap();
     std::fs::remove_file(&socket_path).unwrap();
@@ -5620,6 +5710,19 @@ fn set_clip_rectangles_request(
         push_u16(&mut out, byte_order, width);
         push_u16(&mut out, byte_order, height);
     }
+    out
+}
+
+fn change_window_event_mask_request(
+    byte_order: XByteOrder,
+    window: u32,
+    event_mask: u32,
+) -> Vec<u8> {
+    let mut out = vec![2, 0];
+    push_u16(&mut out, byte_order, 4);
+    push_u32(&mut out, byte_order, window);
+    push_u32(&mut out, byte_order, 1 << 11);
+    push_u32(&mut out, byte_order, event_mask);
     out
 }
 

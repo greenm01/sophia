@@ -130,10 +130,13 @@ engineering reason.
   Engine-facing ingress and attaches private input/control queues to routed
   concurrent workers; stale, disconnected, and backpressured client routes
   fail closed, and worker teardown unregisters its route before cleanup is
-  observed. The persistent one-xterm session now uses this brokered worker
-  transport. It remains single-client until its service loop can accept/reap
-  bounded concurrent workers and prove two-client input, control, and teardown
-  end to end.
+  observed. The persistent session now runs the bounded concurrent brokered
+  service, which stops accepting on supervision command and then drains live
+  workers without killing client processes. A two-client socket regression
+  proves client-targeted keyboard input, configure acknowledgements, and
+  teardown end to end. The launcher still starts one xterm; next, add a
+  real-client multi-app session proof and configurable client admission/auth
+  policy.
 - [x] Define the X11 session profiles: classic shared-X behavior for trusted
   sessions, plus explicit confined namespaces/capabilities where requested.
   The confined profile remains gated on client-aware connection routing.

@@ -77,10 +77,14 @@ Engine-facing ingress for simultaneous workers: callers enqueue client-addressed
 input or control, call `route_pending`, and each connected routed worker owns
 only its private queues. Unknown, disconnected, and backpressured client routes
 fail closed; worker teardown unregisters the client route before its cleanup
-batch is observed. The persistent live session now uses that brokered worker
-transport while it still intentionally accepts one xterm. General concurrent
-accept/reap service supervision is the next integration step. Root/output facts
-are still fixed setup values. Each accepted
+batch is observed. The persistent live session now uses the bounded brokered
+service loop: it admits and reaps routed workers up to the configured cap, and
+on shutdown it stops admission before draining connected workers. A two-client
+socket regression proves each worker receives only its own routed key and
+configure request, returns a client-labeled acknowledgement, and tears down
+cleanly. The live launcher still starts one xterm; a real multi-client session
+proof is the next integration step. Root/output facts are still fixed setup
+values. Each accepted
 client now gets
 a disjoint X11 setup resource-ID range. Every currently supported XID-creating
 wire path—window, pixmap, GC, font, colormap, glyph cursor, and reduced
@@ -515,9 +519,11 @@ the release cleanup is reported. The Engine-side loop calls `route_pending`;
 it never broadcasts an event and it receives an explicit error for an unknown,
 disconnected, or full client queue. Control acknowledgements return through the
 same broker labeled with the worker client identity. This is an in-process
-contract that now carries the persistent one-client live session; it becomes a
-general service only when the session owns bounded concurrent accept/reap
-supervision.
+contract that now carries the persistent live service. The service polls the
+owner-only listener without blocking the Engine path, admits at most the
+configured worker count, and receives `StopAccepting` from session supervision.
+That command never kills a client: it closes only new admission and drains
+workers whose client streams have ended.
 
 The callback observer helpers remain for focused tests and smoke probes. They
 are not the production transport shape.
