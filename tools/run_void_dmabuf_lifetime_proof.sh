@@ -8,10 +8,12 @@ EVIDENCE_FILE="$EVIDENCE_DIR/controlled-lifecycle.log"
 DIAGNOSTIC=false
 TRACE=false
 TRACE_ENV=0
+CORE_DUMP=false
+CORE_ENV=0
 RUNS=1
 
 usage() {
-    echo "usage: $0 [--diagnostic|--trace] [--runs COUNT]" >&2
+    echo "usage: $0 [--diagnostic|--trace|--core] [--runs COUNT]" >&2
 }
 
 while (( $# > 0 )); do
@@ -23,6 +25,11 @@ while (( $# > 0 )); do
             TRACE=true
             TRACE_ENV=1
             EVIDENCE_FILE="$EVIDENCE_DIR/controlled-lifecycle-trace.log"
+            ;;
+        --core)
+            CORE_DUMP=true
+            CORE_ENV=1
+            EVIDENCE_FILE="$EVIDENCE_DIR/controlled-lifecycle-core.log"
             ;;
         --runs)
             shift
@@ -47,16 +54,26 @@ while (( $# > 0 )); do
     shift
 done
 
-if [[ "$DIAGNOSTIC" == true && "$TRACE" == true ]]; then
-    echo "--diagnostic and --trace cannot be used together." >&2
+enabled_modes=0
+if [[ "$DIAGNOSTIC" == true ]]; then
+    (( enabled_modes += 1 ))
+fi
+if [[ "$TRACE" == true ]]; then
+    (( enabled_modes += 1 ))
+fi
+if [[ "$CORE_DUMP" == true ]]; then
+    (( enabled_modes += 1 ))
+fi
+if (( enabled_modes > 1 )); then
+    echo "--diagnostic, --trace, and --core cannot be used together." >&2
     exit 2
 fi
 if [[ ! "$RUNS" =~ ^[0-9]+$ ]] || (( RUNS < 1 || RUNS > 5 )); then
     echo "--runs must be an integer from 1 to 5." >&2
     exit 2
 fi
-if (( RUNS > 1 )) && [[ "$DIAGNOSTIC" == true || "$TRACE" == true ]]; then
-    echo "--runs cannot be combined with --diagnostic or --trace." >&2
+if (( RUNS > 1 )) && [[ "$DIAGNOSTIC" == true || "$TRACE" == true || "$CORE_DUMP" == true ]]; then
+    echo "--runs cannot be combined with --diagnostic, --trace, or --core." >&2
     exit 2
 fi
 
@@ -90,6 +107,9 @@ fi
 if [[ "$TRACE" == true ]]; then
     echo "  mode:     release-timing lifecycle trace"
 fi
+if [[ "$CORE_DUMP" == true ]]; then
+    echo "  mode:     release core capture on SIGABRT"
+fi
 
 for (( run = 1; run <= RUNS; run += 1 )); do
     run_evidence="$EVIDENCE_FILE"
@@ -101,6 +121,7 @@ for (( run = 1; run <= RUNS; run += 1 )); do
         SOPHIA_DMABUF_PRODUCER_FRAMES=300 \
         SOPHIA_DMABUF_FIRST_FRAME_EVIDENCE="$run_evidence" \
         SOPHIA_DMABUF_TRACE="$TRACE_ENV" \
+        SOPHIA_DMABUF_CORE_DUMP="$CORE_ENV" \
         tools/wayland_dmabuf_first_frame_hardware_proof.sh
 done
 

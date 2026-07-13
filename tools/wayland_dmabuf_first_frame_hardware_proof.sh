@@ -7,6 +7,7 @@ FRAME_COUNT="${SOPHIA_DMABUF_PRODUCER_FRAMES:-3}"
 RENDER_NODE="${SOPHIA_DMABUF_RENDER_NODE:-}"
 DIAGNOSTIC="${SOPHIA_DMABUF_DIAGNOSTIC:-0}"
 TRACE="${SOPHIA_DMABUF_TRACE:-0}"
+CORE_DUMP="${SOPHIA_DMABUF_CORE_DUMP:-0}"
 
 if [[ ! -t 0 ]]; then
     echo "Run the DMA-BUF first-frame proof from a dedicated local text TTY." >&2
@@ -28,8 +29,12 @@ if [[ "$TRACE" != 0 && "$TRACE" != 1 ]]; then
     echo "SOPHIA_DMABUF_TRACE must be 0 or 1." >&2
     exit 1
 fi
-if [[ "$DIAGNOSTIC" == 1 && "$TRACE" == 1 ]]; then
-    echo "SOPHIA_DMABUF_DIAGNOSTIC and SOPHIA_DMABUF_TRACE are mutually exclusive." >&2
+if [[ "$CORE_DUMP" != 0 && "$CORE_DUMP" != 1 ]]; then
+    echo "SOPHIA_DMABUF_CORE_DUMP must be 0 or 1." >&2
+    exit 1
+fi
+if (( DIAGNOSTIC + TRACE + CORE_DUMP > 1 )); then
+    echo "SOPHIA_DMABUF_DIAGNOSTIC, SOPHIA_DMABUF_TRACE, and SOPHIA_DMABUF_CORE_DUMP are mutually exclusive." >&2
     exit 1
 fi
 if [[ -z "$RENDER_NODE" ]]; then
@@ -60,6 +65,8 @@ if [[ "$DIAGNOSTIC" == 1 ]]; then
     echo "  diagnostic: GDB allocator/lifecycle capture"
 elif [[ "$TRACE" == 1 ]]; then
     echo "  diagnostic: release-timing lifecycle trace"
+elif [[ "$CORE_DUMP" == 1 ]]; then
+    echo "  diagnostic: release core capture on SIGABRT"
 fi
 
 if [[ "$DIAGNOSTIC" == 1 ]]; then
@@ -76,7 +83,7 @@ tools/atomic_scanout_preflight.sh
 tools/build_wayland_dmabuf_producer.sh "$PRODUCER"
 
 SESSION=(
-    target/release/sophia sophia-wayland-session
+    "$ROOT_DIR/target/release/sophia" sophia-wayland-session
     --client="$PRODUCER"
     --client-arg=--render-node
     --client-arg="$RENDER_NODE"
@@ -109,9 +116,35 @@ else
     if [[ "$TRACE" == 1 ]]; then
         trace_env=(SOPHIA_WAYLAND_DMABUF_DIAGNOSTIC=1 MALLOC_CHECK_=3 MESA_DEBUG=1)
     fi
-    env XDG_RUNTIME_DIR="$RUNTIME_DIR" SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 \
-        "${trace_env[@]}" \
-        timeout --foreground 30s "${SESSION[@]}" >"$EVIDENCE_FILE" 2>&1
+    if [[ "$CORE_DUMP" == 1 ]]; then
+        core_file="$EVIDENCE_FILE.core"
+        rm -f "$core_file"
+        set +e
+        (
+            cd "$RUNTIME_DIR"
+            ulimit -c 262144
+            env XDG_RUNTIME_DIR="$RUNTIME_DIR" SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 \
+                timeout --foreground 30s "${SESSION[@]}"
+        ) >"$EVIDENCE_FILE" 2>&1
+        status=$?
+        set -e
+        captured_core="$(find "$RUNTIME_DIR" -maxdepth 1 -type f -name 'core*' -print -quit)"
+        if [[ -n "$captured_core" ]]; then
+            install -m 600 "$captured_core" "$core_file"
+        fi
+        if (( status != 0 )); then
+            if [[ -f "$core_file" ]]; then
+                echo "DMA-BUF core diagnostic failed; core evidence: $core_file" >&2
+            else
+                echo "DMA-BUF core diagnostic failed without a captured core." >&2
+            fi
+            exit "$status"
+        fi
+    else
+        env XDG_RUNTIME_DIR="$RUNTIME_DIR" SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 \
+            "${trace_env[@]}" \
+            timeout --foreground 30s "${SESSION[@]}" >"$EVIDENCE_FILE" 2>&1
+    fi
 fi
 
 SOPHIA_WAYLAND_REQUIRE_DMABUF=1 \

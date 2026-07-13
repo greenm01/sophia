@@ -134,6 +134,17 @@ retirement, and client-release stages in
 `~/.local/state/sophia/dmabuf-promotion/controlled-lifecycle-trace.log`. Use
 `tools/run_void_dmabuf_lifetime_proof.sh --diagnostic` for the GDB comparison.
 
+If an uninstrumented run aborts with allocator output, preserve its normal-run
+core (limited to 128 MiB) without starting under GDB:
+
+```bash
+tools/run_void_dmabuf_lifetime_proof.sh --core
+```
+
+On failure it keeps the log and core at
+`~/.local/state/sophia/dmabuf-promotion/controlled-lifecycle-core.log` and its
+`.core` sibling for offline stack inspection.
+
 After a future normal 300-frame failure, require three independent
 uninstrumented passes before clearing the lifecycle gate. This preserves each
 evidence file instead of overwriting it:
