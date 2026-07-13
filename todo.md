@@ -9,7 +9,7 @@ next milestone becomes active.
 
 ---
 
-## Active Milestone: Native Renderer Stability and DMA-BUF Performance
+## Active Milestones: Native Renderer Stability, DMA-BUF Performance, and the Sophia X Server Frontend
 
 Current truth:
 
@@ -80,6 +80,60 @@ Exit criteria:
 - [x] Add native KMS presentation wiring for the Wayland session while
   preserving the existing independent TTY recovery guard.
 
+## Sophia X Server Frontend
+
+Sophia’s X direction is a Phoenix-style strategic approach: implement a modern
+X server that presents the established X11 API directly to applications. Do not
+create a separate Sophia-native display protocol. Smithay remains the Wayland
+frontend infrastructure; XLibre remains the broad-compatibility provider and
+reference while the Sophia X Server Frontend matures.
+
+Terminology: call the component **Sophia X Server Frontend** and call the API it
+implements **X11**. The existing `sophia-x-authority` crate is the frontend’s
+implementation seed; retain its name until a source-layout migration has an
+engineering reason.
+
+### Milestone 1: Server Contract and Long-Running Frontend
+
+- [x] Establish the first X11 setup/socket/resource prototype and reduce
+  bounded X lifecycle, property, core-draw, and private-present facts into
+  Engine transactions.
+- [ ] Specify the production X Server Frontend boundary: client connection and
+  authentication ownership, X resource lifecycle, Engine transaction intake,
+  output/RandR facts, routed-input decisions, and presentation feedback.
+- [ ] Turn the temporary socket smoke into a supervised, configurable,
+  long-running local X server frontend without giving it DRM/KMS or physical
+  input ownership.
+- [ ] Define the X11 session profiles: classic shared-X behavior for trusted
+  sessions, plus explicit confined namespaces/capabilities where requested.
+- [ ] Establish an application-driven compatibility matrix and make every new
+  X11 request, reply, event, or extension earn its implementation through a
+  reproducible real-client probe.
+
+### Milestone 2: Modern X11 Input and Graphics
+
+- [ ] Complete a real XKB/keymap path and X11 focus, grab, pointer, keyboard,
+  and XI delivery semantics using Engine-selected targets and local coordinates.
+- [ ] Promote explicit X11 buffer readiness: SHM/software updates first, then
+  standard DRI3/Present DMA-BUF handoff with fences, delayed release, and
+  Engine-owned atomic presentation.
+- [ ] Drive Render, GLX, XFixes, selections, RandR, and extension coverage from
+  the compatibility matrix rather than attempting all Xorg behavior.
+- [ ] Prove a real X11 client reaches Sophia Engine and KMS through normal
+  startup, input, resize, presentation, and teardown—not only a socket smoke.
+
+### Milestone 3: Compatibility Provider and Migration Evidence
+
+- [ ] Define the XLibre provider contract as an optional broad-compatibility
+  lane: it may own X11 semantics, but never Sophia DRM/KMS, physical input,
+  layout policy, or session control.
+- [ ] Keep the XLibre integration thin and evidence-gated; use its behavior and
+  real applications to guide the native frontend rather than treating
+  XComposite/readback as Sophia’s permanent rendering boundary.
+- [ ] Set promotion criteria for moving an application class from XLibre to the
+  Sophia X Server Frontend: protocol coverage, input/grab correctness, buffer
+  lifetime, latency, recovery, and classic-X behavior where selected.
+
 ## DMA-BUF Performance Gates
 
 - [x] Advertise only bounded single-plane XRGB/ARGB linear formats and validate
@@ -119,6 +173,7 @@ Exit criteria:
   Kitty gate.
 - Dedicated-TTY xmonad visual evidence and a second legacy-WM smoke no longer
   block the protocol-authority path.
-- GTK/XInput2/zenity, clipboard, drag-and-drop, optional Wayland protocols,
-  concurrent X clients, and broader desktop compatibility resume after the
-  native terminal path is stable.
+- Optional Wayland protocols and broader desktop compatibility resume after the
+  native terminal path is stable. X11 GTK/XInput2/clipboard/drag-and-drop and
+  concurrent-client work now advance through the Sophia X Server Frontend
+  compatibility matrix.

@@ -8,10 +8,12 @@ atomic surface transactions, rendering, and scanout. Client compatibility lives
 behind protocol authorities that terminate a client protocol and translate it
 into namespace-checked Sophia surface transactions.
 
-The long-term X path is a Sophia-owned modern X authority, informed by Phoenix,
-not a permanent dependency on Xorg or XLibre internals. XLibre remains valuable
-as prototype evidence and as a research reference for X11 semantics,
-Xnamespace, XComposite/Damage, and routed-input experiments.
+The long-term X path is a **Sophia X Server Frontend**: a Sophia-owned modern X
+server implementation, informed by Phoenix’s clean-room, compatibility-driven
+strategy. It presents the X11 API directly to applications; Sophia is not
+planning a separate application-facing “Sophia native” display protocol. XLibre
+remains a valuable broad-compatibility provider and research reference while the
+Sophia frontend matures, not the architectural definition of the session.
 
 ## Processes
 
@@ -47,8 +49,8 @@ Xnamespace, XComposite/Damage, and routed-input experiments.
                          PROTOCOL AUTHORITY LAYER
 ================================================================================
  ┌────────────────────────────────────────────────────────────────────────────┐
- │ Sophia X Authority | Sophia Wayland Authority | Sophia Native Authority    │
- │ protocol resources | grabs/focus | selections | namespace checks           │
+ │ Sophia X Server Frontend | Sophia Wayland Authority                         │
+ │ X11 resources/grabs      | Wayland objects | protocol-specific checks      │
  └────────────────────────────────┬───────────────────────────────────────────┘
                                   │
                                   │ namespace-checked surface transactions
@@ -122,10 +124,13 @@ client object tables, grabs, selections, configure/ack state, and namespace
 checks for their protocol. They must not own workspaces, final layout, global
 shortcuts, compositor chrome, portal policy, physical input devices, or scanout.
 
-The first long-term authority target is **Sophia X Authority**: a modern X
-protocol subset capable of running real applications while avoiding the full
-Xorg/XLibre object graph. It should learn from Phoenix's clean-room approach and
-from Sophia's existing XLibre prototype seams.
+The first long-term frontend target is the **Sophia X Server Frontend**: a
+modern X server capable of running real applications through the X11 API while
+avoiding the full Xorg/XLibre object graph. It adopts Phoenix’s strategic
+approach—clean-room implementation, a modern compatibility subset, and
+probe-driven coverage—without depending on Phoenix code. The current
+`sophia-x-authority` crate is its implementation seed and retains that crate
+name until a later source-layout decision.
 
 A bounded **Sophia Wayland Authority** now supports Wayland-only applications by
 terminating `wl_surface`, `xdg_toplevel`, buffer attach, damage, and commit
@@ -137,6 +142,21 @@ second compositor; Sophia Engine remains the only visual authority.
 Every authority must preserve the same namespace model. `NamespaceId`,
 `SurfaceId`, portal transfer state, and sanitized metadata are Sophia concepts,
 not X-specific or Wayland-specific concepts.
+
+### X Server Naming And Compatibility Contract
+
+Use **Sophia X Server Frontend** for the component and **X11** for the
+client-facing API and wire protocol it implements. “X Authority” remains an
+acceptable shorthand for its protocol-semantic role and existing crate names,
+but must not imply that Sophia only provides an X11 shim.
+
+The frontend is forward-looking through its server implementation, not through
+a replacement client protocol. Existing X11 clients retain ordinary X11
+semantics. Modern behavior comes from Sophia-owned DRM/KMS presentation,
+explicit buffer readiness, atomic visual commits, and narrowly scoped X11
+extensions where necessary. A classic shared-X session is a supported profile;
+namespace confinement and capability mediation are opt-in session policy rather
+than a rejection of X11’s programmable model.
 
 ### Atomic Surface Transactions
 
@@ -153,7 +173,7 @@ The default slow-client behavior is fail-closed visual integrity:
 - record slow or failed readiness as transaction outcomes;
 - degrade only through explicit timeout policy.
 
-For X clients, the Sophia X Authority should translate `PresentPixmap`, SHM,
+For X clients, the Sophia X Server Frontend should translate `PresentPixmap`, SHM,
 Render, and core drawing completion into pending buffer readiness. For Wayland
 clients, the Wayland Authority can map the native attach/damage/commit sequence
 directly into the same readiness model.
@@ -178,7 +198,7 @@ The historical Sophia X Bridge follows picom conceptually for the XLibre
 prototype path. Picom imports the X window tree, tracks top-levels and stacking,
 redirects windows with XComposite, consumes Damage, builds flat layer snapshots,
 and computes damage across buffered layouts. Those lessons remain useful for
-understanding X compatibility, but the long-term Sophia X Authority should emit
+understanding X compatibility, but the long-term Sophia X Server Frontend should emit
 surface transactions directly instead of requiring an XComposite mirror as the
 primary seam.
 
@@ -273,7 +293,7 @@ returns the retired record with no current replacement. This gives the later
 real renderer an explicit point to release old pixmap/import resources.
 
 This seam exists today in broad shape and remains useful as research evidence.
-It should inform the Sophia X Authority design without becoming the permanent
+It should inform the Sophia X Server Frontend design without becoming the permanent
 authority boundary.
 
 The XLibre prototype accepts ordinary X11 limitations:
@@ -913,11 +933,11 @@ The live runtime adapter now has a protocol-neutral authority batch intake.
 `AuthorityTransactionIntake` carries only a Sophia `TransactionId` and bounded
 `SurfaceTransaction` values. The adapter commits those batches through
 `HeadlessEngine::commit_surface_transactions` before projecting committed
-surface state into renderable layers. Sophia X Authority can adapt its bounded
+surface state into renderable layers. Sophia X Server Frontend can adapt its bounded
 `XAuthorityObservedTransactionBatch` into this shape at the process/runtime
-edge without making Sophia Engine depend on the X Authority crate.
+edge without making Sophia Engine depend on the `sophia-x-authority` crate.
 
-The long-running Sophia X Authority side channel is the preferred runtime path
+The long-running Sophia X Server Frontend side channel is the preferred runtime path
 for observed drawing and presentation transactions. Socket dispatch attempts a
 nonblocking send of `XAuthorityObservedTransactionBatch` into a bounded channel;
 the runtime edge converts that batch into `AuthorityTransactionIntake`. Callback
@@ -1085,7 +1105,7 @@ surface transactions and lifecycle facts; Sophia Engine remains the source of
 truth for committed visual placement and scanout.
 
 The XLibre prototype remains responsible for the same X11 concepts while that
-prototype is in use. The long-term Sophia X Authority should bring those
+prototype is in use. The long-term Sophia X Server Frontend should bring those
 responsibilities into a smaller, namespace-aware X subset owned by Sophia.
 
 ## Sophia Responsibilities
@@ -1113,9 +1133,9 @@ desktop. The implementation order is:
 
 1. Back the xterm-driven core drawing subset with bounded XRGB8888 pixels.
 2. Resolve and compose those pixels into a renderer-owned scanout frame.
-3. Run X Authority, backend ticks, scanout, and xterm under one persistent
+3. Run the X Server Frontend, backend ticks, scanout, and xterm under one persistent
    session owner.
-4. Deliver focused keyboard events through X Authority semantics.
+4. Deliver focused keyboard events through X Server Frontend semantics.
 5. Connect the live session to the generic synthetic X11 WM bridge and use
    xmonad as the first proof that a configured legacy WM can provide blind
    layout policy without an Engine-specific integration.

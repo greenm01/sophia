@@ -16,7 +16,19 @@ Sophia Engine is the absolute visual authority. It hit-tests the scene, schedule
 
 ## The Authorities Translate the Past
 
-Sophia does not force the world to rewrite its software. It hosts Protocol Authorities. The Sophia X Authority and Sophia Wayland Authority sit at the edges. They terminate the client protocols, enforce strict namespace sandboxes, and translate legacy requests into atomic surface transactions. They do not own workspaces. They do not dictate layout. They merely translate.
+Sophia does not force the world to rewrite its software. It hosts protocol
+frontends. The **Sophia X Server Frontend** presents the real X11 API to
+applications, while the Sophia Wayland Authority presents Wayland. Both reduce
+client requests into atomic surface transactions. They do not own workspaces or
+dictate layout; they translate client protocol into Sophia Engine facts.
+
+X11 is not a deprecated migration path in Sophia. The long-term X Server
+Frontend is a Sophia-owned, modern X server implementation: X11 remains the
+application API while Sophia modernizes its rendering, presentation, and output
+architecture underneath. A classic shared-X profile preserves the inspectable,
+scriptable model people value; confined namespaces are an explicit session
+choice, not a reason to erase that model. Sophia does not currently plan a
+separate application-facing “Sophia native” display protocol.
 
 ## The Window Manager Remains Blind
 
@@ -87,8 +99,8 @@ half-finished resize.
                          PROTOCOL AUTHORITY LAYER
 ================================================================================
  ┌────────────────────────────────────────────────────────────────────────────┐
- │ Sophia X Authority | Sophia Wayland Authority | Sophia Native Authority    │
- │ protocol resources | grabs/focus | selections | namespace checks           │
+ │ Sophia X Server Frontend | Sophia Wayland Authority                         │
+ │ X11 resources/grabs      | Wayland objects | protocol-specific checks      │
  └────────────────────────────────┬───────────────────────────────────────────┘
                                   │
                                   │ namespace-checked surface transactions
@@ -111,11 +123,13 @@ outputs, and frame loop, so it maps physical input to the surface the user can
 see. A protocol authority then performs the protocol-specific delivery rules:
 focus, grabs, event masks, serials, and namespace checks.
 
-Each authority terminates one client protocol. The Sophia X Authority speaks a
-modern X subset. A later Wayland Authority can speak Wayland. A native authority
-can serve Sophia-first clients. Authorities own protocol resources and client
-semantics; they do not own layout, scanout, global shortcuts, compositor chrome,
-or portal policy.
+Each frontend terminates one client protocol. The Sophia X Server Frontend
+implements a modern, compatibility-driven X11 subset; the Wayland Authority
+serves Wayland clients through Smithay. Sophia adds X11 extensions only where a
+real need cannot be served by the established protocol. There is no planned
+third application protocol for “Sophia-first” clients. Frontends own protocol
+resources and client semantics; they do not own layout, scanout, compositor
+chrome, or portal policy.
 
 The WM is a policy process. It manages workspaces, focus policy, layouts,
 keybindings, and launch decisions, but it does that through opaque handles. It
@@ -135,14 +149,16 @@ feature added after the desktop works. It is the shape of the system.
 
 ### Namespaces At The Edge
 
-Protocol Authorities sit at the edge of the session. When an application
-connects, the authority assigns it to a namespace before it can create useful
-state. An untrusted browser in one namespace cannot query, inspect, or send
-events to a trusted terminal in another.
+Protocol frontends sit at the edge of the session. A **classic shared-X**
+profile puts trusted applications in one namespace and deliberately preserves
+the inspectable, scriptable X11 object model. A confined profile assigns clients
+to separate namespaces before they can create useful state: an untrusted browser
+then cannot query, inspect, or send events to a trusted terminal without an
+explicit handoff.
 
-This is where Sophia breaks with old X11. There is no shared property tree where
-every client becomes a potential observer. Cross-namespace lookup fails closed
-unless a portal grants a narrow handoff.
+Cross-namespace lookup fails closed unless a portal grants a narrow handoff.
+Sophia treats this as a user and session-policy choice, not a reason to deny
+trusted local users the shared-X workflow they selected.
 
 ### A Blind Window Manager
 
@@ -212,7 +228,8 @@ Sophia is split by authority, not by convenience.
 
 - `docs/architecture.md` maps processes and load-bearing boundaries.
 - `docs/dod.md` defines Sophia's data-oriented design rules.
-- `docs/sophia-x-authority.md` defines the long-term modern X authority.
+- `docs/sophia-x-authority.md` defines the long-term Sophia X Server Frontend
+  and its X11 compatibility boundary.
 - `docs/style-guide.md` records implementation discipline.
 - `docs/research-log.md` captures early decisions and open research questions.
 - `docs/research-log-archive.md` preserves completed research and validation

@@ -1,17 +1,33 @@
-# Sophia X Authority
+# Sophia X Server Frontend
 
-Sophia X Authority is the long-term X compatibility target. It replaces the
-idea of a permanent XLibre/Xorg dependency with a Sophia-owned X protocol
-subset that emits namespace-checked `SurfaceTransaction` values to Sophia
-Engine.
+The Sophia X Server Frontend is Sophia’s long-term modern X server
+implementation. It presents the **X11 API and wire protocol** directly to
+applications, then emits `SurfaceTransaction` values to Sophia Engine. It takes
+the Phoenix strategic approach: a clean-room implementation of the modern X11
+subset real applications require, expanded by compatibility evidence rather
+than by reproducing all of Xorg.
 
-The authority is not the compositor. It terminates X protocol, owns X resource
-semantics, enforces namespace boundaries, and translates client-visible X state
-into Sophia-owned data.
+It is not a plan for a separate application-facing Sophia display protocol. X11
+is the native application API of this path; forward progress happens in the
+server architecture, DRM/KMS presentation, and targeted X11 extensions. XLibre
+remains a broad-compatibility provider and reference while this frontend gains
+coverage. The implementation crate is currently named `sophia-x-authority`; the
+name reflects its protocol role and does not narrow the product direction.
+
+The frontend is not the compositor. It terminates X protocol, owns X resource
+semantics, applies the selected classic or confined session profile, and
+translates client-visible X state into Sophia-owned data.
+
+## Naming
+
+Use **Sophia X Server Frontend** for the component and **X11** for the API it
+implements. Use “X Authority” only as a shorthand for its protocol-semantic
+role or the existing crate name. Do not describe it as an X11 compatibility shim
+or an “X12” replacement protocol.
 
 ## Authority Boundary
 
-Sophia X Authority owns:
+The frontend owns:
 
 - X client sockets and protocol parsing;
 - X resource IDs, atoms, properties, windows, pixmaps, GCs, cursors, and
@@ -22,7 +38,7 @@ Sophia X Authority owns:
 - reduced metadata candidates for the metadata broker;
 - portal request facts for cross-namespace transfers.
 
-Sophia X Authority must not own:
+The frontend must not own:
 
 - physical input devices;
 - compositor scene graph or hit-testing;
@@ -31,7 +47,7 @@ Sophia X Authority must not own:
 - portal policy decisions;
 - renderer imports, frame scheduling, or scanout.
 
-## Minimum Compatibility Subset
+## Modern X11 Compatibility Subset
 
 The first practical target is not all of X11. It is enough protocol to run real
 toolkit applications while preserving Sophia's authority boundary.
@@ -76,7 +92,7 @@ startup behavior (`zenity`).
 Each external smoke must keep `first_error=none`. New compatibility code should
 remain bounded and narrow: for example, xcalc admitted `AllocNamedColor`,
 `UnmapWindow`, padded one-character `PolyText8`, and normal client-disconnect
-teardown without turning Sophia X Authority into a broad X11 conformance
+teardown without turning the frontend into a broad X11 conformance
 project. xterm admitted `ConfigureWindow` and the bounded setup/drawing paths
 needed to reach committed `ImageText8` transactions. Core drawing now applies
 GC colors and raster operations to bounded XRGB8888 software buffers, including
@@ -96,17 +112,19 @@ keyboard map became useful. The supported keyboard baseline is core
 ## Namespace Model
 
 Every client connection belongs to a `NamespaceId` before it can create
-resources. The authority may learn this from launch tokens, socket routing,
-credentials, or a later broker, but namespace identity is authority state and
-must not leak to the WM.
+resources. In a classic shared-X profile, trusted clients deliberately share one
+namespace and retain ordinary X11 inspection and coordination. In a confined
+profile, launch tokens, socket routing, credentials, or a later broker select
+separate namespaces. Namespace identity is frontend state and must not leak to
+the WM.
 
 Resource rules:
 
 - XIDs are local to the authority and wrapped as `AuthorityLocalId` before
   becoming Sophia data.
 - Cross-namespace resource lookup fails closed unless a specific portal flow
-  grants a narrow transfer.
-- Event subscriptions are namespace-scoped by default.
+  grants a narrow transfer; same-namespace classic-X behavior remains intact.
+- Event subscriptions are namespace-scoped in confined profiles.
 - Properties may be visible within a namespace, but cross-namespace property
   discovery must not expose titles, classes, PIDs, paths, or atoms that reveal
   another namespace's private clients.
@@ -116,7 +134,7 @@ Resource rules:
 ## Surface Transactions
 
 Each visible top-level or protocol surface maps to an `AuthoritySurface` owned
-by Sophia X Authority and a Sophia `SurfaceId` owned by Sophia Engine.
+by the frontend and a Sophia `SurfaceId` owned by Sophia Engine.
 
 The authority emits `SurfaceTransaction` records when a surface has new visual
 state:
@@ -179,7 +197,7 @@ or client freezing.
 
 ## Lifecycle And Chrome
 
-Sophia X Authority translates compositor lifecycle commands into normal X
+The frontend translates compositor lifecycle commands into normal X
 semantics:
 
 - polite close uses `WM_DELETE_WINDOW` when advertised;
@@ -196,14 +214,14 @@ the chrome presentation and chrome hit-testing.
 ## Input Delivery
 
 Sophia Engine reads physical input, owns the scene graph, performs spatial
-hit-testing, and sends routed input intent to Sophia X Authority:
+hit-testing, and sends routed input intent to the frontend:
 
 - target Sophia `SurfaceId`;
 - authority-local object ID when known;
 - local coordinates after inverse transform;
 - seat, device, time, and event kind.
 
-Sophia X Authority then applies X semantics:
+The frontend then applies X semantics:
 
 - focus and grabs;
 - event masks;
@@ -214,10 +232,12 @@ Sophia X Authority then applies X semantics:
 The authority returns reduced accept/reject outcomes. It must not expose raw
 client streams or general event injection capability back to Sophia Engine.
 
-## Phoenix Study Targets
+## Phoenix Strategic Direction
 
-Use Phoenix as a reference for clean-room X practicality, not as a direct copy.
-The useful study areas are:
+Sophia adopts Phoenix’s strategic direction, not its code: build a modern X
+server from a clean implementation, deliberately support the X11 features real
+applications use, and improve the server beneath the established X11 API. The
+useful study areas are:
 
 - connection setup and request dispatch shape;
 - minimal resource tables;
@@ -225,8 +245,9 @@ The useful study areas are:
 - extension prioritization based on real toolkit compatibility;
 - tests or examples that prove GTK/GL/Vulkan application paths.
 
-Sophia-specific differences must remain intact: namespace enforcement, portal
-boundaries, blind WM policy, and Engine-owned atomic visual commits.
+Sophia-specific differences must remain intact: Engine-owned atomic visual
+commits, blind WM policy, and a user-selectable choice between classic shared-X
+semantics and confined namespace/capability policy.
 
 ## First Implementation Milestones
 
@@ -274,7 +295,7 @@ internal request packets rather than bypassing the authority reducers.
 ## X11 Wire Start
 
 The first X11 wire milestone is connection setup, not application
-compatibility. Sophia X Authority now has a bounded setup parser for byte-order
+compatibility. The frontend now has a bounded setup parser for byte-order
 markers, protocol version fields, authorization name/data fields, and resource
 ID allocation facts. It also has setup success/failure encoders and a local
 Unix socket smoke that completes a setup handshake with a synthetic client.
@@ -313,7 +334,7 @@ window, atom names, type names, value length, and generation. They do not emit
 raw titles, classes, icons, paths, or namespace labels to the window manager.
 
 Minimal `GetProperty` is now present. The first real-client-library smoke uses
-`x11rb` against the Sophia X Authority socket. That path requires a
+`x11rb` against the Sophia X Server Frontend socket. That path requires a
 client-compatible setup reply with one root, one pixmap format, one depth, and
 one TrueColor visual. The smoke connects through the normal X11 setup path,
 interns `_NET_WM_NAME` and `UTF8_STRING`, creates a window, writes and reads a
@@ -367,7 +388,7 @@ Runtime authority counters.
 
 ## Runtime Transport
 
-The long-running X Authority path uses a bounded side channel for observed
+The long-running X Server Frontend path uses a bounded side channel for observed
 surface transactions. Successful X11 drawing and present requests still write no
 client-visible success reply when the X11 protocol does not require one. Instead
 the authority packages ready `SurfaceTransaction` values into
@@ -386,7 +407,7 @@ are not the production transport shape.
 
 ## MIT-SHM Negotiation
 
-Sophia X Authority advertises a minimal `MIT-SHM` extension surface. This is a
+The frontend advertises a minimal `MIT-SHM` extension surface. This is a
 compatibility step, not a shared-memory import implementation.
 
 `QueryExtension("MIT-SHM")` returns a private major opcode, and minor opcode `0`
@@ -418,7 +439,7 @@ seams.
 ## External xclock Probe
 
 `x-authority-xclock-smoke` launches `xclock` against a temporary Sophia
-X Authority socket and treats the client as the compatibility driver. The probe
+X Server Frontend socket and treats the client as the compatibility driver. The probe
 added only the request surface xclock actually exercised: printable atom names,
 pixmap resources, copy-area flow, basic font replies, list-font replies,
 window-attribute and subwindow mapping no-ops, expose events, and bounded core
@@ -440,7 +461,7 @@ Authority socket and keeps authority coverage probe-driven. The probe added the
 request surface xeyes actually exercised after xclock: bounded `QueryColors`,
 `ClearArea`, and `PolyFillArc` handling. Arc and clear operations reduce to core
 draw damage transactions; color replies return bounded RGB records without
-making Sophia X Authority a full colormap implementation.
+making the frontend a full colormap implementation.
 
 The passing proof reached five Engine/Runtime committed authority transactions
 with no X protocol error before the harness killed the long-running xeyes
@@ -451,7 +472,7 @@ identify the next compatibility gap directly.
 ## External xwininfo Probe
 
 `x-authority-xwininfo-root-smoke` launches `xwininfo -root` against a
-temporary Sophia X Authority socket and treats root-window introspection as a
+temporary Sophia X Server Frontend socket and treats root-window introspection as a
 separate non-drawing compatibility surface. The probe added only the request
 surface xwininfo actually exercised: bounded `GetWindowAttributes`,
 `GetGeometry`, `QueryTree`, and `TranslateCoordinates` replies.
@@ -464,7 +485,7 @@ remain visible without requiring visual transaction evidence.
 ## External xprop Probe
 
 `x-authority-xprop-root-smoke` launches `xprop -root` against a
-temporary Sophia X Authority socket and treats root property discovery as a
+temporary Sophia X Server Frontend socket and treats root property discovery as a
 read-only compatibility surface. The probe added only the request surface xprop
 actually exercised after xwininfo: bounded `ListProperties` decoding and replies
 for namespace-local property atom sets.
@@ -478,7 +499,7 @@ reports the properties the namespace-local table actually owns.
 ## External xsetroot And xlogo Probes
 
 `x-authority-xsetroot-name-smoke` launches `xsetroot -name "Sophia
-Root"` against a temporary Sophia X Authority socket. It exits successfully
+Root"` against a temporary Sophia X Server Frontend socket. It exits successfully
 through existing property, input-focus, GC lifecycle, and extension-query paths,
 proving a small root-property mutation case without Engine transactions.
 
@@ -495,7 +516,7 @@ legacy text UI behavior as the next compatibility driver. The probe added only
 the request surface xmessage actually exercised after xlogo: bounded
 `CreateGlyphCursor`, `FreeCursor`, `SetClipRectangles`, and `PolyText8`.
 
-Cursor support is currently resource lifecycle only. Sophia X Authority accepts
+Cursor support is currently resource lifecycle only. The frontend accepts
 the font-backed cursor resource so legacy clients can proceed, but compositor
 cursor presentation remains future Engine/session policy work. `PolyText8`
 parses the text item stream and emits conservative core-draw damage for the
@@ -508,7 +529,7 @@ keeps `first_error=none` as an enforced compatibility invariant.
 ## External xrandr Probe
 
 `x-authority-xrandr-query-smoke` launches `xrandr --query` against a
-temporary Sophia X Authority socket and treats output-size discovery as a
+temporary Sophia X Server Frontend socket and treats output-size discovery as a
 read-only compatibility surface. The probe added only the request surface xrandr
 actually exercised: minimal `RANDR` extension advertisement,
 `RRGetScreenSizeRange`, and `RRGetScreenResources`.
@@ -516,7 +537,7 @@ actually exercised: minimal `RANDR` extension advertisement,
 The first admitted RandR replies are deliberately sparse. Size range reports
 the setup root dimensions as the fixed admitted range, and screen resources
 returns empty CRTC/output/mode/name lists. This is enough for `xrandr --query`
-to observe a bounded screen without giving Sophia X Authority ownership of
+to observe a bounded screen without giving the frontend ownership of
 native connector, CRTC, provider, lease, monitor, or modeset state.
 
 The external probe trace now includes bounded parse-error request heads. That
