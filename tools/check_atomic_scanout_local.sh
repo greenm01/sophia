@@ -40,6 +40,10 @@ if ! grep -q 'SOPHIA_KITTY_REQUIRE_DMABUF=0' tools/wayland_kitty_hardware_proof.
     echo "Interactive Kitty proof must not enable output-sized direct DMA-BUF scanout." >&2
     exit 1
 fi
+if ! rg -q 'open_threaded_native_libinput_path_poller' crates/sophia-cli/src/commands/wayland.rs; then
+    echo "Native Wayland Kitty must keep input acquisition off the render thread." >&2
+    exit 1
+fi
 dmabuf_producer_check="$(mktemp /tmp/sophia-wayland-dmabuf-producer-check.XXXXXX)"
 trap 'rm -f "$dmabuf_producer_check"' EXIT
 tools/build_wayland_dmabuf_producer.sh "$dmabuf_producer_check"

@@ -116,13 +116,16 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
     let mut input = if input_devices.is_empty() {
         None
     } else {
-        Some(sophia_backend_live::open_native_libinput_path_poller(
-            &input_devices,
-            sophia_backend_live::NativeLibinputDeviceMap::new(SeatId::from_raw(1))
-                .with_keyboard_device(DeviceId::from_raw(1))
-                .with_pointer_device(DeviceId::from_raw(2)),
-            64,
-        )?)
+        Some(
+            sophia_backend_live::open_threaded_native_libinput_path_poller(
+                &input_devices,
+                sophia_backend_live::NativeLibinputDeviceMap::new(SeatId::from_raw(1))
+                    .with_keyboard_device(DeviceId::from_raw(1))
+                    .with_pointer_device(DeviceId::from_raw(2)),
+                64,
+                256,
+            )?,
+        )
     };
     let mut emergency_chord = EmergencyChordState::armed();
     let mut awaiting_surface_input = VecDeque::new();
@@ -562,8 +565,12 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
         )
         .into());
     }
+    let input_stats = input
+        .as_ref()
+        .map(sophia_backend_live::ThreadedNativeLibinputEventPoller::stats)
+        .unwrap_or_default();
     println!(
-        "sophia_wayland_session schema=1 status=complete transactions={} frames={} shm_frames={} dmabuf_frames={} resize_requested={} resize_commits={} buffers={} routed_input={} routed_keys={} routed_pointer={} expected_keycodes_observed={} expected_keycodes_matched={} expected_keycodes_total={} input_presentations={} pointer_presentations={} input_pixel_changes={} max_input_latency_msec={} emergency_exit={} x_server=disabled",
+        "sophia_wayland_session schema=1 status=complete transactions={} frames={} shm_frames={} dmabuf_frames={} resize_requested={} resize_commits={} buffers={} routed_input={} routed_keys={} routed_pointer={} expected_keycodes_observed={} expected_keycodes_matched={} expected_keycodes_total={} input_presentations={} pointer_presentations={} input_pixel_changes={} max_input_latency_msec={} input_dispatch_max_gap_msec={} input_queue_max_depth={} input_queue_dwell_max_msec={} emergency_exit={} x_server=disabled",
         transactions,
         frames,
         shm_frames,
@@ -581,6 +588,9 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
         pointer_presentations,
         input_pixel_changes,
         max_observed_input_latency.as_millis(),
+        input_stats.max_dispatch_gap_msec,
+        input_stats.max_queue_depth,
+        input_stats.max_queue_dwell_msec,
         emergency_exit,
     );
     Ok(())

@@ -5,12 +5,13 @@ Completed evidence is archived in `research-log-archive.md`.
 
 ## 2026-07-13: Kitty DMA-BUF Direct-Scanout Boundary
 
-Enabling the experimental DMA-BUF global for guarded Kitty made Kitty submit a
-window-sized GPU buffer to the native route. Sophia's current route is direct
-KMS scanout, whose exporter requires the client buffer to match the physical
-output exactly. It consumed the incompatible buffer as an invalid target and
-then surfaced the misleading scheduler invariant `native frame was neither
-submitted nor retained for a later submit`, disconnecting Kitty.
+Enabling the experimental DMA-BUF global for guarded Kitty failed before a
+usable native presentation and surfaced the misleading scheduler invariant
+`native frame was neither submitted nor retained for a later submit`,
+disconnecting Kitty. Sophia's current DMA-BUF route is direct KMS scanout,
+whose exporter requires the client buffer to match the physical output exactly.
+An arbitrary Kitty toplevel therefore cannot be a valid client for that route,
+regardless of the exact buffer that reached the failed run.
 
 This is an architecture boundary, not evidence that Kitty can use the current
 direct path. The controlled full-output XRGB producer remains the direct

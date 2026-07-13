@@ -42,10 +42,10 @@ fi
 echo "[2/2] Starting guarded native Kitty proof."
 echo "In Kitty: type 'sophia' and Enter, press all four arrow keys, move/click the pointer,"
 echo "then type 'exit' and Enter. Do not use the emergency chord for a passing proof."
-# Kitty normally renders an arbitrarily sized toplevel. Sophia's experimental
-# DMA-BUF route is direct KMS scanout, restricted to output-sized controlled
-# producer buffers. Do not advertise it to interactive Kitty until GPU
-# composition can import and scale a client DMA-BUF.
+# Kitty can render an arbitrarily sized toplevel. Sophia's experimental DMA-BUF
+# route is direct KMS scanout, restricted to output-sized controlled producer
+# buffers. Do not advertise it to interactive Kitty until GPU composition can
+# import and scale a client DMA-BUF.
 SOPHIA_OPERATOR_KEYBOARD="$KEYBOARD" \
 SOPHIA_INPUT_DEVICES="$INPUT_DEVICES" \
 SOPHIA_KITTY_REQUIRE_DMABUF=0 \

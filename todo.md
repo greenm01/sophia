@@ -34,8 +34,8 @@ Current truth:
   attempting further latency reductions.
 - DMA-BUF is admitted but remains experimental and currently means direct KMS
   scanout only. It is valid for the output-sized controlled producer, not an
-  arbitrary Kitty toplevel: Kitty's first GPU buffer is window-sized, while the
-  direct exporter requires the physical output size. The guarded Kitty harness
+  arbitrary Kitty toplevel: direct scanout requires the physical output size,
+  while a Kitty toplevel may be a different size. The guarded Kitty harness
   therefore keeps the proven SHM composition route and does not advertise the
   direct DMA-BUF global. GPU composition (import, scale, blend, then scan out a
   Sophia-owned target) is required before Kitty can use DMA-BUF safely. The
