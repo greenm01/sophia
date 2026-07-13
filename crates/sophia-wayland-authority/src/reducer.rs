@@ -516,9 +516,9 @@ impl WaylandAuthorityReducer {
         if feedback.generation == 0 || feedback.generation > state.committed_generation {
             return Err(WaylandAuthorityError::StalePresentation);
         }
-        // A claimed composition lets the client prepare a subsequent frame.
-        // Unlike `Presented`, it must not release the current client buffer
-        // before the corresponding KMS page flip retires.
+        // A callback lets the client prepare a subsequent frame. Unlike
+        // `Presented`, it must not release the current client buffer before
+        // the corresponding KMS page flip retires.
         let scheduled_generations = state
             .committed_callbacks
             .keys()
