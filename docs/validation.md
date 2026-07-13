@@ -120,10 +120,7 @@ To capture the native allocator stack from a dedicated text TTY, install `gdb`
 if needed and rerun the controlled three-frame proof in diagnostic mode:
 
 ```bash
-sudo xbps-install -S gdb
-SOPHIA_DMABUF_DIAGNOSTIC=1 \
-SOPHIA_DMABUF_PRODUCER_FRAMES=3 \
-tools/wayland_dmabuf_first_frame_hardware_proof.sh
+tools/diagnose_void_dmabuf_heap.sh
 ```
 
 The normal evidence file and a sibling `.gdb.log` retain the process stack and
