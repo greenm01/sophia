@@ -56,7 +56,7 @@ Sophia Engine:
 | Direction | Contract | Owner and rule |
 | --- | --- | --- |
 | X11 client → frontend | local Unix connection, setup authentication, X11 requests, and X resource lifetime | The frontend owns parsing, client identity, XIDs, atoms, windows, properties, selections, grabs, and client-visible replies/events. Production setup authentication must be explicit; an owner-only socket is a transport guard, not a replacement for X11 authorization. |
-| Frontend → Engine | `XAuthorityObservedTransactionBatch` containing `SurfaceTransaction` values and any CPU buffer update | This is the only visual ingress. The batch is bounded; backpressure is an error rather than an unbounded queue. Engine receives Sophia surface data, never raw X11 request parsing or XID ownership. |
+| Frontend → Engine | `XAuthorityObservedTransactionBatch` containing `SurfaceTransaction` values, surface removals, and any CPU buffer update | This is the only visual ingress. The batch is bounded; backpressure is an error rather than an unbounded queue. Engine receives Sophia surface data, never raw X11 request parsing or XID ownership. |
 | Engine → frontend | `XAuthorityInputEvent` and `XAuthorityControlCommand` | Engine selects the physical-input target, owns coordinates/hit-testing, and requests X-visible focus or configure results. The frontend applies X delivery rules and returns `XAuthorityControlAck`. |
 | Engine → frontend (next) | output/RandR snapshot and presentation/buffer-release feedback | Engine remains the source of physical output facts, frame retirement, and buffer lifetime. The frontend turns those facts into RandR/configure/present-visible X11 state; it must never infer scanout completion itself. |
 
@@ -74,7 +74,7 @@ it reaches runtime state. Every successful setup also receives a monotonic
 frontend client identity and retains an XID-range lease until its connection
 ends. The lease is the cleanup ledger key; it does not restrict ordinary
 same-namespace references in the classic shared-X profile. Resource cleanup
-through an Engine-visible surface-removal path and ownership checks on
+now reaches an Engine-visible surface-removal path; ownership checks on
 references to existing resources are still required before simultaneous-client
 dispatch.
 `XServerFrontendConfig`/`XServerFrontend` make the local socket path and
@@ -98,12 +98,21 @@ shared-X semantics: it identifies resources a connection was allowed to create,
 but does not prohibit another trusted client in the same namespace from
 referring to them.
 
-Lease release is bookkeeping, not yet resource reclamation. The next lifecycle
-slice must destroy that lease's windows, buffers, pixmaps, GCs, fonts, cursors,
-and SHM records and emit corresponding surface removals to the Engine/session
-path. It must prove no old client state remains while a later client in the
-same namespace stays intact. This order prevents an apparently-correct local
-cleanup from leaving stale composited surfaces or bypassing Engine policy.
+`DestroyWindow` and connection teardown now use the same authority-side
+destruction primitive. Teardown releases the disconnecting lease's supported
+windows and CPU buffers, pixmaps, GCs, fonts, cursors, SHM segments, window
+properties, and selection ownership. Every destroyed window produces a
+surface-removal fact; the Engine removal intake prunes its committed snapshot,
+while the live layout, CPU scene, and focus state prune their corresponding
+state. A sequential-client proof confirms that a later client receives
+`BadWindow` for the former client's window while resources from a different
+XID range remain intact.
+
+The next lifecycle rule is distinct: existing-resource operations need an
+explicit per-request ownership policy. The cleanup ledger establishes who
+created a resource, but classic shared-X must still define which cross-client
+references, mutations, and destructive operations are permitted before the
+listener dispatches simultaneous clients.
 
 The two session profiles have these precise semantics:
 

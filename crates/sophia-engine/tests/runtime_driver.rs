@@ -114,6 +114,32 @@ fn authority_transaction_commit_maps_to_reduced_runtime_observation() {
 }
 
 #[test]
+fn authority_removal_batch_drops_the_committed_surface() {
+    let engine = HeadlessEngine::default();
+    let surface = SurfaceId::new(77, 1);
+    let mut committed = vec![CommittedSurfaceState {
+        surface,
+        committed_generation: 4,
+        geometry: Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 60,
+        },
+        buffer: BufferSource::CpuBuffer { handle: 77 },
+        damage: Region::empty(),
+    }];
+
+    let commit = AuthorityTransactionIntake::new(TransactionId::from_raw(89), Vec::new())
+        .with_surface_removals(vec![surface])
+        .commit(&engine, &mut committed);
+
+    assert_eq!(commit.outcome, TransactionOutcome::Committed);
+    assert!(commit.applied_surfaces.is_empty());
+    assert!(committed.is_empty());
+}
+
+#[test]
 fn slow_client_visual_decisions_map_to_count_only_runtime_observation() {
     let surface_a = SurfaceId::new(1, 1);
     let surface_b = SurfaceId::new(2, 1);

@@ -20,12 +20,12 @@ use std::{
 use crate::{
     X_SETUP_CLIENT_PREFIX_LEN, X_SETUP_DEFAULT_RESOURCE_ID_MASK, X_SETUP_DEFAULT_ROOT,
     X_SETUP_MAX_AUTH_FIELD_LEN, XAtomTable, XAuthorityCpuBufferUpdate,
-    XAuthorityObservedTransactionBatch, XAuthorityRuntime, XByteOrder, XClientEvent,
-    XDispatchContext, XDispatchResult, XPropertyTable, XResourceId, XSetupFailure, XSetupRequest,
-    XSetupSuccess, XWireClientContext, decode_x11_core_request, dispatch_x11_parse_error,
-    dispatch_x11_wire_request, encode_x_client_event, encode_x11_setup_failure,
-    encode_x11_setup_success, parse_x11_setup_request, try_emit_x_authority_trace,
-    try_emit_x_authority_transactions, x11_setup_request_total_len,
+    XAuthorityObservedTransactionBatch, XAuthorityResponsePacket, XAuthorityRuntime, XByteOrder,
+    XClientEvent, XDispatchContext, XDispatchResult, XPropertyTable, XResourceId, XSetupFailure,
+    XSetupRequest, XSetupSuccess, XWireClientContext, decode_x11_core_request,
+    dispatch_x11_parse_error, dispatch_x11_wire_request, encode_x_client_event,
+    encode_x11_setup_failure, encode_x11_setup_success, parse_x11_setup_request,
+    try_emit_x_authority_trace, try_emit_x_authority_transactions, x11_setup_request_total_len,
 };
 #[cfg(unix)]
 use sophia_protocol::{NamespaceId, Size, SurfaceId, TransactionId};
@@ -470,6 +470,26 @@ impl X11CoreSocketServerState {
     fn active_client_count(&self) -> usize {
         self.client_leases.len()
     }
+}
+
+#[cfg(unix)]
+fn release_x11_client_lease(
+    state: &mut X11CoreSocketServerState,
+    namespace: NamespaceId,
+    lease: XServerFrontendClientLease,
+) -> Result<crate::XAuthorityClientResourceRelease, X11SetupSocketError> {
+    let release = state
+        .runtime
+        .lock()
+        .map_err(|_| X11SetupSocketError::new("X11 authority runtime lock poisoned"))?
+        .release_client_resource_range(namespace, lease.resource_id_range)
+        .map_err(|error| {
+            X11SetupSocketError::new(format!("failed to release X11 client resources: {error:?}"))
+        })?;
+    for window in &release.destroyed_windows {
+        state.properties.remove_window(namespace, *window);
+    }
+    Ok(release)
 }
 
 #[cfg(unix)]
@@ -1153,7 +1173,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
         Ok(())
     })();
 
-    let writer_result = (|| {
+    let writer_result: Result<(), X11SetupSocketError> = (|| {
         if let Some(writer) = input_writer {
             writer.stop.store(true, Ordering::Release);
             writer.thread.join().map_err(|_| {
@@ -1171,8 +1191,33 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
     })();
     let client_lease = state.release_client(client)?;
     debug_assert_eq!(client_lease.resource_id_range, resource_id_range);
+    let release = release_x11_client_lease(state, namespace, client_lease)?;
+    let cleanup_observer_result = if release.removed_surfaces.is_empty() {
+        Ok(())
+    } else {
+        sequence = sequence.wrapping_add(1);
+        let transaction = TransactionId::from_raw(u64::from(sequence));
+        let mut response = XAuthorityResponsePacket::accepted(transaction);
+        response.removed_surfaces = release.removed_surfaces;
+        let cleanup = XDispatchResult {
+            response: Some(response),
+            outputs: Vec::new(),
+            metadata_candidates: Vec::new(),
+        };
+        observer(X11CoreDispatchTrace {
+            client,
+            resource_id_range,
+            sequence,
+            major_opcode: 0,
+            request_detail: Some("DisconnectCleanup".to_owned()),
+            parse_error: None,
+            result: &cleanup,
+            cpu_buffer_update: None,
+        })
+    };
     result?;
-    writer_result
+    writer_result?;
+    cleanup_observer_result
 }
 
 #[cfg(unix)]

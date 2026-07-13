@@ -13,6 +13,21 @@ use crate::{
     surface_transaction_from_drawing_update,
 };
 
+/// Effects of releasing every currently supported resource allocated from one
+/// X11 client connection's setup range.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct XAuthorityClientResourceRelease {
+    /// X11 windows whose properties must be removed from the frontend table.
+    pub destroyed_windows: Vec<crate::XResourceId>,
+    /// Sophia surfaces that must be removed from Engine's committed snapshot.
+    pub removed_surfaces: Vec<sophia_protocol::SurfaceId>,
+    pub released_pixmaps: usize,
+    pub released_fonts: usize,
+    pub released_cursors: usize,
+    pub released_graphics_contexts: usize,
+    pub released_shm_segments: usize,
+}
+
 #[derive(Debug, Default)]
 pub struct XAuthorityRuntime {
     resources: XResourceTable,
@@ -275,6 +290,96 @@ impl XAuthorityRuntime {
             generation,
         })?;
         Ok(())
+    }
+
+    /// Ends an X11 window's lifetime and returns the Sophia surface that the
+    /// Engine must remove from its committed snapshot.
+    pub fn destroy_window(
+        &mut self,
+        namespace: NamespaceId,
+        window: crate::XResourceId,
+    ) -> Result<sophia_protocol::SurfaceId, XAuthorityRuntimeError> {
+        self.resources
+            .lookup(namespace, window, XResourceKind::Window)?;
+        let surface = self
+            .windows
+            .get(window)
+            .ok_or(XAuthorityRuntimeError::UnknownResource)?
+            .surface;
+        self.selections.clear_window_owner(
+            window,
+            &self.windows,
+            crate::XSelectionChangeKind::SelectionWindowDestroyed,
+        );
+        self.windows
+            .apply(XWindowLifecycleEvent::Destroyed { id: window })?;
+        self.resources.remove(window);
+        self.software_buffers.remove(window);
+        self.window_background_pixels.remove(&window);
+        Ok(surface)
+    }
+
+    /// Reclaims every supported resource created from a disconnected client's
+    /// XID range. Existing-resource references are intentionally not used as
+    /// ownership evidence: classic shared-X clients may refer to one another's
+    /// resources, while allocation is constrained by the setup range.
+    pub fn release_client_resource_range(
+        &mut self,
+        namespace: NamespaceId,
+        range: crate::XWireClientResourceRange,
+    ) -> Result<XAuthorityClientResourceRelease, XAuthorityRuntimeError> {
+        if !namespace.is_valid() {
+            return Err(XAuthorityRuntimeError::InvalidNamespace);
+        }
+
+        let mut release = XAuthorityClientResourceRelease::default();
+        for gc in self
+            .graphics_contexts
+            .ids_for_namespace_in_client_range(namespace, range)
+        {
+            self.free_graphics_context(namespace, gc)?;
+            release.released_graphics_contexts =
+                release.released_graphics_contexts.saturating_add(1);
+        }
+        for segment in self
+            .shm_segments
+            .ids_for_namespace_in_client_range(namespace, range)
+        {
+            self.detach_shm_segment(namespace, segment)?;
+            release.released_shm_segments = release.released_shm_segments.saturating_add(1);
+        }
+
+        for record in self
+            .resources
+            .records_for_namespace_in_client_range(namespace, range)
+        {
+            match record.kind {
+                XResourceKind::Window => {
+                    let surface = self.destroy_window(namespace, record.id)?;
+                    release.destroyed_windows.push(record.id);
+                    release.removed_surfaces.push(surface);
+                }
+                XResourceKind::Pixmap => {
+                    self.free_pixmap(namespace, record.id)?;
+                    release.released_pixmaps = release.released_pixmaps.saturating_add(1);
+                }
+                XResourceKind::Font => {
+                    self.close_font(namespace, record.id)?;
+                    release.released_fonts = release.released_fonts.saturating_add(1);
+                }
+                XResourceKind::Cursor => {
+                    self.free_cursor(namespace, record.id)?;
+                    release.released_cursors = release.released_cursors.saturating_add(1);
+                }
+                // The reduced frontend does not currently persist client atoms,
+                // colormaps, or GCs in the resource table. Remove any future
+                // record in this range rather than retaining a disconnect leak.
+                XResourceKind::Atom | XResourceKind::Property | XResourceKind::GraphicsContext => {
+                    self.resources.remove(record.id);
+                }
+            }
+        }
+        Ok(release)
     }
 
     pub fn configure_window_size_from_engine(

@@ -1594,7 +1594,10 @@ fn authority_intakes_from_observed_batches(
 ) -> Vec<AuthorityTransactionIntake> {
     batches
         .iter()
-        .map(|batch| AuthorityTransactionIntake::new(batch.transaction, batch.transactions.clone()))
+        .map(|batch| {
+            AuthorityTransactionIntake::new(batch.transaction, batch.transactions.clone())
+                .with_surface_removals(batch.removed_surfaces.clone())
+        })
         .collect()
 }
 

@@ -221,6 +221,10 @@ fn encode_response_payload(
     for surface in &response.surfaces {
         encode_authority_surface(surface, out);
     }
+    encode_count(response.removed_surfaces.len(), out)?;
+    for surface in &response.removed_surfaces {
+        encode_surface_id(*surface, out);
+    }
     encode_count(response.transactions.len(), out)?;
     for transaction in &response.transactions {
         encode_surface_transaction(transaction, out)?;
@@ -246,6 +250,11 @@ fn decode_response_payload(
     for _ in 0..surface_count {
         surfaces.push(decode_authority_surface(cursor)?);
     }
+    let removal_count = decode_count(cursor)?;
+    let mut removed_surfaces = Vec::with_capacity(removal_count);
+    for _ in 0..removal_count {
+        removed_surfaces.push(decode_surface_id(cursor)?);
+    }
     let transaction_count = decode_count(cursor)?;
     let mut transactions = Vec::with_capacity(transaction_count);
     for _ in 0..transaction_count {
@@ -266,6 +275,7 @@ fn decode_response_payload(
         transaction,
         outcome,
         surfaces,
+        removed_surfaces,
         transactions,
         portal_commands,
         selection_artifacts,

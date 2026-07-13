@@ -10,6 +10,8 @@ use super::{
 pub struct AuthorityTransactionIntake {
     pub transaction: TransactionId,
     pub transactions: Vec<SurfaceTransaction>,
+    /// Committed surfaces the authority has destroyed in this ordered batch.
+    pub removed_surfaces: Vec<SurfaceId>,
 }
 
 impl AuthorityTransactionIntake {
@@ -17,7 +19,13 @@ impl AuthorityTransactionIntake {
         Self {
             transaction,
             transactions,
+            removed_surfaces: Vec::new(),
         }
+    }
+
+    pub fn with_surface_removals(mut self, removed_surfaces: Vec<SurfaceId>) -> Self {
+        self.removed_surfaces = removed_surfaces;
+        self
     }
 
     pub fn commit(
@@ -25,7 +33,12 @@ impl AuthorityTransactionIntake {
         engine: &HeadlessEngine,
         committed: &mut Vec<CommittedSurfaceState>,
     ) -> TransactionCommit {
-        engine.commit_surface_transactions(self.transaction, &self.transactions, committed)
+        let commit =
+            engine.commit_surface_transactions(self.transaction, &self.transactions, committed);
+        if commit.outcome == TransactionOutcome::Committed {
+            committed.retain(|state| !self.removed_surfaces.contains(&state.surface));
+        }
+        commit
     }
 }
 

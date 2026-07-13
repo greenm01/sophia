@@ -61,6 +61,12 @@ pub struct XAuthorityResponsePacket {
     pub transaction: TransactionId,
     pub outcome: XAuthorityResponseOutcome,
     pub surfaces: Vec<AuthoritySurface>,
+    /// Surfaces whose X11 window lifetime ended during this response.
+    ///
+    /// This is deliberately distinct from an unmapped `AuthoritySurface` so
+    /// the Engine can remove its committed state rather than retain a stale
+    /// visual.
+    pub removed_surfaces: Vec<SurfaceId>,
     pub transactions: Vec<SurfaceTransaction>,
     pub portal_commands: Vec<XAuthorityPortalCommand>,
     pub selection_artifacts: Vec<XAuthoritySelectionArtifact>,
@@ -72,6 +78,7 @@ impl XAuthorityResponsePacket {
             transaction,
             outcome: XAuthorityResponseOutcome::Accepted,
             surfaces: Vec::new(),
+            removed_surfaces: Vec::new(),
             transactions: Vec::new(),
             portal_commands: Vec::new(),
             selection_artifacts: Vec::new(),
@@ -83,6 +90,7 @@ impl XAuthorityResponsePacket {
             transaction,
             outcome: XAuthorityResponseOutcome::Rejected(error),
             surfaces: Vec::new(),
+            removed_surfaces: Vec::new(),
             transactions: Vec::new(),
             portal_commands: Vec::new(),
             selection_artifacts: Vec::new(),

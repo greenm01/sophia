@@ -128,6 +128,22 @@ impl XResourceTable {
         self.records.remove(&id)
     }
 
+    pub fn records_for_namespace_in_client_range(
+        &self,
+        namespace: NamespaceId,
+        range: crate::XWireClientResourceRange,
+    ) -> Vec<XResourceRecord> {
+        self.records
+            .values()
+            .filter(|record| {
+                record.owner_namespace == namespace
+                    && u32::try_from(record.id.local.raw())
+                        .is_ok_and(|raw| range.owns_new_resource(raw))
+            })
+            .cloned()
+            .collect()
+    }
+
     pub fn len(&self) -> usize {
         self.records.len()
     }

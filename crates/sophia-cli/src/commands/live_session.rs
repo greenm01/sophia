@@ -651,6 +651,7 @@ impl PersistentLiveLayout {
         &mut self,
         batch: &XAuthorityObservedTransactionBatch,
     ) -> Vec<SurfaceId> {
+        self.remove_surfaces(&batch.removed_surfaces);
         let mut new_surfaces = Vec::new();
         for (index, transaction) in batch.transactions.iter().enumerate() {
             let size = Size {
@@ -695,6 +696,38 @@ impl PersistentLiveLayout {
             }
         }
         new_surfaces
+    }
+
+    fn remove_surfaces(&mut self, removed_surfaces: &[SurfaceId]) {
+        if removed_surfaces.is_empty() {
+            return;
+        }
+        self.layers
+            .retain(|surface, _| !removed_surfaces.contains(surface));
+        self.authority_sizes
+            .retain(|surface, _| !removed_surfaces.contains(surface));
+        self.unmanaged_surfaces
+            .retain(|surface| !removed_surfaces.contains(surface));
+        if self
+            .focus_to_apply
+            .is_some_and(|(_, surface)| removed_surfaces.contains(&surface))
+        {
+            self.focus_to_apply = None;
+        }
+        if let Some(pending) = self.pending.as_mut() {
+            pending
+                .layers
+                .retain(|layer| !removed_surfaces.contains(&layer.surface));
+            pending
+                .requested_sizes
+                .retain(|surface, _| !removed_surfaces.contains(surface));
+            if pending
+                .focus
+                .is_some_and(|surface| removed_surfaces.contains(&surface))
+            {
+                pending.focus = None;
+            }
+        }
     }
 
     fn take_unmanaged_surfaces(&mut self) -> Vec<SurfaceId> {
@@ -1177,6 +1210,7 @@ fn run_session_loop(
                 last_authority_update = Instant::now();
                 batches = batches.saturating_add(1);
                 transactions = transactions.saturating_add(batch.transactions.len());
+                let removed_surfaces = batch.removed_surfaces.clone();
                 let _ = layout.observe_authority_batch(&batch);
                 let mut wm_update = layout.resolve_pending().or_else(|| layout.expire_pending());
                 if wm_update
@@ -1240,6 +1274,9 @@ fn run_session_loop(
                     .runtime_state
                     .authority_transactions_committed;
                 runtime_surfaces = tick.engine.runtime.runtime_state.authority_surfaces_applied;
+                for surface in removed_surfaces {
+                    focus.clear_surface(surface);
+                }
                 if focus.focused_surface(seat).is_none()
                     && let Some(surface) = runtime.committed_surfaces().first()
                 {
@@ -1799,7 +1836,11 @@ impl PersistentBackendRuntime {
         self.run_authority_transactions(
             batch.transaction,
             &batch.transactions,
-            batch.transactions.len(),
+            &batch.removed_surfaces,
+            batch
+                .transactions
+                .len()
+                .saturating_add(batch.removed_surfaces.len()),
             native_scanout,
             native_frames,
             wm_update,
@@ -1810,15 +1851,19 @@ impl PersistentBackendRuntime {
         &mut self,
         transaction_id: TransactionId,
         transactions: &[SurfaceTransaction],
+        removed_surfaces: &[SurfaceId],
         event_count: usize,
         mut native_scanout: Option<&mut PersistentNativeScanout>,
         native_frames: Option<Vec<ObservedComposedFrame>>,
         wm_update: Option<WmTransactionUpdate>,
     ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
+        self.layers
+            .retain(|surface, _| !removed_surfaces.contains(surface));
         for transaction in transactions {
             self.layers.insert(transaction.surface, transaction.clone());
         }
-        let intake = AuthorityTransactionIntake::new(transaction_id, transactions.to_vec());
+        let intake = AuthorityTransactionIntake::new(transaction_id, transactions.to_vec())
+            .with_surface_removals(removed_surfaces.to_vec());
         let active_transactions = self.layers.values().cloned().collect::<Vec<_>>();
         let mut native_frames = native_frames.unwrap_or_default().into_iter();
         let mut first_report = None;
@@ -3040,6 +3085,14 @@ impl PersistentCpuScene {
         &mut self,
         batch: &XAuthorityObservedTransactionBatch,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        for surface in &batch.removed_surfaces {
+            self.surfaces.remove(surface);
+        }
+        self.buffers.retain(|handle, _| {
+            self.surfaces
+                .values()
+                .any(|(_, surface_handle)| surface_handle == handle)
+        });
         for update in &batch.cpu_buffer_updates {
             let stale = self
                 .buffers

@@ -3298,13 +3298,23 @@ fn x11_dispatch_accepts_destroy_window_for_known_namespace_window() {
         &create_window_request(XByteOrder::LittleEndian, 0x220101, 10, 20, 640, 480),
     )
     .unwrap();
-    dispatch_x11_wire_request(
+    let create = dispatch_x11_wire_request(
         dispatch_context(namespace, 1, XByteOrder::LittleEndian, 1),
         create,
         &mut runtime,
         &mut atoms,
         &mut properties,
     );
+    let surface = create
+        .response
+        .as_ref()
+        .expect("CreateWindow should produce an authority response")
+        .surfaces
+        .first()
+        .expect("CreateWindow should create one surface")
+        .surface;
+    assert_eq!(runtime.window_count(), 1);
+    assert_eq!(runtime.resource_count(), 1);
 
     let destroy = decode_x11_core_request(
         context(namespace, 602, XByteOrder::LittleEndian),
@@ -3320,6 +3330,21 @@ fn x11_dispatch_accepts_destroy_window_for_known_namespace_window() {
     );
 
     assert!(destroy.outputs.is_empty());
+    assert_eq!(
+        destroy.response.as_ref().unwrap().removed_surfaces,
+        vec![surface]
+    );
+    assert_eq!(runtime.window_count(), 0);
+    assert_eq!(runtime.resource_count(), 0);
+    assert_eq!(
+        XAuthorityObservedTransactionBatch::from_dispatch_result(&destroy),
+        Some(XAuthorityObservedTransactionBatch {
+            transaction: TransactionId::from_raw(2),
+            transactions: Vec::new(),
+            removed_surfaces: vec![surface],
+            cpu_buffer_updates: Vec::new(),
+        })
+    );
 }
 
 #[test]
@@ -4317,6 +4342,73 @@ fn x_server_frontend_assigns_distinct_connection_identities() {
 
 #[cfg(unix)]
 #[test]
+fn x_server_frontend_emits_surface_removal_when_a_client_disconnects() {
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let socket_path = std::env::temp_dir().join(format!(
+        "sophia-x-server-frontend-disconnect-cleanup-test-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let config = XServerFrontendConfig::new(&socket_path, NamespaceId::from_raw(819)).unwrap();
+    let server = thread::spawn(move || {
+        let mut frontend = XServerFrontend::bind(config).unwrap();
+        let mut removals = Vec::new();
+        frontend
+            .serve_next_traced(|trace| {
+                if trace.request_detail.as_deref() == Some("DisconnectCleanup") {
+                    removals.push((
+                        trace.client.raw(),
+                        trace
+                            .result
+                            .response
+                            .as_ref()
+                            .unwrap()
+                            .removed_surfaces
+                            .clone(),
+                    ));
+                }
+                Ok(())
+            })
+            .unwrap();
+        (removals, frontend.active_client_count())
+    });
+
+    wait_for_socket(&socket_path);
+    let mut stream = UnixStream::connect(&socket_path).unwrap();
+    stream
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    read_setup_success(&mut stream, XByteOrder::LittleEndian);
+    stream
+        .write_all(&create_window_request(
+            XByteOrder::LittleEndian,
+            0x0020_0001,
+            0,
+            0,
+            160,
+            90,
+        ))
+        .unwrap();
+    let configure = read_x_record(&mut stream);
+    assert_eq!(configure[0], 22);
+    drop(stream);
+
+    assert_eq!(
+        server.join().unwrap(),
+        (vec![(1, vec![SurfaceId::new(0x0020_0001, 1)])], 0)
+    );
+    std::fs::remove_file(&socket_path).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
 fn x_server_frontend_rejects_create_window_outside_client_resource_range() {
     use std::io::Write;
     use std::os::unix::net::UnixStream;
@@ -4533,7 +4625,7 @@ fn x11_core_socket_smoke_round_trips_atom_property_and_window_events() {
 
 #[cfg(unix)]
 #[test]
-fn x11_core_listener_reuses_authority_state_across_sequential_clients() {
+fn x11_core_listener_reclaims_disconnected_client_window_before_next_client() {
     use std::io::Write;
     use std::os::unix::net::UnixStream;
     use std::thread;
@@ -4585,12 +4677,10 @@ fn x11_core_listener_reuses_authority_state_across_sequential_clients() {
     second
         .write_all(&resource_request(XByteOrder::LittleEndian, 8, 0x220701))
         .unwrap();
-    let map = read_x_record(&mut second);
-    assert_eq!(map[0], 19);
-    assert_eq!(read_u32(XByteOrder::LittleEndian, &map[8..12]), 0x220701);
-    let expose = read_x_record(&mut second);
-    assert_eq!(expose[0], 12);
-    assert_eq!(read_u32(XByteOrder::LittleEndian, &expose[4..8]), 0x220701);
+    let error = read_x_record(&mut second);
+    assert_eq!(error[0], 0);
+    assert_eq!(error[1], 3, "the released window must be BadWindow");
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &error[4..8]), 0x220701);
 
     drop(second);
     server.join().unwrap();

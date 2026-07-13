@@ -87,6 +87,10 @@ pub(crate) struct XSoftwareBufferStore {
 }
 
 impl XSoftwareBufferStore {
+    pub fn remove(&mut self, drawable: XResourceId) -> Option<XAuthorityCpuBufferSnapshot> {
+        self.buffers.remove(&drawable)
+    }
+
     pub fn paint_damage(
         &mut self,
         drawable: XResourceId,

@@ -1,6 +1,6 @@
 use std::sync::mpsc::{SyncSender, TrySendError};
 
-use sophia_protocol::{SurfaceTransaction, TransactionId};
+use sophia_protocol::{SurfaceId, SurfaceTransaction, TransactionId};
 
 use crate::{X11CoreDispatchTrace, XAuthorityCpuBufferUpdate, XDispatchResult};
 
@@ -10,31 +10,35 @@ pub const X_AUTHORITY_OBSERVED_TRANSACTION_CHANNEL_CAPACITY: usize = 256;
 pub struct XAuthorityObservedTransactionBatch {
     pub transaction: TransactionId,
     pub transactions: Vec<SurfaceTransaction>,
+    /// Frontend-confirmed surface lifetimes that ended in this batch.
+    pub removed_surfaces: Vec<SurfaceId>,
     pub cpu_buffer_updates: Vec<XAuthorityCpuBufferUpdate>,
 }
 
 impl XAuthorityObservedTransactionBatch {
     pub fn from_dispatch_result(result: &XDispatchResult) -> Option<Self> {
         let response = result.response.as_ref()?;
-        if response.transactions.is_empty() {
+        if response.transactions.is_empty() && response.removed_surfaces.is_empty() {
             return None;
         }
 
         Some(Self {
             transaction: response.transaction,
             transactions: response.transactions.clone(),
+            removed_surfaces: response.removed_surfaces.clone(),
             cpu_buffer_updates: Vec::new(),
         })
     }
 
     pub fn from_dispatch_trace(trace: &X11CoreDispatchTrace<'_>) -> Option<Self> {
         let response = trace.result.response.as_ref()?;
-        if response.transactions.is_empty() {
+        if response.transactions.is_empty() && response.removed_surfaces.is_empty() {
             return None;
         }
         Some(Self {
             transaction: response.transaction,
             transactions: response.transactions.clone(),
+            removed_surfaces: response.removed_surfaces.clone(),
             cpu_buffer_updates: trace.cpu_buffer_update.cloned().into_iter().collect(),
         })
     }

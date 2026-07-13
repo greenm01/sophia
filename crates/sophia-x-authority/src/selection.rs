@@ -104,6 +104,32 @@ impl XSelectionMonitor {
         }
     }
 
+    pub fn clear_window_owner(
+        &mut self,
+        window: XResourceId,
+        windows: &XWindowTable,
+        kind: XSelectionChangeKind,
+    ) {
+        let owners = self
+            .owners
+            .values()
+            .filter(|record| record.owner == Some(window))
+            .copied()
+            .collect::<Vec<_>>();
+        for owner in owners {
+            self.apply_event(
+                XSelectionEvent {
+                    selection: owner.selection,
+                    owner: None,
+                    timestamp: owner.timestamp,
+                    selection_timestamp: owner.selection_timestamp,
+                    kind,
+                },
+                windows,
+            );
+        }
+    }
+
     fn namespace_for_existing_selection(&self, selection: XAtom) -> Option<NamespaceId> {
         self.owners
             .iter()

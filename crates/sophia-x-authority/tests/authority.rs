@@ -258,6 +258,89 @@ fn repeated_runtime_draws_advance_surface_generations() {
 }
 
 #[test]
+fn client_resource_range_release_reclaims_only_its_supported_resources() {
+    let namespace = NamespaceId::from_raw(17);
+    let departing_window = XResourceId::new(0x0020_0001, 1);
+    let retained_window = XResourceId::new(0x0040_0001, 1);
+    let mut runtime = XAuthorityRuntime::new();
+    for (window, surface) in [(departing_window, 201), (retained_window, 401)] {
+        assert_eq!(
+            runtime
+                .apply(XAuthorityRequestPacket {
+                    transaction: TransactionId::from_raw(u64::from(surface)),
+                    namespace,
+                    kind: XAuthorityRequestKind::CreateWindow {
+                        window,
+                        surface: SurfaceId::new(surface, 1),
+                        geometry: Rect {
+                            x: 0,
+                            y: 0,
+                            width: 80,
+                            height: 60,
+                        },
+                        constraints: SurfaceConstraints {
+                            min_size: None,
+                            max_size: None,
+                        },
+                        generation: 1,
+                    },
+                })
+                .outcome,
+            XAuthorityResponseOutcome::Accepted
+        );
+    }
+    runtime
+        .create_pixmap(namespace, XResourceId::new(0x0020_0002, 1), 1)
+        .unwrap();
+    runtime
+        .open_font(namespace, XResourceId::new(0x0020_0003, 1), 1)
+        .unwrap();
+    runtime
+        .create_cursor(namespace, XResourceId::new(0x0020_0004, 1), 1)
+        .unwrap();
+    runtime
+        .create_graphics_context(
+            namespace,
+            XResourceId::new(0x0020_0005, 1),
+            departing_window,
+            XGraphicsContextValues::default(),
+        )
+        .unwrap();
+    runtime
+        .attach_shm_segment(namespace, XResourceId::new(0x0020_0006, 1), 10, false, 1)
+        .unwrap();
+
+    let release = runtime
+        .release_client_resource_range(
+            namespace,
+            XWireClientResourceRange {
+                base: 0x0020_0000,
+                mask: X_SETUP_DEFAULT_RESOURCE_ID_MASK,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(release.destroyed_windows, vec![departing_window]);
+    assert_eq!(release.removed_surfaces, vec![SurfaceId::new(201, 1)]);
+    assert_eq!(release.released_pixmaps, 1);
+    assert_eq!(release.released_fonts, 1);
+    assert_eq!(release.released_cursors, 1);
+    assert_eq!(release.released_graphics_contexts, 1);
+    assert_eq!(release.released_shm_segments, 1);
+    assert_eq!(runtime.window_count(), 1);
+    assert_eq!(runtime.resource_count(), 1);
+    assert_eq!(runtime.shm_segment_count(), 0);
+    assert_eq!(
+        runtime.validate_window_access(namespace, departing_window),
+        Err(XAuthorityRuntimeError::UnknownResource)
+    );
+    assert_eq!(
+        runtime.validate_window_access(namespace, retained_window),
+        Ok(())
+    );
+}
+
+#[test]
 fn engine_size_control_updates_authority_geometry_without_consuming_client_generation() {
     let namespace = NamespaceId::from_raw(18);
     let window = XResourceId::new(0x62, 1);
@@ -700,7 +783,7 @@ fn x_authority_response_codec_round_trips_runtime_outputs() {
             generation: 2,
         },
     });
-    let present = runtime.apply(XAuthorityRequestPacket {
+    let mut present = runtime.apply(XAuthorityRequestPacket {
         transaction: TransactionId::from_raw(103),
         namespace,
         kind: XAuthorityRequestKind::PresentPixmap {
@@ -720,6 +803,7 @@ fn x_authority_response_codec_round_trips_runtime_outputs() {
     assert_eq!(create.surfaces.len(), 1);
     assert_eq!(map.surfaces.len(), 1);
     assert_eq!(present.transactions.len(), 1);
+    present.removed_surfaces.push(SurfaceId::new(99, 1));
 
     let frame = encode_x_authority_response_frame(&present).unwrap();
     let decoded = decode_x_authority_response_frame(&frame).unwrap();

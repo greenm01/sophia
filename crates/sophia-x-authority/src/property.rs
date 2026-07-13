@@ -186,6 +186,15 @@ impl XPropertyTable {
             .collect()
     }
 
+    pub fn remove_window(&mut self, namespace: NamespaceId, window: XResourceId) -> usize {
+        let before = self.records.len();
+        self.records
+            .retain(|(record_namespace, record_window, _), _| {
+                *record_namespace != namespace || *record_window != window
+            });
+        before.saturating_sub(self.records.len())
+    }
+
     pub fn len(&self) -> usize {
         self.records.len()
     }

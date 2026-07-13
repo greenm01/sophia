@@ -83,6 +83,22 @@ impl XShmSegmentTable {
         Ok(())
     }
 
+    pub fn ids_for_namespace_in_client_range(
+        &self,
+        namespace: NamespaceId,
+        range: crate::XWireClientResourceRange,
+    ) -> Vec<XResourceId> {
+        self.records
+            .values()
+            .filter(|record| {
+                record.namespace == namespace
+                    && u32::try_from(record.id.local.raw())
+                        .is_ok_and(|raw| range.owns_new_resource(raw))
+            })
+            .map(|record| record.id)
+            .collect()
+    }
+
     pub fn len(&self) -> usize {
         self.records.len()
     }

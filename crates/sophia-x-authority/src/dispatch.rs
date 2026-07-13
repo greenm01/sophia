@@ -127,19 +127,26 @@ pub fn dispatch_x11_wire_request(
             }
         }
         XWireRequest::DestroyWindow { window } => {
-            let outputs =
-                if let Err(error) = runtime.validate_window_access(context.namespace, window) {
+            let transaction = TransactionId::from_raw(u64::from(context.sequence));
+            let mut response = XAuthorityResponsePacket::accepted(transaction);
+            let outputs = match runtime.destroy_window(context.namespace, window) {
+                Ok(surface) => {
+                    properties.remove_window(context.namespace, window);
+                    response.removed_surfaces.push(surface);
+                    Vec::new()
+                }
+                Err(error) => {
+                    response = XAuthorityResponsePacket::rejected(transaction, error);
                     vec![XClientOutput::Error(x_error_from_runtime(
                         error,
                         context.sequence,
                         context.major_opcode,
                         u32::try_from(window.local.raw()).unwrap_or(0),
                     ))]
-                } else {
-                    Vec::new()
-                };
+                }
+            };
             XDispatchResult {
-                response: None,
+                response: Some(response),
                 outputs,
                 metadata_candidates: Vec::new(),
             }
