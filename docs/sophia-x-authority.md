@@ -360,10 +360,10 @@ and socket-write failure are distinct reduced outcomes. The live proof waits for
 every final keyboard token before it starts its bounded redraw/presentation
 window. Tokens contain no XID, keycode, text, or device identity.
 
-The persistent xterm proof also waits for a changed CPU-composed terminal frame
-after focus instead of treating its initial background fill as application
-readiness. This prevents synthetic proof keys from racing the proof shell's
-first prompt.
+The persistent xterm proof waits until the focused surface's own CPU buffer has
+visual detail instead of treating its initial uniform background fill as
+application readiness. Another client drawing cannot satisfy this gate. This
+prevents synthetic proof keys from racing the proof shell's first prompt.
 
 ## Phoenix Strategic Direction
 

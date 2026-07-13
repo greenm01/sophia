@@ -1164,7 +1164,6 @@ fn run_session_loop(
     let mut input_delivery_source: Option<&'static str> = None;
     let mut input_flush_latency: Option<Duration> = None;
     let mut post_input_deadline: Option<Instant> = None;
-    let mut terminal_content_baseline: Option<u64> = None;
     let mut terminal_content_ready = false;
     let mut terminal_content_ready_reported = false;
 
@@ -1460,18 +1459,6 @@ fn run_session_loop(
                 let compose_started = Instant::now();
                 let report = scene.compose()?.clone();
                 max_compose = max_compose.max(compose_started.elapsed());
-                if terminal_content_baseline.is_some_and(|baseline| {
-                    report.nonzero_pixel_bytes > 0 && report.checksum != baseline
-                }) {
-                    terminal_content_ready = true;
-                    if !terminal_content_ready_reported {
-                        println!(
-                            "sophia_live_session_input_pipeline schema=1 status=terminal_content_ready"
-                        );
-                        std::io::stdout().flush()?;
-                        terminal_content_ready_reported = true;
-                    }
-                }
                 let native_frames = native_scanout
                     .as_ref()
                     .map(|_| scene.frames_for_outputs(&outputs))
@@ -1549,7 +1536,6 @@ fn run_session_loop(
                                 }
                             })?;
                         focused_client_control = Some((transaction, surface.surface));
-                        terminal_content_baseline = Some(report.checksum);
                     }
                 }
                 if let Some((transaction, surface)) = layout.focus_to_apply.take()
@@ -1562,11 +1548,23 @@ fn run_session_loop(
                     );
                 }
                 if !focus_ready_reported && focus.focused_surface(seat).is_some() {
-                    terminal_content_baseline.get_or_insert(report.checksum);
                     println!("sophia_live_session_input_pipeline schema=1 status=focus_ready");
                     std::io::stdout().flush()?;
                     focus_ready_reported = true;
                     focus_ready_at = Some(Instant::now());
+                }
+                if !terminal_content_ready
+                    && let Some(surface) = focus.focused_surface(seat)
+                    && scene.surface_has_visual_detail(surface)
+                {
+                    terminal_content_ready = true;
+                    if !terminal_content_ready_reported {
+                        println!(
+                            "sophia_live_session_input_pipeline schema=1 status=terminal_content_ready"
+                        );
+                        std::io::stdout().flush()?;
+                        terminal_content_ready_reported = true;
+                    }
                 }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
@@ -3517,6 +3515,48 @@ impl PersistentCpuScene {
             })
     }
 
+    /// Returns true only when the focused surface contains at least two
+    /// visible XRGB pixel values. A newly mapped xterm initially publishes a
+    /// uniform background buffer; its prompt or cursor introduces visual
+    /// detail once the terminal side is ready for input. Inspecting the
+    /// focused surface avoids treating another client's draw as readiness.
+    fn surface_has_visual_detail(&self, surface: SurfaceId) -> bool {
+        let Some((_, handle)) = self.surfaces.get(&surface) else {
+            return false;
+        };
+        let Some(buffer) = self.buffers.get(handle) else {
+            return false;
+        };
+        let Ok(width) = usize::try_from(buffer.size.width) else {
+            return false;
+        };
+        let Ok(height) = usize::try_from(buffer.size.height) else {
+            return false;
+        };
+        let Ok(stride) = usize::try_from(buffer.stride) else {
+            return false;
+        };
+        let Some(row_bytes) = width.checked_mul(4) else {
+            return false;
+        };
+        if width == 0 || height == 0 || stride < row_bytes || buffer.bytes.len() < 4 {
+            return false;
+        }
+        let first = &buffer.bytes[..4];
+        (0..height).any(|row| {
+            let Some(start) = row.checked_mul(stride) else {
+                return false;
+            };
+            let Some(end) = start.checked_add(row_bytes) else {
+                return false;
+            };
+            buffer
+                .bytes
+                .get(start..end)
+                .is_some_and(|bytes| bytes.chunks_exact(4).any(|pixel| pixel != first))
+        })
+    }
+
     fn frames_for_outputs(
         &self,
         outputs: &[sophia_engine::HeadlessOutput],
@@ -3860,13 +3900,18 @@ impl Drop for SessionProcessGuard {
 #[cfg(test)]
 mod tests {
     use super::{
-        BufferSource, CommittedSurfaceState, PersistentBackendRuntime, Rect, Region, Size,
-        center_geometry_without_scaling, cpu_frame_matches_visible_output,
+        BufferSource, CommittedSurfaceState, PersistentBackendRuntime, PersistentCpuScene, Rect,
+        Region, Size, center_geometry_without_scaling, cpu_frame_matches_visible_output,
         cpu_frame_submission_ready, layer_snapshots_from_committed,
         required_wayland_presentation_submission, retain_latest_wayland_presentation,
         seed_missing_committed_surfaces,
     };
-    use sophia_protocol::{AuthorityKind, SurfaceTransaction, SurfaceTransactionReadiness};
+    use sophia_protocol::{
+        AuthorityKind, SurfaceId, SurfaceTransaction, SurfaceTransactionReadiness,
+    };
+    use sophia_x_authority::{
+        X_AUTHORITY_CPU_BUFFER_FORMAT_XRGB8888, XAuthorityCpuBufferSnapshot, XResourceId,
+    };
     use std::collections::BTreeMap;
 
     #[test]
@@ -3947,6 +3992,69 @@ mod tests {
         assert!(!cpu_frame_matches_visible_output(1, false, Some(7), 7));
         assert!(!cpu_frame_matches_visible_output(1, true, Some(7), 8));
         assert!(!cpu_frame_matches_visible_output(1, true, None, 7));
+    }
+
+    #[test]
+    fn terminal_readiness_is_scoped_to_the_focused_surface() {
+        let focused = SurfaceId::new(21, 1);
+        let secondary = SurfaceId::new(22, 1);
+        let mut scene = PersistentCpuScene::new(Size {
+            width: 4,
+            height: 1,
+        });
+        scene.surfaces.insert(
+            focused,
+            (
+                Rect {
+                    x: 0,
+                    y: 0,
+                    width: 2,
+                    height: 1,
+                },
+                1,
+            ),
+        );
+        scene.surfaces.insert(
+            secondary,
+            (
+                Rect {
+                    x: 2,
+                    y: 0,
+                    width: 2,
+                    height: 1,
+                },
+                2,
+            ),
+        );
+        scene.buffers.insert(1, test_cpu_buffer(1, [0xff; 8]));
+        scene.buffers.insert(
+            2,
+            test_cpu_buffer(2, [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0xff]),
+        );
+
+        assert!(!scene.surface_has_visual_detail(focused));
+        assert!(scene.surface_has_visual_detail(secondary));
+
+        scene.buffers.insert(
+            1,
+            test_cpu_buffer(1, [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0xff]),
+        );
+        assert!(scene.surface_has_visual_detail(focused));
+    }
+
+    fn test_cpu_buffer(handle: u64, bytes: [u8; 8]) -> XAuthorityCpuBufferSnapshot {
+        XAuthorityCpuBufferSnapshot {
+            handle,
+            drawable: XResourceId::new(handle, 1),
+            size: Size {
+                width: 2,
+                height: 1,
+            },
+            stride: 8,
+            format: X_AUTHORITY_CPU_BUFFER_FORMAT_XRGB8888,
+            generation: 1,
+            bytes: bytes.to_vec(),
+        }
     }
 
     #[test]
