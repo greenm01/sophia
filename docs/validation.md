@@ -178,10 +178,14 @@ move/click the pointer, then type `exit` plus Enter. With the controlled
 tools/wayland_kitty_dmabuf_promotion_gate.sh
 ```
 
-It requires exactly three independent Kitty logs. Every one must show all
-eleven evdev keycodes, routed pointer input, DMA-BUF frames, presented-input
-latency no greater than 100 ms, normal client completion, restored KD mode,
-termios state and `keyd`, and no surviving session or input-guard process.
+It first proves the direct, output-sized DMA-BUF producer, then requires exactly
+three independent Kitty logs. Every Kitty log must show all eleven evdev
+keycodes, routed pointer input, presented-input latency no greater than 100 ms,
+normal client completion, restored KD mode, termios state and `keyd`, and no
+surviving session or input-guard process. Kitty intentionally remains on SHM:
+the current DMA-BUF route is direct scanout and cannot present its arbitrary
+window-sized buffers. Re-enable DMA-BUF for Kitty only after GPU composition
+can import, scale, and blend into Sophia's output-sized scanout target.
 `tools/finish_wayland_kitty_milestones.sh` is the operator entry point: it
 discovers the stable keyboard and pointer aliases, runs the three-frame and
 300-frame controlled proofs, and then runs those three guarded Kitty proofs.

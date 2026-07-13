@@ -3,6 +3,25 @@
 This file records decisions and unresolved questions for the active milestone.
 Completed evidence is archived in `research-log-archive.md`.
 
+## 2026-07-13: Kitty DMA-BUF Direct-Scanout Boundary
+
+Enabling the experimental DMA-BUF global for guarded Kitty made Kitty submit a
+window-sized GPU buffer to the native route. Sophia's current route is direct
+KMS scanout, whose exporter requires the client buffer to match the physical
+output exactly. It consumed the incompatible buffer as an invalid target and
+then surfaced the misleading scheduler invariant `native frame was neither
+submitted nor retained for a later submit`, disconnecting Kitty.
+
+This is an architecture boundary, not evidence that Kitty can use the current
+direct path. The controlled full-output XRGB producer remains the direct
+DMA-BUF lifetime proof. The interactive Kitty harness now deliberately does
+not advertise DMA-BUF and continues to prove native SHM composition, input,
+recovery, and latency. The next DMA-BUF milestone is GPU composition: import
+an arbitrary window-sized client DMA-BUF, scale/blend it into a Sophia-owned
+output-sized render target, retain it through the target page-flip retirement,
+and only then release the client buffer. Only that route can support Kitty
+without requiring fullscreen, output-sized buffers.
+
 ## 2026-07-12: Controlled DMA-BUF First-Frame Heap Corruption
 
 The first real controlled DMA-BUF run reached Sophia's full-size 1920x1200
@@ -52,7 +71,8 @@ runs then all completed: every run had 300 imports, callbacks, and retirements,
 no cleanup debt, no surviving process, and 14–16 ms maximum latency. This meets
 the bounded controlled gate, while retaining the normal-stability wrapper as a
 regression guard for the earlier intermittent abort. The next required evidence
-is the three guarded real-Kitty DMA-BUF runs.
+is three guarded native-SHM Kitty runs; a later GPU-composition milestone must
+precede any real-Kitty DMA-BUF runs.
 
 ## 2026-07-12: DMA-BUF Performance Gate and Renderer Safety Boundary
 
@@ -68,7 +88,8 @@ buffers, alternates them only after `wl_buffer.release`, and waits for each
 frame callback. The first hardware gate uses three frames; the second uses 300
 frames to exercise import, presentation, feedback, and retirement lifetime.
 Only after both pass may the three independent guarded real-Kitty runs begin.
-DMA-BUF stays non-default until every real-Kitty log proves input, recovery,
+Those acceptance runs remain on SHM until GPU composition exists. DMA-BUF stays
+non-default until a real-Kitty GPU-composition log proves input, recovery,
 presentation, and the 100 ms budget.
 
 The current CPU composition copy and 2 ms native idle cadence are a safety
@@ -93,8 +114,9 @@ scripts, fixtures, and notes live under `research/xlibre`.
 The native-scanout session advertises a bounded single-plane linear/implicit
 XRGB8888/ARGB8888 DMA-BUF subset. Accepted buffers cross the renderer boundary
 as owned descriptors. Their experimental native import/presentation route is
-now gated by the controlled first-frame/lifetime proof and three real-Kitty
-runs; it is not yet recorded as passing hardware evidence. Wayland
+now gated by the controlled first-frame/lifetime proof; arbitrary Kitty buffers
+need GPU composition before they can enter this route. It is not yet recorded
+as passing hardware evidence. Wayland
 presentation and buffer-release feedback must remain withheld until the
 matching KMS submission is observed as presented. The next evidence gate is the
 controlled proof, followed by text, navigation, pointer, resize, sub-100 ms

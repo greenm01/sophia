@@ -36,6 +36,10 @@ bash -n tools/diagnose_void_dmabuf_heap.sh
 bash -n tools/run_void_dmabuf_lifetime_proof.sh
 bash -n tools/verify_wayland_kitty_evidence.sh
 bash -n tools/install_sophia_session.sh
+if ! grep -q 'SOPHIA_KITTY_REQUIRE_DMABUF=0' tools/wayland_kitty_hardware_proof.sh; then
+    echo "Interactive Kitty proof must not enable output-sized direct DMA-BUF scanout." >&2
+    exit 1
+fi
 dmabuf_producer_check="$(mktemp /tmp/sophia-wayland-dmabuf-producer-check.XXXXXX)"
 trap 'rm -f "$dmabuf_producer_check"' EXIT
 tools/build_wayland_dmabuf_producer.sh "$dmabuf_producer_check"

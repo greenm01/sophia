@@ -92,8 +92,9 @@ if [[ "$DRY_RUN" == true ]]; then
 fi
 
 echo
-echo "The promotion gate runs controlled three-frame and 300-frame DMA-BUF proofs."
-echo "It then asks you to complete the guarded Kitty input sequence three times."
+echo "The gate runs controlled output-sized DMA-BUF proofs, then three guarded Kitty input proofs."
+echo "Kitty stays on the proven native SHM composition route: arbitrary-sized client"
+echo "DMA-BUF composition is a later milestone, not a direct-scanout proof."
 echo "Exit Kitty normally; do not use the emergency chord for a passing proof."
 echo
 

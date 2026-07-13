@@ -32,13 +32,20 @@ Current truth:
   copy for now: tighter polling or zero-copy handoff reproducibly corrupts the
   native renderer/exporter heap on hardware. Isolate that ownership fault before
   attempting further latency reductions.
-- DMA-BUF is admitted but remains experimental. The repaired controlled
+- DMA-BUF is admitted but remains experimental and currently means direct KMS
+  scanout only. It is valid for the output-sized controlled producer, not an
+  arbitrary Kitty toplevel: Kitty's first GPU buffer is window-sized, while the
+  direct exporter requires the physical output size. The guarded Kitty harness
+  therefore keeps the proven SHM composition route and does not advertise the
+  direct DMA-BUF global. GPU composition (import, scale, blend, then scan out a
+  Sophia-owned target) is required before Kitty can use DMA-BUF safely. The
+  repaired controlled
   three-frame proof, core-mode 300-frame run, and three preserved normal
   300-frame runs now pass after isolating each imported EGLImage in a transient
   GL texture. One earlier post-repair 300-frame run still aborted after frame 2
   with `free(): invalid pointer`, so retain the normal-stability wrapper as a
-  regression gate. SHM remains the production fallback until guarded Kitty
-  DMA-BUF evidence passes.
+  regression gate. SHM remains the production fallback until GPU composition
+  and guarded Kitty DMA-BUF evidence pass.
 
 Exit criteria:
 
@@ -63,7 +70,7 @@ Exit criteria:
 - [x] Prove a real software-rendered native Wayland Kitty toplevel handles a
   compositor configure, keeps its old size live until ack, then commits changing
   nonzero pixels at the requested size.
-- [ ] Prove the guarded native session accepts exact text/navigation and pointer
+- [ ] Prove the guarded native SHM session accepts exact text/navigation and pointer
   input, meets the 100 ms presentation budget, exits cleanly, and restores its
   TTY and prior `keyd` state.
 - [x] Make the installed session launch an arbitrary Wayland client without an
@@ -90,21 +97,26 @@ Exit criteria:
   imports, KMS presentation retirement, no cleanup debt, and 14–16 ms maximum
   submit-to-page-flip latency. Keep the wrapper as a regression gate because an
   earlier post-repair normal run aborted after frame 2.
-- [ ] Pass three independent guarded real-Kitty DMA-BUF runs with
+- [ ] Pass three independent guarded real-Kitty native-composition runs with
   `tools/wayland_kitty_dmabuf_promotion_gate.sh`: exact text/navigation and
-  pointer input, resize, clean normal exit, TTY/`keyd` restoration, DMA-BUF
-  presentation, and the 100 ms presentation budget in every log.
-- [ ] After those gates pass, expose DMA-BUF as an explicit non-default `--dmabuf`
-  opt-in. Keep SHM as the default and fallback until broader compatibility and
-  recovery evidence exists.
+  pointer input, resize, clean normal exit, TTY/`keyd` restoration, and the
+  100 ms presentation budget in every log. These runs intentionally use SHM;
+  the controlled producer remains the direct-scanout DMA-BUF proof.
+- [ ] Add GPU composition for arbitrary DMA-BUF client surfaces: import a
+  window-sized buffer, scale/blend it into a Sophia-owned output-sized target,
+  then submit that target to KMS. Require buffer release only after the target's
+  page flip retires.
+- [ ] After GPU composition and its guarded Kitty evidence pass, expose DMA-BUF
+  as an explicit non-default `--dmabuf` opt-in. Keep SHM as the default and
+  fallback until broader compatibility and recovery evidence exists.
 
 ## Deferred
 
 - VRR activation evidence waits for hardware reporting `vrr_capable=1`; the
   current panel cannot prove it.
 - Multi-plane/modifier DMA-BUFs, explicit synchronization, and multi-client
-  DMA-BUF scheduling wait for the single-plane lifetime and three-run Kitty
-  gates.
+  DMA-BUF scheduling wait for single-plane GPU composition and its guarded
+  Kitty gate.
 - Dedicated-TTY xmonad visual evidence and a second legacy-WM smoke no longer
   block the protocol-authority path.
 - GTK/XInput2/zenity, clipboard, drag-and-drop, optional Wayland protocols,

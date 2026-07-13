@@ -39,12 +39,16 @@ if pgrep -x keyd >/dev/null 2>&1; then
     keyd_was_running=1
 fi
 
-echo "[2/2] Starting guarded native Kitty DMA-BUF proof."
+echo "[2/2] Starting guarded native Kitty proof."
 echo "In Kitty: type 'sophia' and Enter, press all four arrow keys, move/click the pointer,"
 echo "then type 'exit' and Enter. Do not use the emergency chord for a passing proof."
+# Kitty normally renders an arbitrarily sized toplevel. Sophia's experimental
+# DMA-BUF route is direct KMS scanout, restricted to output-sized controlled
+# producer buffers. Do not advertise it to interactive Kitty until GPU
+# composition can import and scale a client DMA-BUF.
 SOPHIA_OPERATOR_KEYBOARD="$KEYBOARD" \
 SOPHIA_INPUT_DEVICES="$INPUT_DEVICES" \
-SOPHIA_KITTY_REQUIRE_DMABUF=1 \
+SOPHIA_KITTY_REQUIRE_DMABUF=0 \
 SOPHIA_KITTY_EXPECT_KEYCODES="$EXPECTED_KEYCODES" \
 SOPHIA_KITTY_EXPECT_POINTER_INPUT=1 \
 SOPHIA_KITTY_EXPECT_INPUT_PRESENTATION=1 \
@@ -81,7 +85,6 @@ fi
 printf 'sophia_wayland_recovery schema=1 status=complete kd_mode=%s termios_restored=1 keyd_restored=%s processes=0\n' \
     "$restored_kd_mode" "$keyd_restored" >>"$EVIDENCE_FILE"
 
-SOPHIA_WAYLAND_REQUIRE_DMABUF=1 \
 SOPHIA_WAYLAND_REQUIRE_INPUT=1 \
 SOPHIA_WAYLAND_REQUIRE_RECOVERY=1 \
     tools/verify_wayland_kitty_evidence.sh "$EVIDENCE_FILE"
