@@ -110,6 +110,11 @@ eleven evdev keycodes, routed pointer input, DMA-BUF frames, a presented-input
 latency no greater than 100 ms, normal client completion, restored KD mode and
 termios state and `keyd`, and no surviving session or input-guard process.
 
+`tools/finish_wayland_kitty_milestones.sh` is the operator entry point. It
+discovers the stable keyboard and pointer event aliases, prints the selected
+configuration, and runs the guarded proof. Use `--dry-run` from any shell to
+inspect discovery without opening input or DRM devices.
+
 The archived XLibre latency smoke used a dummy XLibre display,
 routes synthetic text over the compatibility XTEST connection, and requires a
 damage patch plus presented pixel latency of at most 100 milliseconds. The
