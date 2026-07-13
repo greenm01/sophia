@@ -84,11 +84,12 @@ Exit criteria:
   three imports, KMS presentation retirement, no cleanup debt, and 14 ms maximum
   submit-to-page-flip latency.
 - [ ] Pass the controlled 300-frame lifecycle run with the same tool. The
-  GDB diagnostic passes 300 frames, but the normal release execution currently
-  aborts with `corrupted size vs. prev_size` after frame 8 (and previously frame
-  13). Reproduce it with the release-timing trace, isolate the ownership error,
-  then require experimental enablement, imports, KMS presentation retirement,
-  no cleanup debt, and no more than 100 ms submit-to-page-flip latency.
+  GDB diagnostic and one subsequent normal release run pass 300 frames, but
+  earlier normal executions aborted with `corrupted size vs. prev_size` after
+  frames 8 and 13. Preserve three independent uninstrumented 300-frame passes
+  with `tools/run_void_dmabuf_lifetime_proof.sh --runs 3`, then require
+  experimental enablement, imports, KMS presentation retirement, no cleanup
+  debt, and no more than 100 ms submit-to-page-flip latency.
 - [ ] Pass three independent guarded real-Kitty DMA-BUF runs with
   `tools/wayland_kitty_dmabuf_promotion_gate.sh`: exact text/navigation and
   pointer input, resize, clean normal exit, TTY/`keyd` restoration, DMA-BUF

@@ -8,9 +8,10 @@ EVIDENCE_FILE="$EVIDENCE_DIR/controlled-lifecycle.log"
 DIAGNOSTIC=false
 TRACE=false
 TRACE_ENV=0
+RUNS=1
 
 usage() {
-    echo "usage: $0 [--diagnostic|--trace]" >&2
+    echo "usage: $0 [--diagnostic|--trace] [--runs COUNT]" >&2
 }
 
 while (( $# > 0 )); do
@@ -22,6 +23,17 @@ while (( $# > 0 )); do
             TRACE=true
             TRACE_ENV=1
             EVIDENCE_FILE="$EVIDENCE_DIR/controlled-lifecycle-trace.log"
+            ;;
+        --runs)
+            shift
+            if (( $# == 0 )); then
+                usage
+                exit 2
+            fi
+            RUNS="$1"
+            ;;
+        --runs=*)
+            RUNS="${1#--runs=}"
             ;;
         -h|--help)
             usage
@@ -39,6 +51,14 @@ if [[ "$DIAGNOSTIC" == true && "$TRACE" == true ]]; then
     echo "--diagnostic and --trace cannot be used together." >&2
     exit 2
 fi
+if [[ ! "$RUNS" =~ ^[0-9]+$ ]] || (( RUNS < 1 || RUNS > 5 )); then
+    echo "--runs must be an integer from 1 to 5." >&2
+    exit 2
+fi
+if (( RUNS > 1 )) && [[ "$DIAGNOSTIC" == true || "$TRACE" == true ]]; then
+    echo "--runs cannot be combined with --diagnostic or --trace." >&2
+    exit 2
+fi
 
 if [[ ! -r /etc/os-release ]] || ! grep -Eq '^ID="?void"?$' /etc/os-release; then
     echo "This helper supports Void Linux only." >&2
@@ -53,7 +73,12 @@ mkdir -p "$EVIDENCE_DIR"
 chmod 700 "$STATE_DIR" "$EVIDENCE_DIR"
 
 echo "Sophia DMA-BUF 300-frame lifetime proof"
-echo "  evidence: $EVIDENCE_FILE"
+if (( RUNS == 1 )); then
+    echo "  evidence: $EVIDENCE_FILE"
+else
+    echo "  evidence: $EVIDENCE_DIR/controlled-lifecycle-run-N.log"
+    echo "  runs:     $RUNS"
+fi
 
 cd "$ROOT_DIR"
 if [[ "$DIAGNOSTIC" == true ]]; then
@@ -66,8 +91,19 @@ if [[ "$TRACE" == true ]]; then
     echo "  mode:     release-timing lifecycle trace"
 fi
 
-exec env \
-    SOPHIA_DMABUF_PRODUCER_FRAMES=300 \
-    SOPHIA_DMABUF_FIRST_FRAME_EVIDENCE="$EVIDENCE_FILE" \
-    SOPHIA_DMABUF_TRACE="$TRACE_ENV" \
-    tools/wayland_dmabuf_first_frame_hardware_proof.sh
+for (( run = 1; run <= RUNS; run += 1 )); do
+    run_evidence="$EVIDENCE_FILE"
+    if (( RUNS > 1 )); then
+        run_evidence="$EVIDENCE_DIR/controlled-lifecycle-run-$run.log"
+        echo "  run $run/$RUNS"
+    fi
+    env \
+        SOPHIA_DMABUF_PRODUCER_FRAMES=300 \
+        SOPHIA_DMABUF_FIRST_FRAME_EVIDENCE="$run_evidence" \
+        SOPHIA_DMABUF_TRACE="$TRACE_ENV" \
+        tools/wayland_dmabuf_first_frame_hardware_proof.sh
+done
+
+if (( RUNS > 1 )); then
+    echo "Sophia DMA-BUF lifetime stability proof passed: $RUNS/$RUNS runs"
+fi

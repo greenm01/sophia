@@ -132,6 +132,14 @@ retirement, and client-release stages in
 `~/.local/state/sophia/dmabuf-promotion/controlled-lifecycle-trace.log`. Use
 `tools/run_void_dmabuf_lifetime_proof.sh --diagnostic` for the GDB comparison.
 
+After a normal 300-frame pass following an allocator failure, require three
+independent uninstrumented passes before clearing the lifecycle gate. This
+preserves each evidence file instead of overwriting it:
+
+```bash
+tools/run_void_dmabuf_lifetime_proof.sh --runs 3
+```
+
 To capture the native allocator stack from a dedicated text TTY, install `gdb`
 if needed and rerun the controlled three-frame proof in diagnostic mode:
 
