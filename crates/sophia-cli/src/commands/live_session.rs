@@ -1996,21 +1996,12 @@ impl WaylandNativeSession {
             .map(|output| native_frame_for_output(report, output.size))
             .collect::<Vec<_>>();
         if self.runtime.is_none() {
-            let mut runtime = PersistentBackendRuntime::new(
+            self.runtime = Some(PersistentBackendRuntime::new(
                 &self.outputs,
                 std::slice::from_ref(transaction),
                 Some(&mut self.scanout),
                 Some(frames),
-            )?;
-            let _ = runtime.run_authority_transactions(
-                transaction.transaction,
-                std::slice::from_ref(transaction),
-                1,
-                Some(&mut self.scanout),
-                None,
-                None,
-            )?;
-            self.runtime = Some(runtime);
+            )?);
             return Ok(true);
         }
         let runtime = self.runtime.as_mut().expect("checked above");
