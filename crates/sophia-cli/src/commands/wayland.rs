@@ -462,8 +462,9 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
             && native_scanout.should_compose_cpu_frame()
         {
             let report = scene.compose()?;
-            let submission = native_scanout.submit_cpu_frame(&committed, &report)?;
             let checksum = Some(report.checksum);
+            let nonzero_pixel_bytes = report.nonzero_pixel_bytes;
+            let submission = native_scanout.submit_cpu_frame(&committed, report)?;
             last_checksum = checksum;
             frames = frames.saturating_add(submission.presentations.len());
             shm_frames = shm_frames.saturating_add(submission.presentations.len());
@@ -477,8 +478,8 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                     generation,
                     state.geometry.width,
                     state.geometry.height,
-                    report.checksum,
-                    report.nonzero_pixel_bytes,
+                    checksum.unwrap_or_default(),
+                    nonzero_pixel_bytes,
                 );
                 if submission.immediate {
                     observe_input_presentation(

@@ -2090,7 +2090,7 @@ impl WaylandNativeSession {
     pub(super) fn submit_cpu_frame(
         &mut self,
         committed_surfaces: &[CommittedSurfaceState],
-        report: &sophia_backend_live::LiveCpuCompositionReport,
+        report: sophia_backend_live::LiveCpuCompositionReport,
     ) -> Result<WaylandCpuFrameSubmission, Box<dyn std::error::Error>> {
         let presentations = self
             .pending_cpu_presentations
@@ -2100,11 +2100,7 @@ impl WaylandNativeSession {
         if presentations.is_empty() {
             return Err("native CPU composition had no queued presentation".into());
         }
-        let frames = self
-            .outputs
-            .iter()
-            .map(|output| native_frame_for_output(report, output.size))
-            .collect::<Vec<_>>();
+        let frames = native_frames_for_outputs(report, &self.outputs);
         if self.runtime.is_none() {
             self.runtime = Some(PersistentBackendRuntime::new_from_committed_surfaces(
                 &self.outputs,
@@ -2372,6 +2368,23 @@ fn native_frame_for_output(
         checksum,
         nonzero_pixel_bytes,
     }
+}
+
+fn native_frames_for_outputs(
+    report: sophia_backend_live::LiveCpuCompositionReport,
+    outputs: &[sophia_engine::HeadlessOutput],
+) -> Vec<ObservedComposedFrame> {
+    if outputs.len() == 1 && outputs[0].size == report.frame.size {
+        return vec![ObservedComposedFrame {
+            frame: report.frame,
+            checksum: report.checksum,
+            nonzero_pixel_bytes: report.nonzero_pixel_bytes,
+        }];
+    }
+    outputs
+        .iter()
+        .map(|output| native_frame_for_output(&report, output.size))
+        .collect()
 }
 
 fn compositor_tick_input(

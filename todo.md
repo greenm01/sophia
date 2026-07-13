@@ -33,9 +33,10 @@ Exit criteria:
   presentation must consume it directly and must not replay Wayland authority
   transactions into a second Engine state. Verified on hardware with a clean
   native Kitty exit after transaction and surface-destruction teardown.
-- [ ] Add a bounded presentation scheduler: at most one retained pending frame
+- [x] Add a bounded presentation scheduler: at most one retained pending frame
   per surface, explicit page-flip-to-release ownership, and normal teardown
-  ordering.
+  ordering. Verified on hardware with 26 Kitty transactions coalesced into 14
+  SHM frames, clean native teardown, and no scanout failures.
 - [ ] Retain SHM-backed composition resources and coalesce damage so the
   guarded hardware path remains below 100 ms input-to-presentation latency.
 - [x] Prove a real software-rendered native Wayland Kitty toplevel handles a
