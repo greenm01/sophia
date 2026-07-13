@@ -2166,10 +2166,19 @@ impl WaylandNativeSession {
         for head in &mut self.scanout.heads {
             head.exporter.set_pending_dmabuf_frame(frame.try_clone()?);
         }
+        trace_native_dmabuf_lifecycle("client_frame_retained");
         let runtime = self.runtime.as_mut().expect("initialized above");
         let submissions_before = self.scanout.heads[0].submissions;
         let _ =
             runtime.run_committed_snapshot(committed_surfaces, Some(&mut self.scanout), None)?;
+        let head = &self.scanout.heads[0];
+        if head.submissions > submissions_before {
+            trace_native_dmabuf_lifecycle("kms_submitted");
+        } else if head.exporter.pending_dmabuf_frame() {
+            trace_native_dmabuf_lifecycle("kms_submission_deferred");
+        } else {
+            trace_native_dmabuf_lifecycle("kms_submission_failed");
+        }
         self.queue_presentation(transaction.surface, generation, submissions_before)?;
         Ok(false)
     }
@@ -2179,7 +2188,15 @@ impl WaylandNativeSession {
             return Ok(Vec::new());
         };
         if runtime.native_scanout_in_flight() || runtime.native_cleanup_pending() {
+            let callbacks_before = self.scanout.callback_accepted;
+            let retirements_before = self.scanout.retirements;
             runtime.retire_native_scanout(&mut self.scanout)?;
+            if self.scanout.callback_accepted > callbacks_before {
+                trace_native_dmabuf_lifecycle("page_flip_observed");
+            }
+            if self.scanout.retirements > retirements_before {
+                trace_native_dmabuf_lifecycle("scanout_retired");
+            }
         }
         if !runtime.native_scanout_in_flight()
             && self
@@ -2319,6 +2336,15 @@ fn required_wayland_presentation_submission(
         Ok(submissions_after.saturating_add(1))
     } else {
         Err("native frame was neither submitted nor retained for a later submit")
+    }
+}
+
+fn trace_native_dmabuf_lifecycle(stage: &str) {
+    if std::env::var_os("SOPHIA_WAYLAND_DMABUF_DIAGNOSTIC").is_some() {
+        eprintln!(
+            "sophia_dmabuf_lifecycle schema=1 pid={} stage={stage}",
+            std::process::id()
+        );
     }
 }
 

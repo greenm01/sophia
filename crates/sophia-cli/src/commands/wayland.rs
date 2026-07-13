@@ -294,10 +294,18 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
         for event in events {
             match event {
                 WaylandFrontendEvent::CpuBufferRegistered(buffer) => scene.register(buffer),
-                WaylandFrontendEvent::DmaBufRegistered(buffer) => scene.register_dmabuf(buffer),
+                WaylandFrontendEvent::DmaBufRegistered(buffer) => {
+                    trace_dmabuf_lifecycle("client_buffer_admitted");
+                    scene.register_dmabuf(buffer);
+                }
                 WaylandFrontendEvent::Authority(WaylandAuthorityAction::BufferReleased(
                     release,
-                )) => scene.release(release.source),
+                )) => {
+                    if matches!(&release.source, BufferSource::DmaBuf { .. }) {
+                        trace_dmabuf_lifecycle("client_buffer_released");
+                    }
+                    scene.release(release.source);
+                }
                 WaylandFrontendEvent::Authority(WaylandAuthorityAction::SurfaceTransaction(
                     transaction,
                 )) => {
@@ -591,6 +599,15 @@ fn apply_wayland_feedback(
         }
     }
     Ok(())
+}
+
+fn trace_dmabuf_lifecycle(stage: &str) {
+    if std::env::var_os("SOPHIA_WAYLAND_DMABUF_DIAGNOSTIC").is_some() {
+        eprintln!(
+            "sophia_dmabuf_lifecycle schema=1 pid={} stage={stage}",
+            std::process::id()
+        );
+    }
 }
 
 fn parse_size(value: &str) -> Result<Size, Box<dyn std::error::Error>> {

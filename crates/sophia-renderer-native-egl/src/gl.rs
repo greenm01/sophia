@@ -151,6 +151,33 @@ impl PersistentXrgb8888GlPipeline {
         self.draw_bound_texture()
     }
 
+    pub(crate) fn detach_egl_image(&self) -> Result<(), NativeEglDrawSmokeStatus> {
+        unsafe {
+            self.gl.active_texture(glow::TEXTURE0);
+            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+            // glEGLImageTargetTexture2DOES makes this texture an EGLImage
+            // sibling. Re-specify storage before destroying the EGLImage so no
+            // client-owned image remains attached to the persistent pipeline.
+            self.gl.tex_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                glow::RGBA as i32,
+                self.width as i32,
+                self.height as i32,
+                0,
+                glow::BGRA,
+                glow::UNSIGNED_BYTE,
+                glow::PixelUnpackData::Slice(None),
+            );
+            self.gl.bind_texture(glow::TEXTURE_2D, None);
+            self.gl.finish();
+            if self.gl.get_error() != glow::NO_ERROR {
+                return Err(NativeEglDrawSmokeStatus::GlUnavailable);
+            }
+        }
+        Ok(())
+    }
+
     fn draw_bound_texture(&self) -> Result<(), NativeEglDrawSmokeStatus> {
         unsafe {
             self.gl

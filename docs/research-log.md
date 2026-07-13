@@ -18,6 +18,12 @@ rejection; they did not make the native import/presentation path safe. The
 300-frame lifecycle and three-Kitty promotion gates remain blocked pending
 allocator/lifetime diagnosis.
 
+The next controlled rerun uses a GDB-backed diagnostic mode with explicit
+DMA-BUF stages. The importer now detaches the EGLImage from its GL texture and
+finishes that detach before destroying the EGLImage and dropping the imported
+client FD. This makes input-image teardown independent from the retained GBM
+front-buffer owner; it is a candidate fix until the controlled proof passes.
+
 ## 2026-07-12: DMA-BUF Performance Gate and Renderer Safety Boundary
 
 The current native Wayland/Kitty presentation route is SHM-backed and stable

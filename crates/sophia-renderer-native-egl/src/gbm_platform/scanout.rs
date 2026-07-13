@@ -1,7 +1,7 @@
 use std::{
     ffi::c_void,
     os::fd::{AsRawFd, BorrowedFd, OwnedFd},
-    ptr,
+    process, ptr,
     time::Duration,
     time::Instant,
 };
@@ -1021,6 +1021,7 @@ fn render_persistent_target_dmabuf<T: std::os::fd::AsFd>(
         let _ = egl.destroy_surface(display, egl_surface);
         return Err(NativeGbmScanoutBufferExportDetail::EglMakeCurrentFailed);
     }
+    trace_dmabuf_lifecycle("egl_surface_current");
 
     let mut attributes = vec![
         EGL_WIDTH,
@@ -1058,6 +1059,7 @@ fn render_persistent_target_dmabuf<T: std::os::fd::AsFd>(
         .map_err(|_| NativeGbmScanoutBufferExportDetail::DmaBufImportFailed);
     let result = match image {
         Ok(image) => {
+            trace_dmabuf_lifecycle("egl_image_created");
             let result = egl
                 .get_proc_address("glEGLImageTargetTexture2DOES")
                 .ok_or(NativeGbmScanoutBufferExportDetail::DmaBufImportFailed)
@@ -1072,12 +1074,15 @@ fn render_persistent_target_dmabuf<T: std::os::fd::AsFd>(
                         .map_err(|_| NativeGbmScanoutBufferExportDetail::DmaBufImportFailed)
                 })
                 .and_then(|()| {
+                    trace_dmabuf_lifecycle("egl_image_rendered");
                     egl.swap_buffers(display, egl_surface)
                         .map_err(|_| NativeGbmScanoutBufferExportDetail::EglSwapBuffersFailed)
                 })
                 .and_then(|()| {
+                    trace_dmabuf_lifecycle("egl_surface_swapped");
                     let buffer = unsafe { gbm_surface.lock_front_buffer() }
                         .map_err(|_| NativeGbmScanoutBufferExportDetail::FrontBufferLockFailed)?;
+                    trace_dmabuf_lifecycle("scanout_front_buffer_locked");
                     native_owned_scanout_buffer_from_bo(
                         target.width,
                         target.height,
@@ -1085,14 +1090,37 @@ fn render_persistent_target_dmabuf<T: std::os::fd::AsFd>(
                         Some(gbm_surface),
                     )
                 });
-            let _ = egl.destroy_image(display, image);
-            result
+            let detached = target.pipeline.detach_egl_image().is_ok();
+            if detached {
+                trace_dmabuf_lifecycle("egl_image_detached");
+            }
+            let image_destroyed = egl.destroy_image(display, image).is_ok();
+            if image_destroyed {
+                trace_dmabuf_lifecycle("egl_image_destroyed");
+            }
+            match result {
+                Ok(buffer) if detached && image_destroyed => {
+                    trace_dmabuf_lifecycle("scanout_owner_returned");
+                    Ok(buffer)
+                }
+                Ok(_) => Err(NativeGbmScanoutBufferExportDetail::DmaBufImportFailed),
+                Err(detail) => Err(detail),
+            }
         }
         Err(detail) => Err(detail),
     };
     let _ = egl.make_current(display, None, None, None);
     let _ = egl.destroy_surface(display, egl_surface);
     result
+}
+
+fn trace_dmabuf_lifecycle(stage: &str) {
+    if std::env::var_os("SOPHIA_WAYLAND_DMABUF_DIAGNOSTIC").is_some() {
+        eprintln!(
+            "sophia_dmabuf_lifecycle schema=1 pid={} stage={stage}",
+            process::id()
+        );
+    }
 }
 
 fn render_initialized_gbm_scanout_front_buffer_with_config<T: std::os::fd::AsFd>(

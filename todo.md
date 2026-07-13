@@ -55,6 +55,9 @@ Exit criteria:
 - [ ] Isolate the controlled DMA-BUF first-frame heap corruption with allocator
   evidence and resource-lifetime tracing, then demonstrate a clean full-size
   import, KMS submission, page-flip retirement, and client buffer release.
+- [x] Add a dedicated-TTY GDB diagnostic mode that records allocator backtraces
+  and ordered DMA-BUF import, scanout, page-flip, retirement, and client-release
+  stages without changing the production SHM path.
 - [x] Prove a real software-rendered native Wayland Kitty toplevel handles a
   compositor configure, keeps its old size live until ack, then commits changing
   nonzero pixels at the requested size.

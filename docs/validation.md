@@ -116,6 +116,20 @@ full-size 1920x1200 DMA-BUF submission, then aborts with
 failure, not a passing first-frame result. Preserve the evidence log and do not
 run the 300-frame or Kitty promotion steps until it is isolated.
 
+To capture the native allocator stack from a dedicated text TTY, install `gdb`
+if needed and rerun the controlled three-frame proof in diagnostic mode:
+
+```bash
+sudo xbps-install -S gdb
+SOPHIA_DMABUF_DIAGNOSTIC=1 \
+SOPHIA_DMABUF_PRODUCER_FRAMES=3 \
+tools/wayland_dmabuf_first_frame_hardware_proof.sh
+```
+
+The normal evidence file and a sibling `.gdb.log` retain the process stack and
+ordered DMA-BUF stages. Diagnostic mode is only for the controlled proof; do
+not use it for the interactive Kitty gate.
+
 For the real-Kitty gate, set `SOPHIA_INPUT_DEVICES` to comma-separated keyboard
 and pointer event paths. The guarded launcher asks for its recovery chord before
 DRM takeover. In Kitty, type `sophia` plus Enter, press all four arrow keys,
