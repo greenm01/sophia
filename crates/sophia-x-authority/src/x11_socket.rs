@@ -56,6 +56,34 @@ impl core::fmt::Display for X11SetupSocketError {
 
 impl std::error::Error for X11SetupSocketError {}
 
+/// Monotonically assigned identity for one live X11 client connection.
+///
+/// The XID range identifies resources the client is allowed to create. This
+/// identity identifies the connection that owns lifecycle cleanup, event
+/// delivery, and later concurrent-dispatch bookkeeping.
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct XServerFrontendClientId(u64);
+
+#[cfg(unix)]
+impl XServerFrontendClientId {
+    pub const fn raw(self) -> u64 {
+        self.0
+    }
+}
+
+/// The setup allocation retained for one connected X11 client.
+///
+/// The range is a connection lease, not a namespace boundary: in a classic
+/// shared-X session other trusted clients may still reference a resource after
+/// its creator made it. It is retained so disconnect cleanup can reclaim only
+/// resources whose XIDs this client was allowed to create.
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct XServerFrontendClientLease {
+    resource_id_range: crate::XWireClientResourceRange,
+}
+
 /// The X11 setup authorization policy for one local frontend listener.
 ///
 /// `UnauthenticatedLocal` retains the bounded smoke-helper behavior and relies
@@ -200,6 +228,15 @@ impl XServerFrontend {
         &self.config
     }
 
+    /// Number of X11 clients currently holding a frontend connection lease.
+    ///
+    /// With the present sequential dispatcher this is normally zero between
+    /// `serve_next` calls. The value is retained for lifecycle supervision and
+    /// the upcoming simultaneous-client dispatcher.
+    pub fn active_client_count(&self) -> usize {
+        self.state.active_client_count()
+    }
+
     pub fn serve_next(&mut self) -> Result<(), X11SetupSocketError> {
         serve_x11_core_socket_listener_once_with_setup_authorization(
             &self.listener,
@@ -246,6 +283,8 @@ impl XServerFrontend {
 #[cfg(unix)]
 #[derive(Clone, Debug)]
 pub struct X11CoreDispatchTrace<'a> {
+    pub client: XServerFrontendClientId,
+    pub resource_id_range: crate::XWireClientResourceRange,
     pub sequence: u16,
     pub major_opcode: u8,
     pub request_detail: Option<String>,
@@ -354,6 +393,8 @@ pub struct X11CoreSocketServerState {
     atoms: XAtomTable,
     properties: XPropertyTable,
     next_client_resource_range: u16,
+    next_client_id: u64,
+    client_leases: BTreeMap<XServerFrontendClientId, XServerFrontendClientLease>,
 }
 
 #[cfg(unix)]
@@ -364,6 +405,8 @@ impl Default for X11CoreSocketServerState {
             atoms: Default::default(),
             properties: Default::default(),
             next_client_resource_range: 1,
+            next_client_id: 1,
+            client_leases: Default::default(),
         }
     }
 }
@@ -388,6 +431,44 @@ impl X11CoreSocketServerState {
             resource_id_mask: X_SETUP_DEFAULT_RESOURCE_ID_MASK,
             ..XSetupSuccess::client_compatible()
         })
+    }
+
+    fn next_client_id(&mut self) -> Result<XServerFrontendClientId, X11SetupSocketError> {
+        let client = XServerFrontendClientId(self.next_client_id);
+        self.next_client_id = self.next_client_id.checked_add(1).ok_or_else(|| {
+            X11SetupSocketError::new("Sophia X Server Frontend exhausted client identities")
+        })?;
+        Ok(client)
+    }
+
+    fn register_client(
+        &mut self,
+        client: XServerFrontendClientId,
+        resource_id_range: crate::XWireClientResourceRange,
+    ) -> Result<(), X11SetupSocketError> {
+        if self
+            .client_leases
+            .insert(client, XServerFrontendClientLease { resource_id_range })
+            .is_some()
+        {
+            return Err(X11SetupSocketError::new(
+                "Sophia X Server Frontend assigned a duplicate client identity",
+            ));
+        }
+        Ok(())
+    }
+
+    fn release_client(
+        &mut self,
+        client: XServerFrontendClientId,
+    ) -> Result<XServerFrontendClientLease, X11SetupSocketError> {
+        self.client_leases.remove(&client).ok_or_else(|| {
+            X11SetupSocketError::new("Sophia X Server Frontend lost a client connection lease")
+        })
+    }
+
+    fn active_client_count(&self) -> usize {
+        self.client_leases.len()
     }
 }
 
@@ -905,6 +986,11 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
     else {
         return Ok(());
     };
+    let client = state.next_client_id()?;
+    let resource_id_range = crate::XWireClientResourceRange {
+        base: setup_success.resource_id_base,
+        mask: setup_success.resource_id_mask,
+    };
     let mut sequence = 0u16;
     let event_sequence = Arc::new(AtomicU16::new(0));
     let focused_window = Arc::new(AtomicU64::new(u64::from(X_SETUP_DEFAULT_ROOT)));
@@ -940,6 +1026,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
             )
         })
         .transpose()?;
+    state.register_client(client, resource_id_range)?;
 
     let result = (|| {
         while let Some((major_opcode, request)) = read_x11_core_request(stream, setup.byte_order)? {
@@ -962,10 +1049,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                     byte_order: setup.byte_order,
                     namespace,
                     transaction: TransactionId::from_raw(u64::from(sequence)),
-                    resource_id_range: Some(crate::XWireClientResourceRange {
-                        base: setup_success.resource_id_base,
-                        mask: setup_success.resource_id_mask,
-                    }),
+                    resource_id_range: Some(resource_id_range),
                 },
                 &request,
             ) {
@@ -1032,6 +1116,8 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 );
             }
             observer(X11CoreDispatchTrace {
+                client,
+                resource_id_range,
                 sequence,
                 major_opcode,
                 request_detail,
@@ -1067,25 +1153,26 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
         Ok(())
     })();
 
-    if let Some(writer) = input_writer {
-        writer.stop.store(true, Ordering::Release);
-        let writer_result = writer
-            .thread
-            .join()
-            .map_err(|_| X11SetupSocketError::new("X11 input event writer thread panicked"))?;
-        result.as_ref().map_err(Clone::clone)?;
-        writer_result?;
-    }
-    if let Some(writer) = control_writer {
-        writer.stop.store(true, Ordering::Release);
-        let writer_result = writer
-            .thread
-            .join()
-            .map_err(|_| X11SetupSocketError::new("X11 control writer thread panicked"))?;
-        result.as_ref().map_err(Clone::clone)?;
-        writer_result?;
-    }
-    result
+    let writer_result = (|| {
+        if let Some(writer) = input_writer {
+            writer.stop.store(true, Ordering::Release);
+            writer.thread.join().map_err(|_| {
+                X11SetupSocketError::new("X11 input event writer thread panicked")
+            })??;
+        }
+        if let Some(writer) = control_writer {
+            writer.stop.store(true, Ordering::Release);
+            writer
+                .thread
+                .join()
+                .map_err(|_| X11SetupSocketError::new("X11 control writer thread panicked"))??;
+        }
+        Ok(())
+    })();
+    let client_lease = state.release_client(client)?;
+    debug_assert_eq!(client_lease.resource_id_range, resource_id_range);
+    result?;
+    writer_result
 }
 
 #[cfg(unix)]

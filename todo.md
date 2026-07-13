@@ -112,8 +112,10 @@ engineering reason.
   supervision, resource cleanup, and simultaneous clients remain. Accepted
   clients now receive disjoint XID ranges at setup, and every currently
   supported XID-creating request rejects out-of-range IDs with `BadIDChoice`.
-  Add durable client identity, ownership checks for existing resources, and
-  cleanup before enabling concurrent clients.
+  Each accepted connection now also receives a monotonic client identity and
+  retains an XID-range lease until it disconnects. Next, reclaim that lease's
+  resources through an Engine-visible surface-removal path, add ownership
+  checks for existing resources, then enable concurrent clients.
 - [x] Define the X11 session profiles: classic shared-X behavior for trusted
   sessions, plus explicit confined namespaces/capabilities where requested.
   The confined profile remains gated on client-aware connection routing.

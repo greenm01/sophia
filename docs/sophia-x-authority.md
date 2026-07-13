@@ -70,8 +70,13 @@ simultaneous-client dispatch is still required. Each accepted client now gets
 a disjoint X11 setup resource-ID range. Every currently supported XID-creating
 wire path—window, pixmap, GC, font, colormap, glyph cursor, and reduced
 MIT-SHM segment—rejects an XID outside that range with X11 `BadIDChoice` before
-it reaches runtime state. Resource cleanup, ownership checks on references to
-existing resources, and durable client identity are still required.
+it reaches runtime state. Every successful setup also receives a monotonic
+frontend client identity and retains an XID-range lease until its connection
+ends. The lease is the cleanup ledger key; it does not restrict ordinary
+same-namespace references in the classic shared-X profile. Resource cleanup
+through an Engine-visible surface-removal path and ownership checks on
+references to existing resources are still required before simultaneous-client
+dispatch.
 `XServerFrontendConfig`/`XServerFrontend` make the local socket path and
 namespace explicit, reject invalid namespaces, restrict the socket to its
 owner, and refuse to replace a non-socket path. The configuration can now
@@ -82,6 +87,23 @@ remain unauthenticated local sockets. Xauthority-file management, peer-
 credential policy, cookie rotation, session launch policy, request-level XID
 ownership, resource cleanup, and confined-client routing are still required
 before treating the listener as a general local X server.
+
+### Connection Lifecycle
+
+After successful setup, the frontend records the client ID and its setup XID
+range as a connection lease. The lease is released only after the client stream
+and optional input/control writers have stopped, including an observer or
+writer error. This establishes a durable ownership key without changing classic
+shared-X semantics: it identifies resources a connection was allowed to create,
+but does not prohibit another trusted client in the same namespace from
+referring to them.
+
+Lease release is bookkeeping, not yet resource reclamation. The next lifecycle
+slice must destroy that lease's windows, buffers, pixmaps, GCs, fonts, cursors,
+and SHM records and emit corresponding surface removals to the Engine/session
+path. It must prove no old client state remains while a later client in the
+same namespace stays intact. This order prevents an apparently-correct local
+cleanup from leaving stale composited surfaces or bypassing Engine policy.
 
 The two session profiles have these precise semantics:
 

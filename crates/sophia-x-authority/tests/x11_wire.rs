@@ -4246,6 +4246,77 @@ fn x_server_frontend_assigns_disjoint_setup_resource_ranges_to_clients() {
 
 #[cfg(unix)]
 #[test]
+fn x_server_frontend_assigns_distinct_connection_identities() {
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let socket_path = std::env::temp_dir().join(format!(
+        "sophia-x-server-frontend-client-id-test-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let config = XServerFrontendConfig::new(&socket_path, NamespaceId::from_raw(818)).unwrap();
+    let server = thread::spawn(move || {
+        let mut frontend = XServerFrontend::bind(config).unwrap();
+        let mut clients = Vec::new();
+        for _ in 0..2 {
+            frontend
+                .serve_next_traced(|trace| {
+                    clients.push((trace.client.raw(), trace.resource_id_range));
+                    Ok(())
+                })
+                .unwrap();
+        }
+        (clients, frontend.active_client_count())
+    });
+
+    wait_for_socket(&socket_path);
+    for name in ["FIRST_CLIENT", "SECOND_CLIENT"] {
+        let mut stream = UnixStream::connect(&socket_path).unwrap();
+        stream
+            .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+            .unwrap();
+        read_setup_success(&mut stream, XByteOrder::LittleEndian);
+        stream
+            .write_all(&intern_atom_request(XByteOrder::LittleEndian, false, name))
+            .unwrap();
+        let reply = read_x_record(&mut stream);
+        assert_eq!(reply[0], 1);
+        drop(stream);
+    }
+
+    assert_eq!(
+        server.join().unwrap(),
+        (
+            vec![
+                (
+                    1,
+                    XWireClientResourceRange {
+                        base: 0x0020_0000,
+                        mask: X_SETUP_DEFAULT_RESOURCE_ID_MASK,
+                    },
+                ),
+                (
+                    2,
+                    XWireClientResourceRange {
+                        base: 0x0040_0000,
+                        mask: X_SETUP_DEFAULT_RESOURCE_ID_MASK,
+                    },
+                ),
+            ],
+            0,
+        )
+    );
+    std::fs::remove_file(&socket_path).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
 fn x_server_frontend_rejects_create_window_outside_client_resource_range() {
     use std::io::Write;
     use std::os::unix::net::UnixStream;
