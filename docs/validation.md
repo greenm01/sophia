@@ -123,6 +123,9 @@ On Void Linux, run that next gate from a dedicated text TTY with:
 tools/run_void_dmabuf_lifetime_proof.sh
 ```
 
+Use `tools/run_void_dmabuf_lifetime_proof.sh --diagnostic` to capture the same
+300-frame run under GDB after a failure.
+
 To capture the native allocator stack from a dedicated text TTY, install `gdb`
 if needed and rerun the controlled three-frame proof in diagnostic mode:
 
