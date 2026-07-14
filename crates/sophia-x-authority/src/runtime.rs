@@ -51,6 +51,8 @@ pub struct XAuthorityRuntime {
     window_background_pixels: BTreeMap<crate::XResourceId, u32>,
     last_cpu_buffer_update: Option<XAuthorityCpuBufferUpdate>,
     output_topology: OutputTopologySnapshot,
+    input_focus: crate::XResourceId,
+    input_focus_revert_to: u8,
 }
 
 impl Default for XAuthorityRuntime {
@@ -69,6 +71,8 @@ impl Default for XAuthorityRuntime {
             window_background_pixels: Default::default(),
             last_cpu_buffer_update: None,
             output_topology: OutputTopologySnapshot::deterministic(),
+            input_focus: crate::XResourceId::new(u64::from(crate::X_SETUP_DEFAULT_ROOT), 1),
+            input_focus_revert_to: 1,
         }
     }
 }
@@ -102,6 +106,27 @@ impl XAuthorityRuntime {
         }
         self.output_topology = output_topology;
         Ok(true)
+    }
+
+    pub const fn input_focus(&self) -> (crate::XResourceId, u8) {
+        (self.input_focus, self.input_focus_revert_to)
+    }
+
+    pub fn set_input_focus(
+        &mut self,
+        namespace: NamespaceId,
+        focus: crate::XResourceId,
+        revert_to: u8,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        if revert_to > 2 {
+            return Err(XAuthorityRuntimeError::InvalidResource);
+        }
+        if focus.local.raw() != 0 && focus.local.raw() != u64::from(crate::X_SETUP_DEFAULT_ROOT) {
+            self.validate_window_access(namespace, focus)?;
+        }
+        self.input_focus = focus;
+        self.input_focus_revert_to = revert_to;
+        Ok(())
     }
 
     pub fn begin_dispatch(&mut self) {
@@ -590,6 +615,17 @@ impl XAuthorityRuntime {
             .map_err(Into::into)
     }
 
+    pub fn shm_segment_shmid(
+        &self,
+        namespace: NamespaceId,
+        segment: crate::XResourceId,
+    ) -> Result<u32, XAuthorityRuntimeError> {
+        self.shm_segments
+            .lookup(namespace, segment)
+            .map(|record| record.shmid)
+            .map_err(Into::into)
+    }
+
     pub fn validate_window_access(
         &self,
         namespace: NamespaceId,
@@ -664,6 +700,10 @@ impl XAuthorityRuntime {
         self.resources.remove(window);
         self.software_buffers.remove(window);
         self.window_background_pixels.remove(&window);
+        if self.input_focus == window {
+            self.input_focus = crate::XResourceId::new(u64::from(crate::X_SETUP_DEFAULT_ROOT), 1);
+            self.input_focus_revert_to = 1;
+        }
         Ok(surface)
     }
 

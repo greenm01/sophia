@@ -5,7 +5,7 @@ use crate::{
     X_SOPHIA_PRESENT_MAJOR_OPCODE, XAtomTable, XAuthorityRequestKind, XAuthorityResponseOutcome,
     XAuthorityResponsePacket, XAuthorityRuntime, XAuthorityRuntimeError, XByteOrder, XClientEvent,
     XClientOutput, XClientReply, XErrorCode, XMetadataPropertyCandidate, XPropertyError,
-    XPropertyTable, XRandrModeInfo, XResourceId, XWireParseError, XWireRequest,
+    XPropertyTable, XRandrModeInfo, XResourceId, XWireParseError, XWireRequest, XXiDeviceInfo,
     encode_x_client_output, metadata_property_candidate, x_error_from_runtime,
     x_error_from_wire_parse, x_selection_failure_event,
 };
@@ -47,6 +47,7 @@ pub fn dispatch_x11_wire_request(
         XWireRequest::CreateWindow {
             packet,
             background_pixel,
+            ..
         } => {
             let kind = packet.kind.clone();
             let namespace = packet.namespace;
@@ -89,7 +90,7 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
-        XWireRequest::ChangeWindowAttributes { window } => {
+        XWireRequest::ChangeWindowAttributes { window, .. } => {
             let outputs =
                 if let Err(error) = runtime.validate_drawable_access(context.namespace, window) {
                     vec![XClientOutput::Error(x_error_from_runtime(
@@ -448,6 +449,39 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates,
             }
         }
+        XWireRequest::DeleteProperty { window, property } => {
+            let access = if window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
+                Ok(())
+            } else {
+                runtime.validate_window_access(context.namespace, window)
+            };
+            let outputs = match access {
+                Err(error) => vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(window.local.raw()).unwrap_or(0),
+                ))],
+                Ok(()) => properties
+                    .remove(context.namespace, window, property)
+                    .map(|_| {
+                        XClientOutput::Event(XClientEvent::PropertyNotify {
+                            sequence: context.sequence,
+                            window,
+                            atom: property,
+                            time: 0,
+                            new_value: false,
+                        })
+                    })
+                    .into_iter()
+                    .collect(),
+            };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::GetProperty(read) => {
             let output = if read.property == crate::X_PROPERTY_ANY_TYPE
                 || atoms.name(read.property).is_none()
@@ -525,16 +559,31 @@ pub fn dispatch_x11_wire_request(
             mut event,
         } => {
             let requestor = match &event {
-                XClientEvent::SelectionNotify { requestor, .. } => *requestor,
-                _ => unreachable!("wire decoder admits only SelectionNotify"),
+                XClientEvent::SelectionNotify { requestor, .. } => Some(*requestor),
+                XClientEvent::ClientMessage { .. } => None,
+                _ => unreachable!("wire decoder admits only sendable events"),
             };
-            let validation = runtime
-                .validate_window_access(context.namespace, destination)
-                .and_then(|()| runtime.validate_window_access(context.namespace, requestor));
+            let validation = if destination.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
+                Ok(())
+            } else {
+                runtime.validate_window_access(context.namespace, destination)
+            }
+            .and_then(|()| {
+                requestor
+                    .map(|requestor| runtime.validate_window_access(context.namespace, requestor))
+                    .unwrap_or(Ok(()))
+            });
             let outputs = match validation {
-                Ok(()) if destination == requestor && event_mask == 0 => {
-                    if let XClientEvent::SelectionNotify { sequence, .. } = &mut event {
-                        *sequence = context.sequence;
+                Ok(())
+                    if (requestor.is_none() || event_mask == 0)
+                        && requestor.is_none_or(|requestor| destination == requestor) =>
+                {
+                    match &mut event {
+                        XClientEvent::SelectionNotify { sequence, .. }
+                        | XClientEvent::ClientMessage { sequence, .. } => {
+                            *sequence = context.sequence;
+                        }
+                        _ => unreachable!("wire decoder admits only sendable events"),
                     }
                     vec![XClientOutput::Event(event)]
                 }
@@ -910,15 +959,40 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
-        XWireRequest::GetInputFocus => XDispatchResult {
-            response: None,
-            outputs: vec![XClientOutput::Reply(XClientReply::GetInputFocus {
-                sequence: context.sequence,
-                focus: XResourceId::new(u64::from(crate::X_SETUP_DEFAULT_ROOT), 1),
-                revert_to: 1,
-            })],
-            metadata_candidates: Vec::new(),
-        },
+        XWireRequest::GetInputFocus => {
+            let (focus, revert_to) = runtime.input_focus();
+            XDispatchResult {
+                response: None,
+                outputs: vec![XClientOutput::Reply(XClientReply::GetInputFocus {
+                    sequence: context.sequence,
+                    focus,
+                    revert_to,
+                })],
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::SetInputFocus {
+            focus, revert_to, ..
+        } => {
+            let outputs = runtime
+                .set_input_focus(context.namespace, focus, revert_to)
+                .err()
+                .map(|error| {
+                    XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(focus.local.raw()).unwrap_or(0),
+                    ))
+                })
+                .into_iter()
+                .collect();
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::GetModifierMapping => XDispatchResult {
             response: None,
             outputs: vec![XClientOutput::Reply(XClientReply::GetModifierMapping {
@@ -972,6 +1046,37 @@ pub fn dispatch_x11_wire_request(
                         dst_y: src_y,
                     })
                 };
+            XDispatchResult {
+                response: None,
+                outputs: vec![output],
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::QueryPointer { window } => {
+            let output = if window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT)
+                || runtime
+                    .validate_window_access(context.namespace, window)
+                    .is_ok()
+            {
+                XClientOutput::Reply(XClientReply::QueryPointer {
+                    sequence: context.sequence,
+                    root: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+                    child: XResourceId::NONE,
+                    root_x: 0,
+                    root_y: 0,
+                    win_x: 0,
+                    win_y: 0,
+                    mask: 0,
+                })
+            } else {
+                XClientOutput::Error(crate::XClientError {
+                    code: XErrorCode::BadWindow,
+                    sequence: context.sequence,
+                    resource_id: u32::try_from(window.local.raw()).unwrap_or(0),
+                    minor_code: 0,
+                    major_code: context.major_opcode,
+                })
+            };
             XDispatchResult {
                 response: None,
                 outputs: vec![output],
@@ -1312,6 +1417,147 @@ pub fn dispatch_x11_wire_request(
             })],
             metadata_candidates: Vec::new(),
         },
+        XWireRequest::XkbGetMap { full, partial } => {
+            let present = (full | partial) & 0x0007;
+            let flat = x11_us_keyboard_mapping(8, 248);
+            let keysyms = flat
+                .chunks_exact(2)
+                .map(|pair| [pair[0], pair[1]])
+                .collect();
+            let modifier_map = vec![
+                (50, 1),
+                (62, 1),
+                (66, 2),
+                (37, 4),
+                (105, 4),
+                (64, 8),
+                (108, 8),
+                (77, 16),
+                (133, 64),
+                (134, 64),
+            ];
+            XDispatchResult {
+                response: None,
+                outputs: vec![XClientOutput::Reply(XClientReply::XkbGetMap {
+                    sequence: context.sequence,
+                    present,
+                    keysyms,
+                    modifier_map,
+                })],
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::XkbSelectEvents => XDispatchResult {
+            response: None,
+            outputs: Vec::new(),
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::XkbPerClientFlags { change, value } => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::XkbPerClientFlags {
+                sequence: context.sequence,
+                supported: change,
+                value: value & change,
+            })],
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::XiGetExtensionVersion => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::XiGetExtensionVersion {
+                sequence: context.sequence,
+                server_major: 2,
+                server_minor: 0,
+            })],
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::XiGetClientPointer => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::XiGetClientPointer {
+                sequence: context.sequence,
+                device_id: 2,
+            })],
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::XiQueryVersion { .. } => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::XiQueryVersion {
+                sequence: context.sequence,
+                major_version: 2,
+                minor_version: 0,
+            })],
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::XiQueryDevice { device_id } => {
+            let pointer = XXiDeviceInfo {
+                device_id: 2,
+                device_type: 1,
+                attachment: 3,
+                name: "Sophia master pointer".to_owned(),
+            };
+            let keyboard = XXiDeviceInfo {
+                device_id: 3,
+                device_type: 2,
+                attachment: 2,
+                name: "Sophia master keyboard".to_owned(),
+            };
+            let devices = match device_id {
+                0 => vec![pointer, keyboard],
+                1 => vec![pointer, keyboard],
+                2 => vec![pointer],
+                3 => vec![keyboard],
+                _ => Vec::new(),
+            };
+            XDispatchResult {
+                response: None,
+                outputs: vec![XClientOutput::Reply(XClientReply::XiQueryDevice {
+                    sequence: context.sequence,
+                    devices,
+                })],
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::XiSelectEvents { window, .. } => {
+            let outputs = (window.local.raw() != u64::from(X_SETUP_DEFAULT_ROOT))
+                .then(|| {
+                    runtime
+                        .validate_window_access(context.namespace, window)
+                        .err()
+                })
+                .flatten()
+                .map(|error| {
+                    XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(window.local.raw()).unwrap_or(0),
+                    ))
+                })
+                .into_iter()
+                .collect();
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::XiGetFocus { .. } => {
+            let (focus, _) = runtime.input_focus();
+            XDispatchResult {
+                response: None,
+                outputs: vec![XClientOutput::Reply(XClientReply::XiGetFocus {
+                    sequence: context.sequence,
+                    focus,
+                })],
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::XiGetProperty => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::XiGetProperty {
+                sequence: context.sequence,
+            })],
+            metadata_candidates: Vec::new(),
+        },
         XWireRequest::BigRequestsEnable => XDispatchResult {
             response: None,
             outputs: vec![XClientOutput::Reply(XClientReply::BigRequestsEnable {
@@ -1369,11 +1615,17 @@ pub fn dispatch_x11_wire_request(
         XWireRequest::ShmPutImage {
             drawable,
             segment,
+            total_width,
+            total_height,
+            src_x,
+            src_y,
             src_width,
             src_height,
             dst_x,
             dst_y,
-            offset: _,
+            depth,
+            format,
+            offset,
             ..
         } => {
             let transaction = TransactionId::from_raw(u64::from(context.sequence));
@@ -1409,8 +1661,30 @@ pub fn dispatch_x11_wire_request(
                 width: i32::from(src_width),
                 height: i32::from(src_height),
             });
-            let response =
-                runtime.apply_put_image(transaction, context.namespace, drawable, damage, None);
+            let image = runtime
+                .shm_segment_shmid(context.namespace, segment)
+                .ok()
+                .and_then(|shmid| {
+                    copy_shm_image_region(
+                        shmid,
+                        offset,
+                        total_width,
+                        total_height,
+                        src_x,
+                        src_y,
+                        src_width,
+                        src_height,
+                        depth,
+                        format,
+                    )
+                });
+            let response = runtime.apply_put_image(
+                transaction,
+                context.namespace,
+                drawable,
+                damage,
+                image.as_deref(),
+            );
             let outputs = if let XAuthorityResponseOutcome::Rejected(error) = response.outcome {
                 vec![XClientOutput::Error(x_error_from_runtime(
                     error,
@@ -1884,8 +2158,20 @@ fn extension_query_result(name: &str) -> XExtensionQueryResult {
         X_RANDR_EXTENSION_NAME => XExtensionQueryResult {
             present: true,
             major_opcode: X_RANDR_MAJOR_OPCODE,
-            first_event: 0,
+            first_event: crate::X_RANDR_FIRST_EVENT,
             first_error: 0,
+        },
+        crate::X_KEYBOARD_EXTENSION_NAME => XExtensionQueryResult {
+            present: true,
+            major_opcode: crate::X_KEYBOARD_MAJOR_OPCODE,
+            first_event: crate::X_KEYBOARD_FIRST_EVENT,
+            first_error: 0,
+        },
+        crate::X_INPUT_EXTENSION_NAME => XExtensionQueryResult {
+            present: true,
+            major_opcode: crate::X_INPUT_MAJOR_OPCODE,
+            first_event: crate::X_INPUT_FIRST_EVENT,
+            first_error: crate::X_INPUT_FIRST_ERROR,
         },
         X_BIG_REQUESTS_EXTENSION_NAME => XExtensionQueryResult {
             present: true,
@@ -1900,6 +2186,52 @@ fn extension_query_result(name: &str) -> XExtensionQueryResult {
             first_error: 0,
         },
     }
+}
+
+fn copy_shm_image_region(
+    shmid: u32,
+    offset: u32,
+    total_width: u16,
+    total_height: u16,
+    src_x: u16,
+    src_y: u16,
+    src_width: u16,
+    src_height: u16,
+    depth: u8,
+    format: u8,
+) -> Option<Vec<u8>> {
+    const Z_PIXMAP: u8 = 2;
+    const BYTES_PER_PIXEL: usize = 4;
+    const MAX_IMAGE_BYTES: usize = 64 * 1024 * 1024;
+    if format != Z_PIXMAP || !matches!(depth, 24 | 32) {
+        return None;
+    }
+    let total_width = usize::from(total_width);
+    let total_height = usize::from(total_height);
+    let src_x = usize::from(src_x);
+    let src_y = usize::from(src_y);
+    let src_width = usize::from(src_width);
+    let src_height = usize::from(src_height);
+    if src_x.checked_add(src_width)? > total_width || src_y.checked_add(src_height)? > total_height
+    {
+        return None;
+    }
+    let stride = total_width.checked_mul(BYTES_PER_PIXEL)?;
+    let total_len = stride.checked_mul(total_height)?;
+    if total_len > MAX_IMAGE_BYTES {
+        return None;
+    }
+    let source =
+        sophia_sysv_shm::copy_bytes(shmid, usize::try_from(offset).ok()?, total_len).ok()?;
+    let row_len = src_width.checked_mul(BYTES_PER_PIXEL)?;
+    let mut image = Vec::with_capacity(row_len.checked_mul(src_height)?);
+    for row in src_y..src_y.checked_add(src_height)? {
+        let start = row
+            .checked_mul(stride)?
+            .checked_add(src_x.checked_mul(BYTES_PER_PIXEL)?)?;
+        image.extend_from_slice(source.get(start..start.checked_add(row_len)?)?);
+    }
+    Some(image)
 }
 
 #[derive(Clone, Debug)]

@@ -1287,13 +1287,18 @@ pub struct XAuthorityClientControlAck {
 
 /// Service-supervision command for a long-running routed X11 frontend.
 #[cfg(unix)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum XServerFrontendServiceCommand {
     /// Stop accepting new clients and drain workers that are already connected.
     StopAccepting,
     /// Disconnect the worker holding this session-issued admission. Its normal
     /// teardown releases routes and resources before revoking the lease.
     RevokeAdmission { admission: ClientAdmissionId },
+    /// Apply a newer Engine output snapshot and notify subscribed clients.
+    UpdateOutputTopology {
+        snapshot: sophia_protocol::OutputTopologySnapshot,
+        acknowledgement: SyncSender<XAuthorityOutputUpdateOutcome>,
+    },
 }
 
 /// Routing failure between the Engine-facing ingress queues and a live X11
@@ -1448,6 +1453,7 @@ impl XServerFrontendRouteBroker {
             registry: XServerFrontendRouteRegistry {
                 clients: Arc::new(Mutex::new(BTreeMap::new())),
                 surfaces: Arc::new(Mutex::new(BTreeMap::new())),
+                randr_subscriptions: Arc::new(Mutex::new(BTreeMap::new())),
                 pointer_state: Arc::new(Mutex::new(BTreeMap::new())),
                 xkb_config: crate::XkbRmlvoConfig::default(),
                 xkb_worker: XkbKeyboardWorker::spawn(crate::XkbRmlvoConfig::default()),
@@ -1548,6 +1554,7 @@ impl XServerFrontendRouteBroker {
 struct XServerFrontendRouteRegistry {
     clients: Arc<Mutex<BTreeMap<XServerFrontendClientId, XServerFrontendClientRouteSenders>>>,
     surfaces: Arc<Mutex<BTreeMap<SurfaceId, XServerFrontendClientId>>>,
+    randr_subscriptions: Arc<Mutex<BTreeMap<XServerFrontendClientId, (XResourceId, u16)>>>,
     pointer_state: Arc<Mutex<BTreeMap<SeatId, crate::XCorePointerMapper>>>,
     xkb_config: crate::XkbRmlvoConfig,
     xkb_worker: XkbKeyboardWorker,
@@ -1577,6 +1584,7 @@ struct XServerFrontendClientRouteRegistration {
     client: XServerFrontendClientId,
     clients: Arc<Mutex<BTreeMap<XServerFrontendClientId, XServerFrontendClientRouteSenders>>>,
     surfaces: Arc<Mutex<BTreeMap<SurfaceId, XServerFrontendClientId>>>,
+    randr_subscriptions: Arc<Mutex<BTreeMap<XServerFrontendClientId, (XResourceId, u16)>>>,
 }
 
 #[cfg(unix)]
@@ -1686,6 +1694,7 @@ impl XServerFrontendRouteRegistry {
                 client,
                 clients: self.clients.clone(),
                 surfaces: self.surfaces.clone(),
+                randr_subscriptions: self.randr_subscriptions.clone(),
             },
             XServerFrontendClientRouteChannels {
                 input,
@@ -1713,6 +1722,73 @@ impl XServerFrontendRouteRegistry {
             .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
             .insert(surface, client);
         Ok(())
+    }
+
+    fn select_randr_input(
+        &self,
+        client: XServerFrontendClientId,
+        window: XResourceId,
+        mask: u16,
+    ) -> Result<(), XServerFrontendRouteError> {
+        let mut subscriptions = self
+            .randr_subscriptions
+            .lock()
+            .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?;
+        if mask == 0 {
+            subscriptions.remove(&client);
+        } else {
+            subscriptions.insert(client, (window, mask));
+        }
+        Ok(())
+    }
+
+    fn broadcast_randr_screen_change(
+        &self,
+        snapshot: &sophia_protocol::OutputTopologySnapshot,
+    ) -> Result<usize, XServerFrontendRouteError> {
+        let size = snapshot
+            .root_size()
+            .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?;
+        let width =
+            u16::try_from(size.width).map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?;
+        let height =
+            u16::try_from(size.height).map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?;
+        let mm_width = u16::try_from((i64::from(size.width) * 254 + 480) / 960)
+            .unwrap_or(u16::MAX)
+            .max(1);
+        let mm_height = u16::try_from((i64::from(size.height) * 254 + 480) / 960)
+            .unwrap_or(u16::MAX)
+            .max(1);
+        let timestamp = u32::try_from(snapshot.generation)
+            .unwrap_or(u32::MAX)
+            .max(1);
+        let subscriptions = self
+            .randr_subscriptions
+            .lock()
+            .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
+            .clone();
+        let mut delivered = 0usize;
+        for (client, (window, mask)) in subscriptions {
+            if mask & 1 == 0 {
+                continue;
+            }
+            self.route_protocol(
+                client,
+                XClientEvent::RandrScreenChange {
+                    sequence: 0,
+                    timestamp,
+                    config_timestamp: timestamp,
+                    root: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+                    request_window: window,
+                    width,
+                    height,
+                    mm_width,
+                    mm_height,
+                },
+            )?;
+            delivered = delivered.saturating_add(1);
+        }
+        Ok(delivered)
     }
 
     fn route_engine_input(
@@ -1897,6 +1973,9 @@ impl Drop for XServerFrontendClientRouteRegistration {
         }
         if let Ok(mut surfaces) = self.surfaces.lock() {
             surfaces.retain(|_, client| *client != self.client);
+        }
+        if let Ok(mut subscriptions) = self.randr_subscriptions.lock() {
+            subscriptions.remove(&self.client);
         }
     }
 }
@@ -2509,6 +2588,24 @@ pub fn run_x_server_frontend_routed_until_stopped(
             Ok(XServerFrontendServiceCommand::RevokeAdmission { admission }) => {
                 progressed |= frontend.revoke_admission(admission)?;
             }
+            Ok(XServerFrontendServiceCommand::UpdateOutputTopology {
+                snapshot,
+                acknowledgement,
+            }) => {
+                let outcome = frontend.update_output_topology(snapshot.clone())?;
+                if matches!(outcome, XAuthorityOutputUpdateOutcome::Applied { .. }) {
+                    let _delivered = broker
+                        .registry
+                        .broadcast_randr_screen_change(&snapshot)
+                        .map_err(|error| X11SetupSocketError::new(error.to_string()))?;
+                }
+                acknowledgement.try_send(outcome).map_err(|error| {
+                    X11SetupSocketError::new(format!(
+                        "failed to return Engine output topology acknowledgement: {error}"
+                    ))
+                })?;
+                progressed = true;
+            }
             Err(TryRecvError::Empty) => {}
         }
 
@@ -2969,8 +3066,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
     let mut sequence = 0u16;
     let event_sequence = Arc::new(AtomicU16::new(0));
     let focused_surface_window = Arc::new(AtomicU64::new(u64::from(X_SETUP_DEFAULT_ROOT)));
-    let keyboard_event_window = Arc::new(AtomicU64::new(u64::from(X_SETUP_DEFAULT_ROOT)));
-    let keyboard_target_selected = Arc::new(AtomicBool::new(false));
+    let core_event_selections = Arc::new(Mutex::new(XCoreEventSelectionState::default()));
     let surface_windows = Arc::new(Mutex::new(BTreeMap::new()));
     let output_stream = Arc::new(Mutex::new(stream.try_clone().map_err(|error| {
         X11SetupSocketError::new(format!("failed to clone X11 output socket: {error}"))
@@ -3009,8 +3105,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 setup.byte_order,
                 event_sequence.clone(),
                 focused_surface_window.clone(),
-                keyboard_event_window.clone(),
-                keyboard_target_selected.clone(),
+                core_event_selections.clone(),
                 surface_windows.clone(),
                 client,
                 receiver,
@@ -3056,7 +3151,6 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
         while let Some((major_opcode, request)) = read_x11_core_request(stream, setup.byte_order)? {
             sequence = sequence.wrapping_add(1);
             event_sequence.store(sequence, Ordering::Release);
-            let keyboard_event_target = x11_keyboard_event_target(&request, setup.byte_order);
             let dispatch_context = XDispatchContext {
                 byte_order: setup.byte_order,
                 namespace,
@@ -3075,6 +3169,24 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 &request,
             ) {
                 Ok(request) => {
+                    let event_selection = x11_core_event_selection_update(&request);
+                    let randr_selection = match &request {
+                        crate::XWireRequest::RandrSelectInput { window, enable } => {
+                            Some((*window, *enable))
+                        }
+                        _ => None,
+                    };
+                    let mapped_window = match &request {
+                        crate::XWireRequest::Authority(crate::XAuthorityRequestPacket {
+                            kind: crate::XAuthorityRequestKind::MapWindow { window, .. },
+                            ..
+                        }) => Some(*window),
+                        _ => None,
+                    };
+                    let destroyed_window = match &request {
+                        crate::XWireRequest::DestroyWindow { window } => Some(*window),
+                        _ => None,
+                    };
                     if let crate::XWireRequest::CreateWindow {
                         packet:
                             crate::XAuthorityRequestPacket {
@@ -3103,16 +3215,6 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                                 })?;
                         }
                     }
-                    let default_map_target = if !keyboard_target_selected.load(Ordering::Acquire)
-                        && let crate::XWireRequest::Authority(crate::XAuthorityRequestPacket {
-                            kind: crate::XAuthorityRequestKind::MapWindow { window, .. },
-                            ..
-                        }) = &request
-                    {
-                        Some(*window)
-                    } else {
-                        None
-                    };
                     request_detail = x11_core_request_trace_detail(&request);
                     let mut runtime = state.runtime.lock().map_err(|_| {
                         X11SetupSocketError::new("X11 authority runtime lock poisoned")
@@ -3137,13 +3239,33 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                     {
                         eprintln!("sophia_x11_keyboard_map schema=1 {detail}");
                     }
-                    if let Some(window) = keyboard_event_target.or(default_map_target)
-                        && (window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT)
-                            || runtime.validate_window_access(namespace, window).is_ok())
-                    {
-                        keyboard_event_window.store(window.local.raw(), Ordering::Release);
-                        if keyboard_event_target.is_some() {
-                            keyboard_target_selected.store(true, Ordering::Release);
+                    let dispatch_succeeded = !output
+                        .outputs
+                        .iter()
+                        .any(|output| matches!(output, crate::XClientOutput::Error(_)));
+                    if dispatch_succeeded {
+                        let mut selections = core_event_selections.lock().map_err(|_| {
+                            X11SetupSocketError::new("X11 core event selection lock poisoned")
+                        })?;
+                        if let Some((window, event_mask, do_not_propagate_mask)) = event_selection {
+                            selections.update(window, event_mask, do_not_propagate_mask);
+                        }
+                        if let Some(window) = mapped_window {
+                            selections.observe_mapped(window);
+                        }
+                        if let Some(window) = destroyed_window {
+                            selections.remove(window);
+                        }
+                        if let Some((window, mask)) = randr_selection
+                            && let Some(routing) = protocol_routing.as_ref()
+                        {
+                            routing
+                                .select_randr_input(client, window, mask)
+                                .map_err(|error| {
+                                    X11SetupSocketError::new(format!(
+                                        "failed to update RandR subscription: {error}"
+                                    ))
+                                })?;
                         }
                     }
                     // The CPU update belongs to this dispatch. Keep it under
@@ -3335,34 +3457,107 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
 }
 
 #[cfg(unix)]
-fn x11_keyboard_event_target(request: &[u8], byte_order: XByteOrder) -> Option<XResourceId> {
-    const X_CREATE_WINDOW: u8 = 1;
-    const X_CHANGE_WINDOW_ATTRIBUTES: u8 = 2;
-    const X_CW_EVENT_MASK: u32 = 1 << 11;
-    const X_KEY_EVENT_MASKS: u32 = (1 << 0) | (1 << 1);
+fn x11_core_event_selection_update(
+    request: &crate::XWireRequest,
+) -> Option<(XResourceId, Option<u32>, Option<u32>)> {
+    match request {
+        crate::XWireRequest::CreateWindow {
+            packet:
+                crate::XAuthorityRequestPacket {
+                    kind: crate::XAuthorityRequestKind::CreateWindow { window, .. },
+                    ..
+                },
+            event_mask,
+            do_not_propagate_mask,
+            ..
+        }
+        | crate::XWireRequest::ChangeWindowAttributes {
+            window,
+            event_mask,
+            do_not_propagate_mask,
+        } => Some((*window, *event_mask, *do_not_propagate_mask)),
+        _ => None,
+    }
+}
 
-    let (value_mask_offset, values_offset) = match request.first().copied()? {
-        X_CREATE_WINDOW if request.len() >= 32 => (28, 32),
-        X_CHANGE_WINDOW_ATTRIBUTES if request.len() >= 12 => (8, 12),
-        _ => return None,
-    };
-    let value_mask = byte_order.u32(&request[value_mask_offset..value_mask_offset + 4]);
-    if value_mask & X_CW_EVENT_MASK == 0 {
-        return None;
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Default)]
+struct XCoreWindowEventSelection {
+    mask: u32,
+    do_not_propagate_mask: u32,
+    update_ordinal: u64,
+}
+
+#[cfg(unix)]
+#[derive(Debug)]
+struct XCoreEventSelectionState {
+    windows: BTreeMap<XResourceId, XCoreWindowEventSelection>,
+    fallback_mapped_window: XResourceId,
+    next_update_ordinal: u64,
+}
+
+#[cfg(unix)]
+impl Default for XCoreEventSelectionState {
+    fn default() -> Self {
+        Self {
+            windows: BTreeMap::new(),
+            fallback_mapped_window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+            next_update_ordinal: 1,
+        }
     }
-    let preceding_values = (value_mask & (X_CW_EVENT_MASK - 1)).count_ones() as usize;
-    let event_mask_offset = values_offset + preceding_values.saturating_mul(4);
-    if event_mask_offset + 4 > request.len() {
-        return None;
+}
+
+#[cfg(unix)]
+impl XCoreEventSelectionState {
+    const KEY_MASKS: u32 = (1 << 0) | (1 << 1);
+
+    fn update(
+        &mut self,
+        window: XResourceId,
+        event_mask: Option<u32>,
+        do_not_propagate_mask: Option<u32>,
+    ) {
+        if event_mask.is_none() && do_not_propagate_mask.is_none() {
+            return;
+        }
+        let selection = self.windows.entry(window).or_default();
+        if let Some(mask) = event_mask {
+            selection.mask = mask;
+        }
+        if let Some(mask) = do_not_propagate_mask {
+            selection.do_not_propagate_mask = mask;
+        }
+        selection.update_ordinal = self.next_update_ordinal;
+        self.next_update_ordinal = self.next_update_ordinal.saturating_add(1);
     }
-    let event_mask = byte_order.u32(&request[event_mask_offset..event_mask_offset + 4]);
-    if event_mask & X_KEY_EVENT_MASKS == 0 {
-        return None;
+
+    fn observe_mapped(&mut self, window: XResourceId) {
+        self.fallback_mapped_window = window;
     }
-    Some(XResourceId::new(
-        u64::from(byte_order.u32(&request[4..8])),
-        1,
-    ))
+
+    fn remove(&mut self, window: XResourceId) {
+        self.windows.remove(&window);
+        if self.fallback_mapped_window == window {
+            self.fallback_mapped_window = XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1);
+        }
+    }
+
+    fn keyboard_target(&self, focused: XResourceId) -> XResourceId {
+        self.windows
+            .iter()
+            .filter(|(_, selection)| selection.mask & Self::KEY_MASKS != 0)
+            .max_by_key(|(_, selection)| selection.update_ordinal)
+            .map_or_else(
+                || {
+                    if focused.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
+                        self.fallback_mapped_window
+                    } else {
+                        focused
+                    }
+                },
+                |(window, _)| *window,
+            )
+    }
 }
 
 #[cfg(unix)]
@@ -3399,7 +3594,7 @@ fn spawn_x11_protocol_event_writer(
                 Err(RecvTimeoutError::Timeout) => continue,
                 Err(RecvTimeoutError::Disconnected) => return Ok(()),
             };
-            set_x11_selection_event_sequence(&mut event, sequence.load(Ordering::Acquire));
+            set_x11_protocol_event_sequence(&mut event, sequence.load(Ordering::Acquire));
             let record = encode_x_client_event(byte_order, event);
             let mut stream = stream
                 .lock()
@@ -3422,12 +3617,13 @@ fn spawn_x11_protocol_event_writer(
 }
 
 #[cfg(unix)]
-fn set_x11_selection_event_sequence(event: &mut XClientEvent, value: u16) {
+fn set_x11_protocol_event_sequence(event: &mut XClientEvent, value: u16) {
     match event {
         XClientEvent::SelectionClear { sequence, .. }
         | XClientEvent::SelectionRequest { sequence, .. }
-        | XClientEvent::SelectionNotify { sequence, .. } => *sequence = value,
-        _ => unreachable!("protocol routing accepts only selection events"),
+        | XClientEvent::SelectionNotify { sequence, .. }
+        | XClientEvent::RandrScreenChange { sequence, .. } => *sequence = value,
+        _ => unreachable!("protocol routing received a non-routable event"),
     }
 }
 
@@ -3543,6 +3739,24 @@ fn spawn_x11_control_writer(
                     ]
                 }
                 XAuthorityControlCommand::FocusSurface { .. } => {
+                    if runtime
+                        .lock()
+                        .map_err(|_| {
+                            X11SetupSocketError::new("X11 authority runtime lock poisoned")
+                        })?
+                        .set_input_focus(namespace, window, 1)
+                        .is_err()
+                    {
+                        channels.send_ack(
+                            client,
+                            XAuthorityControlAck {
+                                transaction,
+                                surface,
+                                outcome: XAuthorityControlOutcome::AuthorityRejected,
+                            },
+                        )?;
+                        continue;
+                    }
                     let previous = XResourceId::new(
                         focused_surface_window.swap(window.local.raw(), Ordering::AcqRel),
                         1,
@@ -3617,8 +3831,7 @@ fn spawn_x11_input_event_writer(
     byte_order: XByteOrder,
     sequence: Arc<AtomicU16>,
     focused_surface_window: Arc<AtomicU64>,
-    keyboard_event_window: Arc<AtomicU64>,
-    keyboard_target_selected: Arc<AtomicBool>,
+    core_event_selections: Arc<Mutex<XCoreEventSelectionState>>,
     surface_windows: Arc<Mutex<BTreeMap<SurfaceId, XResourceId>>>,
     client: XServerFrontendClientId,
     receiver: X11InputEventReceiver,
@@ -3633,20 +3846,19 @@ fn spawn_x11_input_event_writer(
                 Err(RecvTimeoutError::Timeout) => continue,
                 Err(RecvTimeoutError::Disconnected) => return Ok(()),
             };
-            let focused_window = x11_keyboard_delivery_target(
-                &focused_surface_window,
-                &keyboard_event_window,
-                &keyboard_target_selected,
-            );
+            let focused_window = core_event_selections
+                .lock()
+                .map_err(|_| X11SetupSocketError::new("X11 core event selection lock poisoned"))?
+                .keyboard_target(XResourceId::new(
+                    focused_surface_window.load(Ordering::Acquire),
+                    1,
+                ));
             if std::env::var_os("SOPHIA_LIVE_SESSION_DIAGNOSTIC").is_some()
                 && let XAuthorityInputEvent::Key(key) = event
             {
                 eprintln!(
-                    "sophia_x11_key_delivery schema=1 keycode={} pressed={} state={} target_selected={}",
-                    key.keycode,
-                    key.pressed,
-                    key.state,
-                    keyboard_target_selected.load(Ordering::Acquire),
+                    "sophia_x11_key_delivery schema=1 keycode={} pressed={} state={} target=authority_selection",
+                    key.keycode, key.pressed, key.state,
                 );
             }
             let root = XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1);
@@ -3773,22 +3985,6 @@ fn spawn_x11_input_event_writer(
         Ok(())
     });
     Ok(X11InputEventWriter { stop, thread })
-}
-
-#[cfg(unix)]
-fn x11_keyboard_delivery_target(
-    focused_surface_window: &AtomicU64,
-    keyboard_event_window: &AtomicU64,
-    keyboard_target_selected: &AtomicBool,
-) -> XResourceId {
-    XResourceId::new(
-        if keyboard_target_selected.load(Ordering::Acquire) {
-            keyboard_event_window.load(Ordering::Acquire)
-        } else {
-            focused_surface_window.load(Ordering::Acquire)
-        },
-        1,
-    )
 }
 
 #[cfg(unix)]
@@ -4049,30 +4245,26 @@ mod routing_tests {
 
     #[test]
     fn engine_focus_does_not_replace_selected_keyboard_child() {
-        let focused_surface = AtomicU64::new(0x200001);
-        let keyboard_child = AtomicU64::new(0x200007);
-        let selected = AtomicBool::new(true);
+        let mut selections = XCoreEventSelectionState::default();
+        selections.update(XResourceId::new(0x200007, 1), Some(1), None);
 
         assert_eq!(
-            x11_keyboard_delivery_target(&focused_surface, &keyboard_child, &selected),
+            selections.keyboard_target(XResourceId::new(0x200001, 1)),
             XResourceId::new(0x200007, 1)
         );
 
-        focused_surface.store(0x200009, Ordering::Release);
         assert_eq!(
-            x11_keyboard_delivery_target(&focused_surface, &keyboard_child, &selected),
+            selections.keyboard_target(XResourceId::new(0x200009, 1)),
             XResourceId::new(0x200007, 1)
         );
     }
 
     #[test]
     fn keyboard_delivery_falls_back_to_engine_focused_surface() {
-        let focused_surface = AtomicU64::new(0x200001);
-        let keyboard_child = AtomicU64::new(u64::from(X_SETUP_DEFAULT_ROOT));
-        let selected = AtomicBool::new(false);
+        let selections = XCoreEventSelectionState::default();
 
         assert_eq!(
-            x11_keyboard_delivery_target(&focused_surface, &keyboard_child, &selected),
+            selections.keyboard_target(XResourceId::new(0x200001, 1)),
             XResourceId::new(0x200001, 1)
         );
     }
@@ -4126,7 +4318,7 @@ fn x11_core_request_trace_detail(request: &crate::XWireRequest) -> Option<String
         },
         crate::XWireRequest::QueryExtension { name } => Some(format!("QueryExtension:{name}")),
         crate::XWireRequest::InternAtom { name, .. } => Some(format!("InternAtom:{name}")),
-        crate::XWireRequest::ChangeWindowAttributes { window } => Some(format!(
+        crate::XWireRequest::ChangeWindowAttributes { window, .. } => Some(format!(
             "ChangeWindowAttributes:window={:#x}",
             window.local.raw()
         )),
@@ -4307,6 +4499,9 @@ fn x11_core_request_trace_detail(request: &crate::XWireRequest) -> Option<String
             Some(format!("RANDR:GetMonitors:{:#x}", window.local.raw()))
         }
         crate::XWireRequest::XkbUseExtension { .. } => Some("XKEYBOARD:UseExtension".to_string()),
+        crate::XWireRequest::XkbGetMap { full, partial } => Some(format!(
+            "XKEYBOARD:GetMap:full={full:#x}:partial={partial:#x}"
+        )),
         crate::XWireRequest::BigRequestsEnable => Some("BIG-REQUESTS:Enable".to_string()),
         _ => None,
     }

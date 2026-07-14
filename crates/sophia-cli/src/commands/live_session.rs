@@ -1097,6 +1097,8 @@ struct PersistentLiveLayout {
     stage_new_surfaces_offset: bool,
     center_first_surface_in: Option<Size>,
     committed_resize_replay: Option<(Vec<SurfaceTransaction>, Vec<XAuthorityCpuBufferUpdate>)>,
+    rollback_sizes: BTreeMap<SurfaceId, Size>,
+    next_rollback_transaction: u64,
 }
 
 impl PersistentLiveLayout {
@@ -1104,6 +1106,7 @@ impl PersistentLiveLayout {
         Self {
             stage_new_surfaces_offset,
             center_first_surface_in,
+            next_rollback_transaction: 1 << 63,
             ..Self::default()
         }
     }
@@ -1120,6 +1123,12 @@ impl PersistentLiveLayout {
                 width: transaction.target_geometry.width,
                 height: transaction.target_geometry.height,
             };
+            if let Some(rollback_size) = self.rollback_sizes.get(&transaction.surface).copied() {
+                if size != rollback_size {
+                    continue;
+                }
+                self.rollback_sizes.remove(&transaction.surface);
+            }
             let staged_for_resize = self.pending.as_ref().is_some_and(|pending| {
                 pending.requested_sizes.get(&transaction.surface) == Some(&size)
             });
@@ -1206,6 +1215,8 @@ impl PersistentLiveLayout {
             .retain(|surface, _| !removed_surfaces.contains(surface));
         self.unmanaged_surfaces
             .retain(|surface| !removed_surfaces.contains(surface));
+        self.rollback_sizes
+            .retain(|surface, _| !removed_surfaces.contains(surface));
         if self
             .focus_to_apply
             .is_some_and(|(_, surface)| removed_surfaces.contains(&surface))
@@ -1240,6 +1251,9 @@ impl PersistentLiveLayout {
         control_sender: &SyncSender<XAuthorityClientControlCommand>,
         control_ack_receiver: &Receiver<XAuthorityClientControlAck>,
     ) -> Result<Option<WmTransactionUpdate>, Box<dyn std::error::Error>> {
+        if self.pending.is_some() {
+            return Err("live WM attempted to overlap resize transactions".into());
+        }
         proposal
             .requested_sizes
             .retain(|surface, size| self.authority_sizes.get(surface) != Some(size));
@@ -1314,15 +1328,56 @@ impl PersistentLiveLayout {
         Some(self.commit_pending(pending))
     }
 
-    fn expire_pending(&mut self) -> Option<WmTransactionUpdate> {
+    fn expire_pending(
+        &mut self,
+        control_sender: &SyncSender<XAuthorityClientControlCommand>,
+        control_ack_receiver: &Receiver<XAuthorityClientControlAck>,
+    ) -> Result<Option<WmTransactionUpdate>, Box<dyn std::error::Error>> {
         if !self
             .pending
             .as_ref()
             .is_some_and(|pending| Instant::now() >= pending.deadline)
         {
-            return None;
+            return Ok(None);
         }
         let pending = self.pending.take().expect("checked above");
+        let rollback_transaction = TransactionId::from_raw(self.next_rollback_transaction);
+        self.next_rollback_transaction = self
+            .next_rollback_transaction
+            .checked_add(1)
+            .ok_or("live WM rollback transaction ID exhausted")?;
+        for surface in pending.requested_sizes.keys().copied() {
+            let size = self
+                .authority_sizes
+                .get(&surface)
+                .copied()
+                .ok_or("live WM rollback surface has no committed authority size")?;
+            let client = self
+                .client_routes
+                .client_for_surface(surface)
+                .ok_or("live WM rollback has no X11 client route")?;
+            control_sender.try_send(XAuthorityClientControlCommand {
+                client,
+                command: XAuthorityControlCommand::ConfigureSurface {
+                    transaction: rollback_transaction,
+                    surface,
+                    size,
+                },
+            })?;
+            self.rollback_sizes.insert(surface, size);
+        }
+        for _ in 0..pending.requested_sizes.len() {
+            let acknowledgement = control_ack_receiver.recv_timeout(Duration::from_millis(500))?;
+            if acknowledgement.acknowledgement.transaction != rollback_transaction
+                || acknowledgement.acknowledgement.outcome != XAuthorityControlOutcome::Delivered
+                || self
+                    .client_routes
+                    .client_for_surface(acknowledgement.acknowledgement.surface)
+                    != Some(acknowledgement.client)
+            {
+                return Err("X Authority rejected live WM rollback configure".into());
+            }
+        }
         let resize_state = pending
             .requested_sizes
             .iter()
@@ -1339,18 +1394,20 @@ impl PersistentLiveLayout {
             .collect::<Vec<_>>()
             .join(",");
         println!(
-            "sophia_live_wm schema=1 status=layout_timeout transaction={} preserved_layout=true resize_state={}",
+            "sophia_live_wm schema=1 status=layout_timeout transaction={} preserved_layout=true rollback_transaction={} rollback_configures={} resize_state={}",
             pending.transaction.raw(),
+            rollback_transaction.raw(),
+            pending.requested_sizes.len(),
             resize_state,
         );
-        Some(WmTransactionUpdate {
+        Ok(Some(WmTransactionUpdate {
             commit: TransactionCommit {
                 transaction: pending.transaction,
                 outcome: TransactionOutcome::TimedOut,
                 applied_surfaces: Vec::new(),
             },
             ipc_error: None,
-        })
+        }))
     }
 
     fn commit_proposal(&mut self, proposal: LiveWmProposal) -> WmTransactionUpdate {
@@ -1429,6 +1486,22 @@ impl PersistentLiveLayout {
                 .cpu_buffer_updates
                 .retain(|update| !staged_handles.contains(&update.handle()));
         }
+        let rollback_surfaces = self.rollback_sizes.keys().copied().collect::<BTreeSet<_>>();
+        let rollback_handles = projected
+            .transactions
+            .iter()
+            .filter(|transaction| rollback_surfaces.contains(&transaction.surface))
+            .filter_map(|transaction| match transaction.target_buffer {
+                BufferSource::CpuBuffer { handle } => Some(handle),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        projected
+            .transactions
+            .retain(|transaction| !rollback_surfaces.contains(&transaction.surface));
+        projected
+            .cpu_buffer_updates
+            .retain(|update| !rollback_handles.contains(&update.handle()));
         if let Some((transactions, updates)) = self.committed_resize_replay.take() {
             let surfaces = transactions
                 .iter()
@@ -1943,7 +2016,10 @@ fn run_session_loop(
                     cpu_buffer_updates.saturating_add(batch.cpu_buffer_updates.len());
                 let removed_surfaces = batch.removed_surfaces.clone();
                 let _ = layout.observe_authority_batch(&batch);
-                let mut wm_update = layout.resolve_pending().or_else(|| layout.expire_pending());
+                let mut wm_update = layout.resolve_pending();
+                if wm_update.is_none() {
+                    wm_update = layout.expire_pending(control_sender, control_ack_receiver)?;
+                }
                 if wm_update
                     .as_ref()
                     .is_some_and(|update| update.commit.outcome == TransactionOutcome::Committed)
@@ -2080,7 +2156,7 @@ fn run_session_loop(
                 }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                let _ = layout.expire_pending();
+                let _ = layout.expire_pending(control_sender, control_ack_receiver)?;
                 if let Some(wm_session) = wm_session.as_mut()
                     && let Some(proposal) = wm_session.poll_restart(&layout, output)?
                 {

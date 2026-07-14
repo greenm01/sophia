@@ -781,6 +781,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sophia-sysv-shm"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "sophia-wayland-authority"
 version = "0.1.0"
 dependencies = [
@@ -804,6 +811,8 @@ dependencies = [
  "rustix",
  "sophia-portal",
  "sophia-protocol",
+ "sophia-sysv-shm",
+ "xkbcommon",
 ]
 
 [[package]]

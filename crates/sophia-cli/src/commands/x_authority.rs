@@ -332,6 +332,13 @@ enum ExternalProbeDisplayMode {
 }
 
 #[derive(Clone, Copy, Debug)]
+enum ExternalProbePixelProof {
+    None,
+    Nonzero,
+    Ascii(&'static [u8]),
+}
+
+#[derive(Clone, Copy, Debug)]
 struct ExternalProbeSmokeSpec {
     command_name: &'static str,
     label: &'static str,
@@ -341,6 +348,7 @@ struct ExternalProbeSmokeSpec {
     display_base: u32,
     namespace: u64,
     require_transactions: bool,
+    pixel_proof: ExternalProbePixelProof,
     allow_proof_kill_without_transactions: bool,
     allow_client_failure_without_x_error: bool,
 }
@@ -355,6 +363,7 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         display_base: 6600,
         namespace: 48,
         require_transactions: true,
+        pixel_proof: ExternalProbePixelProof::None,
         allow_proof_kill_without_transactions: false,
         allow_client_failure_without_x_error: false,
     },
@@ -367,6 +376,7 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         display_base: 6800,
         namespace: 49,
         require_transactions: true,
+        pixel_proof: ExternalProbePixelProof::None,
         allow_proof_kill_without_transactions: false,
         allow_client_failure_without_x_error: false,
     },
@@ -379,6 +389,7 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         display_base: 6900,
         namespace: 50,
         require_transactions: false,
+        pixel_proof: ExternalProbePixelProof::None,
         allow_proof_kill_without_transactions: false,
         allow_client_failure_without_x_error: false,
     },
@@ -391,6 +402,7 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         display_base: 7000,
         namespace: 51,
         require_transactions: false,
+        pixel_proof: ExternalProbePixelProof::None,
         allow_proof_kill_without_transactions: false,
         allow_client_failure_without_x_error: false,
     },
@@ -403,6 +415,7 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         display_base: 7100,
         namespace: 52,
         require_transactions: false,
+        pixel_proof: ExternalProbePixelProof::None,
         allow_proof_kill_without_transactions: false,
         allow_client_failure_without_x_error: false,
     },
@@ -415,6 +428,7 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         display_base: 7200,
         namespace: 53,
         require_transactions: true,
+        pixel_proof: ExternalProbePixelProof::None,
         allow_proof_kill_without_transactions: false,
         allow_client_failure_without_x_error: false,
     },
@@ -427,6 +441,7 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         display_base: 7300,
         namespace: 54,
         require_transactions: true,
+        pixel_proof: ExternalProbePixelProof::None,
         allow_proof_kill_without_transactions: false,
         allow_client_failure_without_x_error: false,
     },
@@ -439,6 +454,7 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         display_base: 7400,
         namespace: 55,
         require_transactions: false,
+        pixel_proof: ExternalProbePixelProof::None,
         allow_proof_kill_without_transactions: false,
         allow_client_failure_without_x_error: false,
     },
@@ -451,6 +467,7 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         display_base: 7500,
         namespace: 56,
         require_transactions: true,
+        pixel_proof: ExternalProbePixelProof::None,
         allow_proof_kill_without_transactions: false,
         allow_client_failure_without_x_error: false,
     },
@@ -463,6 +480,7 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         display_base: 7600,
         namespace: 57,
         require_transactions: false,
+        pixel_proof: ExternalProbePixelProof::None,
         allow_proof_kill_without_transactions: true,
         allow_client_failure_without_x_error: true,
     },
@@ -491,6 +509,7 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         display_base: 7650,
         namespace: 59,
         require_transactions: true,
+        pixel_proof: ExternalProbePixelProof::Ascii(b"Sophia"),
         allow_proof_kill_without_transactions: false,
         allow_client_failure_without_x_error: false,
     },
@@ -508,9 +527,10 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         ],
         display_base: 7700,
         namespace: 58,
-        require_transactions: false,
-        allow_proof_kill_without_transactions: true,
-        allow_client_failure_without_x_error: true,
+        require_transactions: true,
+        pixel_proof: ExternalProbePixelProof::Nonzero,
+        allow_proof_kill_without_transactions: false,
+        allow_client_failure_without_x_error: false,
     },
 ];
 
@@ -877,6 +897,7 @@ fn run_x_authority_external_probe_smoke_spec(
         socket_path,
         NamespaceId::from_raw(spec.namespace),
         spec.require_transactions,
+        spec.pixel_proof,
         spec.allow_proof_kill_without_transactions,
         spec.allow_client_failure_without_x_error,
     )
@@ -901,6 +922,7 @@ pub(crate) fn collect_x_authority_xterm_render_authority_batches(
         socket_path,
         NamespaceId::from_raw(spec.namespace),
         spec.require_transactions,
+        spec.pixel_proof,
         spec.allow_proof_kill_without_transactions,
         spec.allow_client_failure_without_x_error,
     )?;
@@ -1525,6 +1547,7 @@ fn run_x_authority_external_probe_smoke(
     socket_path: std::path::PathBuf,
     namespace: NamespaceId,
     require_transactions: bool,
+    pixel_proof: ExternalProbePixelProof,
     allow_proof_kill_without_transactions: bool,
     allow_client_failure_without_x_error: bool,
 ) -> Result<XAuthorityExternalProbeSmokeReport, Box<dyn std::error::Error>> {
@@ -1621,7 +1644,16 @@ fn run_x_authority_external_probe_smoke(
                 }
             }
         }
-        if !transactions.is_empty() {
+        let pixel_proof_ready = match pixel_proof {
+            ExternalProbePixelProof::None => true,
+            ExternalProbePixelProof::Nonzero => cpu_buffers
+                .values()
+                .any(|buffer| buffer.bytes.iter().any(|byte| *byte != 0)),
+            ExternalProbePixelProof::Ascii(marker) => {
+                cpu_buffers_contain_fixed_text(&cpu_buffers, marker)
+            }
+        };
+        if !transactions.is_empty() && pixel_proof_ready {
             break;
         }
         if child.try_wait()?.is_some() {
@@ -1731,9 +1763,16 @@ fn run_x_authority_external_probe_smoke(
         .filter(|byte| **byte != 0)
         .count();
     let ascii_marker_match = cpu_buffers_contain_fixed_text(&cpu_buffers, b"Sophia");
-    if label == "xterm_render" && !ascii_marker_match {
+    let pixel_proof_passed = match pixel_proof {
+        ExternalProbePixelProof::None => true,
+        ExternalProbePixelProof::Nonzero => nonzero_pixel_bytes != 0,
+        ExternalProbePixelProof::Ascii(marker) => {
+            cpu_buffers_contain_fixed_text(&cpu_buffers, marker)
+        }
+    };
+    if !pixel_proof_passed {
         return Err(format!(
-            "xterm render probe produced pixels but not the expected readable ASCII marker for {display}"
+            "{label} did not satisfy its pixel proof for {display}: requests={requests} opcodes={opcodes} details={details}"
         )
         .into());
     }

@@ -1,10 +1,10 @@
 use sophia_protocol::{
     BufferSource, ClientAdmissionContext, ClientAdmissionId, ClientAuthProvenance,
     ClientAuthenticationMethod, DeviceId, InputEventKind, NamespaceCapabilities, NamespaceContext,
-    NamespaceId, NamespacePortalCapability, NamespaceProfile, Point, PortalBrokerRequestPacket,
-    PortalDecision, PortalGrant, PortalGrantState, PortalRequest, PortalTransfer, PortalTransferId,
-    PortalTransferKind, Rect, Region, RoutedInputRequest, SeatId, Size, SurfaceConstraints,
-    SurfaceId, TransactionId,
+    NamespaceId, NamespacePortalCapability, NamespaceProfile, OutputId, OutputTopologyEntry,
+    OutputTopologySnapshot, Point, PortalBrokerRequestPacket, PortalDecision, PortalGrant,
+    PortalGrantState, PortalRequest, PortalTransfer, PortalTransferId, PortalTransferKind, Rect,
+    Region, RoutedInputRequest, SeatId, Size, SurfaceConstraints, SurfaceId, TransactionId,
 };
 use sophia_x_authority::*;
 
@@ -49,7 +49,7 @@ fn selection_request_and_clear_events_use_core_x11_layout() {
 }
 
 #[test]
-fn send_event_accepts_only_selection_notify_and_validates_destination() {
+fn send_event_accepts_selection_notify_and_rejects_input_events() {
     let namespace = NamespaceId::from_raw(44);
     let byte_order = XByteOrder::LittleEndian;
     let mut request = vec![0; 44];
@@ -274,11 +274,15 @@ fn x11_core_decoder_maps_create_and_map_to_authority_packets() {
     let XWireRequest::CreateWindow {
         packet: create,
         background_pixel,
+        event_mask,
+        do_not_propagate_mask,
     } = create
     else {
         panic!("expected create-window request");
     };
     assert_eq!(background_pixel, None);
+    assert_eq!(event_mask, None);
+    assert_eq!(do_not_propagate_mask, None);
     assert_eq!(create.namespace, namespace);
     assert_eq!(
         create.kind,
@@ -395,6 +399,8 @@ fn x11_core_decoder_maps_create_and_map_to_authority_packets() {
         attributes,
         XWireRequest::ChangeWindowAttributes {
             window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+            event_mask: None,
+            do_not_propagate_mask: None,
         }
     );
     let modifier_mapping = decode_x11_core_request(
@@ -1878,7 +1884,7 @@ fn x11_dispatch_advertises_randr_and_replies_to_query_version() {
 }
 
 #[test]
-fn x11_dispatch_does_not_advertise_incomplete_xkeyboard_extension() {
+fn x11_dispatch_advertises_probe_backed_xkeyboard_extension() {
     let namespace = NamespaceId::from_raw(45);
     let mut runtime = XAuthorityRuntime::new();
     let mut atoms = XAtomTable::new();
@@ -1898,8 +1904,9 @@ fn x11_dispatch_does_not_advertise_incomplete_xkeyboard_extension() {
     );
     let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
     assert_eq!(encoded[0][0], 1);
-    assert_eq!(encoded[0][8], 0);
-    assert_eq!(encoded[0][9], 0);
+    assert_eq!(encoded[0][8], 1);
+    assert_eq!(encoded[0][9], X_KEYBOARD_MAJOR_OPCODE);
+    assert_eq!(encoded[0][10], X_KEYBOARD_FIRST_EVENT);
 
     let use_extension = decode_x11_core_request(
         context(namespace, 546, XByteOrder::LittleEndian),
@@ -6466,6 +6473,106 @@ fn routed_service_confines_input_and_control_to_two_workers_and_drains() {
     let revoked = policy.revoked.lock().unwrap();
     assert_eq!(revoked.len(), 2);
     assert_ne!(revoked[0].namespace.id, revoked[1].namespace.id);
+    std::fs::remove_file(&socket_path).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn routed_service_applies_topology_update_and_notifies_randr_subscriber() {
+    use std::io::Write;
+    use std::num::NonZeroUsize;
+    use std::os::unix::net::UnixStream;
+    use std::thread;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    let socket_path = std::env::temp_dir().join(format!(
+        "sophia-x11-randr-update-test-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let server_path = socket_path.clone();
+    let (transaction_sender, _transaction_receiver) =
+        std::sync::mpsc::sync_channel(X_AUTHORITY_OBSERVED_TRANSACTION_CHANNEL_CAPACITY);
+    let broker = XServerFrontendRouteBroker::new(NonZeroUsize::new(4).unwrap());
+    let (service_sender, service_receiver) = std::sync::mpsc::sync_channel(2);
+    let config = XServerFrontendConfig::new(&server_path, NamespaceId::from_raw(854)).unwrap();
+    let server = thread::spawn(move || {
+        run_x_server_frontend_routed_until_stopped(
+            config,
+            transaction_sender,
+            broker,
+            service_receiver,
+        )
+        .unwrap();
+    });
+
+    wait_for_socket(&socket_path);
+    let mut stream = UnixStream::connect(&socket_path).unwrap();
+    stream
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    read_setup_success(&mut stream, XByteOrder::LittleEndian);
+    stream
+        .write_all(&randr_select_input_request(
+            XByteOrder::LittleEndian,
+            X_SETUP_DEFAULT_ROOT,
+            1,
+        ))
+        .unwrap();
+    stream
+        .write_all(&randr_window_request(
+            XByteOrder::LittleEndian,
+            X_RANDR_GET_SCREEN_RESOURCES_CURRENT_MINOR_OPCODE,
+            X_SETUP_DEFAULT_ROOT,
+        ))
+        .unwrap();
+    assert_eq!(read_x_reply(&mut stream, XByteOrder::LittleEndian)[0], 1);
+
+    let snapshot = OutputTopologySnapshot {
+        generation: 2,
+        primary: OutputId::from_raw(9),
+        outputs: vec![OutputTopologyEntry {
+            output: OutputId::from_raw(9),
+            logical: Rect {
+                x: 0,
+                y: 0,
+                width: 1600,
+                height: 900,
+            },
+            pixel_size: Size {
+                width: 1600,
+                height: 900,
+            },
+            scale: 1,
+            refresh_millihz: 60_000,
+        }],
+    };
+    let (ack_sender, ack_receiver) = std::sync::mpsc::sync_channel(1);
+    service_sender
+        .send(XServerFrontendServiceCommand::UpdateOutputTopology {
+            snapshot,
+            acknowledgement: ack_sender,
+        })
+        .unwrap();
+    assert_eq!(
+        ack_receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
+        XAuthorityOutputUpdateOutcome::Applied { generation: 2 }
+    );
+    let event = read_x_record(&mut stream);
+    assert_eq!(event[0], X_RANDR_FIRST_EVENT, "event={event:?}");
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &event[8..12]), 2);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &event[24..26]), 1600);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &event[26..28]), 900);
+
+    drop(stream);
+    service_sender
+        .send(XServerFrontendServiceCommand::StopAccepting)
+        .unwrap();
+    drop(service_sender);
+    server.join().unwrap();
     std::fs::remove_file(&socket_path).unwrap();
 }
 

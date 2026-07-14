@@ -64,13 +64,11 @@ transaction proof; its reduced output is expected to report zero committed
 runtime transactions. `x-authority-xterm-render-smoke` is the separate drawing
 transaction and materialized CPU-pixel proof. The guarded session tools are the
 separate Engine/KMS evidence.
-`x-authority-zenity-smoke` is a GTK startup protocol regression. Prefer running
-it under `dbus-run-session --` on TTY hosts so GTK reaches its DBus startup path.
-The smoke still fails on zero X requests or any `first_error`; a nonzero client
-exit is acceptable only after GTK has reached Sophia X Authority without a
-client-visible X protocol error. The current reduced proof is not a rendered GTK
-dialog because the host portal backend cannot open a display and Sophia does not
-yet advertise XInput2.
+`x-authority-zenity-smoke` is a GTK software-rendering regression. Prefer
+running it under `dbus-run-session --` on TTY hosts so GTK reaches its DBus
+startup path. It requires a committed surface, a copied nonzero `MIT-SHM`
+buffer, and `first_error=none`. Pixel requirements are declarative probe policy;
+the frontend does not branch on client names.
 Parse-error details include a bounded request head so extension decode failures
 show the concrete minor opcode that drove the next compatibility slice.
 

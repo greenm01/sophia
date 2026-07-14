@@ -157,6 +157,21 @@ pub enum XClientEvent {
         target: u32,
         property: u32,
     },
+    ClientMessage {
+        sequence: u16,
+        bytes: [u8; X_CLIENT_OUTPUT_RECORD_LEN],
+    },
+    RandrScreenChange {
+        sequence: u16,
+        timestamp: u32,
+        config_timestamp: u32,
+        root: XResourceId,
+        request_window: XResourceId,
+        width: u16,
+        height: u16,
+        mm_width: u16,
+        mm_height: u16,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -272,6 +287,42 @@ pub enum XClientReply {
         server_major: u16,
         server_minor: u16,
     },
+    XkbGetMap {
+        sequence: u16,
+        present: u16,
+        keysyms: Vec<[u32; 2]>,
+        modifier_map: Vec<(u8, u8)>,
+    },
+    XkbPerClientFlags {
+        sequence: u16,
+        supported: u32,
+        value: u32,
+    },
+    XiQueryVersion {
+        sequence: u16,
+        major_version: u16,
+        minor_version: u16,
+    },
+    XiGetClientPointer {
+        sequence: u16,
+        device_id: u16,
+    },
+    XiGetExtensionVersion {
+        sequence: u16,
+        server_major: u16,
+        server_minor: u16,
+    },
+    XiQueryDevice {
+        sequence: u16,
+        devices: Vec<XXiDeviceInfo>,
+    },
+    XiGetFocus {
+        sequence: u16,
+        focus: XResourceId,
+    },
+    XiGetProperty {
+        sequence: u16,
+    },
     BigRequestsEnable {
         sequence: u16,
         maximum_request_length: u32,
@@ -280,6 +331,16 @@ pub enum XClientReply {
         sequence: u16,
         focus: XResourceId,
         revert_to: u8,
+    },
+    QueryPointer {
+        sequence: u16,
+        root: XResourceId,
+        child: XResourceId,
+        root_x: i16,
+        root_y: i16,
+        win_x: i16,
+        win_y: i16,
+        mask: u16,
     },
     GetModifierMapping {
         sequence: u16,
@@ -337,6 +398,14 @@ pub enum XClientReply {
         sequence: u16,
         pixels: Vec<u32>,
     },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct XXiDeviceInfo {
+    pub device_id: u16,
+    pub device_type: u16,
+    pub attachment: u16,
+    pub name: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -758,6 +827,169 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             put_u16(byte_order, &mut out[10..12], server_minor);
             out
         }
+        XClientReply::XkbGetMap {
+            sequence,
+            present,
+            keysyms,
+            modifier_map,
+        } => {
+            let include_types = present & 1 != 0;
+            let include_syms = present & 2 != 0;
+            let include_modmap = present & 4 != 0;
+            let mut body = Vec::new();
+            if include_types {
+                body.extend_from_slice(&[1, 1]);
+                push_u16(byte_order, &mut body, 0);
+                body.extend_from_slice(&[2, 1, 0, 0]);
+                body.extend_from_slice(&[1, 1, 1, 1]);
+                push_u16(byte_order, &mut body, 0);
+                body.extend_from_slice(&[0, 0]);
+            }
+            if include_syms {
+                for syms in &keysyms {
+                    body.extend_from_slice(&[0, 0, 0, 0, 0, 2]);
+                    push_u16(byte_order, &mut body, 2);
+                    push_u32(byte_order, &mut body, syms[0]);
+                    push_u32(byte_order, &mut body, syms[1]);
+                }
+            }
+            if include_modmap {
+                for (keycode, modifiers) in &modifier_map {
+                    body.extend_from_slice(&[*keycode, *modifiers]);
+                }
+                body.resize(padded_len(body.len()), 0);
+            }
+            let fixed_extra_len = 8usize;
+            let reply_units = u32::try_from((fixed_extra_len + body.len()) / 4)
+                .expect("bounded XKB map reply length");
+            let mut out = vec![0; 40];
+            out[0] = 1;
+            out[1] = 3;
+            put_u16(byte_order, &mut out[2..4], sequence);
+            put_u32(byte_order, &mut out[4..8], reply_units);
+            out[10] = 8;
+            out[11] = u8::MAX;
+            put_u16(byte_order, &mut out[12..14], present);
+            out[14] = 0;
+            out[15] = u8::from(include_types);
+            out[16] = u8::from(include_types);
+            out[17] = 8;
+            put_u16(
+                byte_order,
+                &mut out[18..20],
+                if include_syms {
+                    u16::try_from(keysyms.len().saturating_mul(2)).unwrap_or(u16::MAX)
+                } else {
+                    0
+                },
+            );
+            out[20] = if include_syms {
+                u8::try_from(keysyms.len()).unwrap_or(u8::MAX)
+            } else {
+                0
+            };
+            out[31] = 8;
+            out[32] = if include_modmap { 248 } else { 0 };
+            out[33] = if include_modmap {
+                u8::try_from(modifier_map.len()).unwrap_or(u8::MAX)
+            } else {
+                0
+            };
+            out.extend_from_slice(&body);
+            out
+        }
+        XClientReply::XkbPerClientFlags {
+            sequence,
+            supported,
+            value,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            out[1] = 3;
+            put_u32(byte_order, &mut out[8..12], supported);
+            put_u32(byte_order, &mut out[12..16], value);
+            out
+        }
+        XClientReply::XiQueryVersion {
+            sequence,
+            major_version,
+            minor_version,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            out[1] = crate::X_INPUT_QUERY_VERSION_MINOR_OPCODE;
+            put_u16(byte_order, &mut out[8..10], major_version);
+            put_u16(byte_order, &mut out[10..12], minor_version);
+            out
+        }
+        XClientReply::XiGetClientPointer {
+            sequence,
+            device_id,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            out[8] = 1;
+            put_u16(byte_order, &mut out[10..12], device_id);
+            out
+        }
+        XClientReply::XiGetExtensionVersion {
+            sequence,
+            server_major,
+            server_minor,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            out[1] = crate::X_INPUT_GET_EXTENSION_VERSION_MINOR_OPCODE;
+            put_u16(byte_order, &mut out[8..10], server_major);
+            put_u16(byte_order, &mut out[10..12], server_minor);
+            out[12] = 1;
+            out
+        }
+        XClientReply::XiQueryDevice { sequence, devices } => {
+            let mut body = Vec::new();
+            for device in &devices {
+                push_u16(byte_order, &mut body, device.device_id);
+                push_u16(byte_order, &mut body, device.device_type);
+                push_u16(byte_order, &mut body, device.attachment);
+                push_u16(byte_order, &mut body, 0);
+                push_u16(
+                    byte_order,
+                    &mut body,
+                    u16::try_from(device.name.len()).unwrap_or(0),
+                );
+                body.extend_from_slice(&[1, 0]);
+                body.extend_from_slice(device.name.as_bytes());
+                body.resize(padded_len(body.len()), 0);
+            }
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(
+                byte_order,
+                &mut out,
+                sequence,
+                u32::try_from(body.len() / 4).unwrap_or(0),
+            );
+            out[1] = crate::X_INPUT_QUERY_DEVICE_MINOR_OPCODE;
+            put_u16(
+                byte_order,
+                &mut out[8..10],
+                u16::try_from(devices.len()).unwrap_or(0),
+            );
+            out.extend_from_slice(&body);
+            out
+        }
+        XClientReply::XiGetFocus { sequence, focus } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            out[1] = crate::X_INPUT_GET_FOCUS_MINOR_OPCODE;
+            put_resource(byte_order, &mut out[8..12], focus);
+            out
+        }
+        XClientReply::XiGetProperty { sequence } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            out[1] = crate::X_INPUT_GET_PROPERTY_MINOR_OPCODE;
+            out
+        }
         XClientReply::BigRequestsEnable {
             sequence,
             maximum_request_length,
@@ -776,6 +1008,28 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             write_reply_header(byte_order, &mut out, sequence, 0);
             out[1] = revert_to;
             put_resource(byte_order, &mut out[8..12], focus);
+            out
+        }
+        XClientReply::QueryPointer {
+            sequence,
+            root,
+            child,
+            root_x,
+            root_y,
+            win_x,
+            win_y,
+            mask,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            out[1] = 1;
+            put_resource(byte_order, &mut out[8..12], root);
+            put_resource(byte_order, &mut out[12..16], child);
+            put_i16(byte_order, &mut out[16..18], root_x);
+            put_i16(byte_order, &mut out[18..20], root_y);
+            put_i16(byte_order, &mut out[20..22], win_x);
+            put_i16(byte_order, &mut out[22..24], win_y);
+            put_u16(byte_order, &mut out[24..26], mask);
             out
         }
         XClientReply::GetModifierMapping {
@@ -1189,6 +1443,39 @@ pub fn encode_x_client_event(
             put_u32(byte_order, &mut out[16..20], target);
             put_u32(byte_order, &mut out[20..24], property);
         }
+        XClientEvent::ClientMessage { sequence, bytes } => {
+            out = bytes;
+            put_u16(byte_order, &mut out[2..4], sequence);
+        }
+        XClientEvent::RandrScreenChange {
+            sequence,
+            timestamp,
+            config_timestamp,
+            root,
+            request_window,
+            width,
+            height,
+            mm_width,
+            mm_height,
+        } => {
+            write_event_header(
+                byte_order,
+                &mut out,
+                crate::X_RANDR_FIRST_EVENT,
+                1,
+                sequence,
+            );
+            put_u32(byte_order, &mut out[4..8], timestamp);
+            put_u32(byte_order, &mut out[8..12], config_timestamp);
+            put_resource(byte_order, &mut out[12..16], root);
+            put_resource(byte_order, &mut out[16..20], request_window);
+            put_u16(byte_order, &mut out[20..22], 0);
+            put_u16(byte_order, &mut out[22..24], 0);
+            put_u16(byte_order, &mut out[24..26], width);
+            put_u16(byte_order, &mut out[26..28], height);
+            put_u16(byte_order, &mut out[28..30], mm_width);
+            put_u16(byte_order, &mut out[30..32], mm_height);
+        }
     }
     out
 }
@@ -1235,6 +1522,7 @@ pub fn x_error_from_wire_parse(
         XWireParseError::InvalidPropertyMode(_)
         | XWireParseError::InvalidPropertyFormat(_)
         | XWireParseError::InvalidEventType(_)
+        | XWireParseError::InvalidValue(_)
         | XWireParseError::PropertyValueTooLarge { .. } => XErrorCode::BadValue,
         XWireParseError::ResourceIdOutsideClientRange { .. } => XErrorCode::BadIdChoice,
     };
@@ -1384,6 +1672,12 @@ fn put_i16(byte_order: XByteOrder, out: &mut [u8], value: i16) {
 fn push_u32(byte_order: XByteOrder, out: &mut Vec<u8>, value: u32) {
     let mut bytes = [0; 4];
     put_u32(byte_order, &mut bytes, value);
+    out.extend_from_slice(&bytes);
+}
+
+fn push_u16(byte_order: XByteOrder, out: &mut Vec<u8>, value: u16) {
+    let mut bytes = [0; 2];
+    put_u16(byte_order, &mut bytes, value);
     out.extend_from_slice(&bytes);
 }
 

@@ -21,7 +21,9 @@ const X_QUERY_TREE: u8 = 15;
 const X_INTERN_ATOM: u8 = 16;
 const X_GET_ATOM_NAME: u8 = 17;
 const X_CHANGE_PROPERTY: u8 = 18;
+const X_DELETE_PROPERTY: u8 = 19;
 const X_GET_PROPERTY: u8 = 20;
+const X_QUERY_POINTER: u8 = 38;
 const X_LIST_PROPERTIES: u8 = 21;
 const X_SET_SELECTION_OWNER: u8 = 22;
 const X_GET_SELECTION_OWNER: u8 = 23;
@@ -32,6 +34,7 @@ const X_UNGRAB_BUTTON: u8 = 29;
 const X_GRAB_SERVER: u8 = 36;
 const X_UNGRAB_SERVER: u8 = 37;
 const X_TRANSLATE_COORDINATES: u8 = 40;
+const X_SET_INPUT_FOCUS: u8 = 42;
 const X_GET_INPUT_FOCUS: u8 = 43;
 const X_OPEN_FONT: u8 = 45;
 const X_CLOSE_FONT: u8 = 46;
@@ -77,6 +80,7 @@ pub const X_MIT_SHM_DETACH_MINOR_OPCODE: u8 = 2;
 pub const X_MIT_SHM_PUT_IMAGE_MINOR_OPCODE: u8 = 3;
 pub const X_RANDR_EXTENSION_NAME: &str = "RANDR";
 pub const X_RANDR_MAJOR_OPCODE: u8 = 132;
+pub const X_RANDR_FIRST_EVENT: u8 = 64;
 pub const X_RANDR_QUERY_VERSION_MINOR_OPCODE: u8 = 0;
 pub const X_RANDR_SELECT_INPUT_MINOR_OPCODE: u8 = 4;
 pub const X_RANDR_GET_SCREEN_SIZE_RANGE_MINOR_OPCODE: u8 = 6;
@@ -88,10 +92,25 @@ pub const X_RANDR_GET_OUTPUT_PRIMARY_MINOR_OPCODE: u8 = 31;
 pub const X_RANDR_GET_MONITORS_MINOR_OPCODE: u8 = 42;
 pub const X_KEYBOARD_EXTENSION_NAME: &str = "XKEYBOARD";
 pub const X_KEYBOARD_MAJOR_OPCODE: u8 = 133;
+pub const X_KEYBOARD_FIRST_EVENT: u8 = 80;
 pub const X_KEYBOARD_USE_EXTENSION_MINOR_OPCODE: u8 = 0;
+pub const X_KEYBOARD_SELECT_EVENTS_MINOR_OPCODE: u8 = 1;
+pub const X_KEYBOARD_GET_MAP_MINOR_OPCODE: u8 = 8;
+pub const X_KEYBOARD_PER_CLIENT_FLAGS_MINOR_OPCODE: u8 = 21;
 pub const X_BIG_REQUESTS_EXTENSION_NAME: &str = "BIG-REQUESTS";
 pub const X_BIG_REQUESTS_MAJOR_OPCODE: u8 = 134;
 pub const X_BIG_REQUESTS_ENABLE_MINOR_OPCODE: u8 = 0;
+pub const X_INPUT_EXTENSION_NAME: &str = "XInputExtension";
+pub const X_INPUT_MAJOR_OPCODE: u8 = 135;
+pub const X_INPUT_FIRST_EVENT: u8 = 96;
+pub const X_INPUT_FIRST_ERROR: u8 = 160;
+pub const X_INPUT_GET_EXTENSION_VERSION_MINOR_OPCODE: u8 = 1;
+pub const X_INPUT_SELECT_EVENTS_MINOR_OPCODE: u8 = 46;
+pub const X_INPUT_GET_CLIENT_POINTER_MINOR_OPCODE: u8 = 45;
+pub const X_INPUT_QUERY_VERSION_MINOR_OPCODE: u8 = 47;
+pub const X_INPUT_QUERY_DEVICE_MINOR_OPCODE: u8 = 48;
+pub const X_INPUT_GET_FOCUS_MINOR_OPCODE: u8 = 50;
+pub const X_INPUT_GET_PROPERTY_MINOR_OPCODE: u8 = 59;
 
 const X_CREATE_WINDOW_REQ_LEN: usize = 32;
 const X_CHANGE_WINDOW_ATTRIBUTES_REQ_LEN: usize = 12;
@@ -106,7 +125,9 @@ const X_QUERY_TREE_REQ_LEN: usize = 8;
 const X_INTERN_ATOM_REQ_LEN: usize = 8;
 const X_GET_ATOM_NAME_REQ_LEN: usize = 8;
 const X_CHANGE_PROPERTY_REQ_LEN: usize = 24;
+const X_DELETE_PROPERTY_REQ_LEN: usize = 12;
 const X_GET_PROPERTY_REQ_LEN: usize = 24;
+const X_QUERY_POINTER_REQ_LEN: usize = 8;
 const X_LIST_PROPERTIES_REQ_LEN: usize = 8;
 const X_SET_SELECTION_OWNER_REQ_LEN: usize = 16;
 const X_GET_SELECTION_OWNER_REQ_LEN: usize = 8;
@@ -117,6 +138,7 @@ const X_UNGRAB_BUTTON_REQ_LEN: usize = 12;
 const X_GRAB_SERVER_REQ_LEN: usize = 4;
 const X_UNGRAB_SERVER_REQ_LEN: usize = 4;
 const X_TRANSLATE_COORDINATES_REQ_LEN: usize = 16;
+const X_SET_INPUT_FOCUS_REQ_LEN: usize = 12;
 const X_GET_INPUT_FOCUS_REQ_LEN: usize = 4;
 const X_OPEN_FONT_REQ_LEN: usize = 12;
 const X_CLOSE_FONT_REQ_LEN: usize = 8;
@@ -164,7 +186,16 @@ const X_RANDR_GET_CRTC_INFO_REQ_LEN: usize = 12;
 const X_RANDR_GET_OUTPUT_PRIMARY_REQ_LEN: usize = 8;
 const X_RANDR_GET_MONITORS_REQ_LEN: usize = 12;
 const X_KEYBOARD_USE_EXTENSION_REQ_LEN: usize = 8;
+const X_KEYBOARD_SELECT_EVENTS_REQ_LEN: usize = 16;
+const X_KEYBOARD_GET_MAP_REQ_LEN: usize = 28;
+const X_KEYBOARD_PER_CLIENT_FLAGS_REQ_LEN: usize = 28;
 const X_BIG_REQUESTS_ENABLE_REQ_LEN: usize = 4;
+const X_INPUT_QUERY_VERSION_REQ_LEN: usize = 8;
+const X_INPUT_GET_CLIENT_POINTER_REQ_LEN: usize = 8;
+const X_INPUT_QUERY_DEVICE_REQ_LEN: usize = 8;
+const X_INPUT_SELECT_EVENTS_REQ_LEN: usize = 12;
+const X_INPUT_GET_FOCUS_REQ_LEN: usize = 8;
+const X_INPUT_GET_PROPERTY_REQ_LEN: usize = 24;
 
 pub const X_PUT_IMAGE_MAX_DATA_BYTES: usize = crate::X_PROPERTY_MAX_VALUE_BYTES;
 pub const X_QUERY_COLORS_MAX_PIXELS: usize = 256;
@@ -217,9 +248,13 @@ pub enum XWireRequest {
     CreateWindow {
         packet: XAuthorityRequestPacket,
         background_pixel: Option<u32>,
+        event_mask: Option<u32>,
+        do_not_propagate_mask: Option<u32>,
     },
     ChangeWindowAttributes {
         window: XResourceId,
+        event_mask: Option<u32>,
+        do_not_propagate_mask: Option<u32>,
     },
     GetWindowAttributes {
         window: XResourceId,
@@ -348,6 +383,11 @@ pub enum XWireRequest {
         name: String,
     },
     GetInputFocus,
+    SetInputFocus {
+        focus: XResourceId,
+        revert_to: u8,
+        time: u32,
+    },
     OpenFont {
         font: XResourceId,
         name: String,
@@ -378,6 +418,13 @@ pub enum XWireRequest {
     },
     QueryExtension {
         name: String,
+    },
+    DeleteProperty {
+        window: XResourceId,
+        property: u32,
+    },
+    QueryPointer {
+        window: XResourceId,
     },
     ListExtensions,
     QueryBestSize {
@@ -477,6 +524,32 @@ pub enum XWireRequest {
         wanted_major: u16,
         wanted_minor: u16,
     },
+    XkbGetMap {
+        full: u16,
+        partial: u16,
+    },
+    XkbSelectEvents,
+    XkbPerClientFlags {
+        change: u32,
+        value: u32,
+    },
+    XiQueryVersion {
+        major_version: u16,
+        minor_version: u16,
+    },
+    XiGetClientPointer,
+    XiGetExtensionVersion,
+    XiQueryDevice {
+        device_id: u16,
+    },
+    XiSelectEvents {
+        window: XResourceId,
+        masks: Vec<(u16, Vec<u32>)>,
+    },
+    XiGetFocus {
+        device_id: u16,
+    },
+    XiGetProperty,
     BigRequestsEnable,
     QueryColors {
         colormap: XResourceId,
@@ -522,6 +595,7 @@ pub enum XWireParseError {
     InvalidPropertyMode(u8),
     InvalidPropertyFormat(u8),
     InvalidEventType(u8),
+    InvalidValue(u32),
     PropertyValueTooLarge {
         len: usize,
         max: usize,
@@ -583,6 +657,13 @@ pub fn decode_x11_core_request(
         X_INTERN_ATOM => decode_intern_atom(context, bytes),
         X_GET_ATOM_NAME => decode_get_atom_name(context, bytes),
         X_CHANGE_PROPERTY => decode_change_property(context, bytes),
+        X_DELETE_PROPERTY => {
+            require_exact_len(X_DELETE_PROPERTY, X_DELETE_PROPERTY_REQ_LEN, bytes.len())?;
+            Ok(XWireRequest::DeleteProperty {
+                window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+                property: context.byte_order.u32(&bytes[8..12]),
+            })
+        }
         X_GET_PROPERTY => decode_get_property(context, bytes),
         X_LIST_PROPERTIES => decode_list_properties(context, bytes),
         X_SET_SELECTION_OWNER => decode_set_selection_owner(context, bytes),
@@ -594,6 +675,13 @@ pub fn decode_x11_core_request(
         X_GRAB_SERVER => decode_grab_server(bytes),
         X_UNGRAB_SERVER => decode_ungrab_server(bytes),
         X_TRANSLATE_COORDINATES => decode_translate_coordinates(context, bytes),
+        X_QUERY_POINTER => {
+            require_exact_len(X_QUERY_POINTER, X_QUERY_POINTER_REQ_LEN, bytes.len())?;
+            Ok(XWireRequest::QueryPointer {
+                window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+            })
+        }
+        X_SET_INPUT_FOCUS => decode_set_input_focus(context, bytes),
         X_GET_INPUT_FOCUS => decode_get_input_focus(bytes),
         X_OPEN_FONT => decode_open_font(context, bytes),
         X_CLOSE_FONT => decode_close_font(context, bytes),
@@ -632,7 +720,108 @@ pub fn decode_x11_core_request(
         X_RANDR_MAJOR_OPCODE => decode_randr(context, bytes),
         X_KEYBOARD_MAJOR_OPCODE => decode_x_keyboard(context, bytes),
         X_BIG_REQUESTS_MAJOR_OPCODE => decode_big_requests(bytes),
+        X_INPUT_MAJOR_OPCODE => decode_x_input(context, bytes),
         other => Err(XWireParseError::UnknownOpcode(other)),
+    }
+}
+
+fn decode_x_input(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    match bytes[1] {
+        X_INPUT_GET_CLIENT_POINTER_MINOR_OPCODE => {
+            require_exact_len(
+                X_INPUT_MAJOR_OPCODE,
+                X_INPUT_GET_CLIENT_POINTER_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::XiGetClientPointer)
+        }
+        X_INPUT_GET_EXTENSION_VERSION_MINOR_OPCODE => {
+            require_len(X_INPUT_MAJOR_OPCODE, 8, bytes.len())?;
+            let name_len = usize::from(context.byte_order.u16(&bytes[4..6]));
+            let expected = 8usize.saturating_add(padded_len(name_len));
+            require_exact_len(X_INPUT_MAJOR_OPCODE, expected, bytes.len())?;
+            Ok(XWireRequest::XiGetExtensionVersion)
+        }
+        X_INPUT_QUERY_VERSION_MINOR_OPCODE => {
+            require_exact_len(
+                X_INPUT_MAJOR_OPCODE,
+                X_INPUT_QUERY_VERSION_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::XiQueryVersion {
+                major_version: context.byte_order.u16(&bytes[4..6]),
+                minor_version: context.byte_order.u16(&bytes[6..8]),
+            })
+        }
+        X_INPUT_QUERY_DEVICE_MINOR_OPCODE => {
+            require_exact_len(
+                X_INPUT_MAJOR_OPCODE,
+                X_INPUT_QUERY_DEVICE_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::XiQueryDevice {
+                device_id: context.byte_order.u16(&bytes[4..6]),
+            })
+        }
+        X_INPUT_GET_FOCUS_MINOR_OPCODE => {
+            require_exact_len(X_INPUT_MAJOR_OPCODE, X_INPUT_GET_FOCUS_REQ_LEN, bytes.len())?;
+            Ok(XWireRequest::XiGetFocus {
+                device_id: context.byte_order.u16(&bytes[4..6]),
+            })
+        }
+        X_INPUT_GET_PROPERTY_MINOR_OPCODE => {
+            require_exact_len(
+                X_INPUT_MAJOR_OPCODE,
+                X_INPUT_GET_PROPERTY_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::XiGetProperty)
+        }
+        X_INPUT_SELECT_EVENTS_MINOR_OPCODE => {
+            require_len(
+                X_INPUT_MAJOR_OPCODE,
+                X_INPUT_SELECT_EVENTS_REQ_LEN,
+                bytes.len(),
+            )?;
+            let window = XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1);
+            let count = usize::from(context.byte_order.u16(&bytes[8..10]));
+            let mut offset = X_INPUT_SELECT_EVENTS_REQ_LEN;
+            let mut masks = Vec::with_capacity(count);
+            for _ in 0..count {
+                if offset.checked_add(4).is_none_or(|end| end > bytes.len()) {
+                    return Err(XWireParseError::InvalidLength {
+                        opcode: X_INPUT_MAJOR_OPCODE,
+                        expected_at_least: offset.saturating_add(4),
+                        actual: bytes.len(),
+                    });
+                }
+                let device_id = context.byte_order.u16(&bytes[offset..offset + 2]);
+                let words = usize::from(context.byte_order.u16(&bytes[offset + 2..offset + 4]));
+                offset += 4;
+                let end = offset.saturating_add(words.saturating_mul(4));
+                if end > bytes.len() {
+                    return Err(XWireParseError::InvalidLength {
+                        opcode: X_INPUT_MAJOR_OPCODE,
+                        expected_at_least: end,
+                        actual: bytes.len(),
+                    });
+                }
+                let mask = bytes[offset..end]
+                    .chunks_exact(4)
+                    .map(|word| context.byte_order.u32(word))
+                    .collect();
+                masks.push((device_id, mask));
+                offset = end;
+            }
+            if offset != bytes.len() {
+                return Err(XWireParseError::TrailingBytes(bytes.len() - offset));
+            }
+            Ok(XWireRequest::XiSelectEvents { window, masks })
+        }
+        _ => Err(XWireParseError::UnknownOpcode(bytes[0])),
     }
 }
 
@@ -664,6 +853,36 @@ fn decode_x_keyboard(
             Ok(XWireRequest::XkbUseExtension {
                 wanted_major: context.byte_order.u16(&bytes[4..6]),
                 wanted_minor: context.byte_order.u16(&bytes[6..8]),
+            })
+        }
+        X_KEYBOARD_GET_MAP_MINOR_OPCODE => {
+            require_exact_len(
+                X_KEYBOARD_MAJOR_OPCODE,
+                X_KEYBOARD_GET_MAP_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::XkbGetMap {
+                full: context.byte_order.u16(&bytes[6..8]),
+                partial: context.byte_order.u16(&bytes[8..10]),
+            })
+        }
+        X_KEYBOARD_SELECT_EVENTS_MINOR_OPCODE => {
+            require_len(
+                X_KEYBOARD_MAJOR_OPCODE,
+                X_KEYBOARD_SELECT_EVENTS_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::XkbSelectEvents)
+        }
+        X_KEYBOARD_PER_CLIENT_FLAGS_MINOR_OPCODE => {
+            require_exact_len(
+                X_KEYBOARD_MAJOR_OPCODE,
+                X_KEYBOARD_PER_CLIENT_FLAGS_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::XkbPerClientFlags {
+                change: context.byte_order.u32(&bytes[8..12]),
+                value: context.byte_order.u32(&bytes[12..16]),
             })
         }
         _ => Err(XWireParseError::UnknownOpcode(bytes[0])),
@@ -1768,8 +1987,38 @@ fn decode_change_window_attributes(
         X_CHANGE_WINDOW_ATTRIBUTES_REQ_LEN,
         bytes.len(),
     )?;
+    let value_mask = context.byte_order.u32(&bytes[8..12]);
+    let value_count = usize::try_from(value_mask.count_ones()).unwrap_or(usize::MAX);
+    let expected_len =
+        X_CHANGE_WINDOW_ATTRIBUTES_REQ_LEN.saturating_add(value_count.saturating_mul(4));
+    if bytes.len() != expected_len {
+        return Err(XWireParseError::InvalidLength {
+            opcode: X_CHANGE_WINDOW_ATTRIBUTES,
+            expected_at_least: expected_len,
+            actual: bytes.len(),
+        });
+    }
+    let mut event_mask = None;
+    let mut do_not_propagate_mask = None;
+    let mut value_cursor = X_CHANGE_WINDOW_ATTRIBUTES_REQ_LEN;
+    for bit in 0..15 {
+        if value_mask & (1 << bit) == 0 {
+            continue;
+        }
+        let value = context
+            .byte_order
+            .u32(&bytes[value_cursor..value_cursor + 4]);
+        value_cursor += 4;
+        match bit {
+            11 => event_mask = Some(value),
+            12 => do_not_propagate_mask = Some(value),
+            _ => {}
+        }
+    }
     Ok(XWireRequest::ChangeWindowAttributes {
         window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        event_mask,
+        do_not_propagate_mask,
     })
 }
 
@@ -1815,6 +2064,21 @@ fn decode_get_input_focus(bytes: &[u8]) -> Result<XWireRequest, XWireParseError>
     Ok(XWireRequest::GetInputFocus)
 }
 
+fn decode_set_input_focus(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_SET_INPUT_FOCUS, X_SET_INPUT_FOCUS_REQ_LEN, bytes.len())?;
+    if bytes[1] > 2 {
+        return Err(XWireParseError::InvalidValue(u32::from(bytes[1])));
+    }
+    Ok(XWireRequest::SetInputFocus {
+        focus: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        revert_to: bytes[1],
+        time: context.byte_order.u32(&bytes[8..12]),
+    })
+}
+
 fn decode_get_modifier_mapping(bytes: &[u8]) -> Result<XWireRequest, XWireParseError> {
     require_exact_len(
         X_GET_MODIFIER_MAPPING,
@@ -1853,6 +2117,8 @@ fn decode_create_window(
     }
     let mut value_cursor = X_CREATE_WINDOW_REQ_LEN;
     let mut background_pixel = None;
+    let mut event_mask = None;
+    let mut do_not_propagate_mask = None;
     for bit in 0..15 {
         if value_mask & (1 << bit) == 0 {
             continue;
@@ -1861,8 +2127,11 @@ fn decode_create_window(
             .byte_order
             .u32(&bytes[value_cursor..value_cursor + 4]);
         value_cursor += 4;
-        if bit == 1 {
-            background_pixel = Some(value);
+        match bit {
+            1 => background_pixel = Some(value),
+            11 => event_mask = Some(value),
+            12 => do_not_propagate_mask = Some(value),
+            _ => {}
         }
     }
     let window_raw = context.byte_order.u32(&bytes[4..8]);
@@ -1889,6 +2158,8 @@ fn decode_create_window(
             },
         },
         background_pixel,
+        event_mask,
+        do_not_propagate_mask,
     })
 }
 
@@ -2077,10 +2348,22 @@ fn decode_send_event(
 ) -> Result<XWireRequest, XWireParseError> {
     require_exact_len(X_SEND_EVENT, X_SEND_EVENT_REQ_LEN, bytes.len())?;
     let event_type = bytes[12] & 0x7f;
-    if event_type != 31 {
+    if event_type != 31 && event_type != 33 {
         return Err(XWireParseError::InvalidEventType(event_type));
     }
     let destination = XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1);
+    if event_type == 33 {
+        let mut event = [0; 32];
+        event.copy_from_slice(&bytes[12..44]);
+        return Ok(XWireRequest::SendSelectionNotify {
+            destination,
+            event_mask: context.byte_order.u32(&bytes[8..12]),
+            event: XClientEvent::ClientMessage {
+                sequence: 0,
+                bytes: event,
+            },
+        });
+    }
     let requestor = XResourceId::new(u64::from(context.byte_order.u32(&bytes[20..24])), 1);
     Ok(XWireRequest::SendSelectionNotify {
         destination,

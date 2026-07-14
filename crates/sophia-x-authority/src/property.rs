@@ -195,6 +195,15 @@ impl XPropertyTable {
         before.saturating_sub(self.records.len())
     }
 
+    pub fn remove(
+        &mut self,
+        namespace: NamespaceId,
+        window: XResourceId,
+        property: XAtom,
+    ) -> Option<XPropertyRecord> {
+        self.records.remove(&(namespace, window, property))
+    }
+
     pub fn len(&self) -> usize {
         self.records.len()
     }

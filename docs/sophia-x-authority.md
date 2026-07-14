@@ -257,13 +257,14 @@ The two-client xterm smoke repeats that proof for two separate client IDs with
 distinct `alpha` and `bravo` input sequences, proving the broker does not
 broadcast those Engine routes. It remains CPU-buffer evidence, not KMS-backed
 multi-app session promotion evidence.
-zenity admitted selection-owner lookup, server grab/ungrab, root colormap
-creation, reduced `MIT-SHM`, additional `RANDR`, and `BIG-REQUESTS` startup paths,
-but the current TTY/DBus environment and missing XInput2 support still prevent a
-rendered GTK dialog proof.
+zenity admitted selection-owner lookup, root colormap creation, core
+ClientMessage delivery, reduced `MIT-SHM`, `RANDR`, `BIG-REQUESTS`, and the
+probe-backed XKB/XI2 startup subset. Its regression now copies the client-owned
+SysV SHM payload through a bounds-checked safe adapter and requires a committed
+nonzero software image with `first_error=none`.
 
-`XKEYBOARD` still reports `present=false`: its map/name/state request surface is
-not complete enough to advertise. Engine-routed evdev keys are now translated
+`XKEYBOARD` now advertises the probe-backed UseExtension, event-selection,
+per-client flags, and GetMap subset. Engine-routed evdev keys are translated
 inside the frontend with a bounded deterministic RMLVO configuration (default
 `evdev`/`pc105`/`us`) and per-seat XKB effective-modifier state. Core
 `GetKeyboardMapping`, `GetModifierMapping`, `KeyPress`, and `KeyRelease` remain
