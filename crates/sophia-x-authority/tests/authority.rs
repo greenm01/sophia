@@ -1,8 +1,9 @@
 use sophia_portal::{ClipboardPortal, PortalCommand};
 use sophia_protocol::{
     AuthorityKind, BufferSource, IpcCodecError, IpcMessageKind, NamespaceId, PortalDecision,
-    PortalTransfer, PortalTransferId, PortalTransferKind, Rect, Region, SOPHIA_IPC_MAGIC, Size,
-    SurfaceConstraints, SurfaceId, SurfaceTransactionReadiness, TransactionId, encode_frame,
+    PortalGrant, PortalGrantState, PortalTransfer, PortalTransferId, PortalTransferKind, Rect,
+    Region, SOPHIA_IPC_MAGIC, Size, SurfaceConstraints, SurfaceId, SurfaceTransactionReadiness,
+    TransactionId, encode_frame, encode_portal_clipboard_payload_frame,
 };
 use sophia_x_authority::*;
 
@@ -1011,6 +1012,110 @@ fn x_authority_runtime_selection_error_emits_native_failure_artifact() {
         XAuthorityResponseOutcome::Rejected(XAuthorityRuntimeError::UnknownSourceOwner)
     );
     assert_eq!(response.selection_artifacts.len(), 1);
+}
+
+#[test]
+fn cross_namespace_grant_installs_bounded_utf8_and_reports_stale_owner() {
+    let source = NamespaceId::from_raw(31);
+    let target = NamespaceId::from_raw(32);
+    let transfer = PortalTransferId::from_raw(41);
+    let mut atoms = XAtomTable::new();
+    let selection = atoms.intern("CLIPBOARD", false).unwrap().unwrap();
+    let utf8 = atoms.intern("UTF8_STRING", false).unwrap().unwrap();
+    let property = atoms.intern("SOPHIA_TEST", false).unwrap().unwrap();
+    let mut runtime = XAuthorityRuntime::new();
+    runtime.apply(create_window_request(TransactionId::from_raw(1), source));
+    runtime.apply(create_second_window_request(
+        TransactionId::from_raw(2),
+        target,
+    ));
+    runtime.apply(XAuthorityRequestPacket {
+        transaction: TransactionId::from_raw(3),
+        namespace: source,
+        kind: XAuthorityRequestKind::SetSelectionOwner {
+            selection,
+            owner: Some(XResourceId::new(0xc0, 1)),
+            timestamp: 10,
+            selection_timestamp: 10,
+            kind: XSelectionChangeKind::SetOwner,
+        },
+    });
+    let request = |transfer| XAuthorityRequestPacket {
+        transaction: TransactionId::from_raw(4),
+        namespace: target,
+        kind: XAuthorityRequestKind::RequestSelection {
+            requestor: XResourceId::new(0xc1, 1),
+            selection,
+            target: utf8,
+            target_name: "UTF8_STRING".to_owned(),
+            property,
+            time: 11,
+            transfer,
+        },
+    };
+    runtime.apply(request(transfer));
+    let grant = PortalGrant {
+        transfer,
+        source_namespace: source,
+        target_namespace: target,
+        kind: PortalTransferKind::Clipboard,
+        source_generation: 1,
+        broker_generation: 1,
+        deadline_msec: 2_000,
+        state: PortalGrantState::Active,
+    };
+    let mut properties = XPropertyTable::new();
+    let frame = encode_portal_clipboard_payload_frame(transfer, b"hello").unwrap();
+    let outcome = runtime
+        .execute_clipboard_payload_frame(&frame, &grant, &mut atoms, &mut properties)
+        .unwrap();
+    let ClipboardSelectionExecutionOutcome::Handoff(handoff) = outcome else {
+        panic!("expected handoff");
+    };
+    assert_eq!(handoff.notify.property, property);
+    let record = properties
+        .get(target, XResourceId::new(0xc1, 1), property)
+        .unwrap();
+    assert_eq!(record.property_type, utf8);
+    assert_eq!(record.format, 8);
+    assert_eq!(record.bytes, b"hello");
+
+    let stale_transfer = PortalTransferId::from_raw(42);
+    runtime.apply(request(stale_transfer));
+    runtime.apply(XAuthorityRequestPacket {
+        transaction: TransactionId::from_raw(5),
+        namespace: source,
+        kind: XAuthorityRequestKind::SetSelectionOwner {
+            selection,
+            owner: Some(XResourceId::new(0xc0, 1)),
+            timestamp: 12,
+            selection_timestamp: 12,
+            kind: XSelectionChangeKind::SetOwner,
+        },
+    });
+    let stale_grant = PortalGrant {
+        transfer: stale_transfer,
+        ..grant
+    };
+    let outcome = runtime
+        .execute_clipboard_payload(
+            stale_transfer,
+            &stale_grant,
+            b"stale",
+            &mut atoms,
+            &mut properties,
+        )
+        .unwrap();
+    assert!(matches!(
+        outcome,
+        ClipboardSelectionExecutionOutcome::Failed {
+            error: ClipboardSelectionExecutionError::StaleOwnerGeneration,
+            notify: ClipboardSelectionNotify {
+                property: X_ATOM_NONE,
+                ..
+            }
+        }
+    ));
 }
 
 #[cfg(unix)]

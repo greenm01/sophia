@@ -55,6 +55,37 @@ pub struct ClipboardSelectionOwnerRequest {
     pub time: XTimestamp,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingClipboardSelection {
+    pub namespace: sophia_protocol::NamespaceId,
+    pub portal_request: ClipboardSelectionPortalRequest,
+    pub byte_order: crate::XByteOrder,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClipboardSelectionExecutionError {
+    UnknownTransfer,
+    Denied,
+    Expired,
+    Disconnected,
+    ExecutorFailure,
+    StaleOwnerGeneration,
+    UnsupportedTarget,
+    InvalidUtf8,
+    MissingProperty,
+    PayloadTooLarge,
+    Property,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ClipboardSelectionExecutionOutcome {
+    Handoff(ClipboardSelectionHandoff),
+    Failed {
+        error: ClipboardSelectionExecutionError,
+        notify: ClipboardSelectionNotify,
+    },
+}
+
 pub fn dispatch_clipboard_selection_request(
     request: XSelectionRequest,
     monitor: &XSelectionMonitor,

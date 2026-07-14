@@ -70,6 +70,9 @@ pub fn dispatch_x11_wire_request(
         XWireRequest::Authority(packet) => {
             let kind = packet.kind.clone();
             let response = runtime.apply(packet);
+            if let XAuthorityRequestKind::RequestSelection { transfer, .. } = &kind {
+                runtime.set_pending_clipboard_byte_order(*transfer, context.byte_order);
+            }
             let outputs = outputs_from_authority_response(context, &kind, &response);
             XDispatchResult {
                 response: Some(response),

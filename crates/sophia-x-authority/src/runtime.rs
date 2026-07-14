@@ -4,13 +4,17 @@ use sophia_portal::ClipboardPortal;
 use sophia_protocol::{AuthoritySurface, NamespaceId, Rect, Region, Size, TransactionId};
 
 use crate::{
-    ClipboardSelectionDispatch, ClipboardSelectionFailureRequest, XAuthorityCpuBufferUpdate,
+    ClipboardSelectionDispatch, ClipboardSelectionExecutionError,
+    ClipboardSelectionExecutionOutcome, ClipboardSelectionFailureRequest,
+    ClipboardSelectionHandoff, ClipboardSelectionNotify, ClipboardTextProperty,
+    PendingClipboardSelection, X_ATOM_ATOM, X_ATOM_NONE, XAtomTable, XAuthorityCpuBufferUpdate,
     XAuthorityPortalCommand, XAuthorityRequestKind, XAuthorityRequestPacket,
-    XAuthorityResponsePacket, XAuthorityRuntimeError, XAuthoritySelectionArtifact, XDrawingUpdate,
-    XGraphicsContextTable, XGraphicsContextValues, XPoint, XResourceKind, XResourceTable,
-    XSelectionEvent, XSelectionMonitor, XShmSegmentTable, XSoftwareBufferStore,
-    XWindowLifecycleEvent, XWindowTable, clipboard_selection_failure_notify,
-    dispatch_clipboard_selection_request, surface_transaction_from_drawing_update,
+    XAuthorityResponsePacket, XAuthorityRuntimeError, XAuthoritySelectionArtifact, XByteOrder,
+    XDrawingUpdate, XGraphicsContextTable, XGraphicsContextValues, XPoint, XPropertyChange,
+    XPropertyMode, XPropertyTable, XResourceKind, XResourceTable, XSelectionEvent,
+    XSelectionMonitor, XShmSegmentTable, XSoftwareBufferStore, XWindowLifecycleEvent, XWindowTable,
+    clipboard_selection_failure_notify, dispatch_clipboard_selection_request,
+    surface_transaction_from_drawing_update,
 };
 
 /// Effects of releasing every currently supported resource allocated from one
@@ -35,6 +39,7 @@ pub struct XAuthorityRuntime {
     shm_segments: XShmSegmentTable,
     selections: XSelectionMonitor,
     clipboard: ClipboardPortal,
+    pending_clipboard: BTreeMap<sophia_protocol::PortalTransferId, PendingClipboardSelection>,
     software_buffers: XSoftwareBufferStore,
     graphics_contexts: XGraphicsContextTable,
     window_background_pixels: BTreeMap<crate::XResourceId, u32>,
@@ -200,7 +205,18 @@ impl XAuthorityRuntime {
                     ClipboardSelectionDispatch::SameNamespace(request) => response
                         .selection_artifacts
                         .push(XAuthoritySelectionArtifact::Request(request)),
-                    ClipboardSelectionDispatch::CrossNamespace { command, .. } => {
+                    ClipboardSelectionDispatch::CrossNamespace {
+                        portal_request,
+                        command,
+                    } => {
+                        self.pending_clipboard.insert(
+                            *transfer,
+                            PendingClipboardSelection {
+                                namespace: request.namespace,
+                                portal_request,
+                                byte_order: XByteOrder::LittleEndian,
+                            },
+                        );
                         if let Some(command) = XAuthorityPortalCommand::from_portal_command(command)
                         {
                             response.portal_commands.push(command);
@@ -211,6 +227,164 @@ impl XAuthorityRuntime {
         }
 
         Ok(response)
+    }
+
+    pub(crate) fn set_pending_clipboard_byte_order(
+        &mut self,
+        transfer: sophia_protocol::PortalTransferId,
+        byte_order: XByteOrder,
+    ) {
+        if let Some(pending) = self.pending_clipboard.get_mut(&transfer) {
+            pending.byte_order = byte_order;
+        }
+    }
+
+    /// Completes one broker-approved clipboard transfer. X11 request context
+    /// stays in the authority; the executor supplies only a correlated,
+    /// bounded payload.
+    pub fn execute_clipboard_payload(
+        &mut self,
+        transfer: sophia_protocol::PortalTransferId,
+        grant: &sophia_protocol::PortalGrant,
+        payload: &[u8],
+        atoms: &mut XAtomTable,
+        properties: &mut XPropertyTable,
+    ) -> Result<ClipboardSelectionExecutionOutcome, ClipboardSelectionExecutionError> {
+        let pending = self
+            .pending_clipboard
+            .remove(&transfer)
+            .ok_or(ClipboardSelectionExecutionError::UnknownTransfer)?;
+        let failure = pending.portal_request.failure;
+        let fail = |error| ClipboardSelectionExecutionOutcome::Failed {
+            error,
+            notify: ClipboardSelectionNotify {
+                time: failure.time,
+                requestor: failure.requestor,
+                selection: failure.selection,
+                target: failure.target,
+                property: X_ATOM_NONE,
+            },
+        };
+        if grant.transfer != transfer
+            || grant.state != sophia_protocol::PortalGrantState::Active
+            || grant.source_generation != pending.portal_request.request.generation
+            || grant.source_namespace != pending.portal_request.request.source_namespace
+            || grant.target_namespace != pending.portal_request.request.target_namespace
+        {
+            return Ok(fail(ClipboardSelectionExecutionError::StaleOwnerGeneration));
+        }
+        let Some(owner) = self
+            .selections
+            .current_owner_for_selection(failure.selection)
+        else {
+            return Ok(fail(ClipboardSelectionExecutionError::StaleOwnerGeneration));
+        };
+        if owner.generation != pending.portal_request.request.generation {
+            return Ok(fail(ClipboardSelectionExecutionError::StaleOwnerGeneration));
+        }
+        if pending.portal_request.property == X_ATOM_NONE {
+            return Ok(fail(ClipboardSelectionExecutionError::MissingProperty));
+        }
+        if payload.len() > crate::MAX_CLIPBOARD_TEXT_HANDOFF_BYTES {
+            return Ok(fail(ClipboardSelectionExecutionError::PayloadTooLarge));
+        }
+        let selection_name = atoms.name(failure.selection);
+        if selection_name != Some("PRIMARY") && selection_name != Some("CLIPBOARD") {
+            return Ok(fail(ClipboardSelectionExecutionError::UnsupportedTarget));
+        }
+        let target_name = pending.portal_request.request.target.as_str();
+        let (property_type, format, bytes) = match target_name {
+            "TARGETS" => {
+                let targets = ["TARGETS", "UTF8_STRING", "text/plain;charset=utf-8"];
+                let mut bytes = Vec::with_capacity(targets.len() * 4);
+                for name in targets {
+                    let atom = atoms
+                        .intern(name, false)
+                        .map_err(|_| ClipboardSelectionExecutionError::Property)?
+                        .expect("intern without only-if-exists returns an atom");
+                    match pending.byte_order {
+                        XByteOrder::LittleEndian => bytes.extend_from_slice(&atom.to_le_bytes()),
+                        XByteOrder::BigEndian => bytes.extend_from_slice(&atom.to_be_bytes()),
+                    }
+                }
+                (X_ATOM_ATOM, 32, bytes)
+            }
+            "UTF8_STRING" | "text/plain" | "text/plain;charset=utf-8" => {
+                if core::str::from_utf8(payload).is_err() {
+                    return Ok(fail(ClipboardSelectionExecutionError::InvalidUtf8));
+                }
+                (failure.target, 8, payload.to_vec())
+            }
+            _ => return Ok(fail(ClipboardSelectionExecutionError::UnsupportedTarget)),
+        };
+        if properties
+            .apply_change(
+                pending.namespace,
+                XPropertyChange {
+                    mode: XPropertyMode::Replace,
+                    window: failure.requestor,
+                    property: pending.portal_request.property,
+                    property_type,
+                    format,
+                    bytes: bytes.clone(),
+                },
+            )
+            .is_err()
+        {
+            return Ok(fail(ClipboardSelectionExecutionError::Property));
+        }
+        Ok(ClipboardSelectionExecutionOutcome::Handoff(
+            ClipboardSelectionHandoff {
+                transfer,
+                property: ClipboardTextProperty {
+                    requestor: failure.requestor,
+                    property: pending.portal_request.property,
+                    target: failure.target,
+                    bytes,
+                },
+                notify: ClipboardSelectionNotify {
+                    time: failure.time,
+                    requestor: failure.requestor,
+                    selection: failure.selection,
+                    target: failure.target,
+                    property: pending.portal_request.property,
+                },
+            },
+        ))
+    }
+
+    pub fn fail_clipboard_transfer(
+        &mut self,
+        transfer: sophia_protocol::PortalTransferId,
+        error: ClipboardSelectionExecutionError,
+    ) -> Result<ClipboardSelectionExecutionOutcome, ClipboardSelectionExecutionError> {
+        let pending = self
+            .pending_clipboard
+            .remove(&transfer)
+            .ok_or(ClipboardSelectionExecutionError::UnknownTransfer)?;
+        let request = pending.portal_request.failure;
+        Ok(ClipboardSelectionExecutionOutcome::Failed {
+            error,
+            notify: ClipboardSelectionNotify {
+                time: request.time,
+                requestor: request.requestor,
+                selection: request.selection,
+                target: request.target,
+                property: X_ATOM_NONE,
+            },
+        })
+    }
+
+    pub fn execute_clipboard_payload_frame(
+        &mut self,
+        frame: &[u8],
+        grant: &sophia_protocol::PortalGrant,
+        atoms: &mut XAtomTable,
+        properties: &mut XPropertyTable,
+    ) -> Result<ClipboardSelectionExecutionOutcome, ClipboardSelectionExecutionError> {
+        let (transfer, payload) = sophia_protocol::decode_portal_clipboard_payload_frame(frame)
+            .map_err(|_| ClipboardSelectionExecutionError::ExecutorFailure)?;
+        self.execute_clipboard_payload(transfer, grant, &payload, atoms, properties)
     }
 
     pub fn resource_count(&self) -> usize {
