@@ -839,6 +839,44 @@ pub struct XServerFrontendClipboardExecutor {
 
 #[cfg(unix)]
 impl XServerFrontendClipboardExecutor {
+    pub fn request_source(
+        &self,
+        grant: &sophia_protocol::PortalGrant,
+    ) -> Result<crate::ClipboardSelectionProxy, X11SetupSocketError> {
+        let proxy = self
+            .state
+            .runtime
+            .lock()
+            .map_err(|_| X11SetupSocketError::new("X11 authority runtime lock poisoned"))?
+            .begin_clipboard_source_request(grant)
+            .map_err(|error| {
+                X11SetupSocketError::new(format!("clipboard source request rejected: {error:?}"))
+            })?;
+        let target = self
+            .state
+            .client_for_resource(proxy.owner)?
+            .ok_or_else(|| X11SetupSocketError::new("clipboard owner disconnected"))?;
+        self.routing
+            .route_protocol(
+                target,
+                XClientEvent::SelectionRequest {
+                    sequence: 0,
+                    time: proxy.time,
+                    owner: proxy.owner,
+                    requestor: proxy.requestor,
+                    selection: proxy.selection,
+                    target: proxy.target,
+                    property: proxy.property,
+                },
+            )
+            .map_err(|error| {
+                X11SetupSocketError::new(format!(
+                    "failed to route clipboard source request: {error}"
+                ))
+            })?;
+        Ok(proxy)
+    }
+
     pub fn execute(
         &self,
         grant: &sophia_protocol::PortalGrant,
@@ -876,15 +914,28 @@ impl XServerFrontendClipboardExecutor {
         transfer: sophia_protocol::PortalTransferId,
         error: crate::ClipboardSelectionExecutionError,
     ) -> Result<crate::ClipboardSelectionExecutionOutcome, X11SetupSocketError> {
-        let outcome = self
+        let mut runtime = self
             .state
             .runtime
             .lock()
-            .map_err(|_| X11SetupSocketError::new("X11 authority runtime lock poisoned"))?
+            .map_err(|_| X11SetupSocketError::new("X11 authority runtime lock poisoned"))?;
+        let proxies = runtime.discard_clipboard_proxies(transfer);
+        let outcome = runtime
             .fail_clipboard_transfer(transfer, error)
             .map_err(|error| {
                 X11SetupSocketError::new(format!("clipboard failure rejected: {error:?}"))
             })?;
+        drop(runtime);
+        if !proxies.is_empty() {
+            let mut properties = self
+                .state
+                .properties
+                .lock()
+                .map_err(|_| X11SetupSocketError::new("X11 property table lock poisoned"))?;
+            for (namespace, proxy) in proxies {
+                properties.remove_window(namespace, proxy);
+            }
+        }
         self.route_outcome(&outcome)?;
         Ok(outcome)
     }
@@ -1195,6 +1246,7 @@ pub struct XServerFrontendRouteBroker {
     control_sender: SyncSender<XAuthorityClientControlCommand>,
     control_receiver: Receiver<XAuthorityClientControlCommand>,
     acknowledgement_receiver: Option<Receiver<XAuthorityClientControlAck>>,
+    source_payload_receiver: Receiver<crate::ClipboardSourcePayload>,
 }
 
 #[cfg(unix)]
@@ -1243,18 +1295,21 @@ impl XServerFrontendRouteBroker {
         let capacity = queue_capacity.get();
         let (input_sender, input_receiver) = sync_channel(capacity);
         let (control_sender, control_receiver) = sync_channel(capacity);
+        let (source_payload_sender, source_payload_receiver) = sync_channel(capacity);
         Self {
             registry: XServerFrontendRouteRegistry {
                 clients: Arc::new(Mutex::new(BTreeMap::new())),
                 acknowledgement_sender,
                 input_delivery_sender,
                 per_client_queue_capacity: queue_capacity,
+                source_payload_sender,
             },
             input_sender,
             input_receiver,
             control_sender,
             control_receiver,
             acknowledgement_receiver,
+            source_payload_receiver,
         }
     }
 
@@ -1274,6 +1329,13 @@ impl XServerFrontendRouteBroker {
             .as_ref()
             .ok_or(RecvTimeoutError::Disconnected)?
             .recv_timeout(timeout)
+    }
+
+    pub fn recv_clipboard_source_payload_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<crate::ClipboardSourcePayload, RecvTimeoutError> {
+        self.source_payload_receiver.recv_timeout(timeout)
     }
 
     /// Routes every value currently available at the bounded ingress.
@@ -1322,6 +1384,7 @@ struct XServerFrontendRouteRegistry {
     acknowledgement_sender: SyncSender<XAuthorityClientControlAck>,
     input_delivery_sender: Option<SyncSender<XAuthorityClientInputDelivery>>,
     per_client_queue_capacity: NonZeroUsize,
+    source_payload_sender: SyncSender<crate::ClipboardSourcePayload>,
 }
 
 #[cfg(unix)]
@@ -2704,6 +2767,48 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                     (dispatch_x11_parse_error(dispatch_context, error), None)
                 }
             };
+            if let Some(routing) = protocol_routing.as_ref()
+                && let Some((index, requestor, property)) = output
+                    .outputs
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, output)| match output {
+                        crate::XClientOutput::Event(XClientEvent::SelectionNotify {
+                            requestor,
+                            property,
+                            ..
+                        }) => Some((index, *requestor, *property)),
+                        _ => None,
+                    })
+            {
+                let mut runtime = state
+                    .runtime
+                    .lock()
+                    .map_err(|_| X11SetupSocketError::new("X11 authority runtime lock poisoned"))?;
+                if runtime.is_clipboard_proxy(namespace, requestor) {
+                    let mut properties = state.properties.lock().map_err(|_| {
+                        X11SetupSocketError::new("X11 property table lock poisoned")
+                    })?;
+                    let payload = runtime
+                        .capture_clipboard_source_payload(requestor, property, &mut properties)
+                        .map_err(|error| {
+                            X11SetupSocketError::new(format!(
+                                "failed to capture clipboard source payload: {error:?}"
+                            ))
+                        })?;
+                    routing.source_payload_sender.try_send(payload).map_err(
+                        |error| match error {
+                            TrySendError::Full(_) => {
+                                X11SetupSocketError::new("clipboard source payload queue is full")
+                            }
+                            TrySendError::Disconnected(_) => X11SetupSocketError::new(
+                                "clipboard source payload queue is disconnected",
+                            ),
+                        },
+                    )?;
+                    output.outputs.remove(index);
+                }
+            }
             if let Some(routing) = protocol_routing.as_ref()
                 && let Some((index, destination, event)) = output
                     .outputs

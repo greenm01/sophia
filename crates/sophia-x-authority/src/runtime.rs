@@ -6,13 +6,14 @@ use sophia_protocol::{AuthoritySurface, NamespaceId, Rect, Region, Size, Transac
 use crate::{
     ClipboardSelectionDispatch, ClipboardSelectionExecutionError,
     ClipboardSelectionExecutionOutcome, ClipboardSelectionFailureRequest,
-    ClipboardSelectionHandoff, ClipboardSelectionNotify, ClipboardTextProperty,
-    PendingClipboardSelection, X_ATOM_ATOM, X_ATOM_NONE, XAtomTable, XAuthorityCpuBufferUpdate,
-    XAuthorityPortalCommand, XAuthorityRequestKind, XAuthorityRequestPacket,
-    XAuthorityResponsePacket, XAuthorityRuntimeError, XAuthoritySelectionArtifact, XByteOrder,
-    XDrawingUpdate, XGraphicsContextTable, XGraphicsContextValues, XPoint, XPropertyChange,
-    XPropertyMode, XPropertyTable, XResourceKind, XResourceTable, XSelectionEvent,
-    XSelectionMonitor, XShmSegmentTable, XSoftwareBufferStore, XWindowLifecycleEvent, XWindowTable,
+    ClipboardSelectionHandoff, ClipboardSelectionNotify, ClipboardSelectionProxy,
+    ClipboardSourcePayload, ClipboardTextProperty, PendingClipboardSelection, X_ATOM_ATOM,
+    X_ATOM_NONE, XAtomTable, XAuthorityCpuBufferUpdate, XAuthorityPortalCommand,
+    XAuthorityRequestKind, XAuthorityRequestPacket, XAuthorityResponsePacket,
+    XAuthorityRuntimeError, XAuthoritySelectionArtifact, XByteOrder, XDrawingUpdate,
+    XGraphicsContextTable, XGraphicsContextValues, XPoint, XPropertyChange, XPropertyMode,
+    XPropertyTable, XResourceKind, XResourceTable, XSelectionEvent, XSelectionMonitor,
+    XShmSegmentTable, XSoftwareBufferStore, XWindowLifecycleEvent, XWindowTable,
     clipboard_selection_failure_notify, dispatch_clipboard_selection_request,
     surface_transaction_from_drawing_update,
 };
@@ -40,6 +41,8 @@ pub struct XAuthorityRuntime {
     selections: XSelectionMonitor,
     clipboard: ClipboardPortal,
     pending_clipboard: BTreeMap<sophia_protocol::PortalTransferId, PendingClipboardSelection>,
+    clipboard_proxies: BTreeMap<crate::XResourceId, ClipboardSelectionProxy>,
+    next_clipboard_proxy: u32,
     software_buffers: XSoftwareBufferStore,
     graphics_contexts: XGraphicsContextTable,
     window_background_pixels: BTreeMap<crate::XResourceId, u32>,
@@ -250,6 +253,94 @@ impl XAuthorityRuntime {
         }
     }
 
+    pub fn begin_clipboard_source_request(
+        &mut self,
+        grant: &sophia_protocol::PortalGrant,
+    ) -> Result<ClipboardSelectionProxy, ClipboardSelectionExecutionError> {
+        let pending = self
+            .pending_clipboard
+            .get(&grant.transfer)
+            .ok_or(ClipboardSelectionExecutionError::UnknownTransfer)?;
+        if grant.state != sophia_protocol::PortalGrantState::Active
+            || grant.source_generation != pending.portal_request.request.generation
+            || grant.source_namespace != pending.portal_request.request.source_namespace
+            || grant.target_namespace != pending.portal_request.request.target_namespace
+        {
+            return Err(ClipboardSelectionExecutionError::StaleOwnerGeneration);
+        }
+        let owner = self
+            .selections
+            .current_owner_for_selection(pending.portal_request.failure.selection)
+            .and_then(|record| record.owner)
+            .ok_or(ClipboardSelectionExecutionError::StaleOwnerGeneration)?;
+        let raw = 0x0001_0000u32
+            .checked_add(self.next_clipboard_proxy)
+            .filter(|raw| *raw < 0x0020_0000)
+            .ok_or(ClipboardSelectionExecutionError::ExecutorFailure)?;
+        self.next_clipboard_proxy = self.next_clipboard_proxy.saturating_add(1);
+        let proxy = ClipboardSelectionProxy {
+            transfer: grant.transfer,
+            namespace: grant.source_namespace,
+            owner,
+            requestor: crate::XResourceId::new(u64::from(raw), 1),
+            selection: pending.portal_request.failure.selection,
+            target: pending.portal_request.failure.target,
+            property: pending.portal_request.failure.target,
+            time: pending.portal_request.failure.time,
+        };
+        self.clipboard_proxies.insert(proxy.requestor, proxy);
+        Ok(proxy)
+    }
+
+    pub fn is_clipboard_proxy(&self, namespace: NamespaceId, window: crate::XResourceId) -> bool {
+        self.clipboard_proxies
+            .get(&window)
+            .is_some_and(|proxy| proxy.namespace == namespace)
+    }
+
+    pub fn capture_clipboard_source_payload(
+        &mut self,
+        requestor: crate::XResourceId,
+        property: crate::XAtom,
+        properties: &mut XPropertyTable,
+    ) -> Result<ClipboardSourcePayload, ClipboardSelectionExecutionError> {
+        let proxy = self
+            .clipboard_proxies
+            .remove(&requestor)
+            .ok_or(ClipboardSelectionExecutionError::UnknownTransfer)?;
+        if property == X_ATOM_NONE || property != proxy.property {
+            properties.remove_window(proxy.namespace, proxy.requestor);
+            return Err(ClipboardSelectionExecutionError::ExecutorFailure);
+        }
+        let bytes = properties
+            .get(proxy.namespace, proxy.requestor, property)
+            .map(|record| record.bytes.clone())
+            .ok_or(ClipboardSelectionExecutionError::ExecutorFailure)?;
+        properties.remove_window(proxy.namespace, proxy.requestor);
+        if bytes.len() > crate::MAX_CLIPBOARD_TEXT_HANDOFF_BYTES {
+            return Err(ClipboardSelectionExecutionError::PayloadTooLarge);
+        }
+        Ok(ClipboardSourcePayload {
+            transfer: proxy.transfer,
+            bytes,
+        })
+    }
+
+    pub fn discard_clipboard_proxies(
+        &mut self,
+        transfer: sophia_protocol::PortalTransferId,
+    ) -> Vec<(NamespaceId, crate::XResourceId)> {
+        let removed = self
+            .clipboard_proxies
+            .values()
+            .filter(|proxy| proxy.transfer == transfer)
+            .map(|proxy| (proxy.namespace, proxy.requestor))
+            .collect::<Vec<_>>();
+        self.clipboard_proxies
+            .retain(|_, proxy| proxy.transfer != transfer);
+        removed
+    }
+
     /// Completes one broker-approved clipboard transfer. X11 request context
     /// stays in the authority; the executor supplies only a correlated,
     /// bounded payload.
@@ -449,6 +540,9 @@ impl XAuthorityRuntime {
         namespace: NamespaceId,
         window: crate::XResourceId,
     ) -> Result<(), XAuthorityRuntimeError> {
+        if self.is_clipboard_proxy(namespace, window) {
+            return Ok(());
+        }
         self.resources
             .lookup(namespace, window, XResourceKind::Window)
             .map(|_| ())

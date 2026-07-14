@@ -63,6 +63,24 @@ pub struct PendingClipboardSelection {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ClipboardSelectionProxy {
+    pub transfer: PortalTransferId,
+    pub namespace: sophia_protocol::NamespaceId,
+    pub owner: XResourceId,
+    pub requestor: XResourceId,
+    pub selection: XAtom,
+    pub target: XAtom,
+    pub property: XAtom,
+    pub time: XTimestamp,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClipboardSourcePayload {
+    pub transfer: PortalTransferId,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ClipboardSelectionExecutionError {
     UnknownTransfer,
     Denied,

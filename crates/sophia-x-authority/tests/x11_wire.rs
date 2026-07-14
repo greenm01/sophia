@@ -5099,6 +5099,7 @@ fn cross_namespace_executor_installs_property_and_notifies_requestor() {
         .with_max_concurrent_clients(NonZeroUsize::new(2).unwrap());
     let (executor_sender, executor_receiver) = std::sync::mpsc::sync_channel(1);
     let (request_sender, request_receiver) = std::sync::mpsc::sync_channel(1);
+    let (payload_sender, payload_receiver) = std::sync::mpsc::sync_channel(1);
     let server = thread::spawn(move || {
         let broker = XServerFrontendRouteBroker::new(NonZeroUsize::new(4).unwrap());
         let mut frontend = XServerFrontend::bind(config).unwrap();
@@ -5120,6 +5121,13 @@ fn cross_namespace_executor_installs_property_and_notifies_requestor() {
             .unwrap();
         frontend
             .serve_next_concurrently_routed_traced(&broker, observer)
+            .unwrap();
+        payload_sender
+            .send(
+                broker
+                    .recv_clipboard_source_payload_timeout(std::time::Duration::from_secs(2))
+                    .unwrap(),
+            )
             .unwrap();
         frontend.wait_for_clients().unwrap();
     });
@@ -5188,21 +5196,48 @@ fn cross_namespace_executor_installs_property_and_notifies_requestor() {
         .unwrap();
     request_receiver.recv().unwrap();
     let transfer = PortalTransferId::from_raw(2);
-    let outcome = executor
-        .execute(
-            &PortalGrant {
-                transfer,
-                source_namespace: source.id,
-                target_namespace: target.id,
-                kind: PortalTransferKind::Clipboard,
-                source_generation: 1,
-                broker_generation: 1,
-                deadline_msec: 2_000,
-                state: PortalGrantState::Active,
-            },
+    let grant = PortalGrant {
+        transfer,
+        source_namespace: source.id,
+        target_namespace: target.id,
+        kind: PortalTransferKind::Clipboard,
+        source_generation: 1,
+        broker_generation: 1,
+        deadline_msec: 2_000,
+        state: PortalGrantState::Active,
+    };
+    let proxy = executor.request_source(&grant).unwrap();
+    let source_request = read_x_record(&mut owner);
+    assert_eq!(source_request[0], 30);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &source_request[12..16]),
+        u32::try_from(proxy.requestor.local.raw()).unwrap()
+    );
+    owner
+        .write_all(&change_property_request(
+            XByteOrder::LittleEndian,
+            XPropertyMode::Replace,
+            u32::try_from(proxy.requestor.local.raw()).unwrap(),
+            proxy.property,
+            utf8,
+            8,
             b"cross namespace",
-        )
+        ))
         .unwrap();
+    assert_eq!(read_x_record(&mut owner)[0], 28);
+    owner
+        .write_all(&send_selection_notify_request(
+            XByteOrder::LittleEndian,
+            u32::try_from(proxy.requestor.local.raw()).unwrap(),
+            proxy.time,
+            proxy.selection,
+            proxy.target,
+            proxy.property,
+        ))
+        .unwrap();
+    let source_payload = payload_receiver.recv().unwrap();
+    assert_eq!(source_payload.transfer, transfer);
+    let outcome = executor.execute(&grant, &source_payload.bytes).unwrap();
     assert!(matches!(
         outcome,
         ClipboardSelectionExecutionOutcome::Handoff(_)
