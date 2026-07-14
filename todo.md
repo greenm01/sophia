@@ -46,7 +46,7 @@ compatibility provider; no XLibre integration work is active.
   listener policy, peer credentials, and `MIT-MAGIC-COOKIE-1` validation.
 - [x] Add Xauthority-file creation/removal, cookie rotation, raw-secret
   containment, normal X11 setup failure, and fail-closed route cleanup.
-- [ ] Make both profiles launchable: classic clients intentionally share a
+- [x] Make both profiles launchable: classic clients intentionally share a
   namespace; confined client groups receive distinct namespaces and explicit
   capabilities.
 - [ ] Prove shared-X access within a classic namespace and denial of resource

@@ -129,8 +129,19 @@ session-scoped `MIT-MAGIC-COOKIE-1`; raw cookie bytes never enter the admission
 record. Legacy smoke helpers still default to unauthenticated local sockets.
 The live supervisor publishes a fresh kernel-random cookie in a standard
 owner-only Xauthority record, supplies only the path to launched terminals, and
-removes the file on teardown. Confined-client launch/routing and Engine-derived
-output facts remain before treating the listener as a general local X server.
+removes the file on teardown. Multiple confined-group credentials on one
+listener, the complete confinement matrix, and Engine-derived output facts
+remain before treating the listener as a general local X server.
+
+The live launcher accepts `--namespace-profile=classic|confined`. Classic is
+the default and intentionally shares its namespace among launched terminals.
+Confined allocates a fresh group namespace with explicit zero portal
+capabilities. Admission contexts preserve that immutable profile. A concurrent
+wire regression assigns two clients separate confined contexts and proves
+cross-namespace `MapWindow` fails with native `BadAccess`; it also caught and
+closed a missing runtime resource lookup on the map path. Separate confined
+group credentials on one listener and the full cross-namespace operation
+matrix remain active work.
 
 ### Connection Lifecycle
 

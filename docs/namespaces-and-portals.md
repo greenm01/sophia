@@ -66,6 +66,14 @@ capability set. Resource lookup, event subscription, properties, selections,
 input delivery, metadata, and transfers fail closed across namespaces unless a
 specific portal flow grants the operation.
 
+The live X launcher selects this profile with
+`--namespace-profile=confined`. Each run allocates a fresh confined namespace
+with explicit zero capabilities; all clients deliberately launched as part of
+that group share it. Separate group credentials on one listener remain future
+supervisor work. The socket suite already proves that two policy-assigned
+confined namespaces cannot map each other's windows, while the broader
+property, selection, event, input, and metadata matrix remains active work.
+
 Capabilities bound which portal operations a namespace may request or publish.
 They do not provide ambient cross-namespace access and do not replace a portal
 decision for a particular transfer.

@@ -4378,6 +4378,41 @@ impl XServerFrontendAdmissionPolicy for TestXAdmissionPolicy {
 }
 
 #[cfg(unix)]
+struct SequencedXAdmissionPolicy {
+    namespaces: [NamespaceContext; 2],
+    next_client: std::sync::atomic::AtomicU64,
+    revoked: std::sync::Mutex<Vec<ClientAdmissionContext>>,
+}
+
+#[cfg(unix)]
+impl XServerFrontendAdmissionPolicy for SequencedXAdmissionPolicy {
+    fn admit(
+        &self,
+        request: XServerFrontendAdmissionRequest,
+    ) -> Result<ClientAdmissionContext, XServerFrontendAdmissionError> {
+        let index = self
+            .next_client
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let namespace = self
+            .namespaces
+            .get(usize::try_from(index).map_err(|_| XServerFrontendAdmissionError::Unavailable)?)
+            .copied()
+            .ok_or(XServerFrontendAdmissionError::Unavailable)?;
+        ClientAdmissionContext::new(
+            ClientAdmissionId::from_raw(index + 1),
+            namespace,
+            ClientAuthProvenance::new(request.setup_authentication, 9).unwrap(),
+        )
+        .ok_or(XServerFrontendAdmissionError::Unavailable)
+    }
+
+    fn revoke(&self, context: ClientAdmissionContext) -> Result<(), XServerFrontendAdmissionError> {
+        self.revoked.lock().unwrap().push(context);
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
 #[test]
 fn x_server_frontend_reports_admission_denial_as_x11_setup_failure() {
     use std::io::{Read, Write};
@@ -4493,6 +4528,104 @@ fn x_server_frontend_revokes_distinct_admissions_for_concurrent_clients() {
     assert_eq!(revoked.len(), 2);
     assert_ne!(revoked[0].client_id, revoked[1].client_id);
     assert!(revoked.iter().all(|context| context.namespace == namespace));
+    std::fs::remove_file(&socket_path).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn x_server_frontend_confined_clients_cannot_map_cross_namespace_windows() {
+    use std::io::{Read, Write};
+    use std::num::NonZeroUsize;
+    use std::os::unix::net::UnixStream;
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let socket_path = std::env::temp_dir().join(format!(
+        "sophia-x-server-confined-namespace-test-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let first_namespace = NamespaceContext::new(
+        NamespaceId::from_raw(828),
+        NamespaceProfile::Confined,
+        NamespaceCapabilities::NONE,
+    )
+    .unwrap();
+    let second_namespace = NamespaceContext::new(
+        NamespaceId::from_raw(829),
+        NamespaceProfile::Confined,
+        NamespaceCapabilities::NONE,
+    )
+    .unwrap();
+    let policy = Arc::new(SequencedXAdmissionPolicy {
+        namespaces: [first_namespace, second_namespace],
+        next_client: std::sync::atomic::AtomicU64::new(0),
+        revoked: std::sync::Mutex::new(Vec::new()),
+    });
+    let config = XServerFrontendConfig::new_with_namespace_context(&socket_path, first_namespace)
+        .unwrap()
+        .with_admission_policy(policy.clone())
+        .with_max_concurrent_clients(NonZeroUsize::new(2).unwrap());
+    let server = thread::spawn(move || {
+        let mut frontend = XServerFrontend::bind(config).unwrap();
+        frontend.serve_next_concurrently().unwrap();
+        frontend.serve_next_concurrently().unwrap();
+        frontend.wait_for_clients().unwrap();
+    });
+
+    wait_for_socket(&socket_path);
+    let mut first = UnixStream::connect(&socket_path).unwrap();
+    first
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    assert_eq!(
+        read_setup_resource_id_base(&mut first, XByteOrder::LittleEndian),
+        X_SETUP_DEFAULT_RESOURCE_ID_BASE
+    );
+    let first_window = X_SETUP_DEFAULT_RESOURCE_ID_BASE + 1;
+    first
+        .write_all(&create_window_request(
+            XByteOrder::LittleEndian,
+            first_window,
+            0,
+            0,
+            160,
+            90,
+        ))
+        .unwrap();
+    assert_eq!(read_x_record(&mut first)[0], 22);
+
+    let mut second = UnixStream::connect(&socket_path).unwrap();
+    second
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    assert_eq!(
+        read_setup_resource_id_base(&mut second, XByteOrder::LittleEndian),
+        0x0040_0000
+    );
+    second
+        .write_all(&resource_request(XByteOrder::LittleEndian, 8, first_window))
+        .unwrap();
+    let mut error = [0; 32];
+    second.read_exact(&mut error).unwrap();
+    assert_eq!(error[0], 0);
+    assert_eq!(error[1], XErrorCode::BadAccess.wire_code());
+
+    drop(first);
+    drop(second);
+    server.join().unwrap();
+    let revoked = policy.revoked.lock().unwrap();
+    assert_eq!(revoked.len(), 2);
+    assert!(
+        revoked
+            .iter()
+            .all(|context| context.namespace.profile == NamespaceProfile::Confined)
+    );
+    assert_ne!(revoked[0].namespace.id, revoked[1].namespace.id);
     std::fs::remove_file(&socket_path).unwrap();
 }
 

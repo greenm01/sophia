@@ -117,6 +117,8 @@ impl XAuthorityRuntime {
                 }
             }
             XAuthorityRequestKind::MapWindow { window, generation } => {
+                self.resources
+                    .lookup(request.namespace, *window, XResourceKind::Window)?;
                 if let Some(surface) = self.windows.apply(XWindowLifecycleEvent::Mapped {
                     id: *window,
                     generation: *generation,

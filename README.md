@@ -257,11 +257,12 @@ complete desktop session: confined routing, Engine-derived output/RandR facts,
 normal resize, XKB, grabs, and presentation feedback remain.
 
 The namespace-keyed X resource model, profile/capability/admission types,
-session-owned in-memory registry, same-UID live classic admission, per-client
-revocation, fresh owner-only Xauthority publication/removal, and pure portal
-reducers already exist. Confined routing, broker lifecycle, and native
+session-owned in-memory registry, explicit classic/confined live launch
+profiles, same-UID admission, per-client revocation, fresh owner-only
+Xauthority publication/removal, and pure portal reducers already exist.
+Complete cross-namespace enforcement evidence, broker lifecycle, and native
 cross-namespace execution are not complete. The first reference portal will
-mediate X11 `CLIPBOARD` and `PRIMARY` after both profiles are launchable.
+mediate X11 `CLIPBOARD` and `PRIMARY` after the confinement matrix is proven.
 
 The Smithay-backed Wayland Authority remains functional and supported. Real
 Kitty uses native Wayland SHM, Engine-routed input, and KMS; controlled DMA-BUF

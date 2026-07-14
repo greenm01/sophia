@@ -84,8 +84,12 @@ or layout policy.
   then revokes each admission after connection cleanup. The supervisor creates
   a fresh owner-only Xauthority file and cookie for every live session, passes
   only its path to clients, and removes it on teardown. Denial uses native X11
-  setup failure. Confined launch/routing is not yet complete; classic
-  same-namespace existing-resource behavior is implemented.
+  setup failure. `sophia-live-session` explicitly selects classic-shared or a
+  confined group with zero ambient portal capabilities. A socket regression
+  assigns simultaneous clients distinct confined namespaces and proves a
+  cross-namespace `MapWindow` returns `BadAccess`. The remaining property,
+  selection, event, input, and metadata confinement matrix is not yet complete;
+  classic same-namespace existing-resource behavior is implemented.
 - `sophia-portal` has deterministic reducers for clipboard, drag-and-drop, file
   handoff, screen capture, URI open, and notifications. A session broker,
   policy-provider IPC, expiry lifecycle, and native-X executor are not complete.

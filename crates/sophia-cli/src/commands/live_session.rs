@@ -277,7 +277,7 @@ pub(crate) fn run_persistent_xterm_session(
     let x_namespace = namespace_registry
         .lock()
         .map_err(|_| "Sophia namespace registry lock was poisoned")?
-        .create_namespace(NamespaceProfile::ClassicShared, NamespaceCapabilities::NONE);
+        .create_namespace(config.namespace_profile, config.namespace_capabilities);
     let session_user_id = rustix::process::geteuid().as_raw();
     let admission_policy = Arc::new(LiveXAdmissionPolicy {
         registry: namespace_registry.clone(),
@@ -377,7 +377,7 @@ pub(crate) fn run_persistent_xterm_session(
     }
 
     println!(
-        "sophia_live_session schema=7 status=running display={} terminal=xterm runtime=persistent authority_capacity={} input_capacity={} control_capacity={} native_presentation={} physical_input={} pointer_proof={} secondary_terminal={} wm_policy={}",
+        "sophia_live_session schema=7 status=running display={} terminal=xterm runtime=persistent authority_capacity={} input_capacity={} control_capacity={} native_presentation={} physical_input={} pointer_proof={} secondary_terminal={} wm_policy={} namespace_profile={} namespace_request_capabilities={} namespace_publish_capabilities={}",
         config.display,
         SESSION_AUTHORITY_CAPACITY,
         SESSION_KEY_CAPACITY,
@@ -407,6 +407,12 @@ pub(crate) fn run_persistent_xterm_session(
         } else {
             "disabled"
         },
+        match config.namespace_profile {
+            NamespaceProfile::ClassicShared => "classic_shared",
+            NamespaceProfile::Confined => "confined",
+        },
+        config.namespace_capabilities.request_bits(),
+        config.namespace_capabilities.publish_bits(),
     );
     if let Some(native_scanout) = native_scanout.as_ref() {
         println!(
@@ -473,6 +479,8 @@ struct PersistentXtermSessionConfig {
     wm_process_args: Vec<String>,
     wm_socket_path: std::path::PathBuf,
     input_quiet_msec: u64,
+    namespace_profile: NamespaceProfile,
+    namespace_capabilities: NamespaceCapabilities,
 }
 
 impl PersistentXtermSessionConfig {
@@ -513,6 +521,16 @@ impl PersistentXtermSessionConfig {
         let secondary_terminal = args.iter().any(|arg| arg == "--secondary-terminal");
         let exit_after_input_proof = args.iter().any(|arg| arg == "--exit-after-input-proof");
         let native_scanout = args.iter().any(|arg| arg == "--native-scanout");
+        let namespace_profile = match arg_value(args, "--namespace-profile").as_deref() {
+            None | Some("classic") | Some("classic-shared") => NamespaceProfile::ClassicShared,
+            Some("confined") => NamespaceProfile::Confined,
+            Some(profile) => {
+                return Err(format!(
+                    "unsupported namespace profile {profile:?}; expected classic or confined"
+                )
+                .into());
+            }
+        };
         let wm_process = arg_value(args, "--wm-process");
         let wm_process_args = args
             .iter()
@@ -599,6 +617,8 @@ impl PersistentXtermSessionConfig {
                 std::process::id()
             )),
             input_quiet_msec: SESSION_INPUT_QUIET_MSEC,
+            namespace_profile,
+            namespace_capabilities: NamespaceCapabilities::NONE,
         })
     }
 
@@ -4175,18 +4195,40 @@ impl Drop for SessionProcessGuard {
 mod tests {
     use super::{
         BufferSource, CommittedSurfaceState, LiveXAuthorityFile, PersistentBackendRuntime,
-        PersistentCpuScene, Rect, Region, Size, center_geometry_without_scaling,
-        cpu_frame_matches_visible_output, cpu_frame_submission_ready,
-        layer_snapshots_from_committed, required_wayland_presentation_submission,
-        retain_latest_wayland_presentation, seed_missing_committed_surfaces,
+        PersistentCpuScene, PersistentXtermSessionConfig, Rect, Region, Size,
+        center_geometry_without_scaling, cpu_frame_matches_visible_output,
+        cpu_frame_submission_ready, layer_snapshots_from_committed,
+        required_wayland_presentation_submission, retain_latest_wayland_presentation,
+        seed_missing_committed_surfaces,
     };
     use sophia_protocol::{
-        AuthorityKind, SurfaceId, SurfaceTransaction, SurfaceTransactionReadiness,
+        AuthorityKind, NamespaceCapabilities, NamespaceProfile, SurfaceId, SurfaceTransaction,
+        SurfaceTransactionReadiness,
     };
     use sophia_x_authority::{
         X_AUTHORITY_CPU_BUFFER_FORMAT_XRGB8888, XAuthorityCpuBufferSnapshot, XResourceId,
     };
     use std::collections::BTreeMap;
+
+    #[test]
+    fn live_x_session_profiles_are_explicit_and_fail_closed() {
+        let classic = PersistentXtermSessionConfig::from_args(&[]).unwrap();
+        assert_eq!(classic.namespace_profile, NamespaceProfile::ClassicShared);
+        assert_eq!(classic.namespace_capabilities, NamespaceCapabilities::NONE);
+
+        let confined =
+            PersistentXtermSessionConfig::from_args(&["--namespace-profile=confined".to_owned()])
+                .unwrap();
+        assert_eq!(confined.namespace_profile, NamespaceProfile::Confined);
+        assert_eq!(confined.namespace_capabilities, NamespaceCapabilities::NONE);
+
+        assert!(
+            PersistentXtermSessionConfig::from_args(&["--namespace-profile=unknown".to_owned()])
+                .unwrap_err()
+                .to_string()
+                .contains("expected classic or confined")
+        );
+    }
 
     #[test]
     fn live_xauthority_file_is_owner_only_valid_and_removed_on_drop() {

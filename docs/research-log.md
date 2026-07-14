@@ -3,6 +3,23 @@
 This file records decisions and unresolved questions for the active milestone.
 Completed evidence is archived in `research-log-archive.md`.
 
+## 2026-07-13: Explicit X Session Profiles And Map Isolation
+
+The live X launcher now selects `classic` or `confined` explicitly. Classic
+remains the default shared-X group. A confined run receives a fresh registry
+namespace with explicit zero portal capabilities, and those immutable facts
+flow through every connection admission. The session status record exposes the
+selected profile and directional capability bitsets without exposing namespace
+identity.
+
+The first simultaneous confined socket proof assigned two clients distinct
+namespaces and exposed a real leak: `MapWindow` changed lifecycle state without
+checking the runtime resource table. The runtime now performs namespace-aware
+window lookup before mapping, so the second client receives native `BadAccess`;
+classic same-namespace mapping remains valid. Properties, selections, events,
+input, and metadata still need equivalent end-to-end confinement evidence
+before the isolation milestone is complete.
+
 ## 2026-07-13: Live Xauthority Ownership
 
 The live X session no longer relies on an unauthenticated owner-only socket. Its
