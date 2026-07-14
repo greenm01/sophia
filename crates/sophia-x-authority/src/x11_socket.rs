@@ -971,6 +971,63 @@ impl XServerFrontendClipboardExecutor {
     }
 }
 
+/// Coordinates one retained X11 selection through the broker socket. The
+/// grant is obtained before the source proxy is exposed, and only the bounded
+/// captured bytes return over the portal connection.
+#[cfg(unix)]
+pub fn coordinate_x11_clipboard_transfer(
+    path: impl AsRef<Path>,
+    request: &sophia_protocol::PortalBrokerRequestPacket,
+    executor: &XServerFrontendClipboardExecutor,
+    routes: &XServerFrontendRouteBroker,
+    timeout: Duration,
+) -> Result<sophia_protocol::PortalBrokerResponsePacket, X11SetupSocketError> {
+    let mut session =
+        sophia_portal::begin_portal_clipboard_request(path, request).map_err(|error| {
+            X11SetupSocketError::new(format!("portal broker request failed: {error}"))
+        })?;
+    let decision = session.response().decision.clone();
+    match &decision {
+        sophia_protocol::PortalBrokerResponseDecision::Denied => {
+            executor.fail(
+                session.response().transfer,
+                crate::ClipboardSelectionExecutionError::Denied,
+            )?;
+        }
+        sophia_protocol::PortalBrokerResponseDecision::Allowed(grant) => {
+            executor.request_source(grant)?;
+            let payload = routes
+                .recv_clipboard_source_payload_timeout(timeout)
+                .map_err(|error| {
+                    let _ = executor.fail(
+                        grant.transfer,
+                        crate::ClipboardSelectionExecutionError::Expired,
+                    );
+                    X11SetupSocketError::new(format!(
+                        "clipboard source payload unavailable: {error}"
+                    ))
+                })?;
+            if payload.transfer != grant.transfer {
+                executor.fail(
+                    grant.transfer,
+                    crate::ClipboardSelectionExecutionError::ExecutorFailure,
+                )?;
+                return Err(X11SetupSocketError::new(
+                    "clipboard source payload correlation mismatch",
+                ));
+            }
+            session.send_payload(&payload.bytes).map_err(|error| {
+                let _ = executor.fail(
+                    grant.transfer,
+                    crate::ClipboardSelectionExecutionError::ExecutorFailure,
+                );
+                X11SetupSocketError::new(format!("portal payload send failed: {error}"))
+            })?;
+        }
+    }
+    Ok(session.into_response())
+}
+
 /// A trace callback used by a bounded concurrent frontend worker.
 #[cfg(unix)]
 pub type X11CoreTraceObserver = dyn for<'trace> Fn(X11CoreDispatchTrace<'trace>) -> Result<(), X11SetupSocketError>

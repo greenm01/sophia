@@ -136,6 +136,60 @@ pub fn request_portal_broker_with_clipboard_payload(
     request: &PortalBrokerRequestPacket,
     payload: &[u8],
 ) -> Result<PortalBrokerResponsePacket, PortalBrokerSocketError> {
+    let mut session = begin_portal_clipboard_request(path, request)?;
+    if matches!(
+        session.response().decision,
+        PortalBrokerResponseDecision::Allowed(_)
+    ) {
+        session.send_payload(payload)?;
+    }
+    Ok(session.into_response())
+}
+
+#[cfg(unix)]
+pub struct PortalClipboardGrantSession {
+    stream: Option<UnixStream>,
+    response: PortalBrokerResponsePacket,
+}
+
+#[cfg(unix)]
+impl PortalClipboardGrantSession {
+    pub fn response(&self) -> &PortalBrokerResponsePacket {
+        &self.response
+    }
+
+    pub fn send_payload(&mut self, payload: &[u8]) -> Result<(), PortalBrokerSocketError> {
+        if !matches!(
+            self.response.decision,
+            PortalBrokerResponseDecision::Allowed(_)
+        ) {
+            return Err(PortalBrokerSocketError(
+                "portal broker denied clipboard payload".to_owned(),
+            ));
+        }
+        let frame = encode_portal_clipboard_payload_frame(self.response.transfer, payload)
+            .map_err(|error| PortalBrokerSocketError(format!("encode payload: {error:?}")))?;
+        let stream = self.stream.as_mut().ok_or_else(|| {
+            PortalBrokerSocketError("clipboard payload was already sent".to_owned())
+        })?;
+        stream
+            .write_all(&frame)
+            .and_then(|()| stream.flush())
+            .map_err(|error| socket_error("write payload", error))?;
+        self.stream = None;
+        Ok(())
+    }
+
+    pub fn into_response(self) -> PortalBrokerResponsePacket {
+        self.response
+    }
+}
+
+#[cfg(unix)]
+pub fn begin_portal_clipboard_request(
+    path: impl AsRef<Path>,
+    request: &PortalBrokerRequestPacket,
+) -> Result<PortalClipboardGrantSession, PortalBrokerSocketError> {
     let mut stream =
         UnixStream::connect(path.as_ref()).map_err(|error| socket_error("connect", error))?;
     let frame = encode_portal_broker_request_frame(request)
@@ -146,15 +200,10 @@ pub fn request_portal_broker_with_clipboard_payload(
         .map_err(|error| socket_error("write request", error))?;
     let response = decode_portal_broker_response_frame(&read_frame(&mut stream)?)
         .map_err(|error| PortalBrokerSocketError(format!("decode response: {error:?}")))?;
-    if matches!(response.decision, PortalBrokerResponseDecision::Allowed(_)) {
-        let frame = encode_portal_clipboard_payload_frame(response.transfer, payload)
-            .map_err(|error| PortalBrokerSocketError(format!("encode payload: {error:?}")))?;
-        stream
-            .write_all(&frame)
-            .and_then(|()| stream.flush())
-            .map_err(|error| socket_error("write payload", error))?;
-    }
-    Ok(response)
+    Ok(PortalClipboardGrantSession {
+        stream: Some(stream),
+        response,
+    })
 }
 
 /// Runs a bounded clipboard broker/executor batch. Policy never receives the

@@ -1,8 +1,9 @@
 use sophia_protocol::{
     BufferSource, ClientAdmissionContext, ClientAdmissionId, ClientAuthProvenance,
     ClientAuthenticationMethod, NamespaceCapabilities, NamespaceContext, NamespaceId,
-    NamespacePortalCapability, NamespaceProfile, PortalGrant, PortalGrantState, PortalTransferId,
-    PortalTransferKind, Rect, Region, Size, SurfaceConstraints, SurfaceId, TransactionId,
+    NamespacePortalCapability, NamespaceProfile, PortalBrokerRequestPacket, PortalDecision,
+    PortalRequest, PortalTransfer, PortalTransferId, PortalTransferKind, Rect, Region, Size,
+    SurfaceConstraints, SurfaceId, TransactionId,
 };
 use sophia_x_authority::*;
 
@@ -5076,6 +5077,7 @@ fn cross_namespace_executor_installs_property_and_notifies_requestor() {
             .unwrap()
             .as_nanos()
     ));
+    let portal_path = socket_path.with_extension("portal.sock");
     let source = NamespaceContext::new(
         NamespaceId::from_raw(860),
         NamespaceProfile::Confined,
@@ -5099,13 +5101,15 @@ fn cross_namespace_executor_installs_property_and_notifies_requestor() {
         .with_max_concurrent_clients(NonZeroUsize::new(2).unwrap());
     let (executor_sender, executor_receiver) = std::sync::mpsc::sync_channel(1);
     let (request_sender, request_receiver) = std::sync::mpsc::sync_channel(1);
-    let (payload_sender, payload_receiver) = std::sync::mpsc::sync_channel(1);
+    let (coordinate_sender, coordinate_receiver) = std::sync::mpsc::sync_channel(1);
+    let server_portal_path = portal_path.clone();
     let server = thread::spawn(move || {
         let broker = XServerFrontendRouteBroker::new(NonZeroUsize::new(4).unwrap());
         let mut frontend = XServerFrontend::bind(config).unwrap();
         executor_sender
             .send(frontend.clipboard_executor(&broker))
             .unwrap();
+        let first_request = Arc::new(std::sync::atomic::AtomicBool::new(true));
         let observer: Arc<X11CoreTraceObserver> = Arc::new(move |trace| {
             if trace
                 .request_detail
@@ -5113,6 +5117,9 @@ fn cross_namespace_executor_installs_property_and_notifies_requestor() {
                 .is_some_and(|detail| detail.starts_with("RequestSelection:"))
             {
                 request_sender.send(()).unwrap();
+                if first_request.swap(false, std::sync::atomic::Ordering::AcqRel) {
+                    coordinate_sender.send(()).unwrap();
+                }
             }
             Ok(())
         });
@@ -5122,17 +5129,54 @@ fn cross_namespace_executor_installs_property_and_notifies_requestor() {
         frontend
             .serve_next_concurrently_routed_traced(&broker, observer)
             .unwrap();
-        payload_sender
-            .send(
-                broker
-                    .recv_clipboard_source_payload_timeout(std::time::Duration::from_secs(2))
-                    .unwrap(),
-            )
-            .unwrap();
+        coordinate_receiver.recv().unwrap();
+        let request = PortalBrokerRequestPacket {
+            request: PortalRequest {
+                transfer: PortalTransfer {
+                    transfer: PortalTransferId::from_raw(2),
+                    source_namespace: source.id,
+                    target_namespace: target.id,
+                    kind: PortalTransferKind::Clipboard,
+                    mime_type: Some("UTF8_STRING".to_owned()),
+                    byte_size: 0,
+                    decision: PortalDecision::Pending,
+                    generation: 1,
+                },
+                deadline_msec: 2_000,
+            },
+            source_may_publish: true,
+            target_may_request: true,
+        };
+        coordinate_x11_clipboard_transfer(
+            server_portal_path,
+            &request,
+            &frontend.clipboard_executor(&broker),
+            &broker,
+            std::time::Duration::from_secs(2),
+        )
+        .unwrap();
         frontend.wait_for_clients().unwrap();
     });
     wait_for_socket(&socket_path);
     let executor = executor_receiver.recv().unwrap();
+    let portal_executor = executor.clone();
+    let portal_server_path = portal_path.clone();
+    let portal_server = thread::spawn(move || {
+        sophia_portal::run_portal_clipboard_broker_socket_server_bounded(
+            portal_server_path,
+            1,
+            sophia_portal::HeadlessPortalPolicy::Allow,
+            10,
+            1,
+            move |grant, payload| {
+                portal_executor
+                    .execute(grant, payload)
+                    .map(|_| ())
+                    .map_err(|_| ())
+            },
+        )
+    });
+    wait_for_socket(&portal_path);
     let mut owner = UnixStream::connect(&socket_path).unwrap();
     owner
         .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
@@ -5195,30 +5239,16 @@ fn cross_namespace_executor_installs_property_and_notifies_requestor() {
         ))
         .unwrap();
     request_receiver.recv().unwrap();
-    let transfer = PortalTransferId::from_raw(2);
-    let grant = PortalGrant {
-        transfer,
-        source_namespace: source.id,
-        target_namespace: target.id,
-        kind: PortalTransferKind::Clipboard,
-        source_generation: 1,
-        broker_generation: 1,
-        deadline_msec: 2_000,
-        state: PortalGrantState::Active,
-    };
-    let proxy = executor.request_source(&grant).unwrap();
     let source_request = read_x_record(&mut owner);
     assert_eq!(source_request[0], 30);
-    assert_eq!(
-        read_u32(XByteOrder::LittleEndian, &source_request[12..16]),
-        u32::try_from(proxy.requestor.local.raw()).unwrap()
-    );
+    let proxy = read_u32(XByteOrder::LittleEndian, &source_request[12..16]);
+    let proxy_property = read_u32(XByteOrder::LittleEndian, &source_request[24..28]);
     owner
         .write_all(&change_property_request(
             XByteOrder::LittleEndian,
             XPropertyMode::Replace,
-            u32::try_from(proxy.requestor.local.raw()).unwrap(),
-            proxy.property,
+            proxy,
+            proxy_property,
             utf8,
             8,
             b"cross namespace",
@@ -5228,20 +5258,13 @@ fn cross_namespace_executor_installs_property_and_notifies_requestor() {
     owner
         .write_all(&send_selection_notify_request(
             XByteOrder::LittleEndian,
-            u32::try_from(proxy.requestor.local.raw()).unwrap(),
-            proxy.time,
-            proxy.selection,
-            proxy.target,
-            proxy.property,
+            proxy,
+            read_u32(XByteOrder::LittleEndian, &source_request[4..8]),
+            read_u32(XByteOrder::LittleEndian, &source_request[16..20]),
+            read_u32(XByteOrder::LittleEndian, &source_request[20..24]),
+            proxy_property,
         ))
         .unwrap();
-    let source_payload = payload_receiver.recv().unwrap();
-    assert_eq!(source_payload.transfer, transfer);
-    let outcome = executor.execute(&grant, &source_payload.bytes).unwrap();
-    assert!(matches!(
-        outcome,
-        ClipboardSelectionExecutionOutcome::Handoff(_)
-    ));
     let notify = read_x_record(&mut requestor);
     assert_eq!(notify[0], 31);
     assert_eq!(read_u32(XByteOrder::LittleEndian, &notify[20..24]), utf8);
@@ -5258,6 +5281,7 @@ fn cross_namespace_executor_installs_property_and_notifies_requestor() {
         .unwrap();
     let reply = read_x_reply(&mut requestor, XByteOrder::LittleEndian);
     assert_eq!(&reply[32..47], b"cross namespace");
+    portal_server.join().unwrap().unwrap();
 
     for (sequence, failure) in [
         (4, ClipboardSelectionExecutionError::Denied),
