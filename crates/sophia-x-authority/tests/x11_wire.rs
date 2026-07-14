@@ -47,6 +47,44 @@ fn selection_request_and_clear_events_use_core_x11_layout() {
 }
 
 #[test]
+fn send_event_accepts_only_selection_notify_and_validates_destination() {
+    let namespace = NamespaceId::from_raw(44);
+    let byte_order = XByteOrder::LittleEndian;
+    let mut request = vec![0; 44];
+    request[0] = 25;
+    request[2..4].copy_from_slice(&11u16.to_le_bytes());
+    request[4..8].copy_from_slice(&0x200001u32.to_le_bytes());
+    request[12] = 31;
+    request[16..20].copy_from_slice(&17u32.to_le_bytes());
+    request[20..24].copy_from_slice(&0x200001u32.to_le_bytes());
+    request[24..28].copy_from_slice(&18u32.to_le_bytes());
+    request[28..32].copy_from_slice(&19u32.to_le_bytes());
+    request[32..36].copy_from_slice(&20u32.to_le_bytes());
+
+    assert_eq!(
+        decode_x11_core_request(context(namespace, 1, byte_order), &request).unwrap(),
+        XWireRequest::SendSelectionNotify {
+            destination: XResourceId::new(0x200001, 1),
+            event_mask: 0,
+            event: XClientEvent::SelectionNotify {
+                sequence: 0,
+                time: 17,
+                requestor: XResourceId::new(0x200001, 1),
+                selection: 18,
+                target: 19,
+                property: 20,
+            },
+        }
+    );
+
+    request[12] = 2;
+    assert_eq!(
+        decode_x11_core_request(context(namespace, 1, byte_order), &request),
+        Err(XWireParseError::InvalidEventType(2))
+    );
+}
+
+#[test]
 fn x11_setup_parser_accepts_little_endian_auth_fields() {
     let bytes = setup_request(
         XByteOrder::LittleEndian,
@@ -4868,6 +4906,109 @@ fn x_server_frontend_assigns_disjoint_setup_resource_ranges_to_clients() {
 
 #[cfg(unix)]
 #[test]
+fn x_server_frontend_routes_selection_notify_to_the_requestor_client() {
+    use std::io::{Read, Write};
+    use std::net::Shutdown;
+    use std::num::NonZeroUsize;
+    use std::os::unix::net::UnixStream;
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    let socket_path = std::env::temp_dir().join(format!(
+        "sophia-x-server-frontend-selection-route-test-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let config = XServerFrontendConfig::new(&socket_path, NamespaceId::from_raw(817))
+        .unwrap()
+        .with_max_concurrent_clients(NonZeroUsize::new(2).unwrap());
+    let server = thread::spawn(move || {
+        let broker = XServerFrontendRouteBroker::new(NonZeroUsize::new(4).unwrap());
+        let mut frontend = XServerFrontend::bind(config).unwrap();
+        let observer: Arc<X11CoreTraceObserver> = Arc::new(|_| Ok(()));
+        frontend
+            .serve_next_concurrently_routed_traced(&broker, observer.clone())
+            .unwrap();
+        frontend
+            .serve_next_concurrently_routed_traced(&broker, observer)
+            .unwrap();
+        frontend.wait_for_clients().unwrap();
+    });
+
+    wait_for_socket(&socket_path);
+    let mut owner = UnixStream::connect(&socket_path).unwrap();
+    owner
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    let owner_window = read_setup_resource_id_base(&mut owner, XByteOrder::LittleEndian) + 1;
+    owner
+        .write_all(&create_window_request(
+            XByteOrder::LittleEndian,
+            owner_window,
+            0,
+            0,
+            160,
+            90,
+        ))
+        .unwrap();
+    assert_eq!(read_x_record(&mut owner)[0], 22);
+
+    let mut requestor = UnixStream::connect(&socket_path).unwrap();
+    requestor
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    let requestor_window =
+        read_setup_resource_id_base(&mut requestor, XByteOrder::LittleEndian) + 1;
+    requestor
+        .write_all(&create_window_request(
+            XByteOrder::LittleEndian,
+            requestor_window,
+            0,
+            0,
+            160,
+            90,
+        ))
+        .unwrap();
+    assert_eq!(read_x_record(&mut requestor)[0], 22);
+
+    owner
+        .write_all(&send_selection_notify_request(
+            XByteOrder::LittleEndian,
+            requestor_window,
+            10,
+            11,
+            12,
+            13,
+        ))
+        .unwrap();
+    let event = read_x_record(&mut requestor);
+    assert_eq!(event[0] & 0x7f, 31);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &event[2..4]), 1);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &event[8..12]),
+        requestor_window
+    );
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &event[12..16]), 11);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &event[16..20]), 12);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &event[20..24]), 13);
+
+    owner
+        .set_read_timeout(Some(Duration::from_millis(20)))
+        .unwrap();
+    let mut unexpected = [0; 1];
+    assert!(owner.read(&mut unexpected).is_err());
+    owner.shutdown(Shutdown::Both).unwrap();
+    requestor.shutdown(Shutdown::Both).unwrap();
+    server.join().unwrap();
+    std::fs::remove_file(&socket_path).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
 fn x_server_frontend_assigns_distinct_connection_identities() {
     use std::io::Write;
     use std::os::unix::net::UnixStream;
@@ -6409,6 +6550,30 @@ fn convert_selection_request(
     push_u32(&mut out, byte_order, target);
     push_u32(&mut out, byte_order, property);
     push_u32(&mut out, byte_order, timestamp);
+    out
+}
+
+fn send_selection_notify_request(
+    byte_order: XByteOrder,
+    requestor: u32,
+    timestamp: u32,
+    selection: u32,
+    target: u32,
+    property: u32,
+) -> Vec<u8> {
+    let mut out = vec![25, 0];
+    push_u16(&mut out, byte_order, 11);
+    push_u32(&mut out, byte_order, requestor);
+    push_u32(&mut out, byte_order, 0);
+    out.push(31);
+    out.push(0);
+    push_u16(&mut out, byte_order, 0);
+    push_u32(&mut out, byte_order, timestamp);
+    push_u32(&mut out, byte_order, requestor);
+    push_u32(&mut out, byte_order, selection);
+    push_u32(&mut out, byte_order, target);
+    push_u32(&mut out, byte_order, property);
+    out.extend_from_slice(&[0; 8]);
     out
 }
 

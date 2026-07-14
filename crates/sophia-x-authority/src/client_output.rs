@@ -1076,6 +1076,7 @@ pub fn x_error_from_wire_parse(
         XWireParseError::UnknownOpcode(_) => XErrorCode::BadRequest,
         XWireParseError::InvalidPropertyMode(_)
         | XWireParseError::InvalidPropertyFormat(_)
+        | XWireParseError::InvalidEventType(_)
         | XWireParseError::PropertyValueTooLarge { .. } => XErrorCode::BadValue,
         XWireParseError::ResourceIdOutsideClientRange { .. } => XErrorCode::BadIdChoice,
     };

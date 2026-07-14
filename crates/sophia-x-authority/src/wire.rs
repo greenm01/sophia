@@ -3,9 +3,9 @@ use sophia_protocol::{
 };
 
 use crate::{
-    XAtom, XAuthorityRequestKind, XAuthorityRequestPacket, XByteOrder, XGraphicsContextValues,
-    XPoint, XPropertyChange, XPropertyMode, XPropertyRead, XResourceId, XSelectionChangeKind,
-    padded_len,
+    XAtom, XAuthorityRequestKind, XAuthorityRequestPacket, XByteOrder, XClientEvent,
+    XGraphicsContextValues, XPoint, XPropertyChange, XPropertyMode, XPropertyRead, XResourceId,
+    XSelectionChangeKind, padded_len,
 };
 
 const X_CREATE_WINDOW: u8 = 1;
@@ -26,6 +26,7 @@ const X_LIST_PROPERTIES: u8 = 21;
 const X_SET_SELECTION_OWNER: u8 = 22;
 const X_GET_SELECTION_OWNER: u8 = 23;
 const X_CONVERT_SELECTION: u8 = 24;
+const X_SEND_EVENT: u8 = 25;
 const X_GRAB_BUTTON: u8 = 28;
 const X_UNGRAB_BUTTON: u8 = 29;
 const X_GRAB_SERVER: u8 = 36;
@@ -108,6 +109,7 @@ const X_LIST_PROPERTIES_REQ_LEN: usize = 8;
 const X_SET_SELECTION_OWNER_REQ_LEN: usize = 16;
 const X_GET_SELECTION_OWNER_REQ_LEN: usize = 8;
 const X_CONVERT_SELECTION_REQ_LEN: usize = 24;
+const X_SEND_EVENT_REQ_LEN: usize = 44;
 const X_GRAB_BUTTON_REQ_LEN: usize = 24;
 const X_UNGRAB_BUTTON_REQ_LEN: usize = 12;
 const X_GRAB_SERVER_REQ_LEN: usize = 4;
@@ -255,6 +257,11 @@ pub enum XWireRequest {
     },
     GetSelectionOwner {
         selection: XAtom,
+    },
+    SendSelectionNotify {
+        destination: XResourceId,
+        event_mask: u32,
+        event: XClientEvent,
     },
     GrabButton {
         window: XResourceId,
@@ -502,6 +509,7 @@ pub enum XWireParseError {
     UnknownOpcode(u8),
     InvalidPropertyMode(u8),
     InvalidPropertyFormat(u8),
+    InvalidEventType(u8),
     PropertyValueTooLarge {
         len: usize,
         max: usize,
@@ -568,6 +576,7 @@ pub fn decode_x11_core_request(
         X_SET_SELECTION_OWNER => decode_set_selection_owner(context, bytes),
         X_GET_SELECTION_OWNER => decode_get_selection_owner(context, bytes),
         X_CONVERT_SELECTION => decode_convert_selection(context, bytes),
+        X_SEND_EVENT => decode_send_event(context, bytes),
         X_GRAB_BUTTON => decode_grab_button(context, bytes),
         X_UNGRAB_BUTTON => decode_ungrab_button(context, bytes),
         X_GRAB_SERVER => decode_grab_server(bytes),
@@ -2026,6 +2035,31 @@ fn decode_convert_selection(
             transfer: PortalTransferId::from_raw(context.transaction.raw()),
         },
     }))
+}
+
+fn decode_send_event(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_SEND_EVENT, X_SEND_EVENT_REQ_LEN, bytes.len())?;
+    let event_type = bytes[12] & 0x7f;
+    if event_type != 31 {
+        return Err(XWireParseError::InvalidEventType(event_type));
+    }
+    let destination = XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1);
+    let requestor = XResourceId::new(u64::from(context.byte_order.u32(&bytes[20..24])), 1);
+    Ok(XWireRequest::SendSelectionNotify {
+        destination,
+        event_mask: context.byte_order.u32(&bytes[8..12]),
+        event: XClientEvent::SelectionNotify {
+            sequence: 0,
+            time: context.byte_order.u32(&bytes[16..20]),
+            requestor,
+            selection: context.byte_order.u32(&bytes[24..28]),
+            target: context.byte_order.u32(&bytes[28..32]),
+            property: context.byte_order.u32(&bytes[32..36]),
+        },
+    })
 }
 
 fn require_len(opcode: u8, expected_at_least: usize, actual: usize) -> Result<(), XWireParseError> {

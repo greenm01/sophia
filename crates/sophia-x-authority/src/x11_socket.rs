@@ -1226,12 +1226,14 @@ struct XServerFrontendRouteRegistry {
 struct XServerFrontendClientRouteSenders {
     input: SyncSender<XAuthorityClientInputEvent>,
     control: SyncSender<XAuthorityControlCommand>,
+    protocol: SyncSender<XClientEvent>,
 }
 
 #[cfg(unix)]
 struct XServerFrontendClientRouteChannels {
     input: Receiver<XAuthorityClientInputEvent>,
     control: Receiver<XAuthorityControlCommand>,
+    protocol: Receiver<XClientEvent>,
 }
 
 #[cfg(unix)]
@@ -1255,6 +1257,7 @@ impl XServerFrontendRouteRegistry {
         let capacity = self.per_client_queue_capacity.get();
         let (input_sender, input) = sync_channel(capacity);
         let (control_sender, control) = sync_channel(capacity);
+        let (protocol_sender, protocol) = sync_channel(capacity);
         let mut clients = self
             .clients
             .lock()
@@ -1267,6 +1270,7 @@ impl XServerFrontendRouteRegistry {
             XServerFrontendClientRouteSenders {
                 input: input_sender,
                 control: control_sender,
+                protocol: protocol_sender,
             },
         );
         Ok((
@@ -1274,7 +1278,11 @@ impl XServerFrontendRouteRegistry {
                 client,
                 clients: self.clients.clone(),
             },
-            XServerFrontendClientRouteChannels { input, control },
+            XServerFrontendClientRouteChannels {
+                input,
+                control,
+                protocol,
+            },
         ))
     }
 
@@ -1292,6 +1300,15 @@ impl XServerFrontendRouteRegistry {
     ) -> Result<(), XServerFrontendRouteError> {
         let sender = self.client_senders(route.client)?.control;
         self.route_to_client(route.client, sender, route.command)
+    }
+
+    fn route_protocol(
+        &self,
+        client: XServerFrontendClientId,
+        event: XClientEvent,
+    ) -> Result<(), XServerFrontendRouteError> {
+        let sender = self.client_senders(client)?.protocol;
+        self.route_to_client(client, sender, event)
     }
 
     fn client_senders(
@@ -1617,6 +1634,25 @@ impl X11CoreSocketServerState {
             .lock()
             .map(|clients| clients.client_leases.len())
             .unwrap_or(0)
+    }
+
+    fn client_for_resource(
+        &self,
+        resource: XResourceId,
+    ) -> Result<Option<XServerFrontendClientId>, X11SetupSocketError> {
+        let raw = u32::try_from(resource.local.raw()).ok();
+        let clients = self
+            .clients
+            .lock()
+            .map_err(|_| X11SetupSocketError::new("X11 client lease lock poisoned"))?;
+        Ok(raw.and_then(|raw| {
+            clients.client_leases.iter().find_map(|(client, lease)| {
+                lease
+                    .resource_id_range
+                    .owns_new_resource(raw)
+                    .then_some(*client)
+            })
+        }))
     }
 }
 
@@ -2386,7 +2422,8 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
     let output_stream = Arc::new(Mutex::new(stream.try_clone().map_err(|error| {
         X11SetupSocketError::new(format!("failed to clone X11 output socket: {error}"))
     })?));
-    let (route_registration, input_receiver, control_channels) =
+    let protocol_routing = client_routing.clone();
+    let (route_registration, input_receiver, control_channels, protocol_receiver) =
         if let Some(routing) = client_routing {
             let (registration, channels) = match routing.register_client(client) {
                 Ok(registration) => registration,
@@ -2407,9 +2444,10 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                     receiver: channels.control,
                     acknowledgements: routing.acknowledgement_sender.clone(),
                 }),
+                Some(channels.protocol),
             )
         } else {
-            (None, input_receiver, control_channels)
+            (None, input_receiver, control_channels, None)
         };
     let input_writer = input_receiver
         .map(|receiver| {
@@ -2441,6 +2479,16 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
             )
         })
         .transpose()?;
+    let protocol_writer = protocol_receiver
+        .map(|receiver| {
+            spawn_x11_protocol_event_writer(
+                output_stream.clone(),
+                setup.byte_order,
+                event_sequence.clone(),
+                receiver,
+            )
+        })
+        .transpose()?;
     state.register_client(client_lease)?;
     if let Some((worker_id, sender)) = worker_admission
         && let Some(lease) = admission_lease.as_ref()
@@ -2464,7 +2512,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
             };
             let mut parse_error = None;
             let mut request_detail = None;
-            let (output, cpu_buffer_update) = match decode_x11_core_request(
+            let (mut output, cpu_buffer_update) = match decode_x11_core_request(
                 XWireClientContext {
                     byte_order: setup.byte_order,
                     namespace,
@@ -2553,6 +2601,25 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                     (dispatch_x11_parse_error(dispatch_context, error), None)
                 }
             };
+            if let Some(routing) = protocol_routing.as_ref()
+                && let Some((index, destination, event)) = output
+                    .outputs
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, output)| match output {
+                        crate::XClientOutput::Event(
+                            event @ XClientEvent::SelectionNotify { requestor, .. },
+                        ) => Some((index, *requestor, *event)),
+                        _ => None,
+                    })
+                && let Some(target) = state.client_for_resource(destination)?
+                && target != client
+            {
+                routing.route_protocol(target, event).map_err(|error| {
+                    X11SetupSocketError::new(format!("failed to route X11 protocol event: {error}"))
+                })?;
+                output.outputs.remove(index);
+            }
             if std::env::var_os("SOPHIA_X11_AUTHORITY_TRACE").is_some() {
                 eprintln!(
                     "sophia-x-authority: seq={} opcode={}",
@@ -2610,6 +2677,12 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 .thread
                 .join()
                 .map_err(|_| X11SetupSocketError::new("X11 control writer thread panicked"))??;
+        }
+        if let Some(writer) = protocol_writer {
+            writer.stop.store(true, Ordering::Release);
+            writer.thread.join().map_err(|_| {
+                X11SetupSocketError::new("X11 protocol event writer thread panicked")
+            })??;
         }
         Ok(())
     })();
@@ -2692,6 +2765,60 @@ struct X11InputEventWriter {
 struct X11ControlWriter {
     stop: Arc<AtomicBool>,
     thread: std::thread::JoinHandle<Result<(), X11SetupSocketError>>,
+}
+
+#[cfg(unix)]
+struct X11ProtocolEventWriter {
+    stop: Arc<AtomicBool>,
+    thread: std::thread::JoinHandle<Result<(), X11SetupSocketError>>,
+}
+
+#[cfg(unix)]
+fn spawn_x11_protocol_event_writer(
+    stream: Arc<Mutex<UnixStream>>,
+    byte_order: XByteOrder,
+    sequence: Arc<AtomicU16>,
+    receiver: Receiver<XClientEvent>,
+) -> Result<X11ProtocolEventWriter, X11SetupSocketError> {
+    let stop = Arc::new(AtomicBool::new(false));
+    let writer_stop = stop.clone();
+    let thread = std::thread::spawn(move || {
+        while !writer_stop.load(Ordering::Acquire) {
+            let mut event = match receiver.recv_timeout(Duration::from_millis(10)) {
+                Ok(event) => event,
+                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Disconnected) => return Ok(()),
+            };
+            set_x11_selection_event_sequence(&mut event, sequence.load(Ordering::Acquire));
+            let record = encode_x_client_event(byte_order, event);
+            let mut stream = stream
+                .lock()
+                .map_err(|_| X11SetupSocketError::new("X11 output socket lock poisoned"))?;
+            if let Err(error) = stream.write_all(&record) {
+                if is_x11_client_disconnect(&error) {
+                    return Ok(());
+                }
+                return Err(X11SetupSocketError::new(format!(
+                    "failed to write X11 protocol event: {error}"
+                )));
+            }
+            stream.flush().map_err(|error| {
+                X11SetupSocketError::new(format!("failed to flush X11 protocol event: {error}"))
+            })?;
+        }
+        Ok(())
+    });
+    Ok(X11ProtocolEventWriter { stop, thread })
+}
+
+#[cfg(unix)]
+fn set_x11_selection_event_sequence(event: &mut XClientEvent, value: u16) {
+    match event {
+        XClientEvent::SelectionClear { sequence, .. }
+        | XClientEvent::SelectionRequest { sequence, .. }
+        | XClientEvent::SelectionNotify { sequence, .. } => *sequence = value,
+        _ => unreachable!("protocol routing accepts only selection events"),
+    }
 }
 
 #[cfg(unix)]

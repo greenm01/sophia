@@ -499,6 +499,45 @@ pub fn dispatch_x11_wire_request(
             })],
             metadata_candidates: Vec::new(),
         },
+        XWireRequest::SendSelectionNotify {
+            destination,
+            event_mask,
+            mut event,
+        } => {
+            let requestor = match &event {
+                XClientEvent::SelectionNotify { requestor, .. } => *requestor,
+                _ => unreachable!("wire decoder admits only SelectionNotify"),
+            };
+            let validation = runtime
+                .validate_window_access(context.namespace, destination)
+                .and_then(|()| runtime.validate_window_access(context.namespace, requestor));
+            let outputs = match validation {
+                Ok(()) if destination == requestor && event_mask == 0 => {
+                    if let XClientEvent::SelectionNotify { sequence, .. } = &mut event {
+                        *sequence = context.sequence;
+                    }
+                    vec![XClientOutput::Event(event)]
+                }
+                Ok(()) => vec![XClientOutput::Error(crate::XClientError {
+                    code: XErrorCode::BadValue,
+                    sequence: context.sequence,
+                    resource_id: u32::try_from(destination.local.raw()).unwrap_or(0),
+                    minor_code: 0,
+                    major_code: context.major_opcode,
+                })],
+                Err(error) => vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(destination.local.raw()).unwrap_or(0),
+                ))],
+            };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::GrabButton { window, .. } | XWireRequest::UngrabButton { window, .. } => {
             let outputs = if window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
                 Vec::new()
