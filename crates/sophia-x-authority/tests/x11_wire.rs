@@ -1,8 +1,8 @@
 use sophia_protocol::{
     BufferSource, ClientAdmissionContext, ClientAdmissionId, ClientAuthProvenance,
     ClientAuthenticationMethod, NamespaceCapabilities, NamespaceContext, NamespaceId,
-    NamespacePortalCapability, NamespaceProfile, Rect, Region, Size, SurfaceConstraints, SurfaceId,
-    TransactionId,
+    NamespacePortalCapability, NamespaceProfile, PortalGrant, PortalGrantState, PortalTransferId,
+    PortalTransferKind, Rect, Region, Size, SurfaceConstraints, SurfaceId, TransactionId,
 };
 use sophia_x_authority::*;
 
@@ -5034,6 +5034,178 @@ fn x_server_frontend_routes_selection_notify_to_the_requestor_client() {
         .unwrap();
     let mut unexpected = [0; 1];
     assert!(owner.read(&mut unexpected).is_err());
+    owner.shutdown(Shutdown::Both).unwrap();
+    requestor.shutdown(Shutdown::Both).unwrap();
+    server.join().unwrap();
+    std::fs::remove_file(&socket_path).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn cross_namespace_executor_installs_property_and_notifies_requestor() {
+    use std::io::Write;
+    use std::net::Shutdown;
+    use std::num::NonZeroUsize;
+    use std::os::unix::net::UnixStream;
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let socket_path = std::env::temp_dir().join(format!(
+        "sophia-x11-cross-selection-test-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let source = NamespaceContext::new(
+        NamespaceId::from_raw(860),
+        NamespaceProfile::Confined,
+        NamespaceCapabilities::NONE,
+    )
+    .unwrap();
+    let target = NamespaceContext::new(
+        NamespaceId::from_raw(861),
+        NamespaceProfile::Confined,
+        NamespaceCapabilities::NONE,
+    )
+    .unwrap();
+    let policy = Arc::new(SequencedXAdmissionPolicy {
+        namespaces: [source, target],
+        next_client: std::sync::atomic::AtomicU64::new(0),
+        revoked: std::sync::Mutex::new(Vec::new()),
+    });
+    let config = XServerFrontendConfig::new_with_namespace_context(&socket_path, source)
+        .unwrap()
+        .with_admission_policy(policy)
+        .with_max_concurrent_clients(NonZeroUsize::new(2).unwrap());
+    let (executor_sender, executor_receiver) = std::sync::mpsc::sync_channel(1);
+    let (request_sender, request_receiver) = std::sync::mpsc::sync_channel(1);
+    let server = thread::spawn(move || {
+        let broker = XServerFrontendRouteBroker::new(NonZeroUsize::new(4).unwrap());
+        let mut frontend = XServerFrontend::bind(config).unwrap();
+        executor_sender
+            .send(frontend.clipboard_executor(&broker))
+            .unwrap();
+        let observer: Arc<X11CoreTraceObserver> = Arc::new(move |trace| {
+            if trace
+                .request_detail
+                .as_deref()
+                .is_some_and(|detail| detail.starts_with("RequestSelection:"))
+            {
+                request_sender.send(()).unwrap();
+            }
+            Ok(())
+        });
+        frontend
+            .serve_next_concurrently_routed_traced(&broker, observer.clone())
+            .unwrap();
+        frontend
+            .serve_next_concurrently_routed_traced(&broker, observer)
+            .unwrap();
+        frontend.wait_for_clients().unwrap();
+    });
+    wait_for_socket(&socket_path);
+    let executor = executor_receiver.recv().unwrap();
+    let mut owner = UnixStream::connect(&socket_path).unwrap();
+    owner
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    let owner_window = read_setup_resource_id_base(&mut owner, XByteOrder::LittleEndian) + 1;
+    owner
+        .write_all(&create_window_request(
+            XByteOrder::LittleEndian,
+            owner_window,
+            0,
+            0,
+            100,
+            60,
+        ))
+        .unwrap();
+    read_x_record(&mut owner);
+    owner
+        .write_all(&intern_atom_request(
+            XByteOrder::LittleEndian,
+            false,
+            "UTF8_STRING",
+        ))
+        .unwrap();
+    let atom_reply = read_x_record(&mut owner);
+    let utf8 = read_u32(XByteOrder::LittleEndian, &atom_reply[8..12]);
+    owner
+        .write_all(&set_selection_owner_request(
+            XByteOrder::LittleEndian,
+            owner_window,
+            1,
+            10,
+        ))
+        .unwrap();
+
+    let mut requestor = UnixStream::connect(&socket_path).unwrap();
+    requestor
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    let requestor_window =
+        read_setup_resource_id_base(&mut requestor, XByteOrder::LittleEndian) + 1;
+    requestor
+        .write_all(&create_window_request(
+            XByteOrder::LittleEndian,
+            requestor_window,
+            0,
+            0,
+            100,
+            60,
+        ))
+        .unwrap();
+    read_x_record(&mut requestor);
+    requestor
+        .write_all(&convert_selection_request(
+            XByteOrder::LittleEndian,
+            requestor_window,
+            1,
+            utf8,
+            utf8,
+            11,
+        ))
+        .unwrap();
+    request_receiver.recv().unwrap();
+    let transfer = PortalTransferId::from_raw(2);
+    let outcome = executor
+        .execute(
+            &PortalGrant {
+                transfer,
+                source_namespace: source.id,
+                target_namespace: target.id,
+                kind: PortalTransferKind::Clipboard,
+                source_generation: 1,
+                broker_generation: 1,
+                deadline_msec: 2_000,
+                state: PortalGrantState::Active,
+            },
+            b"cross namespace",
+        )
+        .unwrap();
+    assert!(matches!(
+        outcome,
+        ClipboardSelectionExecutionOutcome::Handoff(_)
+    ));
+    let notify = read_x_record(&mut requestor);
+    assert_eq!(notify[0], 31);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &notify[20..24]), utf8);
+    requestor
+        .write_all(&get_property_request(
+            XByteOrder::LittleEndian,
+            false,
+            requestor_window,
+            utf8,
+            utf8,
+            0,
+            64,
+        ))
+        .unwrap();
+    let reply = read_x_reply(&mut requestor, XByteOrder::LittleEndian);
+    assert_eq!(&reply[32..47], b"cross namespace");
     owner.shutdown(Shutdown::Both).unwrap();
     requestor.shutdown(Shutdown::Both).unwrap();
     server.join().unwrap();

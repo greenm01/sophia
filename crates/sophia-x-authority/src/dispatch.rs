@@ -67,7 +67,16 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
-        XWireRequest::Authority(packet) => {
+        XWireRequest::Authority(mut packet) => {
+            if let XAuthorityRequestKind::RequestSelection {
+                target,
+                target_name,
+                ..
+            } = &mut packet.kind
+                && let Some(name) = atoms.name(*target)
+            {
+                *target_name = name.to_owned();
+            }
             let kind = packet.kind.clone();
             let response = runtime.apply(packet);
             if let XAuthorityRequestKind::RequestSelection { transfer, .. } = &kind {

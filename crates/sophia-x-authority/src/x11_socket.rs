@@ -459,6 +459,16 @@ impl XServerFrontend {
         self.workers.len()
     }
 
+    pub fn clipboard_executor(
+        &self,
+        broker: &XServerFrontendRouteBroker,
+    ) -> XServerFrontendClipboardExecutor {
+        XServerFrontendClipboardExecutor {
+            state: self.state.clone(),
+            routing: broker.registry.clone(),
+        }
+    }
+
     /// Reaps every concurrent worker that has already completed without
     /// waiting for an active client.
     pub fn poll_client_workers(&mut self) -> Result<(), X11SetupSocketError> {
@@ -814,6 +824,73 @@ impl XServerFrontend {
                 "failed to revoke X11 client admission: {error}"
             ))),
         }
+    }
+}
+
+/// Authority-side endpoint for a portal executor. Broker-visible values stop
+/// at the grant and payload; retained XIDs, atoms, properties, and event
+/// routing remain private to this object.
+#[cfg(unix)]
+#[derive(Clone)]
+pub struct XServerFrontendClipboardExecutor {
+    state: X11CoreSocketServerState,
+    routing: XServerFrontendRouteRegistry,
+}
+
+#[cfg(unix)]
+impl XServerFrontendClipboardExecutor {
+    pub fn execute(
+        &self,
+        grant: &sophia_protocol::PortalGrant,
+        payload: &[u8],
+    ) -> Result<crate::ClipboardSelectionExecutionOutcome, X11SetupSocketError> {
+        let mut runtime = self
+            .state
+            .runtime
+            .lock()
+            .map_err(|_| X11SetupSocketError::new("X11 authority runtime lock poisoned"))?;
+        let mut atoms = self
+            .state
+            .atoms
+            .lock()
+            .map_err(|_| X11SetupSocketError::new("X11 atom table lock poisoned"))?;
+        let mut properties = self
+            .state
+            .properties
+            .lock()
+            .map_err(|_| X11SetupSocketError::new("X11 property table lock poisoned"))?;
+        let outcome = runtime
+            .execute_clipboard_payload(grant.transfer, grant, payload, &mut atoms, &mut properties)
+            .map_err(|error| {
+                X11SetupSocketError::new(format!("clipboard executor rejected payload: {error:?}"))
+            })?;
+        drop(properties);
+        drop(atoms);
+        drop(runtime);
+        let notify = match &outcome {
+            crate::ClipboardSelectionExecutionOutcome::Handoff(handoff) => handoff.notify,
+            crate::ClipboardSelectionExecutionOutcome::Failed { notify, .. } => *notify,
+        };
+        let target = self
+            .state
+            .client_for_resource(notify.requestor)?
+            .ok_or_else(|| X11SetupSocketError::new("clipboard requestor disconnected"))?;
+        self.routing
+            .route_protocol(
+                target,
+                XClientEvent::SelectionNotify {
+                    sequence: 0,
+                    time: notify.time,
+                    requestor: notify.requestor,
+                    selection: notify.selection,
+                    target: notify.target,
+                    property: notify.property,
+                },
+            )
+            .map_err(|error| {
+                X11SetupSocketError::new(format!("failed to route clipboard notify: {error}"))
+            })?;
+        Ok(outcome)
     }
 }
 
