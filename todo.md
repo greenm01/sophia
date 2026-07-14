@@ -31,7 +31,7 @@ compatibility provider; no XLibre integration work is active.
 - [x] Reconcile portal kinds so clipboard, drag-and-drop, file handoff, screen
   capture, screen recording, URI open, and notification are explicit protocol
   values.
-- [ ] Split request decisions from grant lifecycle, including deadlines,
+- [x] Split request decisions from grant lifecycle, including deadlines,
   completion, expiry, disconnect revocation, broker-restart revocation, and
   generation checks.
 - [ ] Add bounded broker IPC, an I/O-free policy reducer, a deterministic

@@ -177,6 +177,13 @@ an interchangeable policy provider, not authority or Engine logic.
 Same-namespace selections use ordinary X11 semantics. A selection request whose
 owner and requestor are in different namespaces becomes a portal request.
 
+The native frontend implements that same-namespace path as client-addressed,
+bounded protocol-event queues. `ConvertSelection` delivers `SelectionRequest`
+to the owning connection; the owner may return only a core `SelectionNotify`
+whose destination and requestor agree. The frontend routes that event to the
+requestor connection and rewrites its sequence for that connection. This does
+not grant either client cross-namespace resource access.
+
 The X frontend retains requestor XID, selection atom, target atom, property,
 timestamp, and source-owner generation. The broker sees only namespace IDs,
 transfer kind, normalized target/MIME, bounded size facts, and generation.

@@ -580,6 +580,12 @@ not the long-term target architecture.
   smoke.
 - [x] Portal execution prototype: X11 `SelectionRequest` conversion, native
   denial, approved bounded text handoff, and live X smoke.
+- [x] Portal request/grant lifecycle: bounded pending and active state,
+  deadlines, completion, expiry, disconnect and executor revocation,
+  source-generation validation, and broker-restart invalidation.
+- [x] Native same-namespace selection handshake: per-client routing for core
+  `SelectionRequest` and restricted `SelectionNotify` SendEvent, with a
+  two-client socket proof and connection-local event sequences.
 - [x] Protocol-neutral authority transactions: `AuthoritySurface`,
   `SurfaceTransaction`, readiness states, and committed surface projection into
   renderable layers.
