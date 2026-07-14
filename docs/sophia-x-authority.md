@@ -116,16 +116,20 @@ creation; the lease remains a teardown ledger, not an access-control list.
 namespace explicit, reject invalid namespaces, restrict the socket to its
 owner, and refuse to replace a non-socket path. The configuration can now
 consume an immutable session-created `NamespaceContext`; the legacy constructor
-creates a classic-shared context for existing smoke callers. It does not yet
-admit a distinct `ClientAdmissionContext` per accepted connection. The
-configuration can require a session-scoped `MIT-MAGIC-COOKIE-1` value: a bad
-setup receives a
-normal X11 setup-failure reply and the listener remains available for the next
-client. The legacy smoke helpers and the configuration default deliberately
-remain unauthenticated local sockets. Xauthority-file management,
-peer-credential policy, cookie rotation, per-connection session admission,
-Engine-derived output facts, and confined-client routing are still required
-before treating the listener as a general local X server.
+creates a classic-shared context for existing smoke callers. Production config
+installs a protocol-neutral admission policy: after setup authentication and
+before X client/resource allocation, the policy receives bounded authentication
+provenance plus kernel peer credentials and returns a distinct immutable
+`ClientAdmissionContext`. Denial receives a normal X11 setup-failure reply. An
+admission lease revokes the context after resource/route cleanup and also on
+early worker errors. The live classic session requires the peer UID to match
+the session user and deliberately assigns each connection the same shared
+namespace through the session registry. The configuration can also require a
+session-scoped `MIT-MAGIC-COOKIE-1`; raw cookie bytes never enter the admission
+record. Legacy smoke helpers still default to unauthenticated local sockets.
+Xauthority-file management, cookie rotation, confined-client launch/routing,
+and Engine-derived output facts remain before treating the listener as a
+general local X server.
 
 ### Connection Lifecycle
 

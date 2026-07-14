@@ -6,7 +6,8 @@ use sophia_engine::{
     FocusedInputRoute, InputFocusDecision, InputFocusState, NonBlockingInputPoller,
 };
 use sophia_protocol::{
-    DeviceId, NamespaceCapabilities, NamespaceProfile, OutputId, SeatId, WmManageSurface,
+    ClientAdmissionContext, ClientAuthenticationMethod, DeviceId, NamespaceCapabilities,
+    NamespaceId, NamespaceProfile, OutputId, SeatId, WmManageSurface,
 };
 use sophia_runtime::NamespaceRegistry;
 use sophia_x_authority::{
@@ -14,7 +15,8 @@ use sophia_x_authority::{
     XAuthorityClientInputEvent, XAuthorityClientSurfaceRoutes, XAuthorityControlCommand,
     XAuthorityControlOutcome, XAuthorityInputDeliveryId, XAuthorityInputDeliveryOutcome,
     XAuthorityInputEvent, XAuthorityPointerEvent, XAuthorityPointerEventKind, XCoreKeyboardMapper,
-    XCorePointerMapper, XServerFrontendConfig, XServerFrontendRouteBroker,
+    XCorePointerMapper, XServerFrontendAdmissionError, XServerFrontendAdmissionPolicy,
+    XServerFrontendAdmissionRequest, XServerFrontendConfig, XServerFrontendRouteBroker,
     XServerFrontendServiceCommand, run_x_server_frontend_routed_until_stopped,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -24,6 +26,7 @@ use std::os::unix::fs::MetadataExt;
 use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub(super) mod input_guard;
@@ -39,6 +42,43 @@ const SESSION_SEAT_RAW: u64 = 1;
 const SESSION_KEYBOARD_DEVICE_RAW: u64 = 1;
 const SESSION_POINTER_DEVICE_RAW: u64 = 2;
 static NEXT_SESSION_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+struct LiveXAdmissionPolicy {
+    registry: Arc<Mutex<NamespaceRegistry>>,
+    namespace: NamespaceId,
+    session_user_id: u32,
+}
+
+impl XServerFrontendAdmissionPolicy for LiveXAdmissionPolicy {
+    fn admit(
+        &self,
+        request: XServerFrontendAdmissionRequest,
+    ) -> Result<ClientAdmissionContext, XServerFrontendAdmissionError> {
+        let peer = request
+            .peer_credentials
+            .ok_or(XServerFrontendAdmissionError::Denied)?;
+        if peer.user_id != self.session_user_id {
+            return Err(XServerFrontendAdmissionError::Denied);
+        }
+        self.registry
+            .lock()
+            .map_err(|_| XServerFrontendAdmissionError::Unavailable)?
+            .admit(self.namespace, ClientAuthenticationMethod::PeerCredentials)
+            .map_err(|_| XServerFrontendAdmissionError::Unavailable)
+    }
+
+    fn revoke(&self, context: ClientAdmissionContext) -> Result<(), XServerFrontendAdmissionError> {
+        if context.namespace.id != self.namespace {
+            return Err(XServerFrontendAdmissionError::Unavailable);
+        }
+        self.registry
+            .lock()
+            .map_err(|_| XServerFrontendAdmissionError::Unavailable)?
+            .revoke_admission(context.client_id)
+            .map(|_| ())
+            .map_err(|_| XServerFrontendAdmissionError::Unavailable)
+    }
+}
 
 enum SessionPhysicalInput {
     Direct(
@@ -104,11 +144,20 @@ pub(crate) fn run_persistent_xterm_session(
             generation.checked_add(1)
         })
         .map_err(|_| "Sophia session generation exhausted")?;
-    let mut namespace_registry = NamespaceRegistry::new(session_generation)?;
+    let namespace_registry = Arc::new(Mutex::new(NamespaceRegistry::new(session_generation)?));
     let x_namespace = namespace_registry
+        .lock()
+        .map_err(|_| "Sophia namespace registry lock was poisoned")?
         .create_namespace(NamespaceProfile::ClassicShared, NamespaceCapabilities::NONE);
+    let session_user_id = rustix::process::geteuid().as_raw();
+    let admission_policy = Arc::new(LiveXAdmissionPolicy {
+        registry: namespace_registry.clone(),
+        namespace: x_namespace.id,
+        session_user_id,
+    });
     let frontend_config =
-        XServerFrontendConfig::new_with_namespace_context(&server_path, x_namespace)?;
+        XServerFrontendConfig::new_with_namespace_context(&server_path, x_namespace)?
+            .with_admission_policy(admission_policy);
     let (authority_sender, authority_receiver) = sync_channel(SESSION_AUTHORITY_CAPACITY);
     let (control_ack_sender, control_ack_receiver) = sync_channel(SESSION_CONTROL_CAPACITY);
     let (input_delivery_sender, input_delivery_receiver) = sync_channel(SESSION_KEY_CAPACITY);
@@ -260,7 +309,10 @@ pub(crate) fn run_persistent_xterm_session(
         .join()
         .map_err(|_| "persistent X authority server thread panicked")?;
     server_result.map_err(|error| format!("persistent X authority server failed: {error}"))?;
-    namespace_registry.revoke_namespace(x_namespace.id)?;
+    namespace_registry
+        .lock()
+        .map_err(|_| "Sophia namespace registry lock was poisoned")?
+        .revoke_namespace(x_namespace.id)?;
     result
 }
 

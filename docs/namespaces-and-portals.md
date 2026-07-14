@@ -10,8 +10,8 @@ The current repository has typed namespace/profile/capability/admission values,
 a session-owned in-memory namespace registry, namespace-keyed X resource
 tables, an X configuration seam that accepts immutable namespace context, a
 live X session that allocates and revokes its classic context through the
-registry, and pure portal reducers. Live per-connection admission,
-confined-client routing, broker IPC, prompt policy, expiry, and concrete
+registry, per-connection X admission and revocation, and pure portal reducers.
+Confined-client launch/routing, broker IPC, prompt policy, expiry, and concrete
 native-X portal execution are target work tracked in `todo.md`.
 
 ## Ownership
@@ -76,17 +76,25 @@ frontends.
 
 ## Admission
 
-An X listener is transport, not identity. Accepting a connection must consult a
-session admission interface using the listener/session generation, peer
-credentials, configured policy, and `MIT-MAGIC-COOKIE-1` result. Successful
+An X listener is transport, not identity. After setup authentication and before
+allocating an X client identity or resource range, accepting a connection
+consults a session admission interface using peer credentials, configured
+policy, and the bounded `MIT-MAGIC-COOKIE-1` result when enabled. Successful
 admission returns one immutable `ClientAdmissionContext`; failure sends normal
-X11 setup failure and creates no client resources.
+X11 setup failure and creates no client resources. The live classic session
+currently requires a kernel-authenticated peer UID matching the session user,
+allocates a distinct registry admission for every connection, and revokes it
+after connection cleanup. Deterministic regressions cover denial, simultaneous
+admissions, normal disconnect, and dispatch-failure cleanup.
 
-The production frontend must not use one hardcoded `NamespaceId` for every
-accepted connection. Cookie creation, Xauthority-file publication, rotation,
-removal, and raw-secret handling remain supervisor responsibilities. The
-frontend may validate presented authorization through the supplied admission
-policy but must not persist raw cookie material in diagnostics or Engine data.
+The production frontend must not infer identity from one hardcoded
+`NamespaceId`. Classic policy may deliberately return the same namespace in
+distinct admission contexts; confined policy must return the namespace and
+capabilities selected for that client group. Cookie creation, Xauthority-file
+publication, rotation, removal, and raw-secret handling remain supervisor
+responsibilities. The frontend validates configured setup authorization before
+calling policy and never exposes raw cookie material to admission records,
+diagnostics, or Engine data.
 
 Disconnect revokes the connection context, releases its creation ledger, clears
 its owned selection generations, unregisters input/control routes, and closes

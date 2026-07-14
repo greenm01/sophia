@@ -39,9 +39,9 @@ compatibility provider; no XLibre integration work is active.
 - [x] Replace the production live X session's hardcoded namespace with a
   registry-allocated classic context retained for the session lifetime and
   revoked during teardown.
-- [ ] Thread `ClientAdmissionContext` through accepted authority connections so
+- [x] Thread `ClientAdmissionContext` through accepted authority connections so
   authorities consume admitted identities and never allocate or infer them.
-- [ ] Replace the X frontend's listener-wide single namespace context with a
+- [x] Replace the X frontend's listener-wide single namespace context with a
   bounded per-connection admission interface driven by session generation,
   listener policy, peer credentials, and `MIT-MAGIC-COOKIE-1` validation.
 - [ ] Add Xauthority-file creation/removal, cookie rotation, raw-secret

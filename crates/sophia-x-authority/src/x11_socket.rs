@@ -33,8 +33,8 @@ use crate::{
 };
 #[cfg(unix)]
 use sophia_protocol::{
-    NamespaceCapabilities, NamespaceContext, NamespaceId, NamespaceProfile, Size, SurfaceId,
-    TransactionId,
+    ClientAdmissionContext, ClientAuthenticationMethod, NamespaceCapabilities, NamespaceContext,
+    NamespaceId, NamespaceProfile, Size, SurfaceId, TransactionId,
 };
 
 #[cfg(unix)]
@@ -137,6 +137,65 @@ impl XServerFrontendSetupAuthorization {
             }
         }
     }
+
+    const fn authentication_method(&self) -> ClientAuthenticationMethod {
+        match self {
+            Self::UnauthenticatedLocal => ClientAuthenticationMethod::TrustedLocal,
+            Self::MitMagicCookie(_) => ClientAuthenticationMethod::MitMagicCookie1,
+        }
+    }
+}
+
+/// Kernel-authenticated identity of one local Unix-socket peer.
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct XServerFrontendPeerCredentials {
+    pub process_id: u32,
+    pub user_id: u32,
+    pub group_id: u32,
+}
+
+/// Bounded facts supplied to session admission after X setup authentication.
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XServerFrontendAdmissionRequest {
+    pub setup_authentication: ClientAuthenticationMethod,
+    pub peer_credentials: Option<XServerFrontendPeerCredentials>,
+}
+
+/// Fail-closed result from the session admission boundary.
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum XServerFrontendAdmissionError {
+    Denied,
+    Unavailable,
+}
+
+#[cfg(unix)]
+impl core::fmt::Display for XServerFrontendAdmissionError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Denied => formatter.write_str("X11 client admission denied"),
+            Self::Unavailable => formatter.write_str("X11 client admission unavailable"),
+        }
+    }
+}
+
+#[cfg(unix)]
+impl std::error::Error for XServerFrontendAdmissionError {}
+
+/// Session policy called once after setup authentication and once at teardown.
+///
+/// Implementations may allocate and revoke identities in a session registry.
+/// They receive no raw cookie bytes or X11 resource identity.
+#[cfg(unix)]
+pub trait XServerFrontendAdmissionPolicy: Send + Sync + 'static {
+    fn admit(
+        &self,
+        request: XServerFrontendAdmissionRequest,
+    ) -> Result<ClientAdmissionContext, XServerFrontendAdmissionError>;
+
+    fn revoke(&self, context: ClientAdmissionContext) -> Result<(), XServerFrontendAdmissionError>;
 }
 
 #[cfg(unix)]
@@ -157,12 +216,27 @@ fn x11_authorization_data_eq(actual: &[u8], expected: &[u8]) -> bool {
 /// registry. The legacy constructor retains fixed classic-shared behavior for
 /// existing smoke helpers while callers migrate to an immutable context.
 #[cfg(unix)]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct XServerFrontendConfig {
     socket_path: PathBuf,
     namespace: NamespaceContext,
     setup_authorization: XServerFrontendSetupAuthorization,
+    admission_policy: Option<Arc<dyn XServerFrontendAdmissionPolicy>>,
     max_concurrent_clients: NonZeroUsize,
+}
+
+#[cfg(unix)]
+impl core::fmt::Debug for XServerFrontendConfig {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("XServerFrontendConfig")
+            .field("socket_path", &self.socket_path)
+            .field("namespace", &self.namespace)
+            .field("setup_authorization", &self.setup_authorization)
+            .field("has_admission_policy", &self.admission_policy.is_some())
+            .field("max_concurrent_clients", &self.max_concurrent_clients)
+            .finish()
+    }
 }
 
 #[cfg(unix)]
@@ -201,6 +275,7 @@ impl XServerFrontendConfig {
             socket_path,
             namespace,
             setup_authorization: XServerFrontendSetupAuthorization::default(),
+            admission_policy: None,
             max_concurrent_clients: X_SERVER_FRONTEND_DEFAULT_MAX_CONCURRENT_CLIENTS,
         })
     }
@@ -210,6 +285,14 @@ impl XServerFrontendConfig {
         setup_authorization: XServerFrontendSetupAuthorization,
     ) -> Self {
         self.setup_authorization = setup_authorization;
+        self
+    }
+
+    pub fn with_admission_policy(
+        mut self,
+        admission_policy: Arc<dyn XServerFrontendAdmissionPolicy>,
+    ) -> Self {
+        self.admission_policy = Some(admission_policy);
         self
     }
 
@@ -239,8 +322,74 @@ impl XServerFrontendConfig {
         &self.setup_authorization
     }
 
+    fn admission_policy(&self) -> Option<Arc<dyn XServerFrontendAdmissionPolicy>> {
+        self.admission_policy.clone()
+    }
+
     pub const fn max_concurrent_clients(&self) -> NonZeroUsize {
         self.max_concurrent_clients
+    }
+}
+
+#[cfg(all(unix, target_os = "linux"))]
+fn x11_peer_credentials(
+    stream: &UnixStream,
+) -> Result<Option<XServerFrontendPeerCredentials>, X11SetupSocketError> {
+    let credentials = rustix::net::sockopt::socket_peercred(stream).map_err(|error| {
+        X11SetupSocketError::new(format!("failed to read X11 peer credentials: {error}"))
+    })?;
+    let process_id = u32::try_from(credentials.pid.as_raw_pid()).map_err(|_| {
+        X11SetupSocketError::new("X11 peer process ID is outside the supported range")
+    })?;
+    Ok(Some(XServerFrontendPeerCredentials {
+        process_id,
+        user_id: credentials.uid.as_raw(),
+        group_id: credentials.gid.as_raw(),
+    }))
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn x11_peer_credentials(
+    _stream: &UnixStream,
+) -> Result<Option<XServerFrontendPeerCredentials>, X11SetupSocketError> {
+    Ok(None)
+}
+
+#[cfg(unix)]
+struct XServerFrontendAdmissionLease {
+    policy: Arc<dyn XServerFrontendAdmissionPolicy>,
+    context: Option<ClientAdmissionContext>,
+}
+
+#[cfg(unix)]
+impl XServerFrontendAdmissionLease {
+    fn new(
+        policy: Arc<dyn XServerFrontendAdmissionPolicy>,
+        context: ClientAdmissionContext,
+    ) -> Self {
+        Self {
+            policy,
+            context: Some(context),
+        }
+    }
+
+    fn context(&self) -> ClientAdmissionContext {
+        self.context
+            .expect("active X11 admission lease must retain its context")
+    }
+
+    fn revoke(&mut self) -> Result<(), XServerFrontendAdmissionError> {
+        let Some(context) = self.context.take() else {
+            return Ok(());
+        };
+        self.policy.revoke(context)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for XServerFrontendAdmissionLease {
+    fn drop(&mut self) {
+        let _ = self.revoke();
     }
 }
 
@@ -444,6 +593,7 @@ impl XServerFrontend {
             self.config.namespace(),
             &self.state,
             self.config.setup_authorization(),
+            self.config.admission_policy(),
             None,
             |_| Ok(()),
         )
@@ -458,6 +608,7 @@ impl XServerFrontend {
             self.config.namespace(),
             &self.state,
             self.config.setup_authorization(),
+            self.config.admission_policy(),
             None,
             observer,
         )
@@ -476,6 +627,7 @@ impl XServerFrontend {
             self.config.namespace(),
             &self.state,
             self.config.setup_authorization(),
+            self.config.admission_policy(),
             observer,
         )
     }
@@ -493,6 +645,7 @@ impl XServerFrontend {
         let state = self.state.clone();
         let namespace = self.config.namespace();
         let authorization = self.config.setup_authorization().clone();
+        let admission_policy = self.config.admission_policy();
         let completion_sender = self.worker_completion_sender.clone();
         let worker = std::thread::Builder::new()
             .name(format!("sophia-x11-client-{worker_id}"))
@@ -503,6 +656,7 @@ impl XServerFrontend {
                         namespace,
                         &state,
                         &authorization,
+                        admission_policy,
                         routing,
                         move |trace| observer(trace),
                     )
@@ -1521,6 +1675,7 @@ pub fn run_x11_core_socket_server_once_channels(
         None,
         None,
         &XServerFrontendSetupAuthorization::default(),
+        None,
         move |trace| {
             try_emit_x_authority_trace(&transaction_sender, &trace)
                 .map_err(|error| X11SetupSocketError::new(error.to_string()))?;
@@ -1557,6 +1712,7 @@ pub fn run_x11_core_socket_server_once_session_channels(
         }),
         None,
         &XServerFrontendSetupAuthorization::default(),
+        None,
         move |trace| {
             try_emit_x_authority_trace(&transaction_sender, &trace)
                 .map_err(|error| X11SetupSocketError::new(error.to_string()))?;
@@ -1692,6 +1848,7 @@ fn run_x11_core_socket_server_once_with_trace_observer(
         namespace,
         &mut state,
         &authorization,
+        None,
         idle_timeout,
         observer,
     )
@@ -1764,6 +1921,7 @@ pub fn serve_x11_core_socket_listener_once_traced(
         state,
         &authorization,
         None,
+        None,
         observer,
     )
 }
@@ -1790,6 +1948,7 @@ pub fn serve_x11_core_socket_listener_traced(
         namespace,
         state,
         &authorization,
+        None,
         observer,
     )
 }
@@ -1800,6 +1959,7 @@ fn serve_x11_core_socket_listener_with_setup_authorization(
     namespace: NamespaceId,
     state: &X11CoreSocketServerState,
     authorization: &XServerFrontendSetupAuthorization,
+    admission_policy: Option<Arc<dyn XServerFrontendAdmissionPolicy>>,
     mut observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
     loop {
@@ -1808,6 +1968,7 @@ fn serve_x11_core_socket_listener_with_setup_authorization(
             namespace,
             state,
             authorization,
+            admission_policy.clone(),
             None,
             &mut observer,
         )?;
@@ -1820,6 +1981,7 @@ fn serve_x11_core_socket_listener_once_with_setup_authorization(
     namespace: NamespaceId,
     state: &X11CoreSocketServerState,
     authorization: &XServerFrontendSetupAuthorization,
+    admission_policy: Option<Arc<dyn XServerFrontendAdmissionPolicy>>,
     idle_timeout: Option<Duration>,
     observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
@@ -1836,6 +1998,7 @@ fn serve_x11_core_socket_listener_once_with_setup_authorization(
         namespace,
         state,
         authorization,
+        admission_policy,
         observer,
     )
 }
@@ -1845,8 +2008,8 @@ pub fn serve_x11_setup_socket_client(
     stream: &mut UnixStream,
 ) -> Result<XSetupRequest, X11SetupSocketError> {
     let authorization = XServerFrontendSetupAuthorization::default();
-    serve_x11_setup_socket_client_with_setup_authorization(stream, &authorization, || {
-        Ok(XSetupSuccess::client_compatible())
+    serve_x11_setup_socket_client_with_setup_authorization(stream, &authorization, |_| {
+        Ok(Some(XSetupSuccess::client_compatible()))
     })?
     .map(|(request, _)| request)
     .ok_or_else(|| {
@@ -1858,26 +2021,21 @@ pub fn serve_x11_setup_socket_client(
 fn serve_x11_setup_socket_client_with_setup_authorization(
     stream: &mut UnixStream,
     authorization: &XServerFrontendSetupAuthorization,
-    setup_success: impl FnOnce() -> Result<XSetupSuccess, X11SetupSocketError>,
+    setup_success: impl FnOnce(&XSetupRequest) -> Result<Option<XSetupSuccess>, X11SetupSocketError>,
 ) -> Result<Option<(XSetupRequest, XSetupSuccess)>, X11SetupSocketError> {
     let request = read_x11_setup_request(stream)?;
     if !authorization.permits(&request) {
-        let response = encode_x11_setup_failure(
+        write_x11_setup_failure(
+            stream,
             request.byte_order,
-            &XSetupFailure::new(b"Sophia X11 authorization failed"),
-        )
-        .map_err(|error| {
-            X11SetupSocketError::new(format!("failed to encode X11 setup failure: {error}"))
-        })?;
-        stream.write_all(&response).map_err(|error| {
-            X11SetupSocketError::new(format!("failed to write X11 setup failure: {error}"))
-        })?;
-        stream.flush().map_err(|error| {
-            X11SetupSocketError::new(format!("failed to flush X11 setup failure: {error}"))
-        })?;
+            b"Sophia X11 authorization failed",
+        )?;
         return Ok(None);
     }
-    let setup_success = setup_success()?;
+    let Some(setup_success) = setup_success(&request)? else {
+        write_x11_setup_failure(stream, request.byte_order, b"Sophia X11 admission failed")?;
+        return Ok(None);
+    };
     let response =
         encode_x11_setup_success(request.byte_order, &setup_success).map_err(|error| {
             X11SetupSocketError::new(format!("failed to encode X11 setup success: {error}"))
@@ -1889,6 +2047,24 @@ fn serve_x11_setup_socket_client_with_setup_authorization(
         .flush()
         .map_err(|error| X11SetupSocketError::new(format!("failed to flush X11 setup: {error}")))?;
     Ok(Some((request, setup_success)))
+}
+
+#[cfg(unix)]
+fn write_x11_setup_failure(
+    stream: &mut UnixStream,
+    byte_order: XByteOrder,
+    reason: &[u8],
+) -> Result<(), X11SetupSocketError> {
+    let response =
+        encode_x11_setup_failure(byte_order, &XSetupFailure::new(reason)).map_err(|error| {
+            X11SetupSocketError::new(format!("failed to encode X11 setup failure: {error}"))
+        })?;
+    stream.write_all(&response).map_err(|error| {
+        X11SetupSocketError::new(format!("failed to write X11 setup failure: {error}"))
+    })?;
+    stream.flush().map_err(|error| {
+        X11SetupSocketError::new(format!("failed to flush X11 setup failure: {error}"))
+    })
 }
 
 #[cfg(unix)]
@@ -1947,6 +2123,7 @@ fn serve_x11_core_socket_client_with_trace_observer(
         namespace,
         state,
         &authorization,
+        None,
         observer,
     )
 }
@@ -1957,6 +2134,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_setup_authorization(
     namespace: NamespaceId,
     state: &X11CoreSocketServerState,
     authorization: &XServerFrontendSetupAuthorization,
+    admission_policy: Option<Arc<dyn XServerFrontendAdmissionPolicy>>,
     observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
     serve_x11_core_socket_client_with_trace_observer_and_setup_authorization_and_routing(
@@ -1964,6 +2142,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_setup_authorization(
         namespace,
         state,
         authorization,
+        admission_policy,
         None,
         observer,
     )
@@ -1975,6 +2154,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_setup_authorization_and_
     namespace: NamespaceId,
     state: &X11CoreSocketServerState,
     authorization: &XServerFrontendSetupAuthorization,
+    admission_policy: Option<Arc<dyn XServerFrontendAdmissionPolicy>>,
     client_routing: Option<XServerFrontendRouteRegistry>,
     observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
@@ -1986,6 +2166,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_setup_authorization_and_
         None,
         client_routing,
         authorization,
+        admission_policy,
         observer,
     )
 }
@@ -1999,18 +2180,59 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
     control_channels: Option<X11ControlChannels>,
     client_routing: Option<XServerFrontendRouteRegistry>,
     authorization: &XServerFrontendSetupAuthorization,
+    admission_policy: Option<Arc<dyn XServerFrontendAdmissionPolicy>>,
     mut observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
+    let peer_credentials = if admission_policy.is_some() {
+        x11_peer_credentials(stream)?
+    } else {
+        None
+    };
     let mut setup_lease = None;
-    let Some((setup, _setup_success)) =
-        serve_x11_setup_socket_client_with_setup_authorization(stream, authorization, || {
+    let mut admission_lease = None;
+    let mut admission_failure = None;
+    let Some((setup, _setup_success)) = serve_x11_setup_socket_client_with_setup_authorization(
+        stream,
+        authorization,
+        |setup_request| {
+            if let Some(policy) = admission_policy.as_ref() {
+                let request = XServerFrontendAdmissionRequest {
+                    setup_authentication: authorization.authentication_method(),
+                    peer_credentials,
+                };
+                match policy.admit(request) {
+                    Ok(context) if context.is_valid() => {
+                        admission_lease =
+                            Some(XServerFrontendAdmissionLease::new(policy.clone(), context));
+                    }
+                    Ok(_) => {
+                        admission_failure = Some(XServerFrontendAdmissionError::Unavailable);
+                        return Ok(None);
+                    }
+                    Err(error) => {
+                        admission_failure = Some(error);
+                        return Ok(None);
+                    }
+                }
+            }
+            debug_assert!(authorization.permits(setup_request));
             let (lease, setup_success) = state.next_client_setup_success()?;
             setup_lease = Some(lease);
-            Ok(setup_success)
-        })?
+            Ok(Some(setup_success))
+        },
+    )?
     else {
+        if admission_failure == Some(XServerFrontendAdmissionError::Unavailable) {
+            return Err(X11SetupSocketError::new(
+                "Sophia X Server Frontend admission policy unavailable",
+            ));
+        }
         return Ok(());
     };
+    let namespace = admission_lease
+        .as_ref()
+        .map(|lease| lease.context().namespace.id)
+        .unwrap_or(namespace);
     let client_lease = setup_lease.ok_or_else(|| {
         X11SetupSocketError::new("Sophia X Server Frontend did not retain a setup client lease")
     })?;
@@ -2254,9 +2476,15 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
             cpu_buffer_update: None,
         })
     };
+    let admission_result = admission_lease.as_mut().map_or(Ok(()), |lease| {
+        lease.revoke().map_err(|error| {
+            X11SetupSocketError::new(format!("failed to revoke X11 client admission: {error}"))
+        })
+    });
     result?;
     writer_result?;
-    cleanup_observer_result
+    cleanup_observer_result?;
+    admission_result
 }
 
 #[cfg(unix)]

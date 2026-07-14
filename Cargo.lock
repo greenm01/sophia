@@ -719,6 +719,7 @@ dependencies = [
 name = "sophia-cli"
 version = "0.1.0"
 dependencies = [
+ "rustix",
  "sophia-backend-live",
  "sophia-engine",
  "sophia-portal",
@@ -800,6 +801,7 @@ dependencies = [
 name = "sophia-x-authority"
 version = "0.1.0"
 dependencies = [
+ "rustix",
  "sophia-portal",
  "sophia-protocol",
 ]

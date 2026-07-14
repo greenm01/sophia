@@ -75,15 +75,15 @@ or layout policy.
 - The two-xterm hardware proof completes startup-through-echo in 1,487 ms with
   10 ms maximum composition, 23 ms input-to-presentation, all 14 input events
   flushed, and clean KMS teardown.
-- X resources and selection state are namespace-keyed, but production admission
-  still assigns one configured namespace per listener. Protocol values and a
-  runtime registry now model immutable profiles, directional portal
-  capabilities, admission provenance, and revocation; the X configuration can
-  consume a registry-created namespace context. The live X session allocates,
-  retains, and revokes its classic context through that registry instead of
-  hardcoding an ID. Per-connection admission and confined routing are not yet
-  wired into the live session. Classic
-  same-namespace existing-resource behavior is implemented.
+- X resources and selection state are namespace-keyed. Protocol values and a
+  runtime registry model immutable profiles, directional portal capabilities,
+  admission provenance, and revocation. After X setup authentication, the
+  frontend asks session policy for an immutable context before allocating X
+  client/resource identity. The live classic session admits same-UID Unix peers
+  into distinct registry admissions that deliberately share its namespace,
+  then revokes each admission after connection cleanup. Denial uses native X11
+  setup failure. Confined launch/routing and Xauthority lifecycle are not yet
+  complete; classic same-namespace existing-resource behavior is implemented.
 - `sophia-portal` has deterministic reducers for clipboard, drag-and-drop, file
   handoff, screen capture, URI open, and notifications. A session broker,
   policy-provider IPC, expiry lifecycle, and native-X executor are not complete.

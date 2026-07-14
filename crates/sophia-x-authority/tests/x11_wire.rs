@@ -1,6 +1,8 @@
 use sophia_protocol::{
-    BufferSource, NamespaceCapabilities, NamespaceContext, NamespaceId, NamespacePortalCapability,
-    NamespaceProfile, Rect, Region, Size, SurfaceConstraints, SurfaceId, TransactionId,
+    BufferSource, ClientAdmissionContext, ClientAdmissionId, ClientAuthProvenance,
+    ClientAuthenticationMethod, NamespaceCapabilities, NamespaceContext, NamespaceId,
+    NamespacePortalCapability, NamespaceProfile, Rect, Region, Size, SurfaceConstraints, SurfaceId,
+    TransactionId,
 };
 use sophia_x_authority::*;
 
@@ -4307,6 +4309,231 @@ fn x_server_frontend_rejects_bad_cookie_then_accepts_the_configured_cookie() {
     drop(accepted);
 
     server.join().unwrap();
+    std::fs::remove_file(&socket_path).unwrap();
+}
+
+#[cfg(unix)]
+struct TestXAdmissionPolicy {
+    namespace: NamespaceContext,
+    deny: bool,
+    next_client: std::sync::atomic::AtomicU64,
+    requests: std::sync::Mutex<Vec<XServerFrontendAdmissionRequest>>,
+    revoked: std::sync::Mutex<Vec<ClientAdmissionContext>>,
+}
+
+#[cfg(unix)]
+impl TestXAdmissionPolicy {
+    fn new(namespace: NamespaceContext, deny: bool) -> Self {
+        Self {
+            namespace,
+            deny,
+            next_client: std::sync::atomic::AtomicU64::new(1),
+            requests: std::sync::Mutex::new(Vec::new()),
+            revoked: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+}
+
+#[cfg(unix)]
+impl XServerFrontendAdmissionPolicy for TestXAdmissionPolicy {
+    fn admit(
+        &self,
+        request: XServerFrontendAdmissionRequest,
+    ) -> Result<ClientAdmissionContext, XServerFrontendAdmissionError> {
+        self.requests.lock().unwrap().push(request);
+        if self.deny {
+            return Err(XServerFrontendAdmissionError::Denied);
+        }
+        let client = self
+            .next_client
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Ok(ClientAdmissionContext::new(
+            ClientAdmissionId::from_raw(client),
+            self.namespace,
+            ClientAuthProvenance::new(ClientAuthenticationMethod::PeerCredentials, 7).unwrap(),
+        )
+        .unwrap())
+    }
+
+    fn revoke(&self, context: ClientAdmissionContext) -> Result<(), XServerFrontendAdmissionError> {
+        self.revoked.lock().unwrap().push(context);
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn x_server_frontend_reports_admission_denial_as_x11_setup_failure() {
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let socket_path = std::env::temp_dir().join(format!(
+        "sophia-x-server-admission-denial-test-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let namespace = NamespaceContext::new(
+        NamespaceId::from_raw(825),
+        NamespaceProfile::ClassicShared,
+        NamespaceCapabilities::NONE,
+    )
+    .unwrap();
+    let policy = Arc::new(TestXAdmissionPolicy::new(namespace, true));
+    let config = XServerFrontendConfig::new_with_namespace_context(&socket_path, namespace)
+        .unwrap()
+        .with_admission_policy(policy.clone());
+    let server = thread::spawn(move || {
+        let mut frontend = XServerFrontend::bind(config).unwrap();
+        frontend.serve_next().unwrap();
+    });
+
+    wait_for_socket(&socket_path);
+    let mut client = UnixStream::connect(&socket_path).unwrap();
+    client
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    let mut prefix = [0; X_SETUP_REPLY_PREFIX_LEN];
+    client.read_exact(&mut prefix).unwrap();
+    assert_eq!(prefix[0], 0);
+    let body_len = usize::from(read_u16(XByteOrder::LittleEndian, &prefix[6..8])) * 4;
+    let mut body = vec![0; body_len];
+    client.read_exact(&mut body).unwrap();
+    assert!(String::from_utf8_lossy(&body).contains("admission failed"));
+    drop(client);
+
+    server.join().unwrap();
+    let requests = policy.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].setup_authentication,
+        ClientAuthenticationMethod::TrustedLocal
+    );
+    assert!(requests[0].peer_credentials.is_some());
+    assert!(policy.revoked.lock().unwrap().is_empty());
+    std::fs::remove_file(&socket_path).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn x_server_frontend_revokes_distinct_admissions_for_concurrent_clients() {
+    use std::io::Write;
+    use std::num::NonZeroUsize;
+    use std::os::unix::net::UnixStream;
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let socket_path = std::env::temp_dir().join(format!(
+        "sophia-x-server-admission-concurrency-test-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let namespace = NamespaceContext::new(
+        NamespaceId::from_raw(826),
+        NamespaceProfile::ClassicShared,
+        NamespaceCapabilities::NONE,
+    )
+    .unwrap();
+    let policy = Arc::new(TestXAdmissionPolicy::new(namespace, false));
+    let config = XServerFrontendConfig::new_with_namespace_context(&socket_path, namespace)
+        .unwrap()
+        .with_admission_policy(policy.clone())
+        .with_max_concurrent_clients(NonZeroUsize::new(2).unwrap());
+    let server = thread::spawn(move || {
+        let mut frontend = XServerFrontend::bind(config).unwrap();
+        frontend.serve_next_concurrently().unwrap();
+        frontend.serve_next_concurrently().unwrap();
+        frontend.wait_for_clients().unwrap();
+        frontend.active_client_count()
+    });
+
+    wait_for_socket(&socket_path);
+    let mut first = UnixStream::connect(&socket_path).unwrap();
+    first
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    read_setup_success(&mut first, XByteOrder::LittleEndian);
+    let mut second = UnixStream::connect(&socket_path).unwrap();
+    second
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    read_setup_success(&mut second, XByteOrder::LittleEndian);
+
+    assert_eq!(policy.requests.lock().unwrap().len(), 2);
+    drop(first);
+    drop(second);
+    assert_eq!(server.join().unwrap(), 0);
+
+    let revoked = policy.revoked.lock().unwrap();
+    assert_eq!(revoked.len(), 2);
+    assert_ne!(revoked[0].client_id, revoked[1].client_id);
+    assert!(revoked.iter().all(|context| context.namespace == namespace));
+    std::fs::remove_file(&socket_path).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn x_server_frontend_revokes_admission_after_dispatch_failure() {
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let socket_path = std::env::temp_dir().join(format!(
+        "sophia-x-server-admission-error-cleanup-test-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let namespace = NamespaceContext::new(
+        NamespaceId::from_raw(827),
+        NamespaceProfile::ClassicShared,
+        NamespaceCapabilities::NONE,
+    )
+    .unwrap();
+    let policy = Arc::new(TestXAdmissionPolicy::new(namespace, false));
+    let config = XServerFrontendConfig::new_with_namespace_context(&socket_path, namespace)
+        .unwrap()
+        .with_admission_policy(policy.clone());
+    let server = thread::spawn(move || {
+        let mut frontend = XServerFrontend::bind(config).unwrap();
+        let error = frontend
+            .serve_next_traced(|_| Err(X11SetupSocketError::new("injected observer failure")))
+            .unwrap_err();
+        (error.to_string(), frontend.active_client_count())
+    });
+
+    wait_for_socket(&socket_path);
+    let mut client = UnixStream::connect(&socket_path).unwrap();
+    client
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    read_setup_success(&mut client, XByteOrder::LittleEndian);
+    client
+        .write_all(&intern_atom_request(
+            XByteOrder::LittleEndian,
+            false,
+            "FORCE_OBSERVER_FAILURE",
+        ))
+        .unwrap();
+
+    let (error, active_clients) = server.join().unwrap();
+    assert_eq!(error, "injected observer failure");
+    assert_eq!(active_clients, 0);
+    assert_eq!(policy.revoked.lock().unwrap().len(), 1);
+    drop(client);
     std::fs::remove_file(&socket_path).unwrap();
 }
 

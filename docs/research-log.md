@@ -3,6 +3,24 @@
 This file records decisions and unresolved questions for the active milestone.
 Completed evidence is archived in `research-log-archive.md`.
 
+## 2026-07-13: Per-Connection X Admission Boundary
+
+The native X frontend now calls a protocol-neutral session policy after setup
+authentication and before allocating X client or resource-range identity. The
+policy receives only the bounded authentication method and kernel Unix peer
+credentials; it never receives raw cookie bytes. A successful decision returns
+an immutable `ClientAdmissionContext` retained in an admission lease. Native
+X11 setup failure represents denial, and teardown or any early worker error
+revokes the lease after route and resource cleanup.
+
+The live classic session backs that policy with its session-owned
+`NamespaceRegistry`: it requires a peer UID matching the effective session UID,
+allocates a distinct admission per connection, and intentionally assigns those
+admissions the same classic-shared namespace. This removes the listener-wide
+identity shortcut without weakening classic X semantics. Confined namespace
+selection, Xauthority publication/rotation, and supervisor revocation remain
+the next admission work.
+
 ## 2026-07-13: X11-First Namespace And Portal Critical Path
 
 Sophia's next architecture work is the native X Server Frontend, not broader
