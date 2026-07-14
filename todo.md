@@ -17,37 +17,13 @@ creating a separate application-facing display protocol. The protocol-neutral
 Engine remains the sole owner of physical input, scene state, rendering, and
 scanout.
 
-Namespaces and portals precede broader X11 compatibility because client
-identity, isolation, admission, and explicit transfer grants must be correct
-before more protocol surface depends on them. The selected first portal is
-X11 `CLIPBOARD` plus `PRIMARY`.
+The namespace, admission, portal lifecycle, and bounded X11 `CLIPBOARD` plus
+`PRIMARY` reference flow are established. The active track now advances X11
+session correctness without weakening those boundaries.
 
 The Smithay-backed Wayland Authority remains supported under a maintenance
 lane. XLibre is a retired prototype and documented possible future
 compatibility provider; no XLibre integration work is active.
-
-## Milestone 2: Portal Broker And X11 Clipboard
-
-- [x] Reconcile portal kinds so clipboard, drag-and-drop, file handoff, screen
-  capture, screen recording, URI open, and notification are explicit protocol
-  values.
-- [x] Split request decisions from grant lifecycle, including deadlines,
-  completion, expiry, disconnect revocation, broker-restart revocation, and
-  generation checks.
-- [ ] Add bounded broker IPC, an I/O-free policy reducer, a deterministic
-  headless policy provider, and runtime executors that keep payloads and file
-  descriptors outside Engine and policy state.
-- [ ] Connect native X selection ownership/request context to the broker while
-  keeping XIDs and atoms authority-private.
-- [ ] Implement same-namespace native selection behavior and cross-namespace
-  `CLIPBOARD`/`PRIMARY` mediation for `TARGETS`, `UTF8_STRING`, and bounded UTF-8
-  `text/plain` data.
-- [ ] Map denial, stale owner generation, timeout, disconnect, unsupported
-  target, and executor failure to normal `SelectionNotify(property = None)`.
-
-Exit: deterministic and socket-level tests prove allowed, denied, stale,
-expired, disconnected, same-namespace, and cross-namespace transfers without
-freezing either client or granting general resource visibility.
 
 ## Milestone 3: X11 Session Correctness
 

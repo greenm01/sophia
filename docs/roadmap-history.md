@@ -6,6 +6,29 @@ validation evidence in `docs/research-log.md`.
 
 ---
 
+## 2026-07-14 Portal Broker And X11 Clipboard
+
+- [x] Split sanitized policy requests from single-use, generation-bound grants
+  with bounded pending/active state, deadlines, completion, expiry,
+  disconnect/executor revocation, and broker-restart invalidation.
+- [x] Added owner-only bounded broker IPC, persistent lifecycle across client
+  connections, a default-deny deterministic policy provider, correlated
+  payload frames, and fail-closed disconnect handling.
+- [x] Implemented ordinary same-namespace `SelectionRequest`, restricted
+  `SelectionNotify` SendEvent, owner replacement `SelectionClear`, and
+  per-connection sequence/routing behavior.
+- [x] Implemented cross-namespace `CLIPBOARD`/`PRIMARY` through an
+  authority-private source proxy. The broker sees only sanitized namespace,
+  target, size, generation, grant, and payload values; Engine and policy never
+  receive XIDs or atoms.
+- [x] Implemented `TARGETS`, `UTF8_STRING`, and bounded UTF-8 `text/plain`.
+  Denied, stale, expired, disconnected, unsupported, and executor-failure
+  paths produce normal `SelectionNotify(property = None)`.
+- [x] Deterministic and socket tests prove same-namespace ownership and
+  handoff, a complete broker/source-proxy/target-property transfer, stale
+  generation, expiry, disconnect, default/capability denial, and executor
+  failure without granting general cross-namespace resource visibility.
+
 ## 2026-07-13 X11-First Roadmap Reset
 
 - [x] Added a documentation source-of-truth map and a normative

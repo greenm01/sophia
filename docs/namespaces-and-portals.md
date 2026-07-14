@@ -11,9 +11,10 @@ a session-owned in-memory namespace registry, namespace-keyed X resource
 tables, an X configuration seam that accepts immutable namespace context, a
 live X session that allocates and revokes its classic context through the
 registry, per-connection X admission and revocation, and pure portal reducers.
-Classic/confined launch and the bounded confinement matrix are implemented.
-Broker IPC, prompt policy, expiry, and concrete native-X portal execution are
-the active target work tracked in `todo.md`.
+Classic/confined launch, the bounded confinement matrix, broker IPC and
+lifecycle, deterministic headless policy, and concrete native-X clipboard
+execution are implemented. A graphical prompt provider remains optional
+follow-on policy UI; it does not change the completed authority boundary.
 
 ## Ownership
 
@@ -187,6 +188,15 @@ not grant either client cross-namespace resource access.
 The X frontend retains requestor XID, selection atom, target atom, property,
 timestamp, and source-owner generation. The broker sees only namespace IDs,
 transfer kind, normalized target/MIME, bounded size facts, and generation.
+
+After an allowed grant, the frontend allocates an authority-private proxy XID
+below every client allocation range and delivers a normal `SelectionRequest`
+to the source owner. Only clients in that source namespace may write the proxy
+property or return its `SelectionNotify`. The frontend captures and deletes
+that property, emits only the correlated bounded bytes to runtime, and keeps
+the broker connection open until the target executor succeeds or fails. The
+target executor rechecks grant state, namespaces, and owner generation before
+installing the requestor property and routing `SelectionNotify`.
 
 The first complete adapter supports `CLIPBOARD` and `PRIMARY` with `TARGETS`,
 `UTF8_STRING`, and bounded UTF-8 `text/plain` data. Approval is valid only for
