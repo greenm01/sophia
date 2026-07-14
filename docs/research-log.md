@@ -17,8 +17,7 @@ namespaces and exposed a real leak: `MapWindow` changed lifecycle state without
 checking the runtime resource table. The runtime now performs namespace-aware
 window lookup before mapping, so the second client receives native `BadAccess`;
 classic same-namespace mapping remains valid. The following socket expansion
-closes properties, selections, and metadata; events and input remain before the
-isolation milestone is complete.
+closes properties, selections, metadata, event selection, and routed input.
 
 The next socket expansion found the same missing-boundary pattern in property
 and selection paths. `ChangeProperty` previously keyed a foreign XID under the
@@ -28,7 +27,20 @@ requestor XID instead of the admitted namespace. Runtime/dispatch now validate
 all three before mutation or portal construction. The wire proof requires
 `BadAccess` for foreign property and owner changes, normal
 `SelectionNotify(property=None)` for foreign conversion, and zero metadata
-candidates. Event delivery and routed input are the remaining matrix rows.
+candidates.
+
+The final confinement expansion found that the socket bridge updated its
+authority-local keyboard target from `CWEventMask` before dispatch authorization.
+A rejected foreign event subscription could therefore redirect later input in
+the requester's private worker to another namespace's XID. Event-target changes
+now occur only after namespace validation. The drawable validator also
+classifies a resource once so a foreign window's `CrossNamespaceDenied` is not
+overwritten by a failed pixmap fallback. A routed simultaneous-client proof
+requires native `BadAccess`, sends a broker-addressed key to the requester, and
+verifies that its event target remains the local root; the broker's separate
+queue regressions prove delivery stays client-specific. This completes the
+bounded Milestone 1 confinement matrix; full XKB, XI2, focus, and grab semantics
+remain Milestone 3 work.
 
 ## 2026-07-13: Live Xauthority Ownership
 

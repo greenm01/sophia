@@ -89,9 +89,10 @@ or layout policy.
   assigns simultaneous clients distinct confined namespaces and proves a
   cross-namespace window map, property mutation, and selection ownership return
   `BadAccess`; selection conversion fails normally and rejected property writes
-  emit no metadata candidate. Event and routed-input confinement remain to be
-  completed end to end; classic same-namespace existing-resource behavior is
-  implemented.
+  emit no metadata candidate. Foreign event-mask selection also returns
+  `BadAccess`, cannot change the receiving worker's authority-local key target,
+  and brokered input reaches only the addressed client's private queue. Classic
+  same-namespace existing-resource behavior remains available.
 - `sophia-portal` has deterministic reducers for clipboard, drag-and-drop, file
   handoff, screen capture, URI open, and notifications. A session broker,
   policy-provider IPC, expiry lifecycle, and native-X executor are not complete.

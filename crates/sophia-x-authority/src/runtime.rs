@@ -549,10 +549,20 @@ impl XAuthorityRuntime {
         if drawable.local.raw() == u64::from(crate::X_SETUP_DEFAULT_ROOT) {
             return Ok(());
         }
-        if self.validate_window_access(namespace, drawable).is_ok() {
-            return Ok(());
+        if !namespace.is_valid() {
+            return Err(XAuthorityRuntimeError::InvalidNamespace);
         }
-        self.validate_pixmap_access(namespace, drawable)
+        let record = self
+            .resources
+            .get(drawable)
+            .ok_or(XAuthorityRuntimeError::UnknownResource)?;
+        if !matches!(record.kind, XResourceKind::Window | XResourceKind::Pixmap) {
+            return Err(XAuthorityRuntimeError::WrongResourceKind);
+        }
+        if record.owner_namespace != namespace {
+            return Err(XAuthorityRuntimeError::CrossNamespaceDenied);
+        }
+        Ok(())
     }
 
     pub fn create_graphics_context(

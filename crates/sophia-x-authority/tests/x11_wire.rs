@@ -4638,6 +4638,17 @@ fn x_server_frontend_confined_clients_reject_cross_namespace_window_property_and
     assert_eq!(error[1], XErrorCode::BadAccess.wire_code());
 
     second
+        .write_all(&change_window_event_mask_request(
+            XByteOrder::LittleEndian,
+            first_window,
+            (1 << 0) | (1 << 1),
+        ))
+        .unwrap();
+    second.read_exact(&mut error).unwrap();
+    assert_eq!(error[0], 0);
+    assert_eq!(error[1], XErrorCode::BadAccess.wire_code());
+
+    second
         .write_all(&change_property_request(
             XByteOrder::LittleEndian,
             XPropertyMode::Replace,
@@ -5625,10 +5636,11 @@ fn x11_core_socket_channel_sees_sophia_present_transaction_batch() {
 
 #[cfg(unix)]
 #[test]
-fn routed_service_delivers_brokered_control_to_two_workers_and_drains() {
-    use std::io::Write;
+fn routed_service_confines_input_and_control_to_two_workers_and_drains() {
+    use std::io::{Read, Write};
     use std::num::NonZeroUsize;
     use std::os::unix::net::UnixStream;
+    use std::sync::Arc;
     use std::thread;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -5651,10 +5663,30 @@ fn routed_service_delivers_brokered_control_to_two_workers_and_drains() {
     let input_sender = broker.input_sender();
     let control_sender = broker.control_sender();
     let (service_command_sender, service_command_receiver) = std::sync::mpsc::sync_channel(1);
+    let first_namespace = NamespaceContext::new(
+        NamespaceId::from_raw(852),
+        NamespaceProfile::Confined,
+        NamespaceCapabilities::NONE,
+    )
+    .unwrap();
+    let second_namespace = NamespaceContext::new(
+        NamespaceId::from_raw(853),
+        NamespaceProfile::Confined,
+        NamespaceCapabilities::NONE,
+    )
+    .unwrap();
+    let policy = Arc::new(SequencedXAdmissionPolicy {
+        namespaces: [first_namespace, second_namespace],
+        next_client: std::sync::atomic::AtomicU64::new(0),
+        revoked: std::sync::Mutex::new(Vec::new()),
+    });
+    let config = XServerFrontendConfig::new_with_namespace_context(&server_path, first_namespace)
+        .unwrap()
+        .with_admission_policy(policy.clone())
+        .with_max_concurrent_clients(NonZeroUsize::new(2).unwrap());
     let server = thread::spawn(move || {
-        run_x11_core_socket_server_routed_until_stopped(
-            &server_path,
-            NamespaceId::from_raw(52),
+        run_x_server_frontend_routed_until_stopped(
+            config,
             transaction_sender,
             broker,
             service_command_receiver,
@@ -5716,10 +5748,14 @@ fn routed_service_delivers_brokered_control_to_two_workers_and_drains() {
     second
         .write_all(&change_window_event_mask_request(
             XByteOrder::LittleEndian,
-            0x0040_0702,
+            0x0020_0701,
             0b11,
         ))
         .unwrap();
+    let mut error = [0; 32];
+    second.read_exact(&mut error).unwrap();
+    assert_eq!(error[0], 0);
+    assert_eq!(error[1], XErrorCode::BadAccess.wire_code());
     second
         .write_all(&sophia_present_pixmap_request(
             XByteOrder::LittleEndian,
@@ -5764,10 +5800,18 @@ fn routed_service_delivers_brokered_control_to_two_workers_and_drains() {
     let first_key = read_x_record(&mut first);
     assert_eq!(first_key[0], 2);
     assert_eq!(first_key[1], 38);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &first_key[12..16]),
+        0x0020_0701
+    );
     assert_eq!(read_x_record(&mut second)[0], 9);
     let second_key = read_x_record(&mut second);
     assert_eq!(second_key[0], 2);
     assert_eq!(second_key[1], 39);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &second_key[12..16]),
+        X_SETUP_DEFAULT_ROOT
+    );
     for (index, (client, surface)) in routes.iter().copied().enumerate() {
         control_sender
             .send(XAuthorityClientControlCommand {
@@ -5815,6 +5859,9 @@ fn routed_service_delivers_brokered_control_to_two_workers_and_drains() {
     drop(input_sender);
     drop(control_sender);
     server.join().unwrap();
+    let revoked = policy.revoked.lock().unwrap();
+    assert_eq!(revoked.len(), 2);
+    assert_ne!(revoked[0].namespace.id, revoked[1].namespace.id);
     std::fs::remove_file(&socket_path).unwrap();
 }
 

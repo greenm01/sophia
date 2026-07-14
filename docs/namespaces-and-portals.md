@@ -73,8 +73,11 @@ that group share it. Separate group credentials on one listener remain future
 supervisor work. The socket suite proves that two policy-assigned confined
 namespaces cannot map each other's windows, mutate their properties, claim
 their selections, forge a selection requestor, or emit metadata from a rejected
-foreign property write. Event delivery and routed input remain active
-end-to-end confinement work.
+foreign property write. It also proves that a rejected foreign event-mask
+request cannot redirect brokered input: the addressed worker retains its root
+target, while the broker's private queues keep delivery client-specific.
+Broader XKB, XI2, and grab semantics remain X11 session-correctness work rather
+than a namespace exception.
 
 Capabilities bound which portal operations a namespace may request or publish.
 They do not provide ambient cross-namespace access and do not replace a portal

@@ -49,7 +49,7 @@ compatibility provider; no XLibre integration work is active.
 - [x] Make both profiles launchable: classic clients intentionally share a
   namespace; confined client groups receive distinct namespaces and explicit
   capabilities.
-- [ ] Prove shared-X access within a classic namespace and denial of resource
+- [x] Prove shared-X access within a classic namespace and denial of resource
   lookup, properties, selections, events, input, and metadata across confined
   namespaces.
 

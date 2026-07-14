@@ -129,9 +129,10 @@ session-scoped `MIT-MAGIC-COOKIE-1`; raw cookie bytes never enter the admission
 record. Legacy smoke helpers still default to unauthenticated local sockets.
 The live supervisor publishes a fresh kernel-random cookie in a standard
 owner-only Xauthority record, supplies only the path to launched terminals, and
-removes the file on teardown. Multiple confined-group credentials on one
-listener, the complete confinement matrix, and Engine-derived output facts
-remain before treating the listener as a general local X server.
+removes the file on teardown. Multiple independently credentialed confined
+groups on one listener, supervisor-triggered connection revocation, and
+Engine-derived output facts remain before treating the listener as a general
+local X server.
 
 The live launcher accepts `--namespace-profile=classic|confined`. Classic is
 the default and intentionally shares its namespace among launched terminals.
@@ -142,8 +143,11 @@ cross-namespace map, property mutation, and selection ownership fail with
 native `BadAccess`; foreign selection conversion returns
 `SelectionNotify(property=None)`, and denied property mutation emits no metadata
 candidate. These proofs caught and closed missing validation on map, property,
-selection-owner, and selection-requestor paths. Separate confined-group
-credentials on one listener plus end-to-end event and routed-input isolation
+selection-owner, selection-requestor, drawable, and event-target paths. A
+routed two-client regression additionally proves that a rejected foreign
+event-mask request cannot redirect a confined worker's key events: input stays
+on the broker-addressed client and retains that worker's root target. Separate
+confined-group credentials on one listener and supervisor-triggered revocation
 remain active work.
 
 ### Connection Lifecycle
