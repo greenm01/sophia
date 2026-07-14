@@ -21,6 +21,18 @@ build pass, followed by ten of ten uninstrumented exact-text native stability
 runs with clean evidence and no allocator diagnostic. The three operator-typed
 runs remain the physical acceptance gate.
 
+## 2026-07-14: Portal Requests And Grants Are Separate State
+
+Portal policy decisions no longer need to double as execution authority. A
+generic I/O-free lifecycle now retains deadline-bound request facts separately
+from single-use grants. Allowed requests create active grants bound to source
+generation and broker generation; completion, executor failure, expiry,
+namespace disconnect, owner change, and broker restart have explicit terminal
+transitions. A caller supplies monotonic time, the active set is capped at 64,
+and no payload or operating-system handle enters this state. The first broker
+IPC slice will use this reducer for every portal kind while clipboard remains
+the first concrete executor.
+
 ## 2026-07-13: Core Keyboard Map Offsets And Semantic Input Evidence
 
 The X13 stability workload exposed a false-positive input proof: xterm visibly

@@ -7,6 +7,7 @@
 mod clipboard;
 mod drag_and_drop;
 mod file_handoff;
+mod lifecycle;
 mod notification;
 mod screen_capture;
 mod types;
@@ -23,6 +24,7 @@ mod prelude {
 pub use clipboard::*;
 pub use drag_and_drop::*;
 pub use file_handoff::*;
+pub use lifecycle::*;
 pub use notification::*;
 pub use screen_capture::*;
 pub use types::*;
