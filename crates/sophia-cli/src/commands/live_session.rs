@@ -2691,17 +2691,26 @@ impl PersistentBackendRuntime {
             self.retire_native_scanout(native_scanout)?;
             std::thread::sleep(Duration::from_millis(5));
         }
+        if self.native_scanout_in_flight() {
+            return Err("persistent native scanout remained in flight during teardown".into());
+        }
         for (index, output) in self.outputs.values_mut().enumerate() {
-            if output
+            trace_live_native_lifecycle("displayed_scanout_retire_started");
+            let retired = output
                 .runtime
-                .rendered_primary_plane_scanout_cleanup_pending()
-            {
-                let _ = output
+                .retire_displayed_rendered_primary_plane_scanout(native_scanout.card(index));
+            if retired.cleanup_pending {
+                trace_live_native_lifecycle("displayed_scanout_cleanup_retry_started");
+                let cleanup = output
                     .runtime
                     .retry_tracked_rendered_primary_plane_scanout_cleanup(
                         native_scanout.card(index),
                     );
+                if cleanup.cleanup_pending {
+                    return Err("persistent displayed scanout cleanup remained pending".into());
+                }
             }
+            trace_live_native_lifecycle("displayed_scanout_owner_released");
         }
         Ok(())
     }

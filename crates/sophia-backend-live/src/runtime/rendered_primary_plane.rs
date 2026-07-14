@@ -34,6 +34,51 @@ where
             .is_some()
     }
 
+    /// Releases the final displayed submission during bounded session
+    /// teardown. Persistent scanout intentionally retains that submission
+    /// between frames, so callers must retire it through the DRM device before
+    /// dropping the renderer-owned buffer.
+    pub fn retire_displayed_rendered_primary_plane_scanout<D>(
+        &mut self,
+        device: &D,
+    ) -> LiveTrackedRenderedPrimaryPlaneScanoutCleanupReport
+    where
+        D: LibdrmNativePrimaryPlaneResourceDevice,
+    {
+        let state = self.primary_output_state_mut();
+        state.retain_rendered_primary_plane_displayed_submission = false;
+        let Some(displayed) = state.rendered_primary_plane_displayed_submission.take() else {
+            return LiveTrackedRenderedPrimaryPlaneScanoutCleanupReport {
+                status: LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus::NoCleanupPending,
+                destroy: None,
+                cleanup_pending: state.cleanup_pending(),
+            };
+        };
+        let LiveRenderedPrimaryPlaneScanoutSubmission {
+            scanout_buffer,
+            primary_plane,
+            ..
+        } = displayed;
+        let retired = primary_plane.retire(device);
+        let destroy = retired.status;
+        if let Some(primary_plane) = retired.cleanup {
+            state.rendered_primary_plane_scanout_cleanup =
+                Some(LiveRenderedPrimaryPlaneScanoutCleanup {
+                    scanout_buffer,
+                    primary_plane,
+                });
+        }
+        LiveTrackedRenderedPrimaryPlaneScanoutCleanupReport {
+            status: if state.cleanup_pending() {
+                LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus::CleanupFailed
+            } else {
+                LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus::CleanedUp
+            },
+            destroy: Some(destroy),
+            cleanup_pending: state.cleanup_pending(),
+        }
+    }
+
     pub fn with_persistent_rendered_primary_plane_scanout(mut self) -> Self {
         self.primary_output_state_mut()
             .retain_rendered_primary_plane_displayed_submission = true;

@@ -3,6 +3,24 @@
 This file records decisions and unresolved questions for the active milestone.
 Completed evidence is archived in `research-log-archive.md`.
 
+## 2026-07-14: Explicit Final Scanout Retirement
+
+The post-completion X11 allocator failure exposed a teardown ownership gap.
+Persistent presentation deliberately retained the last displayed submission,
+but the bounded session drained only the in-flight submission. Returning from
+the loop therefore dropped the last GBM owner implicitly without first
+retiring its framebuffer, mode blob, and imported GEM handles through the live
+DRM device.
+
+Persistent runtime shutdown now explicitly retires that displayed submission,
+retries any reduced cleanup while the DRM device and renderer context are
+still alive, and refuses clean completion if either in-flight or cleanup state
+remains. Lifecycle diagnostics bracket the terminal retirement without logging
+native handles. On X13, the focused backend regression and native-feature CLI
+build pass, followed by ten of ten uninstrumented exact-text native stability
+runs with clean evidence and no allocator diagnostic. The three operator-typed
+runs remain the physical acceptance gate.
+
 ## 2026-07-13: Core Keyboard Map Offsets And Semantic Input Evidence
 
 The X13 stability workload exposed a false-positive input proof: xterm visibly

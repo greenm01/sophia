@@ -2882,6 +2882,18 @@ fn persistent_rendered_scanout_retires_only_the_replaced_displayed_buffer() {
     assert!(!assembly.rendered_primary_plane_scanout_in_flight());
     assert!(!assembly.rendered_primary_plane_scanout_cleanup_pending());
 
+    let shutdown = assembly.retire_displayed_rendered_primary_plane_scanout(&device);
+    assert_eq!(
+        shutdown.status,
+        LiveTrackedRenderedPrimaryPlaneScanoutCleanupStatus::CleanedUp
+    );
+    assert_eq!(
+        shutdown.destroy,
+        Some(LibdrmNativePrimaryPlaneResourceDestroyStatus::Destroyed)
+    );
+    assert!(!shutdown.cleanup_pending);
+    assert!(!assembly.rendered_primary_plane_scanout_displayed());
+
     std::fs::remove_dir_all(root).unwrap();
 }
 
