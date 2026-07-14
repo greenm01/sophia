@@ -7,17 +7,16 @@ use sophia_engine::{
 };
 use sophia_protocol::{
     ClientAdmissionContext, DeviceId, NamespaceCapabilities, NamespaceId, NamespaceProfile,
-    OutputId, SeatId, WmManageSurface,
+    OutputId, Point, SeatId, WmManageSurface,
 };
 use sophia_runtime::NamespaceRegistry;
 use sophia_x_authority::{
     XAuthorityClientControlAck, XAuthorityClientControlCommand, XAuthorityClientInputDelivery,
-    XAuthorityClientInputEvent, XAuthorityClientSurfaceRoutes, XAuthorityControlCommand,
-    XAuthorityControlOutcome, XAuthorityInputDeliveryId, XAuthorityInputDeliveryOutcome,
-    XAuthorityInputEvent, XAuthorityPointerEvent, XAuthorityPointerEventKind, XCoreKeyboardMapper,
-    XCorePointerMapper, XServerFrontendAdmissionError, XServerFrontendAdmissionPolicy,
-    XServerFrontendAdmissionRequest, XServerFrontendConfig, XServerFrontendRouteBroker,
-    XServerFrontendServiceCommand, XServerFrontendSetupAuthorization,
+    XAuthorityClientSurfaceRoutes, XAuthorityControlCommand, XAuthorityControlOutcome,
+    XAuthorityInputDeliveryId, XAuthorityInputDeliveryOutcome, XAuthorityRoutedInput,
+    XCoreKeyboardMapper, XCorePointerMapper, XServerFrontendAdmissionError,
+    XServerFrontendAdmissionPolicy, XServerFrontendAdmissionRequest, XServerFrontendConfig,
+    XServerFrontendRouteBroker, XServerFrontendServiceCommand, XServerFrontendSetupAuthorization,
     run_x_server_frontend_routed_until_stopped,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -309,6 +308,11 @@ pub(crate) fn run_persistent_xterm_session(
         std::io::stdout().flush()?;
     }
     let mut wm_session = LiveWmSession::from_config(&config)?;
+    let initial_outputs = native_scanout
+        .as_ref()
+        .map(PersistentNativeScanout::outputs)
+        .unwrap_or_else(|| vec![sophia_engine::HeadlessOutput::deterministic()]);
+    let output_topology = output_topology_from_engine_outputs(&initial_outputs)?;
 
     let server_path = config.socket_path.clone();
     let session_generation = NEXT_SESSION_GENERATION
@@ -329,6 +333,7 @@ pub(crate) fn run_persistent_xterm_session(
     });
     let frontend_config =
         XServerFrontendConfig::new_with_namespace_context(&server_path, x_namespace)?
+            .with_output_topology(output_topology)?
             .with_setup_authorization(XServerFrontendSetupAuthorization::MitMagicCookie(
                 xauthority_cookie,
             ))
@@ -336,12 +341,14 @@ pub(crate) fn run_persistent_xterm_session(
     let (authority_sender, authority_receiver) = sync_channel(SESSION_AUTHORITY_CAPACITY);
     let (control_ack_sender, control_ack_receiver) = sync_channel(SESSION_CONTROL_CAPACITY);
     let (input_delivery_sender, input_delivery_receiver) = sync_channel(SESSION_KEY_CAPACITY);
-    let broker = XServerFrontendRouteBroker::with_control_and_input_delivery_senders(
-        NonZeroUsize::new(SESSION_KEY_CAPACITY).expect("session route capacity is nonzero"),
-        control_ack_sender,
-        input_delivery_sender,
-    );
-    let input_sender = broker.input_sender();
+    let broker =
+        XServerFrontendRouteBroker::with_control_and_input_delivery_senders_and_xkb_config(
+            NonZeroUsize::new(SESSION_KEY_CAPACITY).expect("session route capacity is nonzero"),
+            control_ack_sender,
+            input_delivery_sender,
+            sophia_x_authority::XkbRmlvoConfig::default(),
+        )?;
+    let input_sender = broker.routed_input_sender();
     let control_sender = broker.control_sender();
     let (service_command_sender, service_command_receiver) = sync_channel(1);
     let mut server = Some(std::thread::spawn(move || {
@@ -511,6 +518,52 @@ pub(crate) fn run_persistent_xterm_session(
     result?;
     xauthority_cleanup?;
     Ok(())
+}
+
+fn output_topology_from_engine_outputs(
+    outputs: &[sophia_engine::HeadlessOutput],
+) -> Result<sophia_protocol::OutputTopologySnapshot, Box<dyn std::error::Error>> {
+    let primary = outputs
+        .first()
+        .ok_or("live session requires at least one Engine output")?
+        .id;
+    let mut logical_x = 0i32;
+    let entries = outputs
+        .iter()
+        .map(|output| {
+            let scale = output.scale.max(1);
+            let scale_i32 = i32::try_from(scale).unwrap_or(i32::MAX);
+            let logical_size = Size {
+                width: output.size.width.saturating_div(scale_i32).max(1),
+                height: output.size.height.saturating_div(scale_i32).max(1),
+            };
+            let logical = Rect {
+                x: logical_x,
+                y: 0,
+                width: logical_size.width,
+                height: logical_size.height,
+            };
+            logical_x = logical_x.saturating_add(logical_size.width);
+            sophia_protocol::OutputTopologyEntry {
+                output: output.id,
+                logical,
+                pixel_size: output.size,
+                scale,
+                refresh_millihz: 60_000,
+            }
+        })
+        .collect();
+    let snapshot = sophia_protocol::OutputTopologySnapshot {
+        generation: 1,
+        primary,
+        outputs: entries,
+    };
+    snapshot
+        .validate()
+        .map_err(|error| -> Box<dyn std::error::Error> {
+            format!("invalid live Engine output topology: {error:?}").into()
+        })?;
+    Ok(snapshot)
 }
 
 #[derive(Clone, Debug)]
@@ -1029,6 +1082,8 @@ struct PendingLiveWmLayout {
     deadline: Instant,
     update: WmTransactionUpdate,
     moved_surfaces: usize,
+    staged_transactions: BTreeMap<SurfaceId, SurfaceTransaction>,
+    staged_cpu_buffer_updates: Vec<XAuthorityCpuBufferUpdate>,
 }
 
 #[derive(Default)]
@@ -1041,6 +1096,7 @@ struct PersistentLiveLayout {
     focus_to_apply: Option<(TransactionId, SurfaceId)>,
     stage_new_surfaces_offset: bool,
     center_first_surface_in: Option<Size>,
+    committed_resize_replay: Option<(Vec<SurfaceTransaction>, Vec<XAuthorityCpuBufferUpdate>)>,
 }
 
 impl PersistentLiveLayout {
@@ -1064,6 +1120,25 @@ impl PersistentLiveLayout {
                 width: transaction.target_geometry.width,
                 height: transaction.target_geometry.height,
             };
+            let staged_for_resize = self.pending.as_ref().is_some_and(|pending| {
+                pending.requested_sizes.get(&transaction.surface) == Some(&size)
+            });
+            if staged_for_resize {
+                let pending = self.pending.as_mut().expect("checked above");
+                pending
+                    .staged_transactions
+                    .insert(transaction.surface, transaction.clone());
+                if let Some(layer) = pending
+                    .layers
+                    .iter_mut()
+                    .find(|layer| layer.surface == transaction.surface)
+                {
+                    layer.source = transaction.target_buffer;
+                    layer.damage = transaction.damage.clone();
+                    layer.generation = transaction.previous_committed_generation.saturating_add(1);
+                }
+                continue;
+            }
             self.authority_sizes.insert(transaction.surface, size);
             match self.layers.get_mut(&transaction.surface) {
                 Some(layer) => {
@@ -1100,6 +1175,23 @@ impl PersistentLiveLayout {
                     );
                 }
             }
+        }
+        if let Some(pending) = self.pending.as_mut() {
+            let staged_handles = pending
+                .staged_transactions
+                .values()
+                .filter_map(|transaction| match transaction.target_buffer {
+                    BufferSource::CpuBuffer { handle } => Some(handle),
+                    _ => None,
+                })
+                .collect::<BTreeSet<_>>();
+            pending.staged_cpu_buffer_updates.extend(
+                batch
+                    .cpu_buffer_updates
+                    .iter()
+                    .filter(|update| staged_handles.contains(&update.handle()))
+                    .cloned(),
+            );
         }
         new_surfaces
     }
@@ -1171,7 +1263,7 @@ impl PersistentLiveLayout {
                 .client_routes
                 .client_for_surface(acknowledgement.acknowledgement.surface);
             if acknowledgement.acknowledgement.transaction != proposal.transaction
-                || acknowledgement.acknowledgement.outcome != XAuthorityControlOutcome::Applied
+                || acknowledgement.acknowledgement.outcome != XAuthorityControlOutcome::Delivered
                 || expected_client != Some(acknowledgement.client)
             {
                 return Err(format!(
@@ -1198,16 +1290,23 @@ impl PersistentLiveLayout {
             deadline: Instant::now() + proposal.timeout,
             update: proposal.update,
             moved_surfaces: proposal.moved_surfaces,
+            staged_transactions: BTreeMap::new(),
+            staged_cpu_buffer_updates: Vec::new(),
         });
         Ok(None)
     }
 
     fn resolve_pending(&mut self) -> Option<WmTransactionUpdate> {
         let pending = self.pending.as_ref()?;
-        let ready = pending
-            .requested_sizes
-            .iter()
-            .all(|(surface, size)| self.authority_sizes.get(surface) == Some(size));
+        let ready = pending.requested_sizes.iter().all(|(surface, size)| {
+            pending
+                .staged_transactions
+                .get(surface)
+                .is_some_and(|transaction| {
+                    transaction.target_geometry.width == size.width
+                        && transaction.target_geometry.height == size.height
+                })
+        });
         if !ready {
             return None;
         }
@@ -1263,11 +1362,28 @@ impl PersistentLiveLayout {
             deadline: Instant::now(),
             update: proposal.update,
             moved_surfaces: proposal.moved_surfaces,
+            staged_transactions: BTreeMap::new(),
+            staged_cpu_buffer_updates: Vec::new(),
         };
         self.commit_pending(pending)
     }
 
     fn commit_pending(&mut self, pending: PendingLiveWmLayout) -> WmTransactionUpdate {
+        if !pending.staged_transactions.is_empty() {
+            for transaction in pending.staged_transactions.values() {
+                self.authority_sizes.insert(
+                    transaction.surface,
+                    Size {
+                        width: transaction.target_geometry.width,
+                        height: transaction.target_geometry.height,
+                    },
+                );
+            }
+            self.committed_resize_replay = Some((
+                pending.staged_transactions.values().cloned().collect(),
+                pending.staged_cpu_buffer_updates.clone(),
+            ));
+        }
         self.layers = pending
             .layers
             .into_iter()
@@ -1288,10 +1404,49 @@ impl PersistentLiveLayout {
     }
 
     fn projected_batch(
-        &self,
+        &mut self,
         batch: &XAuthorityObservedTransactionBatch,
     ) -> XAuthorityObservedTransactionBatch {
         let mut projected = batch.clone();
+        if let Some(pending) = self.pending.as_ref() {
+            let staged_surfaces = pending
+                .staged_transactions
+                .keys()
+                .copied()
+                .collect::<BTreeSet<_>>();
+            let staged_handles = pending
+                .staged_transactions
+                .values()
+                .filter_map(|transaction| match transaction.target_buffer {
+                    BufferSource::CpuBuffer { handle } => Some(handle),
+                    _ => None,
+                })
+                .collect::<BTreeSet<_>>();
+            projected
+                .transactions
+                .retain(|transaction| !staged_surfaces.contains(&transaction.surface));
+            projected
+                .cpu_buffer_updates
+                .retain(|update| !staged_handles.contains(&update.handle()));
+        }
+        if let Some((transactions, updates)) = self.committed_resize_replay.take() {
+            let surfaces = transactions
+                .iter()
+                .map(|transaction| transaction.surface)
+                .collect::<BTreeSet<_>>();
+            let handles = updates
+                .iter()
+                .map(XAuthorityCpuBufferUpdate::handle)
+                .collect::<BTreeSet<_>>();
+            projected
+                .transactions
+                .retain(|transaction| !surfaces.contains(&transaction.surface));
+            projected
+                .cpu_buffer_updates
+                .retain(|update| !handles.contains(&update.handle()));
+            projected.transactions.extend(transactions);
+            projected.cpu_buffer_updates.extend(updates);
+        }
         for transaction in &mut projected.transactions {
             if let Some(layer) = self.layers.get(&transaction.surface) {
                 transaction.target_geometry = layer.geometry;
@@ -1386,7 +1541,7 @@ fn rect_is_within(bounds: Rect, geometry: Rect) -> bool {
 fn run_session_loop(
     config: &PersistentXtermSessionConfig,
     authority_receiver: &Receiver<XAuthorityObservedTransactionBatch>,
-    input_sender: &SyncSender<XAuthorityClientInputEvent>,
+    input_sender: &SyncSender<XAuthorityRoutedInput>,
     control_sender: &SyncSender<XAuthorityClientControlCommand>,
     control_ack_receiver: &Receiver<XAuthorityClientControlAck>,
     input_delivery_receiver: &Receiver<XAuthorityClientInputDelivery>,
@@ -2004,7 +2159,7 @@ fn run_session_loop(
                 {
                     continue;
                 }
-                if acknowledgement.acknowledgement.outcome != XAuthorityControlOutcome::Applied {
+                if acknowledgement.acknowledgement.outcome != XAuthorityControlOutcome::Delivered {
                     return Err(format!(
                         "initial X11 focus control was rejected: {:?}",
                         acknowledgement.acknowledgement.outcome
@@ -4080,7 +4235,7 @@ fn route_physical_input<P: NonBlockingInputPoller>(
     committed_surfaces: &[CommittedSurfaceState],
     input_layers: &[LayerSnapshot],
     client_routes: &XAuthorityClientSurfaceRoutes,
-    input_sender: &SyncSender<XAuthorityClientInputEvent>,
+    input_sender: &SyncSender<XAuthorityRoutedInput>,
     modifiers: &mut XCoreKeyboardMapper,
     emergency_chord: &mut EmergencyChordState,
     pointer: &mut XCorePointerMapper,
@@ -4109,11 +4264,11 @@ fn route_input_events(
     focus: &InputFocusState,
     committed_surfaces: &[CommittedSurfaceState],
     input_layers: &[LayerSnapshot],
-    client_routes: &XAuthorityClientSurfaceRoutes,
-    input_sender: &SyncSender<XAuthorityClientInputEvent>,
+    _client_routes: &XAuthorityClientSurfaceRoutes,
+    input_sender: &SyncSender<XAuthorityRoutedInput>,
     modifiers: &mut XCoreKeyboardMapper,
     emergency_chord: &mut EmergencyChordState,
-    pointer: &mut XCorePointerMapper,
+    _pointer: &mut XCorePointerMapper,
     next_input_delivery: &mut u64,
     mut physical_text_proof: Option<&mut PhysicalTextProof>,
 ) -> Result<PhysicalInputRouteReport, Box<dyn std::error::Error>> {
@@ -4139,10 +4294,7 @@ fn route_input_events(
                 else {
                     continue;
                 };
-                let Some(client) = event
-                    .target_surface
-                    .and_then(|surface| client_routes.client_for_surface(surface))
-                else {
+                let Some(target_surface) = event.target_surface else {
                     continue;
                 };
                 let Some((keycode, state)) = modifiers.map_evdev_key(keycode, pressed) else {
@@ -4175,15 +4327,17 @@ fn route_input_events(
                 *next_input_delivery = next_input_delivery
                     .checked_add(1)
                     .ok_or("live-session input delivery ID exhausted")?;
-                input_sender.try_send(XAuthorityClientInputEvent {
-                    client,
-                    event: XAuthorityKeyEvent {
-                        keycode,
-                        pressed,
-                        state,
-                        time_msec: u32::try_from(event.time_msec).unwrap_or(u32::MAX),
-                    }
-                    .into(),
+                input_sender.try_send(XAuthorityRoutedInput {
+                    request: sophia_protocol::RoutedInputRequest {
+                        serial: event.serial,
+                        seat: event.seat,
+                        device: event.device,
+                        time_msec: event.time_msec,
+                        target_surface,
+                        global_position: Point::default(),
+                        local_position: Point::default(),
+                        kind: event.kind,
+                    },
                     delivery: Some(delivery),
                 })?;
                 report.keys_routed = report.keys_routed.saturating_add(1);
@@ -4203,41 +4357,21 @@ fn route_input_events(
                 let Some(surface) = route.target_surface else {
                     continue;
                 };
-                let Some(client) = client_routes.client_for_surface(surface) else {
-                    continue;
-                };
-                let (event_kind, state) = match kind {
-                    sophia_protocol::InputEventKind::PointerMotion => {
-                        (XAuthorityPointerEventKind::Motion, pointer.state())
-                    }
-                    sophia_protocol::InputEventKind::PointerButton { button, pressed } => {
-                        let Some((button, state)) = pointer.map_evdev_button(button, pressed)
-                        else {
-                            continue;
-                        };
-                        (
-                            XAuthorityPointerEventKind::Button { button, pressed },
-                            state,
-                        )
-                    }
-                    sophia_protocol::InputEventKind::Key { .. } => unreachable!(),
-                };
                 let delivery = XAuthorityInputDeliveryId::from_raw(*next_input_delivery);
                 *next_input_delivery = next_input_delivery
                     .checked_add(1)
                     .ok_or("live-session input delivery ID exhausted")?;
-                input_sender.try_send(XAuthorityClientInputEvent {
-                    client,
-                    event: XAuthorityInputEvent::Pointer(XAuthorityPointerEvent {
-                        kind: event_kind,
-                        surface,
-                        root_x: pointer_coordinate(global.x),
-                        root_y: pointer_coordinate(global.y),
-                        event_x: pointer_coordinate(local.x),
-                        event_y: pointer_coordinate(local.y),
-                        state,
-                        time_msec: u32::try_from(event.time_msec).unwrap_or(u32::MAX),
-                    }),
+                input_sender.try_send(XAuthorityRoutedInput {
+                    request: sophia_protocol::RoutedInputRequest {
+                        serial: event.serial,
+                        seat: event.seat,
+                        device: event.device,
+                        time_msec: event.time_msec,
+                        target_surface: surface,
+                        global_position: global,
+                        local_position: local,
+                        kind,
+                    },
                     delivery: Some(delivery),
                 })?;
                 report.pointer_routed = report.pointer_routed.saturating_add(1);
@@ -4246,15 +4380,6 @@ fn route_input_events(
         }
     }
     Ok(report)
-}
-
-fn pointer_coordinate(value: f64) -> i16 {
-    if !value.is_finite() {
-        return 0;
-    }
-    value
-        .round()
-        .clamp(f64::from(i16::MIN), f64::from(i16::MAX)) as i16
 }
 
 struct SessionProcessGuard {

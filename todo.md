@@ -27,6 +27,12 @@ compatibility provider; no XLibre integration work is active.
 
 ## Milestone 3: X11 Session Correctness
 
+Implemented foundation: live setup/populated RandR facts consume a bounded
+Engine topology snapshot; Engine input crosses as surface-targeted routed facts
+and gains deterministic per-seat XKB state inside the authority; resize-sized
+transactions and CPU pixels are quarantined until geometry-plus-pixels commit.
+The unchecked gates below remain the promotion criteria.
+
 - [ ] Implement a real XKB keymap/state path and complete X11 focus, active and
   passive grabs, keyboard, pointer, and required XI2 delivery using
   Engine-selected targets and authority-local coordinates.

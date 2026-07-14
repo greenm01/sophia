@@ -29,9 +29,11 @@ here.
 
 No current X11 entry meets the complete `session` promotion gate. The guarded
 two-xterm path has retained `hardware` evidence with concurrent client-targeted
-input and KMS composition, but remains fixed-size with fixed output facts while
-normal resize, XKB/grabs, presentation feedback, and confined admission are
-completed. External probe harnesses are not session evidence.
+input and KMS composition. Engine-derived initial output facts, authority-local
+XKB state, and resize pixel quarantine are implemented, but normal resize
+evidence, dynamic RandR events, XKB wire requests, grabs/XI2, presentation
+feedback, and confined admission remain. External probes are not session
+evidence.
 
 ## Baseline Matrix
 
@@ -46,7 +48,7 @@ completed. External probe harnesses are not session evidence.
 | Core drawing | `cargo run --offline -q -p sophia-cli -- x-authority-xlib-drawing-smoke` | GC lifecycle and `PolyFillRectangle` reduced to a ready transaction | `engine` | `proven`; visual output still needs session evidence. |
 | Software image upload | `cargo run --offline -q -p sophia-cli -- x-authority-xlib-put-image-smoke` | bounded `PutImage` CPU-buffer update and ready transaction | `engine` | `proven`; retain buffer ownership/release requirements when real SHM import arrives. |
 | Private explicit handoff | `cargo run --offline -q -p sophia-cli -- x-authority-present-pixmap-smoke` | `SOPHIA-PRESENT` query and bounded pixmap transaction | `engine` | `proven` as Sophia-private prototype only; replace with standard DRI3/Present and fences. |
-| Root inspection | `cargo run --offline -q -p sophia-cli -- x-authority-xwininfo-root-smoke` | root attributes, geometry, tree, coordinate translation | `client` | `proven`; output/RandR facts remain fixed rather than Engine-derived. |
+| Root inspection | `cargo run --offline -q -p sophia-cli -- x-authority-xwininfo-root-smoke` | root attributes, geometry, tree, coordinate translation | `client` | `proven`; live setup root size is Engine-derived, while dynamic resize notification remains open. |
 | Root properties | `cargo run --offline -q -p sophia-cli -- x-authority-xprop-root-smoke` | root property enumeration and bounded reads | `client` | `proven`; broaden only when a client captures a required atom/property pattern. |
 | Root mutation | `cargo run --offline -q -p sophia-cli -- x-authority-xsetroot-name-smoke` | root name/property mutation, focus, GC, extension-query flow | `client` | `proven`; no Engine pixels are expected. |
 | Simple Xaw drawing | `cargo run --offline -q -p sophia-cli -- x-authority-xlogo-smoke` | create/map/property plus polygon/rectangle drawing | `engine` | `proven`; use as a low-complexity drawing regression. |
@@ -54,13 +56,13 @@ completed. External probe harnesses are not session evidence.
 | Xaw widgets | `cargo run --offline -q -p sophia-cli -- x-authority-xcalc-smoke` | colors, unmap, padded text, normal disconnect cleanup | `engine` | `proven`; grow through xcalc traces rather than generic Xaw support. |
 | Clock drawing | `cargo run --offline -q -p sophia-cli -- x-authority-xclock-smoke` | fonts, pixmaps, copy/draw damage, exposure | `engine` | `proven` for the probe window; not proof of every font or drawing path. |
 | Eye drawing | `cargo run --offline -q -p sophia-cli -- x-authority-xeyes-smoke` | `QueryColors`, clear, fill-arc draw damage | `engine` | `proven`; colormaps remain reduced. |
-| Output query | `cargo run --offline -q -p sophia-cli -- x-authority-xrandr-query-smoke` | bounded RandR version/output query | `client` | `proven` for fixed root facts; connect Engine output snapshots before claiming dynamic RandR. |
+| Output query | `cargo run --offline -q -p sophia-cli -- x-authority-xrandr-query-smoke` | bounded RandR version/output query | `client` | `proven` for populated snapshot-derived CRTC/output/mode facts; dynamic RandR subscription events remain open. |
 | xterm startup | `cargo run --offline -q -p sophia-cli -- x-authority-xterm-smoke` | core setup/lifecycle and compatibility request trace | `client` | `proven` as a lifecycle proof; it intentionally does not require a committed render transaction. |
 | xterm render | `cargo run --offline -q -p sophia-cli -- x-authority-xterm-render-smoke` | text drawing becomes a changing CPU-buffer transaction | `engine` | `proven`; add standard buffer handoff and normal resize/presentation feedback. |
-| xterm input | `cargo run --offline -q -p sophia-cli -- x-authority-xterm-input-smoke` | bounded core key events make the proof shell receive exactly `sophia` and advance xterm CPU-buffer generation | `engine` | `proven` for injected core keys and the core keyboard map; real XKB, grabs, physical input, and multi-client focus are still open. |
+| xterm input | `cargo run --offline -q -p sophia-cli -- x-authority-xterm-input-smoke` | bounded core key events make the proof shell receive exactly `sophia` and advance xterm CPU-buffer generation | `engine` | `proven`; live Engine input now crosses as a routed surface request and is translated by authority-local XKB state. XKB wire maps, grabs, XI2, and multi-client focus semantics remain open. |
 | Two-client xterm routing | `cargo run --offline -q -p sophia-cli -- x-authority-xterm-two-client-smoke` | two real xterms receive distinct client-targeted core keys through the bounded concurrent frontend and each advances CPU pixels | `engine` | `proven` for brokered CPU-buffer routing and service drain; it is not KMS-backed multi-app session evidence. |
 | Guarded one-client xterm | `tools/live_session_persistent_hardware_proof.sh` and `tools/live_session_content_hardware_proof.sh` | real xterm pixels reach Engine-owned GBM/KMS presentation; focused physical input changes later pixels | `hardware` | `proven` at the fixed established buffer size; normal resize and the full multi-client session contract remain open. |
-| Guarded two-xterm session | `tools/live_session_two_xterm_hardware_proof.sh` | focused-terminal input plus a supervised second xterm flush every routed X11 event, produce later CPU pixels, and reach KMS presentation with at least two CPU layers | `hardware` | `proven`: retained run completed in 1,487 ms with 10 ms maximum composition, 23 ms input-to-presentation, all 14 events flushed, and clean KMS teardown. Engine output facts, resize, XKB/grabs, and confined admission remain before `session`. |
+| Guarded two-xterm session | `tools/live_session_two_xterm_hardware_proof.sh` | focused-terminal input plus a supervised second xterm flush every routed X11 event, produce later CPU pixels, and reach KMS presentation with at least two CPU layers | `hardware` | `proven`: retained run completed in 1,487 ms with 10 ms maximum composition, 23 ms input-to-presentation, all 14 events flushed, and clean KMS teardown. Normal resize evidence, dynamic RandR, full XKB/grabs/XI2, and confined admission remain before `session`. |
 | GTK startup | `dbus-run-session -- cargo run --offline -q -p sophia-cli -- x-authority-zenity-smoke` | GTK reaches reduced startup, selections, `MIT-SHM`, `RANDR`, and `BIG-REQUESTS` | `client` | `startup only`; it is not a rendered dialog proof and currently lacks XInput2. |
 
 ## Admission Rule

@@ -96,6 +96,11 @@ or layout policy.
   supervision can revoke one admission by opaque `ClientAdmissionId`; socket
   shutdown then runs the worker's ordinary route, resource, surface, and lease
   cleanup without terminating its peers.
+- Live native-X setup and populated RandR resource replies now derive their
+  bounded root/output/mode facts from an Engine output-topology snapshot. Engine
+  hit-testing also crosses the boundary as a `RoutedInputRequest`; the frontend
+  resolves the owning client and applies deterministic authority-local XKB
+  modifier state before emitting core events.
 - `sophia-portal` has deterministic reducers for clipboard, drag-and-drop, file
   handoff, screen capture, URI open, and notifications. A session broker,
   policy-provider IPC, expiry lifecycle, and native-X executor are not complete.
@@ -111,8 +116,9 @@ or layout policy.
   protocol client before useful resources are created.
 - Classic shared-X and confined profiles are both launchable and explicit.
 - Cross-namespace operations use revocable, generation-bound portal grants.
-- The native X frontend grows from application evidence toward normal XKB,
-  input/grab, RandR, SHM, DRI3/Present, and toolkit behavior.
+- The native X frontend grows from application evidence toward complete XKB
+  wire compatibility, focus/grabs, dynamic RandR notifications, XI2, SHM,
+  DRI3/Present, and toolkit behavior.
 - Wayland remains a supported frontend through Smithay, but it is a maintenance
   lane while the X11, namespace, and portal foundations mature.
 

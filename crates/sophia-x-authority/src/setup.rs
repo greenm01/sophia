@@ -1,3 +1,5 @@
+use sophia_protocol::Size;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum XByteOrder {
     LittleEndian,
@@ -115,6 +117,7 @@ pub struct XSetupSuccess {
     pub vendor: Vec<u8>,
     pub roots: u8,
     pub formats: u8,
+    pub root_size: Size,
 }
 
 impl XSetupSuccess {
@@ -129,6 +132,10 @@ impl XSetupSuccess {
             vendor: X_SETUP_VENDOR.to_vec(),
             roots: 0,
             formats: 0,
+            root_size: Size {
+                width: i32::from(X_SETUP_ROOT_WIDTH),
+                height: i32::from(X_SETUP_ROOT_HEIGHT),
+            },
         }
     }
 
@@ -269,6 +276,17 @@ pub fn encode_x11_setup_success(
     byte_order: XByteOrder,
     setup: &XSetupSuccess,
 ) -> Result<Vec<u8>, XSetupParseError> {
+    if setup.root_size.width <= 0
+        || setup.root_size.height <= 0
+        || setup.root_size.width > i32::from(u16::MAX)
+        || setup.root_size.height > i32::from(u16::MAX)
+    {
+        return Err(XSetupParseError::ReplyFieldTooLarge {
+            field: "root_size",
+            len: usize::MAX,
+            max: u16::MAX as usize,
+        });
+    }
     if setup.vendor.len() > u16::MAX as usize {
         return Err(XSetupParseError::ReplyFieldTooLarge {
             field: "vendor",
@@ -330,7 +348,7 @@ pub fn encode_x11_setup_success(
         encode_pixmap_format(&mut out);
     }
     for _ in 0..setup.roots {
-        encode_root(byte_order, &mut out);
+        encode_root(byte_order, &mut out, setup.root_size);
     }
 
     Ok(out)
@@ -392,16 +410,16 @@ fn encode_pixmap_format(out: &mut Vec<u8>) {
     out.extend_from_slice(&[0; 5]);
 }
 
-fn encode_root(byte_order: XByteOrder, out: &mut Vec<u8>) {
+fn encode_root(byte_order: XByteOrder, out: &mut Vec<u8>, root_size: Size) {
     byte_order.push_u32(out, X_SETUP_DEFAULT_ROOT);
     byte_order.push_u32(out, X_SETUP_DEFAULT_COLORMAP);
     byte_order.push_u32(out, 0x00ff_ffff);
     byte_order.push_u32(out, 0x0000_0000);
     byte_order.push_u32(out, 0);
-    byte_order.push_u16(out, X_SETUP_ROOT_WIDTH);
-    byte_order.push_u16(out, X_SETUP_ROOT_HEIGHT);
-    byte_order.push_u16(out, 340);
-    byte_order.push_u16(out, 190);
+    byte_order.push_u16(out, root_size.width as u16);
+    byte_order.push_u16(out, root_size.height as u16);
+    byte_order.push_u16(out, logical_pixels_to_millimeters(root_size.width));
+    byte_order.push_u16(out, logical_pixels_to_millimeters(root_size.height));
     byte_order.push_u16(out, 1);
     byte_order.push_u16(out, 1);
     byte_order.push_u32(out, X_SETUP_DEFAULT_VISUAL);
@@ -423,6 +441,14 @@ fn encode_root(byte_order: XByteOrder, out: &mut Vec<u8>) {
     byte_order.push_u32(out, 0x0000_ff00);
     byte_order.push_u32(out, 0x0000_00ff);
     byte_order.push_u32(out, 0);
+}
+
+fn logical_pixels_to_millimeters(pixels: i32) -> u16 {
+    // X setup requires physical dimensions. Engine deliberately does not
+    // expose connector/EDID identity, so the frontend reports a stable 96-DPI
+    // logical size instead of inventing a physical monitor measurement.
+    let millimeters = i64::from(pixels).saturating_mul(254).saturating_add(480) / 960;
+    u16::try_from(millimeters).unwrap_or(u16::MAX).max(1)
 }
 
 const fn byte_order_code(byte_order: XByteOrder) -> u8 {

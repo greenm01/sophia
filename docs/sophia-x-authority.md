@@ -60,8 +60,9 @@ Sophia Engine:
 | --- | --- | --- |
 | X11 client → frontend | local Unix connection, setup authentication, X11 requests, and X resource lifetime | The frontend owns parsing, client identity, XIDs, atoms, windows, properties, selections, grabs, and client-visible replies/events. Production setup authentication must be explicit; an owner-only socket is a transport guard, not a replacement for X11 authorization. |
 | Frontend → Engine | `XAuthorityObservedTransactionBatch` containing the originating frontend client when available, `SurfaceTransaction` values, surface removals, and any CPU buffer update | This is the only visual ingress. The batch is bounded; backpressure is an error rather than an unbounded queue. Engine receives Sophia surface data, never raw X11 request parsing or XID ownership. |
-| Engine → frontend | `XAuthorityClientInputEvent` and `XAuthorityClientControlCommand` | Engine selects the physical-input target, owns coordinates/hit-testing, resolves that surface to its frontend client from observed transactions, and requests X-visible focus or configure results. The frontend applies only routes addressed to that connection and returns `XAuthorityClientControlAck`. |
-| Engine → frontend (next) | output/RandR snapshot and presentation/buffer-release feedback | Engine remains the source of physical output facts, frame retirement, and buffer lifetime. The frontend turns those facts into RandR/configure/present-visible X11 state; it must never infer scanout completion itself. |
+| Engine → frontend | `RoutedInputRequest` plus `XAuthorityClientControlCommand` | Engine selects the physical-input surface and owns global/local coordinates. The frontend resolves the surface to its connection, applies authority-local XKB/pointer state, and requests X-visible focus or configure results. It returns client-labeled delivery/control acknowledgements. |
+| Engine → frontend | bounded `OutputTopologySnapshot` | Engine remains the source of physical output facts. Setup and populated RandR resources are derived from the current validated generation; dynamic RandR subscription events remain incomplete. |
+| Engine → frontend (next) | presentation/buffer-release feedback | Engine owns frame retirement and buffer lifetime. The frontend must never infer scanout completion itself. |
 
 The existing implementation covers the second and third rows for the
 persistent native session: X11 socket dispatch emits bounded, client-attributed
@@ -94,12 +95,14 @@ is the operator gate for KMS-backed evidence: it requires normal persistent
 session validation plus at least two composed CPU layers. Retained hardware
 evidence passes in 1,487 ms with 10 ms maximum composition, 23 ms
 input-to-presentation, all 14 X11 events flushed, and clean KMS teardown. This
-is `hardware`, not full `session`, evidence because output facts, resize, XKB,
-grabs, and confined admission remain incomplete. Initial Engine focus is now
+is `hardware`, not full `session`, evidence because dynamic output events,
+normal resize proof, full XKB wire compatibility, grabs, XI2, and confined
+admission remain incomplete. Initial Engine focus is now
 acknowledged by the owning X11 client before the input proof begins, so
 either focused terminal can demonstrate delivery. X11 map/configure lifecycle
-updates no longer overwrite a surface's committed-pixel generation. Root/output
-facts are still fixed setup values. Each accepted client now gets
+updates no longer overwrite a surface's committed-pixel generation. Live setup
+and populated RandR CRTC/output/mode resources use Engine-derived topology
+facts. Each accepted client now gets
 a disjoint X11 setup resource-ID range. Every currently supported XID-creating
 wire path—window, pixmap, GC, font, colormap, glyph cursor, and reduced
 MIT-SHM segment—rejects an XID outside that range with X11 `BadIDChoice` before
@@ -259,10 +262,12 @@ creation, reduced `MIT-SHM`, additional `RANDR`, and `BIG-REQUESTS` startup path
 but the current TTY/DBus environment and missing XInput2 support still prevent a
 rendered GTK dialog proof.
 
-`XKEYBOARD` reports `present=false`. Advertising only its version handshake
-caused real xterm to advance into unsupported XKB map requests once the core
-keyboard map became useful. The supported keyboard baseline is core
-`GetKeyboardMapping`, `GetModifierMapping`, `KeyPress`, and `KeyRelease`.
+`XKEYBOARD` still reports `present=false`: its map/name/state request surface is
+not complete enough to advertise. Engine-routed evdev keys are now translated
+inside the frontend with a bounded deterministic RMLVO configuration (default
+`evdev`/`pc105`/`us`) and per-seat XKB effective-modifier state. Core
+`GetKeyboardMapping`, `GetModifierMapping`, `KeyPress`, and `KeyRelease` remain
+the client-visible compatibility baseline.
 
 ## Namespace Model
 
@@ -712,11 +717,11 @@ read-only compatibility surface. The probe added only the request surface xrandr
 actually exercised: minimal `RANDR` extension advertisement,
 `RRGetScreenSizeRange`, and `RRGetScreenResources`.
 
-The first admitted RandR replies are deliberately sparse. Size range reports
-the setup root dimensions as the fixed admitted range, and screen resources
-returns empty CRTC/output/mode/name lists. This is enough for `xrandr --query`
-to observe a bounded screen without giving the frontend ownership of
-native connector, CRTC, provider, lease, monitor, or modeset state.
+RandR size range and screen resources now sample a validated, bounded Engine
+topology generation. Replies contain synthetic protocol-local CRTC, output,
+mode, and name IDs plus output and CRTC detail; those IDs do not claim ownership
+of native connectors or KMS objects. Dynamic topology intake and RandR
+subscription events remain the next output-correctness boundary.
 
 The external probe trace now includes bounded parse-error request heads. That
 keeps future extension work probe-driven when Xlib labels an extension failure

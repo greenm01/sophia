@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
 
 use sophia_portal::ClipboardPortal;
-use sophia_protocol::{AuthoritySurface, NamespaceId, Rect, Region, Size, TransactionId};
+use sophia_protocol::{
+    AuthoritySurface, NamespaceId, OutputTopologyError, OutputTopologySnapshot, Rect, Region, Size,
+    TransactionId,
+};
 
 use crate::{
     ClipboardSelectionDispatch, ClipboardSelectionExecutionError,
@@ -33,7 +36,7 @@ pub struct XAuthorityClientResourceRelease {
     pub released_shm_segments: usize,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct XAuthorityRuntime {
     resources: XResourceTable,
     windows: XWindowTable,
@@ -47,11 +50,58 @@ pub struct XAuthorityRuntime {
     graphics_contexts: XGraphicsContextTable,
     window_background_pixels: BTreeMap<crate::XResourceId, u32>,
     last_cpu_buffer_update: Option<XAuthorityCpuBufferUpdate>,
+    output_topology: OutputTopologySnapshot,
+}
+
+impl Default for XAuthorityRuntime {
+    fn default() -> Self {
+        Self {
+            resources: Default::default(),
+            windows: Default::default(),
+            shm_segments: Default::default(),
+            selections: Default::default(),
+            clipboard: Default::default(),
+            pending_clipboard: Default::default(),
+            clipboard_proxies: Default::default(),
+            next_clipboard_proxy: 0,
+            software_buffers: Default::default(),
+            graphics_contexts: Default::default(),
+            window_background_pixels: Default::default(),
+            last_cpu_buffer_update: None,
+            output_topology: OutputTopologySnapshot::deterministic(),
+        }
+    }
 }
 
 impl XAuthorityRuntime {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_output_topology(
+        output_topology: OutputTopologySnapshot,
+    ) -> Result<Self, OutputTopologyError> {
+        output_topology.validate()?;
+        Ok(Self {
+            output_topology,
+            ..Self::default()
+        })
+    }
+
+    pub fn output_topology(&self) -> &OutputTopologySnapshot {
+        &self.output_topology
+    }
+
+    pub fn update_output_topology(
+        &mut self,
+        output_topology: OutputTopologySnapshot,
+    ) -> Result<bool, OutputTopologyError> {
+        output_topology.validate()?;
+        if output_topology.generation <= self.output_topology.generation {
+            return Ok(false);
+        }
+        self.output_topology = output_topology;
+        Ok(true)
     }
 
     pub fn begin_dispatch(&mut self) {

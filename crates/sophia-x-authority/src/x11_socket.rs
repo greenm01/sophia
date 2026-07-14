@@ -35,8 +35,9 @@ use crate::{
 };
 #[cfg(unix)]
 use sophia_protocol::{
-    ClientAdmissionContext, ClientAdmissionId, ClientAuthenticationMethod, NamespaceCapabilities,
-    NamespaceContext, NamespaceId, NamespaceProfile, Size, SurfaceId, TransactionId,
+    ClientAdmissionContext, ClientAdmissionId, ClientAuthenticationMethod, InputEventKind,
+    NamespaceCapabilities, NamespaceContext, NamespaceId, NamespaceProfile, RoutedInputRequest,
+    SeatId, Size, SurfaceId, TransactionId,
 };
 
 #[cfg(unix)]
@@ -225,6 +226,7 @@ pub struct XServerFrontendConfig {
     setup_authorization: XServerFrontendSetupAuthorization,
     admission_policy: Option<Arc<dyn XServerFrontendAdmissionPolicy>>,
     max_concurrent_clients: NonZeroUsize,
+    output_topology: sophia_protocol::OutputTopologySnapshot,
 }
 
 #[cfg(unix)]
@@ -237,6 +239,7 @@ impl core::fmt::Debug for XServerFrontendConfig {
             .field("setup_authorization", &self.setup_authorization)
             .field("has_admission_policy", &self.admission_policy.is_some())
             .field("max_concurrent_clients", &self.max_concurrent_clients)
+            .field("output_topology", &self.output_topology)
             .finish()
     }
 }
@@ -279,6 +282,7 @@ impl XServerFrontendConfig {
             setup_authorization: XServerFrontendSetupAuthorization::default(),
             admission_policy: None,
             max_concurrent_clients: X_SERVER_FRONTEND_DEFAULT_MAX_CONCURRENT_CLIENTS,
+            output_topology: sophia_protocol::OutputTopologySnapshot::deterministic(),
         })
     }
 
@@ -306,6 +310,21 @@ impl XServerFrontendConfig {
     pub fn with_max_concurrent_clients(mut self, max_concurrent_clients: NonZeroUsize) -> Self {
         self.max_concurrent_clients = max_concurrent_clients;
         self
+    }
+
+    pub fn with_output_topology(
+        mut self,
+        output_topology: sophia_protocol::OutputTopologySnapshot,
+    ) -> Result<Self, X11SetupSocketError> {
+        output_topology.validate().map_err(|error| {
+            X11SetupSocketError::new(format!("invalid Engine output topology: {error:?}"))
+        })?;
+        self.output_topology = output_topology;
+        Ok(self)
+    }
+
+    pub fn output_topology(&self) -> &sophia_protocol::OutputTopologySnapshot {
+        &self.output_topology
     }
 
     pub fn socket_path(&self) -> &Path {
@@ -421,12 +440,14 @@ pub struct XServerFrontend {
 impl XServerFrontend {
     pub fn bind(config: XServerFrontendConfig) -> Result<Self, X11SetupSocketError> {
         let listener = bind_x11_core_socket_server(config.socket_path())?;
+        let state =
+            X11CoreSocketServerState::with_output_topology(config.output_topology().clone())?;
         let (worker_completion_sender, worker_completions) = std::sync::mpsc::channel();
         let (worker_admission_event_sender, worker_admission_events) = std::sync::mpsc::channel();
         Ok(Self {
             config,
             listener,
-            state: X11CoreSocketServerState::new(),
+            state,
             workers: BTreeMap::new(),
             worker_completions,
             worker_completion_sender,
@@ -440,6 +461,23 @@ impl XServerFrontend {
 
     pub fn config(&self) -> &XServerFrontendConfig {
         &self.config
+    }
+
+    pub fn update_output_topology(
+        &mut self,
+        snapshot: sophia_protocol::OutputTopologySnapshot,
+    ) -> Result<XAuthorityOutputUpdateOutcome, X11SetupSocketError> {
+        let generation = snapshot.generation;
+        let mut runtime = self
+            .state
+            .runtime
+            .lock()
+            .map_err(|_| X11SetupSocketError::new("X11 authority runtime lock poisoned"))?;
+        match runtime.update_output_topology(snapshot) {
+            Ok(true) => Ok(XAuthorityOutputUpdateOutcome::Applied { generation }),
+            Ok(false) => Ok(XAuthorityOutputUpdateOutcome::RejectedStale { generation }),
+            Err(error) => Ok(XAuthorityOutputUpdateOutcome::RejectedInvalid { generation, error }),
+        }
     }
 
     /// Number of X11 clients currently holding a frontend connection lease.
@@ -827,6 +865,21 @@ impl XServerFrontend {
     }
 }
 
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum XAuthorityOutputUpdateOutcome {
+    Applied {
+        generation: u64,
+    },
+    RejectedStale {
+        generation: u64,
+    },
+    RejectedInvalid {
+        generation: u64,
+        error: sophia_protocol::OutputTopologyError,
+    },
+}
+
 /// Authority-side endpoint for a portal executor. Broker-visible values stop
 /// at the grant and payload; retained XIDs, atoms, properties, and event
 /// routing remain private to this object.
@@ -1120,6 +1173,16 @@ pub struct XAuthorityClientInputEvent {
     pub delivery: Option<XAuthorityInputDeliveryId>,
 }
 
+/// Protocol-neutral physical input after Engine hit-testing and focus policy.
+/// The X authority, not Engine, resolves this Sophia surface to an X11 client
+/// and applies its keyboard/pointer protocol state.
+#[cfg(unix)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct XAuthorityRoutedInput {
+    pub request: RoutedInputRequest,
+    pub delivery: Option<XAuthorityInputDeliveryId>,
+}
+
 /// Opaque per-session identifier for one routed input event.
 #[cfg(unix)]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -1200,7 +1263,7 @@ impl XAuthorityControlCommand {
 #[cfg(unix)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum XAuthorityControlOutcome {
-    Applied,
+    Delivered,
     UnknownSurface,
     InvalidSize,
     AuthorityRejected,
@@ -1239,6 +1302,7 @@ pub enum XServerFrontendServiceCommand {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum XServerFrontendRouteError {
     UnknownClient { client: XServerFrontendClientId },
+    UnknownSurface { surface: SurfaceId },
     ClientQueueFull { client: XServerFrontendClientId },
     ClientQueueDisconnected { client: XServerFrontendClientId },
     DuplicateClient { client: XServerFrontendClientId },
@@ -1257,6 +1321,12 @@ impl core::fmt::Display for XServerFrontendRouteError {
                     client.raw()
                 )
             }
+            Self::UnknownSurface { surface } => write!(
+                formatter,
+                "X11 route targets unknown Sophia surface {}:{}",
+                surface.index(),
+                surface.generation()
+            ),
             Self::ClientQueueFull { client } => {
                 write!(
                     formatter,
@@ -1300,6 +1370,8 @@ pub struct XServerFrontendRouteBroker {
     registry: XServerFrontendRouteRegistry,
     input_sender: SyncSender<XAuthorityClientInputEvent>,
     input_receiver: Receiver<XAuthorityClientInputEvent>,
+    routed_input_sender: SyncSender<XAuthorityRoutedInput>,
+    routed_input_receiver: Receiver<XAuthorityRoutedInput>,
     control_sender: SyncSender<XAuthorityClientControlCommand>,
     control_receiver: Receiver<XAuthorityClientControlCommand>,
     acknowledgement_receiver: Option<Receiver<XAuthorityClientControlAck>>,
@@ -1343,6 +1415,24 @@ impl XServerFrontendRouteBroker {
         )
     }
 
+    pub fn with_control_and_input_delivery_senders_and_xkb_config(
+        queue_capacity: NonZeroUsize,
+        acknowledgement_sender: SyncSender<XAuthorityClientControlAck>,
+        input_delivery_sender: SyncSender<XAuthorityClientInputDelivery>,
+        xkb_config: crate::XkbRmlvoConfig,
+    ) -> Result<Self, crate::XkbKeyboardError> {
+        crate::XkbKeyboardState::new(&xkb_config)?;
+        let mut broker = Self::with_transports(
+            queue_capacity,
+            acknowledgement_sender,
+            None,
+            Some(input_delivery_sender),
+        );
+        broker.registry.xkb_config = xkb_config.clone();
+        broker.registry.xkb_worker = XkbKeyboardWorker::spawn(xkb_config);
+        Ok(broker)
+    }
+
     fn with_transports(
         queue_capacity: NonZeroUsize,
         acknowledgement_sender: SyncSender<XAuthorityClientControlAck>,
@@ -1351,11 +1441,16 @@ impl XServerFrontendRouteBroker {
     ) -> Self {
         let capacity = queue_capacity.get();
         let (input_sender, input_receiver) = sync_channel(capacity);
+        let (routed_input_sender, routed_input_receiver) = sync_channel(capacity);
         let (control_sender, control_receiver) = sync_channel(capacity);
         let (source_payload_sender, source_payload_receiver) = sync_channel(capacity);
         Self {
             registry: XServerFrontendRouteRegistry {
                 clients: Arc::new(Mutex::new(BTreeMap::new())),
+                surfaces: Arc::new(Mutex::new(BTreeMap::new())),
+                pointer_state: Arc::new(Mutex::new(BTreeMap::new())),
+                xkb_config: crate::XkbRmlvoConfig::default(),
+                xkb_worker: XkbKeyboardWorker::spawn(crate::XkbRmlvoConfig::default()),
                 acknowledgement_sender,
                 input_delivery_sender,
                 per_client_queue_capacity: queue_capacity,
@@ -1363,6 +1458,8 @@ impl XServerFrontendRouteBroker {
             },
             input_sender,
             input_receiver,
+            routed_input_sender,
+            routed_input_receiver,
             control_sender,
             control_receiver,
             acknowledgement_receiver,
@@ -1372,6 +1469,10 @@ impl XServerFrontendRouteBroker {
 
     pub fn input_sender(&self) -> SyncSender<XAuthorityClientInputEvent> {
         self.input_sender.clone()
+    }
+
+    pub fn routed_input_sender(&self) -> SyncSender<XAuthorityRoutedInput> {
+        self.routed_input_sender.clone()
     }
 
     pub fn control_sender(&self) -> SyncSender<XAuthorityClientControlCommand> {
@@ -1400,6 +1501,14 @@ impl XServerFrontendRouteBroker {
         let mut routed = 0usize;
         loop {
             let mut progressed = false;
+            match self.routed_input_receiver.try_recv() {
+                Ok(route) => {
+                    self.registry.route_engine_input(route)?;
+                    routed = routed.saturating_add(1);
+                    progressed = true;
+                }
+                Err(TryRecvError::Empty | TryRecvError::Disconnected) => {}
+            }
             match self.input_receiver.try_recv() {
                 Ok(route) => {
                     if let Err(error) = self.registry.route_input(route) {
@@ -1438,6 +1547,10 @@ impl XServerFrontendRouteBroker {
 #[derive(Clone)]
 struct XServerFrontendRouteRegistry {
     clients: Arc<Mutex<BTreeMap<XServerFrontendClientId, XServerFrontendClientRouteSenders>>>,
+    surfaces: Arc<Mutex<BTreeMap<SurfaceId, XServerFrontendClientId>>>,
+    pointer_state: Arc<Mutex<BTreeMap<SeatId, crate::XCorePointerMapper>>>,
+    xkb_config: crate::XkbRmlvoConfig,
+    xkb_worker: XkbKeyboardWorker,
     acknowledgement_sender: SyncSender<XAuthorityClientControlAck>,
     input_delivery_sender: Option<SyncSender<XAuthorityClientInputDelivery>>,
     per_client_queue_capacity: NonZeroUsize,
@@ -1463,6 +1576,78 @@ struct XServerFrontendClientRouteChannels {
 struct XServerFrontendClientRouteRegistration {
     client: XServerFrontendClientId,
     clients: Arc<Mutex<BTreeMap<XServerFrontendClientId, XServerFrontendClientRouteSenders>>>,
+    surfaces: Arc<Mutex<BTreeMap<SurfaceId, XServerFrontendClientId>>>,
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug)]
+enum XkbWorkerCommand {
+    Key {
+        seat: SeatId,
+        keycode: u32,
+        pressed: bool,
+    },
+    Modifiers {
+        seat: SeatId,
+    },
+}
+
+#[cfg(unix)]
+#[derive(Clone)]
+struct XkbKeyboardWorker {
+    commands: SyncSender<XkbWorkerCommand>,
+    replies: Arc<Mutex<Receiver<Option<(u8, u16)>>>>,
+}
+
+#[cfg(unix)]
+impl XkbKeyboardWorker {
+    fn spawn(config: crate::XkbRmlvoConfig) -> Self {
+        let (commands, command_receiver) = sync_channel(64);
+        let (reply_sender, replies) = sync_channel(64);
+        std::thread::Builder::new()
+            .name("sophia-xkb-authority".to_owned())
+            .spawn(move || {
+                let mut seats = BTreeMap::<SeatId, crate::XkbKeyboardState>::new();
+                while let Ok(command) = command_receiver.recv() {
+                    let seat_id = match command {
+                        XkbWorkerCommand::Key { seat, .. }
+                        | XkbWorkerCommand::Modifiers { seat } => seat,
+                    };
+                    let state = seats.entry(seat_id).or_insert_with(|| {
+                        crate::XkbKeyboardState::new(&config)
+                            .expect("validated XKB configuration must remain compilable")
+                    });
+                    let reply = match command {
+                        XkbWorkerCommand::Key {
+                            keycode, pressed, ..
+                        } => state.map_evdev_key(keycode, pressed),
+                        XkbWorkerCommand::Modifiers { .. } => Some((0, state.modifier_mask())),
+                    };
+                    if reply_sender.send(reply).is_err() {
+                        break;
+                    }
+                }
+            })
+            .expect("Sophia XKB authority worker must start");
+        Self {
+            commands,
+            replies: Arc::new(Mutex::new(replies)),
+        }
+    }
+
+    fn request(
+        &self,
+        command: XkbWorkerCommand,
+    ) -> Result<Option<(u8, u16)>, XServerFrontendRouteError> {
+        self.commands
+            .try_send(command)
+            .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?;
+        self.replies
+            .lock()
+            .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
+            .recv()
+            .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)
+    }
 }
 
 #[cfg(unix)]
@@ -1500,6 +1685,7 @@ impl XServerFrontendRouteRegistry {
             XServerFrontendClientRouteRegistration {
                 client,
                 clients: self.clients.clone(),
+                surfaces: self.surfaces.clone(),
             },
             XServerFrontendClientRouteChannels {
                 input,
@@ -1515,6 +1701,112 @@ impl XServerFrontendRouteRegistry {
     ) -> Result<(), XServerFrontendRouteError> {
         let sender = self.client_senders(route.client)?.input;
         self.route_to_client(route.client, sender, route)
+    }
+
+    fn register_surface(
+        &self,
+        client: XServerFrontendClientId,
+        surface: SurfaceId,
+    ) -> Result<(), XServerFrontendRouteError> {
+        self.surfaces
+            .lock()
+            .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
+            .insert(surface, client);
+        Ok(())
+    }
+
+    fn route_engine_input(
+        &self,
+        route: XAuthorityRoutedInput,
+    ) -> Result<(), XServerFrontendRouteError> {
+        let client = self
+            .surfaces
+            .lock()
+            .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
+            .get(&route.request.target_surface)
+            .copied()
+            .ok_or(XServerFrontendRouteError::UnknownSurface {
+                surface: route.request.target_surface,
+            })?;
+        let mut pointers = self
+            .pointer_state
+            .lock()
+            .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?;
+        let pointer = pointers
+            .entry(route.request.seat)
+            .or_insert_with(crate::XCorePointerMapper::new);
+        let time_msec = u32::try_from(route.request.time_msec).unwrap_or(u32::MAX);
+        let event = match route.request.kind {
+            InputEventKind::Key { keycode, pressed } => {
+                let Some((keycode, state)) = self.xkb_worker.request(XkbWorkerCommand::Key {
+                    seat: route.request.seat,
+                    keycode,
+                    pressed,
+                })?
+                else {
+                    return self.send_input_delivery(
+                        client,
+                        route.delivery,
+                        XAuthorityInputDeliveryOutcome::RouteRejected,
+                    );
+                };
+                XAuthorityInputEvent::Key(XAuthorityKeyEvent {
+                    keycode,
+                    pressed,
+                    state: state | pointer.state(),
+                    time_msec,
+                })
+            }
+            InputEventKind::PointerMotion => {
+                XAuthorityInputEvent::Pointer(XAuthorityPointerEvent {
+                    kind: XAuthorityPointerEventKind::Motion,
+                    surface: route.request.target_surface,
+                    root_x: clamp_input_coordinate(route.request.global_position.x),
+                    root_y: clamp_input_coordinate(route.request.global_position.y),
+                    event_x: clamp_input_coordinate(route.request.local_position.x),
+                    event_y: clamp_input_coordinate(route.request.local_position.y),
+                    state: self
+                        .xkb_worker
+                        .request(XkbWorkerCommand::Modifiers {
+                            seat: route.request.seat,
+                        })?
+                        .map_or(0, |(_, state)| state)
+                        | pointer.state(),
+                    time_msec,
+                })
+            }
+            InputEventKind::PointerButton { button, pressed } => {
+                let Some((button, state)) = pointer.map_evdev_button(button, pressed) else {
+                    return self.send_input_delivery(
+                        client,
+                        route.delivery,
+                        XAuthorityInputDeliveryOutcome::RouteRejected,
+                    );
+                };
+                XAuthorityInputEvent::Pointer(XAuthorityPointerEvent {
+                    kind: XAuthorityPointerEventKind::Button { button, pressed },
+                    surface: route.request.target_surface,
+                    root_x: clamp_input_coordinate(route.request.global_position.x),
+                    root_y: clamp_input_coordinate(route.request.global_position.y),
+                    event_x: clamp_input_coordinate(route.request.local_position.x),
+                    event_y: clamp_input_coordinate(route.request.local_position.y),
+                    state: self
+                        .xkb_worker
+                        .request(XkbWorkerCommand::Modifiers {
+                            seat: route.request.seat,
+                        })?
+                        .map_or(0, |(_, state)| state)
+                        | state,
+                    time_msec,
+                })
+            }
+        };
+        drop(pointers);
+        self.route_input(XAuthorityClientInputEvent {
+            client,
+            event,
+            delivery: route.delivery,
+        })
     }
 
     fn route_control(
@@ -1603,7 +1895,20 @@ impl Drop for XServerFrontendClientRouteRegistration {
         if let Ok(mut clients) = self.clients.lock() {
             clients.remove(&self.client);
         }
+        if let Ok(mut surfaces) = self.surfaces.lock() {
+            surfaces.retain(|_, client| *client != self.client);
+        }
     }
+}
+
+#[cfg(unix)]
+fn clamp_input_coordinate(value: f64) -> i16 {
+    if !value.is_finite() {
+        return 0;
+    }
+    value
+        .floor()
+        .clamp(f64::from(i16::MIN), f64::from(i16::MAX)) as i16
 }
 
 #[cfg(unix)]
@@ -1783,9 +2088,33 @@ impl X11CoreSocketServerState {
         Self::default()
     }
 
+    pub fn with_output_topology(
+        output_topology: sophia_protocol::OutputTopologySnapshot,
+    ) -> Result<Self, X11SetupSocketError> {
+        let runtime =
+            XAuthorityRuntime::with_output_topology(output_topology).map_err(|error| {
+                X11SetupSocketError::new(format!("invalid Engine output topology: {error:?}"))
+            })?;
+        Ok(Self {
+            runtime: Arc::new(Mutex::new(runtime)),
+            ..Self::default()
+        })
+    }
+
     fn next_client_setup_success(
         &self,
     ) -> Result<(XServerFrontendClientLease, XSetupSuccess), X11SetupSocketError> {
+        let root_size = self
+            .runtime
+            .lock()
+            .map_err(|_| X11SetupSocketError::new("X11 authority runtime lock poisoned"))?
+            .output_topology()
+            .root_size()
+            .map_err(|error| {
+                X11SetupSocketError::new(format!(
+                    "invalid Engine output topology during setup: {error:?}"
+                ))
+            })?;
         let mut clients = self
             .clients
             .lock()
@@ -1814,6 +2143,7 @@ impl X11CoreSocketServerState {
             XSetupSuccess {
                 resource_id_base,
                 resource_id_mask: X_SETUP_DEFAULT_RESOURCE_ID_MASK,
+                root_size,
                 ..XSetupSuccess::client_compatible()
             },
         ))
@@ -2763,6 +3093,15 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                                 X11SetupSocketError::new("X11 surface/window map lock poisoned")
                             })?
                             .insert(*surface, *window);
+                        if let Some(routing) = protocol_routing.as_ref() {
+                            routing
+                                .register_surface(client, *surface)
+                                .map_err(|error| {
+                                    X11SetupSocketError::new(format!(
+                                        "failed to register X11 surface route: {error}"
+                                    ))
+                                })?;
+                        }
                     }
                     let default_map_target = if !keyboard_target_selected.load(Ordering::Acquire)
                         && let crate::XWireRequest::Authority(crate::XAuthorityRequestPacket {
@@ -3258,7 +3597,7 @@ fn spawn_x11_control_writer(
                 XAuthorityControlAck {
                     transaction,
                     surface,
-                    outcome: XAuthorityControlOutcome::Applied,
+                    outcome: XAuthorityControlOutcome::Delivered,
                 },
             )?;
         }
@@ -3549,7 +3888,7 @@ mod routing_tests {
         let acknowledgement = XAuthorityControlAck {
             transaction: command.transaction(),
             surface: command.surface(),
-            outcome: XAuthorityControlOutcome::Applied,
+            outcome: XAuthorityControlOutcome::Delivered,
         };
         channels.send_ack(first, acknowledgement).unwrap();
         assert_eq!(
@@ -3603,7 +3942,7 @@ mod routing_tests {
         let acknowledgement = XAuthorityControlAck {
             transaction: command.transaction(),
             surface: command.surface(),
-            outcome: XAuthorityControlOutcome::Applied,
+            outcome: XAuthorityControlOutcome::Delivered,
         };
         let channels = X11ControlChannels::ClientBound {
             receiver: channels.control,
@@ -3951,6 +4290,15 @@ fn x11_core_request_trace_detail(request: &crate::XWireRequest) -> Option<String
         crate::XWireRequest::RandrQueryVersion { .. } => Some("RANDR:QueryVersion".to_string()),
         crate::XWireRequest::RandrSelectInput { window, .. } => {
             Some(format!("RANDR:SelectInput:{:#x}", window.local.raw()))
+        }
+        crate::XWireRequest::RandrGetScreenResources { current, .. } => {
+            Some(format!("RANDR:GetScreenResources:current={current}"))
+        }
+        crate::XWireRequest::RandrGetOutputInfo { output, .. } => {
+            Some(format!("RANDR:GetOutputInfo:{output:#x}"))
+        }
+        crate::XWireRequest::RandrGetCrtcInfo { crtc, .. } => {
+            Some(format!("RANDR:GetCrtcInfo:{crtc:#x}"))
         }
         crate::XWireRequest::RandrGetOutputPrimary { window } => {
             Some(format!("RANDR:GetOutputPrimary:{:#x}", window.local.raw()))

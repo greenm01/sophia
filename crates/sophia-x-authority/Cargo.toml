@@ -10,6 +10,7 @@ rust-version.workspace = true
 rustix = { version = "1.1", default-features = false, features = ["net", "std"] }
 sophia-portal = { path = "../sophia-portal" }
 sophia-protocol = { path = "../sophia-protocol" }
+xkbcommon = "0.8"
 
 [lints]
 workspace = true

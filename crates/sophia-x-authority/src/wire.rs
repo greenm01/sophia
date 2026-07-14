@@ -81,6 +81,8 @@ pub const X_RANDR_QUERY_VERSION_MINOR_OPCODE: u8 = 0;
 pub const X_RANDR_SELECT_INPUT_MINOR_OPCODE: u8 = 4;
 pub const X_RANDR_GET_SCREEN_SIZE_RANGE_MINOR_OPCODE: u8 = 6;
 pub const X_RANDR_GET_SCREEN_RESOURCES_MINOR_OPCODE: u8 = 8;
+pub const X_RANDR_GET_OUTPUT_INFO_MINOR_OPCODE: u8 = 9;
+pub const X_RANDR_GET_CRTC_INFO_MINOR_OPCODE: u8 = 20;
 pub const X_RANDR_GET_SCREEN_RESOURCES_CURRENT_MINOR_OPCODE: u8 = 25;
 pub const X_RANDR_GET_OUTPUT_PRIMARY_MINOR_OPCODE: u8 = 31;
 pub const X_RANDR_GET_MONITORS_MINOR_OPCODE: u8 = 42;
@@ -157,6 +159,8 @@ const X_RANDR_QUERY_VERSION_REQ_LEN: usize = 12;
 const X_RANDR_SELECT_INPUT_REQ_LEN: usize = 12;
 const X_RANDR_GET_SCREEN_SIZE_RANGE_REQ_LEN: usize = 8;
 const X_RANDR_GET_SCREEN_RESOURCES_REQ_LEN: usize = 8;
+const X_RANDR_GET_OUTPUT_INFO_REQ_LEN: usize = 12;
+const X_RANDR_GET_CRTC_INFO_REQ_LEN: usize = 12;
 const X_RANDR_GET_OUTPUT_PRIMARY_REQ_LEN: usize = 8;
 const X_RANDR_GET_MONITORS_REQ_LEN: usize = 12;
 const X_KEYBOARD_USE_EXTENSION_REQ_LEN: usize = 8;
@@ -454,6 +458,14 @@ pub enum XWireRequest {
         window: XResourceId,
         current: bool,
     },
+    RandrGetOutputInfo {
+        output: u32,
+        config_timestamp: u32,
+    },
+    RandrGetCrtcInfo {
+        crtc: u32,
+        config_timestamp: u32,
+    },
     RandrGetOutputPrimary {
         window: XResourceId,
     },
@@ -705,6 +717,28 @@ fn decode_randr(
             Ok(XWireRequest::RandrGetScreenResources {
                 window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
                 current: bytes[1] == X_RANDR_GET_SCREEN_RESOURCES_CURRENT_MINOR_OPCODE,
+            })
+        }
+        X_RANDR_GET_OUTPUT_INFO_MINOR_OPCODE => {
+            require_exact_len(
+                X_RANDR_MAJOR_OPCODE,
+                X_RANDR_GET_OUTPUT_INFO_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::RandrGetOutputInfo {
+                output: context.byte_order.u32(&bytes[4..8]),
+                config_timestamp: context.byte_order.u32(&bytes[8..12]),
+            })
+        }
+        X_RANDR_GET_CRTC_INFO_MINOR_OPCODE => {
+            require_exact_len(
+                X_RANDR_MAJOR_OPCODE,
+                X_RANDR_GET_CRTC_INFO_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::RandrGetCrtcInfo {
+                crtc: context.byte_order.u32(&bytes[4..8]),
+                config_timestamp: context.byte_order.u32(&bytes[8..12]),
             })
         }
         X_RANDR_GET_OUTPUT_PRIMARY_MINOR_OPCODE => {

@@ -1,9 +1,10 @@
 use sophia_protocol::{
     BufferSource, ClientAdmissionContext, ClientAdmissionId, ClientAuthProvenance,
-    ClientAuthenticationMethod, NamespaceCapabilities, NamespaceContext, NamespaceId,
-    NamespacePortalCapability, NamespaceProfile, PortalBrokerRequestPacket, PortalDecision,
-    PortalGrant, PortalGrantState, PortalRequest, PortalTransfer, PortalTransferId,
-    PortalTransferKind, Rect, Region, Size, SurfaceConstraints, SurfaceId, TransactionId,
+    ClientAuthenticationMethod, DeviceId, InputEventKind, NamespaceCapabilities, NamespaceContext,
+    NamespaceId, NamespacePortalCapability, NamespaceProfile, Point, PortalBrokerRequestPacket,
+    PortalDecision, PortalGrant, PortalGrantState, PortalRequest, PortalTransfer, PortalTransferId,
+    PortalTransferKind, Rect, Region, RoutedInputRequest, SeatId, Size, SurfaceConstraints,
+    SurfaceId, TransactionId,
 };
 use sophia_x_authority::*;
 
@@ -171,6 +172,10 @@ fn x11_setup_success_reply_encodes_resource_id_facts() {
             vendor: b"Sophia".to_vec(),
             roots: 0,
             formats: 0,
+            root_size: Size {
+                width: 1280,
+                height: 720,
+            },
         },
     )
     .unwrap();
@@ -1842,7 +1847,10 @@ fn x11_dispatch_advertises_randr_and_replies_to_query_version() {
     );
     let encoded = primary.encoded_outputs(XByteOrder::LittleEndian);
     assert_eq!(encoded[0][0], 1);
-    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][8..12]), 0);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &encoded[0][8..12]),
+        0x0001_0100
+    );
 
     let monitors = decode_x11_core_request(
         context(namespace, 542, XByteOrder::LittleEndian),
@@ -1922,6 +1930,33 @@ fn x11_dispatch_does_not_advertise_incomplete_xkeyboard_extension() {
     assert_eq!(encoded[0][1], 1);
     assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][8..10]), 1);
     assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][10..12]), 0);
+}
+
+#[test]
+fn xkb_state_uses_deterministic_rmlvo_and_tracks_effective_modifiers() {
+    let mut keyboard = XkbKeyboardState::new(&XkbRmlvoConfig::default()).unwrap();
+    assert_eq!(keyboard.map_evdev_key(42, true), Some((50, 0)));
+    assert_eq!(keyboard.map_evdev_key(30, true), Some((38, 1)));
+    assert_eq!(keyboard.map_evdev_key(30, false), Some((38, 1)));
+    assert_eq!(keyboard.map_evdev_key(42, false), Some((50, 1)));
+    assert_eq!(keyboard.modifier_mask(), 0);
+}
+
+#[test]
+fn xkb_rmlvo_validation_rejects_empty_and_unbounded_configuration() {
+    let mut empty = XkbRmlvoConfig::default();
+    empty.layout.clear();
+    assert_eq!(
+        XkbKeyboardState::new(&empty).unwrap_err(),
+        XkbKeyboardError::InvalidConfiguration
+    );
+
+    let mut unbounded = XkbRmlvoConfig::default();
+    unbounded.options = "x".repeat(XKB_RMLVO_FIELD_MAX_BYTES + 1);
+    assert_eq!(
+        XkbKeyboardState::new(&unbounded).unwrap_err(),
+        XkbKeyboardError::InvalidConfiguration
+    );
 }
 
 #[test]
@@ -2365,7 +2400,7 @@ fn x11_dispatch_query_tree_reports_root_without_children() {
 }
 
 #[test]
-fn x11_dispatch_randr_reports_root_screen_size_and_empty_resources() {
+fn x11_dispatch_randr_reports_root_screen_size_and_populated_resources() {
     let namespace = NamespaceId::from_raw(45);
     let mut runtime = XAuthorityRuntime::new();
     let mut atoms = XAtomTable::new();
@@ -2437,11 +2472,11 @@ fn x11_dispatch_randr_reports_root_screen_size_and_empty_resources() {
     );
     let encoded = resources.encoded_outputs(XByteOrder::LittleEndian);
     assert_eq!(encoded[0][0], 1);
-    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][4..8]), 0);
-    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][16..18]), 0);
-    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][18..20]), 0);
-    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][20..22]), 0);
-    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][22..24]), 0);
+    assert!(read_u32(XByteOrder::LittleEndian, &encoded[0][4..8]) > 0);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][16..18]), 1);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][18..20]), 1);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][20..22]), 1);
+    assert!(read_u16(XByteOrder::LittleEndian, &encoded[0][22..24]) > 0);
 }
 
 #[test]
@@ -6224,7 +6259,7 @@ fn routed_service_confines_input_and_control_to_two_workers_and_drains() {
         NonZeroUsize::new(4).unwrap(),
         acknowledgement_sender,
     );
-    let input_sender = broker.input_sender();
+    let input_sender = broker.routed_input_sender();
     let control_sender = broker.control_sender();
     let (service_command_sender, service_command_receiver) = std::sync::mpsc::sync_channel(1);
     let first_namespace = NamespaceContext::new(
@@ -6345,17 +6380,22 @@ fn routed_service_confines_input_and_control_to_two_workers_and_drains() {
     }
     routes.sort_by_key(|(client, _)| client.raw());
     assert_ne!(routes[0].0, routes[1].0);
-    for (index, (client, _)) in routes.iter().copied().enumerate() {
+    for (index, (_, surface)) in routes.iter().copied().enumerate() {
         input_sender
-            .send(XAuthorityClientInputEvent {
-                client,
-                event: XAuthorityKeyEvent {
-                    keycode: 38 + index as u8,
-                    pressed: true,
-                    state: 0,
-                    time_msec: 10 + index as u32,
-                }
-                .into(),
+            .send(XAuthorityRoutedInput {
+                request: RoutedInputRequest {
+                    serial: 20 + index as u64,
+                    seat: SeatId::from_raw(1),
+                    device: DeviceId::from_raw(1),
+                    time_msec: 10 + index as u64,
+                    target_surface: surface,
+                    global_position: Point::default(),
+                    local_position: Point::default(),
+                    kind: InputEventKind::Key {
+                        keycode: 30 + index as u32,
+                        pressed: true,
+                    },
+                },
                 delivery: None,
             })
             .unwrap();
@@ -6405,7 +6445,7 @@ fn routed_service_confines_input_and_control_to_two_workers_and_drains() {
             acknowledgement: XAuthorityControlAck {
                 transaction: TransactionId::from_raw(88 + index as u64),
                 surface,
-                outcome: XAuthorityControlOutcome::Applied,
+                outcome: XAuthorityControlOutcome::Delivered,
             },
         }));
     }

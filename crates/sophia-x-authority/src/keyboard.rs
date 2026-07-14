@@ -1,3 +1,124 @@
+use xkbcommon::xkb;
+
+pub const XKB_RMLVO_FIELD_MAX_BYTES: usize = 128;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct XkbRmlvoConfig {
+    pub rules: String,
+    pub model: String,
+    pub layout: String,
+    pub variant: String,
+    pub options: String,
+}
+
+impl Default for XkbRmlvoConfig {
+    fn default() -> Self {
+        Self {
+            rules: "evdev".to_owned(),
+            model: "pc105".to_owned(),
+            layout: "us".to_owned(),
+            variant: String::new(),
+            options: String::new(),
+        }
+    }
+}
+
+impl XkbRmlvoConfig {
+    pub fn validate(&self) -> Result<(), XkbKeyboardError> {
+        for value in [
+            &self.rules,
+            &self.model,
+            &self.layout,
+            &self.variant,
+            &self.options,
+        ] {
+            if value.len() > XKB_RMLVO_FIELD_MAX_BYTES || value.as_bytes().contains(&0) {
+                return Err(XkbKeyboardError::InvalidConfiguration);
+            }
+        }
+        if self.rules.is_empty() || self.model.is_empty() || self.layout.is_empty() {
+            return Err(XkbKeyboardError::InvalidConfiguration);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum XkbKeyboardError {
+    InvalidConfiguration,
+    KeymapCompilationFailed,
+}
+
+impl core::fmt::Display for XkbKeyboardError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter.write_str(match self {
+            Self::InvalidConfiguration => "invalid XKB RMLVO configuration",
+            Self::KeymapCompilationFailed => "XKB keymap compilation failed",
+        })
+    }
+}
+
+impl std::error::Error for XkbKeyboardError {}
+
+pub struct XkbKeyboardState {
+    state: xkb::State,
+}
+
+impl core::fmt::Debug for XkbKeyboardState {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("XkbKeyboardState")
+            .finish_non_exhaustive()
+    }
+}
+
+impl XkbKeyboardState {
+    pub fn new(config: &XkbRmlvoConfig) -> Result<Self, XkbKeyboardError> {
+        config.validate()?;
+        let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS | xkb::CONTEXT_NO_ENVIRONMENT_NAMES);
+        let keymap = xkb::Keymap::new_from_names(
+            &context,
+            &config.rules,
+            &config.model,
+            &config.layout,
+            &config.variant,
+            Some(config.options.clone()),
+            xkb::KEYMAP_COMPILE_NO_FLAGS,
+        )
+        .ok_or(XkbKeyboardError::KeymapCompilationFailed)?;
+        Ok(Self {
+            state: xkb::State::new(&keymap),
+        })
+    }
+
+    pub fn map_evdev_key(&mut self, evdev_keycode: u32, pressed: bool) -> Option<(u8, u16)> {
+        let x_keycode = evdev_keycode
+            .checked_add(8)
+            .and_then(|keycode| u8::try_from(keycode).ok().filter(|keycode| *keycode >= 8))?;
+        let state = self.modifier_mask();
+        self.state.update_key(
+            xkb::Keycode::new(u32::from(x_keycode)),
+            if pressed {
+                xkb::KeyDirection::Down
+            } else {
+                xkb::KeyDirection::Up
+            },
+        );
+        Some((x_keycode, state))
+    }
+
+    pub fn modifier_mask(&self) -> u16 {
+        u16::try_from(self.state.serialize_mods(xkb::STATE_MODS_EFFECTIVE) & 0xff).unwrap_or(0)
+    }
+}
+
+impl Default for XkbKeyboardState {
+    fn default() -> Self {
+        Self::new(&XkbRmlvoConfig::default())
+            .expect("the deterministic evdev/pc105/us XKB keymap must compile")
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct XCoreKeyboardMapper {
     shift: u8,

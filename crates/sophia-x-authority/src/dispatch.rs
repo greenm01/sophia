@@ -1,15 +1,15 @@
 use crate::{
     X_BIG_REQUESTS_EXTENSION_NAME, X_BIG_REQUESTS_MAJOR_OPCODE, X_MIT_SHM_EXTENSION_NAME,
     X_MIT_SHM_MAJOR_OPCODE, X_RANDR_EXTENSION_NAME, X_RANDR_MAJOR_OPCODE, X_SETUP_DEFAULT_COLORMAP,
-    X_SETUP_DEFAULT_ROOT, X_SETUP_DEFAULT_VISUAL, X_SETUP_ROOT_HEIGHT, X_SETUP_ROOT_WIDTH,
-    X_SOPHIA_PRESENT_EXTENSION_NAME, X_SOPHIA_PRESENT_MAJOR_OPCODE, XAtomTable,
-    XAuthorityRequestKind, XAuthorityResponseOutcome, XAuthorityResponsePacket, XAuthorityRuntime,
-    XAuthorityRuntimeError, XByteOrder, XClientEvent, XClientOutput, XClientReply, XErrorCode,
-    XMetadataPropertyCandidate, XPropertyError, XPropertyTable, XResourceId, XWireParseError,
-    XWireRequest, encode_x_client_output, metadata_property_candidate, x_error_from_runtime,
+    X_SETUP_DEFAULT_ROOT, X_SETUP_DEFAULT_VISUAL, X_SOPHIA_PRESENT_EXTENSION_NAME,
+    X_SOPHIA_PRESENT_MAJOR_OPCODE, XAtomTable, XAuthorityRequestKind, XAuthorityResponseOutcome,
+    XAuthorityResponsePacket, XAuthorityRuntime, XAuthorityRuntimeError, XByteOrder, XClientEvent,
+    XClientOutput, XClientReply, XErrorCode, XMetadataPropertyCandidate, XPropertyError,
+    XPropertyTable, XRandrModeInfo, XResourceId, XWireParseError, XWireRequest,
+    encode_x_client_output, metadata_property_candidate, x_error_from_runtime,
     x_error_from_wire_parse, x_selection_failure_event,
 };
-use sophia_protocol::{NamespaceId, Rect, Region, TransactionId};
+use sophia_protocol::{NamespaceId, OutputTopologySnapshot, Rect, Region, TransactionId};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct XDispatchContext {
@@ -293,8 +293,16 @@ pub fn dispatch_x11_wire_request(
                     geometry: Rect {
                         x: 0,
                         y: 0,
-                        width: i32::from(X_SETUP_ROOT_WIDTH),
-                        height: i32::from(X_SETUP_ROOT_HEIGHT),
+                        width: runtime
+                            .output_topology()
+                            .root_size()
+                            .expect("validated output topology")
+                            .width,
+                        height: runtime
+                            .output_topology()
+                            .root_size()
+                            .expect("validated output topology")
+                            .height,
                     },
                     border_width: 0,
                 })
@@ -1098,13 +1106,19 @@ pub fn dispatch_x11_wire_request(
             }
         }
         XWireRequest::RandrGetScreenSizeRange { window } => {
+            let root_size = runtime
+                .output_topology()
+                .root_size()
+                .expect("validated output topology");
+            let root_width = u16::try_from(root_size.width).expect("validated output width");
+            let root_height = u16::try_from(root_size.height).expect("validated output height");
             let output = if window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
                 XClientOutput::Reply(XClientReply::RandrGetScreenSizeRange {
                     sequence: context.sequence,
-                    min_width: X_SETUP_ROOT_WIDTH,
-                    min_height: X_SETUP_ROOT_HEIGHT,
-                    max_width: X_SETUP_ROOT_WIDTH,
-                    max_height: X_SETUP_ROOT_HEIGHT,
+                    min_width: root_width,
+                    min_height: root_height,
+                    max_width: root_width,
+                    max_height: root_height,
                 })
             } else if let Err(error) = runtime.validate_window_access(context.namespace, window) {
                 XClientOutput::Error(x_error_from_runtime(
@@ -1116,10 +1130,10 @@ pub fn dispatch_x11_wire_request(
             } else {
                 XClientOutput::Reply(XClientReply::RandrGetScreenSizeRange {
                     sequence: context.sequence,
-                    min_width: X_SETUP_ROOT_WIDTH,
-                    min_height: X_SETUP_ROOT_HEIGHT,
-                    max_width: X_SETUP_ROOT_WIDTH,
-                    max_height: X_SETUP_ROOT_HEIGHT,
+                    min_width: root_width,
+                    min_height: root_height,
+                    max_width: root_width,
+                    max_height: root_height,
                 })
             };
             XDispatchResult {
@@ -1129,9 +1143,14 @@ pub fn dispatch_x11_wire_request(
             }
         }
         XWireRequest::RandrGetScreenResources { window, .. } => {
+            let resources = randr_resources(runtime.output_topology());
             let output = if window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
                 XClientOutput::Reply(XClientReply::RandrGetScreenResources {
                     sequence: context.sequence,
+                    timestamp: resources.timestamp,
+                    crtcs: resources.crtcs.clone(),
+                    outputs: resources.outputs.clone(),
+                    modes: resources.modes.clone(),
                 })
             } else if let Err(error) = runtime.validate_window_access(context.namespace, window) {
                 XClientOutput::Error(x_error_from_runtime(
@@ -1143,6 +1162,10 @@ pub fn dispatch_x11_wire_request(
             } else {
                 XClientOutput::Reply(XClientReply::RandrGetScreenResources {
                     sequence: context.sequence,
+                    timestamp: resources.timestamp,
+                    crtcs: resources.crtcs,
+                    outputs: resources.outputs,
+                    modes: resources.modes,
                 })
             };
             XDispatchResult {
@@ -1151,11 +1174,89 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
+        XWireRequest::RandrGetOutputInfo { output, .. } => {
+            let resources = randr_resources(runtime.output_topology());
+            let client_output = resources
+                .outputs
+                .iter()
+                .position(|candidate| *candidate == output)
+                .map(|index| {
+                    let entry = &runtime.output_topology().outputs[index];
+                    let mode = resources.modes[index].id;
+                    XClientOutput::Reply(XClientReply::RandrGetOutputInfo {
+                        sequence: context.sequence,
+                        timestamp: resources.timestamp,
+                        crtc: resources.crtcs[index],
+                        mm_width: logical_pixels_to_millimeters(entry.logical.width),
+                        mm_height: logical_pixels_to_millimeters(entry.logical.height),
+                        crtcs: vec![resources.crtcs[index]],
+                        modes: vec![mode],
+                        name: format!("SOPHIA-{}", entry.output.raw()).into_bytes(),
+                    })
+                })
+                .unwrap_or_else(|| {
+                    XClientOutput::Error(crate::XClientError {
+                        code: XErrorCode::BadValue,
+                        sequence: context.sequence,
+                        resource_id: output,
+                        minor_code: crate::X_RANDR_GET_OUTPUT_INFO_MINOR_OPCODE.into(),
+                        major_code: context.major_opcode,
+                    })
+                });
+            XDispatchResult {
+                response: None,
+                outputs: vec![client_output],
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::RandrGetCrtcInfo { crtc, .. } => {
+            let resources = randr_resources(runtime.output_topology());
+            let client_output = resources
+                .crtcs
+                .iter()
+                .position(|candidate| *candidate == crtc)
+                .map(|index| {
+                    let entry = &runtime.output_topology().outputs[index];
+                    XClientOutput::Reply(XClientReply::RandrGetCrtcInfo {
+                        sequence: context.sequence,
+                        timestamp: resources.timestamp,
+                        x: i16::try_from(entry.logical.x).unwrap_or(i16::MAX),
+                        y: i16::try_from(entry.logical.y).unwrap_or(i16::MAX),
+                        width: u16::try_from(entry.logical.width).expect("validated output width"),
+                        height: u16::try_from(entry.logical.height)
+                            .expect("validated output height"),
+                        mode: resources.modes[index].id,
+                        outputs: vec![resources.outputs[index]],
+                    })
+                })
+                .unwrap_or_else(|| {
+                    XClientOutput::Error(crate::XClientError {
+                        code: XErrorCode::BadValue,
+                        sequence: context.sequence,
+                        resource_id: crtc,
+                        minor_code: crate::X_RANDR_GET_CRTC_INFO_MINOR_OPCODE.into(),
+                        major_code: context.major_opcode,
+                    })
+                });
+            XDispatchResult {
+                response: None,
+                outputs: vec![client_output],
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::RandrGetOutputPrimary { window } => {
+            let resources = randr_resources(runtime.output_topology());
+            let primary = runtime
+                .output_topology()
+                .outputs
+                .iter()
+                .position(|entry| entry.output == runtime.output_topology().primary)
+                .map(|index| resources.outputs[index])
+                .expect("validated primary output");
             let output = if window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
                 XClientOutput::Reply(XClientReply::RandrGetOutputPrimary {
                     sequence: context.sequence,
-                    output: 0,
+                    output: primary,
                 })
             } else if let Err(error) = runtime.validate_window_access(context.namespace, window) {
                 XClientOutput::Error(x_error_from_runtime(
@@ -1167,7 +1268,7 @@ pub fn dispatch_x11_wire_request(
             } else {
                 XClientOutput::Reply(XClientReply::RandrGetOutputPrimary {
                     sequence: context.sequence,
-                    output: 0,
+                    output: primary,
                 })
             };
             XDispatchResult {
@@ -1799,6 +1900,56 @@ fn extension_query_result(name: &str) -> XExtensionQueryResult {
             first_error: 0,
         },
     }
+}
+
+#[derive(Clone, Debug)]
+struct XRandrResources {
+    timestamp: u32,
+    crtcs: Vec<u32>,
+    outputs: Vec<u32>,
+    modes: Vec<XRandrModeInfo>,
+}
+
+fn randr_resources(snapshot: &OutputTopologySnapshot) -> XRandrResources {
+    let timestamp = u32::try_from(snapshot.generation)
+        .unwrap_or(u32::MAX)
+        .max(1);
+    let mut crtcs = Vec::with_capacity(snapshot.outputs.len());
+    let mut outputs = Vec::with_capacity(snapshot.outputs.len());
+    let mut modes = Vec::with_capacity(snapshot.outputs.len());
+    for (index, entry) in snapshot.outputs.iter().enumerate() {
+        let ordinal = u32::try_from(index).expect("output topology is bounded");
+        let crtc = 0x0001_0000 + ordinal;
+        let output = 0x0001_0100 + ordinal;
+        let mode = 0x0001_0200 + ordinal;
+        crtcs.push(crtc);
+        outputs.push(output);
+        modes.push(XRandrModeInfo {
+            id: mode,
+            width: u16::try_from(entry.logical.width).expect("validated output width"),
+            height: u16::try_from(entry.logical.height).expect("validated output height"),
+            refresh_millihz: entry.refresh_millihz,
+            name: format!(
+                "{}x{}@{}",
+                entry.logical.width,
+                entry.logical.height,
+                entry.refresh_millihz / 1_000
+            )
+            .into_bytes(),
+        });
+    }
+    XRandrResources {
+        timestamp,
+        crtcs,
+        outputs,
+        modes,
+    }
+}
+
+fn logical_pixels_to_millimeters(pixels: i32) -> u32 {
+    u32::try_from(i64::from(pixels).saturating_mul(254).saturating_add(480) / 960)
+        .unwrap_or(u32::MAX)
+        .max(1)
 }
 
 pub fn dispatch_x11_parse_error(

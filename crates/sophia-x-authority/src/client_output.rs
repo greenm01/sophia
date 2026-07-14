@@ -233,6 +233,30 @@ pub enum XClientReply {
     },
     RandrGetScreenResources {
         sequence: u16,
+        timestamp: u32,
+        crtcs: Vec<u32>,
+        outputs: Vec<u32>,
+        modes: Vec<XRandrModeInfo>,
+    },
+    RandrGetOutputInfo {
+        sequence: u16,
+        timestamp: u32,
+        crtc: u32,
+        mm_width: u32,
+        mm_height: u32,
+        crtcs: Vec<u32>,
+        modes: Vec<u32>,
+        name: Vec<u8>,
+    },
+    RandrGetCrtcInfo {
+        sequence: u16,
+        timestamp: u32,
+        x: i16,
+        y: i16,
+        width: u16,
+        height: u16,
+        mode: u32,
+        outputs: Vec<u32>,
     },
     RandrGetOutputPrimary {
         sequence: u16,
@@ -313,6 +337,15 @@ pub enum XClientReply {
         sequence: u16,
         pixels: Vec<u32>,
     },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct XRandrModeInfo {
+    pub id: u32,
+    pub width: u16,
+    pub height: u16,
+    pub refresh_millihz: u32,
+    pub name: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -559,15 +592,140 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             put_u16(byte_order, &mut out[14..16], max_height);
             out
         }
-        XClientReply::RandrGetScreenResources { sequence } => {
-            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
-            write_reply_header(byte_order, &mut out, sequence, 0);
-            put_u32(byte_order, &mut out[8..12], 0);
-            put_u32(byte_order, &mut out[12..16], 0);
-            put_u16(byte_order, &mut out[16..18], 0);
-            put_u16(byte_order, &mut out[18..20], 0);
-            put_u16(byte_order, &mut out[20..22], 0);
-            put_u16(byte_order, &mut out[22..24], 0);
+        XClientReply::RandrGetScreenResources {
+            sequence,
+            timestamp,
+            crtcs,
+            outputs,
+            modes,
+        } => {
+            let names_len = modes.iter().map(|mode| mode.name.len()).sum::<usize>();
+            let payload_len = crtcs.len() * 4 + outputs.len() * 4 + modes.len() * 32 + names_len;
+            let padded_payload_len = (payload_len + 3) & !3;
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN + padded_payload_len];
+            write_reply_header(
+                byte_order,
+                &mut out,
+                sequence,
+                u32::try_from(padded_payload_len / 4).unwrap_or(u32::MAX),
+            );
+            put_u32(byte_order, &mut out[8..12], timestamp);
+            put_u32(byte_order, &mut out[12..16], timestamp);
+            put_u16(byte_order, &mut out[16..18], crtcs.len() as u16);
+            put_u16(byte_order, &mut out[18..20], outputs.len() as u16);
+            put_u16(byte_order, &mut out[20..22], modes.len() as u16);
+            put_u16(byte_order, &mut out[22..24], names_len as u16);
+            let mut offset = 32;
+            for id in crtcs.iter().chain(outputs.iter()) {
+                put_u32(byte_order, &mut out[offset..offset + 4], *id);
+                offset += 4;
+            }
+            for mode in &modes {
+                put_u32(byte_order, &mut out[offset..offset + 4], mode.id);
+                put_u16(byte_order, &mut out[offset + 4..offset + 6], mode.width);
+                put_u16(byte_order, &mut out[offset + 6..offset + 8], mode.height);
+                let dot_clock = u64::from(mode.width)
+                    .saturating_mul(u64::from(mode.height))
+                    .saturating_mul(u64::from(mode.refresh_millihz))
+                    / 1_000;
+                put_u32(
+                    byte_order,
+                    &mut out[offset + 8..offset + 12],
+                    u32::try_from(dot_clock).unwrap_or(u32::MAX),
+                );
+                put_u16(byte_order, &mut out[offset + 12..offset + 14], mode.width);
+                put_u16(byte_order, &mut out[offset + 14..offset + 16], mode.width);
+                put_u16(byte_order, &mut out[offset + 16..offset + 18], mode.width);
+                put_u16(byte_order, &mut out[offset + 20..offset + 22], mode.height);
+                put_u16(byte_order, &mut out[offset + 22..offset + 24], mode.height);
+                put_u16(byte_order, &mut out[offset + 24..offset + 26], mode.height);
+                put_u16(
+                    byte_order,
+                    &mut out[offset + 26..offset + 28],
+                    mode.name.len() as u16,
+                );
+                offset += 32;
+            }
+            for mode in modes {
+                let end = offset + mode.name.len();
+                out[offset..end].copy_from_slice(&mode.name);
+                offset = end;
+            }
+            out
+        }
+        XClientReply::RandrGetOutputInfo {
+            sequence,
+            timestamp,
+            crtc,
+            mm_width,
+            mm_height,
+            crtcs,
+            modes,
+            name,
+        } => {
+            let payload_len = crtcs.len() * 4 + modes.len() * 4 + name.len();
+            let padded_payload_len = (payload_len + 3) & !3;
+            let mut out = vec![0; 32 + padded_payload_len];
+            write_reply_header(
+                byte_order,
+                &mut out,
+                sequence,
+                (padded_payload_len / 4) as u32,
+            );
+            out[1] = 0;
+            put_u32(byte_order, &mut out[8..12], timestamp);
+            put_u32(byte_order, &mut out[12..16], crtc);
+            put_u32(byte_order, &mut out[16..20], mm_width);
+            put_u32(byte_order, &mut out[20..24], mm_height);
+            out[24] = 0;
+            out[25] = 0;
+            put_u16(byte_order, &mut out[26..28], crtcs.len() as u16);
+            put_u16(byte_order, &mut out[28..30], modes.len() as u16);
+            put_u16(byte_order, &mut out[30..32], u16::from(!modes.is_empty()));
+            out.extend_from_slice(&[0; 4]);
+            put_u16(byte_order, &mut out[34..36], name.len() as u16);
+            let mut payload = Vec::with_capacity(padded_payload_len);
+            for id in crtcs.iter().chain(modes.iter()) {
+                push_u32(byte_order, &mut payload, *id);
+            }
+            payload.extend_from_slice(&name);
+            payload.resize(padded_payload_len, 0);
+            out.truncate(36);
+            out.extend_from_slice(&payload);
+            let reply_units = (out.len().saturating_sub(32) + 3) / 4;
+            out.resize(32 + reply_units * 4, 0);
+            put_u32(byte_order, &mut out[4..8], reply_units as u32);
+            out
+        }
+        XClientReply::RandrGetCrtcInfo {
+            sequence,
+            timestamp,
+            x,
+            y,
+            width,
+            height,
+            mode,
+            outputs,
+        } => {
+            let payload_len = outputs.len() * 8;
+            let mut out = vec![0; 32 + payload_len];
+            write_reply_header(byte_order, &mut out, sequence, (payload_len / 4) as u32);
+            out[1] = 0;
+            put_u32(byte_order, &mut out[8..12], timestamp);
+            put_i16(byte_order, &mut out[12..14], x);
+            put_i16(byte_order, &mut out[14..16], y);
+            put_u16(byte_order, &mut out[16..18], width);
+            put_u16(byte_order, &mut out[18..20], height);
+            put_u32(byte_order, &mut out[20..24], mode);
+            put_u16(byte_order, &mut out[24..26], 1);
+            put_u16(byte_order, &mut out[26..28], 1);
+            put_u16(byte_order, &mut out[28..30], outputs.len() as u16);
+            put_u16(byte_order, &mut out[30..32], outputs.len() as u16);
+            let mut offset = 32;
+            for id in outputs.iter().chain(outputs.iter()) {
+                put_u32(byte_order, &mut out[offset..offset + 4], *id);
+                offset += 4;
+            }
             out
         }
         XClientReply::RandrGetOutputPrimary { sequence, output } => {
@@ -1221,6 +1379,12 @@ fn put_i16(byte_order: XByteOrder, out: &mut [u8], value: i16) {
         XByteOrder::LittleEndian => out.copy_from_slice(&value.to_le_bytes()),
         XByteOrder::BigEndian => out.copy_from_slice(&value.to_be_bytes()),
     }
+}
+
+fn push_u32(byte_order: XByteOrder, out: &mut Vec<u8>, value: u32) {
+    let mut bytes = [0; 4];
+    put_u32(byte_order, &mut bytes, value);
+    out.extend_from_slice(&bytes);
 }
 
 fn put_u32(byte_order: XByteOrder, out: &mut [u8], value: u32) {
