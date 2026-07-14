@@ -20,7 +20,7 @@ fi
 
 echo
 echo "Sophia processes:"
-if ! pgrep -a -f '(^|/)sophia([[:space:]]|$)' 2>/dev/null; then
+if ! pgrep -a -x sophia 2>/dev/null; then
     echo "  none detected"
 fi
 
