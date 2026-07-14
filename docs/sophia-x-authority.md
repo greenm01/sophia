@@ -130,9 +130,8 @@ record. Legacy smoke helpers still default to unauthenticated local sockets.
 The live supervisor publishes a fresh kernel-random cookie in a standard
 owner-only Xauthority record, supplies only the path to launched terminals, and
 removes the file on teardown. Multiple independently credentialed confined
-groups on one listener, supervisor-triggered connection revocation, and
-Engine-derived output facts remain before treating the listener as a general
-local X server.
+groups on one listener and Engine-derived output facts remain before treating
+the listener as a general local X server.
 
 The live launcher accepts `--namespace-profile=classic|confined`. Classic is
 the default and intentionally shares its namespace among launched terminals.
@@ -147,8 +146,11 @@ selection-owner, selection-requestor, drawable, and event-target paths. A
 routed two-client regression additionally proves that a rejected foreign
 event-mask request cannot redirect a confined worker's key events: input stays
 on the broker-addressed client and retains that worker's root target. Separate
-confined-group credentials on one listener and supervisor-triggered revocation
-remain active work.
+confined-group credentials on one listener remain active work. The routed
+service now accepts targeted revocation by `ClientAdmissionId`; it disconnects
+only the matching worker and leaves route/resource/surface/admission cleanup in
+that worker's ordinary teardown path. The simultaneous classic-client proof
+verifies its peer remains usable.
 
 ### Connection Lifecycle
 

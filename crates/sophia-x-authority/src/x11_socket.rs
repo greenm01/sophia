@@ -1,4 +1,6 @@
 #[cfg(unix)]
+use std::net::Shutdown;
+#[cfg(unix)]
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 #[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -8,7 +10,7 @@ use std::sync::mpsc::{
 };
 #[cfg(unix)]
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     io::{ErrorKind, Read, Write},
     num::NonZeroUsize,
     panic::{AssertUnwindSafe, catch_unwind},
@@ -33,8 +35,8 @@ use crate::{
 };
 #[cfg(unix)]
 use sophia_protocol::{
-    ClientAdmissionContext, ClientAuthenticationMethod, NamespaceCapabilities, NamespaceContext,
-    NamespaceId, NamespaceProfile, Size, SurfaceId, TransactionId,
+    ClientAdmissionContext, ClientAdmissionId, ClientAuthenticationMethod, NamespaceCapabilities,
+    NamespaceContext, NamespaceId, NamespaceProfile, Size, SurfaceId, TransactionId,
 };
 
 #[cfg(unix)]
@@ -405,9 +407,13 @@ pub struct XServerFrontend {
     config: XServerFrontendConfig,
     listener: UnixListener,
     state: X11CoreSocketServerState,
-    workers: BTreeMap<u64, std::thread::JoinHandle<()>>,
+    workers: BTreeMap<u64, X11CoreClientWorker>,
     worker_completions: Receiver<X11CoreClientWorkerCompletion>,
     worker_completion_sender: Sender<X11CoreClientWorkerCompletion>,
+    worker_admissions: BTreeMap<ClientAdmissionId, u64>,
+    pending_admission_revocations: BTreeSet<ClientAdmissionId>,
+    worker_admission_events: Receiver<X11CoreClientWorkerAdmission>,
+    worker_admission_event_sender: Sender<X11CoreClientWorkerAdmission>,
     next_worker_id: u64,
 }
 
@@ -416,6 +422,7 @@ impl XServerFrontend {
     pub fn bind(config: XServerFrontendConfig) -> Result<Self, X11SetupSocketError> {
         let listener = bind_x11_core_socket_server(config.socket_path())?;
         let (worker_completion_sender, worker_completions) = std::sync::mpsc::channel();
+        let (worker_admission_event_sender, worker_admission_events) = std::sync::mpsc::channel();
         Ok(Self {
             config,
             listener,
@@ -423,6 +430,10 @@ impl XServerFrontend {
             workers: BTreeMap::new(),
             worker_completions,
             worker_completion_sender,
+            worker_admissions: BTreeMap::new(),
+            pending_admission_revocations: BTreeSet::new(),
+            worker_admission_events,
+            worker_admission_event_sender,
             next_worker_id: 1,
         })
     }
@@ -452,6 +463,30 @@ impl XServerFrontend {
     /// waiting for an active client.
     pub fn poll_client_workers(&mut self) -> Result<(), X11SetupSocketError> {
         self.reap_finished_client_workers()
+    }
+
+    /// Disconnects the worker holding one session-issued admission.
+    ///
+    /// The worker retains teardown ownership: it stops its private writers,
+    /// releases routes and X resources, emits surface removal, and only then
+    /// revokes the admission lease. An admission that is not attached yet is
+    /// retained as a pending revocation so a setup race cannot lose the
+    /// supervisor command; `Ok(false)` reports that deferred outcome.
+    pub fn revoke_admission(
+        &mut self,
+        admission: ClientAdmissionId,
+    ) -> Result<bool, X11SetupSocketError> {
+        self.reap_finished_client_workers()?;
+        self.observe_worker_admissions()?;
+        let Some(worker_id) = self.worker_admissions.remove(&admission) else {
+            self.pending_admission_revocations.insert(admission);
+            return Ok(false);
+        };
+        if let Err(error) = self.shutdown_worker(worker_id) {
+            self.worker_admissions.insert(admission, worker_id);
+            return Err(error);
+        }
+        Ok(true)
     }
 
     /// Starts one client worker, if the configured concurrency limit permits
@@ -573,11 +608,27 @@ impl XServerFrontend {
     pub fn wait_for_clients(&mut self) -> Result<(), X11SetupSocketError> {
         let mut first_error = self.reap_finished_client_workers().err();
         while !self.workers.is_empty() {
-            let completion = self.worker_completions.recv().map_err(|_| {
-                X11SetupSocketError::new(
-                    "Sophia X Server Frontend concurrent worker supervisor disconnected",
-                )
-            })?;
+            self.observe_worker_admissions()?;
+            let completion = if self.pending_admission_revocations.is_empty() {
+                self.worker_completions.recv().map_err(|_| {
+                    X11SetupSocketError::new(
+                        "Sophia X Server Frontend concurrent worker supervisor disconnected",
+                    )
+                })?
+            } else {
+                match self
+                    .worker_completions
+                    .recv_timeout(Duration::from_millis(1))
+                {
+                    Ok(completion) => completion,
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => {
+                        return Err(X11SetupSocketError::new(
+                            "Sophia X Server Frontend concurrent worker supervisor disconnected",
+                        ));
+                    }
+                }
+            };
             if let Err(error) = self.reap_client_worker(completion)
                 && first_error.is_none()
             {
@@ -647,6 +698,12 @@ impl XServerFrontend {
         let authorization = self.config.setup_authorization().clone();
         let admission_policy = self.config.admission_policy();
         let completion_sender = self.worker_completion_sender.clone();
+        let admission_event_sender = self.worker_admission_event_sender.clone();
+        let shutdown = stream.try_clone().map_err(|error| {
+            X11SetupSocketError::new(format!(
+                "failed to clone X11 client socket for supervision: {error}"
+            ))
+        })?;
         let worker = std::thread::Builder::new()
             .name(format!("sophia-x11-client-{worker_id}"))
             .spawn(move || {
@@ -658,6 +715,7 @@ impl XServerFrontend {
                         &authorization,
                         admission_policy,
                         routing,
+                        Some((worker_id, admission_event_sender)),
                         move |trace| observer(trace),
                     )
                 }))
@@ -671,11 +729,18 @@ impl XServerFrontend {
             .map_err(|error| {
                 X11SetupSocketError::new(format!("failed to start X11 client worker: {error}"))
             })?;
-        self.workers.insert(worker_id, worker);
+        self.workers.insert(
+            worker_id,
+            X11CoreClientWorker {
+                thread: worker,
+                shutdown,
+            },
+        );
         Ok(())
     }
 
     fn reap_finished_client_workers(&mut self) -> Result<(), X11SetupSocketError> {
+        self.observe_worker_admissions()?;
         loop {
             match self.worker_completions.try_recv() {
                 Ok(completion) => self.reap_client_worker(completion)?,
@@ -697,10 +762,58 @@ impl XServerFrontend {
         let worker = self.workers.remove(&completion.worker_id).ok_or_else(|| {
             X11SetupSocketError::new("Sophia X Server Frontend lost a concurrent client worker")
         })?;
-        worker.join().map_err(|_| {
+        self.worker_admissions
+            .retain(|_, worker_id| *worker_id != completion.worker_id);
+        worker.thread.join().map_err(|_| {
             X11SetupSocketError::new("Sophia X Server Frontend client worker panicked")
         })?;
         completion.result
+    }
+
+    fn observe_worker_admissions(&mut self) -> Result<(), X11SetupSocketError> {
+        loop {
+            match self.worker_admission_events.try_recv() {
+                Ok(event) if self.workers.contains_key(&event.worker_id) => {
+                    match self.worker_admissions.get(&event.admission).copied() {
+                        Some(existing) if existing != event.worker_id => {
+                            return Err(X11SetupSocketError::new(
+                                "Sophia X Server Frontend admission is attached to multiple workers",
+                            ));
+                        }
+                        Some(_) => {}
+                        None => {
+                            self.worker_admissions
+                                .insert(event.admission, event.worker_id);
+                        }
+                    }
+                    if self.pending_admission_revocations.remove(&event.admission) {
+                        self.shutdown_worker(event.worker_id)?;
+                        self.worker_admissions.remove(&event.admission);
+                    }
+                }
+                Ok(_) => {}
+                Err(TryRecvError::Empty) => return Ok(()),
+                Err(TryRecvError::Disconnected) if self.workers.is_empty() => return Ok(()),
+                Err(TryRecvError::Disconnected) => {
+                    return Err(X11SetupSocketError::new(
+                        "Sophia X Server Frontend admission observer disconnected",
+                    ));
+                }
+            }
+        }
+    }
+
+    fn shutdown_worker(&self, worker_id: u64) -> Result<(), X11SetupSocketError> {
+        let Some(worker) = self.workers.get(&worker_id) else {
+            return Ok(());
+        };
+        match worker.shutdown.shutdown(Shutdown::Both) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == ErrorKind::NotConnected => Ok(()),
+            Err(error) => Err(X11SetupSocketError::new(format!(
+                "failed to revoke X11 client admission: {error}"
+            ))),
+        }
     }
 }
 
@@ -715,6 +828,20 @@ pub type X11CoreTraceObserver = dyn for<'trace> Fn(X11CoreDispatchTrace<'trace>)
 struct X11CoreClientWorkerCompletion {
     worker_id: u64,
     result: Result<(), X11SetupSocketError>,
+}
+
+#[cfg(unix)]
+#[derive(Debug)]
+struct X11CoreClientWorker {
+    thread: std::thread::JoinHandle<()>,
+    shutdown: UnixStream,
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct X11CoreClientWorkerAdmission {
+    worker_id: u64,
+    admission: ClientAdmissionId,
 }
 
 #[cfg(unix)]
@@ -890,6 +1017,9 @@ pub struct XAuthorityClientControlAck {
 pub enum XServerFrontendServiceCommand {
     /// Stop accepting new clients and drain workers that are already connected.
     StopAccepting,
+    /// Disconnect the worker holding this session-issued admission. Its normal
+    /// teardown releases routes and resources before revoking the lease.
+    RevokeAdmission { admission: ClientAdmissionId },
 }
 
 /// Routing failure between the Engine-facing ingress queues and a live X11
@@ -1676,6 +1806,7 @@ pub fn run_x11_core_socket_server_once_channels(
         None,
         &XServerFrontendSetupAuthorization::default(),
         None,
+        None,
         move |trace| {
             try_emit_x_authority_trace(&transaction_sender, &trace)
                 .map_err(|error| X11SetupSocketError::new(error.to_string()))?;
@@ -1712,6 +1843,7 @@ pub fn run_x11_core_socket_server_once_session_channels(
         }),
         None,
         &XServerFrontendSetupAuthorization::default(),
+        None,
         None,
         move |trace| {
             try_emit_x_authority_trace(&transaction_sender, &trace)
@@ -1780,14 +1912,17 @@ pub fn run_x_server_frontend_routed_until_stopped(
     });
     let mut accepting = true;
     loop {
+        let mut progressed = false;
         match service_commands.try_recv() {
             Ok(XServerFrontendServiceCommand::StopAccepting) | Err(TryRecvError::Disconnected) => {
                 accepting = false
             }
+            Ok(XServerFrontendServiceCommand::RevokeAdmission { admission }) => {
+                progressed |= frontend.revoke_admission(admission)?;
+            }
             Err(TryRecvError::Empty) => {}
         }
 
-        let mut progressed = false;
         if accepting {
             while frontend.active_client_worker_count()
                 < frontend.config().max_concurrent_clients().get()
@@ -2144,6 +2279,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_setup_authorization(
         authorization,
         admission_policy,
         None,
+        None,
         observer,
     )
 }
@@ -2156,6 +2292,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_setup_authorization_and_
     authorization: &XServerFrontendSetupAuthorization,
     admission_policy: Option<Arc<dyn XServerFrontendAdmissionPolicy>>,
     client_routing: Option<XServerFrontendRouteRegistry>,
+    worker_admission: Option<(u64, Sender<X11CoreClientWorkerAdmission>)>,
     observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
     serve_x11_core_socket_client_with_trace_observer_and_input(
@@ -2167,6 +2304,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_setup_authorization_and_
         client_routing,
         authorization,
         admission_policy,
+        worker_admission,
         observer,
     )
 }
@@ -2181,6 +2319,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
     client_routing: Option<XServerFrontendRouteRegistry>,
     authorization: &XServerFrontendSetupAuthorization,
     admission_policy: Option<Arc<dyn XServerFrontendAdmissionPolicy>>,
+    worker_admission: Option<(u64, Sender<X11CoreClientWorkerAdmission>)>,
     mut observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
 ) -> Result<(), X11SetupSocketError> {
     let peer_credentials = if admission_policy.is_some() {
@@ -2300,6 +2439,14 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
         })
         .transpose()?;
     state.register_client(client_lease)?;
+    if let Some((worker_id, sender)) = worker_admission
+        && let Some(lease) = admission_lease.as_ref()
+    {
+        let _ = sender.send(X11CoreClientWorkerAdmission {
+            worker_id,
+            admission: lease.context().client_id,
+        });
+    }
 
     let result = (|| {
         while let Some((major_opcode, request)) = read_x11_core_request(stream, setup.byte_order)? {

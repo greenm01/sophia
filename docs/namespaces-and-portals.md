@@ -11,8 +11,9 @@ a session-owned in-memory namespace registry, namespace-keyed X resource
 tables, an X configuration seam that accepts immutable namespace context, a
 live X session that allocates and revokes its classic context through the
 registry, per-connection X admission and revocation, and pure portal reducers.
-Confined-client launch/routing, broker IPC, prompt policy, expiry, and concrete
-native-X portal execution are target work tracked in `todo.md`.
+Classic/confined launch and the bounded confinement matrix are implemented.
+Broker IPC, prompt policy, expiry, and concrete native-X portal execution are
+the active target work tracked in `todo.md`.
 
 ## Ownership
 
@@ -78,6 +79,13 @@ request cannot redirect brokered input: the addressed worker retains its root
 target, while the broker's private queues keep delivery client-specific.
 Broader XKB, XI2, and grab semantics remain X11 session-correctness work rather
 than a namespace exception.
+
+The routed frontend accepts supervisor revocation by opaque
+`ClientAdmissionId`. It shuts down only the matching worker, which then removes
+its private routes and connection-owned resources, emits surface cleanup, and
+revokes the immutable admission lease in the same order as an ordinary
+disconnect. A socket regression proves the other client in a classic namespace
+remains connected and can continue creating resources.
 
 Capabilities bound which portal operations a namespace may request or publish.
 They do not provide ambient cross-namespace access and do not replace a portal

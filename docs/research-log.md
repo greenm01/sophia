@@ -42,6 +42,19 @@ queue regressions prove delivery stays client-specific. This completes the
 bounded Milestone 1 confinement matrix; full XKB, XI2, focus, and grab semantics
 remain Milestone 3 work.
 
+The final admission-lifecycle gap was targeted supervisor revocation. Concurrent
+workers now report only their session-issued `ClientAdmissionId` to frontend
+supervision and retain a cloned socket solely as a disconnect handle. A
+`RevokeAdmission` service command shuts down that one socket; the worker still
+owns writer shutdown, private-route removal, connection-ledger cleanup, surface
+removal observation, and admission-lease revocation in that order. A
+pre-admission command is retained until the matching worker attaches, closing
+the allocation/worker-registration race. A simultaneous classic-client
+regression revokes admission 1, observes its surface removal and inaccessible
+old window, then creates another window through the uninterrupted peer. This
+completes the namespace/admission foundation and makes the portal broker plus
+X11 clipboard the active milestone.
+
 ## 2026-07-13: Live Xauthority Ownership
 
 The live X session no longer relies on an unauthenticated owner-only socket. Its
@@ -72,9 +85,8 @@ The live classic session backs that policy with its session-owned
 `NamespaceRegistry`: it requires a peer UID matching the effective session UID,
 allocates a distinct admission per connection, and intentionally assigns those
 admissions the same classic-shared namespace. This removes the listener-wide
-identity shortcut without weakening classic X semantics. Confined namespace
-selection and supervisor-triggered live-client revocation remain the next
-admission work.
+identity shortcut without weakening classic X semantics. Confined launch and
+targeted supervisor revocation are now implemented as described above.
 
 ## 2026-07-13: X11-First Namespace And Portal Critical Path
 

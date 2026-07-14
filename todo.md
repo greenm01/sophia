@@ -26,38 +26,6 @@ The Smithay-backed Wayland Authority remains supported under a maintenance
 lane. XLibre is a retired prototype and documented possible future
 compatibility provider; no XLibre integration work is active.
 
-## Milestone 1: Namespace And X Admission Foundation
-
-- [x] Add protocol value types for `NamespaceProfile`, bounded directional
-  capabilities, immutable `NamespaceContext`, and `ClientAdmissionContext`.
-- [x] Add a session-owned namespace registry with monotonic allocation,
-  admission, lookup, individual revocation, namespace revocation, and
-  generation-safe validation.
-- [x] Add a compatibility-safe X frontend configuration seam that accepts an
-  immutable session-created `NamespaceContext` while preserving existing smoke
-  callers.
-- [x] Replace the production live X session's hardcoded namespace with a
-  registry-allocated classic context retained for the session lifetime and
-  revoked during teardown.
-- [x] Thread `ClientAdmissionContext` through accepted authority connections so
-  authorities consume admitted identities and never allocate or infer them.
-- [x] Replace the X frontend's listener-wide single namespace context with a
-  bounded per-connection admission interface driven by session generation,
-  listener policy, peer credentials, and `MIT-MAGIC-COOKIE-1` validation.
-- [x] Add Xauthority-file creation/removal, cookie rotation, raw-secret
-  containment, normal X11 setup failure, and fail-closed route cleanup.
-- [x] Make both profiles launchable: classic clients intentionally share a
-  namespace; confined client groups receive distinct namespaces and explicit
-  capabilities.
-- [x] Prove shared-X access within a classic namespace and denial of resource
-  lookup, properties, selections, events, input, and metadata across confined
-  namespaces.
-
-Exit: no production X session hardcodes a `NamespaceId`; every accepted client
-has an immutable admission context; disconnect or supervisor revocation removes
-its routes, grants, selection generations, and creation ledger without exposing
-another namespace.
-
 ## Milestone 2: Portal Broker And X11 Clipboard
 
 - [ ] Reconcile portal kinds so clipboard, drag-and-drop, file handoff, screen

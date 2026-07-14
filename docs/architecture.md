@@ -92,7 +92,10 @@ or layout policy.
   emit no metadata candidate. Foreign event-mask selection also returns
   `BadAccess`, cannot change the receiving worker's authority-local key target,
   and brokered input reaches only the addressed client's private queue. Classic
-  same-namespace existing-resource behavior remains available.
+  same-namespace existing-resource behavior remains available. Session
+  supervision can revoke one admission by opaque `ClientAdmissionId`; socket
+  shutdown then runs the worker's ordinary route, resource, surface, and lease
+  cleanup without terminating its peers.
 - `sophia-portal` has deterministic reducers for clipboard, drag-and-drop, file
   handoff, screen capture, URI open, and notifications. A session broker,
   policy-provider IPC, expiry lifecycle, and native-X executor are not complete.

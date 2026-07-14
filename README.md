@@ -248,21 +248,23 @@ Sophia is split by authority, not by convenience.
 ## Status
 
 Sophia is a research prototype. The primary development track is now the native
-Sophia X Server Frontend, followed by namespace admission and portal mediation.
+Sophia X Server Frontend, with portal mediation as the active architecture
+milestone.
 The frontend runs two concurrent real xterms through Engine-owned composition
 and KMS with client-targeted input. Retained dedicated-TTY evidence completes in
 1,487 ms with 10 ms maximum composition, 23 ms input-to-presentation, all 14
 X11 input events flushed, and clean teardown. This is hardware evidence, not a
-complete desktop session: confined routing, Engine-derived output/RandR facts,
-normal resize, XKB, grabs, and presentation feedback remain.
+complete desktop session: Engine-derived output/RandR facts, normal resize,
+XKB, grabs, and presentation feedback remain. Confined routing has bounded
+socket evidence but not yet a corresponding hardware session proof.
 
 The namespace-keyed X resource model, profile/capability/admission types,
 session-owned in-memory registry, explicit classic/confined live launch
 profiles, same-UID admission, per-client revocation, fresh owner-only
 Xauthority publication/removal, and pure portal reducers already exist.
-Complete cross-namespace enforcement evidence, broker lifecycle, and native
-cross-namespace execution are not complete. The first reference portal will
-mediate X11 `CLIPBOARD` and `PRIMARY` after the confinement matrix is proven.
+The bounded cross-namespace enforcement matrix and targeted admission cleanup
+are proven. Broker lifecycle and native cross-namespace execution remain; the
+active reference portal is X11 `CLIPBOARD` plus `PRIMARY`.
 
 The Smithay-backed Wayland Authority remains functional and supported. Real
 Kitty uses native Wayland SHM, Engine-routed input, and KMS; controlled DMA-BUF
