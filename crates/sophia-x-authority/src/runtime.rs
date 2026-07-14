@@ -165,7 +165,7 @@ impl XAuthorityRuntime {
                     self.resources
                         .lookup(request.namespace, *owner, XResourceKind::Window)?;
                 }
-                self.selections.apply_event(
+                let update = self.selections.apply_event(
                     XSelectionEvent {
                         selection: *selection,
                         owner: *owner,
@@ -175,6 +175,17 @@ impl XAuthorityRuntime {
                     },
                     &self.windows,
                 );
+                if let Some(previous_owner) = update.previous.and_then(|record| record.owner)
+                    && Some(previous_owner) != *owner
+                {
+                    response
+                        .selection_artifacts
+                        .push(XAuthoritySelectionArtifact::Clear {
+                            owner: previous_owner,
+                            selection: *selection,
+                            time: *timestamp,
+                        });
+                }
             }
             XAuthorityRequestKind::RequestSelection {
                 requestor,

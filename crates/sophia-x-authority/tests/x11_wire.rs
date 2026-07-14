@@ -5029,6 +5029,23 @@ fn x_server_frontend_routes_selection_notify_to_the_requestor_client() {
     assert_eq!(read_u32(XByteOrder::LittleEndian, &event[16..20]), 12);
     assert_eq!(read_u32(XByteOrder::LittleEndian, &event[20..24]), 13);
 
+    requestor
+        .write_all(&set_selection_owner_request(
+            XByteOrder::LittleEndian,
+            requestor_window,
+            1,
+            11,
+        ))
+        .unwrap();
+    let clear = read_x_record(&mut owner);
+    assert_eq!(clear[0], 29);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &clear[2..4]), 3);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &clear[8..12]),
+        owner_window
+    );
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &clear[12..16]), 1);
+
     owner
         .set_read_timeout(Some(Duration::from_millis(20)))
         .unwrap();

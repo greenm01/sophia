@@ -174,4 +174,9 @@ impl XAuthorityPortalCommand {
 pub enum XAuthoritySelectionArtifact {
     Failure(ClipboardSelectionFailure),
     Request(ClipboardSelectionOwnerRequest),
+    Clear {
+        owner: XResourceId,
+        selection: XAtom,
+        time: XTimestamp,
+    },
 }

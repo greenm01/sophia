@@ -60,6 +60,46 @@ fn owner_only_socket_roundtrips_allowed_request() {
 
 #[cfg(unix)]
 #[test]
+fn expired_socket_request_returns_denial_without_waiting_for_payload() {
+    let path =
+        std::env::temp_dir().join(format!("sophia-portal-expired-{}.sock", std::process::id()));
+    let server_path = path.clone();
+    let server = std::thread::spawn(move || {
+        run_portal_broker_socket_server_once(server_path, 3, HeadlessPortalPolicy::Allow, 10)
+    });
+    for _ in 0..100 {
+        if path.exists() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let response = request_portal_broker(
+        &path,
+        &PortalBrokerRequestPacket {
+            request: PortalRequest {
+                transfer: PortalTransfer {
+                    transfer: PortalTransferId::from_raw(90),
+                    source_namespace: NamespaceId::from_raw(10),
+                    target_namespace: NamespaceId::from_raw(20),
+                    kind: PortalTransferKind::Clipboard,
+                    mime_type: Some("UTF8_STRING".to_owned()),
+                    byte_size: 1,
+                    decision: PortalDecision::Pending,
+                    generation: 1,
+                },
+                deadline_msec: 5,
+            },
+            source_may_publish: true,
+            target_may_request: true,
+        },
+    )
+    .unwrap();
+    assert_eq!(response.decision, PortalBrokerResponseDecision::Denied);
+    server.join().unwrap().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
 fn allowed_payload_reaches_executor_only_after_correlated_grant() {
     let path =
         std::env::temp_dir().join(format!("sophia-portal-payload-{}.sock", std::process::id()));

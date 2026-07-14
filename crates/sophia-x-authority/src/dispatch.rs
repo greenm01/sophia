@@ -1821,6 +1821,19 @@ fn outputs_from_authority_response(
     kind: &XAuthorityRequestKind,
     response: &XAuthorityResponsePacket,
 ) -> Vec<XClientOutput> {
+    if let Some(crate::XAuthoritySelectionArtifact::Clear {
+        owner,
+        selection,
+        time,
+    }) = response.selection_artifacts.first()
+    {
+        return vec![XClientOutput::Event(XClientEvent::SelectionClear {
+            sequence: context.sequence,
+            time: *time,
+            owner: *owner,
+            selection: *selection,
+        })];
+    }
     if let XAuthorityRequestKind::RequestSelection {
         requestor,
         selection,
@@ -1849,6 +1862,16 @@ fn outputs_from_authority_response(
                         property: request.property,
                     }
                 }
+                crate::XAuthoritySelectionArtifact::Clear {
+                    owner,
+                    selection,
+                    time,
+                } => XClientEvent::SelectionClear {
+                    sequence: context.sequence,
+                    time: *time,
+                    owner: *owner,
+                    selection: *selection,
+                },
             })];
         }
     }

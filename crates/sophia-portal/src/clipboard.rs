@@ -113,7 +113,7 @@ fn validate_request(request: &ClipboardTransferRequest) -> Result<(), PortalErro
         return Err(PortalError::InvalidNamespace);
     }
 
-    if !request.target.is_text() {
+    if request.target.as_str() != "TARGETS" && !request.target.is_text() {
         return Err(PortalError::UnsupportedTarget);
     }
 

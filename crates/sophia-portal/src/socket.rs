@@ -88,7 +88,7 @@ pub fn run_portal_broker_socket_server_bounded(
                     },
                     now_msec,
                 )
-                .map_err(|error| PortalBrokerSocketError(format!("evaluate request: {error:?}")))?;
+                .unwrap_or(PortalBrokerDecision::Denied);
             let response = PortalBrokerResponsePacket {
                 transfer,
                 decision: match decision {
@@ -202,7 +202,7 @@ pub fn run_portal_clipboard_broker_socket_server_bounded(
                     },
                     now_msec,
                 )
-                .map_err(|error| PortalBrokerSocketError(format!("evaluate request: {error:?}")))?;
+                .unwrap_or(PortalBrokerDecision::Denied);
             let grant = match decision {
                 PortalBrokerDecision::Allowed(grant) => Some(grant),
                 PortalBrokerDecision::Denied => None,

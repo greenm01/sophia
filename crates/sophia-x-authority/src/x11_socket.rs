@@ -867,6 +867,32 @@ impl XServerFrontendClipboardExecutor {
         drop(properties);
         drop(atoms);
         drop(runtime);
+        self.route_outcome(&outcome)?;
+        Ok(outcome)
+    }
+
+    pub fn fail(
+        &self,
+        transfer: sophia_protocol::PortalTransferId,
+        error: crate::ClipboardSelectionExecutionError,
+    ) -> Result<crate::ClipboardSelectionExecutionOutcome, X11SetupSocketError> {
+        let outcome = self
+            .state
+            .runtime
+            .lock()
+            .map_err(|_| X11SetupSocketError::new("X11 authority runtime lock poisoned"))?
+            .fail_clipboard_transfer(transfer, error)
+            .map_err(|error| {
+                X11SetupSocketError::new(format!("clipboard failure rejected: {error:?}"))
+            })?;
+        self.route_outcome(&outcome)?;
+        Ok(outcome)
+    }
+
+    fn route_outcome(
+        &self,
+        outcome: &crate::ClipboardSelectionExecutionOutcome,
+    ) -> Result<(), X11SetupSocketError> {
         let notify = match &outcome {
             crate::ClipboardSelectionExecutionOutcome::Handoff(handoff) => handoff.notify,
             crate::ClipboardSelectionExecutionOutcome::Failed { notify, .. } => *notify,
@@ -890,7 +916,7 @@ impl XServerFrontendClipboardExecutor {
             .map_err(|error| {
                 X11SetupSocketError::new(format!("failed to route clipboard notify: {error}"))
             })?;
-        Ok(outcome)
+        Ok(())
     }
 }
 
@@ -2689,6 +2715,9 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                         ) => Some((index, *requestor, *event)),
                         crate::XClientOutput::Event(
                             event @ XClientEvent::SelectionRequest { owner, .. },
+                        ) => Some((index, *owner, *event)),
+                        crate::XClientOutput::Event(
+                            event @ XClientEvent::SelectionClear { owner, .. },
                         ) => Some((index, *owner, *event)),
                         _ => None,
                     })

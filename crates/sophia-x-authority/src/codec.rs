@@ -396,6 +396,16 @@ fn encode_selection_artifact(artifact: &XAuthoritySelectionArtifact, out: &mut V
             push_u32(out, request.property);
             push_u32(out, request.time);
         }
+        XAuthoritySelectionArtifact::Clear {
+            owner,
+            selection,
+            time,
+        } => {
+            push_u16(out, 3);
+            encode_x_resource_id(*owner, out);
+            push_u32(out, *selection);
+            push_u32(out, *time);
+        }
     }
 }
 
@@ -416,6 +426,11 @@ fn decode_selection_artifact(
                 time: cursor.u32()?,
             },
         )),
+        3 => Ok(XAuthoritySelectionArtifact::Clear {
+            owner: decode_x_resource_id(cursor)?,
+            selection: cursor.u32()?,
+            time: cursor.u32()?,
+        }),
         other => Err(IpcCodecError::InvalidEnum {
             field: "x_authority_selection_artifact",
             value: u32::from(other),

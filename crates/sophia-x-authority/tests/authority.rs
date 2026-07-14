@@ -1116,6 +1116,71 @@ fn cross_namespace_grant_installs_bounded_utf8_and_reports_stale_owner() {
             }
         }
     ));
+
+    let targets = atoms.intern("TARGETS", false).unwrap().unwrap();
+    let targets_transfer = PortalTransferId::from_raw(43);
+    runtime.apply(XAuthorityRequestPacket {
+        transaction: TransactionId::from_raw(6),
+        namespace: target,
+        kind: XAuthorityRequestKind::RequestSelection {
+            requestor: XResourceId::new(0xc1, 1),
+            selection,
+            target: targets,
+            target_name: "TARGETS".to_owned(),
+            property,
+            time: 13,
+            transfer: targets_transfer,
+        },
+    });
+    let targets_grant = PortalGrant {
+        transfer: targets_transfer,
+        source_generation: 2,
+        ..stale_grant
+    };
+    let outcome = runtime
+        .execute_clipboard_payload(
+            targets_transfer,
+            &targets_grant,
+            b"",
+            &mut atoms,
+            &mut properties,
+        )
+        .unwrap();
+    assert!(matches!(
+        outcome,
+        ClipboardSelectionExecutionOutcome::Handoff(_)
+    ));
+    let record = properties
+        .get(target, XResourceId::new(0xc1, 1), property)
+        .unwrap();
+    assert_eq!(record.property_type, X_ATOM_ATOM);
+    assert_eq!(record.format, 32);
+    let advertised = record
+        .bytes
+        .chunks_exact(4)
+        .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+        .collect::<Vec<_>>();
+    assert_eq!(advertised[0], targets);
+    assert_eq!(advertised[1], utf8);
+    assert_eq!(atoms.name(advertised[2]), Some("text/plain;charset=utf-8"));
+
+    for (raw, error) in [
+        (50, ClipboardSelectionExecutionError::Denied),
+        (51, ClipboardSelectionExecutionError::Expired),
+        (52, ClipboardSelectionExecutionError::Disconnected),
+        (53, ClipboardSelectionExecutionError::ExecutorFailure),
+    ] {
+        let transfer = PortalTransferId::from_raw(raw);
+        runtime.apply(request(transfer));
+        let outcome = runtime.fail_clipboard_transfer(transfer, error).unwrap();
+        assert!(matches!(
+            outcome,
+            ClipboardSelectionExecutionOutcome::Failed {
+                error: actual,
+                notify: ClipboardSelectionNotify { property: X_ATOM_NONE, .. }
+            } if actual == error
+        ));
+    }
 }
 
 #[cfg(unix)]
