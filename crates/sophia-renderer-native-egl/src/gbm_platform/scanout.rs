@@ -32,10 +32,19 @@ pub struct NativeGbmOwnedScanoutBuffer {
     plane_offsets: [u32; 4],
     plane_fds: Option<[Option<OwnedFd>; 4]>,
     modifier: Option<u64>,
-    // Drop order matters: the locked front buffer must release before the
-    // surface it was locked from is destroyed.
-    _buffer: gbm::BufferObject<()>,
+    // Drop explicitly releases the locked front buffer before its surface.
+    _buffer: Option<gbm::BufferObject<()>>,
     _surface: Option<gbm::Surface<()>>,
+}
+
+impl Drop for NativeGbmOwnedScanoutBuffer {
+    fn drop(&mut self) {
+        trace_native_lifecycle("scanout_owner_drop_started");
+        drop(self._buffer.take());
+        trace_native_lifecycle("front_buffer_released");
+        drop(self._surface.take());
+        trace_native_lifecycle("originating_surface_released");
+    }
 }
 
 impl NativeGbmOwnedScanoutBuffer {
@@ -522,9 +531,11 @@ where
     }
 
     fn destroy_persistent_target(&self, target: PersistentNativeFrameTarget) {
+        trace_native_lifecycle("persistent_target_destroy_started");
         let _ = self.egl.make_current(self.display, None, None, None);
         drop(target.pipeline);
         let _ = self.egl.destroy_context(self.display, target.egl_context);
+        trace_native_lifecycle("egl_context_destroyed");
     }
 }
 
@@ -537,6 +548,7 @@ where
             self.destroy_persistent_target(target);
         }
         let _ = self.egl.terminate(self.display);
+        trace_native_lifecycle("egl_display_terminated");
     }
 }
 
@@ -668,7 +680,7 @@ fn native_owned_scanout_buffer_from_bo(
         plane_offsets,
         plane_fds,
         modifier: normalized_scanout_modifier(buffer.modifier()),
-        _buffer: buffer,
+        _buffer: Some(buffer),
         _surface: surface,
     })
 }
@@ -911,6 +923,7 @@ fn create_persistent_target<T: std::os::fd::AsFd>(
     let _ = egl.make_current(display, None, None, None);
     let _ = egl.destroy_surface(display, egl_surface);
     drop(gbm_surface);
+    trace_native_lifecycle("persistent_context_created");
     Ok(PersistentNativeFrameTarget {
         width,
         height,
@@ -955,17 +968,21 @@ fn render_persistent_target_frame<T: std::os::fd::AsFd>(
         let _ = egl.destroy_surface(display, egl_surface);
         return Err(NativeGbmScanoutBufferExportDetail::EglMakeCurrentFailed);
     }
+    trace_native_lifecycle("egl_surface_current");
     let result = target
         .pipeline
         .upload(pixels)
         .map_err(|_| NativeGbmScanoutBufferExportDetail::GlSmokeFailed)
         .and_then(|()| {
+            trace_native_lifecycle("cpu_frame_uploaded");
             egl.swap_buffers(display, egl_surface)
                 .map_err(|_| NativeGbmScanoutBufferExportDetail::EglSwapBuffersFailed)
         })
         .and_then(|()| {
+            trace_native_lifecycle("egl_surface_swapped");
             let buffer = unsafe { gbm_surface.lock_front_buffer() }
                 .map_err(|_| NativeGbmScanoutBufferExportDetail::FrontBufferLockFailed)?;
+            trace_native_lifecycle("scanout_front_buffer_locked");
             native_owned_scanout_buffer_from_bo(
                 target.width,
                 target.height,
@@ -1117,6 +1134,12 @@ fn trace_dmabuf_lifecycle(stage: &str) {
             "sophia_dmabuf_lifecycle schema=1 pid={} stage={stage}",
             process::id()
         );
+    }
+}
+
+fn trace_native_lifecycle(stage: &str) {
+    if std::env::var_os("SOPHIA_LIVE_SESSION_DIAGNOSTIC").is_some() {
+        eprintln!("sophia_native_lifecycle schema=1 stage={stage}");
     }
 }
 

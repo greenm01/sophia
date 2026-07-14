@@ -281,6 +281,35 @@ count other than 300. QEMU does not claim VRR because virtio-gpu does not expose
 the physical property contract. Keep the physical TTY proof for the AMD
 multi-connector/VRR gates and operator-typed input evidence.
 
+### X11 Live-Session Stability Diagnostics
+
+After an allocator abort or a flushed-input pixel timeout, do not repeatedly run
+the combined milestone gate. From a dedicated local text TTY with no graphical
+compositor, first run the automated synthetic-input stability workload:
+
+```sh
+tools/run_x11_live_session_stability.sh --runs 10
+```
+
+The workload uses the same persistent X11 CPU-upload and Engine-owned KMS path
+without requiring operator typing. It retains independent logs under
+`~/.local/state/sophia/x11-live-session-stability/`. To capture the native
+allocator seam, use exactly one diagnostic mode:
+
+```sh
+tools/run_x11_live_session_stability.sh --diagnostic
+tools/run_x11_live_session_stability.sh --trace
+tools/run_x11_live_session_stability.sh --core
+```
+
+GDB follows the Sophia parent and detaches from xterm, builds the release binary
+with full Rust debuginfo, enables glibc and Mesa diagnostics, and records all
+thread stacks. Core mode caps the dump at 128 MiB. Trace mode records reduced
+EGL/GBM lifecycle stages without native handles. A fix is not hardware-stable
+until ten automated runs, three physical keyboard/pixel runs, and the complete
+milestone helper pass without allocator output, stale generations, missing
+pixels, callback rejection, in-flight ownership, or cleanup debt.
+
 The two remaining physical gates are deliberately separate from the QEMU
 regression loop. On a dedicated TTY, after the graphical compositor has
 released DRM master, run:

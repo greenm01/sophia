@@ -2379,8 +2379,9 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
     let resource_id_range = client_lease.resource_id_range;
     let mut sequence = 0u16;
     let event_sequence = Arc::new(AtomicU16::new(0));
-    let focused_window = Arc::new(AtomicU64::new(u64::from(X_SETUP_DEFAULT_ROOT)));
-    let mut keyboard_target_selected = false;
+    let focused_surface_window = Arc::new(AtomicU64::new(u64::from(X_SETUP_DEFAULT_ROOT)));
+    let keyboard_event_window = Arc::new(AtomicU64::new(u64::from(X_SETUP_DEFAULT_ROOT)));
+    let keyboard_target_selected = Arc::new(AtomicBool::new(false));
     let surface_windows = Arc::new(Mutex::new(BTreeMap::new()));
     let output_stream = Arc::new(Mutex::new(stream.try_clone().map_err(|error| {
         X11SetupSocketError::new(format!("failed to clone X11 output socket: {error}"))
@@ -2416,7 +2417,9 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 output_stream.clone(),
                 setup.byte_order,
                 event_sequence.clone(),
-                focused_window.clone(),
+                focused_surface_window.clone(),
+                keyboard_event_window.clone(),
+                keyboard_target_selected.clone(),
                 surface_windows.clone(),
                 client,
                 receiver,
@@ -2429,7 +2432,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 output_stream.clone(),
                 setup.byte_order,
                 event_sequence.clone(),
-                focused_window.clone(),
+                focused_surface_window.clone(),
                 surface_windows.clone(),
                 state.runtime.clone(),
                 namespace,
@@ -2490,7 +2493,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                             })?
                             .insert(*surface, *window);
                     }
-                    let default_map_target = if !keyboard_target_selected
+                    let default_map_target = if !keyboard_target_selected.load(Ordering::Acquire)
                         && let crate::XWireRequest::Authority(crate::XAuthorityRequestPacket {
                             kind: crate::XAuthorityRequestKind::MapWindow { window, .. },
                             ..
@@ -2522,8 +2525,10 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                         && (window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT)
                             || runtime.validate_window_access(namespace, window).is_ok())
                     {
-                        focused_window.store(window.local.raw(), Ordering::Release);
-                        keyboard_target_selected |= keyboard_event_target.is_some();
+                        keyboard_event_window.store(window.local.raw(), Ordering::Release);
+                        if keyboard_event_target.is_some() {
+                            keyboard_target_selected.store(true, Ordering::Release);
+                        }
                     }
                     // The CPU update belongs to this dispatch. Keep it under
                     // the runtime lock so a simultaneous client cannot take
@@ -2689,7 +2694,7 @@ fn spawn_x11_control_writer(
     stream: Arc<Mutex<UnixStream>>,
     byte_order: XByteOrder,
     sequence: Arc<AtomicU16>,
-    focused_window: Arc<AtomicU64>,
+    focused_surface_window: Arc<AtomicU64>,
     surface_windows: Arc<Mutex<BTreeMap<SurfaceId, XResourceId>>>,
     runtime: Arc<Mutex<XAuthorityRuntime>>,
     namespace: NamespaceId,
@@ -2796,7 +2801,7 @@ fn spawn_x11_control_writer(
                 }
                 XAuthorityControlCommand::FocusSurface { .. } => {
                     let previous = XResourceId::new(
-                        focused_window.swap(window.local.raw(), Ordering::AcqRel),
+                        focused_surface_window.swap(window.local.raw(), Ordering::AcqRel),
                         1,
                     );
                     let mut records = Vec::with_capacity(2);
@@ -2868,7 +2873,9 @@ fn spawn_x11_input_event_writer(
     stream: Arc<Mutex<UnixStream>>,
     byte_order: XByteOrder,
     sequence: Arc<AtomicU16>,
-    focused_window: Arc<AtomicU64>,
+    focused_surface_window: Arc<AtomicU64>,
+    keyboard_event_window: Arc<AtomicU64>,
+    keyboard_target_selected: Arc<AtomicBool>,
     surface_windows: Arc<Mutex<BTreeMap<SurfaceId, XResourceId>>>,
     client: XServerFrontendClientId,
     receiver: X11InputEventReceiver,
@@ -2883,7 +2890,11 @@ fn spawn_x11_input_event_writer(
                 Err(RecvTimeoutError::Timeout) => continue,
                 Err(RecvTimeoutError::Disconnected) => return Ok(()),
             };
-            let focused_window = XResourceId::new(focused_window.load(Ordering::Acquire), 1);
+            let focused_window = x11_keyboard_delivery_target(
+                &focused_surface_window,
+                &keyboard_event_window,
+                &keyboard_target_selected,
+            );
             let root = XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1);
             let sequence = sequence.load(Ordering::Acquire);
             let record = encode_x_client_event(
@@ -3008,6 +3019,22 @@ fn spawn_x11_input_event_writer(
         Ok(())
     });
     Ok(X11InputEventWriter { stop, thread })
+}
+
+#[cfg(unix)]
+fn x11_keyboard_delivery_target(
+    focused_surface_window: &AtomicU64,
+    keyboard_event_window: &AtomicU64,
+    keyboard_target_selected: &AtomicBool,
+) -> XResourceId {
+    XResourceId::new(
+        if keyboard_target_selected.load(Ordering::Acquire) {
+            keyboard_event_window.load(Ordering::Acquire)
+        } else {
+            focused_surface_window.load(Ordering::Acquire)
+        },
+        1,
+    )
 }
 
 #[cfg(unix)]
@@ -3263,6 +3290,36 @@ mod routing_tests {
                 delivery,
                 outcome: XAuthorityInputDeliveryOutcome::RouteRejected,
             }
+        );
+    }
+
+    #[test]
+    fn engine_focus_does_not_replace_selected_keyboard_child() {
+        let focused_surface = AtomicU64::new(0x200001);
+        let keyboard_child = AtomicU64::new(0x200007);
+        let selected = AtomicBool::new(true);
+
+        assert_eq!(
+            x11_keyboard_delivery_target(&focused_surface, &keyboard_child, &selected),
+            XResourceId::new(0x200007, 1)
+        );
+
+        focused_surface.store(0x200009, Ordering::Release);
+        assert_eq!(
+            x11_keyboard_delivery_target(&focused_surface, &keyboard_child, &selected),
+            XResourceId::new(0x200007, 1)
+        );
+    }
+
+    #[test]
+    fn keyboard_delivery_falls_back_to_engine_focused_surface() {
+        let focused_surface = AtomicU64::new(0x200001);
+        let keyboard_child = AtomicU64::new(u64::from(X_SETUP_DEFAULT_ROOT));
+        let selected = AtomicBool::new(false);
+
+        assert_eq!(
+            x11_keyboard_delivery_target(&focused_surface, &keyboard_child, &selected),
+            XResourceId::new(0x200001, 1)
         );
     }
 }

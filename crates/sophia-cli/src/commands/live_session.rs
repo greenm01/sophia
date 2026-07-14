@@ -1379,6 +1379,9 @@ fn run_session_loop(
     let mut pointer_pixel_change = false;
     let mut batches = 0usize;
     let mut transactions = 0usize;
+    let mut cpu_buffer_updates = 0usize;
+    let mut input_batch_baseline = None;
+    let mut input_cpu_update_baseline = None;
     let mut backend_ticks = 0usize;
     let mut runtime_committed = 0u64;
     let mut runtime_surfaces = 0u64;
@@ -1475,6 +1478,8 @@ fn run_session_loop(
                     input_pixel_change = false;
                     input_surface_pixel_change = false;
                     input_change_submission_baseline = None;
+                    input_batch_baseline = Some(batches);
+                    input_cpu_update_baseline = Some(cpu_buffer_updates);
                 }
                 if report.pointer_events > 0 {
                     println!(
@@ -1564,8 +1569,13 @@ fn run_session_loop(
         {
             if !input_pixel_change {
                 return Err(format!(
-                    "persistent live session timed out waiting for pixels after flushed X11 input: expected={input_events_expected} flushed={input_events_flushed} final_checksum={:?} input_surface={input_surface:?} input_surface_pixel_change={input_surface_pixel_change}",
+                    "persistent live session timed out waiting for pixels after flushed X11 input: expected={input_events_expected} flushed={input_events_flushed} authority_batches_after_input={} cpu_updates_after_input={} baseline_checksum={injection_checksum:?} final_checksum={:?} baseline_generation={input_surface_generation:?} final_generation={:?} input_surface_pixel_change={input_surface_pixel_change} native_submission_baseline={input_change_submission_baseline:?} native_submissions={} native_callbacks={}",
+                    batches.saturating_sub(input_batch_baseline.unwrap_or(batches)),
+                    cpu_buffer_updates.saturating_sub(input_cpu_update_baseline.unwrap_or(cpu_buffer_updates)),
                     scene.last_report.as_ref().map(|report| report.checksum),
+                    input_surface.and_then(|surface| scene.surface_buffer_generation(surface)),
+                    native_scanout.as_ref().map_or(0, |native| native.submissions),
+                    native_scanout.as_ref().map_or(0, |native| native.callback_accepted),
                 )
                 .into());
             }
@@ -1628,9 +1638,6 @@ fn run_session_loop(
             .is_none_or(PhysicalTextProof::is_complete);
         let waiting_for_keyboard_sequence =
             physical_input_ready_at.is_some() && !physical_sequence_complete;
-        let waiting_for_keyboard_pixels = physical_sequence_complete
-            && physical_sequence_completed_at.is_some()
-            && !input_pixel_change;
         let waiting_for_pointer_pixels = config.expect_physical_pointer
             && physical_sequence_complete
             && input_pixel_change
@@ -1646,16 +1653,6 @@ fn run_session_loop(
                     "persistent live session timed out waiting for exact physical input sequence: matched_events={} expected_events={} keyboard_routed={physical_keys_routed}",
                     proof.matched_events(),
                     proof.expected_events(),
-                )
-                .into());
-            }
-        } else if waiting_for_keyboard_pixels {
-            let completed_at = physical_sequence_completed_at.expect("checked above");
-            if completed_at.elapsed() >= Duration::from_millis(SESSION_PHYSICAL_PIXEL_TIMEOUT_MSEC)
-            {
-                return Err(format!(
-                    "persistent live session timed out waiting for pixels after exact physical input: keyboard_routed={physical_keys_routed} final_checksum={:?}",
-                    scene.last_report.as_ref().map(|report| report.checksum)
                 )
                 .into());
             }
@@ -1692,6 +1689,8 @@ fn run_session_loop(
                 last_authority_update = Instant::now();
                 batches = batches.saturating_add(1);
                 transactions = transactions.saturating_add(batch.transactions.len());
+                cpu_buffer_updates =
+                    cpu_buffer_updates.saturating_add(batch.cpu_buffer_updates.len());
                 let removed_surfaces = batch.removed_surfaces.clone();
                 let _ = layout.observe_authority_batch(&batch);
                 let mut wm_update = layout.resolve_pending().or_else(|| layout.expire_pending());
@@ -1993,6 +1992,8 @@ fn run_session_loop(
                 pending_input_deliveries.extend(report.deliveries.iter().copied());
                 input_delivery_wait_started_at = Some(Instant::now());
                 input_delivery_source = Some("synthetic");
+                input_batch_baseline = Some(batches);
+                input_cpu_update_baseline = Some(cpu_buffer_updates);
                 if !key_routed_reported {
                     println!(
                         "sophia_live_session_input_pipeline schema=1 status=key_routed source=synthetic"
@@ -3428,6 +3429,7 @@ impl PersistentNativeScanout {
             use sophia_backend_live::LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus as Status;
             match submit.status {
                 Status::SubmittedWaitingForPageFlip => {
+                    trace_live_native_lifecycle("kms_submit_accepted");
                     self.submissions = self.submissions.saturating_add(1);
                     self.heads[index].submissions = self.heads[index].submissions.saturating_add(1);
                     self.heads[index].submitted_at = Some(Instant::now());
@@ -3482,6 +3484,7 @@ impl PersistentNativeScanout {
         use sophia_backend_live::LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus as Status;
         match retire.status {
             Status::RetiredAfterPageFlip => {
+                trace_live_native_lifecycle("kms_buffer_retired");
                 self.retirements = self.retirements.saturating_add(1);
                 self.heads[index].retirements = self.heads[index].retirements.saturating_add(1);
                 if let Some(submitted_at) = self.heads[index].submitted_at.take() {
@@ -3506,6 +3509,7 @@ impl PersistentNativeScanout {
             .callback_accepted
             .saturating_add(report.accepted);
         if report.accepted > 0 {
+            trace_live_native_lifecycle("page_flip_callback_accepted");
             if let Some(checksum) = self.heads[index].submitted_checksum.take() {
                 self.heads[index].presented_checksum = checksum;
             }
@@ -3577,6 +3581,7 @@ impl PersistentNativeScanout {
             head.pending_nonzero_pixel_bytes = 0;
         }
         self.submissions = self.submissions.saturating_add(1);
+        trace_live_native_lifecycle("initial_modeset_complete");
         head.submissions = head.submissions.saturating_add(1);
         head.presented_checksum = head.last_checksum;
         head.presented_submissions = head.submissions;
@@ -3904,6 +3909,12 @@ impl PersistentCpuScene {
             });
         }
         Ok(frames)
+    }
+}
+
+fn trace_live_native_lifecycle(stage: &str) {
+    if std::env::var_os("SOPHIA_LIVE_SESSION_DIAGNOSTIC").is_some() {
+        eprintln!("sophia_live_native_lifecycle schema=1 stage={stage}");
     }
 }
 
