@@ -2940,6 +2940,18 @@ fn x11_property_records_emit_metadata_candidates_without_raw_payloads() {
         .unwrap()
         .unwrap();
     let window = 0x220006;
+    let create = decode_x11_core_request(
+        context(namespace, 511, XByteOrder::LittleEndian),
+        &create_window_request(XByteOrder::LittleEndian, window, 0, 0, 320, 200),
+    )
+    .unwrap();
+    dispatch_x11_wire_request(
+        dispatch_context(namespace, 4, XByteOrder::LittleEndian, 1),
+        create,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
     let decoded = decode_x11_core_request(
         context(namespace, 512, XByteOrder::LittleEndian),
         &change_property_request(
@@ -4533,7 +4545,8 @@ fn x_server_frontend_revokes_distinct_admissions_for_concurrent_clients() {
 
 #[cfg(unix)]
 #[test]
-fn x_server_frontend_confined_clients_cannot_map_cross_namespace_windows() {
+fn x_server_frontend_confined_clients_reject_cross_namespace_window_property_and_selection_access()
+{
     use std::io::{Read, Write};
     use std::num::NonZeroUsize;
     use std::os::unix::net::UnixStream;
@@ -4566,14 +4579,23 @@ fn x_server_frontend_confined_clients_cannot_map_cross_namespace_windows() {
         next_client: std::sync::atomic::AtomicU64::new(0),
         revoked: std::sync::Mutex::new(Vec::new()),
     });
+    let metadata_candidates = Arc::new(std::sync::Mutex::new(0usize));
     let config = XServerFrontendConfig::new_with_namespace_context(&socket_path, first_namespace)
         .unwrap()
         .with_admission_policy(policy.clone())
         .with_max_concurrent_clients(NonZeroUsize::new(2).unwrap());
+    let server_metadata_candidates = metadata_candidates.clone();
     let server = thread::spawn(move || {
         let mut frontend = XServerFrontend::bind(config).unwrap();
-        frontend.serve_next_concurrently().unwrap();
-        frontend.serve_next_concurrently().unwrap();
+        let observer: Arc<X11CoreTraceObserver> = Arc::new(move |trace| {
+            let mut count = server_metadata_candidates.lock().unwrap();
+            *count = count.saturating_add(trace.result.metadata_candidates.len());
+            Ok(())
+        });
+        frontend
+            .serve_next_concurrently_traced(observer.clone())
+            .unwrap();
+        frontend.serve_next_concurrently_traced(observer).unwrap();
         frontend.wait_for_clients().unwrap();
     });
 
@@ -4615,6 +4637,47 @@ fn x_server_frontend_confined_clients_cannot_map_cross_namespace_windows() {
     assert_eq!(error[0], 0);
     assert_eq!(error[1], XErrorCode::BadAccess.wire_code());
 
+    second
+        .write_all(&change_property_request(
+            XByteOrder::LittleEndian,
+            XPropertyMode::Replace,
+            first_window,
+            X_ATOM_WM_NAME,
+            X_ATOM_STRING,
+            8,
+            b"foreign title",
+        ))
+        .unwrap();
+    second.read_exact(&mut error).unwrap();
+    assert_eq!(error[0], 0);
+    assert_eq!(error[1], XErrorCode::BadAccess.wire_code());
+
+    second
+        .write_all(&set_selection_owner_request(
+            XByteOrder::LittleEndian,
+            first_window,
+            X_ATOM_PRIMARY,
+            1,
+        ))
+        .unwrap();
+    second.read_exact(&mut error).unwrap();
+    assert_eq!(error[0], 0);
+    assert_eq!(error[1], XErrorCode::BadAccess.wire_code());
+
+    second
+        .write_all(&convert_selection_request(
+            XByteOrder::LittleEndian,
+            first_window,
+            X_ATOM_PRIMARY,
+            X_ATOM_STRING,
+            X_ATOM_WM_NAME,
+            2,
+        ))
+        .unwrap();
+    second.read_exact(&mut error).unwrap();
+    assert_eq!(error[0], 31);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &error[20..24]), 0);
+
     drop(first);
     drop(second);
     server.join().unwrap();
@@ -4626,6 +4689,7 @@ fn x_server_frontend_confined_clients_cannot_map_cross_namespace_windows() {
             .all(|context| context.namespace.profile == NamespaceProfile::Confined)
     );
     assert_ne!(revoked[0].namespace.id, revoked[1].namespace.id);
+    assert_eq!(*metadata_candidates.lock().unwrap(), 0);
     std::fs::remove_file(&socket_path).unwrap();
 }
 

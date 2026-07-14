@@ -16,9 +16,19 @@ The first simultaneous confined socket proof assigned two clients distinct
 namespaces and exposed a real leak: `MapWindow` changed lifecycle state without
 checking the runtime resource table. The runtime now performs namespace-aware
 window lookup before mapping, so the second client receives native `BadAccess`;
-classic same-namespace mapping remains valid. Properties, selections, events,
-input, and metadata still need equivalent end-to-end confinement evidence
-before the isolation milestone is complete.
+classic same-namespace mapping remains valid. The following socket expansion
+closes properties, selections, and metadata; events and input remain before the
+isolation milestone is complete.
+
+The next socket expansion found the same missing-boundary pattern in property
+and selection paths. `ChangeProperty` previously keyed a foreign XID under the
+requester's namespace and could emit a metadata candidate without checking the
+window owner. Selection ownership and conversion likewise trusted the owner or
+requestor XID instead of the admitted namespace. Runtime/dispatch now validate
+all three before mutation or portal construction. The wire proof requires
+`BadAccess` for foreign property and owner changes, normal
+`SelectionNotify(property=None)` for foreign conversion, and zero metadata
+candidates. Event delivery and routed input are the remaining matrix rows.
 
 ## 2026-07-13: Live Xauthority Ownership
 

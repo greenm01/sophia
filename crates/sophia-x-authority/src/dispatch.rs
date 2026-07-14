@@ -382,8 +382,21 @@ pub fn dispatch_x11_wire_request(
             }
         }
         XWireRequest::ChangeProperty(change) => {
-            let (output, metadata_candidates) =
-                match properties.apply_change(context.namespace, change.clone()) {
+            let window_access = (change.window.local.raw()
+                == u64::from(crate::X_SETUP_DEFAULT_ROOT))
+            .then_some(Ok(()))
+            .unwrap_or_else(|| runtime.validate_window_access(context.namespace, change.window));
+            let (output, metadata_candidates) = match window_access {
+                Err(error) => (
+                    XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(change.window.local.raw()).unwrap_or(0),
+                    )),
+                    Vec::new(),
+                ),
+                Ok(()) => match properties.apply_change(context.namespace, change.clone()) {
                     Ok(record) => {
                         let candidate = metadata_property_candidate(&record, atoms);
                         (
@@ -407,7 +420,8 @@ pub fn dispatch_x11_wire_request(
                         }),
                         Vec::new(),
                     ),
-                };
+                },
+            };
             XDispatchResult {
                 response: None,
                 outputs: vec![output],

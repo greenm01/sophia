@@ -138,10 +138,13 @@ the default and intentionally shares its namespace among launched terminals.
 Confined allocates a fresh group namespace with explicit zero portal
 capabilities. Admission contexts preserve that immutable profile. A concurrent
 wire regression assigns two clients separate confined contexts and proves
-cross-namespace `MapWindow` fails with native `BadAccess`; it also caught and
-closed a missing runtime resource lookup on the map path. Separate confined
-group credentials on one listener and the full cross-namespace operation
-matrix remain active work.
+cross-namespace map, property mutation, and selection ownership fail with
+native `BadAccess`; foreign selection conversion returns
+`SelectionNotify(property=None)`, and denied property mutation emits no metadata
+candidate. These proofs caught and closed missing validation on map, property,
+selection-owner, and selection-requestor paths. Separate confined-group
+credentials on one listener plus end-to-end event and routed-input isolation
+remain active work.
 
 ### Connection Lifecycle
 

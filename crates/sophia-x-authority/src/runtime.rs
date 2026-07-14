@@ -156,6 +156,10 @@ impl XAuthorityRuntime {
                 selection_timestamp,
                 kind,
             } => {
+                if let Some(owner) = owner {
+                    self.resources
+                        .lookup(request.namespace, *owner, XResourceKind::Window)?;
+                }
                 self.selections.apply_event(
                     XSelectionEvent {
                         selection: *selection,
@@ -176,6 +180,8 @@ impl XAuthorityRuntime {
                 time,
                 transfer,
             } => {
+                self.resources
+                    .lookup(request.namespace, *requestor, XResourceKind::Window)?;
                 let dispatch = dispatch_clipboard_selection_request(
                     crate::XSelectionRequest {
                         requestor: *requestor,
