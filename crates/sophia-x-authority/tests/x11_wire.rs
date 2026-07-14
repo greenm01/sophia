@@ -7,6 +7,46 @@ use sophia_protocol::{
 use sophia_x_authority::*;
 
 #[test]
+fn selection_request_and_clear_events_use_core_x11_layout() {
+    let owner = XResourceId::new(0x200001, 1);
+    let requestor = XResourceId::new(0x400001, 1);
+    for byte_order in [XByteOrder::LittleEndian, XByteOrder::BigEndian] {
+        let clear = encode_x_client_event(
+            byte_order,
+            XClientEvent::SelectionClear {
+                sequence: 9,
+                time: 11,
+                owner,
+                selection: 12,
+            },
+        );
+        assert_eq!(clear[0], 29);
+        assert_eq!(read_u32(byte_order, &clear[4..8]), 11);
+        assert_eq!(read_u32(byte_order, &clear[8..12]), 0x200001);
+        assert_eq!(read_u32(byte_order, &clear[12..16]), 12);
+
+        let request = encode_x_client_event(
+            byte_order,
+            XClientEvent::SelectionRequest {
+                sequence: 10,
+                time: 13,
+                owner,
+                requestor,
+                selection: 14,
+                target: 15,
+                property: 16,
+            },
+        );
+        assert_eq!(request[0], 30);
+        assert_eq!(read_u32(byte_order, &request[8..12]), 0x200001);
+        assert_eq!(read_u32(byte_order, &request[12..16]), 0x400001);
+        assert_eq!(read_u32(byte_order, &request[16..20]), 14);
+        assert_eq!(read_u32(byte_order, &request[20..24]), 15);
+        assert_eq!(read_u32(byte_order, &request[24..28]), 16);
+    }
+}
+
+#[test]
 fn x11_setup_parser_accepts_little_endian_auth_fields() {
     let bytes = setup_request(
         XByteOrder::LittleEndian,

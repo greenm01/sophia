@@ -134,6 +134,21 @@ pub enum XClientEvent {
         time: XTimestamp,
         new_value: bool,
     },
+    SelectionClear {
+        sequence: u16,
+        time: XTimestamp,
+        owner: XResourceId,
+        selection: u32,
+    },
+    SelectionRequest {
+        sequence: u16,
+        time: XTimestamp,
+        owner: XResourceId,
+        requestor: XResourceId,
+        selection: u32,
+        target: u32,
+        property: u32,
+    },
     SelectionNotify {
         sequence: u16,
         time: XTimestamp,
@@ -972,6 +987,34 @@ pub fn encode_x_client_event(
             put_u32(byte_order, &mut out[8..12], atom);
             put_u32(byte_order, &mut out[12..16], time);
             out[16] = if new_value { PROPERTY_NEW_VALUE } else { 1 };
+        }
+        XClientEvent::SelectionClear {
+            sequence,
+            time,
+            owner,
+            selection,
+        } => {
+            write_event_header(byte_order, &mut out, 29, 0, sequence);
+            put_u32(byte_order, &mut out[4..8], time);
+            put_resource(byte_order, &mut out[8..12], owner);
+            put_u32(byte_order, &mut out[12..16], selection);
+        }
+        XClientEvent::SelectionRequest {
+            sequence,
+            time,
+            owner,
+            requestor,
+            selection,
+            target,
+            property,
+        } => {
+            write_event_header(byte_order, &mut out, 30, 0, sequence);
+            put_u32(byte_order, &mut out[4..8], time);
+            put_resource(byte_order, &mut out[8..12], owner);
+            put_resource(byte_order, &mut out[12..16], requestor);
+            put_u32(byte_order, &mut out[16..20], selection);
+            put_u32(byte_order, &mut out[20..24], target);
+            put_u32(byte_order, &mut out[24..28], property);
         }
         XClientEvent::SelectionNotify {
             sequence,
