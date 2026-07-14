@@ -306,9 +306,10 @@ GDB follows the Sophia parent and detaches from xterm, builds the release binary
 with full Rust debuginfo, enables glibc and Mesa diagnostics, and records all
 thread stacks. Core mode caps the dump at 128 MiB. Trace mode records reduced
 EGL/GBM lifecycle stages without native handles. A fix is not hardware-stable
-until ten automated runs, three physical keyboard/pixel runs, and the complete
-milestone helper pass without allocator output, stale generations, missing
-pixels, callback rejection, in-flight ownership, or cleanup debt.
+until ten automated runs report exact terminal text plus changed pixels, three
+physical keyboard/pixel runs do the same, and the complete milestone helper
+passes without allocator output, stale generations, missing pixels, callback
+rejection, in-flight ownership, or cleanup debt.
 
 The two remaining physical gates are deliberately separate from the QEMU
 regression loop. On a dedicated TTY, after the graphical compositor has
@@ -342,8 +343,10 @@ xterm with a clean interactive `/bin/sh`. Stop it from another TTY with
 `tools/stop_sophia_xmonad_session.sh`. A bounded automated form can pass `--max-runtime-ms=10000`,
 `--inject-text=sophia`, and `--exit-after-input-proof`; passing evidence requires one
 WM request, one acknowledged resize, one committed layout with a moved surface,
-and a later terminal pixel change. The separate xterm raster smoke also requires
-an exact readable ASCII glyph match. The final physical gate uses the wrapper
+the proof shell to receive exactly `sophia`, and a later terminal pixel change.
+Schema-11 live evidence records `input_text_match=true`; changed pixels without
+the semantic completion record fail verification. The separate xterm raster
+smoke also requires an exact readable ASCII glyph match. The final physical gate uses the wrapper
 without injection and requires operator-visible typing on the scanned-out xterm.
 
 The keyboard helper presents `type sophia then Return:` inside the scanned-out

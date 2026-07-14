@@ -6,6 +6,7 @@ use sophia_x_authority::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroUsize;
+use std::os::unix::fs::OpenOptionsExt;
 
 pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
     if args
@@ -33,7 +34,7 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
     {
         let report = run_x_authority_xterm_input_smoke()?;
         println!(
-            "x-authority-xterm-input-smoke display={} keys={} initial_generation={} final_generation={} initial_checksum={} final_checksum={} pixel_change={}",
+            "x-authority-xterm-input-smoke display={} keys={} initial_generation={} final_generation={} initial_checksum={} final_checksum={} pixel_change={} text_match={}",
             report.display,
             report.keys,
             report.initial_generation,
@@ -41,6 +42,7 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
             report.initial_checksum,
             report.final_checksum,
             report.initial_checksum != report.final_checksum,
+            report.text_match,
         );
         return Ok(true);
     }
@@ -299,6 +301,17 @@ pub(crate) struct XAuthorityXtermInputSmokeReport {
     pub final_generation: u64,
     pub initial_checksum: u64,
     pub final_checksum: u64,
+    pub text_match: bool,
+}
+
+struct XtermInputResultFile {
+    path: std::path::PathBuf,
+}
+
+impl Drop for XtermInputResultFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -947,6 +960,18 @@ pub(crate) fn run_x_authority_xterm_input_smoke()
 -> Result<XAuthorityXtermInputSmokeReport, Box<dyn std::error::Error>> {
     let command = resolve_external_probe_binary("xterm", "xterm")?;
     let (display, socket_path) = temp_xauthority_display(150)?;
+    let input_result = XtermInputResultFile {
+        path: std::env::temp_dir().join(format!(
+            "sophia-xterm-input-{}-{}",
+            std::process::id(),
+            display.trim_start_matches(':')
+        )),
+    };
+    let _result_file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&input_result.path)?;
     let server_path = socket_path.clone();
     let (transaction_sender, transaction_receiver) = sync_channel(256);
     let (key_sender, key_receiver) = sync_channel(32);
@@ -970,8 +995,10 @@ pub(crate) fn run_x_authority_xterm_input_smoke()
             "-e",
             "sh",
             "-c",
-            "printf 'type sophia then Return: '; read line; printf 'received:%s\\n' \"$line\"; sleep 3",
+            "printf 'type sophia then Return: '; read line; umask 077; printf '%s' \"$line\" > \"$1\"; printf 'received:%s\\n' \"$line\"; sleep 3",
+            "sophia-xterm-input",
         ])
+        .arg(&input_result.path)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .spawn()?;
@@ -1030,6 +1057,14 @@ pub(crate) fn run_x_authority_xterm_input_smoke()
             String::from_utf8_lossy(&output.stderr).trim()
         )
     })?;
+    let received = std::fs::read(&input_result.path)?;
+    if received != b"sophia" {
+        return Err(format!(
+            "xterm input smoke received incorrect terminal bytes: expected=6 received={}",
+            received.len(),
+        )
+        .into());
+    }
 
     Ok(XAuthorityXtermInputSmokeReport {
         display,
@@ -1038,6 +1073,7 @@ pub(crate) fn run_x_authority_xterm_input_smoke()
         final_generation: final_state.0,
         initial_checksum: initial.1,
         final_checksum: final_state.1,
+        text_match: true,
     })
 }
 

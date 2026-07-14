@@ -85,6 +85,49 @@ struct LiveXAuthorityFile {
     path: Option<std::path::PathBuf>,
 }
 
+struct LiveInputProofResult {
+    directory: std::path::PathBuf,
+    path: std::path::PathBuf,
+}
+
+impl LiveInputProofResult {
+    fn create(display_number: u32) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut nonce = [0u8; 8];
+        fill_session_random(&mut nonce)?;
+        let suffix = nonce
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let directory = std::env::temp_dir().join(format!(
+            "sophia-input-proof-{}-{display_number}-{suffix}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&directory)?;
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))?;
+        let path = directory.join("received");
+        Ok(Self { directory, path })
+    }
+
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
+    fn received(&self) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
+        match std::fs::read(&self.path) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+}
+
+impl Drop for LiveInputProofResult {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+        let _ = std::fs::remove_dir(&self.directory);
+    }
+}
+
 impl LiveXAuthorityFile {
     fn create(display_number: u32) -> Result<(Self, [u8; 16]), Box<dyn std::error::Error>> {
         Self::create_in(&live_xauthority_directory(), display_number)
@@ -311,6 +354,10 @@ pub(crate) fn run_persistent_xterm_session(
     }));
     wait_for_x_server_socket(&config.socket_path, &mut server)?;
 
+    let input_proof_result = config
+        .input_proof_requested()
+        .then(|| LiveInputProofResult::create(display_number))
+        .transpose()?;
     let mut terminal_command = std::process::Command::new(&terminal);
     terminal_command
         .env("DISPLAY", &config.display)
@@ -336,10 +383,16 @@ pub(crate) fn run_persistent_xterm_session(
                 "-e",
                 "sh",
                 "-c",
-                "printf 'type %s then Return: ' \"$1\"; IFS= read -r line; printf '\\nreceived:%s\\n' \"$line\"; sleep 5",
+                "printf 'type %s then Return: ' \"$1\"; IFS= read -r line; umask 077; printf '%s' \"$line\" > \"$2\"; printf '\\nreceived:%s\\n' \"$line\"; sleep 5",
                 "sophia-input-proof",
             ])
-            .arg(proof_text);
+            .arg(proof_text)
+            .arg(
+                input_proof_result
+                    .as_ref()
+                    .expect("input proof result exists with proof text")
+                    .path(),
+            );
     } else if let Some(program) = config.terminal_exec.as_deref() {
         terminal_command
             .env_remove("ENV")
@@ -436,6 +489,7 @@ pub(crate) fn run_persistent_xterm_session(
         &mut physical_input,
         &mut native_scanout,
         &mut wm_session,
+        input_proof_result.as_ref(),
         false,
         initial_authority_batch,
     );
@@ -1341,6 +1395,7 @@ fn run_session_loop(
     physical_input: &mut Option<SessionPhysicalInput>,
     native_scanout: &mut Option<PersistentNativeScanout>,
     wm_session: &mut Option<LiveWmSession>,
+    input_proof_result: Option<&LiveInputProofResult>,
     require_startup_focus: bool,
     mut initial_authority_batch: Option<XAuthorityObservedTransactionBatch>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -1414,6 +1469,7 @@ fn run_session_loop(
     let mut post_input_deadline: Option<Instant> = None;
     let mut terminal_content_ready = false;
     let mut terminal_content_ready_reported = false;
+    let mut input_text_match = false;
 
     macro_rules! drain_physical_input {
         () => {{
@@ -1563,6 +1619,45 @@ fn run_session_loop(
             }
         }
         drain_input_deliveries!();
+        if !input_text_match
+            && let (Some(expected), Some(result)) = (
+                config
+                    .inject_text
+                    .as_deref()
+                    .or(config.expect_physical_text.as_deref()),
+                input_proof_result,
+            )
+            && let Some(received) = result.received()?
+        {
+            if received != expected.as_bytes() {
+                return Err(format!(
+                    "persistent live session terminal received incorrect input: expected_bytes={} received_bytes={}",
+                    expected.len(),
+                    received.len(),
+                )
+                .into());
+            }
+            input_text_match = true;
+            println!(
+                "sophia_live_session_input schema=3 status=semantic_complete source={} text_match=true bytes={}",
+                if config.inject_text.is_some() {
+                    "synthetic"
+                } else {
+                    "physical"
+                },
+                received.len(),
+            );
+            std::io::stdout().flush()?;
+        }
+        if let Some(post_input_deadline) = post_input_deadline
+            && Instant::now() >= post_input_deadline
+            && !input_text_match
+        {
+            return Err(
+                "persistent live session timed out waiting for the terminal to receive exact text and Return"
+                    .into(),
+            );
+        }
         if input_presented_latency.is_none()
             && let Some(post_input_deadline) = post_input_deadline
             && Instant::now() >= post_input_deadline
@@ -1882,6 +1977,7 @@ fn run_session_loop(
 
         if !physical_input_completion_reported
             && input_pixel_change
+            && input_text_match
             && let (Some(text), Some(proof)) = (
                 config.expect_physical_text.as_deref(),
                 physical_text_proof.as_ref(),
@@ -2042,6 +2138,7 @@ fn run_session_loop(
         }
         if (config.exit_after_input_proof || config.inject_text.is_some())
             && input_presented_latency.is_some()
+            && input_text_match
             && (config.expect_physical_text.is_none() || physical_input_completion_reported)
             && (!config.expect_physical_pointer || pointer_pixel_change)
         {
@@ -2093,6 +2190,11 @@ fn run_session_loop(
         )
         .into());
     }
+    if config.input_proof_requested() && !input_text_match {
+        return Err(
+            "persistent live session terminal did not receive the expected text and Return".into(),
+        );
+    }
     if config.expect_physical_text.is_some()
         && (!physical_text_proof
             .as_ref()
@@ -2126,7 +2228,7 @@ fn run_session_loop(
         PersistentNativeScanout::persistent_render_metrics,
     );
     println!(
-        "sophia_live_session schema=10 status=bounded_complete display={} elapsed_msec={} session_ticks={} authority_batches={} authority_transactions={} authority_queue_capacity={} authority_batches_dropped=0 backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_max_nonzero_pixel_bytes={} cpu_nonzero_frames={} cpu_checksum={} cpu_max_compose_msec={} injected_input={} input_events_expected={} input_events_flushed={} input_flush_latency_msec={} input_pixel_change={} input_presented_latency_msec={} input_dispatch_max_gap_msec={} input_queue_max_depth={} input_queue_dwell_max_msec={} physical_events={} physical_keys_routed={} pointer_pixel_change={} physical_pointer_events={} physical_pointer_routed={} pointer_proof={} native_presentation={} native_submissions={} native_submit_deferred={} native_submit_failures={} native_retirements={} native_retire_failures={} native_max_in_flight_ticks={} native_max_submit_to_page_flip_msec={} native_max_upload_msec={} native_target_creations={} native_target_recreations={} native_pipeline_creations={} native_frame_uploads={} native_callback_accepted={} native_callback_rejected={} native_callback_queue_saturated={} native_nonzero_exports={} native_export_attempts={} native_in_flight={} native_cleanup_pending={} physical_input={} wm_policy={} wm_requests={} wm_committed={} wm_restarts={} wm_degraded={}",
+        "sophia_live_session schema=11 status=bounded_complete display={} elapsed_msec={} session_ticks={} authority_batches={} authority_transactions={} authority_queue_capacity={} authority_batches_dropped=0 backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_max_nonzero_pixel_bytes={} cpu_nonzero_frames={} cpu_checksum={} cpu_max_compose_msec={} injected_input={} input_events_expected={} input_events_flushed={} input_flush_latency_msec={} input_pixel_change={} input_text_match={} input_presented_latency_msec={} input_dispatch_max_gap_msec={} input_queue_max_depth={} input_queue_dwell_max_msec={} physical_events={} physical_keys_routed={} pointer_pixel_change={} physical_pointer_events={} physical_pointer_routed={} pointer_proof={} native_presentation={} native_submissions={} native_submit_deferred={} native_submit_failures={} native_retirements={} native_retire_failures={} native_max_in_flight_ticks={} native_max_submit_to_page_flip_msec={} native_max_upload_msec={} native_target_creations={} native_target_recreations={} native_pipeline_creations={} native_frame_uploads={} native_callback_accepted={} native_callback_rejected={} native_callback_queue_saturated={} native_nonzero_exports={} native_export_attempts={} native_in_flight={} native_cleanup_pending={} physical_input={} wm_policy={} wm_requests={} wm_committed={} wm_restarts={} wm_degraded={}",
         config.display,
         started.elapsed().as_millis(),
         session_ticks,
@@ -2147,6 +2249,7 @@ fn run_session_loop(
         input_events_flushed,
         input_flush_latency.map_or(0, |duration| duration.as_millis()),
         input_pixel_change,
+        input_text_match,
         input_presented_latency
             .map(|latency| latency.as_millis().to_string())
             .unwrap_or_else(|| "none".to_owned()),

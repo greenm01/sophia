@@ -1788,8 +1788,8 @@ fn decode_get_keyboard_mapping(bytes: &[u8]) -> Result<XWireRequest, XWireParseE
         bytes.len(),
     )?;
     Ok(XWireRequest::GetKeyboardMapping {
-        first_keycode: bytes[1],
-        count: bytes[4],
+        first_keycode: bytes[4],
+        count: bytes[5],
     })
 }
 

@@ -77,7 +77,7 @@ if [[ "$(grep -c '^sophia_qemu_pointer schema=1 status=sent source=qmp device=vi
 fi
 
 completion_line="$(grep -E '^sophia_live_session .*status=bounded_complete ' "$EVIDENCE_FILE")"
-if [[ ! " $completion_line " =~ " schema=10 " ]]; then
+if [[ ! " $completion_line " =~ " schema=10 " ]] && [[ ! " $completion_line " =~ " schema=11 " ]]; then
     echo "QEMU evidence did not use the latency/resource schema" >&2
     exit 1
 fi

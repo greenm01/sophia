@@ -321,7 +321,7 @@ fn x11_core_decoder_maps_create_and_map_to_authority_packets() {
     assert_eq!(modifier_mapping, XWireRequest::GetModifierMapping);
     let keyboard_mapping = decode_x11_core_request(
         context(namespace, 513, XByteOrder::LittleEndian),
-        &[101, 8, 2, 0, 4, 0, 0, 0],
+        &[101, 0, 2, 0, 8, 4, 0, 0],
     )
     .unwrap();
     assert_eq!(
@@ -331,6 +331,23 @@ fn x11_core_decoder_maps_create_and_map_to_authority_packets() {
             count: 4,
         }
     );
+}
+
+#[test]
+fn keyboard_mapping_request_uses_body_keycode_and_count_bytes() {
+    let namespace = NamespaceId::from_raw(44);
+    for (byte_order, request) in [
+        (XByteOrder::LittleEndian, [101, 0, 2, 0, 8, 248, 0, 0]),
+        (XByteOrder::BigEndian, [101, 0, 0, 2, 8, 248, 0, 0]),
+    ] {
+        assert_eq!(
+            decode_x11_core_request(context(namespace, 514, byte_order), &request).unwrap(),
+            XWireRequest::GetKeyboardMapping {
+                first_keycode: 8,
+                count: 248,
+            }
+        );
+    }
 }
 
 #[test]
@@ -1408,7 +1425,7 @@ fn x11_dispatch_reports_us_keyboard_mapping_for_minimal_server() {
     let mut properties = XPropertyTable::new();
     let request = decode_x11_core_request(
         context(namespace, 524, XByteOrder::LittleEndian),
-        &[101, 8, 2, 0, 4, 0, 0, 0],
+        &[101, 0, 2, 0, 8, 4, 0, 0],
     )
     .unwrap();
 
@@ -1453,7 +1470,7 @@ fn x11_dispatch_reports_evdev_navigation_keysyms() {
     let mut properties = XPropertyTable::new();
     let request = decode_x11_core_request(
         context(namespace, 525, XByteOrder::LittleEndian),
-        &[101, 111, 2, 0, 6, 0, 0, 0],
+        &[101, 0, 2, 0, 111, 6, 0, 0],
     )
     .unwrap();
 

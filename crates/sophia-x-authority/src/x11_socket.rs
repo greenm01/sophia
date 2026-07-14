@@ -2521,6 +2521,12 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                         &mut atoms,
                         &mut properties,
                     );
+                    if std::env::var_os("SOPHIA_LIVE_SESSION_DIAGNOSTIC").is_some()
+                        && let Some(detail) = request_detail.as_deref()
+                        && detail.starts_with("GetKeyboardMapping:")
+                    {
+                        eprintln!("sophia_x11_keyboard_map schema=1 {detail}");
+                    }
                     if let Some(window) = keyboard_event_target.or(default_map_target)
                         && (window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT)
                             || runtime.validate_window_access(namespace, window).is_ok())
@@ -2895,6 +2901,17 @@ fn spawn_x11_input_event_writer(
                 &keyboard_event_window,
                 &keyboard_target_selected,
             );
+            if std::env::var_os("SOPHIA_LIVE_SESSION_DIAGNOSTIC").is_some()
+                && let XAuthorityInputEvent::Key(key) = event
+            {
+                eprintln!(
+                    "sophia_x11_key_delivery schema=1 keycode={} pressed={} state={} target_selected={}",
+                    key.keycode,
+                    key.pressed,
+                    key.state,
+                    keyboard_target_selected.load(Ordering::Acquire),
+                );
+            }
             let root = XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1);
             let sequence = sequence.load(Ordering::Acquire);
             let record = encode_x_client_event(
