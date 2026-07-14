@@ -243,6 +243,40 @@ page-flip retirement, xterm pixel export/input change, no callback rejection,
 and no in-flight frame or cleanup debt. Evidence defaults to
 `/tmp/sophia-qemu-session.log`; build artifacts stay under ignored `.qemu/`.
 
+### Remote Hardware Target
+
+When the development workstation must keep its graphical session, use a second
+machine as the dedicated hardware target. The workstation remains the editing
+and control station; the target must release its own graphical compositor
+before a physical DRM/KMS proof.
+
+Configure any existing SSH host alias and stage the current working tree:
+
+```sh
+SOPHIA_REMOTE_HOST=my-test-machine tools/remote_target.sh stage
+```
+
+The helper synchronizes source without Git metadata or generated artifacts,
+builds the optimized live binary remotely, and prints the physical proof
+command. That command must still be entered at the target's dedicated local
+text TTY. The helper does not bypass local-TTY, active-compositor,
+physical-input, or recovery checks.
+
+Inspect the target without taking DRM master, retrieve evidence, or run the
+isolated QEMU integration gate with:
+
+```sh
+SOPHIA_REMOTE_HOST=my-test-machine tools/remote_target.sh status
+SOPHIA_REMOTE_HOST=my-test-machine tools/remote_target.sh fetch-evidence
+SOPHIA_REMOTE_HOST=my-test-machine tools/remote_target.sh qemu
+```
+
+`SOPHIA_REMOTE_DIR` selects a deployment path below the remote home and defaults
+to `dev/sophia-stack-target`, keeping an existing clone untouched. Synchronizing
+does not delete target-only files. `SOPHIA_REMOTE_EVIDENCE_DIR` selects the
+local destination; retrieved logs default to ignored
+`.evidence/remote-target/`.
+
 The destructive TTY3 terminal-content presentation proof is:
 
 ```sh
