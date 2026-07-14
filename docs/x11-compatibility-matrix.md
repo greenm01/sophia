@@ -1,5 +1,7 @@
 # Sophia X11 Compatibility Matrix
 
+**Role:** current native-X compatibility evidence and admission record.
+
 This matrix is the admission record for the **Sophia X Server Frontend**. It
 answers a deliberately narrow question: which real X11 client behavior has a
 reproducible, bounded proof through Sophia's own X11 server frontend?
@@ -11,9 +13,9 @@ unlisted application modes work. `startup only` means the application reaches
 the stated protocol stage without a client-visible X error but has no rendered
 desktop proof yet.
 
-The native frontend is always the subject of this matrix. XLibre can remain an
-optional broad-compatibility provider, but its behavior does not promote an
-entry here.
+The native frontend is always the subject of this matrix. XLibre is a retired
+prototype and deferred possible provider; its behavior cannot promote an entry
+here.
 
 ## Evidence Levels
 
@@ -26,10 +28,10 @@ entry here.
 | `session` | The client reaches normal startup, routed input, resize, presentation, and teardown backed by Sophia Engine and KMS. |
 
 No current X11 entry meets the complete `session` promotion gate. The guarded
-single-client xterm path has `hardware` evidence, but remains fixed-size while
-normal resize, client concurrency, output facts, and full X11 input semantics
-are completed. The external-probe harness is not a simultaneous-client X
-desktop.
+two-xterm path has retained `hardware` evidence with concurrent client-targeted
+input and KMS composition, but remains fixed-size with fixed output facts while
+normal resize, XKB/grabs, presentation feedback, and confined admission are
+completed. External probe harnesses are not session evidence.
 
 ## Baseline Matrix
 
@@ -37,7 +39,7 @@ desktop.
 | --- | --- | --- | --- | --- |
 | Setup parser | `cargo test --offline -q -p sophia-x-authority --test x11_wire` | byte order, bounded setup fields, setup success/failure encoding, configured MIT-MAGIC-COOKIE-1 acceptance/rejection | `wire` | `proven`; Xauthority-file management, peer credentials, cookie rotation, and launch policy remain before a general local session. |
 | Raw core protocol | `cargo run --offline -q -p sophia-cli -- x-authority-x11-smoke` | atoms, property read/write, create/map window, core events | `client` | `proven`; grow only from a captured missing request. |
-| Rust X11 client | `cargo run --offline -q -p sophia-cli -- x-authority-x11rb-smoke` | client-compatible setup, root/visual facts, atom/property/window flow | `client` | `proven`; setup assigns disjoint client XID ranges and every currently supported resource creator validates them, but existing-resource ownership and simultaneous-client dispatch are required before a shared-desktop proof. |
+| Rust X11 client | `cargo run --offline -q -p sophia-cli -- x-authority-x11rb-smoke` | client-compatible setup, root/visual facts, atom/property/window flow | `client` | `proven`; setup assigns disjoint client XID ranges, resource creation validates them, and concurrent classic clients may use existing same-namespace resources. Confined admission remains open. |
 | `xdpyinfo` | `cargo run --offline -q -p sophia-cli -- x-authority-xdpyinfo-smoke` | root screen, extension discovery, root properties, focus, GC cleanup | `client` | `proven`; do not turn its empty extension list into an extension-completeness claim. |
 | Minimal Xlib lifecycle | `cargo run --offline -q -p sophia-cli -- x-authority-xlib-smoke` | normal Xlib create/property/map/destroy path | `client` | `proven`; retain as the first C/Xlib regression. |
 | Core drawing | `cargo run --offline -q -p sophia-cli -- x-authority-xlib-drawing-smoke` | GC lifecycle and `PolyFillRectangle` reduced to a ready transaction | `engine` | `proven`; visual output still needs session evidence. |
@@ -57,7 +59,7 @@ desktop.
 | xterm input | `cargo run --offline -q -p sophia-cli -- x-authority-xterm-input-smoke` | bounded core key events advance xterm CPU-buffer generation | `engine` | `proven` for injected core keys; real XKB, grabs, physical input, and multi-client focus are still open. |
 | Two-client xterm routing | `cargo run --offline -q -p sophia-cli -- x-authority-xterm-two-client-smoke` | two real xterms receive distinct client-targeted core keys through the bounded concurrent frontend and each advances CPU pixels | `engine` | `proven` for brokered CPU-buffer routing and service drain; it is not KMS-backed multi-app session evidence. |
 | Guarded one-client xterm | `tools/live_session_persistent_hardware_proof.sh` and `tools/live_session_content_hardware_proof.sh` | real xterm pixels reach Engine-owned GBM/KMS presentation; focused physical input changes later pixels | `hardware` | `proven` at the fixed established buffer size; normal resize and the full multi-client session contract remain open. |
-| Guarded two-xterm session | `tools/live_session_two_xterm_hardware_proof.sh` | focused-terminal input plus a supervised second xterm must flush every routed X11 event, produce later CPU pixels, and reach KMS presentation with at least two CPU layers | `hardware` | `operator gate`; run from an exclusive DRM/KMS TTY and retain the resulting evidence before promotion. |
+| Guarded two-xterm session | `tools/live_session_two_xterm_hardware_proof.sh` | focused-terminal input plus a supervised second xterm flush every routed X11 event, produce later CPU pixels, and reach KMS presentation with at least two CPU layers | `hardware` | `proven`: retained run completed in 1,487 ms with 10 ms maximum composition, 23 ms input-to-presentation, all 14 events flushed, and clean KMS teardown. Engine output facts, resize, XKB/grabs, and confined admission remain before `session`. |
 | GTK startup | `dbus-run-session -- cargo run --offline -q -p sophia-cli -- x-authority-zenity-smoke` | GTK reaches reduced startup, selections, `MIT-SHM`, `RANDR`, and `BIG-REQUESTS` | `client` | `startup only`; it is not a rendered dialog proof and currently lacks XInput2. |
 
 ## Admission Rule
@@ -93,5 +95,6 @@ real client proves all of the following through the native frontend:
 - committed Sophia Engine state and real KMS presentation; and
 - the applicable classic shared-X or confined-namespace policy.
 
-Until then, XLibre remains the optional broad-compatibility lane for
-applications that need a wider X server surface.
+Until then, unsupported applications remain unsupported by the native session.
+Reconsider an optional XLibre provider only after measured compatibility gaps
+justify its authority and maintenance cost.

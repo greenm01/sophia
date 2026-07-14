@@ -1,5 +1,7 @@
 # Data-Oriented Design
 
+**Role:** normative data-boundary design.
+
 Sophia is a set of cooperating processes. The data-oriented rule is simple:
 data crosses a boundary as a packet, snapshot, command stream, or typed ID.
 Nothing reaches back across the boundary to mutate private state.
@@ -49,7 +51,7 @@ state      dense tables owned by one process
 protocol   packet definitions and serialization
 systems    logic that consumes snapshots and emits new packets
 authority  client-protocol translation and protocol resources
-bridge     legacy/prototype translation to external servers
+bridge     explicitly historical or optional external-authority adaptation
 portal     namespace-crossing transfer policy
 ```
 
@@ -86,8 +88,8 @@ auditable.
 Typed IDs prevent one domain's integer from masquerading as another.
 
 - `SurfaceId` for compositor surfaces tracked by Sophia Engine.
-- `XWindowId` for X11 window XIDs mirrored from the XLibre prototype or owned
-  by Sophia X Authority.
+- `XWindowId` for authority-private X11 window XIDs where an X-specific adapter
+  requires a typed wrapper.
 - `NamespaceId` for sandbox labels known to Sophia.
 - `OutputId` for physical or virtual outputs.
 - `SeatId` and `DeviceId` for input routing.
@@ -187,10 +189,10 @@ state, generation, and status-message length. It does not retain the status
 message string. Stale health generations are ignored so an older broker report
 cannot overwrite a newer readiness/degraded/stopped observation.
 
-### XWindowMirror
+### Historical XWindowMirror
 
-Sophia X Bridge keeps a mirror of the XLibre prototype window tree. This is
-cache data, not long-term authority.
+The retired Sophia X Bridge kept a mirror of the XLibre window tree. This is
+historical cache design, not an active or target authority interface.
 
 Fields should describe:
 
@@ -202,10 +204,9 @@ Fields should describe:
 - namespace identity when known
 - stale metadata flags
 
-Namespace identity may start from static configuration and later be replaced by
-authority-discovered records. X Bridge should treat discovered namespace
-ownership as mirror metadata; the active protocol authority remains the
-enforcement point.
+The native X Server Frontend owns its resource tables directly and receives
+namespace identity from session admission. It must not reconstruct identity by
+mirroring another server.
 
 Picom's window-tree mirror is the reference shape, but Sophia's mirror should
 emit snapshots instead of owning render policy.
@@ -213,8 +214,8 @@ emit snapshots instead of owning render policy.
 ### LayerSnapshot
 
 A layer snapshot is the reduced frame value that Sophia Engine render planning
-consumes. It may come from the XLibre prototype bridge, Sophia X Authority,
-Sophia Wayland Authority, or a future native authority.
+consumes. It may come from Sophia X Authority, Sophia Wayland Authority, or a
+future protocol authority.
 
 Fields should describe:
 
@@ -433,10 +434,11 @@ renderers may use native `XPixmap` or `DmaBuf` handles when supported. A GPU
 renderer should keep the same report shape so tests can distinguish "requested
 import path" from "used path" without inspecting renderer-private state.
 
-### CompositePixmapRecord
+### Historical CompositePixmapRecord
 
-A composite pixmap record describes the XLibre prototype bridge-owned lifetime
-of one named XComposite pixmap.
+A composite pixmap record described the retired XLibre bridge-owned lifetime of
+one named XComposite pixmap. It is retained as buffer-lifetime evidence, not as
+the native X frontend's presentation contract.
 
 Fields should describe:
 
@@ -479,12 +481,12 @@ Fields should describe:
 - time
 - global position
 - target surface when known
-- target XID when routing to XLibre
 - local coordinates
 - buttons, keycodes, modifiers, valuators
 
-For X11 clients, the packet is not delivered directly to the client. It becomes
-input to XLibre's routed-input extension, which still applies X11 semantics.
+The packet is not delivered directly to a client. Engine resolves the visible
+`SurfaceId` and sends a reduced route to the owning protocol authority, which
+still applies X11 or Wayland delivery semantics.
 
 ### LibinputDeviceDescriptor
 
@@ -522,63 +524,36 @@ Fields should describe:
 
 - input event serial
 - target surface ID
-- target X window ID when the target is X11
 - global coordinates
 - local coordinates
 - transform used for inversion
 - route confidence or rejection reason
 
-This packet is Sophia Engine authority, but final X11 delivery remains XLibre
-authority.
+This packet is Sophia Engine authority, but final delivery remains protocol
+authority. Authority-local XIDs or Wayland objects are resolved inside that
+authority and never become Engine routing keys.
 
 Transformed scene hit-testing must produce target-local coordinates by applying
 the inverse layer transform to the physical pointer position before checking
 layer geometry. Hit-test walks should prefer the highest stack rank so a
 transformed top layer wins over lower overlapping layers.
 
-### XLibreRoutedInputRequest
+### RoutedInputDecision
 
-The routed-input request is the smallest data packet Sophia should send to an
-XLibre routed-input extension.
-
-Fields should describe:
-
-- input serial
-- seat and device
-- event time
-- target XID
-- local X/Y coordinates in the target
-- event kind
-
-It must not include a client connection, destination socket, or arbitrary
-serialized X event. XLibre uses this packet to replace only the visual
-hit-test target that legacy X11 cannot compute after compositor transforms.
-Grabs, focus policy, XI2 semantics, and Xnamespace checks remain XLibre
-authority.
-
-The Engine may generate this request only from a physical `InputEventPacket`
-plus an accepted `InputRoute`. Serial mismatches, missing target XIDs, missing
-local coordinates, and non-routed outcomes are closed routes.
-
-### XLibreRoutedInputDecision
-
-XLibre's answer is a decision packet.
+The owning protocol authority answers an Engine route with a reduced decision.
 
 Fields should describe:
 
-- input serial
-- target XID
-- accepted or rejected outcome
+- input serial or opaque delivery token;
+- target surface ID;
+- accepted, rejected, flushed, or failed outcome;
+- bounded rejection reason.
 
 Expected rejection outcomes include stale target, denied namespace,
-sync-frozen device state, focus policy, and unsupported event. Ordinary active
-grabs are still XLibre authority; accepted routes may be redirected by normal
-grab semantics. Sophia treats every rejection as a closed route and never falls
-back to direct client delivery.
-
-Grab/focus edge smoke reports should record the edge kind, XLibre decision, and
-whether delivery is allowed. Rejected active-grab and focus-policy outcomes must
-always report `delivery_allowed = false`.
+sync-frozen protocol state, focus policy, unsupported event, backpressure, and
+client disconnect. X11 grabs may redirect an accepted route according to normal
+X semantics. Engine treats rejection as a closed route and never falls back to
+direct client delivery.
 
 ### LayoutTransaction
 
@@ -699,8 +674,9 @@ Descriptor removal follows the same generation rule.
 
 Chrome actions are not WM commands. A compositor close button produces a
 `ChromeActionRequest` owned by Engine/session policy, validated against surface
-generation and capabilities, then translated by Sophia X Bridge into normal X11
-close semantics. The WM receives only later layout consequences.
+generation and capabilities, then translated by the owning protocol authority
+into normal X11 or Wayland close semantics. The WM receives only later layout
+consequences.
 
 Session events are compositor/session inputs that may produce privileged
 commands. For chrome close, `SessionEvent::ChromeAction` can produce
@@ -709,9 +685,11 @@ When a surface is actually removed, `SessionEvent::SurfaceRemoved` can produce
 a `WmRequestKind::SurfaceRemoved` packet. This keeps WM relayout tied to X11
 lifecycle consequences, not compositor chrome intent.
 
-### SurfaceSnapshot
+### Legacy SurfaceSnapshot
 
-Sophia X Bridge emits surface snapshots from XLibre state.
+`SurfaceSnapshot` is the earlier X-shaped compatibility packet retained for
+conversion tests. Native authorities should prefer protocol-neutral
+`AuthoritySurface`, `SurfaceTransaction`, and `LayerSnapshot` values.
 
 Fields should describe:
 
@@ -725,7 +703,8 @@ Fields should describe:
 - serial/generation
 - resize sync capability
 
-Window titles, app classes, and sync reputation keys are bridge-local metadata.
+Window titles, app classes, and sync reputation keys are authority-private
+metadata.
 They must not be copied into `SurfaceSnapshot` or `LayerSnapshot`; the snapshot
 may carry only the reduced `ResizeSyncCapability`.
 
@@ -753,82 +732,39 @@ Namespace crossings are explicit data packets.
 
 Fields should describe:
 
+- transfer ID
 - source namespace
 - target namespace
 - transfer kind
 - MIME or protocol type
 - byte size
-- data handle or inline data
-- user or policy decision
-- lifetime and revocation state
+- source generation
+- deadline
+- policy decision
 
 Portals should never grant two namespaces general X11 visibility just to move
 one piece of user-approved data.
 
-Clipboard transfers are asynchronous. Denial becomes normal X11 selection
-failure, such as a failed conversion, rather than synthetic input. Pending
-approval holds only the specific transfer for a bounded timeout. Approval is
-single-use and generation-bound; if the source owner changes, the pending
-transfer becomes stale and must be revoked or restarted.
+The policy packet carries no payload or OS handle. The `sophia-portal` reducer
+owns pending decisions and emits abstract allow, deny, revoke, or handoff
+commands. Runtime executors own clipboard bytes, files, capture buffers, URI
+launchers, notification effects, and protocol completion.
 
-The `sophia-portal` crate implements this policy as a reducer over
-`PortalTransfer` values. Its commands are intentionally abstract:
-prompt user/policy, hand off clipboard data, or fail the X11 selection. X Bridge
-code later translates those commands into concrete ICCCM/XFixes behavior.
+An allowed decision creates a separate bounded grant whose lifecycle is active,
+completed, revoked, or expired. Source generation changes, disconnects,
+deadlines, policy failure, executor failure, and broker restart fail closed.
+The exact contract and portal taxonomy live in
+[namespaces-and-portals.md](namespaces-and-portals.md).
 
-X Bridge owns requestor-side clipboard context. A `SelectionRequest` is reduced
-with the selection owner monitor, mirrored namespace table, resolved target atom
-name, and runtime-minted transfer ID into a `ClipboardTransferRequest` plus
-`ClipboardSelectionFailureRequest`. The portal receives only namespaces, target
-name, byte-size placeholder, and owner generation; the bridge keeps X requestor,
-selection, target atom, property, and timestamp context for concrete X11
-replies.
+Clipboard transfers are asynchronous. The X Server Frontend retains requestor
+XID, selection/target/property atoms, timestamp, and source-owner generation.
+Portal policy receives only normalized target/MIME facts and namespaces. Denial
+or expiry becomes normal X11 selection failure, never synthetic input or a
+blocked session.
 
-The dispatcher boundary consumes `Event::SelectionRequest` from x11rb and calls
-the clipboard portal reducer. It must fail closed before portal mutation when
-the event is not a selection request, when namespace attribution is missing, or
-when source and target are in the same namespace.
-
-Approved clipboard text handoff is represented as data before it touches X. The
-bridge validates a `HandoffClipboard` command against the original request,
-requires a non-`None` request property, rejects non-text targets, caps UTF-8
-payload bytes with `MAX_CLIPBOARD_TEXT_HANDOFF_BYTES`, and emits a property
-payload plus successful `SelectionNotify` artifact.
-
-The live clipboard portal smoke applies those artifacts to X: denial sends only
-the failure notify, while approval writes the bounded text property before
-sending the success notify. The smoke must read the requestor property back to
-prove the bytes reached X.
-
-Drag-and-drop follows the same reducer shape. Offered MIME/protocol targets are
-bounded before storage, approval is generation-bound, denial or stale ownership
-becomes an abstract cancel command, and Xdnd-specific protocol mechanics stay
-in X Bridge.
-
-File handoff also stays metadata-only at the reducer level. The policy model
-stores open/save intent, bounded offered types, and a sanitized suggested
-filename. It emits abstract handoff or cancel commands; concrete file handles,
-temporary storage, and chooser UI are runtime responsibilities.
-
-Screen capture policy records only capture intent: screenshot versus recording,
-redacted scope, supported MIME type, size hint, decision, and generation. It
-must not expose raw surface IDs, pixels, or buffers to policy code.
-
-URI-open policy records bounded URI metadata only. It validates syntax and a
-small scheme allowlist before creating pending policy state; the runtime owns
-the actual launcher/browser handoff.
-
-Notification policy stores bounded text/action metadata and urgency only. It
-emits abstract deliver/drop commands. Sophia Engine maps those commands into
-bounded compositor chrome notification state: deliver presents a staged
-notification, while drop dismisses pending or visible state. The compositor
-shell still owns drawing, notification action execution, history, and rate
-limits.
-
-X Bridge owns selection monitoring data. It should reduce XFixes owner-change
-events into records keyed by selection atom and namespace, then pass only the
-selection, namespace, owner generation, and owner-change fact to portal policy.
-The portal reducer should not subscribe to X events or hold raw X authority.
+Other portal reducers follow the same split: bounded metadata in policy,
+protocol-specific context in the authority, payloads and handles in runtime
+executors, and user-visible effects in the appropriate shell or launcher.
 
 ## Storage
 
@@ -836,8 +772,8 @@ Use dense tables inside a process. Use snapshots between processes.
 
 Sophia Engine owns dense tables for surfaces, outputs, seats, devices,
 committed visual state, and active transactions. Protocol authorities own their
-client resource tables. Sophia X Bridge owns X11 mirror tables only for the
-XLibre prototype path. Sophia WM owns policy state. Portals own transfer state.
+client resource tables. Sophia WM owns policy state. Portal policy owns bounded
+request/grant state; portal executors own active payload/handle operations.
 
 No process should hold a mutable reference into another process's table. Cross a
 boundary by serializing a packet or by passing an OS handle with explicit
@@ -861,21 +797,22 @@ The hot paths are:
 - surface ordering and transform evaluation
 
 Keep them allocation-light and branch-obvious. Slow policy work belongs in the
-WM or portal processes. X11 protocol complexity belongs in XLibre or Sophia X
-Bridge, not inside the compositor's inner frame path.
+WM or portal processes. X11 and Wayland protocol complexity belongs in their
+authorities, not inside the compositor's inner frame path.
 
 Policy can be TEA-style. Compositor hot paths should be table/system style.
 
 ## Invariants
 
 - Protocol authorities are the source of truth for their client resources.
-- Sophia X Bridge mirrors XLibre prototype state; it does not become the target
-  X authority.
 - Sophia Engine is the source of truth for committed visual placement.
 - Sophia must not present new geometry without matching committed pixels.
 - Layer snapshots are frame values, not mutable windows.
 - The WM proposes policy; the engine commits renderable state.
 - Namespace crossings require portal packets.
+- Namespace identity is assigned by session admission, not inferred from
+  protocol metadata.
+- Portal policy packets never carry payloads or raw protocol object IDs.
 - A frame plan is immutable once rendering begins.
 - A transaction has a serial and an outcome.
 - A stale ID must fail closed.

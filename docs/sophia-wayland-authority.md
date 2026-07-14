@@ -1,5 +1,13 @@
 # Sophia Wayland Authority
 
+**Role:** subsystem contract and maintenance status.
+
+The first native authority slice is implemented: real Kitty connects through a
+private Smithay-backed socket, commits SHM buffers, receives Engine-routed
+keyboard/pointer input, and reaches native KMS presentation. During the current
+X11-first roadmap, this authority remains supported under correctness,
+security, recovery, and regression gates rather than protocol-expansion work.
+
 Sophia Wayland Authority is the native protocol authority for Wayland-only
 clients. Its bounded first implementation terminates a private Smithay Wayland
 socket, owns protocol object/resource semantics, assigns each client a Sophia
@@ -311,44 +319,26 @@ Cross-namespace clipboard, drag-and-drop, screencopy, URI open, and notification
 flows must become Sophia Portal requests. The Wayland Authority can report the
 facts of a request; it cannot make cross-namespace policy decisions itself.
 
-## First Implementation Target
+## Maintenance And Deferred Work
 
-The first practical Wayland Authority milestone is not a complete compositor.
-It is a deterministic reducer over synthetic Wayland events:
+The deterministic `WaylandSurfaceState + WaylandSurfaceEvent` reducers already
+cover ordered attach/damage/commit, ready and pending buffers, null-buffer
+unmap, stale generations, configure/ack lifecycle, protocol close, and
+namespace-local input delivery. Keep those behaviors and the real SHM/Kitty
+path as regressions.
 
-```text
-WaylandSurfaceState + WaylandSurfaceEvent -> WaylandSurfaceState + AuthorityCommand
-```
+Current maintenance gates are:
 
-The initial reducer should prove:
+- native SHM startup, changing pixels, keyboard/pointer delivery, frame
+  callbacks, buffer release, presentation, and normal teardown;
+- TTY and input-service recovery after normal or failed sessions;
+- the controlled linear DMA-BUF first-frame and retained 300-frame lifetime
+  proofs;
+- the rule that Smithay owns protocol infrastructure while Sophia Engine alone
+  owns the scene, rendering, physical input, and scanout.
 
-- attach plus damage does not emit a transaction before commit;
-- commit with a ready buffer emits a ready `SurfaceTransaction`;
-- commit with an unready import emits a pending transaction;
-- null buffer commit produces an unmap/hide artifact;
-- stale generation is rejected by Sophia Engine, not patched by the authority.
-
-The second reducer should prove:
-
-- configure serials are authority-owned and protocol-local;
-- `ack_configure` does not emit a visual transaction by itself;
-- a matching acknowledged commit emits a transaction through the `wl_surface`
-  commit path;
-- stale or destroyed toplevel state cannot advance committed visual truth;
-- polite close maps to `xdg_toplevel.close`, not engine-owned process killing.
-
-The input reducer should prove:
-
-- Engine routes are mapped to namespace-local `wl_surface` targets;
-- cross-namespace routes are rejected before Wayland event delivery;
-- protocol-local grabs can redirect delivery within the same namespace/seat;
-- destroyed or unmapped targets clear focus instead of fabricating events;
-- compositor chrome clicks never enter the Wayland Authority input path.
-
-The portal reducer should prove:
-
-- cross-namespace paste becomes a Sophia clipboard portal request;
-- source generation changes revoke pending transfer approval;
-- denied drag-and-drop maps to native cancellation/no-action;
-- screencopy outside the requester namespace requires portal approval;
-- portal facts are bounded and do not expose protocol object IDs to the WM.
+Additional Wayland protocols, arbitrary client DMA-BUF GPU composition, broader
+desktop compatibility, and new portal adapters are deferred behind the native
+X11 namespace, portal, session, and presentation milestones. A correctness,
+security, recovery, or dependency-boundary regression may still interrupt that
+ordering.

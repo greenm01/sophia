@@ -1,5 +1,11 @@
 # Validation
 
+**Role:** reproducible validation catalog.
+
+The active priority is native X11, namespace admission, and portals. Wayland,
+DMA-BUF, XLibre, and legacy-WM commands below remain regression or historical
+evidence unless `todo.md` names them as an active exit gate.
+
 Sophia's default validation path must not require native renderer libraries,
 kernel devices, a display server, or network access. The default suite protects
 the data model, protocol authorities, runtime reducers, renderer admission
@@ -23,6 +29,8 @@ probe's precise proven surface and next gate; do not treat this list as a full
 X server conformance suite:
 
 ```sh
+cargo test --offline -q -p sophia-protocol
+cargo test --offline -q -p sophia-portal
 cargo test --offline -q -p sophia-x-authority --test x11_wire
 cargo run --offline -q -p sophia-cli -- x-authority-xclock-smoke
 cargo run --offline -q -p sophia-cli -- x-authority-xeyes-smoke
@@ -36,6 +44,7 @@ cargo run --offline -q -p sophia-cli -- x-authority-xcalc-smoke
 cargo run --offline -q -p sophia-cli -- x-authority-xterm-smoke
 cargo run --offline -q -p sophia-cli -- x-authority-xterm-render-smoke
 cargo run --offline -q -p sophia-cli -- x-authority-xterm-input-smoke
+cargo run --offline -q -p sophia-cli -- x-authority-xterm-two-client-smoke
 dbus-run-session -- cargo run --offline -q -p sophia-cli -- x-authority-zenity-smoke
 ```
 
@@ -50,8 +59,8 @@ External probe binaries are resolved from `PATH`; set
 `x-authority-xterm-smoke` is a setup/lifecycle regression, not a rendered
 transaction proof; its reduced output is expected to report zero committed
 runtime transactions. `x-authority-xterm-render-smoke` is the separate drawing
-transaction proof. Until the CPU-buffer registry and compositor path land, it
-does not prove visible glyph pixels.
+transaction and materialized CPU-pixel proof. The guarded session tools are the
+separate Engine/KMS evidence.
 `x-authority-zenity-smoke` is a GTK startup protocol regression. Prefer running
 it under `dbus-run-session --` on TTY hosts so GTK reaches its DBus startup path.
 The smoke still fails on zero X requests or any `first_error`; a nonzero client
@@ -74,6 +83,7 @@ cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- sophia-li
 # type into xterm, and require physical_keys_routed>0 plus changed pixels.
 tools/live_session_content_hardware_proof.sh
 tools/live_session_persistent_hardware_proof.sh
+tools/live_session_two_xterm_hardware_proof.sh
 tools/operator_keyboard_hardware_proof.sh
 tools/vrr_hardware_proof.sh
 tools/build_qemu_session_initramfs.sh
@@ -84,6 +94,15 @@ tools/audit_no_xlibre_runtime.sh
 # Dedicated text TTY with SOPHIA_INPUT_DEVICES set:
 tools/wayland_kitty_hardware_proof.sh
 ```
+
+The retained two-xterm hardware proof must preserve its 2,000 ms startup,
+25 ms maximum-composition, 100 ms input-to-presentation, complete event-flush,
+two-layer, and clean-teardown gates. Its current retained result is 1,487 ms,
+10 ms, 23 ms, all 14 events flushed, and no cleanup debt. It remains
+`hardware`, not `session`, evidence until the compatibility-matrix promotion
+gate passes.
+
+## Wayland And DMA-BUF Maintenance Evidence
 
 The native Wayland Kitty smoke is non-destructive: it uses a private Wayland
 socket, software rendering, and the headless CPU composition path. It also
@@ -96,9 +115,10 @@ are frozen under `research/xlibre` and are not release gates.
 
 The native session defaults to its proven SHM path even with `--native-scanout`.
 The bounded DMA-BUF path requires the explicit experimental
-`--experimental-dmabuf` flag. It has no passing real-hardware evidence yet.
-Run the controlled external producer first, from a dedicated text TTY with an
-outside recovery path:
+`--experimental-dmabuf` flag. Controlled output-sized direct scanout has passing
+hardware evidence; arbitrary window-sized client GPU composition does not. Run
+the controlled external producer from a dedicated text TTY with an outside
+recovery path:
 
 ```bash
 # First-frame admission and retirement:

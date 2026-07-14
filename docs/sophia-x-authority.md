@@ -1,5 +1,7 @@
 # Sophia X Server Frontend
 
+**Role:** subsystem contract and current implementation status.
+
 The Sophia X Server Frontend is Sophia’s long-term modern X server
 implementation. It presents the **X11 API and wire protocol** directly to
 applications, then emits `SurfaceTransaction` values to Sophia Engine. It takes
@@ -10,9 +12,10 @@ than by reproducing all of Xorg.
 It is not a plan for a separate application-facing Sophia display protocol. X11
 is the native application API of this path; forward progress happens in the
 server architecture, DRM/KMS presentation, and targeted X11 extensions. XLibre
-remains a broad-compatibility provider and reference while this frontend gains
-coverage. The implementation crate is currently named `sophia-x-authority`; the
-name reflects its protocol role and does not narrow the product direction.
+is a retired prototype and possible future compatibility provider, not an
+active integration lane. The implementation crate is currently named
+`sophia-x-authority`; the name reflects its protocol role and does not narrow
+the product direction.
 
 The frontend is not the compositor. It terminates X protocol, owns X resource
 semantics, applies the selected classic or confined session profile, and
@@ -61,11 +64,10 @@ Sophia Engine:
 | Engine → frontend (next) | output/RandR snapshot and presentation/buffer-release feedback | Engine remains the source of physical output facts, frame retirement, and buffer lifetime. The frontend turns those facts into RandR/configure/present-visible X11 state; it must never infer scanout completion itself. |
 
 The existing implementation covers the second and third rows for the
-single-client live-session prototype: the X11 socket dispatch emits bounded
-transaction batches, and the Engine can route key/pointer events plus
-focus/configure commands back to that client. Its persistent socket listener
-also reuses authority state across *sequential* clients. The frontend now also
-offers an opt-in bounded concurrent worker API: callers use
+persistent native session: X11 socket dispatch emits bounded, client-attributed
+transaction batches, and Engine routes key/pointer events plus focus/configure
+commands back to the owning client. The frontend supports bounded concurrent
+workers: callers use
 `serve_next_concurrently[_traced]` to accept independent clients and
 `wait_for_clients` to reap the accepted batch. It shares only independently
 synchronized runtime, atom, property, and connection-lease state; the default
@@ -89,12 +91,15 @@ pixel changes before draining the service. The live launcher still starts one
 xterm by default, but `--secondary-terminal` starts and supervises a second
 xterm on the same bounded frontend. `tools/live_session_two_xterm_hardware_proof.sh`
 is the operator gate for KMS-backed evidence: it requires normal persistent
-session validation plus at least two composed CPU layers. Initial Engine focus
-is now acknowledged by the owning X11 client before the input proof begins, so
+session validation plus at least two composed CPU layers. Retained hardware
+evidence passes in 1,487 ms with 10 ms maximum composition, 23 ms
+input-to-presentation, all 14 X11 events flushed, and clean KMS teardown. This
+is `hardware`, not full `session`, evidence because output facts, resize, XKB,
+grabs, and confined admission remain incomplete. Initial Engine focus is now
+acknowledged by the owning X11 client before the input proof begins, so
 either focused terminal can demonstrate delivery. X11 map/configure lifecycle
 updates no longer overwrite a surface's committed-pixel generation. Root/output
-facts are still fixed setup values. Each accepted
-client now gets
+facts are still fixed setup values. Each accepted client now gets
 a disjoint X11 setup resource-ID range. Every currently supported XID-creating
 wire path—window, pixmap, GC, font, colormap, glyph cursor, and reduced
 MIT-SHM segment—rejects an XID outside that range with X11 `BadIDChoice` before
@@ -113,10 +118,10 @@ owner, and refuse to replace a non-socket path. The configuration can now
 require a session-scoped `MIT-MAGIC-COOKIE-1` value: a bad setup receives a
 normal X11 setup-failure reply and the listener remains available for the next
 client. The legacy smoke helpers and the configuration default deliberately
-remain unauthenticated local sockets. Xauthority-file management, peer-
-credential policy, cookie rotation, session launch policy, Engine-backed
-multi-client input/control routing, and confined-client routing are still
-required before treating the listener as a general local X server.
+remain unauthenticated local sockets. Xauthority-file management,
+peer-credential policy, cookie rotation, session-owned namespace admission,
+Engine-derived output facts, and confined-client routing are still required
+before treating the listener as a general local X server.
 
 ### Connection Lifecycle
 
@@ -232,6 +237,10 @@ keyboard map became useful. The supported keyboard baseline is core
 
 ## Namespace Model
 
+The normative identity, profile, admission, capability, and grant contract is
+in [namespaces-and-portals.md](namespaces-and-portals.md). This section records
+the X-specific consequences.
+
 Every client connection belongs to a `NamespaceId` before it can create
 resources. In a classic shared-X profile, trusted clients deliberately share one
 namespace and retain ordinary X11 inspection and coordination. In a confined
@@ -290,6 +299,11 @@ mirroring. XComposite/Damage remains prototype evidence, not the long-term
 surface boundary.
 
 ## Portals And Selections
+
+The normative broker and grant lifecycle is in
+[namespaces-and-portals.md](namespaces-and-portals.md). The native X frontend
+owns namespace-keyed selection state today; the session broker and concrete
+cross-namespace executor remain roadmap work.
 
 Selections, clipboard, drag-and-drop, URI open, notifications, screenshots, and
 file handoff are protocol-specific inputs to Sophia Portals.
@@ -382,20 +396,7 @@ Sophia-specific differences must remain intact: Engine-owned atomic visual
 commits, blind WM policy, and a user-selectable choice between classic shared-X
 semantics and confined namespace/capability policy.
 
-## First Implementation Milestones
-
-1. Add a `sophia-x-authority` crate skeleton with passive resource tables and
-   no live socket yet.
-2. Model namespace-scoped X resource lookup and event subscription in tests.
-3. Model `AuthoritySurface` creation from X window lifecycle events.
-4. Convert a synthetic Present/SHM/CoreDraw update into a ready
-   `SurfaceTransaction`.
-5. Convert a synthetic selection request into a portal request and native X
-   denial/handoff artifact.
-6. Add a local socket parser only after the resource and transaction reducers
-   are covered by integration tests.
-
-## v0 Internal Socket Runtime
+## Historical v0 Internal Socket Runtime
 
 The first executable authority seam is an internal Sophia frame protocol over a
 Unix socket. It is not the X11 wire protocol. It exists to prove that the X

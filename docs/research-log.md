@@ -3,6 +3,26 @@
 This file records decisions and unresolved questions for the active milestone.
 Completed evidence is archived in `research-log-archive.md`.
 
+## 2026-07-13: X11-First Namespace And Portal Critical Path
+
+Sophia's next architecture work is the native X Server Frontend, not broader
+Wayland protocol or DMA-BUF coverage. The two-xterm frontend already proves
+bounded concurrent workers, client-attributed transactions, targeted input,
+Engine composition, and KMS presentation. Its next risk is no longer basic
+visibility; it is admitting clients into the correct trust domain before more
+X11 semantics depend on a hardcoded listener namespace.
+
+The chosen dependency order is session-owned namespace admission, then a portal
+broker with X11 `CLIPBOARD`/`PRIMARY` as its first complete adapter, then XKB,
+grabs, Engine-derived output/resize, and standard presentation semantics.
+Classic shared-X intentionally retains same-namespace resource visibility.
+Confined sessions use distinct namespaces and explicit capabilities; XID ranges
+remain creation/cleanup ledgers rather than access-control lists.
+
+Wayland/Smithay stays supported under maintenance gates. XLibre remains frozen
+historical evidence and a possible future provider only if measured native-X
+gaps later justify its authority and maintenance cost.
+
 ## 2026-07-13: Kitty DMA-BUF Direct-Scanout Boundary
 
 Enabling the experimental DMA-BUF global for guarded Kitty failed before a
@@ -282,10 +302,14 @@ same generic bridge socket and apply validated proposals to presented surfaces.
 
 ## Active Questions
 
-- Which second legacy WM provides the smallest independent compatibility proof
-  that the generic launcher and fake-X11 coverage are not xmonad-shaped?
-- Can one live-session xterm be laid out through the bridge while operator input
-  still routes through Engine focus and changes presented pixels?
+- What is the smallest immutable admission record that lets the supervisor bind
+  listener policy, peer credentials, cookie validation, session generation,
+  namespace profile, and capabilities without exporting secrets?
+- What bounded broker IPC keeps portal decisions and grant lifecycle pure while
+  allowing runtime executors to retain X selection context, payload bytes, and
+  later OS handles?
+- Which XKB, grab, RandR, resize, and presentation gaps must close before the
+  proven two-xterm hardware path can honestly become `session` evidence?
 
 These questions remain probe-driven: implement the first observed missing path,
 then rerun the relevant real-client smoke.

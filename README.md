@@ -220,58 +220,59 @@ Sophia is split by authority, not by convenience.
 - **Sophia WM** owns layout, focus policy, keybindings, workspaces, and launch
   decisions.
 - **Sophia Portals** handle intentional namespace crossing: clipboard,
-  drag-and-drop, files, screenshots, notifications, and URI handoff.
+  drag-and-drop, files, screen capture/recording, notifications, and URI
+  handoff.
 - **Metadata Broker and Chrome** turn protocol metadata into redacted
   compositor UI without giving the WM namespace visibility.
 
 ## Documentation
 
+- `docs/README.md` maps normative contracts, subsystem status, evidence, and
+  historical material.
 - `docs/architecture.md` maps processes and load-bearing boundaries.
+- `docs/namespaces-and-portals.md` defines admission, isolation profiles,
+  capabilities, grants, and cross-namespace failure behavior.
 - `docs/dod.md` defines Sophia's data-oriented design rules.
 - `docs/sophia-x-authority.md` defines the long-term Sophia X Server Frontend
   and its X11 compatibility boundary.
 - `docs/x11-compatibility-matrix.md` records the real-client evidence that
   admits each native X11 compatibility slice.
 - `docs/style-guide.md` records implementation discipline.
-- `docs/research-log.md` captures early decisions and open research questions.
+- `docs/research-log.md` captures active decisions and research questions.
 - `docs/research-log-archive.md` preserves completed research and validation
   evidence.
 - `research/xlibre/docs/xlibre-prototype-regression-map.md` maps retired XLibre
   checks to active Sophia-owned regressions.
-- `todo.md` tracks build phases and research milestones.
+- `todo.md` tracks only active milestones and measurable exits.
 
 ## Status
 
-Sophia is a research prototype. Deterministic tests protect the data model and
-authority boundaries, while AMD TTY evidence proves native GBM/KMS allocation,
-atomic submit, page-flip retirement, cleanup, and exact operator keyboard input
-changing presented xterm pixels. The isolated QEMU harness passes 300 persistent
-native-session ticks with two independently owned outputs, distinct content,
-page-flip-paced fixed refresh, and routed keyboard/pointer input. Real xmonad
-also passes as blind two-window layout policy against synthetic windows; it is
-a compatibility proof, not a hard-coded Engine component. The generic live
-session now applies real xmonad placement, resize, and focus to one real xterm.
-Its headless gate requires a readable fixed-font ASCII marker, one acknowledged
-configure, and a later injected-input pixel change; the dedicated-TTY operator
-visual gate remains.
-Real Kitty now connects to Sophia's private native Wayland authority with
-`DISPLAY` removed. SHM frames pass through the protocol-neutral Engine path;
-the native session additionally admits a bounded linear DMA-BUF subset behind
-an experimental flag. SHM is the verified default. The DMA-BUF importer now has
-a controlled first-frame/lifetime proof and a three-run real-Kitty promotion
-gate. The persistent CPU-upload texture is no longer reused as an EGLImage
-sibling; the repaired three-frame proof, core-mode 300-frame run, and three
-preserved normal 300-frame runs pass. An earlier post-repair run still aborted
-after frame 2, so the normal-stability proof remains a regression gate. DMA-BUF
-stays blocked before Kitty promotion until the three guarded real-Kitty runs
-pass. The installed launcher
-uses the native Wayland path and retains the independent
-Ctrl-Alt-Backspace recovery guard. XLibre is no longer a production dependency,
-feature, workspace member, or launcher path; its frozen sources live under
-`research/xlibre`. The remaining Kitty gates prove resize,
-keyboard/navigation/pointer input, sub-100 ms presentation, clean TTY recovery,
-and then DMA-BUF performance. VRR evidence still requires a display whose
-connector reports `vrr_capable=1`.
+Sophia is a research prototype. The primary development track is now the native
+Sophia X Server Frontend, followed by namespace admission and portal mediation.
+The frontend runs two concurrent real xterms through Engine-owned composition
+and KMS with client-targeted input. Retained dedicated-TTY evidence completes in
+1,487 ms with 10 ms maximum composition, 23 ms input-to-presentation, all 14
+X11 input events flushed, and clean teardown. This is hardware evidence, not a
+complete desktop session: session-owned namespace admission, confined routing,
+Xauthority lifecycle, Engine-derived output/RandR facts, normal resize, XKB,
+grabs, and presentation feedback remain.
+
+The namespace-keyed X resource model and pure portal reducers already exist,
+but the supervisor-owned namespace registry, immutable admission context,
+broker lifecycle, and native cross-namespace execution are not complete. The
+first reference portal will mediate X11 `CLIPBOARD` and `PRIMARY` after the
+admission contract is implemented.
+
+The Smithay-backed Wayland Authority remains functional and supported. Real
+Kitty uses native Wayland SHM, Engine-routed input, and KMS; controlled DMA-BUF
+direct-scanout lifecycle evidence is retained as a renderer regression. New
+Wayland protocols and arbitrary client GPU composition are deferred while the
+X11, namespace, and portal architecture matures.
+
+XLibre is not a production dependency, feature, workspace member, or launcher
+path. Its frozen source and prototype evidence live under `research/xlibre`.
+Sophia may reconsider an optional provider only if measured native-X gaps later
+justify that authority and maintenance cost.
 
 ## License
 
