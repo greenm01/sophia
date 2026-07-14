@@ -2,8 +2,8 @@ use sophia_protocol::{
     BufferSource, ClientAdmissionContext, ClientAdmissionId, ClientAuthProvenance,
     ClientAuthenticationMethod, NamespaceCapabilities, NamespaceContext, NamespaceId,
     NamespacePortalCapability, NamespaceProfile, PortalBrokerRequestPacket, PortalDecision,
-    PortalRequest, PortalTransfer, PortalTransferId, PortalTransferKind, Rect, Region, Size,
-    SurfaceConstraints, SurfaceId, TransactionId,
+    PortalGrant, PortalGrantState, PortalRequest, PortalTransfer, PortalTransferId,
+    PortalTransferKind, Rect, Region, Size, SurfaceConstraints, SurfaceId, TransactionId,
 };
 use sophia_x_authority::*;
 
@@ -5203,10 +5203,18 @@ fn cross_namespace_executor_installs_property_and_notifies_requestor() {
     let atom_reply = read_x_record(&mut owner);
     let utf8 = read_u32(XByteOrder::LittleEndian, &atom_reply[8..12]);
     owner
+        .write_all(&intern_atom_request(
+            XByteOrder::LittleEndian,
+            false,
+            "CLIPBOARD",
+        ))
+        .unwrap();
+    let selection = read_u32(XByteOrder::LittleEndian, &read_x_record(&mut owner)[8..12]);
+    owner
         .write_all(&set_selection_owner_request(
             XByteOrder::LittleEndian,
             owner_window,
-            1,
+            selection,
             10,
         ))
         .unwrap();
@@ -5232,7 +5240,7 @@ fn cross_namespace_executor_installs_property_and_notifies_requestor() {
         .write_all(&convert_selection_request(
             XByteOrder::LittleEndian,
             requestor_window,
-            1,
+            selection,
             utf8,
             utf8,
             11,
@@ -5283,17 +5291,65 @@ fn cross_namespace_executor_installs_property_and_notifies_requestor() {
     assert_eq!(&reply[32..47], b"cross namespace");
     portal_server.join().unwrap().unwrap();
 
+    requestor
+        .write_all(&convert_selection_request(
+            XByteOrder::LittleEndian,
+            requestor_window,
+            selection,
+            utf8,
+            utf8,
+            12,
+        ))
+        .unwrap();
+    request_receiver.recv().unwrap();
+    owner
+        .write_all(&set_selection_owner_request(
+            XByteOrder::LittleEndian,
+            owner_window,
+            selection,
+            12,
+        ))
+        .unwrap();
+    owner
+        .write_all(&resource_request(XByteOrder::LittleEndian, 23, selection))
+        .unwrap();
+    assert_eq!(read_x_record(&mut owner)[0], 1);
+    let stale_transfer = PortalTransferId::from_raw(4);
+    assert!(
+        executor
+            .request_source(&PortalGrant {
+                transfer: stale_transfer,
+                source_namespace: source.id,
+                target_namespace: target.id,
+                kind: PortalTransferKind::Clipboard,
+                source_generation: 1,
+                broker_generation: 1,
+                deadline_msec: 2_000,
+                state: PortalGrantState::Active,
+            })
+            .is_err()
+    );
+    executor
+        .fail(
+            stale_transfer,
+            ClipboardSelectionExecutionError::StaleOwnerGeneration,
+        )
+        .unwrap();
+    let notify = read_x_record(&mut requestor);
+    assert_eq!(notify[0], 31);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &notify[20..24]), 0);
+
     for (sequence, failure) in [
-        (4, ClipboardSelectionExecutionError::Denied),
-        (5, ClipboardSelectionExecutionError::Expired),
-        (6, ClipboardSelectionExecutionError::Disconnected),
-        (7, ClipboardSelectionExecutionError::ExecutorFailure),
+        (5, ClipboardSelectionExecutionError::Denied),
+        (6, ClipboardSelectionExecutionError::Expired),
+        (7, ClipboardSelectionExecutionError::Disconnected),
+        (8, ClipboardSelectionExecutionError::ExecutorFailure),
     ] {
         requestor
             .write_all(&convert_selection_request(
                 XByteOrder::LittleEndian,
                 requestor_window,
-                1,
+                selection,
                 utf8,
                 utf8,
                 12,

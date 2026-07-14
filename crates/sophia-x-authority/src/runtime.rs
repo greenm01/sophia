@@ -268,10 +268,15 @@ impl XAuthorityRuntime {
         {
             return Err(ClipboardSelectionExecutionError::StaleOwnerGeneration);
         }
-        let owner = self
+        let owner_record = self
             .selections
             .current_owner_for_selection(pending.portal_request.failure.selection)
-            .and_then(|record| record.owner)
+            .ok_or(ClipboardSelectionExecutionError::StaleOwnerGeneration)?;
+        if owner_record.generation != grant.source_generation {
+            return Err(ClipboardSelectionExecutionError::StaleOwnerGeneration);
+        }
+        let owner = owner_record
+            .owner
             .ok_or(ClipboardSelectionExecutionError::StaleOwnerGeneration)?;
         let raw = 0x0001_0000u32
             .checked_add(self.next_clipboard_proxy)
