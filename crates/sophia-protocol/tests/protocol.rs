@@ -12,6 +12,59 @@ fn simple_ids_start_after_zero() {
 }
 
 #[test]
+fn namespace_capabilities_are_directional_and_bounded() {
+    let capabilities = NamespaceCapabilities::NONE
+        .with_request(NamespacePortalCapability::Clipboard)
+        .with_publish(NamespacePortalCapability::Notification);
+
+    assert!(capabilities.allows_request(NamespacePortalCapability::Clipboard));
+    assert!(!capabilities.allows_publish(NamespacePortalCapability::Clipboard));
+    assert!(capabilities.allows_publish(NamespacePortalCapability::Notification));
+    assert!(!capabilities.allows_request(NamespacePortalCapability::Notification));
+    assert_eq!(
+        NamespaceCapabilities::from_bits(capabilities.request_bits(), capabilities.publish_bits()),
+        Some(capabilities)
+    );
+    assert_eq!(NamespaceCapabilities::from_bits(1 << 63, 0), None);
+}
+
+#[test]
+fn namespace_and_admission_contexts_reject_invalid_identity() {
+    assert_eq!(
+        NamespaceContext::new(
+            NamespaceId::INVALID,
+            NamespaceProfile::Confined,
+            NamespaceCapabilities::NONE,
+        ),
+        None
+    );
+    assert_eq!(
+        ClientAuthProvenance::new(ClientAuthenticationMethod::MitMagicCookie1, 0),
+        None
+    );
+
+    let namespace = NamespaceContext::new(
+        NamespaceId::from_raw(9),
+        NamespaceProfile::ClassicShared,
+        NamespaceCapabilities::ALL,
+    )
+    .unwrap();
+    let provenance =
+        ClientAuthProvenance::new(ClientAuthenticationMethod::MitMagicCookie1, 4).unwrap();
+    let admission =
+        ClientAdmissionContext::new(ClientAdmissionId::from_raw(12), namespace, provenance)
+            .unwrap();
+
+    assert!(admission.is_valid());
+    assert_eq!(admission.namespace.profile, NamespaceProfile::ClassicShared);
+    assert_eq!(admission.auth_provenance.session_generation, 4);
+    assert_eq!(
+        ClientAdmissionContext::new(ClientAdmissionId::INVALID, namespace, provenance),
+        None
+    );
+}
+
+#[test]
 fn foreign_xids_keep_generation() {
     let id = XWindowId::new(0x1200042, 7);
 

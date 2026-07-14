@@ -28,14 +28,22 @@ compatibility provider; no XLibre integration work is active.
 
 ## Milestone 1: Namespace And X Admission Foundation
 
-- [ ] Add protocol value types for `NamespaceProfile`, bounded namespace
+- [x] Add protocol value types for `NamespaceProfile`, bounded directional
   capabilities, immutable `NamespaceContext`, and `ClientAdmissionContext`.
-- [ ] Add a session-owned namespace registry with allocation, admission,
-  revocation, and generation-safe cleanup. Authorities consume admitted
-  contexts and do not allocate namespace identity.
-- [ ] Replace the X frontend's listener-wide hardcoded namespace with a bounded
-  admission interface driven by session generation, listener policy, peer
-  credentials, and `MIT-MAGIC-COOKIE-1` validation.
+- [x] Add a session-owned namespace registry with monotonic allocation,
+  admission, lookup, individual revocation, namespace revocation, and
+  generation-safe validation.
+- [x] Add a compatibility-safe X frontend configuration seam that accepts an
+  immutable session-created `NamespaceContext` while preserving existing smoke
+  callers.
+- [x] Replace the production live X session's hardcoded namespace with a
+  registry-allocated classic context retained for the session lifetime and
+  revoked during teardown.
+- [ ] Thread `ClientAdmissionContext` through accepted authority connections so
+  authorities consume admitted identities and never allocate or infer them.
+- [ ] Replace the X frontend's listener-wide single namespace context with a
+  bounded per-connection admission interface driven by session generation,
+  listener policy, peer credentials, and `MIT-MAGIC-COOKIE-1` validation.
 - [ ] Add Xauthority-file creation/removal, cookie rotation, raw-secret
   containment, normal X11 setup failure, and fail-closed route cleanup.
 - [ ] Make both profiles launchable: classic clients intentionally share a

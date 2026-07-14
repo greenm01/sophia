@@ -1,5 +1,6 @@
 use sophia_protocol::{
-    BufferSource, NamespaceId, Rect, Region, Size, SurfaceConstraints, SurfaceId, TransactionId,
+    BufferSource, NamespaceCapabilities, NamespaceContext, NamespaceId, NamespacePortalCapability,
+    NamespaceProfile, Rect, Region, Size, SurfaceConstraints, SurfaceId, TransactionId,
 };
 use sophia_x_authority::*;
 
@@ -4174,7 +4175,33 @@ fn x_server_frontend_config_requires_a_socket_path_and_namespace() {
         std::path::Path::new("/tmp/sophia-x11.sock")
     );
     assert_eq!(config.namespace(), NamespaceId::from_raw(812));
+    assert_eq!(
+        config.namespace_context().profile,
+        NamespaceProfile::ClassicShared
+    );
     assert_eq!(config.max_concurrent_clients().get(), 16);
+}
+
+#[cfg(unix)]
+#[test]
+fn x_server_frontend_config_accepts_a_session_namespace_context() {
+    let namespace = NamespaceContext::new(
+        NamespaceId::from_raw(821),
+        NamespaceProfile::Confined,
+        NamespaceCapabilities::NONE
+            .with_request(NamespacePortalCapability::Clipboard)
+            .with_publish(NamespacePortalCapability::Clipboard),
+    )
+    .unwrap();
+
+    let config = XServerFrontendConfig::new_with_namespace_context(
+        "/tmp/sophia-x11-confined.sock",
+        namespace,
+    )
+    .unwrap();
+
+    assert_eq!(config.namespace(), namespace.id);
+    assert_eq!(config.namespace_context(), namespace);
 }
 
 #[cfg(unix)]

@@ -1,6 +1,7 @@
 mod authority;
 mod chrome;
 mod input;
+mod namespace;
 mod portal;
 mod surface;
 mod wm;
@@ -8,6 +9,7 @@ mod wm;
 pub use authority::*;
 pub use chrome::*;
 pub use input::*;
+pub use namespace::*;
 pub use portal::*;
 pub use surface::*;
 pub use wm::*;

@@ -38,8 +38,8 @@ override the ownership and trust rules in the normative architecture.
 - [X11 Compatibility Matrix](x11-compatibility-matrix.md) is the admission
   record for native X11 client behavior.
 - [Validation](validation.md) lists reproducible validation commands and gates.
-- [Active Roadmap](../todo.md) contains only incomplete work and measurable
-  milestone exits.
+- [Active Roadmap](../todo.md) contains current milestone progress, incomplete
+  work, and measurable exits.
 - [Active Research Log](research-log.md) contains current investigations and
   retained evidence.
 

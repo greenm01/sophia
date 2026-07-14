@@ -6,10 +6,13 @@ Sophia assigns trust at session admission, before a client can create useful
 protocol state. Namespaces isolate client resources. Portals mediate the narrow
 operations that intentionally cross that isolation boundary.
 
-The current repository already has typed `NamespaceId` values, namespace-keyed
-X resource tables, and pure portal reducers. The session-owned admission
-registry, confined-client routing, broker IPC, prompt policy, expiry, and
-concrete native-X portal execution are target work tracked in `todo.md`.
+The current repository has typed namespace/profile/capability/admission values,
+a session-owned in-memory namespace registry, namespace-keyed X resource
+tables, an X configuration seam that accepts immutable namespace context, a
+live X session that allocates and revokes its classic context through the
+registry, and pure portal reducers. Live per-connection admission,
+confined-client routing, broker IPC, prompt policy, expiry, and concrete
+native-X portal execution are target work tracked in `todo.md`.
 
 ## Ownership
 

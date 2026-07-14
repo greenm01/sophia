@@ -257,11 +257,12 @@ complete desktop session: session-owned namespace admission, confined routing,
 Xauthority lifecycle, Engine-derived output/RandR facts, normal resize, XKB,
 grabs, and presentation feedback remain.
 
-The namespace-keyed X resource model and pure portal reducers already exist,
-but the supervisor-owned namespace registry, immutable admission context,
-broker lifecycle, and native cross-namespace execution are not complete. The
-first reference portal will mediate X11 `CLIPBOARD` and `PRIMARY` after the
-admission contract is implemented.
+The namespace-keyed X resource model, passive profile/capability/admission
+types, session-owned in-memory registry, live-session classic-context lifetime,
+and pure portal reducers already exist. Per-connection admission, confined
+routing, broker lifecycle, and native cross-namespace execution are not
+complete. The first reference portal will mediate X11 `CLIPBOARD` and `PRIMARY`
+after the admission contract is implemented.
 
 The Smithay-backed Wayland Authority remains functional and supported. Real
 Kitty uses native Wayland SHM, Engine-routed input, and KMS; controlled DMA-BUF

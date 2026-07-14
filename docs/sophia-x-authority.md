@@ -115,11 +115,15 @@ creation; the lease remains a teardown ledger, not an access-control list.
 `XServerFrontendConfig`/`XServerFrontend` make the local socket path and
 namespace explicit, reject invalid namespaces, restrict the socket to its
 owner, and refuse to replace a non-socket path. The configuration can now
-require a session-scoped `MIT-MAGIC-COOKIE-1` value: a bad setup receives a
+consume an immutable session-created `NamespaceContext`; the legacy constructor
+creates a classic-shared context for existing smoke callers. It does not yet
+admit a distinct `ClientAdmissionContext` per accepted connection. The
+configuration can require a session-scoped `MIT-MAGIC-COOKIE-1` value: a bad
+setup receives a
 normal X11 setup-failure reply and the listener remains available for the next
 client. The legacy smoke helpers and the configuration default deliberately
 remain unauthenticated local sockets. Xauthority-file management,
-peer-credential policy, cookie rotation, session-owned namespace admission,
+peer-credential policy, cookie rotation, per-connection session admission,
 Engine-derived output facts, and confined-client routing are still required
 before treating the listener as a general local X server.
 

@@ -32,7 +32,10 @@ use crate::{
     try_emit_x_authority_trace, x11_setup_request_total_len,
 };
 #[cfg(unix)]
-use sophia_protocol::{NamespaceId, Size, SurfaceId, TransactionId};
+use sophia_protocol::{
+    NamespaceCapabilities, NamespaceContext, NamespaceId, NamespaceProfile, Size, SurfaceId,
+    TransactionId,
+};
 
 #[cfg(unix)]
 const X11_CLIENT_RESOURCE_RANGE_SIZE: u32 = X_SETUP_DEFAULT_RESOURCE_ID_MASK + 1;
@@ -150,16 +153,14 @@ fn x11_authorization_data_eq(actual: &[u8], expected: &[u8]) -> bool {
 
 /// Configuration owned by one local Sophia X Server Frontend listener.
 ///
-/// This deliberately describes only the boundary that exists today: one
-/// owner-only Unix socket, one Sophia namespace, and explicit setup
-/// authorization. Output/RandR facts and multi-client resource allocation are
-/// explicit follow-up work rather than implicit defaults hidden in a smoke
-/// helper.
+/// A production session should construct this from its session-owned namespace
+/// registry. The legacy constructor retains fixed classic-shared behavior for
+/// existing smoke helpers while callers migrate to an immutable context.
 #[cfg(unix)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct XServerFrontendConfig {
     socket_path: PathBuf,
-    namespace: NamespaceId,
+    namespace: NamespaceContext,
     setup_authorization: XServerFrontendSetupAuthorization,
     max_concurrent_clients: NonZeroUsize,
 }
@@ -169,6 +170,21 @@ impl XServerFrontendConfig {
     pub fn new(
         socket_path: impl Into<PathBuf>,
         namespace: NamespaceId,
+    ) -> Result<Self, X11SetupSocketError> {
+        let namespace = NamespaceContext::new(
+            namespace,
+            NamespaceProfile::ClassicShared,
+            NamespaceCapabilities::NONE,
+        )
+        .ok_or_else(|| {
+            X11SetupSocketError::new("Sophia X Server Frontend namespace must be valid")
+        })?;
+        Self::new_with_namespace_context(socket_path, namespace)
+    }
+
+    pub fn new_with_namespace_context(
+        socket_path: impl Into<PathBuf>,
+        namespace: NamespaceContext,
     ) -> Result<Self, X11SetupSocketError> {
         let socket_path = socket_path.into();
         if socket_path.as_os_str().is_empty() {
@@ -212,6 +228,10 @@ impl XServerFrontendConfig {
     }
 
     pub const fn namespace(&self) -> NamespaceId {
+        self.namespace.id
+    }
+
+    pub const fn namespace_context(&self) -> NamespaceContext {
         self.namespace
     }
 

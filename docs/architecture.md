@@ -76,8 +76,14 @@ or layout policy.
   10 ms maximum composition, 23 ms input-to-presentation, all 14 input events
   flushed, and clean KMS teardown.
 - X resources and selection state are namespace-keyed, but production admission
-  still assigns one configured namespace per listener. Classic same-namespace
-  existing-resource behavior is implemented; confined session routing is not.
+  still assigns one configured namespace per listener. Protocol values and a
+  runtime registry now model immutable profiles, directional portal
+  capabilities, admission provenance, and revocation; the X configuration can
+  consume a registry-created namespace context. The live X session allocates,
+  retains, and revokes its classic context through that registry instead of
+  hardcoding an ID. Per-connection admission and confined routing are not yet
+  wired into the live session. Classic
+  same-namespace existing-resource behavior is implemented.
 - `sophia-portal` has deterministic reducers for clipboard, drag-and-drop, file
   handoff, screen capture, URI open, and notifications. A session broker,
   policy-provider IPC, expiry lifecycle, and native-X executor are not complete.

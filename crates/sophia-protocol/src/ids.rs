@@ -24,6 +24,7 @@ macro_rules! simple_id {
 }
 
 simple_id!(NamespaceId);
+simple_id!(ClientAdmissionId);
 simple_id!(OutputId);
 simple_id!(SeatId);
 simple_id!(DeviceId);
@@ -125,6 +126,7 @@ macro_rules! allocator_next {
 }
 
 allocator_next!(NamespaceId);
+allocator_next!(ClientAdmissionId);
 allocator_next!(OutputId);
 allocator_next!(SeatId);
 allocator_next!(DeviceId);

@@ -5,20 +5,24 @@ use sophia_cli::input_proof::{PhysicalTextProof, PhysicalTextProofEvent};
 use sophia_engine::{
     FocusedInputRoute, InputFocusDecision, InputFocusState, NonBlockingInputPoller,
 };
-use sophia_protocol::{DeviceId, OutputId, SeatId, WmManageSurface};
+use sophia_protocol::{
+    DeviceId, NamespaceCapabilities, NamespaceProfile, OutputId, SeatId, WmManageSurface,
+};
+use sophia_runtime::NamespaceRegistry;
 use sophia_x_authority::{
     XAuthorityClientControlAck, XAuthorityClientControlCommand, XAuthorityClientInputDelivery,
     XAuthorityClientInputEvent, XAuthorityClientSurfaceRoutes, XAuthorityControlCommand,
     XAuthorityControlOutcome, XAuthorityInputDeliveryId, XAuthorityInputDeliveryOutcome,
     XAuthorityInputEvent, XAuthorityPointerEvent, XAuthorityPointerEventKind, XCoreKeyboardMapper,
-    XCorePointerMapper, XServerFrontendRouteBroker, XServerFrontendServiceCommand,
-    run_x11_core_socket_server_routed_until_stopped,
+    XCorePointerMapper, XServerFrontendConfig, XServerFrontendRouteBroker,
+    XServerFrontendServiceCommand, run_x_server_frontend_routed_until_stopped,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::num::NonZeroUsize;
 use std::os::unix::fs::MetadataExt;
 use std::process::{Child, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
 use std::time::{Duration, Instant};
 
@@ -34,6 +38,7 @@ const SESSION_INPUT_DELIVERY_TIMEOUT_MSEC: u64 = 1_000;
 const SESSION_SEAT_RAW: u64 = 1;
 const SESSION_KEYBOARD_DEVICE_RAW: u64 = 1;
 const SESSION_POINTER_DEVICE_RAW: u64 = 2;
+static NEXT_SESSION_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 enum SessionPhysicalInput {
     Direct(
@@ -94,6 +99,16 @@ pub(crate) fn run_persistent_xterm_session(
     let mut wm_session = LiveWmSession::from_config(&config)?;
 
     let server_path = config.socket_path.clone();
+    let session_generation = NEXT_SESSION_GENERATION
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |generation| {
+            generation.checked_add(1)
+        })
+        .map_err(|_| "Sophia session generation exhausted")?;
+    let mut namespace_registry = NamespaceRegistry::new(session_generation)?;
+    let x_namespace = namespace_registry
+        .create_namespace(NamespaceProfile::ClassicShared, NamespaceCapabilities::NONE);
+    let frontend_config =
+        XServerFrontendConfig::new_with_namespace_context(&server_path, x_namespace)?;
     let (authority_sender, authority_receiver) = sync_channel(SESSION_AUTHORITY_CAPACITY);
     let (control_ack_sender, control_ack_receiver) = sync_channel(SESSION_CONTROL_CAPACITY);
     let (input_delivery_sender, input_delivery_receiver) = sync_channel(SESSION_KEY_CAPACITY);
@@ -106,9 +121,8 @@ pub(crate) fn run_persistent_xterm_session(
     let control_sender = broker.control_sender();
     let (service_command_sender, service_command_receiver) = sync_channel(1);
     let mut server = Some(std::thread::spawn(move || {
-        run_x11_core_socket_server_routed_until_stopped(
-            &server_path,
-            NamespaceId::from_raw(50),
+        run_x_server_frontend_routed_until_stopped(
+            frontend_config,
             authority_sender,
             broker,
             service_command_receiver,
@@ -246,6 +260,7 @@ pub(crate) fn run_persistent_xterm_session(
         .join()
         .map_err(|_| "persistent X authority server thread panicked")?;
     server_result.map_err(|error| format!("persistent X authority server failed: {error}"))?;
+    namespace_registry.revoke_namespace(x_namespace.id)?;
     result
 }
 
