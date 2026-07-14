@@ -40,6 +40,25 @@ pub fn run_portal_broker_socket_server_once(
     policy: HeadlessPortalPolicy,
     now_msec: u64,
 ) -> Result<(), PortalBrokerSocketError> {
+    run_portal_broker_socket_server_bounded(path, broker_generation, policy, now_msec, 1)
+}
+
+/// Serves a bounded batch while retaining one broker lifecycle across clients.
+/// This is the runtime coordination primitive: duplicate transfers, capacity,
+/// grants, and generation checks cannot be reset by reconnecting.
+#[cfg(unix)]
+pub fn run_portal_broker_socket_server_bounded(
+    path: impl AsRef<Path>,
+    broker_generation: u64,
+    policy: HeadlessPortalPolicy,
+    now_msec: u64,
+    max_requests: usize,
+) -> Result<(), PortalBrokerSocketError> {
+    if max_requests == 0 {
+        return Err(PortalBrokerSocketError(
+            "portal broker request bound must be nonzero".to_owned(),
+        ));
+    }
     let path = path.as_ref();
     match std::fs::remove_file(path) {
         Ok(()) => {}
@@ -50,39 +69,42 @@ pub fn run_portal_broker_socket_server_once(
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
         .map_err(|error| socket_error("restrict socket", error))?;
     let result = (|| {
-        let (mut stream, _) = listener
-            .accept()
-            .map_err(|error| socket_error("accept client", error))?;
-        let request = decode_portal_broker_request_frame(&read_frame(&mut stream)?)
-            .map_err(|error| PortalBrokerSocketError(format!("decode request: {error:?}")))?;
         let mut broker = DeterministicPortalBroker::new(broker_generation, policy)
             .map_err(|error| PortalBrokerSocketError(format!("create broker: {error:?}")))?;
-        let transfer = request.request.transfer.transfer;
-        let decision = broker
-            .request(
-                request.request,
-                PortalCapabilityAdmission {
-                    source_may_publish: request.source_may_publish,
-                    target_may_request: request.target_may_request,
+        for _ in 0..max_requests {
+            let (mut stream, _) = listener
+                .accept()
+                .map_err(|error| socket_error("accept client", error))?;
+            let request = decode_portal_broker_request_frame(&read_frame(&mut stream)?)
+                .map_err(|error| PortalBrokerSocketError(format!("decode request: {error:?}")))?;
+            let transfer = request.request.transfer.transfer;
+            let decision = broker
+                .request(
+                    request.request,
+                    PortalCapabilityAdmission {
+                        source_may_publish: request.source_may_publish,
+                        target_may_request: request.target_may_request,
+                    },
+                    now_msec,
+                )
+                .map_err(|error| PortalBrokerSocketError(format!("evaluate request: {error:?}")))?;
+            let response = PortalBrokerResponsePacket {
+                transfer,
+                decision: match decision {
+                    PortalBrokerDecision::Allowed(grant) => {
+                        PortalBrokerResponseDecision::Allowed(grant)
+                    }
+                    PortalBrokerDecision::Denied => PortalBrokerResponseDecision::Denied,
                 },
-                now_msec,
-            )
-            .map_err(|error| PortalBrokerSocketError(format!("evaluate request: {error:?}")))?;
-        let response = PortalBrokerResponsePacket {
-            transfer,
-            decision: match decision {
-                PortalBrokerDecision::Allowed(grant) => {
-                    PortalBrokerResponseDecision::Allowed(grant)
-                }
-                PortalBrokerDecision::Denied => PortalBrokerResponseDecision::Denied,
-            },
-        };
-        let frame = encode_portal_broker_response_frame(&response)
-            .map_err(|error| PortalBrokerSocketError(format!("encode response: {error:?}")))?;
-        stream
-            .write_all(&frame)
-            .and_then(|()| stream.flush())
-            .map_err(|error| socket_error("write response", error))
+            };
+            let frame = encode_portal_broker_response_frame(&response)
+                .map_err(|error| PortalBrokerSocketError(format!("encode response: {error:?}")))?;
+            stream
+                .write_all(&frame)
+                .and_then(|()| stream.flush())
+                .map_err(|error| socket_error("write response", error))?;
+        }
+        Ok(())
     })();
     let _ = std::fs::remove_file(path);
     result
