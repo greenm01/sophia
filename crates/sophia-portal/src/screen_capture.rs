@@ -21,7 +21,10 @@ impl ScreenCapturePortal {
             transfer: request.transfer,
             source_namespace: request.source_namespace,
             target_namespace: request.target_namespace,
-            kind: PortalTransferKind::Screenshot,
+            kind: match request.mode {
+                ScreenCaptureMode::Screenshot => PortalTransferKind::ScreenCapture,
+                ScreenCaptureMode::ScreenRecording => PortalTransferKind::ScreenRecording,
+            },
             mime_type: Some(screen_capture_type_hint(&request)),
             byte_size: request.byte_size,
             decision: PortalDecision::Pending,

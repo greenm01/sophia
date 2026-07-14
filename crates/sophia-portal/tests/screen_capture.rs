@@ -33,7 +33,7 @@ fn screenshot_capture_is_pending_by_default() {
     match command {
         PortalCommand::PromptScreenCapture(transfer) => {
             assert_eq!(transfer.transfer, PortalTransferId::from_raw(1));
-            assert_eq!(transfer.kind, PortalTransferKind::Screenshot);
+            assert_eq!(transfer.kind, PortalTransferKind::ScreenCapture);
             assert_eq!(
                 transfer.mime_type,
                 Some("screenshot:output:image/png".to_owned())
@@ -55,6 +55,7 @@ fn screen_recording_capture_is_pending_by_default() {
 
     match command {
         PortalCommand::PromptScreenCapture(transfer) => {
+            assert_eq!(transfer.kind, PortalTransferKind::ScreenRecording);
             assert_eq!(
                 transfer.mime_type,
                 Some("screen-recording:desktop:video/webm".to_owned())

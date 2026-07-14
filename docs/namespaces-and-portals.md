@@ -145,9 +145,10 @@ The target portal taxonomy is explicit:
 - URI open;
 - notification.
 
-The current `PortalTransferKind::Screenshot` and missing URI-open kind are
-implementation debt; the protocol taxonomy must be reconciled in the broker
-milestone rather than encoded through MIME or type-hint conventions.
+`PortalTransferKind` now represents all seven directly. Screenshot capture and
+screen recording are distinct kinds, URI-open no longer aliases notification,
+and every kind maps to exactly one directional `NamespacePortalCapability`.
+MIME and type hints may refine a request but never determine its authority.
 
 A request contains a transfer ID, source and target namespaces, kind, source
 generation, bounded metadata, and a deadline. It carries no raw application

@@ -1,4 +1,4 @@
-use crate::ids::{NamespaceId, PortalTransferId};
+use crate::{NamespaceId, NamespacePortalCapability, PortalTransferId};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PortalTransfer {
@@ -17,8 +17,24 @@ pub enum PortalTransferKind {
     Clipboard,
     DragAndDrop,
     FileHandoff,
-    Screenshot,
+    ScreenCapture,
+    ScreenRecording,
+    UriOpen,
     Notification,
+}
+
+impl PortalTransferKind {
+    pub const fn capability(self) -> NamespacePortalCapability {
+        match self {
+            Self::Clipboard => NamespacePortalCapability::Clipboard,
+            Self::DragAndDrop => NamespacePortalCapability::DragAndDrop,
+            Self::FileHandoff => NamespacePortalCapability::FileHandoff,
+            Self::ScreenCapture => NamespacePortalCapability::ScreenCapture,
+            Self::ScreenRecording => NamespacePortalCapability::ScreenRecording,
+            Self::UriOpen => NamespacePortalCapability::UriOpen,
+            Self::Notification => NamespacePortalCapability::Notification,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

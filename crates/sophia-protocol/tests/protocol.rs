@@ -29,6 +29,44 @@ fn namespace_capabilities_are_directional_and_bounded() {
 }
 
 #[test]
+fn every_portal_kind_maps_to_its_explicit_namespace_capability() {
+    let mappings = [
+        (
+            PortalTransferKind::Clipboard,
+            NamespacePortalCapability::Clipboard,
+        ),
+        (
+            PortalTransferKind::DragAndDrop,
+            NamespacePortalCapability::DragAndDrop,
+        ),
+        (
+            PortalTransferKind::FileHandoff,
+            NamespacePortalCapability::FileHandoff,
+        ),
+        (
+            PortalTransferKind::ScreenCapture,
+            NamespacePortalCapability::ScreenCapture,
+        ),
+        (
+            PortalTransferKind::ScreenRecording,
+            NamespacePortalCapability::ScreenRecording,
+        ),
+        (
+            PortalTransferKind::UriOpen,
+            NamespacePortalCapability::UriOpen,
+        ),
+        (
+            PortalTransferKind::Notification,
+            NamespacePortalCapability::Notification,
+        ),
+    ];
+
+    for (kind, capability) in mappings {
+        assert_eq!(kind.capability(), capability);
+    }
+}
+
+#[test]
 fn namespace_and_admission_contexts_reject_invalid_identity() {
     assert_eq!(
         NamespaceContext::new(

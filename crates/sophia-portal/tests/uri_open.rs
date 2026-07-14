@@ -22,7 +22,7 @@ fn uri_open_request_is_pending_by_default() {
     match command {
         PortalCommand::PromptUriOpen(transfer) => {
             assert_eq!(transfer.transfer, PortalTransferId::from_raw(1));
-            assert_eq!(transfer.kind, PortalTransferKind::Notification);
+            assert_eq!(transfer.kind, PortalTransferKind::UriOpen);
             assert_eq!(transfer.mime_type, Some("uri-open:https".to_owned()));
             assert_eq!(transfer.byte_size, "https://example.test/path".len() as u64);
             assert_eq!(transfer.decision, PortalDecision::Pending);

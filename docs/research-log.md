@@ -3,6 +3,18 @@
 This file records decisions and unresolved questions for the active milestone.
 Completed evidence is archived in `research-log-archive.md`.
 
+## 2026-07-13: Explicit Portal Taxonomy
+
+The portal milestone began by removing two ambiguous protocol encodings.
+`Screenshot` had represented both still capture and recording, while URI-open
+requests were labeled as notifications and distinguished only by a type hint.
+`PortalTransferKind` now has explicit clipboard, drag-and-drop, file-handoff,
+screen-capture, screen-recording, URI-open, and notification values. Each maps
+directly to its namespace capability. Reducer and codec regressions cover every
+kind; established codec numbers for the five existing values remain stable,
+with recording and URI-open using new tags. Request/grant lifecycle separation
+is the next portal slice.
+
 ## 2026-07-13: Explicit X Session Profiles And Map Isolation
 
 The live X launcher now selects `classic` or `confined` explicitly. Classic

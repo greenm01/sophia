@@ -28,7 +28,7 @@ compatibility provider; no XLibre integration work is active.
 
 ## Milestone 2: Portal Broker And X11 Clipboard
 
-- [ ] Reconcile portal kinds so clipboard, drag-and-drop, file handoff, screen
+- [x] Reconcile portal kinds so clipboard, drag-and-drop, file handoff, screen
   capture, screen recording, URI open, and notification are explicit protocol
   values.
 - [ ] Split request decisions from grant lifecycle, including deadlines,

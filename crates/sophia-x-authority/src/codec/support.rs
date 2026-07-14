@@ -267,8 +267,10 @@ pub(super) fn encode_portal_transfer_kind(kind: PortalTransferKind, out: &mut Ve
             PortalTransferKind::Clipboard => 1,
             PortalTransferKind::DragAndDrop => 2,
             PortalTransferKind::FileHandoff => 3,
-            PortalTransferKind::Screenshot => 4,
+            PortalTransferKind::ScreenCapture => 4,
             PortalTransferKind::Notification => 5,
+            PortalTransferKind::ScreenRecording => 6,
+            PortalTransferKind::UriOpen => 7,
         },
     );
 }
@@ -278,8 +280,10 @@ pub(super) fn decode_portal_transfer_kind(value: u16) -> Result<PortalTransferKi
         1 => Ok(PortalTransferKind::Clipboard),
         2 => Ok(PortalTransferKind::DragAndDrop),
         3 => Ok(PortalTransferKind::FileHandoff),
-        4 => Ok(PortalTransferKind::Screenshot),
+        4 => Ok(PortalTransferKind::ScreenCapture),
         5 => Ok(PortalTransferKind::Notification),
+        6 => Ok(PortalTransferKind::ScreenRecording),
+        7 => Ok(PortalTransferKind::UriOpen),
         other => Err(IpcCodecError::InvalidEnum {
             field: "portal_transfer_kind",
             value: u32::from(other),

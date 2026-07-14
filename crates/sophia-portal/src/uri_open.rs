@@ -18,7 +18,7 @@ impl UriOpenPortal {
             transfer: request.transfer,
             source_namespace: request.source_namespace,
             target_namespace: request.target_namespace,
-            kind: PortalTransferKind::Notification,
+            kind: PortalTransferKind::UriOpen,
             mime_type: Some(uri_open_type_hint(&request.uri)),
             byte_size: request.uri.len() as u64,
             decision: PortalDecision::Pending,

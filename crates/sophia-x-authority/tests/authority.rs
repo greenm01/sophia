@@ -1,8 +1,8 @@
 use sophia_portal::{ClipboardPortal, PortalCommand};
 use sophia_protocol::{
     AuthorityKind, BufferSource, IpcCodecError, IpcMessageKind, NamespaceId, PortalDecision,
-    PortalTransferId, Rect, Region, SOPHIA_IPC_MAGIC, Size, SurfaceConstraints, SurfaceId,
-    SurfaceTransactionReadiness, TransactionId, encode_frame,
+    PortalTransfer, PortalTransferId, PortalTransferKind, Rect, Region, SOPHIA_IPC_MAGIC, Size,
+    SurfaceConstraints, SurfaceId, SurfaceTransactionReadiness, TransactionId, encode_frame,
 };
 use sophia_x_authority::*;
 
@@ -821,6 +821,41 @@ fn x_authority_response_codec_round_trips_runtime_outputs() {
     let decoded = decode_x_authority_response_frame(&frame).unwrap();
 
     assert_eq!(decoded, present);
+}
+
+#[test]
+fn x_authority_codec_round_trips_every_explicit_portal_kind() {
+    let kinds = [
+        PortalTransferKind::Clipboard,
+        PortalTransferKind::DragAndDrop,
+        PortalTransferKind::FileHandoff,
+        PortalTransferKind::ScreenCapture,
+        PortalTransferKind::ScreenRecording,
+        PortalTransferKind::UriOpen,
+        PortalTransferKind::Notification,
+    ];
+
+    for (index, kind) in kinds.into_iter().enumerate() {
+        let transaction = TransactionId::from_raw(120 + index as u64);
+        let mut response = XAuthorityResponsePacket::accepted(transaction);
+        response
+            .portal_commands
+            .push(XAuthorityPortalCommand::PromptClipboardTransfer(
+                PortalTransfer {
+                    transfer: PortalTransferId::from_raw(40 + index as u64),
+                    source_namespace: NamespaceId::from_raw(30),
+                    target_namespace: NamespaceId::from_raw(31),
+                    kind,
+                    mime_type: None,
+                    byte_size: 0,
+                    decision: PortalDecision::Pending,
+                    generation: 1,
+                },
+            ));
+
+        let frame = encode_x_authority_response_frame(&response).unwrap();
+        assert_eq!(decode_x_authority_response_frame(&frame).unwrap(), response);
+    }
 }
 
 #[test]
