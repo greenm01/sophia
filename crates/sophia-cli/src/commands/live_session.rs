@@ -6,8 +6,8 @@ use sophia_engine::{
     FocusedInputRoute, InputFocusDecision, InputFocusState, NonBlockingInputPoller,
 };
 use sophia_protocol::{
-    ClientAdmissionContext, ClientAuthenticationMethod, DeviceId, NamespaceCapabilities,
-    NamespaceId, NamespaceProfile, OutputId, SeatId, WmManageSurface,
+    ClientAdmissionContext, DeviceId, NamespaceCapabilities, NamespaceId, NamespaceProfile,
+    OutputId, SeatId, WmManageSurface,
 };
 use sophia_runtime::NamespaceRegistry;
 use sophia_x_authority::{
@@ -17,12 +17,13 @@ use sophia_x_authority::{
     XAuthorityInputEvent, XAuthorityPointerEvent, XAuthorityPointerEventKind, XCoreKeyboardMapper,
     XCorePointerMapper, XServerFrontendAdmissionError, XServerFrontendAdmissionPolicy,
     XServerFrontendAdmissionRequest, XServerFrontendConfig, XServerFrontendRouteBroker,
-    XServerFrontendServiceCommand, run_x_server_frontend_routed_until_stopped,
+    XServerFrontendServiceCommand, XServerFrontendSetupAuthorization,
+    run_x_server_frontend_routed_until_stopped,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::num::NonZeroUsize;
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
@@ -63,7 +64,7 @@ impl XServerFrontendAdmissionPolicy for LiveXAdmissionPolicy {
         self.registry
             .lock()
             .map_err(|_| XServerFrontendAdmissionError::Unavailable)?
-            .admit(self.namespace, ClientAuthenticationMethod::PeerCredentials)
+            .admit(self.namespace, request.setup_authentication)
             .map_err(|_| XServerFrontendAdmissionError::Unavailable)
     }
 
@@ -78,6 +79,132 @@ impl XServerFrontendAdmissionPolicy for LiveXAdmissionPolicy {
             .map(|_| ())
             .map_err(|_| XServerFrontendAdmissionError::Unavailable)
     }
+}
+
+struct LiveXAuthorityFile {
+    path: Option<std::path::PathBuf>,
+}
+
+impl LiveXAuthorityFile {
+    fn create(display_number: u32) -> Result<(Self, [u8; 16]), Box<dyn std::error::Error>> {
+        Self::create_in(&live_xauthority_directory(), display_number)
+    }
+
+    fn create_in(
+        directory: &std::path::Path,
+        display_number: u32,
+    ) -> Result<(Self, [u8; 16]), Box<dyn std::error::Error>> {
+        let mut cookie = [0u8; 16];
+        fill_session_random(&mut cookie)?;
+        let mut nonce = [0u8; 8];
+        fill_session_random(&mut nonce)?;
+        let suffix = nonce
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let path = directory.join(format!(
+            ".sophia-Xauthority-{}-{display_number}-{suffix}",
+            std::process::id()
+        ));
+        let record = encode_live_xauthority_record(display_number, cookie)?;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)?;
+        let create_result = (|| -> Result<(), Box<dyn std::error::Error>> {
+            file.write_all(&record)?;
+            file.sync_all()?;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+            Ok(())
+        })();
+        if let Err(error) = create_result {
+            let _ = std::fs::remove_file(&path);
+            return Err(error);
+        }
+        Ok((Self { path: Some(path) }, cookie))
+    }
+
+    fn path(&self) -> &std::path::Path {
+        self.path
+            .as_deref()
+            .expect("live Xauthority path is retained until cleanup")
+    }
+
+    fn remove(&mut self) -> Result<(), std::io::Error> {
+        let Some(path) = self.path.take() else {
+            return Ok(());
+        };
+        match std::fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+}
+
+impl Drop for LiveXAuthorityFile {
+    fn drop(&mut self) {
+        let _ = self.remove();
+    }
+}
+
+fn live_xauthority_directory() -> std::path::PathBuf {
+    let effective_user = rustix::process::geteuid().as_raw();
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .filter(|path| {
+            std::fs::metadata(path).is_ok_and(|metadata| {
+                metadata.is_dir()
+                    && metadata.uid() == effective_user
+                    && metadata.permissions().mode() & 0o077 == 0
+            })
+        })
+        .unwrap_or_else(std::env::temp_dir)
+}
+
+fn fill_session_random(bytes: &mut [u8]) -> Result<(), std::io::Error> {
+    let mut filled = 0;
+    while filled < bytes.len() {
+        let written =
+            rustix::rand::getrandom(&mut bytes[filled..], rustix::rand::GetRandomFlags::empty())?;
+        if written == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "kernel random source returned no bytes",
+            ));
+        }
+        filled += written;
+    }
+    Ok(())
+}
+
+fn encode_live_xauthority_record(
+    display_number: u32,
+    cookie: [u8; 16],
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    const FAMILY_LOCAL: u16 = 256;
+    let system = rustix::system::uname();
+    let hostname = system.nodename().to_bytes();
+    let display = display_number.to_string();
+    let mut record = Vec::with_capacity(64 + hostname.len());
+    record.extend_from_slice(&FAMILY_LOCAL.to_be_bytes());
+    push_xauthority_field(&mut record, hostname)?;
+    push_xauthority_field(&mut record, display.as_bytes())?;
+    push_xauthority_field(&mut record, b"MIT-MAGIC-COOKIE-1")?;
+    push_xauthority_field(&mut record, &cookie)?;
+    Ok(record)
+}
+
+fn push_xauthority_field(
+    output: &mut Vec<u8>,
+    field: &[u8],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let len = u16::try_from(field.len()).map_err(|_| "Xauthority field exceeds u16")?;
+    output.extend_from_slice(&len.to_be_bytes());
+    output.extend_from_slice(field);
+    Ok(())
 }
 
 enum SessionPhysicalInput {
@@ -110,6 +237,8 @@ pub(crate) fn run_persistent_xterm_session(
     let config = PersistentXtermSessionConfig::from_args(args)?;
     let terminal = super::x_authority::resolve_external_probe_binary("xterm", &config.terminal)?;
     prepare_display_socket(&config.socket_path)?;
+    let display_number = parse_display_number(&config.display)?;
+    let (mut xauthority, xauthority_cookie) = LiveXAuthorityFile::create(display_number)?;
     let mut native_scanout = config
         .native_scanout
         .then(PersistentNativeScanout::new)
@@ -157,6 +286,9 @@ pub(crate) fn run_persistent_xterm_session(
     });
     let frontend_config =
         XServerFrontendConfig::new_with_namespace_context(&server_path, x_namespace)?
+            .with_setup_authorization(XServerFrontendSetupAuthorization::MitMagicCookie(
+                xauthority_cookie,
+            ))
             .with_admission_policy(admission_policy);
     let (authority_sender, authority_receiver) = sync_channel(SESSION_AUTHORITY_CAPACITY);
     let (control_ack_sender, control_ack_receiver) = sync_channel(SESSION_CONTROL_CAPACITY);
@@ -182,6 +314,7 @@ pub(crate) fn run_persistent_xterm_session(
     let mut terminal_command = std::process::Command::new(&terminal);
     terminal_command
         .env("DISPLAY", &config.display)
+        .env("XAUTHORITY", xauthority.path())
         .args([
             "-cm",
             "-dc",
@@ -235,6 +368,7 @@ pub(crate) fn run_persistent_xterm_session(
         process.add_secondary_child(spawn_secondary_xterm(
             &terminal,
             &config.display,
+            xauthority.path(),
             config
                 .inject_text
                 .as_deref()
@@ -313,7 +447,10 @@ pub(crate) fn run_persistent_xterm_session(
         .lock()
         .map_err(|_| "Sophia namespace registry lock was poisoned")?
         .revoke_namespace(x_namespace.id)?;
-    result
+    let xauthority_cleanup = xauthority.remove();
+    result?;
+    xauthority_cleanup?;
+    Ok(())
 }
 
 #[derive(Clone, Debug)]
@@ -473,11 +610,13 @@ impl PersistentXtermSessionConfig {
 fn spawn_secondary_xterm(
     terminal: &std::path::Path,
     display: &str,
+    xauthority: &std::path::Path,
     input_proof: Option<&str>,
 ) -> Result<Child, Box<dyn std::error::Error>> {
     let mut command = std::process::Command::new(terminal);
     command
         .env("DISPLAY", display)
+        .env("XAUTHORITY", xauthority)
         .args([
             "-cm",
             "-dc",
@@ -4035,11 +4174,11 @@ impl Drop for SessionProcessGuard {
 #[cfg(test)]
 mod tests {
     use super::{
-        BufferSource, CommittedSurfaceState, PersistentBackendRuntime, PersistentCpuScene, Rect,
-        Region, Size, center_geometry_without_scaling, cpu_frame_matches_visible_output,
-        cpu_frame_submission_ready, layer_snapshots_from_committed,
-        required_wayland_presentation_submission, retain_latest_wayland_presentation,
-        seed_missing_committed_surfaces,
+        BufferSource, CommittedSurfaceState, LiveXAuthorityFile, PersistentBackendRuntime,
+        PersistentCpuScene, Rect, Region, Size, center_geometry_without_scaling,
+        cpu_frame_matches_visible_output, cpu_frame_submission_ready,
+        layer_snapshots_from_committed, required_wayland_presentation_submission,
+        retain_latest_wayland_presentation, seed_missing_committed_surfaces,
     };
     use sophia_protocol::{
         AuthorityKind, SurfaceId, SurfaceTransaction, SurfaceTransactionReadiness,
@@ -4048,6 +4187,50 @@ mod tests {
         X_AUTHORITY_CPU_BUFFER_FORMAT_XRGB8888, XAuthorityCpuBufferSnapshot, XResourceId,
     };
     use std::collections::BTreeMap;
+
+    #[test]
+    fn live_xauthority_file_is_owner_only_valid_and_removed_on_drop() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        fn field<'a>(record: &'a [u8], offset: &mut usize) -> &'a [u8] {
+            let len = usize::from(u16::from_be_bytes([record[*offset], record[*offset + 1]]));
+            *offset += 2;
+            let value = &record[*offset..*offset + len];
+            *offset += len;
+            value
+        }
+
+        let directory = std::env::temp_dir().join(format!(
+            "sophia-live-xauthority-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let (authority, cookie) = LiveXAuthorityFile::create_in(&directory, 77).unwrap();
+        let path = authority.path().to_owned();
+        let metadata = std::fs::metadata(&path).unwrap();
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
+
+        let record = std::fs::read(&path).unwrap();
+        assert_eq!(u16::from_be_bytes([record[0], record[1]]), 256);
+        let mut offset = 2;
+        assert_eq!(
+            field(&record, &mut offset),
+            rustix::system::uname().nodename().to_bytes()
+        );
+        assert_eq!(field(&record, &mut offset), b"77");
+        assert_eq!(field(&record, &mut offset), b"MIT-MAGIC-COOKIE-1");
+        assert_eq!(field(&record, &mut offset), cookie);
+        assert_eq!(offset, record.len());
+
+        drop(authority);
+        assert!(!path.exists());
+        std::fs::remove_dir(directory).unwrap();
+    }
 
     #[test]
     fn compatibility_surface_is_centered_without_resizing() {

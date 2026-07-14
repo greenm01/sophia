@@ -253,16 +253,15 @@ The frontend runs two concurrent real xterms through Engine-owned composition
 and KMS with client-targeted input. Retained dedicated-TTY evidence completes in
 1,487 ms with 10 ms maximum composition, 23 ms input-to-presentation, all 14
 X11 input events flushed, and clean teardown. This is hardware evidence, not a
-complete desktop session: confined routing, Xauthority lifecycle,
-Engine-derived output/RandR facts, normal resize, XKB, grabs, and presentation
-feedback remain.
+complete desktop session: confined routing, Engine-derived output/RandR facts,
+normal resize, XKB, grabs, and presentation feedback remain.
 
 The namespace-keyed X resource model, profile/capability/admission types,
 session-owned in-memory registry, same-UID live classic admission, per-client
-revocation, and pure portal reducers already exist. Confined routing,
-Xauthority publication/rotation, broker lifecycle, and native cross-namespace
-execution are not complete. The first reference portal will mediate X11
-`CLIPBOARD` and `PRIMARY` after both profiles are launchable.
+revocation, fresh owner-only Xauthority publication/removal, and pure portal
+reducers already exist. Confined routing, broker lifecycle, and native
+cross-namespace execution are not complete. The first reference portal will
+mediate X11 `CLIPBOARD` and `PRIMARY` after both profiles are launchable.
 
 The Smithay-backed Wayland Authority remains functional and supported. Real
 Kitty uses native Wayland SHM, Engine-routed input, and KMS; controlled DMA-BUF

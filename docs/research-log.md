@@ -3,6 +3,22 @@
 This file records decisions and unresolved questions for the active milestone.
 Completed evidence is archived in `research-log-archive.md`.
 
+## 2026-07-13: Live Xauthority Ownership
+
+The live X session no longer relies on an unauthenticated owner-only socket. Its
+supervisor obtains a fresh 128-bit cookie from the kernel for every run, writes
+a standard `FamilyLocal` `MIT-MAGIC-COOKIE-1` record with mode `0600`, syncs the
+complete record before exposing its path, passes `XAUTHORITY` to both launched
+terminals, and removes the file through explicit and drop cleanup. A private,
+owner-only `XDG_RUNTIME_DIR` is preferred; the random, create-new owner-only
+file remains safe when the system temporary directory is the fallback.
+
+The frontend validates that cookie before invoking session admission. Policy
+sees only `MitMagicCookie1` provenance and kernel peer credentials, never the
+secret. A regression proves bad cookies do not invoke policy, while the accepted
+connection is admitted once and revoked once. Fresh per-session generation is
+the rotation boundary; confined launch credentials remain future policy work.
+
 ## 2026-07-13: Per-Connection X Admission Boundary
 
 The native X frontend now calls a protocol-neutral session policy after setup
@@ -18,8 +34,8 @@ The live classic session backs that policy with its session-owned
 allocates a distinct admission per connection, and intentionally assigns those
 admissions the same classic-shared namespace. This removes the listener-wide
 identity shortcut without weakening classic X semantics. Confined namespace
-selection, Xauthority publication/rotation, and supervisor revocation remain
-the next admission work.
+selection and supervisor-triggered live-client revocation remain the next
+admission work.
 
 ## 2026-07-13: X11-First Namespace And Portal Critical Path
 

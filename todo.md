@@ -44,7 +44,7 @@ compatibility provider; no XLibre integration work is active.
 - [x] Replace the X frontend's listener-wide single namespace context with a
   bounded per-connection admission interface driven by session generation,
   listener policy, peer credentials, and `MIT-MAGIC-COOKIE-1` validation.
-- [ ] Add Xauthority-file creation/removal, cookie rotation, raw-secret
+- [x] Add Xauthority-file creation/removal, cookie rotation, raw-secret
   containment, normal X11 setup failure, and fail-closed route cleanup.
 - [ ] Make both profiles launchable: classic clients intentionally share a
   namespace; confined client groups receive distinct namespaces and explicit

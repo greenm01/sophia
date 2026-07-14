@@ -127,9 +127,10 @@ the session user and deliberately assigns each connection the same shared
 namespace through the session registry. The configuration can also require a
 session-scoped `MIT-MAGIC-COOKIE-1`; raw cookie bytes never enter the admission
 record. Legacy smoke helpers still default to unauthenticated local sockets.
-Xauthority-file management, cookie rotation, confined-client launch/routing,
-and Engine-derived output facts remain before treating the listener as a
-general local X server.
+The live supervisor publishes a fresh kernel-random cookie in a standard
+owner-only Xauthority record, supplies only the path to launched terminals, and
+removes the file on teardown. Confined-client launch/routing and Engine-derived
+output facts remain before treating the listener as a general local X server.
 
 ### Connection Lifecycle
 

@@ -4249,6 +4249,7 @@ fn x_server_frontend_binds_an_owner_only_socket_and_preserves_regular_files() {
 fn x_server_frontend_rejects_bad_cookie_then_accepts_the_configured_cookie() {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
+    use std::sync::Arc;
     use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -4261,9 +4262,17 @@ fn x_server_frontend_rejects_bad_cookie_then_accepts_the_configured_cookie() {
             .as_nanos()
     ));
     let cookie = [0x3c; 16];
-    let config = XServerFrontendConfig::new(&socket_path, NamespaceId::from_raw(815))
+    let namespace = NamespaceContext::new(
+        NamespaceId::from_raw(815),
+        NamespaceProfile::ClassicShared,
+        NamespaceCapabilities::NONE,
+    )
+    .unwrap();
+    let policy = Arc::new(TestXAdmissionPolicy::new(namespace, false));
+    let config = XServerFrontendConfig::new_with_namespace_context(&socket_path, namespace)
         .unwrap()
-        .with_setup_authorization(XServerFrontendSetupAuthorization::MitMagicCookie(cookie));
+        .with_setup_authorization(XServerFrontendSetupAuthorization::MitMagicCookie(cookie))
+        .with_admission_policy(policy.clone());
     assert_eq!(
         format!("{:?}", config.setup_authorization()),
         "MitMagicCookie([redacted])"
@@ -4309,6 +4318,13 @@ fn x_server_frontend_rejects_bad_cookie_then_accepts_the_configured_cookie() {
     drop(accepted);
 
     server.join().unwrap();
+    let requests = policy.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].setup_authentication,
+        ClientAuthenticationMethod::MitMagicCookie1
+    );
+    assert_eq!(policy.revoked.lock().unwrap().len(), 1);
     std::fs::remove_file(&socket_path).unwrap();
 }
 

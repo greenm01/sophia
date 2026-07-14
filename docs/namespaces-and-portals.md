@@ -91,10 +91,13 @@ The production frontend must not infer identity from one hardcoded
 `NamespaceId`. Classic policy may deliberately return the same namespace in
 distinct admission contexts; confined policy must return the namespace and
 capabilities selected for that client group. Cookie creation, Xauthority-file
-publication, rotation, removal, and raw-secret handling remain supervisor
-responsibilities. The frontend validates configured setup authorization before
-calling policy and never exposes raw cookie material to admission records,
-diagnostics, or Engine data.
+publication, rotation, removal, and raw-secret handling are supervisor
+responsibilities. The live supervisor generates a fresh kernel-random cookie
+per session, publishes a standard owner-only record only after it is fully
+written, passes its path to launched clients, and removes it on normal or error
+teardown. The frontend validates configured setup authorization before calling
+policy and never exposes raw cookie material to admission records, diagnostics,
+or Engine data.
 
 Disconnect revokes the connection context, releases its creation ledger, clears
 its owned selection generations, unregisters input/control routes, and closes

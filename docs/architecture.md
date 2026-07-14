@@ -81,9 +81,11 @@ or layout policy.
   frontend asks session policy for an immutable context before allocating X
   client/resource identity. The live classic session admits same-UID Unix peers
   into distinct registry admissions that deliberately share its namespace,
-  then revokes each admission after connection cleanup. Denial uses native X11
-  setup failure. Confined launch/routing and Xauthority lifecycle are not yet
-  complete; classic same-namespace existing-resource behavior is implemented.
+  then revokes each admission after connection cleanup. The supervisor creates
+  a fresh owner-only Xauthority file and cookie for every live session, passes
+  only its path to clients, and removes it on teardown. Denial uses native X11
+  setup failure. Confined launch/routing is not yet complete; classic
+  same-namespace existing-resource behavior is implemented.
 - `sophia-portal` has deterministic reducers for clipboard, drag-and-drop, file
   handoff, screen capture, URI open, and notifications. A session broker,
   policy-provider IPC, expiry lifecycle, and native-X executor are not complete.
