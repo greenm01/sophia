@@ -222,12 +222,23 @@ pub fn run_portal_clipboard_broker_socket_server_bounded(
                 .and_then(|()| stream.flush())
                 .map_err(|error| socket_error("write response", error))?;
             if let Some(grant) = grant {
-                let (payload_transfer, payload) = decode_portal_clipboard_payload_frame(
-                    &read_frame(&mut stream)?,
-                )
-                .map_err(|error| {
-                    PortalBrokerSocketError(format!("decode clipboard payload: {error:?}"))
-                })?;
+                let payload_frame = match read_frame(&mut stream) {
+                    Ok(frame) => frame,
+                    Err(error) => {
+                        broker
+                            .executor_failed(transfer)
+                            .map_err(|lifecycle_error| {
+                                PortalBrokerSocketError(format!(
+                                    "revoke disconnected executor: {lifecycle_error:?}"
+                                ))
+                            })?;
+                        return Err(error);
+                    }
+                };
+                let (payload_transfer, payload) =
+                    decode_portal_clipboard_payload_frame(&payload_frame).map_err(|error| {
+                        PortalBrokerSocketError(format!("decode clipboard payload: {error:?}"))
+                    })?;
                 if payload_transfer != transfer || executor(&grant, &payload).is_err() {
                     broker.executor_failed(transfer).map_err(|error| {
                         PortalBrokerSocketError(format!("revoke failed executor: {error:?}"))

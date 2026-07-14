@@ -5223,6 +5223,35 @@ fn cross_namespace_executor_installs_property_and_notifies_requestor() {
         .unwrap();
     let reply = read_x_reply(&mut requestor, XByteOrder::LittleEndian);
     assert_eq!(&reply[32..47], b"cross namespace");
+
+    for (sequence, failure) in [
+        (4, ClipboardSelectionExecutionError::Denied),
+        (5, ClipboardSelectionExecutionError::Expired),
+        (6, ClipboardSelectionExecutionError::Disconnected),
+        (7, ClipboardSelectionExecutionError::ExecutorFailure),
+    ] {
+        requestor
+            .write_all(&convert_selection_request(
+                XByteOrder::LittleEndian,
+                requestor_window,
+                1,
+                utf8,
+                utf8,
+                12,
+            ))
+            .unwrap();
+        request_receiver.recv().unwrap();
+        let outcome = executor
+            .fail(PortalTransferId::from_raw(sequence), failure)
+            .unwrap();
+        assert!(matches!(
+            outcome,
+            ClipboardSelectionExecutionOutcome::Failed { error, .. } if error == failure
+        ));
+        let notify = read_x_record(&mut requestor);
+        assert_eq!(notify[0], 31);
+        assert_eq!(read_u32(XByteOrder::LittleEndian, &notify[20..24]), 0);
+    }
     owner.shutdown(Shutdown::Both).unwrap();
     requestor.shutdown(Shutdown::Both).unwrap();
     server.join().unwrap();
