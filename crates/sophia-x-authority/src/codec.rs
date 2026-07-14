@@ -387,6 +387,15 @@ fn encode_selection_artifact(artifact: &XAuthoritySelectionArtifact, out: &mut V
             push_u16(out, 1);
             encode_selection_failure(failure, out);
         }
+        XAuthoritySelectionArtifact::Request(request) => {
+            push_u16(out, 2);
+            encode_x_resource_id(request.owner, out);
+            encode_x_resource_id(request.requestor, out);
+            push_u32(out, request.selection);
+            push_u32(out, request.target);
+            push_u32(out, request.property);
+            push_u32(out, request.time);
+        }
     }
 }
 
@@ -396,6 +405,16 @@ fn decode_selection_artifact(
     match cursor.u16()? {
         1 => Ok(XAuthoritySelectionArtifact::Failure(
             decode_selection_failure(cursor)?,
+        )),
+        2 => Ok(XAuthoritySelectionArtifact::Request(
+            crate::ClipboardSelectionOwnerRequest {
+                owner: decode_x_resource_id(cursor)?,
+                requestor: decode_x_resource_id(cursor)?,
+                selection: cursor.u32()?,
+                target: cursor.u32()?,
+                property: cursor.u32()?,
+                time: cursor.u32()?,
+            },
         )),
         other => Err(IpcCodecError::InvalidEnum {
             field: "x_authority_selection_artifact",

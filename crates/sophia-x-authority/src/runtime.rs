@@ -4,13 +4,13 @@ use sophia_portal::ClipboardPortal;
 use sophia_protocol::{AuthoritySurface, NamespaceId, Rect, Region, Size, TransactionId};
 
 use crate::{
-    ClipboardSelectionFailureRequest, XAuthorityCpuBufferUpdate, XAuthorityPortalCommand,
-    XAuthorityRequestKind, XAuthorityRequestPacket, XAuthorityResponsePacket,
-    XAuthorityRuntimeError, XAuthoritySelectionArtifact, XDrawingUpdate, XGraphicsContextTable,
-    XGraphicsContextValues, XPoint, XResourceKind, XResourceTable, XSelectionEvent,
-    XSelectionMonitor, XShmSegmentTable, XSoftwareBufferStore, XWindowLifecycleEvent, XWindowTable,
-    clipboard_selection_failure_notify, dispatch_clipboard_selection_request,
-    surface_transaction_from_drawing_update,
+    ClipboardSelectionDispatch, ClipboardSelectionFailureRequest, XAuthorityCpuBufferUpdate,
+    XAuthorityPortalCommand, XAuthorityRequestKind, XAuthorityRequestPacket,
+    XAuthorityResponsePacket, XAuthorityRuntimeError, XAuthoritySelectionArtifact, XDrawingUpdate,
+    XGraphicsContextTable, XGraphicsContextValues, XPoint, XResourceKind, XResourceTable,
+    XSelectionEvent, XSelectionMonitor, XShmSegmentTable, XSoftwareBufferStore,
+    XWindowLifecycleEvent, XWindowTable, clipboard_selection_failure_notify,
+    dispatch_clipboard_selection_request, surface_transaction_from_drawing_update,
 };
 
 /// Effects of releasing every currently supported resource allocated from one
@@ -196,10 +196,16 @@ impl XAuthorityRuntime {
                     *transfer,
                     &mut self.clipboard,
                 )?;
-                if let Some(command) =
-                    XAuthorityPortalCommand::from_portal_command(dispatch.command)
-                {
-                    response.portal_commands.push(command);
+                match dispatch {
+                    ClipboardSelectionDispatch::SameNamespace(request) => response
+                        .selection_artifacts
+                        .push(XAuthoritySelectionArtifact::Request(request)),
+                    ClipboardSelectionDispatch::CrossNamespace { command, .. } => {
+                        if let Some(command) = XAuthorityPortalCommand::from_portal_command(command)
+                        {
+                            response.portal_commands.push(command);
+                        }
+                    }
                 }
             }
         }

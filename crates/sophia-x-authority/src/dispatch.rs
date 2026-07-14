@@ -1817,14 +1817,27 @@ fn outputs_from_authority_response(
         ..
     } = kind
     {
-        if !response.selection_artifacts.is_empty() {
-            return vec![XClientOutput::Event(x_selection_failure_event(
-                context.sequence,
-                *time,
-                *requestor,
-                *selection,
-                *target,
-            ))];
+        if let Some(artifact) = response.selection_artifacts.first() {
+            return vec![XClientOutput::Event(match artifact {
+                crate::XAuthoritySelectionArtifact::Failure(_) => x_selection_failure_event(
+                    context.sequence,
+                    *time,
+                    *requestor,
+                    *selection,
+                    *target,
+                ),
+                crate::XAuthoritySelectionArtifact::Request(request) => {
+                    XClientEvent::SelectionRequest {
+                        sequence: context.sequence,
+                        time: request.time,
+                        owner: request.owner,
+                        requestor: request.requestor,
+                        selection: request.selection,
+                        target: request.target,
+                        property: request.property,
+                    }
+                }
+            })];
         }
     }
 

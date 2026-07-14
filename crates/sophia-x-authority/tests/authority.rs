@@ -657,7 +657,14 @@ fn selection_request_becomes_portal_prompt_and_native_denial_artifact() {
     )
     .unwrap();
 
-    let PortalCommand::PromptClipboardTransfer(prompt) = &dispatch.command else {
+    let ClipboardSelectionDispatch::CrossNamespace {
+        portal_request,
+        command,
+    } = dispatch
+    else {
+        panic!("expected cross-namespace dispatch");
+    };
+    let PortalCommand::PromptClipboardTransfer(prompt) = &command else {
         panic!("expected clipboard prompt");
     };
     assert_eq!(prompt.transfer, transfer);
@@ -665,12 +672,12 @@ fn selection_request_becomes_portal_prompt_and_native_denial_artifact() {
     assert_eq!(prompt.target_namespace, target_namespace);
     assert_eq!(prompt.decision, PortalDecision::Pending);
     assert_eq!(prompt.generation, 1);
-    assert_eq!(dispatch.portal_request.property, 9);
+    assert_eq!(portal_request.property, 9);
 
     let PortalCommand::FailSelection { transfer: denied } = portal.deny(transfer).unwrap() else {
         panic!("expected fail-selection command");
     };
-    let failure = clipboard_selection_failure_notify(dispatch.portal_request.failure);
+    let failure = clipboard_selection_failure_notify(portal_request.failure);
 
     assert_eq!(denied, transfer);
     assert_eq!(failure.transfer, transfer);
@@ -717,12 +724,14 @@ fn approved_selection_request_becomes_bounded_text_handoff_artifact() {
         &mut portal,
     )
     .unwrap();
+    let ClipboardSelectionDispatch::CrossNamespace { portal_request, .. } = dispatch else {
+        panic!("expected cross-namespace dispatch");
+    };
     let command = portal
         .approve_generation(transfer, update.current.generation)
         .unwrap();
     let handoff =
-        clipboard_selection_text_handoff_artifact(&command, &dispatch.portal_request, "hello")
-            .unwrap();
+        clipboard_selection_text_handoff_artifact(&command, &portal_request, "hello").unwrap();
 
     assert_eq!(handoff.transfer, transfer);
     assert_eq!(handoff.property.requestor, requestor);

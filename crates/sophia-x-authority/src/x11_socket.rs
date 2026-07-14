@@ -2610,6 +2610,9 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                         crate::XClientOutput::Event(
                             event @ XClientEvent::SelectionNotify { requestor, .. },
                         ) => Some((index, *requestor, *event)),
+                        crate::XClientOutput::Event(
+                            event @ XClientEvent::SelectionRequest { owner, .. },
+                        ) => Some((index, *owner, *event)),
                         _ => None,
                     })
                 && let Some(target) = state.client_for_resource(destination)?

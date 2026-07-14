@@ -5,8 +5,8 @@ use sophia_protocol::{
 };
 
 use crate::{
-    ClipboardSelectionFailure, ClipboardSelectionRequestError, XAtom, XAuthorityAccessError,
-    XResourceId, XSelectionChangeKind, XTimestamp,
+    ClipboardSelectionFailure, ClipboardSelectionOwnerRequest, ClipboardSelectionRequestError,
+    XAtom, XAuthorityAccessError, XResourceId, XSelectionChangeKind, XTimestamp,
 };
 
 pub const X_AUTHORITY_MAX_TARGET_NAME_LEN: usize = 256;
@@ -173,4 +173,5 @@ impl XAuthorityPortalCommand {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum XAuthoritySelectionArtifact {
     Failure(ClipboardSelectionFailure),
+    Request(ClipboardSelectionOwnerRequest),
 }

@@ -30,14 +30,29 @@ pub enum ClipboardSelectionRequestError {
     UnknownRequestorNamespace,
     UnknownSourceOwner,
     MissingSourceNamespace,
+    /// Retained for stable runtime error decoding; normal dispatch now routes
+    /// this case directly to the owning X11 client.
     SameNamespace,
     Portal(PortalError),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ClipboardSelectionDispatch {
-    pub portal_request: ClipboardSelectionPortalRequest,
-    pub command: PortalCommand,
+pub enum ClipboardSelectionDispatch {
+    SameNamespace(ClipboardSelectionOwnerRequest),
+    CrossNamespace {
+        portal_request: ClipboardSelectionPortalRequest,
+        command: PortalCommand,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ClipboardSelectionOwnerRequest {
+    pub owner: XResourceId,
+    pub requestor: XResourceId,
+    pub selection: XAtom,
+    pub target: XAtom,
+    pub property: XAtom,
+    pub time: XTimestamp,
 }
 
 pub fn dispatch_clipboard_selection_request(
@@ -47,13 +62,37 @@ pub fn dispatch_clipboard_selection_request(
     transfer: PortalTransferId,
     portal: &mut ClipboardPortal,
 ) -> Result<ClipboardSelectionDispatch, ClipboardSelectionRequestError> {
+    let requestor_namespace = windows
+        .get(request.requestor)
+        .ok_or(ClipboardSelectionRequestError::UnknownRequestorNamespace)?
+        .namespace;
+    let source_owner = monitor
+        .current_owner_for_selection(request.selection)
+        .ok_or(ClipboardSelectionRequestError::UnknownSourceOwner)?;
+    let source_namespace = source_owner
+        .namespace
+        .ok_or(ClipboardSelectionRequestError::MissingSourceNamespace)?;
+    if source_namespace == requestor_namespace {
+        return Ok(ClipboardSelectionDispatch::SameNamespace(
+            ClipboardSelectionOwnerRequest {
+                owner: source_owner
+                    .owner
+                    .ok_or(ClipboardSelectionRequestError::UnknownSourceOwner)?,
+                requestor: request.requestor,
+                selection: request.selection,
+                target: request.target,
+                property: request.property,
+                time: request.time,
+            },
+        ));
+    }
     let portal_request =
         clipboard_portal_request_from_selection_request(request, monitor, windows, transfer)?;
     let command = portal
         .request_import(portal_request.request.clone())
         .map_err(ClipboardSelectionRequestError::Portal)?;
 
-    Ok(ClipboardSelectionDispatch {
+    Ok(ClipboardSelectionDispatch::CrossNamespace {
         portal_request,
         command,
     })

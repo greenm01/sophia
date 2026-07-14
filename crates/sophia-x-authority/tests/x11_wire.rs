@@ -4956,6 +4956,14 @@ fn x_server_frontend_routes_selection_notify_to_the_requestor_client() {
         ))
         .unwrap();
     assert_eq!(read_x_record(&mut owner)[0], 22);
+    owner
+        .write_all(&set_selection_owner_request(
+            XByteOrder::LittleEndian,
+            owner_window,
+            1,
+            10,
+        ))
+        .unwrap();
 
     let mut requestor = UnixStream::connect(&socket_path).unwrap();
     requestor
@@ -4975,6 +4983,31 @@ fn x_server_frontend_routes_selection_notify_to_the_requestor_client() {
         .unwrap();
     assert_eq!(read_x_record(&mut requestor)[0], 22);
 
+    requestor
+        .write_all(&convert_selection_request(
+            XByteOrder::LittleEndian,
+            requestor_window,
+            1,
+            31,
+            31,
+            10,
+        ))
+        .unwrap();
+    let request = read_x_record(&mut owner);
+    assert_eq!(request[0], 30);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &request[2..4]), 2);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &request[8..12]),
+        owner_window
+    );
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &request[12..16]),
+        requestor_window
+    );
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &request[16..20]), 1);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &request[20..24]), 31);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &request[24..28]), 31);
+
     owner
         .write_all(&send_selection_notify_request(
             XByteOrder::LittleEndian,
@@ -4987,7 +5020,7 @@ fn x_server_frontend_routes_selection_notify_to_the_requestor_client() {
         .unwrap();
     let event = read_x_record(&mut requestor);
     assert_eq!(event[0] & 0x7f, 31);
-    assert_eq!(read_u16(XByteOrder::LittleEndian, &event[2..4]), 1);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &event[2..4]), 2);
     assert_eq!(
         read_u32(XByteOrder::LittleEndian, &event[8..12]),
         requestor_window
