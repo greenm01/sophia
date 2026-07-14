@@ -227,6 +227,7 @@ pub struct XServerFrontendConfig {
     admission_policy: Option<Arc<dyn XServerFrontendAdmissionPolicy>>,
     max_concurrent_clients: NonZeroUsize,
     output_topology: sophia_protocol::OutputTopologySnapshot,
+    xkb_config: crate::XkbRmlvoConfig,
 }
 
 #[cfg(unix)]
@@ -240,6 +241,7 @@ impl core::fmt::Debug for XServerFrontendConfig {
             .field("has_admission_policy", &self.admission_policy.is_some())
             .field("max_concurrent_clients", &self.max_concurrent_clients)
             .field("output_topology", &self.output_topology)
+            .field("xkb_config", &self.xkb_config)
             .finish()
     }
 }
@@ -283,6 +285,7 @@ impl XServerFrontendConfig {
             admission_policy: None,
             max_concurrent_clients: X_SERVER_FRONTEND_DEFAULT_MAX_CONCURRENT_CLIENTS,
             output_topology: sophia_protocol::OutputTopologySnapshot::deterministic(),
+            xkb_config: crate::XkbRmlvoConfig::default(),
         })
     }
 
@@ -325,6 +328,21 @@ impl XServerFrontendConfig {
 
     pub fn output_topology(&self) -> &sophia_protocol::OutputTopologySnapshot {
         &self.output_topology
+    }
+
+    pub fn with_xkb_config(
+        mut self,
+        xkb_config: crate::XkbRmlvoConfig,
+    ) -> Result<Self, X11SetupSocketError> {
+        xkb_config.validate().map_err(|error| {
+            X11SetupSocketError::new(format!("invalid XKB configuration: {error}"))
+        })?;
+        self.xkb_config = xkb_config;
+        Ok(self)
+    }
+
+    pub const fn xkb_config(&self) -> &crate::XkbRmlvoConfig {
+        &self.xkb_config
     }
 
     pub fn socket_path(&self) -> &Path {
@@ -440,8 +458,10 @@ pub struct XServerFrontend {
 impl XServerFrontend {
     pub fn bind(config: XServerFrontendConfig) -> Result<Self, X11SetupSocketError> {
         let listener = bind_x11_core_socket_server(config.socket_path())?;
-        let state =
-            X11CoreSocketServerState::with_output_topology(config.output_topology().clone())?;
+        let state = X11CoreSocketServerState::with_output_topology_and_xkb_config(
+            config.output_topology().clone(),
+            config.xkb_config(),
+        )?;
         let (worker_completion_sender, worker_completions) = std::sync::mpsc::channel();
         let (worker_admission_event_sender, worker_admission_events) = std::sync::mpsc::channel();
         Ok(Self {
@@ -2174,6 +2194,19 @@ impl X11CoreSocketServerState {
             XAuthorityRuntime::with_output_topology(output_topology).map_err(|error| {
                 X11SetupSocketError::new(format!("invalid Engine output topology: {error:?}"))
             })?;
+        Ok(Self {
+            runtime: Arc::new(Mutex::new(runtime)),
+            ..Self::default()
+        })
+    }
+
+    pub fn with_output_topology_and_xkb_config(
+        output_topology: sophia_protocol::OutputTopologySnapshot,
+        xkb_config: &crate::XkbRmlvoConfig,
+    ) -> Result<Self, X11SetupSocketError> {
+        let runtime =
+            XAuthorityRuntime::with_output_topology_and_xkb_config(output_topology, xkb_config)
+                .map_err(|error| X11SetupSocketError::new(error.to_string()))?;
         Ok(Self {
             runtime: Arc::new(Mutex::new(runtime)),
             ..Self::default()

@@ -1855,7 +1855,7 @@ fn x11_dispatch_advertises_randr_and_replies_to_query_version() {
     assert_eq!(encoded[0][0], 1);
     assert_eq!(
         read_u32(XByteOrder::LittleEndian, &encoded[0][8..12]),
-        0x0001_0100
+        0x2000_0001
     );
 
     let monitors = decode_x11_core_request(
@@ -1950,6 +1950,20 @@ fn xkb_state_uses_deterministic_rmlvo_and_tracks_effective_modifiers() {
 }
 
 #[test]
+fn xkb_snapshot_drives_core_and_xkb_maps_from_the_same_rmlvo() {
+    let us = XkbKeymapSnapshot::new(&XkbRmlvoConfig::default()).unwrap();
+    let mut de_config = XkbRmlvoConfig::default();
+    de_config.layout = "de".to_owned();
+    let de = XkbKeymapSnapshot::new(&de_config).unwrap();
+
+    assert_eq!(us.config().layout, "us");
+    assert_eq!(de.config().layout, "de");
+    assert_eq!(us.core_mapping(8, 248), us.xkb_keysyms().concat());
+    assert_eq!(de.core_mapping(8, 248), de.xkb_keysyms().concat());
+    assert_ne!(us.core_mapping(29, 1), de.core_mapping(29, 1));
+}
+
+#[test]
 fn xkb_rmlvo_validation_rejects_empty_and_unbounded_configuration() {
     let mut empty = XkbRmlvoConfig::default();
     empty.layout.clear();
@@ -1963,6 +1977,21 @@ fn xkb_rmlvo_validation_rejects_empty_and_unbounded_configuration() {
     assert_eq!(
         XkbKeyboardState::new(&unbounded).unwrap_err(),
         XkbKeyboardError::InvalidConfiguration
+    );
+}
+
+#[test]
+fn input_focus_state_is_scoped_per_namespace() {
+    let first = NamespaceId::from_raw(45);
+    let second = NamespaceId::from_raw(46);
+    let mut runtime = XAuthorityRuntime::new();
+    let none = XResourceId::new(0, 1);
+
+    runtime.set_input_focus(first, none, 2).unwrap();
+    assert_eq!(runtime.input_focus(first), (none, 2));
+    assert_eq!(
+        runtime.input_focus(second),
+        (XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1), 1)
     );
 }
 

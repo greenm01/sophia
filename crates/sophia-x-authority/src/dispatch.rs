@@ -960,7 +960,7 @@ pub fn dispatch_x11_wire_request(
             }
         }
         XWireRequest::GetInputFocus => {
-            let (focus, revert_to) = runtime.input_focus();
+            let (focus, revert_to) = runtime.input_focus(context.namespace);
             XDispatchResult {
                 response: None,
                 outputs: vec![XClientOutput::Reply(XClientReply::GetInputFocus {
@@ -1010,7 +1010,7 @@ pub fn dispatch_x11_wire_request(
             outputs: vec![XClientOutput::Reply(XClientReply::GetKeyboardMapping {
                 sequence: context.sequence,
                 keysyms_per_keycode: 2,
-                keysyms: x11_us_keyboard_mapping(first_keycode, count),
+                keysyms: runtime.xkb_keymap().core_mapping(first_keycode, count),
             })],
             metadata_candidates: Vec::new(),
         },
@@ -1419,23 +1419,8 @@ pub fn dispatch_x11_wire_request(
         },
         XWireRequest::XkbGetMap { full, partial } => {
             let present = (full | partial) & 0x0007;
-            let flat = x11_us_keyboard_mapping(8, 248);
-            let keysyms = flat
-                .chunks_exact(2)
-                .map(|pair| [pair[0], pair[1]])
-                .collect();
-            let modifier_map = vec![
-                (50, 1),
-                (62, 1),
-                (66, 2),
-                (37, 4),
-                (105, 4),
-                (64, 8),
-                (108, 8),
-                (77, 16),
-                (133, 64),
-                (134, 64),
-            ];
+            let keysyms = runtime.xkb_keymap().xkb_keysyms();
+            let modifier_map = runtime.xkb_keymap().modifier_map();
             XDispatchResult {
                 response: None,
                 outputs: vec![XClientOutput::Reply(XClientReply::XkbGetMap {
@@ -1541,7 +1526,7 @@ pub fn dispatch_x11_wire_request(
             }
         }
         XWireRequest::XiGetFocus { .. } => {
-            let (focus, _) = runtime.input_focus();
+            let (focus, _) = runtime.input_focus(context.namespace);
             XDispatchResult {
                 response: None,
                 outputs: vec![XClientOutput::Reply(XClientReply::XiGetFocus {
@@ -2009,67 +1994,6 @@ pub fn dispatch_x11_wire_request(
     }
 }
 
-fn x11_us_keyboard_mapping(first_keycode: u8, count: u8) -> Vec<u32> {
-    let mut keysyms = Vec::with_capacity(usize::from(count) * 2);
-    for offset in 0..count {
-        let keycode = first_keycode.saturating_add(offset);
-        let (base, shifted) = x11_us_keysyms(keycode);
-        keysyms.push(base);
-        keysyms.push(shifted);
-    }
-    keysyms
-}
-
-fn x11_us_keysyms(keycode: u8) -> (u32, u32) {
-    match keycode {
-        9 => (0xff1b, 0xff1b),
-        10..=18 => {
-            const BASE: &[u8; 9] = b"123456789";
-            const SHIFTED: &[u8; 9] = b"!@#$%^&*(";
-            let index = usize::from(keycode - 10);
-            (u32::from(BASE[index]), u32::from(SHIFTED[index]))
-        }
-        19 => (u32::from(b'0'), u32::from(b')')),
-        20 => (u32::from(b'-'), u32::from(b'_')),
-        21 => (u32::from(b'='), u32::from(b'+')),
-        22 => (0xff08, 0xff08),
-        23 => (0xff09, 0xfe20),
-        24..=33 => letter_keysyms(keycode, 24, b"qwertyuiop"),
-        34 => (u32::from(b'['), u32::from(b'{')),
-        35 => (u32::from(b']'), u32::from(b'}')),
-        36 => (0xff0d, 0xff0d),
-        37 => (0xffe3, 0xffe3),
-        38..=46 => letter_keysyms(keycode, 38, b"asdfghjkl"),
-        47 => (u32::from(b';'), u32::from(b':')),
-        48 => (u32::from(b'\''), u32::from(b'\"')),
-        49 => (u32::from(b'`'), u32::from(b'~')),
-        50 | 62 => (0xffe1, 0xffe2),
-        51 => (u32::from(b'\\'), u32::from(b'|')),
-        52..=58 => letter_keysyms(keycode, 52, b"zxcvbnm"),
-        59 => (u32::from(b','), u32::from(b'<')),
-        60 => (u32::from(b'.'), u32::from(b'>')),
-        61 => (u32::from(b'/'), u32::from(b'?')),
-        65 => (u32::from(b' '), u32::from(b' ')),
-        66 => (0xffe5, 0xffe5),
-        110 => (0xff50, 0xff50),
-        111 => (0xff52, 0xff52),
-        112 => (0xff55, 0xff55),
-        113 => (0xff51, 0xff51),
-        114 => (0xff53, 0xff53),
-        115 => (0xff57, 0xff57),
-        116 => (0xff54, 0xff54),
-        117 => (0xff56, 0xff56),
-        118 => (0xff63, 0xff63),
-        119 => (0xffff, 0xffff),
-        _ => (0, 0),
-    }
-}
-
-fn letter_keysyms(keycode: u8, first: u8, letters: &[u8]) -> (u32, u32) {
-    let letter = letters[usize::from(keycode - first)];
-    (u32::from(letter), u32::from(letter.to_ascii_uppercase()))
-}
-
 fn dispatch_text_draw(
     context: XDispatchContext,
     runtime: &mut XAuthorityRuntime,
@@ -2249,11 +2173,18 @@ fn randr_resources(snapshot: &OutputTopologySnapshot) -> XRandrResources {
     let mut crtcs = Vec::with_capacity(snapshot.outputs.len());
     let mut outputs = Vec::with_capacity(snapshot.outputs.len());
     let mut modes = Vec::with_capacity(snapshot.outputs.len());
-    for (index, entry) in snapshot.outputs.iter().enumerate() {
-        let ordinal = u32::try_from(index).expect("output topology is bounded");
-        let crtc = 0x0001_0000 + ordinal;
-        let output = 0x0001_0100 + ordinal;
-        let mode = 0x0001_0200 + ordinal;
+    for entry in &snapshot.outputs {
+        // Output identity is Engine-owned and survives topology reordering.
+        // The protocol caps the topology at 16 entries; folding the opaque ID
+        // keeps it outside client resource ranges while remaining stable.
+        let identity = stable_randr_identity(entry.output.raw());
+        let crtc = 0x1000_0000 | identity;
+        let output = 0x2000_0000 | identity;
+        let mode = stable_randr_mode_id(
+            entry.logical.width,
+            entry.logical.height,
+            entry.refresh_millihz,
+        );
         crtcs.push(crtc);
         outputs.push(output);
         modes.push(XRandrModeInfo {
@@ -2276,6 +2207,20 @@ fn randr_resources(snapshot: &OutputTopologySnapshot) -> XRandrResources {
         outputs,
         modes,
     }
+}
+
+fn stable_randr_identity(raw: u64) -> u32 {
+    let folded = raw ^ (raw >> 32);
+    (u32::try_from(folded & 0x0fff_ffff).unwrap_or(0)).max(1)
+}
+
+fn stable_randr_mode_id(width: i32, height: i32, refresh_millihz: u32) -> u32 {
+    let mut hash = 0x811c_9dc5u32;
+    for value in [width as u32, height as u32, refresh_millihz] {
+        hash ^= value;
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    0x3000_0000 | (hash & 0x0fff_ffff).max(1)
 }
 
 fn logical_pixels_to_millimeters(pixels: i32) -> u32 {

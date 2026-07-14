@@ -51,8 +51,8 @@ pub struct XAuthorityRuntime {
     window_background_pixels: BTreeMap<crate::XResourceId, u32>,
     last_cpu_buffer_update: Option<XAuthorityCpuBufferUpdate>,
     output_topology: OutputTopologySnapshot,
-    input_focus: crate::XResourceId,
-    input_focus_revert_to: u8,
+    input_focus: BTreeMap<NamespaceId, (crate::XResourceId, u8)>,
+    xkb_keymap: crate::XkbKeymapSnapshot,
 }
 
 impl Default for XAuthorityRuntime {
@@ -71,8 +71,9 @@ impl Default for XAuthorityRuntime {
             window_background_pixels: Default::default(),
             last_cpu_buffer_update: None,
             output_topology: OutputTopologySnapshot::deterministic(),
-            input_focus: crate::XResourceId::new(u64::from(crate::X_SETUP_DEFAULT_ROOT), 1),
-            input_focus_revert_to: 1,
+            input_focus: Default::default(),
+            xkb_keymap: crate::XkbKeymapSnapshot::new(&crate::XkbRmlvoConfig::default())
+                .expect("the deterministic default XKB keymap must compile"),
         }
     }
 }
@@ -82,12 +83,40 @@ impl XAuthorityRuntime {
         Self::default()
     }
 
+    pub fn with_xkb_config(
+        config: &crate::XkbRmlvoConfig,
+    ) -> Result<Self, crate::XkbKeyboardError> {
+        Ok(Self {
+            xkb_keymap: crate::XkbKeymapSnapshot::new(config)?,
+            ..Self::default()
+        })
+    }
+
+    pub const fn xkb_keymap(&self) -> &crate::XkbKeymapSnapshot {
+        &self.xkb_keymap
+    }
+
     pub fn with_output_topology(
         output_topology: OutputTopologySnapshot,
     ) -> Result<Self, OutputTopologyError> {
         output_topology.validate()?;
         Ok(Self {
             output_topology,
+            ..Self::default()
+        })
+    }
+
+    pub fn with_output_topology_and_xkb_config(
+        output_topology: OutputTopologySnapshot,
+        xkb_config: &crate::XkbRmlvoConfig,
+    ) -> Result<Self, String> {
+        output_topology
+            .validate()
+            .map_err(|error| format!("invalid Engine output topology: {error:?}"))?;
+        Ok(Self {
+            output_topology,
+            xkb_keymap: crate::XkbKeymapSnapshot::new(xkb_config)
+                .map_err(|error| format!("invalid XKB configuration: {error}"))?,
             ..Self::default()
         })
     }
@@ -108,8 +137,11 @@ impl XAuthorityRuntime {
         Ok(true)
     }
 
-    pub const fn input_focus(&self) -> (crate::XResourceId, u8) {
-        (self.input_focus, self.input_focus_revert_to)
+    pub fn input_focus(&self, namespace: NamespaceId) -> (crate::XResourceId, u8) {
+        self.input_focus.get(&namespace).copied().unwrap_or((
+            crate::XResourceId::new(u64::from(crate::X_SETUP_DEFAULT_ROOT), 1),
+            1,
+        ))
     }
 
     pub fn set_input_focus(
@@ -124,8 +156,7 @@ impl XAuthorityRuntime {
         if focus.local.raw() != 0 && focus.local.raw() != u64::from(crate::X_SETUP_DEFAULT_ROOT) {
             self.validate_window_access(namespace, focus)?;
         }
-        self.input_focus = focus;
-        self.input_focus_revert_to = revert_to;
+        self.input_focus.insert(namespace, (focus, revert_to));
         Ok(())
     }
 
@@ -700,9 +731,12 @@ impl XAuthorityRuntime {
         self.resources.remove(window);
         self.software_buffers.remove(window);
         self.window_background_pixels.remove(&window);
-        if self.input_focus == window {
-            self.input_focus = crate::XResourceId::new(u64::from(crate::X_SETUP_DEFAULT_ROOT), 1);
-            self.input_focus_revert_to = 1;
+        if self
+            .input_focus
+            .get(&namespace)
+            .is_some_and(|(focus, _)| *focus == window)
+        {
+            self.input_focus.remove(&namespace);
         }
         Ok(surface)
     }

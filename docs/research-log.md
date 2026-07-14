@@ -768,3 +768,20 @@ The generic pixel-proof policy now records one 310-by-233 committed surface,
 288,920 nonzero bytes, and `first_error=none`. This is software-pixel evidence,
 not completion of interactive GTK input, the full XI2/grab contract, or
 Milestone 3 hardware promotion.
+
+## 2026-07-14: One Session XKB Description And Stable RandR Identity
+
+The native frontend now compiles one immutable xkbcommon snapshot from the
+session RMLVO. Core `GetKeyboardMapping`, XKB `GetMap`, and per-seat event
+translation consume that configuration instead of combining a handwritten US
+wire map with an independently compiled state machine. The live command accepts
+bounded `--xkb-rules`, `--xkb-model`, `--xkb-layout`, `--xkb-variant`, and
+`--xkb-options` overrides; a German-layout regression proves that core and XKB
+views change together.
+
+RandR CRTC and output identities now derive from Engine `OutputId`, while mode
+identity derives from the mode tuple. Reordering a topology snapshot therefore
+does not renumber an unchanged output. Focus state is also namespace-local and
+window destruction resets only its namespace. Dynamic RandR event diffs,
+complete XKB state/name notifications, grabs, and XI2 event delivery remain
+Milestone 3 work.

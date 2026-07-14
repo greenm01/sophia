@@ -334,6 +334,7 @@ pub(crate) fn run_persistent_xterm_session(
     let frontend_config =
         XServerFrontendConfig::new_with_namespace_context(&server_path, x_namespace)?
             .with_output_topology(output_topology)?
+            .with_xkb_config(config.xkb_config.clone())?
             .with_setup_authorization(XServerFrontendSetupAuthorization::MitMagicCookie(
                 xauthority_cookie,
             ))
@@ -346,7 +347,7 @@ pub(crate) fn run_persistent_xterm_session(
             NonZeroUsize::new(SESSION_KEY_CAPACITY).expect("session route capacity is nonzero"),
             control_ack_sender,
             input_delivery_sender,
-            sophia_x_authority::XkbRmlvoConfig::default(),
+            config.xkb_config.clone(),
         )?;
     let input_sender = broker.routed_input_sender();
     let control_sender = broker.control_sender();
@@ -588,6 +589,7 @@ struct PersistentXtermSessionConfig {
     input_quiet_msec: u64,
     namespace_profile: NamespaceProfile,
     namespace_capabilities: NamespaceCapabilities,
+    xkb_config: sophia_x_authority::XkbRmlvoConfig,
 }
 
 impl PersistentXtermSessionConfig {
@@ -638,6 +640,15 @@ impl PersistentXtermSessionConfig {
                 .into());
             }
         };
+        let defaults = sophia_x_authority::XkbRmlvoConfig::default();
+        let xkb_config = sophia_x_authority::XkbRmlvoConfig {
+            rules: arg_value(args, "--xkb-rules").unwrap_or(defaults.rules),
+            model: arg_value(args, "--xkb-model").unwrap_or(defaults.model),
+            layout: arg_value(args, "--xkb-layout").unwrap_or(defaults.layout),
+            variant: arg_value(args, "--xkb-variant").unwrap_or(defaults.variant),
+            options: arg_value(args, "--xkb-options").unwrap_or(defaults.options),
+        };
+        xkb_config.validate()?;
         let wm_process = arg_value(args, "--wm-process");
         let wm_process_args = args
             .iter()
@@ -726,6 +737,7 @@ impl PersistentXtermSessionConfig {
             input_quiet_msec: SESSION_INPUT_QUIET_MSEC,
             namespace_profile,
             namespace_capabilities: NamespaceCapabilities::NONE,
+            xkb_config,
         })
     }
 

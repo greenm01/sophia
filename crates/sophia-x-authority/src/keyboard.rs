@@ -60,6 +60,110 @@ impl core::fmt::Display for XkbKeyboardError {
 
 impl std::error::Error for XkbKeyboardError {}
 
+/// Immutable, client-visible description compiled from the session RMLVO.
+///
+/// Core X11 and XKB replies must describe the same map used by the per-seat
+/// state machines. Keeping the reduced wire representation here prevents the
+/// two protocol paths from silently drifting apart.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct XkbKeymapSnapshot {
+    config: XkbRmlvoConfig,
+    min_keycode: u8,
+    max_keycode: u8,
+    keysyms: Vec<[u32; 2]>,
+    modifier_map: Vec<(u8, u8)>,
+}
+
+impl XkbKeymapSnapshot {
+    pub fn new(config: &XkbRmlvoConfig) -> Result<Self, XkbKeyboardError> {
+        let keymap = compile_keymap(config)?;
+        // The X11 setup contract exposes the full 8..=255 core keycode range.
+        // xkbcommon may report a narrower range (normally starting at 9), so
+        // preserve explicit NoSymbol entries at either edge.
+        let min_keycode = 8;
+        let max_keycode = u8::MAX;
+        let mut keysyms = Vec::with_capacity(usize::from(max_keycode - min_keycode) + 1);
+        for raw in min_keycode..=max_keycode {
+            let key = xkb::Keycode::new(u32::from(raw));
+            let base = keymap
+                .key_get_syms_by_level(key, 0, 0)
+                .first()
+                .map_or(0, |keysym| keysym.raw());
+            let shifted = keymap
+                .key_get_syms_by_level(key, 0, 1)
+                .first()
+                .map_or(base, |keysym| keysym.raw());
+            keysyms.push([base, shifted]);
+        }
+        Ok(Self {
+            config: config.clone(),
+            min_keycode,
+            max_keycode,
+            keysyms,
+            modifier_map: vec![
+                (50, 1),
+                (62, 1),
+                (66, 2),
+                (37, 4),
+                (105, 4),
+                (64, 8),
+                (108, 8),
+                (77, 16),
+                (133, 64),
+                (134, 64),
+            ],
+        })
+    }
+
+    pub fn config(&self) -> &XkbRmlvoConfig {
+        &self.config
+    }
+
+    pub fn core_mapping(&self, first_keycode: u8, count: u8) -> Vec<u32> {
+        let mut result = Vec::with_capacity(usize::from(count) * 2);
+        for offset in 0..count {
+            let keycode = first_keycode.saturating_add(offset);
+            let pair = keycode
+                .checked_sub(self.min_keycode)
+                .and_then(|index| self.keysyms.get(usize::from(index)))
+                .copied()
+                .unwrap_or([0, 0]);
+            result.extend(pair);
+        }
+        result
+    }
+
+    pub fn xkb_keysyms(&self) -> Vec<[u32; 2]> {
+        self.keysyms.clone()
+    }
+
+    pub fn modifier_map(&self) -> Vec<(u8, u8)> {
+        self.modifier_map.clone()
+    }
+
+    pub const fn min_keycode(&self) -> u8 {
+        self.min_keycode
+    }
+    pub const fn max_keycode(&self) -> u8 {
+        self.max_keycode
+    }
+}
+
+fn compile_keymap(config: &XkbRmlvoConfig) -> Result<xkb::Keymap, XkbKeyboardError> {
+    config.validate()?;
+    let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS | xkb::CONTEXT_NO_ENVIRONMENT_NAMES);
+    xkb::Keymap::new_from_names(
+        &context,
+        &config.rules,
+        &config.model,
+        &config.layout,
+        &config.variant,
+        Some(config.options.clone()),
+        xkb::KEYMAP_COMPILE_NO_FLAGS,
+    )
+    .ok_or(XkbKeyboardError::KeymapCompilationFailed)
+}
+
 pub struct XkbKeyboardState {
     state: xkb::State,
 }
@@ -74,18 +178,7 @@ impl core::fmt::Debug for XkbKeyboardState {
 
 impl XkbKeyboardState {
     pub fn new(config: &XkbRmlvoConfig) -> Result<Self, XkbKeyboardError> {
-        config.validate()?;
-        let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS | xkb::CONTEXT_NO_ENVIRONMENT_NAMES);
-        let keymap = xkb::Keymap::new_from_names(
-            &context,
-            &config.rules,
-            &config.model,
-            &config.layout,
-            &config.variant,
-            Some(config.options.clone()),
-            xkb::KEYMAP_COMPILE_NO_FLAGS,
-        )
-        .ok_or(XkbKeyboardError::KeymapCompilationFailed)?;
+        let keymap = compile_keymap(config)?;
         Ok(Self {
             state: xkb::State::new(&keymap),
         })
