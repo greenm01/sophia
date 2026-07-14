@@ -72,3 +72,24 @@ pub enum PortalGrantState {
     Revoked,
     Expired,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PortalBrokerRequestPacket {
+    pub request: PortalRequest,
+    pub source_may_publish: bool,
+    pub target_may_request: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PortalBrokerResponsePacket {
+    pub transfer: PortalTransferId,
+    pub decision: PortalBrokerResponseDecision,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PortalBrokerResponseDecision {
+    Allowed(PortalGrant),
+    Denied,
+}
+
+pub const SOPHIA_PORTAL_MAX_MIME_TYPE_LEN: usize = 255;
