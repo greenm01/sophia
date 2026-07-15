@@ -17,38 +17,14 @@ creating a separate application-facing display protocol. The protocol-neutral
 Engine remains the sole owner of physical input, scene state, rendering, and
 scanout.
 
-The namespace, admission, portal lifecycle, and bounded X11 `CLIPBOARD` plus
-`PRIMARY` reference flow are established. The active track now advances X11
-session correctness without weakening those boundaries.
+The namespace, admission, portal lifecycle, bounded X11 `CLIPBOARD` plus
+`PRIMARY` reference flow, and native X11 session-correctness milestone are
+established. The active track now advances standard X11 buffer and presentation
+semantics without weakening those boundaries.
 
 The Smithay-backed Wayland Authority remains supported under a maintenance
 lane. XLibre is a retired prototype and documented possible future
 compatibility provider; no XLibre integration work is active.
-
-## Milestone 3: X11 Session Correctness
-
-Implemented foundation: live setup/populated RandR facts consume a bounded
-Engine topology snapshot; Engine input crosses as surface-targeted routed facts
-and gains deterministic per-seat XKB state inside the authority; resize-sized
-transactions and CPU pixels are quarantined until geometry-plus-pixels commit.
-The unchecked gates below remain the promotion criteria.
-
-- [ ] Implement a real XKB keymap/state path and complete X11 focus, active and
-  passive grabs, keyboard, pointer, and required XI2 delivery using
-  Engine-selected targets and authority-local coordinates.
-- [ ] Replace fixed root/output facts with Engine-sourced output and RandR
-  snapshots, including normal resize/configure behavior.
-- [ ] Preserve client-targeted input/control acknowledgements, bounded
-  backpressure, deterministic focus/stacking, and complete disconnect cleanup.
-- [ ] Run normal startup, physical input, resize, presentation, and teardown
-  through the native frontend under classic shared-X and the applicable
-  confined profile.
-
-Exit: promote the guarded two-xterm path from `hardware` to `session` evidence
-only when all X11 events flush, both clients remain independently interactive,
-output facts come from Engine, resize completes, KMS cleanup is clean, startup
-is at most 2,000 ms, maximum composition is at most 25 ms, and
-input-to-presentation is at most 100 ms.
 
 ## Milestone 4: X11 Buffer And Presentation Semantics
 
