@@ -809,3 +809,12 @@ owner-events routing, synchronous freeze with bounded deferred input and
 on disconnect. Engine still chooses the ordinary target surface and local
 coordinates; the authority redirects only when X grab semantics require it.
 XI2 generic-event delivery remains the next input-compatibility boundary.
+
+That XI2 boundary now advertises XGE 1.0 and XI 2.0, reports master pointer
+button/valuator classes plus the master keyboard key class, retains bounded
+per-client selection masks, and emits selected Key, Button, Motion,
+Enter/Leave, and Focus generic events. Device events preserve Engine-provided
+root/local coordinates as FP16.16 values and follow core grab redirection. One
+input delivery acknowledgement is returned only after the writer flushes the
+core event and every selected XI2 record generated from it. Raw, touch, and
+gesture events remain deliberately outside Milestone 3.

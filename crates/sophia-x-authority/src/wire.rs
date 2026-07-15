@@ -118,6 +118,9 @@ pub const X_INPUT_QUERY_VERSION_MINOR_OPCODE: u8 = 47;
 pub const X_INPUT_QUERY_DEVICE_MINOR_OPCODE: u8 = 48;
 pub const X_INPUT_GET_FOCUS_MINOR_OPCODE: u8 = 50;
 pub const X_INPUT_GET_PROPERTY_MINOR_OPCODE: u8 = 59;
+pub const X_GENERIC_EVENT_EXTENSION_NAME: &str = "Generic Event Extension";
+pub const X_GENERIC_EVENT_MAJOR_OPCODE: u8 = 136;
+pub const X_GENERIC_EVENT_QUERY_VERSION_MINOR_OPCODE: u8 = 0;
 
 const X_CREATE_WINDOW_REQ_LEN: usize = 32;
 const X_CHANGE_WINDOW_ATTRIBUTES_REQ_LEN: usize = 12;
@@ -210,6 +213,7 @@ const X_INPUT_QUERY_DEVICE_REQ_LEN: usize = 8;
 const X_INPUT_SELECT_EVENTS_REQ_LEN: usize = 12;
 const X_INPUT_GET_FOCUS_REQ_LEN: usize = 8;
 const X_INPUT_GET_PROPERTY_REQ_LEN: usize = 24;
+const X_GENERIC_EVENT_QUERY_VERSION_REQ_LEN: usize = 8;
 
 pub const X_PUT_IMAGE_MAX_DATA_BYTES: usize = crate::X_PROPERTY_MAX_VALUE_BYTES;
 pub const X_QUERY_COLORS_MAX_PIXELS: usize = 256;
@@ -604,6 +608,10 @@ pub enum XWireRequest {
         device_id: u16,
     },
     XiGetProperty,
+    GeQueryVersion {
+        major_version: u16,
+        minor_version: u16,
+    },
     BigRequestsEnable,
     QueryColors {
         colormap: XResourceId,
@@ -782,6 +790,20 @@ pub fn decode_x11_core_request(
         X_KEYBOARD_MAJOR_OPCODE => decode_x_keyboard(context, bytes),
         X_BIG_REQUESTS_MAJOR_OPCODE => decode_big_requests(bytes),
         X_INPUT_MAJOR_OPCODE => decode_x_input(context, bytes),
+        X_GENERIC_EVENT_MAJOR_OPCODE => {
+            require_exact_len(
+                X_GENERIC_EVENT_MAJOR_OPCODE,
+                X_GENERIC_EVENT_QUERY_VERSION_REQ_LEN,
+                bytes.len(),
+            )?;
+            if bytes[1] != X_GENERIC_EVENT_QUERY_VERSION_MINOR_OPCODE {
+                return Err(XWireParseError::UnknownOpcode(bytes[1]));
+            }
+            Ok(XWireRequest::GeQueryVersion {
+                major_version: context.byte_order.u16(&bytes[4..6]),
+                minor_version: context.byte_order.u16(&bytes[6..8]),
+            })
+        }
         other => Err(XWireParseError::UnknownOpcode(other)),
     }
 }
@@ -849,6 +871,9 @@ fn decode_x_input(
             )?;
             let window = XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1);
             let count = usize::from(context.byte_order.u16(&bytes[8..10]));
+            if count > 16 {
+                return Err(XWireParseError::InvalidValue(count as u32));
+            }
             let mut offset = X_INPUT_SELECT_EVENTS_REQ_LEN;
             let mut masks = Vec::with_capacity(count);
             for _ in 0..count {
@@ -861,6 +886,9 @@ fn decode_x_input(
                 }
                 let device_id = context.byte_order.u16(&bytes[offset..offset + 2]);
                 let words = usize::from(context.byte_order.u16(&bytes[offset + 2..offset + 4]));
+                if words > 8 {
+                    return Err(XWireParseError::InvalidValue(words as u32));
+                }
                 offset += 4;
                 let end = offset.saturating_add(words.saturating_mul(4));
                 if end > bytes.len() {

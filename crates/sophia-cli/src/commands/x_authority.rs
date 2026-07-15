@@ -1394,6 +1394,8 @@ fn send_xterm_text_to_client(
                 }
                 .into(),
                 target_window: None,
+                xi_event_type: None,
+                xi_transition_mask: 0,
                 delivery: Some(delivery),
             })?;
             *time_msec = time_msec.saturating_add(1);

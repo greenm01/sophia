@@ -6,9 +6,9 @@ use crate::{
     XAuthorityRequestKind, XAuthorityResponseOutcome, XAuthorityResponsePacket, XAuthorityRuntime,
     XAuthorityRuntimeError, XByteOrder, XClientEvent, XClientOutput, XClientReply, XErrorCode,
     XMetadataPropertyCandidate, XPropertyError, XPropertyTable, XRandrModeInfo, XRandrMonitorInfo,
-    XResourceId, XWireParseError, XWireRequest, XXiDeviceInfo, encode_x_client_output,
-    metadata_property_candidate, x_error_from_runtime, x_error_from_wire_parse,
-    x_selection_failure_event,
+    XResourceId, XWireParseError, XWireRequest, XXiDeviceClass, XXiDeviceInfo,
+    encode_x_client_output, metadata_property_candidate, x_error_from_runtime,
+    x_error_from_wire_parse, x_selection_failure_event,
 };
 use sophia_protocol::{NamespaceId, OutputTopologySnapshot, Rect, Region, TransactionId};
 
@@ -1718,6 +1718,15 @@ pub fn dispatch_x11_wire_request(
             })],
             metadata_candidates: Vec::new(),
         },
+        XWireRequest::GeQueryVersion { .. } => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::GeQueryVersion {
+                sequence: context.sequence,
+                major_version: 1,
+                minor_version: 0,
+            })],
+            metadata_candidates: Vec::new(),
+        },
         XWireRequest::XiQueryVersion { .. } => XDispatchResult {
             response: None,
             outputs: vec![XClientOutput::Reply(XClientReply::XiQueryVersion {
@@ -1733,12 +1742,34 @@ pub fn dispatch_x11_wire_request(
                 device_type: 1,
                 attachment: 3,
                 name: "Sophia master pointer".to_owned(),
+                classes: vec![
+                    XXiDeviceClass::Button {
+                        source_id: 2,
+                        button_count: 5,
+                    },
+                    XXiDeviceClass::Valuator {
+                        source_id: 2,
+                        number: 0,
+                        min: 0,
+                        max: i64::from(u16::MAX) << 32,
+                    },
+                    XXiDeviceClass::Valuator {
+                        source_id: 2,
+                        number: 1,
+                        min: 0,
+                        max: i64::from(u16::MAX) << 32,
+                    },
+                ],
             };
             let keyboard = XXiDeviceInfo {
                 device_id: 3,
                 device_type: 2,
                 attachment: 2,
                 name: "Sophia master keyboard".to_owned(),
+                classes: vec![XXiDeviceClass::Key {
+                    source_id: 3,
+                    keys: (8..=255).collect(),
+                }],
             };
             let devices = match device_id {
                 0 => vec![pointer, keyboard],
@@ -1756,7 +1787,7 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
-        XWireRequest::XiSelectEvents { window, .. } => {
+        XWireRequest::XiSelectEvents { window, masks } => {
             let outputs = (window.local.raw() != u64::from(X_SETUP_DEFAULT_ROOT))
                 .then(|| {
                     runtime
@@ -1773,7 +1804,15 @@ pub fn dispatch_x11_wire_request(
                     ))
                 })
                 .into_iter()
-                .collect();
+                .collect::<Vec<_>>();
+            if outputs.is_empty() {
+                runtime.input_authority_mut().select_xi_events(
+                    context.namespace,
+                    context.client_id,
+                    window,
+                    &masks,
+                );
+            }
             XDispatchResult {
                 response: None,
                 outputs,
@@ -2373,6 +2412,12 @@ fn extension_query_result(name: &str) -> XExtensionQueryResult {
             major_opcode: crate::X_INPUT_MAJOR_OPCODE,
             first_event: crate::X_INPUT_FIRST_EVENT,
             first_error: crate::X_INPUT_FIRST_ERROR,
+        },
+        crate::X_GENERIC_EVENT_EXTENSION_NAME => XExtensionQueryResult {
+            present: true,
+            major_opcode: crate::X_GENERIC_EVENT_MAJOR_OPCODE,
+            first_event: 0,
+            first_error: 0,
         },
         X_BIG_REQUESTS_EXTENSION_NAME => XExtensionQueryResult {
             present: true,

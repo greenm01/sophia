@@ -2020,6 +2020,68 @@ fn x11_dispatch_advertises_probe_backed_xkeyboard_extension() {
 }
 
 #[test]
+fn xge_and_xi2_report_versioned_master_device_classes() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let query = decode_x11_core_request(
+        context(namespace, 1, XByteOrder::LittleEndian),
+        &query_extension_request(XByteOrder::LittleEndian, X_GENERIC_EVENT_EXTENSION_NAME),
+    )
+    .unwrap();
+    let encoded = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 98),
+        query,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    )
+    .encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][8], 1);
+    assert_eq!(encoded[0][9], X_GENERIC_EVENT_MAJOR_OPCODE);
+
+    let version = decode_x11_core_request(
+        context(namespace, 2, XByteOrder::LittleEndian),
+        &[X_GENERIC_EVENT_MAJOR_OPCODE, 0, 2, 0, 1, 0, 0, 0],
+    )
+    .unwrap();
+    assert_eq!(
+        version,
+        XWireRequest::GeQueryVersion {
+            major_version: 1,
+            minor_version: 0
+        }
+    );
+    let encoded = dispatch_x11_wire_request(
+        dispatch_context(
+            namespace,
+            2,
+            XByteOrder::LittleEndian,
+            X_GENERIC_EVENT_MAJOR_OPCODE,
+        ),
+        version,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    )
+    .encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][8..10]), 1);
+
+    let devices = dispatch_x11_wire_request(
+        dispatch_context(namespace, 3, XByteOrder::LittleEndian, X_INPUT_MAJOR_OPCODE),
+        XWireRequest::XiQueryDevice { device_id: 0 },
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    )
+    .encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &devices[0][8..10]), 2);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &devices[0][38..40]), 3);
+    assert!(devices[0].len() > 128);
+}
+
+#[test]
 fn xkb_state_uses_deterministic_rmlvo_and_tracks_effective_modifiers() {
     let mut keyboard = XkbKeyboardState::new(&XkbRmlvoConfig::default()).unwrap();
     assert_eq!(keyboard.map_evdev_key(42, true), Some((50, 0)));

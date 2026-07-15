@@ -52,6 +52,7 @@ struct XNamespaceInputAuthority {
 #[derive(Clone, Debug, Default)]
 pub struct XInputAuthorityState {
     namespaces: BTreeMap<NamespaceId, XNamespaceInputAuthority>,
+    xi_selections: BTreeMap<(NamespaceId, u64, XResourceId, u16), Vec<u32>>,
 }
 
 impl XInputAuthorityState {
@@ -254,6 +255,42 @@ impl XInputAuthorityState {
             .and_then(|state| state.server_owner)
     }
 
+    pub fn select_xi_events(
+        &mut self,
+        namespace: NamespaceId,
+        owner: u64,
+        window: XResourceId,
+        masks: &[(u16, Vec<u32>)],
+    ) {
+        for (device, mask) in masks {
+            let key = (namespace, owner, window, *device);
+            if mask.iter().all(|word| *word == 0) {
+                self.xi_selections.remove(&key);
+            } else {
+                self.xi_selections.insert(key, mask.clone());
+            }
+        }
+    }
+
+    pub fn xi_event_selected(
+        &self,
+        namespace: NamespaceId,
+        owner: u64,
+        window: XResourceId,
+        device: u16,
+        event_type: u16,
+    ) -> bool {
+        [device, 1].into_iter().any(|selected_device| {
+            self.xi_selections
+                .get(&(namespace, owner, window, selected_device))
+                .is_some_and(|mask| {
+                    let bit = usize::from(event_type);
+                    mask.get(bit / 32)
+                        .is_some_and(|word| word & (1 << (bit % 32)) != 0)
+                })
+        })
+    }
+
     pub fn activate_key(
         &mut self,
         namespace: NamespaceId,
@@ -321,6 +358,8 @@ impl XInputAuthorityState {
     }
 
     pub fn cleanup_owner(&mut self, owner: u64) {
+        self.xi_selections
+            .retain(|(_, selection_owner, _, _), _| *selection_owner != owner);
         self.namespaces.retain(|_, state| {
             if state.pointer.is_some_and(|grab| grab.owner == owner) {
                 state.pointer = None;

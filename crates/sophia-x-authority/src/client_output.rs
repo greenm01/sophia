@@ -332,6 +332,11 @@ pub enum XClientReply {
         major_version: u16,
         minor_version: u16,
     },
+    GeQueryVersion {
+        sequence: u16,
+        major_version: u16,
+        minor_version: u16,
+    },
     XiGetClientPointer {
         sequence: u16,
         device_id: u16,
@@ -435,6 +440,25 @@ pub struct XXiDeviceInfo {
     pub device_type: u16,
     pub attachment: u16,
     pub name: String,
+    pub classes: Vec<XXiDeviceClass>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum XXiDeviceClass {
+    Key {
+        source_id: u16,
+        keys: Vec<u32>,
+    },
+    Button {
+        source_id: u16,
+        button_count: u16,
+    },
+    Valuator {
+        source_id: u16,
+        number: u16,
+        min: i64,
+        max: i64,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1017,6 +1041,17 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             put_u16(byte_order, &mut out[10..12], minor_version);
             out
         }
+        XClientReply::GeQueryVersion {
+            sequence,
+            major_version,
+            minor_version,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            put_u16(byte_order, &mut out[8..10], major_version);
+            put_u16(byte_order, &mut out[10..12], minor_version);
+            out
+        }
         XClientReply::XiGetClientPointer {
             sequence,
             device_id,
@@ -1046,7 +1081,11 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
                 push_u16(byte_order, &mut body, device.device_id);
                 push_u16(byte_order, &mut body, device.device_type);
                 push_u16(byte_order, &mut body, device.attachment);
-                push_u16(byte_order, &mut body, 0);
+                push_u16(
+                    byte_order,
+                    &mut body,
+                    u16::try_from(device.classes.len()).unwrap_or(0),
+                );
                 push_u16(
                     byte_order,
                     &mut body,
@@ -1055,6 +1094,57 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
                 body.extend_from_slice(&[1, 0]);
                 body.extend_from_slice(device.name.as_bytes());
                 body.resize(padded_len(body.len()), 0);
+                for class in &device.classes {
+                    match class {
+                        XXiDeviceClass::Key { source_id, keys } => {
+                            push_u16(byte_order, &mut body, 0);
+                            push_u16(
+                                byte_order,
+                                &mut body,
+                                u16::try_from(2 + keys.len()).unwrap_or(u16::MAX),
+                            );
+                            push_u16(byte_order, &mut body, *source_id);
+                            push_u16(
+                                byte_order,
+                                &mut body,
+                                u16::try_from(keys.len()).unwrap_or(0),
+                            );
+                            for key in keys {
+                                push_u32(byte_order, &mut body, *key);
+                            }
+                        }
+                        XXiDeviceClass::Button {
+                            source_id,
+                            button_count,
+                        } => {
+                            push_u16(byte_order, &mut body, 1);
+                            push_u16(byte_order, &mut body, 2 + 1 + *button_count * 1);
+                            push_u16(byte_order, &mut body, *source_id);
+                            push_u16(byte_order, &mut body, *button_count);
+                            push_u32(byte_order, &mut body, 0);
+                            for _ in 0..*button_count {
+                                push_u32(byte_order, &mut body, 0);
+                            }
+                        }
+                        XXiDeviceClass::Valuator {
+                            source_id,
+                            number,
+                            min,
+                            max,
+                        } => {
+                            push_u16(byte_order, &mut body, 2);
+                            push_u16(byte_order, &mut body, 11);
+                            push_u16(byte_order, &mut body, *source_id);
+                            push_u16(byte_order, &mut body, *number);
+                            push_u32(byte_order, &mut body, 0);
+                            push_i64(byte_order, &mut body, *min);
+                            push_i64(byte_order, &mut body, *max);
+                            push_i64(byte_order, &mut body, 0);
+                            push_u32(byte_order, &mut body, 1);
+                            body.extend_from_slice(&[0; 4]);
+                        }
+                    }
+                }
             }
             let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
             write_reply_header(
@@ -1842,6 +1932,13 @@ fn push_u16(byte_order: XByteOrder, out: &mut Vec<u8>, value: u16) {
     let mut bytes = [0; 2];
     put_u16(byte_order, &mut bytes, value);
     out.extend_from_slice(&bytes);
+}
+
+fn push_i64(byte_order: XByteOrder, out: &mut Vec<u8>, value: i64) {
+    match byte_order {
+        XByteOrder::LittleEndian => out.extend_from_slice(&value.to_le_bytes()),
+        XByteOrder::BigEndian => out.extend_from_slice(&value.to_be_bytes()),
+    }
 }
 
 fn put_u32(byte_order: XByteOrder, out: &mut [u8], value: u32) {

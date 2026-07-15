@@ -72,3 +72,15 @@ fn disconnect_cleanup_releases_every_owned_grab() {
     state.grab_button(namespace, passive(2, 1, 0)).unwrap();
     state.grab_server(namespace, 2).unwrap();
 }
+
+#[test]
+fn xi2_selection_masks_are_device_scoped_and_disconnect_cleaned() {
+    let namespace = NamespaceId::from_raw(3);
+    let window = XResourceId::new(0x100, 1);
+    let mut state = XInputAuthorityState::default();
+    state.select_xi_events(namespace, 7, window, &[(1, vec![1 << 6])]);
+    assert!(state.xi_event_selected(namespace, 7, window, 2, 6));
+    assert!(!state.xi_event_selected(namespace, 8, window, 2, 6));
+    state.cleanup_owner(7);
+    assert!(!state.xi_event_selected(namespace, 7, window, 2, 6));
+}

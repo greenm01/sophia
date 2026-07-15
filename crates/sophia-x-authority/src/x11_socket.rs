@@ -1188,6 +1188,8 @@ pub struct XAuthorityClientInputEvent {
     pub client: XServerFrontendClientId,
     pub event: XAuthorityInputEvent,
     pub target_window: Option<XResourceId>,
+    pub xi_event_type: Option<u16>,
+    pub xi_transition_mask: u16,
     /// Opaque Engine-assigned token used to prove that the owning X11 worker
     /// flushed this event to its client socket. It deliberately carries no
     /// X11 resource, key, or text identity.
@@ -2100,10 +2102,51 @@ impl XServerFrontendRouteRegistry {
             }
         };
         drop(pointers);
+        let (xi_device, selected_type) = match event {
+            XAuthorityInputEvent::Key(key) => (3, if key.pressed { 2 } else { 3 }),
+            XAuthorityInputEvent::Pointer(XAuthorityPointerEvent {
+                kind: XAuthorityPointerEventKind::Button { pressed, .. },
+                ..
+            }) => (2, if pressed { 4 } else { 5 }),
+            XAuthorityInputEvent::Pointer(_) => (2, 6),
+        };
+        let event_window = target_window.unwrap_or(surface_route.window);
+        let xi_event_type = self
+            .input_authority
+            .lock()
+            .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
+            .xi_event_selected(
+                surface_route.namespace,
+                client.raw(),
+                event_window,
+                xi_device,
+                selected_type,
+            )
+            .then_some(selected_type);
+        let transition_types: &[u16] = if xi_device == 3 { &[9, 10] } else { &[7, 8] };
+        let authority = self
+            .input_authority
+            .lock()
+            .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?;
+        let xi_transition_mask = transition_types.iter().fold(0u16, |mask, event_type| {
+            if authority.xi_event_selected(
+                surface_route.namespace,
+                client.raw(),
+                event_window,
+                xi_device,
+                *event_type,
+            ) {
+                mask | (1 << event_type)
+            } else {
+                mask
+            }
+        });
         self.route_input(XAuthorityClientInputEvent {
             client,
             event,
             target_window,
+            xi_event_type,
+            xi_transition_mask,
             delivery: route.delivery,
         })
     }
@@ -2279,6 +2322,158 @@ fn clamp_input_coordinate(value: f64) -> i16 {
 }
 
 #[cfg(unix)]
+fn encode_xi_device_event(
+    byte_order: XByteOrder,
+    sequence: u16,
+    event_type: u16,
+    event: XAuthorityInputEvent,
+    event_window: XResourceId,
+) -> Vec<u8> {
+    let (device, time, detail, root_x, root_y, event_x, event_y, state) = match event {
+        XAuthorityInputEvent::Key(key) => (
+            3,
+            key.time_msec,
+            u32::from(key.keycode),
+            0,
+            0,
+            0,
+            0,
+            key.state,
+        ),
+        XAuthorityInputEvent::Pointer(pointer) => (
+            2,
+            pointer.time_msec,
+            match pointer.kind {
+                XAuthorityPointerEventKind::Button { button, .. } => u32::from(button),
+                XAuthorityPointerEventKind::Motion => 0,
+            },
+            pointer.root_x,
+            pointer.root_y,
+            pointer.event_x,
+            pointer.event_y,
+            pointer.state,
+        ),
+    };
+    let mut out = vec![0; 80];
+    out[0] = 35;
+    out[1] = crate::X_INPUT_MAJOR_OPCODE;
+    write_xi_u16(byte_order, &mut out[2..4], sequence);
+    write_xi_u32(byte_order, &mut out[4..8], 12);
+    write_xi_u16(byte_order, &mut out[8..10], event_type);
+    write_xi_u16(byte_order, &mut out[10..12], device);
+    write_xi_u32(byte_order, &mut out[12..16], time);
+    write_xi_u32(byte_order, &mut out[16..20], detail);
+    write_xi_u32(byte_order, &mut out[20..24], X_SETUP_DEFAULT_ROOT);
+    write_xi_u32(
+        byte_order,
+        &mut out[24..28],
+        u32::try_from(event_window.local.raw()).unwrap_or(0),
+    );
+    write_xi_u32(
+        byte_order,
+        &mut out[32..36],
+        (i32::from(root_x) << 16) as u32,
+    );
+    write_xi_u32(
+        byte_order,
+        &mut out[36..40],
+        (i32::from(root_y) << 16) as u32,
+    );
+    write_xi_u32(
+        byte_order,
+        &mut out[40..44],
+        (i32::from(event_x) << 16) as u32,
+    );
+    write_xi_u32(
+        byte_order,
+        &mut out[44..48],
+        (i32::from(event_y) << 16) as u32,
+    );
+    write_xi_u16(byte_order, &mut out[52..54], device);
+    write_xi_u32(byte_order, &mut out[72..76], u32::from(state & 0xff));
+    out
+}
+
+#[cfg(unix)]
+fn encode_xi_crossing_event(
+    byte_order: XByteOrder,
+    sequence: u16,
+    event_type: u16,
+    event: XAuthorityInputEvent,
+    event_window: XResourceId,
+) -> Vec<u8> {
+    let (device, time, root_x, root_y, event_x, event_y, state) = match event {
+        XAuthorityInputEvent::Key(key) => (3, key.time_msec, 0, 0, 0, 0, key.state),
+        XAuthorityInputEvent::Pointer(pointer) => (
+            2,
+            pointer.time_msec,
+            pointer.root_x,
+            pointer.root_y,
+            pointer.event_x,
+            pointer.event_y,
+            pointer.state,
+        ),
+    };
+    let mut out = vec![0; 72];
+    out[0] = 35;
+    out[1] = crate::X_INPUT_MAJOR_OPCODE;
+    write_xi_u16(byte_order, &mut out[2..4], sequence);
+    write_xi_u32(byte_order, &mut out[4..8], 10);
+    write_xi_u16(byte_order, &mut out[8..10], event_type);
+    write_xi_u16(byte_order, &mut out[10..12], device);
+    write_xi_u32(byte_order, &mut out[12..16], time);
+    write_xi_u16(byte_order, &mut out[16..18], device);
+    out[18] = 0;
+    out[19] = 3;
+    write_xi_u32(byte_order, &mut out[20..24], X_SETUP_DEFAULT_ROOT);
+    write_xi_u32(
+        byte_order,
+        &mut out[24..28],
+        u32::try_from(event_window.local.raw()).unwrap_or(0),
+    );
+    write_xi_u32(
+        byte_order,
+        &mut out[32..36],
+        (i32::from(root_x) << 16) as u32,
+    );
+    write_xi_u32(
+        byte_order,
+        &mut out[36..40],
+        (i32::from(root_y) << 16) as u32,
+    );
+    write_xi_u32(
+        byte_order,
+        &mut out[40..44],
+        (i32::from(event_x) << 16) as u32,
+    );
+    write_xi_u32(
+        byte_order,
+        &mut out[44..48],
+        (i32::from(event_y) << 16) as u32,
+    );
+    out[48] = 1;
+    out[49] = 1;
+    write_xi_u32(byte_order, &mut out[64..68], u32::from(state & 0xff));
+    out
+}
+
+#[cfg(unix)]
+fn write_xi_u16(byte_order: XByteOrder, out: &mut [u8], value: u16) {
+    match byte_order {
+        XByteOrder::LittleEndian => out.copy_from_slice(&value.to_le_bytes()),
+        XByteOrder::BigEndian => out.copy_from_slice(&value.to_be_bytes()),
+    }
+}
+
+#[cfg(unix)]
+fn write_xi_u32(byte_order: XByteOrder, out: &mut [u8], value: u32) {
+    match byte_order {
+        XByteOrder::LittleEndian => out.copy_from_slice(&value.to_le_bytes()),
+        XByteOrder::BigEndian => out.copy_from_slice(&value.to_be_bytes()),
+    }
+}
+
+#[cfg(unix)]
 enum X11InputEventReceiver {
     Plain(Receiver<XAuthorityInputEvent>),
     Routed {
@@ -2296,6 +2491,8 @@ impl X11InputEventReceiver {
         (
             XAuthorityInputEvent,
             Option<XResourceId>,
+            Option<u16>,
+            u16,
             Option<XAuthorityInputDeliveryId>,
         ),
         RecvTimeoutError,
@@ -2305,12 +2502,18 @@ impl X11InputEventReceiver {
                 Self::Plain(receiver) => {
                     return receiver
                         .recv_timeout(Duration::from_millis(10))
-                        .map(|event| (event, None, None));
+                        .map(|event| (event, None, None, 0, None));
                 }
                 Self::Routed { receiver, .. } => {
                     match receiver.recv_timeout(Duration::from_millis(10)) {
                         Ok(route) if route.client == client => {
-                            return Ok((route.event, route.target_window, route.delivery));
+                            return Ok((
+                                route.event,
+                                route.target_window,
+                                route.xi_event_type,
+                                route.xi_transition_mask,
+                                route.delivery,
+                            ));
                         }
                         // Drop one misaddressed route, then let the writer loop
                         // observe its stop flag before it receives again.
@@ -4182,12 +4385,14 @@ fn spawn_x11_input_event_writer(
     let writer_stop = stop.clone();
     let thread = std::thread::spawn(move || {
         let mut focus_sent_to = None;
+        let mut pointer_sent_to = None;
         while !writer_stop.load(Ordering::Acquire) {
-            let (event, target_window, delivery) = match receiver.recv_timeout(client) {
-                Ok(event) => event,
-                Err(RecvTimeoutError::Timeout) => continue,
-                Err(RecvTimeoutError::Disconnected) => return Ok(()),
-            };
+            let (event, target_window, xi_event_type, xi_transition_mask, delivery) =
+                match receiver.recv_timeout(client) {
+                    Ok(event) => event,
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => return Ok(()),
+                };
             let focused_window = core_event_selections
                 .lock()
                 .map_err(|_| X11SetupSocketError::new("X11 core event selection lock poisoned"))?
@@ -4204,7 +4409,21 @@ fn spawn_x11_input_event_writer(
                 );
             }
             let root = XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1);
-            let delivered_focus = target_window.unwrap_or(focused_window);
+            let delivered_window = match event {
+                XAuthorityInputEvent::Key(_) => target_window.unwrap_or(focused_window),
+                XAuthorityInputEvent::Pointer(pointer) => target_window.unwrap_or(
+                    *surface_windows
+                        .lock()
+                        .map_err(|_| {
+                            X11SetupSocketError::new("X11 surface/window map lock poisoned")
+                        })?
+                        .get(&pointer.surface)
+                        .ok_or_else(|| {
+                            X11SetupSocketError::new("X11 pointer target surface is unknown")
+                        })?,
+                ),
+            };
+            let delivered_focus = delivered_window;
             let sequence = sequence.load(Ordering::Acquire);
             let record = encode_x_client_event(
                 byte_order,
@@ -4215,7 +4434,7 @@ fn spawn_x11_input_event_writer(
                         keycode: event.keycode,
                         time: event.time_msec,
                         root,
-                        event: target_window.unwrap_or(focused_window),
+                        event: delivered_window,
                         state: event.state,
                     },
                     XAuthorityInputEvent::Pointer(XAuthorityPointerEvent {
@@ -4290,6 +4509,50 @@ fn spawn_x11_input_event_writer(
                 let mut stream = stream
                     .lock()
                     .map_err(|_| X11SetupSocketError::new("X11 output socket lock poisoned"))?;
+                let transition = match event {
+                    XAuthorityInputEvent::Key(_) if focus_sent_to != Some(delivered_window) => {
+                        Some((focus_sent_to, 10, 9))
+                    }
+                    XAuthorityInputEvent::Pointer(_)
+                        if pointer_sent_to != Some(delivered_window) =>
+                    {
+                        Some((pointer_sent_to, 8, 7))
+                    }
+                    _ => None,
+                };
+                if let Some((previous, out_type, in_type)) = transition {
+                    if let Some(previous) = previous
+                        && xi_transition_mask & (1 << out_type) != 0
+                    {
+                        stream
+                            .write_all(&encode_xi_crossing_event(
+                                byte_order, sequence, out_type, event, previous,
+                            ))
+                            .map_err(|error| {
+                                X11SetupSocketError::new(format!(
+                                    "failed to write XI2 leave/focus-out event: {error}"
+                                ))
+                            })?;
+                    }
+                    if xi_transition_mask & (1 << in_type) != 0 {
+                        stream
+                            .write_all(&encode_xi_crossing_event(
+                                byte_order,
+                                sequence,
+                                in_type,
+                                event,
+                                delivered_window,
+                            ))
+                            .map_err(|error| {
+                                X11SetupSocketError::new(format!(
+                                    "failed to write XI2 enter/focus-in event: {error}"
+                                ))
+                            })?;
+                    }
+                    if matches!(event, XAuthorityInputEvent::Pointer(_)) {
+                        pointer_sent_to = Some(delivered_window);
+                    }
+                }
                 if matches!(event, XAuthorityInputEvent::Key(_))
                     && focus_sent_to != Some(delivered_focus)
                 {
@@ -4313,6 +4576,20 @@ fn spawn_x11_input_event_writer(
                 stream.write_all(&record).map_err(|error| {
                     X11SetupSocketError::new(format!("failed to write X11 input event: {error}"))
                 })?;
+                if let Some(event_type) = xi_event_type {
+                    let generic = encode_xi_device_event(
+                        byte_order,
+                        sequence,
+                        event_type,
+                        event,
+                        delivered_window,
+                    );
+                    stream.write_all(&generic).map_err(|error| {
+                        X11SetupSocketError::new(format!(
+                            "failed to write XI2 generic event: {error}"
+                        ))
+                    })?;
+                }
                 stream.flush().map_err(|error| {
                     X11SetupSocketError::new(format!("failed to flush X11 input event: {error}"))
                 })
@@ -4368,6 +4645,8 @@ mod routing_tests {
                 }
                 .into(),
                 target_window: None,
+                xi_event_type: None,
+                xi_transition_mask: 0,
                 delivery: None,
             })
             .unwrap();
@@ -4382,6 +4661,8 @@ mod routing_tests {
                 }
                 .into(),
                 target_window: None,
+                xi_event_type: None,
+                xi_transition_mask: 0,
                 delivery: None,
             })
             .unwrap();
@@ -4401,6 +4682,8 @@ mod routing_tests {
                     time_msec: 2,
                 }),
                 None,
+                None,
+                0,
                 None,
             )
         );
@@ -4473,6 +4756,8 @@ mod routing_tests {
                 client,
                 event: input,
                 target_window: None,
+                xi_event_type: None,
+                xi_transition_mask: 0,
                 delivery: None,
             })
             .unwrap();
@@ -4488,6 +4773,8 @@ mod routing_tests {
                 client,
                 event: input,
                 target_window: None,
+                xi_event_type: None,
+                xi_transition_mask: 0,
                 delivery: None,
             }
         );
@@ -4521,6 +4808,8 @@ mod routing_tests {
                 client,
                 event: input,
                 target_window: None,
+                xi_event_type: None,
+                xi_transition_mask: 0,
                 delivery: None,
             })
             .unwrap();
@@ -4548,6 +4837,8 @@ mod routing_tests {
                     }
                     .into(),
                     target_window: None,
+                    xi_event_type: None,
+                    xi_transition_mask: 0,
                     delivery: None,
                 })
                 .unwrap();
@@ -4585,6 +4876,8 @@ mod routing_tests {
                 }
                 .into(),
                 target_window: None,
+                xi_event_type: None,
+                xi_transition_mask: 0,
                 delivery: Some(delivery),
             })
             .unwrap();
@@ -4636,6 +4929,12 @@ mod routing_tests {
             )
             .unwrap();
         broker
+            .registry
+            .input_authority
+            .lock()
+            .unwrap()
+            .select_xi_events(namespace, grabber.raw(), grab_window, &[(1, vec![1 << 2])]);
+        broker
             .routed_input_sender()
             .send(XAuthorityRoutedInput {
                 request: RoutedInputRequest {
@@ -4662,6 +4961,7 @@ mod routing_tests {
         let routed = grab_channels.input.recv().unwrap();
         assert_eq!(routed.client, grabber);
         assert_eq!(routed.target_window, Some(grab_window));
+        assert_eq!(routed.xi_event_type, Some(2));
     }
 
     #[test]
@@ -4725,6 +5025,58 @@ mod routing_tests {
             .unwrap();
         assert_eq!(broker.route_pending(), Ok(1));
         assert_eq!(channels.input.recv().unwrap().client, client);
+    }
+
+    #[test]
+    fn xi2_device_event_uses_xge_header_and_fp1616_local_coordinates() {
+        let bytes = encode_xi_device_event(
+            XByteOrder::LittleEndian,
+            7,
+            6,
+            XAuthorityInputEvent::Pointer(XAuthorityPointerEvent {
+                kind: XAuthorityPointerEventKind::Motion,
+                surface: SurfaceId::new(1, 1),
+                root_x: 11,
+                root_y: 12,
+                event_x: 3,
+                event_y: -4,
+                state: 5,
+                time_msec: 9,
+            }),
+            XResourceId::new(0x200001, 1),
+        );
+        assert_eq!(bytes.len(), 80);
+        assert_eq!(bytes[0], 35);
+        assert_eq!(bytes[1], crate::X_INPUT_MAJOR_OPCODE);
+        assert_eq!(u16::from_le_bytes([bytes[8], bytes[9]]), 6);
+        assert_eq!(u16::from_le_bytes([bytes[10], bytes[11]]), 2);
+        assert_eq!(
+            i32::from_le_bytes(bytes[40..44].try_into().unwrap()),
+            3 << 16
+        );
+        assert_eq!(
+            i32::from_le_bytes(bytes[44..48].try_into().unwrap()),
+            -4 << 16
+        );
+        let crossing = encode_xi_crossing_event(
+            XByteOrder::LittleEndian,
+            8,
+            7,
+            XAuthorityInputEvent::Pointer(XAuthorityPointerEvent {
+                kind: XAuthorityPointerEventKind::Motion,
+                surface: SurfaceId::new(1, 1),
+                root_x: 11,
+                root_y: 12,
+                event_x: 3,
+                event_y: -4,
+                state: 5,
+                time_msec: 9,
+            }),
+            XResourceId::new(0x200001, 1),
+        );
+        assert_eq!(crossing.len(), 72);
+        assert_eq!(u16::from_le_bytes([crossing[8], crossing[9]]), 7);
+        assert_eq!(crossing[48], 1);
     }
 
     #[test]
