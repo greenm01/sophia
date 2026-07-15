@@ -15,9 +15,9 @@ use sophia_x_authority::{
     XAuthorityClientControlAck, XAuthorityClientControlCommand, XAuthorityClientInputDelivery,
     XAuthorityClientSurfaceRoutes, XAuthorityControlCommand, XAuthorityControlOutcome,
     XAuthorityInputDeliveryId, XAuthorityInputDeliveryOutcome, XAuthorityRoutedInput,
-    XCoreKeyboardMapper, XCorePointerMapper, XServerFrontendAdmissionError,
-    XServerFrontendAdmissionPolicy, XServerFrontendAdmissionRequest, XServerFrontendConfig,
-    XServerFrontendRouteBroker, XServerFrontendServiceCommand, XServerFrontendSetupAuthorization,
+    XCoreKeyboardMapper, XServerFrontendAdmissionError, XServerFrontendAdmissionPolicy,
+    XServerFrontendAdmissionRequest, XServerFrontendConfig, XServerFrontendRouteBroker,
+    XServerFrontendServiceCommand, XServerFrontendSetupAuthorization,
     run_x_server_frontend_routed_until_stopped,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -1828,7 +1828,7 @@ fn run_session_loop(
     let mut focus = InputFocusState::new();
     let mut modifiers = XCoreKeyboardMapper::new();
     let mut emergency_chord = EmergencyChordState::armed();
-    let mut pointer = XCorePointerMapper::new();
+    let mut pointer = SessionPointerPlacement::default();
     let mut physical_events = 0usize;
     let mut physical_keys_routed = 0usize;
     let mut physical_pointer_events = 0usize;
@@ -4565,6 +4565,43 @@ struct PhysicalInputRouteReport {
     emergency_exit: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct SessionPointerPlacement {
+    offset: Option<Point>,
+}
+
+fn pointer_offset_for_geometry(raw: Point, geometry: Rect) -> Point {
+    Point {
+        x: f64::from(geometry.x) + f64::from(geometry.width) / 2.0 - raw.x,
+        y: f64::from(geometry.y) + f64::from(geometry.height) / 2.0 - raw.y,
+    }
+}
+
+impl SessionPointerPlacement {
+    fn place(
+        &mut self,
+        raw: Point,
+        focused_surface: Option<SurfaceId>,
+        input_layers: &[LayerSnapshot],
+    ) -> Point {
+        let offset = *self.offset.get_or_insert_with(|| {
+            let Some(geometry) = focused_surface.and_then(|surface| {
+                input_layers
+                    .iter()
+                    .find(|layer| layer.surface == surface)
+                    .map(|layer| layer.geometry)
+            }) else {
+                return Point::default();
+            };
+            pointer_offset_for_geometry(raw, geometry)
+        });
+        Point {
+            x: raw.x + offset.x,
+            y: raw.y + offset.y,
+        }
+    }
+}
+
 fn route_physical_input<P: NonBlockingInputPoller>(
     poller: &mut P,
     focus: &InputFocusState,
@@ -4574,7 +4611,7 @@ fn route_physical_input<P: NonBlockingInputPoller>(
     input_sender: &SyncSender<XAuthorityRoutedInput>,
     modifiers: &mut XCoreKeyboardMapper,
     emergency_chord: &mut EmergencyChordState,
-    pointer: &mut XCorePointerMapper,
+    pointer: &mut SessionPointerPlacement,
     next_input_delivery: &mut u64,
     physical_text_proof: Option<&mut PhysicalTextProof>,
 ) -> Result<PhysicalInputRouteReport, Box<dyn std::error::Error>> {
@@ -4604,7 +4641,7 @@ fn route_input_events(
     input_sender: &SyncSender<XAuthorityRoutedInput>,
     modifiers: &mut XCoreKeyboardMapper,
     emergency_chord: &mut EmergencyChordState,
-    _pointer: &mut XCorePointerMapper,
+    pointer: &mut SessionPointerPlacement,
     next_input_delivery: &mut u64,
     mut physical_text_proof: Option<&mut PhysicalTextProof>,
 ) -> Result<PhysicalInputRouteReport, Box<dyn std::error::Error>> {
@@ -4617,7 +4654,7 @@ fn route_input_events(
         deliveries: Vec::new(),
         emergency_exit: false,
     };
-    for event in events {
+    for mut event in events {
         match event.kind {
             sophia_protocol::InputEventKind::Key { keycode, pressed } => {
                 report.keys_observed = report.keys_observed.saturating_add(1);
@@ -4682,6 +4719,10 @@ fn route_input_events(
             kind @ (sophia_protocol::InputEventKind::PointerMotion
             | sophia_protocol::InputEventKind::PointerButton { .. }) => {
                 report.pointer_events = report.pointer_events.saturating_add(1);
+                if let Some(raw) = event.global_position {
+                    event.global_position =
+                        Some(pointer.place(raw, focus.focused_surface(event.seat), input_layers));
+                }
                 let route = sophia_engine::hit_test_scene_surface_for_input(&event, input_layers);
                 if route.target_surface != focus.focused_surface(event.seat) {
                     continue;
@@ -4782,13 +4823,13 @@ mod tests {
         PersistentCpuScene, PersistentXtermSessionConfig, Rect, Region, Size,
         authority_commit_event_count, center_geometry_without_scaling,
         cpu_frame_matches_visible_output, cpu_frame_submission_ready,
-        layer_snapshots_from_committed, required_wayland_presentation_submission,
-        retain_latest_wayland_presentation, seed_missing_committed_surfaces,
-        successful_primary_exit_ends_session,
+        layer_snapshots_from_committed, pointer_offset_for_geometry,
+        required_wayland_presentation_submission, retain_latest_wayland_presentation,
+        seed_missing_committed_surfaces, successful_primary_exit_ends_session,
     };
     use sophia_protocol::{
-        AuthorityKind, NamespaceCapabilities, NamespaceProfile, SurfaceId, SurfaceTransaction,
-        SurfaceTransactionReadiness,
+        AuthorityKind, NamespaceCapabilities, NamespaceProfile, Point, SurfaceId,
+        SurfaceTransaction, SurfaceTransactionReadiness,
     };
     use sophia_x_authority::{
         X_AUTHORITY_CPU_BUFFER_FORMAT_XRGB8888, XAuthorityCpuBufferSnapshot, XResourceId,
@@ -4807,6 +4848,22 @@ mod tests {
             authority_commit_event_count(&[], &[SurfaceId::new(2, 1)]),
             1
         );
+    }
+
+    #[test]
+    fn physical_pointer_starts_at_focused_surface_center() {
+        let raw = Point { x: -4.0, y: 6.0 };
+        let offset = pointer_offset_for_geometry(
+            raw,
+            Rect {
+                x: 80,
+                y: 60,
+                width: 960,
+                height: 640,
+            },
+        );
+        assert_eq!(raw.x + offset.x, 560.0);
+        assert_eq!(raw.y + offset.y, 380.0);
     }
 
     #[test]
