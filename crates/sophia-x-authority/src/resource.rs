@@ -32,6 +32,7 @@ pub enum XResourceKind {
     GraphicsContext,
     Font,
     Cursor,
+    Fence,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

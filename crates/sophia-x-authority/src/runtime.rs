@@ -812,7 +812,10 @@ impl XAuthorityRuntime {
                 // The reduced frontend does not currently persist client atoms,
                 // colormaps, or GCs in the resource table. Remove any future
                 // record in this range rather than retaining a disconnect leak.
-                XResourceKind::Atom | XResourceKind::Property | XResourceKind::GraphicsContext => {
+                XResourceKind::Atom
+                | XResourceKind::Property
+                | XResourceKind::GraphicsContext
+                | XResourceKind::Fence => {
                     self.resources.remove(record.id);
                 }
             }
@@ -901,6 +904,28 @@ impl XAuthorityRuntime {
     ) -> Result<(), XAuthorityRuntimeError> {
         self.resources
             .lookup(namespace, pixmap, XResourceKind::Pixmap)
+            .map(|_| ())
+            .map_err(Into::into)
+    }
+
+    pub fn create_dri3_fence(
+        &mut self,
+        namespace: NamespaceId,
+        fence: crate::XResourceId,
+        generation: u64,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        self.resources
+            .insert(fence, XResourceKind::Fence, namespace, generation)
+            .map_err(Into::into)
+    }
+
+    pub fn validate_dri3_fence_access(
+        &self,
+        namespace: NamespaceId,
+        fence: crate::XResourceId,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        self.resources
+            .lookup(namespace, fence, XResourceKind::Fence)
             .map(|_| ())
             .map_err(Into::into)
     }

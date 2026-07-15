@@ -1512,6 +1512,35 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
+        XWireRequest::Dri3FenceFromFd {
+            drawable, fence, ..
+        } => {
+            let outputs =
+                if let Err(error) = runtime.validate_drawable_access(context.namespace, drawable) {
+                    vec![XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(drawable.local.raw()).unwrap_or(0),
+                    ))]
+                } else if let Err(error) =
+                    runtime.create_dri3_fence(context.namespace, fence, u64::from(context.sequence))
+                {
+                    vec![XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(fence.local.raw()).unwrap_or(0),
+                    ))]
+                } else {
+                    Vec::new()
+                };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::PresentQueryVersion { .. } => XDispatchResult {
             response: None,
             outputs: vec![XClientOutput::Reply(XClientReply::PresentQueryVersion {

@@ -1976,6 +1976,45 @@ fn dri3_pixmap_from_buffer_requires_one_fd_and_preserves_bounded_metadata() {
 }
 
 #[test]
+fn dri3_fence_from_fd_requires_one_fd_and_registers_authority_identity() {
+    let namespace = NamespaceId::from_raw(45);
+    let request = decode_x11_core_request(
+        context(namespace, 531, XByteOrder::LittleEndian),
+        &dri3_fence_from_fd_request(
+            XByteOrder::LittleEndian,
+            X_SETUP_DEFAULT_ROOT,
+            0x220802,
+            false,
+        ),
+    )
+    .unwrap();
+    assert_eq!(request.required_fd_count(), 1);
+    assert_eq!(
+        request,
+        XWireRequest::Dri3FenceFromFd {
+            drawable: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+            fence: XResourceId::new(0x220802, 1),
+            initially_triggered: false,
+        }
+    );
+
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 3, XByteOrder::LittleEndian, X_DRI3_MAJOR_OPCODE),
+        request,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert!(result.outputs.is_empty());
+    runtime
+        .validate_dri3_fence_access(namespace, XResourceId::new(0x220802, 1))
+        .unwrap();
+}
+
+#[test]
 fn x11_dispatch_advertises_randr_and_replies_to_query_version() {
     let namespace = NamespaceId::from_raw(45);
     let mut runtime = XAuthorityRuntime::new();
@@ -8146,6 +8185,21 @@ fn dri3_pixmap_from_buffer_request(
     push_u16(&mut out, byte_order, stride);
     out.push(depth);
     out.push(bits_per_pixel);
+    out
+}
+
+fn dri3_fence_from_fd_request(
+    byte_order: XByteOrder,
+    drawable: u32,
+    fence: u32,
+    initially_triggered: bool,
+) -> Vec<u8> {
+    let mut out = vec![X_DRI3_MAJOR_OPCODE, X_DRI3_FENCE_FROM_FD_MINOR_OPCODE];
+    push_u16(&mut out, byte_order, 4);
+    push_u32(&mut out, byte_order, drawable);
+    push_u32(&mut out, byte_order, fence);
+    out.push(u8::from(initially_triggered));
+    out.extend_from_slice(&[0; 3]);
     out
 }
 

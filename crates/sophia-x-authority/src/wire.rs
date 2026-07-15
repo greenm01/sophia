@@ -128,6 +128,7 @@ pub const X_DRI3_EXTENSION_NAME: &str = "DRI3";
 pub const X_DRI3_MAJOR_OPCODE: u8 = 137;
 pub const X_DRI3_QUERY_VERSION_MINOR_OPCODE: u8 = 0;
 pub const X_DRI3_PIXMAP_FROM_BUFFER_MINOR_OPCODE: u8 = 2;
+pub const X_DRI3_FENCE_FROM_FD_MINOR_OPCODE: u8 = 4;
 pub const X_PRESENT_EXTENSION_NAME: &str = "Present";
 pub const X_PRESENT_MAJOR_OPCODE: u8 = 138;
 pub const X_PRESENT_FIRST_EVENT: u8 = 120;
@@ -551,6 +552,11 @@ pub enum XWireRequest {
         depth: u8,
         bits_per_pixel: u8,
     },
+    Dri3FenceFromFd {
+        drawable: XResourceId,
+        fence: XResourceId,
+        initially_triggered: bool,
+    },
     PresentQueryVersion {
         major_version: u32,
         minor_version: u32,
@@ -887,6 +893,16 @@ fn decode_dri3(context: XWireClientContext, bytes: &[u8]) -> Result<XWireRequest
                 bits_per_pixel: bytes[23],
             })
         }
+        X_DRI3_FENCE_FROM_FD_MINOR_OPCODE => {
+            require_exact_len(X_DRI3_MAJOR_OPCODE, 16, bytes.len())?;
+            let fence = context.byte_order.u32(&bytes[8..12]);
+            context.validate_new_resource_id(fence)?;
+            Ok(XWireRequest::Dri3FenceFromFd {
+                drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+                fence: XResourceId::new(u64::from(fence), 1),
+                initially_triggered: bytes[12] != 0,
+            })
+        }
         _ => Err(XWireParseError::UnknownOpcode(bytes[1])),
     }
 }
@@ -894,7 +910,7 @@ fn decode_dri3(context: XWireClientContext, bytes: &[u8]) -> Result<XWireRequest
 impl XWireRequest {
     pub const fn required_fd_count(&self) -> usize {
         match self {
-            Self::Dri3PixmapFromBuffer { .. } => 1,
+            Self::Dri3PixmapFromBuffer { .. } | Self::Dri3FenceFromFd { .. } => 1,
             _ => 0,
         }
     }
