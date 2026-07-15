@@ -70,7 +70,7 @@ if [[ "${observed[schema]:-}" == "7" || "${observed[schema]:-}" == "8" || "${obs
     expected_keys+=(wm_policy wm_requests wm_committed wm_restarts wm_degraded)
 fi
 if [[ "${observed[schema]:-}" == "12" ]]; then
-    expected_keys+=(namespace_profile output_update output_notifications)
+    expected_keys+=(namespace_profile output_update output_notifications surface_resize)
 fi
 if [[ "${#observed[@]}" -ne "${#expected_keys[@]}" ]]; then
     echo "persistent live-session evidence has an unknown or missing field" >&2
@@ -93,9 +93,15 @@ fi
 if [[ "${observed[schema]}" == "12" ]]; then
     [[ "${observed[namespace_profile]}" == "classic_shared" || "${observed[namespace_profile]}" == "confined" ]]
     [[ "${observed[output_update]}" == "applied" || "${observed[output_update]}" == "disabled" ]]
+    [[ "${observed[surface_resize]}" == "committed" || "${observed[surface_resize]}" == "disabled" ]]
     if [[ "${observed[output_update]}" == "applied" ]] \
         && [[ "$(grep -Ec '^sophia_live_output_update schema=2 status=applied width=[1-9][0-9]* height=[1-9][0-9]* notifications=[1-9][0-9]*$' "$EVIDENCE_FILE" || true)" -ne 1 ]]; then
         echo "persistent live-session evidence is missing its applied output update" >&2
+        exit 1
+    fi
+    if [[ "${observed[surface_resize]}" == "committed" ]] \
+        && [[ "$(grep -Ec '^sophia_live_resize schema=1 status=committed transaction=[1-9][0-9]* surface=[1-9][0-9]* width=[1-9][0-9]* height=[1-9][0-9]* configure_ack=true pixels=true$' "$EVIDENCE_FILE" || true)" -ne 1 ]]; then
+        echo "persistent live-session evidence is missing committed resize pixels" >&2
         exit 1
     fi
 fi

@@ -24,6 +24,10 @@ verify_profile() {
         echo "Milestone 3 evidence requires delivered RandR update records: $evidence" >&2
         exit 1
     fi
+    if [[ " $completion " != *" surface_resize=committed "* ]]; then
+        echo "Milestone 3 evidence requires a committed configure-plus-pixels resize: $evidence" >&2
+        exit 1
+    fi
 }
 
 verify_profile "$CLASSIC_EVIDENCE" classic_shared

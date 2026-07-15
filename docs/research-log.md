@@ -847,3 +847,11 @@ startup, composition, input-flush, presentation, resize, and cleanup checks.
 The output-update acknowledgement now also carries the number of RandR records
 queued to live subscribers. Schema 12 retains that count, and promotion rejects
 an accepted topology update that reached no X11 client.
+
+The paired runner now also requests a deterministic one-shot X11 surface
+resize after both terminal surfaces have published. The live layout sends the
+client-targeted ConfigureSurface command, validates the matching control
+acknowledgement, and keeps the new geometry quarantined until a transaction
+with matching resized pixels arrives. Schema 12 reports `surface_resize` only
+after that commit; the promotion verifier requires the configure acknowledgement
+and pixels marker in both namespace profiles.

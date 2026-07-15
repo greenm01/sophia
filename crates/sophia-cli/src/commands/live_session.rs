@@ -630,6 +630,7 @@ struct PersistentXtermSessionConfig {
     namespace_capabilities: NamespaceCapabilities,
     xkb_config: sophia_x_authority::XkbRmlvoConfig,
     inject_output_size: Option<Size>,
+    inject_surface_resize: Option<Size>,
 }
 
 impl PersistentXtermSessionConfig {
@@ -690,6 +691,10 @@ impl PersistentXtermSessionConfig {
         };
         xkb_config.validate()?;
         let inject_output_size = arg_value(args, "--inject-output-size")
+            .as_deref()
+            .map(parse_output_size)
+            .transpose()?;
+        let inject_surface_resize = arg_value(args, "--inject-surface-resize")
             .as_deref()
             .map(parse_output_size)
             .transpose()?;
@@ -783,6 +788,7 @@ impl PersistentXtermSessionConfig {
             namespace_capabilities: NamespaceCapabilities::NONE,
             xkb_config,
             inject_output_size,
+            inject_surface_resize,
         })
     }
 
@@ -1747,6 +1753,8 @@ fn run_session_loop(
     let mut focused_client_ready = wm_session.is_some();
     let mut focused_client_control: Option<(TransactionId, SurfaceId)> = None;
     let mut next_focus_control_transaction = 1_000_000u64;
+    let mut resize_proof: Option<(TransactionId, SurfaceId, Size)> = None;
+    let mut resize_proof_complete = false;
     let mut key_observed_reported = false;
     let mut key_routed_reported = false;
     let mut max_compose = Duration::ZERO;
@@ -2080,6 +2088,20 @@ fn run_session_loop(
                 let removed_surfaces = batch.removed_surfaces.clone();
                 let _ = layout.observe_authority_batch(&batch);
                 let mut wm_update = layout.resolve_pending();
+                if !resize_proof_complete
+                    && let Some((transaction, surface, size)) = resize_proof
+                    && layout.pending.is_none()
+                    && layout.resize.committed_size(surface) == Some(size)
+                {
+                    println!(
+                        "sophia_live_resize schema=1 status=committed transaction={} surface={} width={} height={} configure_ack=true pixels=true",
+                        transaction.raw(),
+                        surface.index(),
+                        size.width,
+                        size.height,
+                    );
+                    resize_proof_complete = true;
+                }
                 if wm_update.is_none() {
                     wm_update = layout.expire_pending(control_sender, control_ack_receiver)?;
                 }
@@ -2094,6 +2116,51 @@ fn run_session_loop(
                     if let Some(proposal) = wm_session.poll_restart(&layout, output)? {
                         wm_update = layout.stage(proposal, control_sender, control_ack_receiver)?;
                     }
+                }
+                if resize_proof.is_none()
+                    && let Some(size) = config.inject_surface_resize
+                    && layout.layers.len() >= if config.secondary_terminal { 2 } else { 1 }
+                    && layout.pending.is_none()
+                {
+                    let surface = layout
+                        .layers
+                        .keys()
+                        .next()
+                        .copied()
+                        .ok_or("surface resize proof has no target")?;
+                    let transaction = TransactionId::from_raw(2_000_000);
+                    let mut layers = layout.layers.values().cloned().collect::<Vec<_>>();
+                    let layer = layers
+                        .iter_mut()
+                        .find(|layer| layer.surface == surface)
+                        .ok_or("surface resize proof lost its target")?;
+                    layer.geometry.width = size.width;
+                    layer.geometry.height = size.height;
+                    let proposal = LiveWmProposal {
+                        transaction,
+                        layers,
+                        requested_sizes: BTreeMap::from([(surface, size)]),
+                        focus: None,
+                        timeout: Duration::from_secs(2),
+                        update: WmTransactionUpdate {
+                            commit: TransactionCommit {
+                                transaction,
+                                outcome: TransactionOutcome::Committed,
+                                applied_surfaces: vec![surface],
+                            },
+                            ipc_error: None,
+                        },
+                        moved_surfaces: 0,
+                    };
+                    wm_update = layout.stage(proposal, control_sender, control_ack_receiver)?;
+                    resize_proof = Some((transaction, surface, size));
+                    println!(
+                        "sophia_live_resize schema=1 status=requested transaction={} surface={} width={} height={}",
+                        transaction.raw(),
+                        surface.index(),
+                        size.width,
+                        size.height,
+                    );
                 }
                 let batch = layout.projected_batch(&batch);
                 scene.observe(&batch)?;
@@ -2503,6 +2570,11 @@ fn run_session_loop(
         )
         .into());
     }
+    if config.inject_surface_resize.is_some() && !resize_proof_complete {
+        return Err(
+            "persistent live session did not commit configured surface resize pixels".into(),
+        );
+    }
     if let Some(wm_session) = wm_session.as_ref()
         && wm_session.committed == 0
     {
@@ -2522,7 +2594,7 @@ fn run_session_loop(
         PersistentNativeScanout::persistent_render_metrics,
     );
     println!(
-        "sophia_live_session schema=12 status=bounded_complete display={} elapsed_msec={} session_ticks={} authority_batches={} authority_transactions={} authority_queue_capacity={} authority_batches_dropped=0 backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_max_nonzero_pixel_bytes={} cpu_nonzero_frames={} cpu_checksum={} cpu_max_compose_msec={} injected_input={} input_events_expected={} input_events_flushed={} input_flush_latency_msec={} input_pixel_change={} input_text_match={} input_presented_latency_msec={} input_dispatch_max_gap_msec={} input_queue_max_depth={} input_queue_dwell_max_msec={} physical_events={} physical_keys_routed={} pointer_pixel_change={} physical_pointer_events={} physical_pointer_routed={} pointer_proof={} native_presentation={} native_submissions={} native_submit_deferred={} native_submit_failures={} native_retirements={} native_retire_failures={} native_max_in_flight_ticks={} native_max_submit_to_page_flip_msec={} native_max_upload_msec={} native_target_creations={} native_target_recreations={} native_pipeline_creations={} native_frame_uploads={} native_callback_accepted={} native_callback_rejected={} native_callback_queue_saturated={} native_nonzero_exports={} native_export_attempts={} native_in_flight={} native_cleanup_pending={} physical_input={} wm_policy={} wm_requests={} wm_committed={} wm_restarts={} wm_degraded={} namespace_profile={} output_update={} output_notifications={}",
+        "sophia_live_session schema=12 status=bounded_complete display={} elapsed_msec={} session_ticks={} authority_batches={} authority_transactions={} authority_queue_capacity={} authority_batches_dropped=0 backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_max_nonzero_pixel_bytes={} cpu_nonzero_frames={} cpu_checksum={} cpu_max_compose_msec={} injected_input={} input_events_expected={} input_events_flushed={} input_flush_latency_msec={} input_pixel_change={} input_text_match={} input_presented_latency_msec={} input_dispatch_max_gap_msec={} input_queue_max_depth={} input_queue_dwell_max_msec={} physical_events={} physical_keys_routed={} pointer_pixel_change={} physical_pointer_events={} physical_pointer_routed={} pointer_proof={} native_presentation={} native_submissions={} native_submit_deferred={} native_submit_failures={} native_retirements={} native_retire_failures={} native_max_in_flight_ticks={} native_max_submit_to_page_flip_msec={} native_max_upload_msec={} native_target_creations={} native_target_recreations={} native_pipeline_creations={} native_frame_uploads={} native_callback_accepted={} native_callback_rejected={} native_callback_queue_saturated={} native_nonzero_exports={} native_export_attempts={} native_in_flight={} native_cleanup_pending={} physical_input={} wm_policy={} wm_requests={} wm_committed={} wm_restarts={} wm_degraded={} namespace_profile={} output_update={} output_notifications={} surface_resize={}",
         config.display,
         started.elapsed().as_millis(),
         session_ticks,
@@ -2636,6 +2708,11 @@ fn run_session_loop(
             "disabled"
         },
         output_notifications,
+        if resize_proof_complete {
+            "committed"
+        } else {
+            "disabled"
+        },
     );
     if let (Some(runtime), Some(native_scanout)) = (runtime.as_ref(), native_scanout.as_ref())
         && (native_scanout.submissions == 0
@@ -4629,14 +4706,23 @@ mod tests {
 
     #[test]
     fn live_x_output_injection_is_bounded_and_explicit() {
-        let config =
-            PersistentXtermSessionConfig::from_args(&["--inject-output-size=1600x900".to_owned()])
-                .unwrap();
+        let config = PersistentXtermSessionConfig::from_args(&[
+            "--inject-output-size=1600x900".to_owned(),
+            "--inject-surface-resize=960x640".to_owned(),
+        ])
+        .unwrap();
         assert_eq!(
             config.inject_output_size,
             Some(Size {
                 width: 1600,
                 height: 900
+            })
+        );
+        assert_eq!(
+            config.inject_surface_resize,
+            Some(Size {
+                width: 960,
+                height: 640
             })
         );
         assert!(
