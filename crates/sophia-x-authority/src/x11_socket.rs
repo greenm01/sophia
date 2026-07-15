@@ -11,8 +11,10 @@ use std::sync::mpsc::{
 #[cfg(unix)]
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
-    io::{ErrorKind, Read, Write},
+    io::{ErrorKind, IoSliceMut, Read, Write},
+    mem::MaybeUninit,
     num::NonZeroUsize,
+    os::fd::OwnedFd,
     panic::{AssertUnwindSafe, catch_unwind},
     path::{Path, PathBuf},
     sync::{
@@ -1145,6 +1147,8 @@ pub struct X11CoreDispatchTrace<'a> {
     pub parse_error: Option<String>,
     pub result: &'a XDispatchResult,
     pub cpu_buffer_update: Option<&'a XAuthorityCpuBufferUpdate>,
+    pub received_fd_count: usize,
+    pub received_fds: &'a [OwnedFd],
 }
 
 #[cfg(unix)]
@@ -3691,7 +3695,10 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
     }
 
     let result = (|| {
-        while let Some((major_opcode, request)) = read_x11_core_request(stream, setup.byte_order)? {
+        while let Some(received) = read_x11_core_request(stream, setup.byte_order)? {
+            let major_opcode = received.major_opcode;
+            let request = received.bytes;
+            let received_fds = received.fds;
             loop {
                 let server_owner = state
                     .runtime
@@ -3725,6 +3732,13 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 &request,
             ) {
                 Ok(request) => {
+                    if request.required_fd_count() != received_fds.len() {
+                        return Err(X11SetupSocketError::new(format!(
+                            "X11 request opcode {major_opcode} required {} file descriptors but received {}",
+                            request.required_fd_count(),
+                            received_fds.len()
+                        )));
+                    }
                     let event_selection = x11_core_event_selection_update(&request);
                     let hierarchy_create = match &request {
                         crate::XWireRequest::CreateWindow { packet, parent, .. } => {
@@ -3992,6 +4006,8 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 parse_error,
                 result: &output,
                 cpu_buffer_update: cpu_buffer_update.as_ref(),
+                received_fd_count: received_fds.len(),
+                received_fds: &received_fds,
             })?;
             let mut output_stream = output_stream
                 .lock()
@@ -4074,6 +4090,8 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
             parse_error: None,
             result: &cleanup,
             cpu_buffer_update: None,
+            received_fd_count: 0,
+            received_fds: &[],
         })
     };
     let admission_result = admission_lease.as_mut().map_or(Ok(()), |lease| {
@@ -5562,34 +5580,93 @@ pub fn read_x11_setup_request(
 }
 
 #[cfg(unix)]
-fn read_x11_core_request(
+#[derive(Debug)]
+pub struct X11ReceivedCoreRequest {
+    pub major_opcode: u8,
+    pub bytes: Vec<u8>,
+    pub fds: Vec<OwnedFd>,
+}
+
+pub fn read_x11_core_request(
     stream: &mut UnixStream,
     byte_order: crate::XByteOrder,
-) -> Result<Option<(u8, Vec<u8>)>, X11SetupSocketError> {
+) -> Result<Option<X11ReceivedCoreRequest>, X11SetupSocketError> {
     let mut header = [0; 4];
-    match stream.read_exact(&mut header) {
-        Ok(()) => {}
-        Err(error)
+    let mut ancillary_space = [MaybeUninit::uninit();
+        rustix::cmsg_space!(ScmRights(sophia_protocol::DMA_BUF_MAX_PLANES))];
+    let mut ancillary = rustix::net::RecvAncillaryBuffer::new(&mut ancillary_space);
+    let mut iov = [IoSliceMut::new(&mut header)];
+    let received = match rustix::net::recvmsg(
+        &*stream,
+        &mut iov,
+        &mut ancillary,
+        rustix::net::RecvFlags::CMSG_CLOEXEC,
+    ) {
+        Ok(received) => received,
+        Err(error) => {
+            let error = std::io::Error::from(error);
             if matches!(
                 error.kind(),
                 ErrorKind::UnexpectedEof
                     | ErrorKind::ConnectionReset
                     | ErrorKind::TimedOut
                     | ErrorKind::WouldBlock
-            ) =>
-        {
-            return Ok(None);
-        }
-        Err(error) => {
+            ) {
+                return Ok(None);
+            }
             return Err(X11SetupSocketError::new(format!(
                 "failed to read X11 request header: {error}"
             )));
+        }
+    };
+    if received.bytes == 0 {
+        return Ok(None);
+    }
+    if received.flags.contains(rustix::net::ReturnFlags::CTRUNC) {
+        return Err(X11SetupSocketError::new(
+            "X11 request carried too many ancillary file descriptors",
+        ));
+    }
+    let mut fds = Vec::new();
+    for message in ancillary.drain() {
+        if let rustix::net::RecvAncillaryMessage::ScmRights(rights) = message {
+            fds.extend(rights);
+        }
+    }
+    if fds.len() > sophia_protocol::DMA_BUF_MAX_PLANES {
+        return Err(X11SetupSocketError::new(
+            "X11 request carried too many file descriptors",
+        ));
+    }
+    if received.bytes < header.len() {
+        match stream.read_exact(&mut header[received.bytes..]) {
+            Ok(()) => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    ErrorKind::UnexpectedEof
+                        | ErrorKind::ConnectionReset
+                        | ErrorKind::TimedOut
+                        | ErrorKind::WouldBlock
+                ) =>
+            {
+                return Ok(None);
+            }
+            Err(error) => {
+                return Err(X11SetupSocketError::new(format!(
+                    "failed to read X11 request header: {error}"
+                )));
+            }
         }
     }
 
     let length = usize::from(byte_order.u16(&header[2..4])) * 4;
     if length < 4 {
-        return Ok(Some((header[0], header.to_vec())));
+        return Ok(Some(X11ReceivedCoreRequest {
+            major_opcode: header[0],
+            bytes: header.to_vec(),
+            fds,
+        }));
     }
     let max_len = X_SETUP_MAX_AUTH_FIELD_LEN * 64;
     if length > max_len {
@@ -5605,5 +5682,9 @@ fn read_x11_core_request(
         X11SetupSocketError::new(format!("failed to read X11 request payload: {error}"))
     })?;
 
-    Ok(Some((header[0], request)))
+    Ok(Some(X11ReceivedCoreRequest {
+        major_opcode: header[0],
+        bytes: request,
+        fds,
+    }))
 }

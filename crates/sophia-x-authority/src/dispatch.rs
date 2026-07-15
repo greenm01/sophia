@@ -1431,6 +1431,96 @@ pub fn dispatch_x11_wire_request(
             })],
             metadata_candidates: Vec::new(),
         },
+        XWireRequest::Dri3QueryVersion { .. } => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::Dri3QueryVersion {
+                sequence: context.sequence,
+                major_version: 1,
+                minor_version: 2,
+            })],
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::Dri3PixmapFromBuffer {
+            pixmap,
+            drawable,
+            size_bytes,
+            width,
+            height,
+            stride,
+            depth,
+            bits_per_pixel,
+        } => {
+            let format = match (depth, bits_per_pixel) {
+                (24, 32) => Some(sophia_protocol::DRM_FORMAT_XRGB8888),
+                (32, 32) => Some(sophia_protocol::DRM_FORMAT_ARGB8888),
+                _ => None,
+            };
+            let descriptor_valid = format.is_some_and(|format| {
+                let descriptor = sophia_protocol::DmaBufDescriptor {
+                    handle: sophia_protocol::BufferHandle::from_raw(pixmap.local.raw()),
+                    size: sophia_protocol::Size {
+                        width: i32::from(width),
+                        height: i32::from(height),
+                    },
+                    format,
+                    modifier: sophia_protocol::DRM_FORMAT_MOD_INVALID,
+                    plane_count: 1,
+                    planes: [
+                        Some(sophia_protocol::DmaBufPlaneDescriptor {
+                            offset: 0,
+                            stride: u32::from(stride),
+                        }),
+                        None,
+                        None,
+                        None,
+                    ],
+                };
+                descriptor.validate().is_ok()
+                    && u64::from(stride).saturating_mul(u64::from(height)) <= u64::from(size_bytes)
+            });
+            let outputs = if !descriptor_valid {
+                vec![XClientOutput::Error(crate::XClientError {
+                    code: XErrorCode::BadValue,
+                    sequence: context.sequence,
+                    resource_id: u32::try_from(pixmap.local.raw()).unwrap_or(0),
+                    minor_code: u16::from(crate::X_DRI3_PIXMAP_FROM_BUFFER_MINOR_OPCODE),
+                    major_code: context.major_opcode,
+                })]
+            } else if let Err(error) = runtime.validate_drawable_access(context.namespace, drawable)
+            {
+                vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(drawable.local.raw()).unwrap_or(0),
+                ))]
+            } else if let Err(error) =
+                runtime.create_pixmap(context.namespace, pixmap, u64::from(context.sequence))
+            {
+                vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(pixmap.local.raw()).unwrap_or(0),
+                ))]
+            } else {
+                Vec::new()
+            };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::PresentQueryVersion { .. } => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::PresentQueryVersion {
+                sequence: context.sequence,
+                major_version: 1,
+                minor_version: 2,
+            })],
+            metadata_candidates: Vec::new(),
+        },
         XWireRequest::RandrQueryVersion { .. } => XDispatchResult {
             response: None,
             outputs: vec![XClientOutput::Reply(XClientReply::RandrQueryVersion {
@@ -2451,6 +2541,18 @@ fn extension_query_result(name: &str) -> XExtensionQueryResult {
             present: true,
             major_opcode: X_MIT_SHM_MAJOR_OPCODE,
             first_event: crate::X_MIT_SHM_FIRST_EVENT,
+            first_error: 0,
+        },
+        crate::X_DRI3_EXTENSION_NAME => XExtensionQueryResult {
+            present: true,
+            major_opcode: crate::X_DRI3_MAJOR_OPCODE,
+            first_event: 0,
+            first_error: 0,
+        },
+        crate::X_PRESENT_EXTENSION_NAME => XExtensionQueryResult {
+            present: true,
+            major_opcode: crate::X_PRESENT_MAJOR_OPCODE,
+            first_event: crate::X_PRESENT_FIRST_EVENT,
             first_error: 0,
         },
         X_RANDR_EXTENSION_NAME => XExtensionQueryResult {

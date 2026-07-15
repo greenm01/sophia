@@ -276,6 +276,16 @@ pub enum XClientReply {
         shared_pixmaps: bool,
         pixmap_format: u8,
     },
+    Dri3QueryVersion {
+        sequence: u16,
+        major_version: u32,
+        minor_version: u32,
+    },
+    PresentQueryVersion {
+        sequence: u16,
+        major_version: u32,
+        minor_version: u32,
+    },
     RandrQueryVersion {
         sequence: u16,
         major_version: u32,
@@ -730,6 +740,22 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             put_u16(byte_order, &mut out[8..10], major_version);
             put_u16(byte_order, &mut out[10..12], minor_version);
             out[16] = pixmap_format;
+            out
+        }
+        XClientReply::Dri3QueryVersion {
+            sequence,
+            major_version,
+            minor_version,
+        }
+        | XClientReply::PresentQueryVersion {
+            sequence,
+            major_version,
+            minor_version,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            put_u32(byte_order, &mut out[8..12], major_version);
+            put_u32(byte_order, &mut out[12..16], minor_version);
             out
         }
         XClientReply::RandrQueryVersion {

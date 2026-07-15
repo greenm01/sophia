@@ -8,6 +8,41 @@ use sophia_protocol::{
 };
 use sophia_x_authority::*;
 
+#[cfg(unix)]
+#[test]
+fn x11_request_reader_receives_bounded_scm_rights_with_the_request_header() {
+    use std::fs::File;
+    use std::io::IoSlice;
+    use std::mem::MaybeUninit;
+    use std::os::fd::AsFd;
+    use std::os::unix::net::UnixStream;
+
+    let (sender, mut receiver) = UnixStream::pair().unwrap();
+    let request =
+        extension_query_version_request(XByteOrder::LittleEndian, X_DRI3_MAJOR_OPCODE, 1, 2);
+    let file = File::open("/dev/null").unwrap();
+    let borrowed = [file.as_fd()];
+    let mut space = [MaybeUninit::uninit();
+        rustix::cmsg_space!(ScmRights(sophia_protocol::DMA_BUF_MAX_PLANES))];
+    let mut ancillary = rustix::net::SendAncillaryBuffer::new(&mut space);
+    assert!(ancillary.push(rustix::net::SendAncillaryMessage::ScmRights(&borrowed)));
+    let sent = rustix::net::sendmsg(
+        sender,
+        &[IoSlice::new(&request)],
+        &mut ancillary,
+        rustix::net::SendFlags::empty(),
+    )
+    .unwrap();
+    assert_eq!(sent, request.len());
+
+    let received = read_x11_core_request(&mut receiver, XByteOrder::LittleEndian)
+        .unwrap()
+        .unwrap();
+    assert_eq!(received.major_opcode, X_DRI3_MAJOR_OPCODE);
+    assert_eq!(received.bytes, request);
+    assert_eq!(received.fds.len(), 1);
+}
+
 #[test]
 fn mit_shm_completion_uses_the_advertised_extension_event_layout() {
     for byte_order in [XByteOrder::LittleEndian, XByteOrder::BigEndian] {
@@ -1855,6 +1890,89 @@ fn x11_dispatch_advertises_mit_shm_and_replies_to_query_version() {
     assert_eq!(encoded[0][1], 0);
     assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][8..10]), 1);
     assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][10..12]), 2);
+}
+
+#[test]
+fn x11_dispatch_negotiates_standard_dri3_and_present_1_2() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    for (name, opcode, first_event) in [
+        (X_DRI3_EXTENSION_NAME, X_DRI3_MAJOR_OPCODE, 0),
+        (
+            X_PRESENT_EXTENSION_NAME,
+            X_PRESENT_MAJOR_OPCODE,
+            X_PRESENT_FIRST_EVENT,
+        ),
+    ] {
+        let query = decode_x11_core_request(
+            context(namespace, 528, XByteOrder::LittleEndian),
+            &query_extension_request(XByteOrder::LittleEndian, name),
+        )
+        .unwrap();
+        let result = dispatch_x11_wire_request(
+            dispatch_context(namespace, 1, XByteOrder::LittleEndian, 98),
+            query,
+            &mut runtime,
+            &mut atoms,
+            &mut properties,
+        );
+        let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
+        assert_eq!(encoded[0][8], 1);
+        assert_eq!(encoded[0][9], opcode);
+        assert_eq!(encoded[0][10], first_event);
+
+        let version = decode_x11_core_request(
+            context(namespace, 529, XByteOrder::LittleEndian),
+            &extension_query_version_request(XByteOrder::LittleEndian, opcode, 1, 4),
+        )
+        .unwrap();
+        let version = dispatch_x11_wire_request(
+            dispatch_context(namespace, 2, XByteOrder::LittleEndian, opcode),
+            version,
+            &mut runtime,
+            &mut atoms,
+            &mut properties,
+        );
+        let encoded = version.encoded_outputs(XByteOrder::LittleEndian);
+        assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][8..12]), 1);
+        assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][12..16]), 2);
+    }
+}
+
+#[test]
+fn dri3_pixmap_from_buffer_requires_one_fd_and_preserves_bounded_metadata() {
+    let namespace = NamespaceId::from_raw(45);
+    let request = decode_x11_core_request(
+        context(namespace, 530, XByteOrder::LittleEndian),
+        &dri3_pixmap_from_buffer_request(
+            XByteOrder::LittleEndian,
+            0x220801,
+            X_SETUP_DEFAULT_ROOT,
+            64 * 48 * 4,
+            64,
+            48,
+            256,
+            24,
+            32,
+        ),
+    )
+    .unwrap();
+    assert_eq!(request.required_fd_count(), 1);
+    assert_eq!(
+        request,
+        XWireRequest::Dri3PixmapFromBuffer {
+            pixmap: XResourceId::new(0x220801, 1),
+            drawable: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+            size_bytes: 64 * 48 * 4,
+            width: 64,
+            height: 48,
+            stride: 256,
+            depth: 24,
+            bits_per_pixel: 32,
+        }
+    );
 }
 
 #[test]
@@ -7990,6 +8108,44 @@ fn randr_query_version_request(
     push_u16(&mut out, byte_order, 3);
     push_u32(&mut out, byte_order, major_version);
     push_u32(&mut out, byte_order, minor_version);
+    out
+}
+
+fn extension_query_version_request(
+    byte_order: XByteOrder,
+    opcode: u8,
+    major_version: u32,
+    minor_version: u32,
+) -> Vec<u8> {
+    let mut out = vec![opcode, 0];
+    push_u16(&mut out, byte_order, 3);
+    push_u32(&mut out, byte_order, major_version);
+    push_u32(&mut out, byte_order, minor_version);
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dri3_pixmap_from_buffer_request(
+    byte_order: XByteOrder,
+    pixmap: u32,
+    drawable: u32,
+    size_bytes: u32,
+    width: u16,
+    height: u16,
+    stride: u16,
+    depth: u8,
+    bits_per_pixel: u8,
+) -> Vec<u8> {
+    let mut out = vec![X_DRI3_MAJOR_OPCODE, X_DRI3_PIXMAP_FROM_BUFFER_MINOR_OPCODE];
+    push_u16(&mut out, byte_order, 6);
+    push_u32(&mut out, byte_order, pixmap);
+    push_u32(&mut out, byte_order, drawable);
+    push_u32(&mut out, byte_order, size_bytes);
+    push_u16(&mut out, byte_order, width);
+    push_u16(&mut out, byte_order, height);
+    push_u16(&mut out, byte_order, stride);
+    out.push(depth);
+    out.push(bits_per_pixel);
     out
 }
 

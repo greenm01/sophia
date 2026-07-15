@@ -124,6 +124,14 @@ pub const X_INPUT_GET_PROPERTY_MINOR_OPCODE: u8 = 59;
 pub const X_GENERIC_EVENT_EXTENSION_NAME: &str = "Generic Event Extension";
 pub const X_GENERIC_EVENT_MAJOR_OPCODE: u8 = 136;
 pub const X_GENERIC_EVENT_QUERY_VERSION_MINOR_OPCODE: u8 = 0;
+pub const X_DRI3_EXTENSION_NAME: &str = "DRI3";
+pub const X_DRI3_MAJOR_OPCODE: u8 = 137;
+pub const X_DRI3_QUERY_VERSION_MINOR_OPCODE: u8 = 0;
+pub const X_DRI3_PIXMAP_FROM_BUFFER_MINOR_OPCODE: u8 = 2;
+pub const X_PRESENT_EXTENSION_NAME: &str = "Present";
+pub const X_PRESENT_MAJOR_OPCODE: u8 = 138;
+pub const X_PRESENT_FIRST_EVENT: u8 = 120;
+pub const X_PRESENT_QUERY_VERSION_MINOR_OPCODE: u8 = 0;
 
 const X_CREATE_WINDOW_REQ_LEN: usize = 32;
 const X_CHANGE_WINDOW_ATTRIBUTES_REQ_LEN: usize = 12;
@@ -529,6 +537,24 @@ pub enum XWireRequest {
         damage: Vec<Rect>,
     },
     ShmQueryVersion,
+    Dri3QueryVersion {
+        major_version: u32,
+        minor_version: u32,
+    },
+    Dri3PixmapFromBuffer {
+        pixmap: XResourceId,
+        drawable: XResourceId,
+        size_bytes: u32,
+        width: u16,
+        height: u16,
+        stride: u16,
+        depth: u8,
+        bits_per_pixel: u8,
+    },
+    PresentQueryVersion {
+        major_version: u32,
+        minor_version: u32,
+    },
     ShmAttach {
         segment: XResourceId,
         shmid: u32,
@@ -819,8 +845,76 @@ pub fn decode_x11_core_request(
                 minor_version: context.byte_order.u16(&bytes[6..8]),
             })
         }
+        X_DRI3_MAJOR_OPCODE => decode_dri3(context, bytes),
+        X_PRESENT_MAJOR_OPCODE => decode_extension_query_version(
+            context,
+            bytes,
+            X_PRESENT_MAJOR_OPCODE,
+            X_PRESENT_QUERY_VERSION_MINOR_OPCODE,
+            |major_version, minor_version| XWireRequest::PresentQueryVersion {
+                major_version,
+                minor_version,
+            },
+        ),
         other => Err(XWireParseError::UnknownOpcode(other)),
     }
+}
+
+fn decode_dri3(context: XWireClientContext, bytes: &[u8]) -> Result<XWireRequest, XWireParseError> {
+    match bytes[1] {
+        X_DRI3_QUERY_VERSION_MINOR_OPCODE => decode_extension_query_version(
+            context,
+            bytes,
+            X_DRI3_MAJOR_OPCODE,
+            X_DRI3_QUERY_VERSION_MINOR_OPCODE,
+            |major_version, minor_version| XWireRequest::Dri3QueryVersion {
+                major_version,
+                minor_version,
+            },
+        ),
+        X_DRI3_PIXMAP_FROM_BUFFER_MINOR_OPCODE => {
+            require_exact_len(X_DRI3_MAJOR_OPCODE, 24, bytes.len())?;
+            let pixmap = context.byte_order.u32(&bytes[4..8]);
+            context.validate_new_resource_id(pixmap)?;
+            Ok(XWireRequest::Dri3PixmapFromBuffer {
+                pixmap: XResourceId::new(u64::from(pixmap), 1),
+                drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
+                size_bytes: context.byte_order.u32(&bytes[12..16]),
+                width: context.byte_order.u16(&bytes[16..18]),
+                height: context.byte_order.u16(&bytes[18..20]),
+                stride: context.byte_order.u16(&bytes[20..22]),
+                depth: bytes[22],
+                bits_per_pixel: bytes[23],
+            })
+        }
+        _ => Err(XWireParseError::UnknownOpcode(bytes[1])),
+    }
+}
+
+impl XWireRequest {
+    pub const fn required_fd_count(&self) -> usize {
+        match self {
+            Self::Dri3PixmapFromBuffer { .. } => 1,
+            _ => 0,
+        }
+    }
+}
+
+fn decode_extension_query_version(
+    context: XWireClientContext,
+    bytes: &[u8],
+    major_opcode: u8,
+    minor_opcode: u8,
+    request: impl FnOnce(u32, u32) -> XWireRequest,
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(major_opcode, 12, bytes.len())?;
+    if bytes[1] != minor_opcode {
+        return Err(XWireParseError::UnknownOpcode(bytes[1]));
+    }
+    Ok(request(
+        context.byte_order.u32(&bytes[4..8]),
+        context.byte_order.u32(&bytes[8..12]),
+    ))
 }
 
 fn decode_x_input(
