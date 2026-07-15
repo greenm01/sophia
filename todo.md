@@ -28,14 +28,42 @@ compatibility provider; no XLibre integration work is active.
 
 ## Milestone 4: X11 Buffer And Presentation Semantics
 
-- [ ] Make SHM/software readiness, immutability, damage, release, and
-  presentation feedback explicit rather than inferred from drawing traffic.
-- [ ] Implement standard DRI3/Present DMA-BUF handoff with bounded format and
-  plane validation, fences, delayed release, and presentation feedback.
+- [x] Make SHM/software buffer ownership, damage, and release explicit rather
+  than inferred from drawing traffic; retain the established real-client SHM
+  resize and teardown evidence as the software baseline.
+- [x] Decode standard DRI3 `PixmapFromBuffer`/`FenceFromFD` and Present
+  `Pixmap`/`SelectInput`/`QueryCapabilities`, validate bounded descriptors and
+  options, transfer duplicated DMA-BUF and xshmfence FDs into Engine-facing
+  batches, and encode standard Present XGE complete/idle events.
+- [x] Add a safe dynamically loaded xshmfence adapter plus a renderer-private
+  DMA-BUF registry that owns plane FDs and polls acquire fences without
+  blocking; prove pending fences hold submission in external tests.
+- [ ] Connect the observed DMA-BUF/fence registrations to the persistent live
+  renderer path. Hold a Present transaction until its acquire fence signals,
+  preserve the last committed frame on rejection, and submit mixed CPU/GPU
+  scene layers without exposing native objects to the Engine or X authority.
+- [ ] Route real backend page-flip completion through a cloneable frontend
+  protocol router, emit Present Complete before Idle, trigger the idle fence,
+  and retire each imported buffer exactly once.
+- [ ] Implement FD-bearing server replies and standard DRI3 `Open` (then the
+  smallest modifier/multi-plane requests proven necessary by the client
+  trace). This is the next resume point and the current blocker for Mesa/Vulkan
+  clients such as `vkcube`; do not invent a permanent private presentation
+  path.
 - [ ] Keep renderer import, frame scheduling, DRM/KMS, and page-flip retirement
   exclusively in Engine/backend ownership.
 - [ ] Prove slow, stale, rejected, and disconnected buffers preserve the last
   committed good geometry-plus-pixels state and release every resource once.
+- [ ] Automate and retain one software-backed real-client run and one
+  GPU-backed `vkcube` run on the X13 native KMS target, including startup,
+  resize, delayed-fence, failure-recovery, and clean-teardown evidence.
+
+Resume checkpoint: `7828f00` on `master` passes `cargo fmt --check`,
+`git diff --check`, offline metadata, and the full offline workspace test suite.
+Begin by extending the X11 socket output abstraction from byte-only writes to a
+bounded byte-plus-SCM_RIGHTS record, then implement and externally test DRI3
+`Open` against `/usr/share/xcb/dri3.xml` before wiring it to an Engine-selected
+render node.
 
 Exit: one software-backed and one GPU-backed real X11 client pass normal
 startup, resize, presentation, delayed release, failure recovery, and teardown
