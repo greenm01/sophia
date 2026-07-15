@@ -829,3 +829,10 @@ component atoms derived from the configured session RMLVO, and bounded
 transitions emit the standard 32-byte StateNotify record only when the selected
 state detail changed. Focus/hierarchy policy and retained classic/confined
 session evidence remain separate open gates.
+
+Window input routing no longer treats event-mask update order as focus. The
+connection records CreateWindow parent links, mapped state, and ConfigureWindow
+sibling/stack modes. Engine-selected target surfaces begin core propagation at
+their owning window, ancestor selection is bounded against malformed cycles,
+and root focus resolves through the current mapped stacking order. Scene-level
+restack acknowledgement remains an Engine integration/evidence gate.

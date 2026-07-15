@@ -267,6 +267,7 @@ pub enum XWireRequest {
     Authority(XAuthorityRequestPacket),
     CreateWindow {
         packet: XAuthorityRequestPacket,
+        parent: XResourceId,
         background_pixel: Option<u32>,
         event_mask: Option<u32>,
         do_not_propagate_mask: Option<u32>,
@@ -295,6 +296,8 @@ pub enum XWireRequest {
         y: Option<i16>,
         width: Option<u16>,
         height: Option<u16>,
+        sibling: Option<XResourceId>,
+        stack_mode: Option<u8>,
     },
     GetGeometry {
         drawable: XResourceId,
@@ -1400,12 +1403,8 @@ fn decode_configure_window(
     if value_mask & 0x0010 != 0 {
         let _ = next_value();
     }
-    if value_mask & 0x0020 != 0 {
-        let _ = next_value();
-    }
-    if value_mask & 0x0040 != 0 {
-        let _ = next_value();
-    }
+    let sibling = (value_mask & 0x0020 != 0).then(|| XResourceId::new(u64::from(next_value()), 1));
+    let stack_mode = (value_mask & 0x0040 != 0).then(|| next_value() as u8);
 
     Ok(XWireRequest::ConfigureWindow {
         window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
@@ -1414,6 +1413,8 @@ fn decode_configure_window(
         y,
         width,
         height,
+        sibling,
+        stack_mode,
     })
 }
 
@@ -2284,6 +2285,7 @@ fn decode_create_window(
                 generation: 1,
             },
         },
+        parent: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
         background_pixel,
         event_mask,
         do_not_propagate_mask,

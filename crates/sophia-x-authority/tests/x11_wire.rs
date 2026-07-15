@@ -276,6 +276,7 @@ fn x11_core_decoder_maps_create_and_map_to_authority_packets() {
         background_pixel,
         event_mask,
         do_not_propagate_mask,
+        parent,
     } = create
     else {
         panic!("expected create-window request");
@@ -283,6 +284,7 @@ fn x11_core_decoder_maps_create_and_map_to_authority_packets() {
     assert_eq!(background_pixel, None);
     assert_eq!(event_mask, None);
     assert_eq!(do_not_propagate_mask, None);
+    assert_eq!(parent, XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1));
     assert_eq!(create.namespace, namespace);
     assert_eq!(
         create.kind,
@@ -334,6 +336,8 @@ fn x11_core_decoder_maps_create_and_map_to_authority_packets() {
             y: None,
             width: Some(12),
             height: Some(14),
+            sibling: None,
+            stack_mode: None,
         }
     );
     let geometry = decode_x11_core_request(
@@ -6711,7 +6715,7 @@ fn routed_service_confines_input_and_control_to_two_workers_and_drains() {
     assert_eq!(second_key[1], 39);
     assert_eq!(
         read_u32(XByteOrder::LittleEndian, &second_key[12..16]),
-        X_SETUP_DEFAULT_ROOT
+        0x0040_0702
     );
     for (index, (client, surface)) in routes.iter().copied().enumerate() {
         control_sender

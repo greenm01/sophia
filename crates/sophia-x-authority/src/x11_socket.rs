@@ -1936,7 +1936,10 @@ impl XServerFrontendRouteRegistry {
             return Ok(());
         }
         let mut client = surface_route.client;
-        let mut target_window = None;
+        // Engine already selected the committed target surface. Preserve its
+        // owning window as the start of core propagation; X grabs may replace
+        // it below, but event-mask update order must never choose the target.
+        let mut target_window = Some(surface_route.window);
         let mut pointers = self
             .pointer_state
             .lock()
@@ -3710,6 +3713,26 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
             ) {
                 Ok(request) => {
                     let event_selection = x11_core_event_selection_update(&request);
+                    let hierarchy_create = match &request {
+                        crate::XWireRequest::CreateWindow { packet, parent, .. } => {
+                            match &packet.kind {
+                                crate::XAuthorityRequestKind::CreateWindow { window, .. } => {
+                                    Some((*window, *parent))
+                                }
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    };
+                    let hierarchy_restack = match &request {
+                        crate::XWireRequest::ConfigureWindow {
+                            window,
+                            sibling,
+                            stack_mode,
+                            ..
+                        } => Some((*window, *sibling, *stack_mode)),
+                        _ => None,
+                    };
                     let randr_selection = match &request {
                         crate::XWireRequest::RandrSelectInput { window, enable } => {
                             Some((*window, *enable))
@@ -3735,6 +3758,10 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                     };
                     let destroyed_window = match &request {
                         crate::XWireRequest::DestroyWindow { window } => Some(*window),
+                        _ => None,
+                    };
+                    let unmapped_window = match &request {
+                        crate::XWireRequest::UnmapWindow { window } => Some(*window),
                         _ => None,
                     };
                     if let crate::XWireRequest::CreateWindow {
@@ -3811,8 +3838,17 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                         if let Some((window, event_mask, do_not_propagate_mask)) = event_selection {
                             selections.update(window, event_mask, do_not_propagate_mask);
                         }
+                        if let Some((window, parent)) = hierarchy_create {
+                            selections.register(window, parent);
+                        }
+                        if let Some((window, sibling, mode)) = hierarchy_restack {
+                            selections.restack(window, sibling, mode);
+                        }
                         if let Some(window) = mapped_window {
                             selections.observe_mapped(window);
+                        }
+                        if let Some(window) = unmapped_window {
+                            selections.observe_unmapped(window);
                         }
                         if let Some(window) = destroyed_window {
                             selections.remove(window);
@@ -4067,15 +4103,16 @@ fn x11_core_event_selection_update(
 struct XCoreWindowEventSelection {
     mask: u32,
     do_not_propagate_mask: u32,
-    update_ordinal: u64,
 }
 
 #[cfg(unix)]
 #[derive(Debug)]
 struct XCoreEventSelectionState {
     windows: BTreeMap<XResourceId, XCoreWindowEventSelection>,
+    parents: BTreeMap<XResourceId, XResourceId>,
+    stacking: Vec<XResourceId>,
+    mapped: BTreeSet<XResourceId>,
     fallback_mapped_window: XResourceId,
-    next_update_ordinal: u64,
 }
 
 #[cfg(unix)]
@@ -4083,8 +4120,10 @@ impl Default for XCoreEventSelectionState {
     fn default() -> Self {
         Self {
             windows: BTreeMap::new(),
+            parents: BTreeMap::new(),
+            stacking: Vec::new(),
+            mapped: BTreeSet::new(),
             fallback_mapped_window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
-            next_update_ordinal: 1,
         }
     }
 }
@@ -4109,36 +4148,85 @@ impl XCoreEventSelectionState {
         if let Some(mask) = do_not_propagate_mask {
             selection.do_not_propagate_mask = mask;
         }
-        selection.update_ordinal = self.next_update_ordinal;
-        self.next_update_ordinal = self.next_update_ordinal.saturating_add(1);
+    }
+
+    fn register(&mut self, window: XResourceId, parent: XResourceId) {
+        self.parents.insert(window, parent);
+        self.stacking.retain(|candidate| *candidate != window);
+        self.stacking.push(window);
+    }
+
+    fn restack(&mut self, window: XResourceId, sibling: Option<XResourceId>, mode: Option<u8>) {
+        self.stacking.retain(|candidate| *candidate != window);
+        let sibling_index = sibling.and_then(|sibling| {
+            self.stacking
+                .iter()
+                .position(|candidate| *candidate == sibling)
+        });
+        let index = match (mode, sibling_index) {
+            (Some(1 | 3), Some(index)) => index,
+            (Some(1 | 3), None) => 0,
+            (Some(0 | 2 | 4), Some(index)) => index.saturating_add(1),
+            _ => self.stacking.len(),
+        };
+        self.stacking.insert(index.min(self.stacking.len()), window);
     }
 
     fn observe_mapped(&mut self, window: XResourceId) {
+        self.mapped.insert(window);
         self.fallback_mapped_window = window;
+    }
+
+    fn observe_unmapped(&mut self, window: XResourceId) {
+        self.mapped.remove(&window);
+        if self.fallback_mapped_window == window {
+            self.fallback_mapped_window = self
+                .stacking
+                .iter()
+                .rev()
+                .copied()
+                .find(|candidate| self.mapped.contains(candidate))
+                .unwrap_or_else(|| XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1));
+        }
     }
 
     fn remove(&mut self, window: XResourceId) {
         self.windows.remove(&window);
+        self.parents.remove(&window);
+        self.stacking.retain(|candidate| *candidate != window);
+        self.mapped.remove(&window);
         if self.fallback_mapped_window == window {
             self.fallback_mapped_window = XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1);
         }
     }
 
     fn keyboard_target(&self, focused: XResourceId) -> XResourceId {
-        self.windows
-            .iter()
-            .filter(|(_, selection)| selection.mask & Self::KEY_MASKS != 0)
-            .max_by_key(|(_, selection)| selection.update_ordinal)
-            .map_or_else(
-                || {
-                    if focused.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
-                        self.fallback_mapped_window
-                    } else {
-                        focused
-                    }
-                },
-                |(window, _)| *window,
-            )
+        let root = XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1);
+        let mut candidate = if focused == root {
+            self.stacking
+                .iter()
+                .rev()
+                .copied()
+                .find(|window| self.mapped.contains(window))
+                .unwrap_or(self.fallback_mapped_window)
+        } else {
+            focused
+        };
+        let fallback = candidate;
+        for _ in 0..64 {
+            if self
+                .windows
+                .get(&candidate)
+                .is_some_and(|selection| selection.mask & Self::KEY_MASKS != 0)
+            {
+                return candidate;
+            }
+            let Some(parent) = self.parents.get(&candidate).copied() else {
+                return fallback;
+            };
+            candidate = parent;
+        }
+        fallback
     }
 }
 
@@ -4435,13 +4523,16 @@ fn spawn_x11_input_event_writer(
                     Err(RecvTimeoutError::Timeout) => continue,
                     Err(RecvTimeoutError::Disconnected) => return Ok(()),
                 };
-            let focused_window = core_event_selections
+            let selections = core_event_selections
                 .lock()
-                .map_err(|_| X11SetupSocketError::new("X11 core event selection lock poisoned"))?
-                .keyboard_target(XResourceId::new(
-                    focused_surface_window.load(Ordering::Acquire),
-                    1,
-                ));
+                .map_err(|_| X11SetupSocketError::new("X11 core event selection lock poisoned"))?;
+            let focused_window = selections.keyboard_target(XResourceId::new(
+                focused_surface_window.load(Ordering::Acquire),
+                1,
+            ));
+            let routed_keyboard_window =
+                target_window.map(|window| selections.keyboard_target(window));
+            drop(selections);
             if std::env::var_os("SOPHIA_LIVE_SESSION_DIAGNOSTIC").is_some()
                 && let XAuthorityInputEvent::Key(key) = event
             {
@@ -4452,7 +4543,7 @@ fn spawn_x11_input_event_writer(
             }
             let root = XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1);
             let delivered_window = match event {
-                XAuthorityInputEvent::Key(_) => target_window.unwrap_or(focused_window),
+                XAuthorityInputEvent::Key(_) => routed_keyboard_window.unwrap_or(focused_window),
                 XAuthorityInputEvent::Pointer(pointer) => target_window.unwrap_or(
                     *surface_windows
                         .lock()
@@ -5145,18 +5236,18 @@ mod routing_tests {
     }
 
     #[test]
-    fn engine_focus_does_not_replace_selected_keyboard_child() {
+    fn keyboard_focus_propagates_only_through_its_ancestor_chain() {
         let mut selections = XCoreEventSelectionState::default();
-        selections.update(XResourceId::new(0x200007, 1), Some(1), None);
+        let parent = XResourceId::new(0x200007, 1);
+        let child = XResourceId::new(0x200001, 1);
+        selections.register(child, parent);
+        selections.update(parent, Some(1), None);
 
-        assert_eq!(
-            selections.keyboard_target(XResourceId::new(0x200001, 1)),
-            XResourceId::new(0x200007, 1)
-        );
+        assert_eq!(selections.keyboard_target(child), parent);
 
         assert_eq!(
             selections.keyboard_target(XResourceId::new(0x200009, 1)),
-            XResourceId::new(0x200007, 1)
+            XResourceId::new(0x200009, 1)
         );
     }
 
@@ -5168,6 +5259,26 @@ mod routing_tests {
             selections.keyboard_target(XResourceId::new(0x200001, 1)),
             XResourceId::new(0x200001, 1)
         );
+    }
+
+    #[test]
+    fn root_focus_uses_mapped_stacking_order_and_restacking() {
+        let root = XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1);
+        let lower = XResourceId::new(0x200001, 1);
+        let upper = XResourceId::new(0x200002, 1);
+        let mut selections = XCoreEventSelectionState::default();
+        for window in [lower, upper] {
+            selections.register(window, root);
+            selections.update(window, Some(1), None);
+            selections.observe_mapped(window);
+        }
+        assert_eq!(selections.keyboard_target(root), upper);
+
+        selections.restack(lower, Some(upper), Some(0));
+        assert_eq!(selections.keyboard_target(root), lower);
+
+        selections.observe_unmapped(lower);
+        assert_eq!(selections.keyboard_target(root), upper);
     }
 }
 
@@ -5230,6 +5341,7 @@ fn x11_core_request_trace_detail(request: &crate::XWireRequest) -> Option<String
             y,
             width,
             height,
+            ..
         } => Some(format!(
             "ConfigureWindow:window={:#x}:mask={value_mask:#x}:x={x:?}:y={y:?}:width={width:?}:height={height:?}",
             window.local.raw()
