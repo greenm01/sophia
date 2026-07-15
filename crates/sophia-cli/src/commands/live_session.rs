@@ -42,7 +42,7 @@ const SESSION_INPUT_DELIVERY_TIMEOUT_MSEC: u64 = 1_000;
 const SESSION_SEAT_RAW: u64 = 1;
 const SESSION_KEYBOARD_DEVICE_RAW: u64 = 1;
 const SESSION_POINTER_DEVICE_RAW: u64 = 2;
-const SECONDARY_POINTER_WITNESS_SCRIPT: &str = r#"printf '\033[?1003h\033[?1006hPointer witness: move or click here\n'; dd bs=1 count=1 >/dev/null 2>&1; printf '\033[?1003l\033[?1006lPointer input received\n'; sleep 300"#;
+const SECONDARY_POINTER_WITNESS_SCRIPT: &str = r#"saved=$(stty -g); stty raw -echo; printf '\033[?1000h\033[?1006hPointer witness: click here\r\n'; dd bs=1 count=1 >/dev/null 2>&1; printf '\033[?1000l\033[?1006l'; stty "$saved"; printf 'Pointer input received\n'; sleep 300"#;
 static NEXT_SESSION_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 struct LiveXAdmissionPolicy {
@@ -4896,7 +4896,8 @@ mod tests {
 
     #[test]
     fn secondary_terminal_is_a_pointer_witness_without_a_text_prompt() {
-        assert!(SECONDARY_POINTER_WITNESS_SCRIPT.contains("?1003h"));
+        assert!(SECONDARY_POINTER_WITNESS_SCRIPT.contains("?1000h"));
+        assert!(SECONDARY_POINTER_WITNESS_SCRIPT.contains("stty raw -echo"));
         assert!(SECONDARY_POINTER_WITNESS_SCRIPT.contains("Pointer input received"));
         assert!(!SECONDARY_POINTER_WITNESS_SCRIPT.contains("read -r line"));
         assert!(!SECONDARY_POINTER_WITNESS_SCRIPT.contains('\0'));

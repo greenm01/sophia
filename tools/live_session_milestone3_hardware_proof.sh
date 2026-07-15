@@ -27,7 +27,7 @@ trap restore_keyd EXIT
 echo "Sophia Milestone 3 paired hardware proof"
 echo "This runs two exclusive-DRM sessions: classic shared-X, then fresh confined."
 echo "For each session, type sophia and Return once in the prompted terminal."
-echo "When the prompt disappears, move/click either the touchpad or TrackPoint."
+echo "When the prompt disappears, click the pointer-witness terminal once."
 
 if [[ -z "$INPUT_DEVICES" ]]; then
     mapfile -t keyboards < <(
