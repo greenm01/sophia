@@ -1450,62 +1450,34 @@ pub fn dispatch_x11_wire_request(
             depth,
             bits_per_pixel,
         } => {
-            let format = match (depth, bits_per_pixel) {
-                (24, 32) => Some(sophia_protocol::DRM_FORMAT_XRGB8888),
-                (32, 32) => Some(sophia_protocol::DRM_FORMAT_ARGB8888),
-                _ => None,
-            };
-            let descriptor_valid = format.is_some_and(|format| {
-                let descriptor = sophia_protocol::DmaBufDescriptor {
-                    handle: sophia_protocol::BufferHandle::from_raw(pixmap.local.raw()),
-                    size: sophia_protocol::Size {
-                        width: i32::from(width),
-                        height: i32::from(height),
-                    },
-                    format,
-                    modifier: sophia_protocol::DRM_FORMAT_MOD_INVALID,
-                    plane_count: 1,
-                    planes: [
-                        Some(sophia_protocol::DmaBufPlaneDescriptor {
-                            offset: 0,
-                            stride: u32::from(stride),
-                        }),
-                        None,
-                        None,
-                        None,
-                    ],
+            let outputs =
+                if let Err(error) = runtime.validate_drawable_access(context.namespace, drawable) {
+                    vec![XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(drawable.local.raw()).unwrap_or(0),
+                    ))]
+                } else if let Err(error) = runtime.create_dri3_pixmap(
+                    context.namespace,
+                    pixmap,
+                    u64::from(context.sequence),
+                    size_bytes,
+                    width,
+                    height,
+                    stride,
+                    depth,
+                    bits_per_pixel,
+                ) {
+                    vec![XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(pixmap.local.raw()).unwrap_or(0),
+                    ))]
+                } else {
+                    Vec::new()
                 };
-                descriptor.validate().is_ok()
-                    && u64::from(stride).saturating_mul(u64::from(height)) <= u64::from(size_bytes)
-            });
-            let outputs = if !descriptor_valid {
-                vec![XClientOutput::Error(crate::XClientError {
-                    code: XErrorCode::BadValue,
-                    sequence: context.sequence,
-                    resource_id: u32::try_from(pixmap.local.raw()).unwrap_or(0),
-                    minor_code: u16::from(crate::X_DRI3_PIXMAP_FROM_BUFFER_MINOR_OPCODE),
-                    major_code: context.major_opcode,
-                })]
-            } else if let Err(error) = runtime.validate_drawable_access(context.namespace, drawable)
-            {
-                vec![XClientOutput::Error(x_error_from_runtime(
-                    error,
-                    context.sequence,
-                    context.major_opcode,
-                    u32::try_from(drawable.local.raw()).unwrap_or(0),
-                ))]
-            } else if let Err(error) =
-                runtime.create_pixmap(context.namespace, pixmap, u64::from(context.sequence))
-            {
-                vec![XClientOutput::Error(x_error_from_runtime(
-                    error,
-                    context.sequence,
-                    context.major_opcode,
-                    u32::try_from(pixmap.local.raw()).unwrap_or(0),
-                ))]
-            } else {
-                Vec::new()
-            };
             XDispatchResult {
                 response: None,
                 outputs,
@@ -1550,6 +1522,128 @@ pub fn dispatch_x11_wire_request(
             })],
             metadata_candidates: Vec::new(),
         },
+        XWireRequest::PresentQueryCapabilities { target } => {
+            let outputs = if target.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT)
+                || runtime
+                    .validate_window_access(context.namespace, target)
+                    .is_ok()
+            {
+                vec![XClientOutput::Reply(
+                    XClientReply::PresentQueryCapabilities {
+                        sequence: context.sequence,
+                        capabilities: 1 << 1,
+                    },
+                )]
+            } else {
+                vec![XClientOutput::Error(crate::XClientError {
+                    code: XErrorCode::BadWindow,
+                    sequence: context.sequence,
+                    resource_id: u32::try_from(target.local.raw()).unwrap_or(0),
+                    minor_code: u16::from(crate::X_PRESENT_QUERY_CAPABILITIES_MINOR_OPCODE),
+                    major_code: context.major_opcode,
+                })]
+            };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::PresentSelectInput {
+            window, event_mask, ..
+        } => {
+            let outputs = if event_mask & !0x0f != 0 {
+                vec![XClientOutput::Error(crate::XClientError {
+                    code: XErrorCode::BadValue,
+                    sequence: context.sequence,
+                    resource_id: event_mask,
+                    minor_code: u16::from(crate::X_PRESENT_SELECT_INPUT_MINOR_OPCODE),
+                    major_code: context.major_opcode,
+                })]
+            } else if let Err(error) = runtime.validate_window_access(context.namespace, window) {
+                vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(window.local.raw()).unwrap_or(0),
+                ))]
+            } else {
+                Vec::new()
+            };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::PresentPixmap {
+            window,
+            pixmap,
+            valid_region,
+            update_region,
+            target_crtc,
+            wait_fence,
+            idle_fence,
+            options,
+            divisor,
+            remainder,
+            ..
+        } => {
+            let invalid_value = valid_region != 0
+                || update_region != 0
+                || target_crtc != 0
+                || options & !0x0f != 0
+                || (divisor == 0 && remainder != 0)
+                || (divisor != 0 && remainder >= divisor);
+            let validation = if invalid_value {
+                Err(XAuthorityRuntimeError::InvalidResource)
+            } else {
+                runtime
+                    .validate_window_access(context.namespace, window)
+                    .and_then(|()| runtime.validate_pixmap_access(context.namespace, pixmap))
+                    .and_then(|()| {
+                        wait_fence.map_or(Ok(()), |fence| {
+                            runtime.validate_dri3_fence_access(context.namespace, fence)
+                        })
+                    })
+                    .and_then(|()| {
+                        idle_fence.map_or(Ok(()), |fence| {
+                            runtime.validate_dri3_fence_access(context.namespace, fence)
+                        })
+                    })
+            };
+            if let Err(error) = validation {
+                return XDispatchResult {
+                    response: None,
+                    outputs: vec![XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(pixmap.local.raw()).unwrap_or(0),
+                    ))],
+                    metadata_candidates: Vec::new(),
+                };
+            }
+            let transaction = TransactionId::from_raw(u64::from(context.sequence));
+            let response =
+                runtime.present_standard_pixmap(transaction, context.namespace, window, pixmap);
+            let outputs = match response.outcome {
+                XAuthorityResponseOutcome::Accepted => Vec::new(),
+                XAuthorityResponseOutcome::Rejected(error) => {
+                    vec![XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(pixmap.local.raw()).unwrap_or(0),
+                    ))]
+                }
+            };
+            XDispatchResult {
+                response: Some(response),
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::RandrQueryVersion { .. } => XDispatchResult {
             response: None,
             outputs: vec![XClientOutput::Reply(XClientReply::RandrQueryVersion {

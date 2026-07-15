@@ -761,6 +761,7 @@ dependencies = [
  "sophia-engine",
  "sophia-protocol",
  "sophia-renderer-native-egl",
+ "sophia-xshmfence",
 ]
 
 [[package]]
@@ -821,6 +822,13 @@ version = "0.1.0"
 dependencies = [
  "sophia-protocol",
  "sophia-x-authority",
+]
+
+[[package]]
+name = "sophia-xshmfence"
+version = "0.1.0"
+dependencies = [
+ "libloading",
 ]
 
 [[package]]

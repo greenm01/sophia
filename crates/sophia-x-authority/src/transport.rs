@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+use std::os::fd::OwnedFd;
+use std::sync::Arc;
 use std::sync::mpsc::{SyncSender, TrySendError};
 
 use sophia_protocol::{SurfaceId, SurfaceTransaction, TransactionId};
@@ -8,6 +10,38 @@ use crate::{
 };
 
 pub const X_AUTHORITY_OBSERVED_TRANSACTION_CHANNEL_CAPACITY: usize = 256;
+
+#[derive(Clone, Debug)]
+pub struct XAuthorityDmaBufRegistration {
+    pub pixmap: crate::XResourceId,
+    pub descriptor: sophia_protocol::DmaBufDescriptor,
+    pub plane_fds: Vec<Arc<OwnedFd>>,
+}
+
+impl PartialEq for XAuthorityDmaBufRegistration {
+    fn eq(&self, other: &Self) -> bool {
+        self.pixmap == other.pixmap
+            && self.descriptor == other.descriptor
+            && self.plane_fds.len() == other.plane_fds.len()
+    }
+}
+
+impl Eq for XAuthorityDmaBufRegistration {}
+
+#[derive(Clone, Debug)]
+pub struct XAuthorityFenceRegistration {
+    pub fence: crate::XResourceId,
+    pub initially_triggered: bool,
+    pub fd: Arc<OwnedFd>,
+}
+
+impl PartialEq for XAuthorityFenceRegistration {
+    fn eq(&self, other: &Self) -> bool {
+        self.fence == other.fence && self.initially_triggered == other.initially_triggered
+    }
+}
+
+impl Eq for XAuthorityFenceRegistration {}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct XAuthorityObservedTransactionBatch {
@@ -20,6 +54,9 @@ pub struct XAuthorityObservedTransactionBatch {
     /// Frontend-confirmed surface lifetimes that ended in this batch.
     pub removed_surfaces: Vec<SurfaceId>,
     pub cpu_buffer_updates: Vec<XAuthorityCpuBufferUpdate>,
+    pub dma_buf_registrations: Vec<XAuthorityDmaBufRegistration>,
+    pub fence_registrations: Vec<XAuthorityFenceRegistration>,
+    pub present_submissions: Vec<crate::XAuthorityPresentSubmission>,
 }
 
 impl XAuthorityObservedTransactionBatch {
@@ -35,20 +72,75 @@ impl XAuthorityObservedTransactionBatch {
             transactions: response.transactions.clone(),
             removed_surfaces: response.removed_surfaces.clone(),
             cpu_buffer_updates: Vec::new(),
+            dma_buf_registrations: Vec::new(),
+            fence_registrations: Vec::new(),
+            present_submissions: Vec::new(),
         })
     }
 
     pub fn from_dispatch_trace(trace: &X11CoreDispatchTrace<'_>) -> Option<Self> {
-        let response = trace.result.response.as_ref()?;
-        if response.transactions.is_empty() && response.removed_surfaces.is_empty() {
+        let dma_buf_registrations = trace
+            .dri3_pixmap_import
+            .and_then(|import| {
+                let plane_fds = trace
+                    .received_fds
+                    .iter()
+                    .map(|fd| fd.try_clone().map(Arc::new))
+                    .collect::<Result<Vec<_>, _>>()
+                    .ok()?;
+                Some(XAuthorityDmaBufRegistration {
+                    pixmap: import.pixmap,
+                    descriptor: import.descriptor,
+                    plane_fds,
+                })
+            })
+            .into_iter()
+            .collect::<Vec<_>>();
+        let fence_registrations = trace
+            .dri3_fence_import
+            .and_then(|import| {
+                Some(XAuthorityFenceRegistration {
+                    fence: import.fence,
+                    initially_triggered: import.initially_triggered,
+                    fd: Arc::new(trace.received_fds.first()?.try_clone().ok()?),
+                })
+            })
+            .into_iter()
+            .collect::<Vec<_>>();
+        let response = trace.result.response.as_ref();
+        if response.is_none()
+            && dma_buf_registrations.is_empty()
+            && fence_registrations.is_empty()
+            && trace.present_submission.is_none()
+        {
+            return None;
+        }
+        let transactions = response
+            .map(|response| response.transactions.clone())
+            .unwrap_or_default();
+        let removed_surfaces = response
+            .map(|response| response.removed_surfaces.clone())
+            .unwrap_or_default();
+        if transactions.is_empty()
+            && removed_surfaces.is_empty()
+            && dma_buf_registrations.is_empty()
+            && fence_registrations.is_empty()
+            && trace.present_submission.is_none()
+        {
             return None;
         }
         Some(Self {
             client: Some(trace.client),
-            transaction: response.transaction,
-            transactions: response.transactions.clone(),
-            removed_surfaces: response.removed_surfaces.clone(),
+            transaction: response.map_or(
+                TransactionId::from_raw(u64::from(trace.sequence)),
+                |response| response.transaction,
+            ),
+            transactions,
+            removed_surfaces,
             cpu_buffer_updates: trace.cpu_buffer_update.cloned().into_iter().collect(),
+            dma_buf_registrations,
+            fence_registrations,
+            present_submissions: trace.present_submission.into_iter().collect(),
         })
     }
 }

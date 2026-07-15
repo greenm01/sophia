@@ -48,6 +48,8 @@ pub struct XAuthorityRuntime {
     clipboard_proxies: BTreeMap<crate::XResourceId, ClipboardSelectionProxy>,
     next_clipboard_proxy: u32,
     software_buffers: XSoftwareBufferStore,
+    dri3_pixmaps: BTreeMap<crate::XResourceId, sophia_protocol::DmaBufDescriptor>,
+    next_dma_buf_handle: u64,
     graphics_contexts: XGraphicsContextTable,
     window_background_pixels: BTreeMap<crate::XResourceId, u32>,
     last_cpu_buffer_update: Option<XAuthorityCpuBufferUpdate>,
@@ -69,6 +71,8 @@ impl Default for XAuthorityRuntime {
             clipboard_proxies: Default::default(),
             next_clipboard_proxy: 0,
             software_buffers: Default::default(),
+            dri3_pixmaps: Default::default(),
+            next_dma_buf_handle: 1,
             graphics_contexts: Default::default(),
             window_background_pixels: Default::default(),
             last_cpu_buffer_update: None,
@@ -894,6 +898,7 @@ impl XAuthorityRuntime {
         self.resources
             .lookup(namespace, pixmap, XResourceKind::Pixmap)?;
         self.resources.remove(pixmap);
+        self.dri3_pixmaps.remove(&pixmap);
         Ok(())
     }
 
@@ -906,6 +911,111 @@ impl XAuthorityRuntime {
             .lookup(namespace, pixmap, XResourceKind::Pixmap)
             .map(|_| ())
             .map_err(Into::into)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_dri3_pixmap(
+        &mut self,
+        namespace: NamespaceId,
+        pixmap: crate::XResourceId,
+        generation: u64,
+        size_bytes: u32,
+        width: u16,
+        height: u16,
+        stride: u16,
+        depth: u8,
+        bits_per_pixel: u8,
+    ) -> Result<sophia_protocol::DmaBufDescriptor, XAuthorityRuntimeError> {
+        let format = match (depth, bits_per_pixel) {
+            (24, 32) => sophia_protocol::DRM_FORMAT_XRGB8888,
+            (32, 32) => sophia_protocol::DRM_FORMAT_ARGB8888,
+            _ => return Err(XAuthorityRuntimeError::InvalidResource),
+        };
+        let handle = self.next_dma_buf_handle.max(1);
+        let descriptor = sophia_protocol::DmaBufDescriptor {
+            handle: sophia_protocol::BufferHandle::from_raw(handle),
+            size: Size {
+                width: i32::from(width),
+                height: i32::from(height),
+            },
+            format,
+            modifier: sophia_protocol::DRM_FORMAT_MOD_INVALID,
+            plane_count: 1,
+            planes: [
+                Some(sophia_protocol::DmaBufPlaneDescriptor {
+                    offset: 0,
+                    stride: u32::from(stride),
+                }),
+                None,
+                None,
+                None,
+            ],
+        };
+        descriptor
+            .validate()
+            .map_err(|_| XAuthorityRuntimeError::InvalidResource)?;
+        if u64::from(stride).saturating_mul(u64::from(height)) > u64::from(size_bytes) {
+            return Err(XAuthorityRuntimeError::InvalidResource);
+        }
+        self.create_pixmap(namespace, pixmap, generation)?;
+        self.next_dma_buf_handle = handle.saturating_add(1).max(1);
+        self.dri3_pixmaps.insert(pixmap, descriptor);
+        Ok(descriptor)
+    }
+
+    pub fn dri3_pixmap_descriptor(
+        &self,
+        namespace: NamespaceId,
+        pixmap: crate::XResourceId,
+    ) -> Result<sophia_protocol::DmaBufDescriptor, XAuthorityRuntimeError> {
+        self.validate_pixmap_access(namespace, pixmap)?;
+        self.dri3_pixmaps
+            .get(&pixmap)
+            .copied()
+            .ok_or(XAuthorityRuntimeError::UnknownResource)
+    }
+
+    pub fn present_standard_pixmap(
+        &mut self,
+        transaction: TransactionId,
+        namespace: NamespaceId,
+        window: crate::XResourceId,
+        pixmap: crate::XResourceId,
+    ) -> XAuthorityResponsePacket {
+        let record = match self.windows.get(window) {
+            Some(record) if record.namespace == namespace => record.clone(),
+            _ => {
+                return XAuthorityResponsePacket::rejected(
+                    transaction,
+                    XAuthorityRuntimeError::UnknownResource,
+                );
+            }
+        };
+        if let Err(error) = self.validate_pixmap_access(namespace, pixmap) {
+            return XAuthorityResponsePacket::rejected(transaction, error);
+        }
+        let buffer = self.dri3_pixmaps.get(&pixmap).map_or(
+            sophia_protocol::BufferSource::XPixmap {
+                pixmap: u32::try_from(pixmap.local.raw()).unwrap_or(0),
+            },
+            |descriptor| sophia_protocol::BufferSource::DmaBuf {
+                handle: descriptor.handle.raw(),
+            },
+        );
+        self.finish_drawing_update(XDrawingUpdate::present_buffer(
+            transaction,
+            namespace,
+            window,
+            buffer,
+            Region::single(Rect {
+                x: 0,
+                y: 0,
+                width: record.geometry.width,
+                height: record.geometry.height,
+            }),
+            record.generation,
+            250,
+        ))
     }
 
     pub fn create_dri3_fence(

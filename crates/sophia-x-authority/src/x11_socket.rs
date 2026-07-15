@@ -1149,6 +1149,33 @@ pub struct X11CoreDispatchTrace<'a> {
     pub cpu_buffer_update: Option<&'a XAuthorityCpuBufferUpdate>,
     pub received_fd_count: usize,
     pub received_fds: &'a [OwnedFd],
+    pub dri3_pixmap_import: Option<XAuthorityDri3PixmapImport>,
+    pub dri3_fence_import: Option<XAuthorityDri3FenceImport>,
+    pub present_submission: Option<XAuthorityPresentSubmission>,
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XAuthorityDri3PixmapImport {
+    pub pixmap: XResourceId,
+    pub descriptor: sophia_protocol::DmaBufDescriptor,
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XAuthorityDri3FenceImport {
+    pub fence: XResourceId,
+    pub initially_triggered: bool,
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XAuthorityPresentSubmission {
+    pub window: XResourceId,
+    pub pixmap: XResourceId,
+    pub serial: u32,
+    pub wait_fence: Option<XResourceId>,
+    pub idle_fence: Option<XResourceId>,
 }
 
 #[cfg(unix)]
@@ -1487,6 +1514,8 @@ impl XServerFrontendRouteBroker {
                 clients: Arc::new(Mutex::new(BTreeMap::new())),
                 surfaces: Arc::new(Mutex::new(BTreeMap::new())),
                 randr_subscriptions: Arc::new(Mutex::new(BTreeMap::new())),
+                present_subscriptions: Arc::new(Mutex::new(BTreeMap::new())),
+                pending_presentations: Arc::new(Mutex::new(BTreeMap::new())),
                 pointer_state: Arc::new(Mutex::new(BTreeMap::new())),
                 input_authority: Arc::new(Mutex::new(crate::XInputAuthorityState::default())),
                 frozen_input: Arc::new(Mutex::new(VecDeque::new())),
@@ -1587,6 +1616,22 @@ impl XServerFrontendRouteBroker {
     pub fn registered_client_count(&self) -> usize {
         self.registry.registered_client_count()
     }
+
+    pub fn route_present_complete(
+        &self,
+        surface: SurfaceId,
+        ust: u64,
+        msc: u64,
+    ) -> Result<bool, XServerFrontendRouteError> {
+        self.registry.route_present_complete(surface, ust, msc)
+    }
+
+    pub fn route_present_idle(
+        &self,
+        surface: SurfaceId,
+    ) -> Result<bool, XServerFrontendRouteError> {
+        self.registry.route_present_idle(surface)
+    }
 }
 
 #[cfg(unix)]
@@ -1595,6 +1640,8 @@ struct XServerFrontendRouteRegistry {
     clients: Arc<Mutex<BTreeMap<XServerFrontendClientId, XServerFrontendClientRouteSenders>>>,
     surfaces: Arc<Mutex<BTreeMap<SurfaceId, XServerFrontendSurfaceRoute>>>,
     randr_subscriptions: Arc<Mutex<BTreeMap<XServerFrontendClientId, (XResourceId, u16)>>>,
+    present_subscriptions: Arc<Mutex<BTreeMap<XServerFrontendClientId, XPresentSubscription>>>,
+    pending_presentations: Arc<Mutex<BTreeMap<SurfaceId, VecDeque<XPendingPresent>>>>,
     pointer_state: Arc<Mutex<BTreeMap<SeatId, crate::XCorePointerMapper>>>,
     input_authority: Arc<Mutex<crate::XInputAuthorityState>>,
     frozen_input: Arc<Mutex<VecDeque<XDeferredRoutedInput>>>,
@@ -1612,6 +1659,25 @@ struct XServerFrontendSurfaceRoute {
     client: XServerFrontendClientId,
     namespace: NamespaceId,
     window: XResourceId,
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug)]
+struct XPresentSubscription {
+    event_id: XResourceId,
+    window: XResourceId,
+    mask: u32,
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug)]
+struct XPendingPresent {
+    client: XServerFrontendClientId,
+    window: XResourceId,
+    pixmap: XResourceId,
+    serial: u32,
+    idle_fence: Option<XResourceId>,
+    completed: bool,
 }
 
 #[cfg(unix)]
@@ -1642,6 +1708,8 @@ struct XServerFrontendClientRouteRegistration {
     clients: Arc<Mutex<BTreeMap<XServerFrontendClientId, XServerFrontendClientRouteSenders>>>,
     surfaces: Arc<Mutex<BTreeMap<SurfaceId, XServerFrontendSurfaceRoute>>>,
     randr_subscriptions: Arc<Mutex<BTreeMap<XServerFrontendClientId, (XResourceId, u16)>>>,
+    present_subscriptions: Arc<Mutex<BTreeMap<XServerFrontendClientId, XPresentSubscription>>>,
+    pending_presentations: Arc<Mutex<BTreeMap<SurfaceId, VecDeque<XPendingPresent>>>>,
     frozen_input: Arc<Mutex<VecDeque<XDeferredRoutedInput>>>,
 }
 
@@ -1753,6 +1821,8 @@ impl XServerFrontendRouteRegistry {
                 clients: self.clients.clone(),
                 surfaces: self.surfaces.clone(),
                 randr_subscriptions: self.randr_subscriptions.clone(),
+                present_subscriptions: self.present_subscriptions.clone(),
+                pending_presentations: self.pending_presentations.clone(),
                 frozen_input: self.frozen_input.clone(),
             },
             XServerFrontendClientRouteChannels {
@@ -1808,6 +1878,157 @@ impl XServerFrontendRouteRegistry {
             subscriptions.insert(client, (window, mask));
         }
         Ok(())
+    }
+
+    fn select_present_input(
+        &self,
+        client: XServerFrontendClientId,
+        event_id: XResourceId,
+        window: XResourceId,
+        mask: u32,
+    ) -> Result<(), XServerFrontendRouteError> {
+        let mut subscriptions = self
+            .present_subscriptions
+            .lock()
+            .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?;
+        if mask == 0 {
+            subscriptions.remove(&client);
+        } else {
+            subscriptions.insert(
+                client,
+                XPresentSubscription {
+                    event_id,
+                    window,
+                    mask,
+                },
+            );
+        }
+        Ok(())
+    }
+
+    fn queue_present(
+        &self,
+        client: XServerFrontendClientId,
+        window: XResourceId,
+        pixmap: XResourceId,
+        serial: u32,
+        idle_fence: Option<XResourceId>,
+    ) -> Result<(), XServerFrontendRouteError> {
+        let surface = self
+            .surfaces
+            .lock()
+            .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
+            .iter()
+            .find_map(|(surface, route)| {
+                (route.client == client && route.window == window).then_some(*surface)
+            })
+            .ok_or(XServerFrontendRouteError::UnknownClient { client })?;
+        let mut pending = self
+            .pending_presentations
+            .lock()
+            .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?;
+        let queue = pending.entry(surface).or_default();
+        if queue.len() >= self.per_client_queue_capacity.get() {
+            return Err(XServerFrontendRouteError::ClientQueueFull { client });
+        }
+        queue.push_back(XPendingPresent {
+            client,
+            window,
+            pixmap,
+            serial,
+            idle_fence,
+            completed: false,
+        });
+        Ok(())
+    }
+
+    fn route_present_complete(
+        &self,
+        surface: SurfaceId,
+        ust: u64,
+        msc: u64,
+    ) -> Result<bool, XServerFrontendRouteError> {
+        let presentation = {
+            let mut pending = self
+                .pending_presentations
+                .lock()
+                .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?;
+            let Some(queue) = pending.get_mut(&surface) else {
+                return Ok(false);
+            };
+            let Some(presentation) = queue.iter_mut().find(|pending| !pending.completed) else {
+                return Ok(false);
+            };
+            presentation.completed = true;
+            *presentation
+        };
+        let subscription = self
+            .present_subscriptions
+            .lock()
+            .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
+            .get(&presentation.client)
+            .copied();
+        let Some(subscription) = subscription.filter(|subscription| {
+            subscription.window == presentation.window && subscription.mask & (1 << 1) != 0
+        }) else {
+            return Ok(false);
+        };
+        self.route_protocol(
+            presentation.client,
+            XClientEvent::PresentCompleteNotify {
+                sequence: 0,
+                event_id: subscription.event_id,
+                window: presentation.window,
+                serial: presentation.serial,
+                ust,
+                msc,
+                mode: 1,
+            },
+        )?;
+        Ok(true)
+    }
+
+    fn route_present_idle(&self, surface: SurfaceId) -> Result<bool, XServerFrontendRouteError> {
+        let presentation = {
+            let mut pending = self
+                .pending_presentations
+                .lock()
+                .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?;
+            let Some(queue) = pending.get_mut(&surface) else {
+                return Ok(false);
+            };
+            let Some(front) = queue.front().copied().filter(|pending| pending.completed) else {
+                return Ok(false);
+            };
+            queue.pop_front();
+            if queue.is_empty() {
+                pending.remove(&surface);
+            }
+            front
+        };
+        let subscription = self
+            .present_subscriptions
+            .lock()
+            .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
+            .get(&presentation.client)
+            .copied();
+        let Some(subscription) = subscription.filter(|subscription| {
+            subscription.window == presentation.window && subscription.mask & (1 << 2) != 0
+        }) else {
+            return Ok(false);
+        };
+        self.route_protocol(
+            presentation.client,
+            XClientEvent::PresentIdleNotify {
+                sequence: 0,
+                event_id: subscription.event_id,
+                window: presentation.window,
+                serial: presentation.serial,
+                pixmap: presentation.pixmap,
+                idle_fence: presentation.idle_fence,
+            },
+        )?;
+        Ok(true)
     }
 
     fn broadcast_randr_update(
@@ -2317,6 +2538,15 @@ impl Drop for XServerFrontendClientRouteRegistration {
         }
         if let Ok(mut subscriptions) = self.randr_subscriptions.lock() {
             subscriptions.remove(&self.client);
+        }
+        if let Ok(mut subscriptions) = self.present_subscriptions.lock() {
+            subscriptions.remove(&self.client);
+        }
+        if let Ok(mut pending) = self.pending_presentations.lock() {
+            pending.retain(|_, queue| {
+                queue.retain(|presentation| presentation.client != self.client);
+                !queue.is_empty()
+            });
         }
         if let Ok(mut frozen) = self.frozen_input.lock() {
             frozen.retain(|route| route.client != self.client);
@@ -3722,7 +3952,13 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
             };
             let mut parse_error = None;
             let mut request_detail = None;
-            let (mut output, cpu_buffer_update) = match decode_x11_core_request(
+            let (
+                mut output,
+                cpu_buffer_update,
+                dri3_pixmap_import,
+                dri3_fence_import,
+                present_submission,
+            ) = match decode_x11_core_request(
                 XWireClientContext {
                     byte_order: setup.byte_order,
                     namespace,
@@ -3740,6 +3976,21 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                         )));
                     }
                     let event_selection = x11_core_event_selection_update(&request);
+                    let dri3_pixmap = match &request {
+                        crate::XWireRequest::Dri3PixmapFromBuffer { pixmap, .. } => Some(*pixmap),
+                        _ => None,
+                    };
+                    let dri3_fence_import = match &request {
+                        crate::XWireRequest::Dri3FenceFromFd {
+                            fence,
+                            initially_triggered,
+                            ..
+                        } => Some(XAuthorityDri3FenceImport {
+                            fence: *fence,
+                            initially_triggered: *initially_triggered,
+                        }),
+                        _ => None,
+                    };
                     let hierarchy_create = match &request {
                         crate::XWireRequest::CreateWindow { packet, parent, .. } => {
                             match &packet.kind {
@@ -3764,6 +4015,41 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                         crate::XWireRequest::RandrSelectInput { window, enable } => {
                             Some((*window, *enable))
                         }
+                        _ => None,
+                    };
+                    let present_selection = match &request {
+                        crate::XWireRequest::PresentSelectInput {
+                            event_id,
+                            window,
+                            event_mask,
+                        } => Some((*event_id, *window, *event_mask)),
+                        _ => None,
+                    };
+                    let pending_present = match &request {
+                        crate::XWireRequest::PresentPixmap {
+                            window,
+                            pixmap,
+                            serial,
+                            idle_fence,
+                            ..
+                        } => Some((*window, *pixmap, *serial, *idle_fence)),
+                        _ => None,
+                    };
+                    let present_submission = match &request {
+                        crate::XWireRequest::PresentPixmap {
+                            window,
+                            pixmap,
+                            serial,
+                            wait_fence,
+                            idle_fence,
+                            ..
+                        } => Some(XAuthorityPresentSubmission {
+                            window: *window,
+                            pixmap: *pixmap,
+                            serial: *serial,
+                            wait_fence: *wait_fence,
+                            idle_fence: *idle_fence,
+                        }),
                         _ => None,
                     };
                     let xkb_selection = match &request {
@@ -3891,6 +4177,28 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                                     ))
                                 })?;
                         }
+                        if let Some((event_id, window, mask)) = present_selection
+                            && let Some(routing) = protocol_routing.as_ref()
+                        {
+                            routing
+                                .select_present_input(client, event_id, window, mask)
+                                .map_err(|error| {
+                                    X11SetupSocketError::new(format!(
+                                        "failed to update Present subscription: {error}"
+                                    ))
+                                })?;
+                        }
+                        if let Some((window, pixmap, serial, idle_fence)) = pending_present
+                            && let Some(routing) = protocol_routing.as_ref()
+                        {
+                            routing
+                                .queue_present(client, window, pixmap, serial, idle_fence)
+                                .map_err(|error| {
+                                    X11SetupSocketError::new(format!(
+                                        "failed to queue Present feedback: {error}"
+                                    ))
+                                })?;
+                        }
                         if let Some((affect_which, clear, select_all, state)) = xkb_selection {
                             let mut details = xkb_state_details.load(Ordering::Acquire);
                             if clear & 4 != 0 {
@@ -3911,7 +4219,19 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                     // the runtime lock so a simultaneous client cannot take
                     // an update generated by this request.
                     let cpu_buffer_update = runtime.take_cpu_buffer_update();
-                    (output, cpu_buffer_update)
+                    let dri3_pixmap_import = dri3_pixmap.and_then(|pixmap| {
+                        runtime
+                            .dri3_pixmap_descriptor(namespace, pixmap)
+                            .ok()
+                            .map(|descriptor| XAuthorityDri3PixmapImport { pixmap, descriptor })
+                    });
+                    (
+                        output,
+                        cpu_buffer_update,
+                        dri3_pixmap_import,
+                        dri3_fence_import,
+                        dispatch_succeeded.then_some(present_submission).flatten(),
+                    )
                 }
                 Err(error) => {
                     let head = request
@@ -3921,7 +4241,13 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                         .collect::<Vec<_>>()
                         .join("");
                     parse_error = Some(format!("{error:?}:len={}:head={head}", request.len()));
-                    (dispatch_x11_parse_error(dispatch_context, error), None)
+                    (
+                        dispatch_x11_parse_error(dispatch_context, error),
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
                 }
             };
             if let Some(routing) = protocol_routing.as_ref()
@@ -4008,6 +4334,9 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 cpu_buffer_update: cpu_buffer_update.as_ref(),
                 received_fd_count: received_fds.len(),
                 received_fds: &received_fds,
+                dri3_pixmap_import,
+                dri3_fence_import,
+                present_submission,
             })?;
             let mut output_stream = output_stream
                 .lock()
@@ -4092,6 +4421,9 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
             cpu_buffer_update: None,
             received_fd_count: 0,
             received_fds: &[],
+            dri3_pixmap_import: None,
+            dri3_fence_import: None,
+            present_submission: None,
         })
     };
     let admission_result = admission_lease.as_mut().map_or(Ok(()), |lease| {
@@ -4326,7 +4658,9 @@ fn set_x11_protocol_event_sequence(event: &mut XClientEvent, value: u16) {
         | XClientEvent::RandrScreenChange { sequence, .. }
         | XClientEvent::RandrCrtcChange { sequence, .. }
         | XClientEvent::RandrOutputChange { sequence, .. }
-        | XClientEvent::RandrResourceChange { sequence, .. } => *sequence = value,
+        | XClientEvent::RandrResourceChange { sequence, .. }
+        | XClientEvent::PresentCompleteNotify { sequence, .. }
+        | XClientEvent::PresentIdleNotify { sequence, .. } => *sequence = value,
         _ => unreachable!("protocol routing received a non-routable event"),
     }
 }

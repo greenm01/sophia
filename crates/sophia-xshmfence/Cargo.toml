@@ -1,0 +1,13 @@
+[package]
+name = "sophia-xshmfence"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+libloading = "0.8"
+
+[lints.clippy]
+new_without_default = "allow"

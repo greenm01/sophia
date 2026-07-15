@@ -103,3 +103,22 @@ fn cpu_rejection_and_stale_retirement_preserve_last_good_pixels() {
     );
     assert!(registry.disconnect().is_empty());
 }
+
+#[test]
+fn real_xshmfence_poll_holds_submission_until_triggered() {
+    let fence = sophia_xshmfence::allocate().unwrap();
+    let trigger = fence.try_clone().unwrap();
+    let handle = BufferHandle::from_raw(21);
+    let mut registry = LiveBufferRegistry::default();
+    registry
+        .register(descriptor(21), vec![fd()], Some(fence))
+        .unwrap();
+    assert_eq!(registry.poll_acquire_fence(handle), Ok(false));
+    assert_eq!(
+        registry.submit(handle),
+        Err(LiveBufferRegistryError::AcquireFencePending)
+    );
+    sophia_xshmfence::trigger(&trigger).unwrap();
+    assert_eq!(registry.poll_acquire_fence(handle), Ok(true));
+    registry.submit(handle).unwrap();
+}

@@ -69,6 +69,55 @@ fn mit_shm_completion_uses_the_advertised_extension_event_layout() {
 }
 
 #[test]
+fn present_complete_and_idle_notifications_use_xge_packed_layouts() {
+    for byte_order in [XByteOrder::LittleEndian, XByteOrder::BigEndian] {
+        let complete = encode_x_client_event(
+            byte_order,
+            XClientEvent::PresentCompleteNotify {
+                sequence: 0x1234,
+                event_id: XResourceId::new(0x220900, 1),
+                window: XResourceId::new(0x220901, 1),
+                serial: 77,
+                ust: 123_456,
+                msc: 42,
+                mode: 1,
+            },
+        );
+        assert_eq!(complete.len(), 44);
+        assert_eq!(complete[0], 35);
+        assert_eq!(complete[1], X_PRESENT_MAJOR_OPCODE);
+        assert_eq!(read_u32(byte_order, &complete[4..8]), 3);
+        assert_eq!(read_u16(byte_order, &complete[8..10]), 1);
+        assert_eq!(complete[10], 0);
+        assert_eq!(complete[11], 1);
+        assert_eq!(read_u32(byte_order, &complete[12..16]), 0x220900);
+        assert_eq!(read_u32(byte_order, &complete[16..20]), 0x220901);
+        assert_eq!(read_u32(byte_order, &complete[20..24]), 77);
+        assert_eq!(read_u64(byte_order, &complete[24..32]), 123_456);
+        assert_eq!(read_u64(byte_order, &complete[36..44]), 42);
+
+        let idle = encode_x_client_event(
+            byte_order,
+            XClientEvent::PresentIdleNotify {
+                sequence: 0x1235,
+                event_id: XResourceId::new(0x220900, 1),
+                window: XResourceId::new(0x220901, 1),
+                serial: 77,
+                pixmap: XResourceId::new(0x220902, 1),
+                idle_fence: Some(XResourceId::new(0x220903, 1)),
+            },
+        );
+        assert_eq!(idle.len(), 36);
+        assert_eq!(idle[0], 35);
+        assert_eq!(idle[1], X_PRESENT_MAJOR_OPCODE);
+        assert_eq!(read_u32(byte_order, &idle[4..8]), 1);
+        assert_eq!(read_u16(byte_order, &idle[8..10]), 2);
+        assert_eq!(read_u32(byte_order, &idle[24..28]), 0x220902);
+        assert_eq!(read_u32(byte_order, &idle[28..32]), 0x220903);
+    }
+}
+
+#[test]
 fn selection_request_and_clear_events_use_core_x11_layout() {
     let owner = XResourceId::new(0x200001, 1);
     let requestor = XResourceId::new(0x400001, 1);
@@ -2012,6 +2061,68 @@ fn dri3_fence_from_fd_requires_one_fd_and_registers_authority_identity() {
     runtime
         .validate_dri3_fence_access(namespace, XResourceId::new(0x220802, 1))
         .unwrap();
+}
+
+#[test]
+fn standard_present_pixmap_reduces_dri3_pixmap_to_dmabuf_transaction() {
+    let namespace = NamespaceId::from_raw(45);
+    let window = XResourceId::new(0x220810, 1);
+    let pixmap = XResourceId::new(0x220811, 1);
+    let mut runtime = XAuthorityRuntime::new();
+    runtime.apply(XAuthorityRequestPacket {
+        transaction: TransactionId::from_raw(1),
+        namespace,
+        kind: XAuthorityRequestKind::CreateWindow {
+            window,
+            surface: SurfaceId::new(45, 1),
+            geometry: Rect {
+                x: 0,
+                y: 0,
+                width: 64,
+                height: 48,
+            },
+            constraints: SurfaceConstraints {
+                min_size: None,
+                max_size: None,
+            },
+            generation: 1,
+        },
+    });
+    let descriptor = runtime
+        .create_dri3_pixmap(namespace, pixmap, 2, 64 * 48 * 4, 64, 48, 256, 24, 32)
+        .unwrap();
+
+    let request = decode_x11_core_request(
+        context(namespace, 532, XByteOrder::LittleEndian),
+        &present_pixmap_request(XByteOrder::LittleEndian, window, pixmap, 77),
+    )
+    .unwrap();
+    assert_eq!(request.required_fd_count(), 0);
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let result = dispatch_x11_wire_request(
+        dispatch_context(
+            namespace,
+            2,
+            XByteOrder::LittleEndian,
+            X_PRESENT_MAJOR_OPCODE,
+        ),
+        request,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert!(result.outputs.is_empty());
+    let response = result.response.unwrap();
+    assert_eq!(response.transactions.len(), 1);
+    assert_eq!(
+        response.transactions[0].target_buffer,
+        BufferSource::DmaBuf {
+            handle: descriptor.handle.raw()
+        }
+    );
+    assert_eq!(response.transactions[0].damage.rects[0].width, 64);
+    assert_eq!(response.transactions[0].damage.rects[0].height, 48);
 }
 
 #[test]
@@ -4033,6 +4144,9 @@ fn x11_dispatch_accepts_destroy_window_for_known_namespace_window() {
             transactions: Vec::new(),
             removed_surfaces: vec![surface],
             cpu_buffer_updates: Vec::new(),
+            dma_buf_registrations: Vec::new(),
+            fence_registrations: Vec::new(),
+            present_submissions: Vec::new(),
         })
     );
 }
@@ -6712,6 +6826,9 @@ fn x11_core_socket_channel_sees_sophia_present_transaction_batch() {
         transactions: Vec::new(),
         removed_surfaces: vec![surface],
         cpu_buffer_updates: Vec::new(),
+        dma_buf_registrations: Vec::new(),
+        fence_registrations: Vec::new(),
+        present_submissions: Vec::new(),
     });
     assert!(routes.is_empty());
 }
@@ -8203,6 +8320,32 @@ fn dri3_fence_from_fd_request(
     out
 }
 
+fn present_pixmap_request(
+    byte_order: XByteOrder,
+    window: XResourceId,
+    pixmap: XResourceId,
+    serial: u32,
+) -> Vec<u8> {
+    let mut out = vec![X_PRESENT_MAJOR_OPCODE, X_PRESENT_PIXMAP_MINOR_OPCODE];
+    push_u16(&mut out, byte_order, 18);
+    push_u32(&mut out, byte_order, window.local.raw() as u32);
+    push_u32(&mut out, byte_order, pixmap.local.raw() as u32);
+    push_u32(&mut out, byte_order, serial);
+    push_u32(&mut out, byte_order, 0);
+    push_u32(&mut out, byte_order, 0);
+    push_u16(&mut out, byte_order, 0);
+    push_u16(&mut out, byte_order, 0);
+    push_u32(&mut out, byte_order, 0);
+    push_u32(&mut out, byte_order, 0);
+    push_u32(&mut out, byte_order, 0);
+    push_u32(&mut out, byte_order, 0);
+    push_u32(&mut out, byte_order, 0);
+    push_u64(&mut out, byte_order, 0);
+    push_u64(&mut out, byte_order, 0);
+    push_u64(&mut out, byte_order, 0);
+    out
+}
+
 fn randr_select_input_request(byte_order: XByteOrder, window: u32, enable: u16) -> Vec<u8> {
     let mut out = vec![X_RANDR_MAJOR_OPCODE, X_RANDR_SELECT_INPUT_MINOR_OPCODE];
     push_u16(&mut out, byte_order, 3);
@@ -8372,6 +8515,13 @@ fn read_u32(byte_order: XByteOrder, bytes: &[u8]) -> u32 {
     match byte_order {
         XByteOrder::LittleEndian => u32::from_le_bytes(bytes.try_into().unwrap()),
         XByteOrder::BigEndian => u32::from_be_bytes(bytes.try_into().unwrap()),
+    }
+}
+
+fn read_u64(byte_order: XByteOrder, bytes: &[u8]) -> u64 {
+    match byte_order {
+        XByteOrder::LittleEndian => u64::from_le_bytes(bytes.try_into().unwrap()),
+        XByteOrder::BigEndian => u64::from_be_bytes(bytes.try_into().unwrap()),
     }
 }
 

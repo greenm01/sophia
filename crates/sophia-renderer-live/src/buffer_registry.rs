@@ -28,6 +28,7 @@ pub enum LiveBufferRegistryError {
     UnknownHandle,
     AcquireFencePending,
     AlreadySubmitted,
+    FenceQueryFailed,
 }
 
 #[derive(Debug, Default)]
@@ -156,6 +157,30 @@ impl LiveBufferRegistry {
             buffer.state = LiveBufferState::Ready;
         }
         Ok(())
+    }
+
+    pub fn poll_acquire_fence(
+        &mut self,
+        handle: BufferHandle,
+    ) -> Result<bool, LiveBufferRegistryError> {
+        let buffer = self
+            .buffers
+            .get(&handle)
+            .ok_or(LiveBufferRegistryError::UnknownHandle)?;
+        if buffer.state != LiveBufferState::WaitingForAcquireFence {
+            return Ok(true);
+        }
+        let signaled = sophia_xshmfence::query(
+            buffer
+                .acquire_fence
+                .as_ref()
+                .ok_or(LiveBufferRegistryError::FenceQueryFailed)?,
+        )
+        .map_err(|_| LiveBufferRegistryError::FenceQueryFailed)?;
+        if signaled {
+            self.signal_acquire_fence(handle)?;
+        }
+        Ok(signaled)
     }
 
     pub fn submit(&mut self, handle: BufferHandle) -> Result<(), LiveBufferRegistryError> {

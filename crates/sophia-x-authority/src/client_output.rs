@@ -175,6 +175,23 @@ pub enum XClientEvent {
         segment: XResourceId,
         offset: u32,
     },
+    PresentCompleteNotify {
+        sequence: u16,
+        event_id: XResourceId,
+        window: XResourceId,
+        serial: u32,
+        ust: u64,
+        msc: u64,
+        mode: u8,
+    },
+    PresentIdleNotify {
+        sequence: u16,
+        event_id: XResourceId,
+        window: XResourceId,
+        serial: u32,
+        pixmap: XResourceId,
+        idle_fence: Option<XResourceId>,
+    },
     RandrScreenChange {
         sequence: u16,
         timestamp: u32,
@@ -285,6 +302,10 @@ pub enum XClientReply {
         sequence: u16,
         major_version: u32,
         minor_version: u32,
+    },
+    PresentQueryCapabilities {
+        sequence: u16,
+        capabilities: u32,
     },
     RandrQueryVersion {
         sequence: u16,
@@ -756,6 +777,15 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             write_reply_header(byte_order, &mut out, sequence, 0);
             put_u32(byte_order, &mut out[8..12], major_version);
             put_u32(byte_order, &mut out[12..16], minor_version);
+            out
+        }
+        XClientReply::PresentQueryCapabilities {
+            sequence,
+            capabilities,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            put_u32(byte_order, &mut out[8..12], capabilities);
             out
         }
         XClientReply::RandrQueryVersion {
@@ -1493,11 +1523,8 @@ pub fn encode_x_client_error(
     out
 }
 
-pub fn encode_x_client_event(
-    byte_order: XByteOrder,
-    event: XClientEvent,
-) -> [u8; X_CLIENT_OUTPUT_RECORD_LEN] {
-    let mut out = [0; X_CLIENT_OUTPUT_RECORD_LEN];
+pub fn encode_x_client_event(byte_order: XByteOrder, event: XClientEvent) -> Vec<u8> {
+    let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
     match event {
         XClientEvent::Key {
             sequence,
@@ -1736,7 +1763,7 @@ pub fn encode_x_client_event(
             put_u32(byte_order, &mut out[20..24], property);
         }
         XClientEvent::ClientMessage { sequence, bytes } => {
-            out = bytes;
+            out = bytes.to_vec();
             put_u16(byte_order, &mut out[2..4], sequence);
         }
         XClientEvent::ShmCompletion {
@@ -1761,6 +1788,55 @@ pub fn encode_x_client_event(
             out[10] = crate::X_MIT_SHM_MAJOR_OPCODE;
             put_resource(byte_order, &mut out[12..16], segment);
             put_u32(byte_order, &mut out[16..20], offset);
+        }
+        XClientEvent::PresentCompleteNotify {
+            sequence,
+            event_id,
+            window,
+            serial,
+            ust,
+            msc,
+            mode,
+        } => {
+            out.resize(44, 0);
+            out[0] = 35;
+            out[1] = crate::X_PRESENT_MAJOR_OPCODE;
+            put_u16(byte_order, &mut out[2..4], sequence);
+            put_u32(byte_order, &mut out[4..8], 3);
+            put_u16(byte_order, &mut out[8..10], 1);
+            out[10] = 0;
+            out[11] = mode;
+            put_resource(byte_order, &mut out[12..16], event_id);
+            put_resource(byte_order, &mut out[16..20], window);
+            put_u32(byte_order, &mut out[20..24], serial);
+            put_u64(byte_order, &mut out[24..32], ust);
+            put_u32(byte_order, &mut out[32..36], u32::from(sequence));
+            put_u64(byte_order, &mut out[36..44], msc);
+        }
+        XClientEvent::PresentIdleNotify {
+            sequence,
+            event_id,
+            window,
+            serial,
+            pixmap,
+            idle_fence,
+        } => {
+            out.resize(36, 0);
+            out[0] = 35;
+            out[1] = crate::X_PRESENT_MAJOR_OPCODE;
+            put_u16(byte_order, &mut out[2..4], sequence);
+            put_u32(byte_order, &mut out[4..8], 1);
+            put_u16(byte_order, &mut out[8..10], 2);
+            put_resource(byte_order, &mut out[12..16], event_id);
+            put_resource(byte_order, &mut out[16..20], window);
+            put_u32(byte_order, &mut out[20..24], serial);
+            put_resource(byte_order, &mut out[24..28], pixmap);
+            put_resource(
+                byte_order,
+                &mut out[28..32],
+                idle_fence.unwrap_or(XResourceId::NONE),
+            );
+            put_u32(byte_order, &mut out[32..36], u32::from(sequence));
         }
         XClientEvent::RandrScreenChange {
             sequence,
@@ -1866,7 +1942,7 @@ pub fn encode_x_client_event(
 #[allow(clippy::too_many_arguments)]
 fn write_pointer_event(
     byte_order: XByteOrder,
-    out: &mut [u8; X_CLIENT_OUTPUT_RECORD_LEN],
+    out: &mut [u8],
     event_type: u8,
     detail: u8,
     sequence: u16,
@@ -2014,7 +2090,7 @@ fn encode_font_info_reply(
 
 fn write_event_header(
     byte_order: XByteOrder,
-    out: &mut [u8; X_CLIENT_OUTPUT_RECORD_LEN],
+    out: &mut [u8],
     event_type: u8,
     detail: u8,
     sequence: u16,
@@ -2076,4 +2152,12 @@ fn put_u32(byte_order: XByteOrder, out: &mut [u8], value: u32) {
         XByteOrder::LittleEndian => out.copy_from_slice(&value.to_le_bytes()),
         XByteOrder::BigEndian => out.copy_from_slice(&value.to_be_bytes()),
     }
+}
+
+fn put_u64(byte_order: XByteOrder, out: &mut [u8], value: u64) {
+    let bytes = match byte_order {
+        XByteOrder::LittleEndian => value.to_le_bytes(),
+        XByteOrder::BigEndian => value.to_be_bytes(),
+    };
+    out.copy_from_slice(&bytes);
 }

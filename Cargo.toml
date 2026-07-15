@@ -12,6 +12,7 @@ members = [
     "crates/sophia-wm-demo",
     "crates/sophia-wayland-authority",
     "crates/sophia-x-authority",
+    "crates/sophia-xshmfence",
     "crates/sophia-x11-wm-bridge",
 ]
 default-members = [
@@ -27,6 +28,7 @@ default-members = [
     "crates/sophia-wayland-authority",
     "crates/sophia-wm-demo",
     "crates/sophia-x-authority",
+    "crates/sophia-xshmfence",
     "crates/sophia-x11-wm-bridge",
 ]
 resolver = "3"

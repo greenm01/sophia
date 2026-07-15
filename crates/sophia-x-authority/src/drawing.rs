@@ -46,6 +46,27 @@ impl XDrawingUpdate {
         }
     }
 
+    pub fn present_buffer(
+        transaction: TransactionId,
+        requester_namespace: NamespaceId,
+        target_window: XResourceId,
+        buffer: BufferSource,
+        damage: Region,
+        previous_committed_generation: u64,
+        timeout_msec: u32,
+    ) -> Self {
+        Self {
+            transaction,
+            requester_namespace,
+            target_window,
+            kind: XDrawingUpdateKind::PresentPixmap,
+            buffer,
+            damage,
+            previous_committed_generation,
+            timeout_msec,
+        }
+    }
+
     pub fn shm_put_image(
         transaction: TransactionId,
         requester_namespace: NamespaceId,
