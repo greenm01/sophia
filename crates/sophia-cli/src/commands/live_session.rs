@@ -1760,6 +1760,14 @@ fn successful_primary_exit_ends_session(input_proof_requested: bool) -> bool {
     !input_proof_requested
 }
 
+fn physical_input_may_route_after_primary_exit(
+    primary_child_exited: bool,
+    focused_surface: Option<SurfaceId>,
+    proof_surface: Option<SurfaceId>,
+) -> bool {
+    !primary_child_exited || focused_surface != proof_surface
+}
+
 fn authority_commit_event_count(
     transactions: &[SurfaceTransaction],
     removed_surfaces: &[SurfaceId],
@@ -1983,7 +1991,7 @@ fn run_session_loop(
         }};
     }
 
-    'session: loop {
+    loop {
         if !primary_child_exited && let Some(status) = child.try_wait()? {
             if status.success()
                 && successful_primary_exit_ends_session(config.input_proof_requested())
@@ -2078,7 +2086,12 @@ fn run_session_loop(
             }
             break;
         }
-        if drain_physical_input!() {
+        if physical_input_may_route_after_primary_exit(
+            primary_child_exited,
+            focus.focused_surface(seat),
+            input_surface,
+        ) && drain_physical_input!()
+        {
             break;
         }
         if let (Some(runtime), Some(native_scanout)) = (runtime.as_mut(), native_scanout.as_mut())
@@ -2169,9 +2182,6 @@ fn run_session_loop(
         );
         match authority_batch {
             Ok(batch) => {
-                if drain_physical_input!() {
-                    break 'session;
-                }
                 last_authority_update = Instant::now();
                 batches = batches.saturating_add(1);
                 transactions = transactions.saturating_add(authority_commit_event_count(
@@ -4823,9 +4833,10 @@ mod tests {
         PersistentCpuScene, PersistentXtermSessionConfig, Rect, Region, Size,
         authority_commit_event_count, center_geometry_without_scaling,
         cpu_frame_matches_visible_output, cpu_frame_submission_ready,
-        layer_snapshots_from_committed, pointer_offset_for_geometry,
-        required_wayland_presentation_submission, retain_latest_wayland_presentation,
-        seed_missing_committed_surfaces, successful_primary_exit_ends_session,
+        layer_snapshots_from_committed, physical_input_may_route_after_primary_exit,
+        pointer_offset_for_geometry, required_wayland_presentation_submission,
+        retain_latest_wayland_presentation, seed_missing_committed_surfaces,
+        successful_primary_exit_ends_session,
     };
     use sophia_protocol::{
         AuthorityKind, NamespaceCapabilities, NamespaceProfile, Point, SurfaceId,
@@ -4840,6 +4851,27 @@ mod tests {
     fn successful_primary_exit_keeps_requested_input_proof_alive() {
         assert!(successful_primary_exit_ends_session(false));
         assert!(!successful_primary_exit_ends_session(true));
+    }
+
+    #[test]
+    fn physical_input_waits_for_focus_to_leave_exited_proof_surface() {
+        let proof = SurfaceId::new(1, 1);
+        let survivor = SurfaceId::new(2, 1);
+        assert!(physical_input_may_route_after_primary_exit(
+            false,
+            Some(proof),
+            Some(proof)
+        ));
+        assert!(!physical_input_may_route_after_primary_exit(
+            true,
+            Some(proof),
+            Some(proof)
+        ));
+        assert!(physical_input_may_route_after_primary_exit(
+            true,
+            Some(survivor),
+            Some(proof)
+        ));
     }
 
     #[test]
