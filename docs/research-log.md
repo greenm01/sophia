@@ -863,3 +863,10 @@ timing-dependent assumption that xterm itself would subscribe. The witness is
 closed before frontend drain; a two-xterm headless live smoke then completed
 with four queued RandR records, a matching wire event, committed resized
 pixels, and clean process teardown.
+
+Milestone 3 promotion no longer accepts the synthetic-input default. The paired
+runner requires readable physical keyboard and pointer event nodes, exact
+physical `sophia` plus Return input, flushed delivery, presented text pixels,
+and a pointer-driven pixel change in both profiles. Schema 13 separates
+automated terminal-content readiness from total operator interaction time, so
+the two-second startup budget measures startup rather than typing speed.

@@ -21,7 +21,7 @@ if [[ "$(grep -Ec '^sophia_live_session schema=7 status=running .* secondary_ter
     exit 1
 fi
 
-mapfile -t lines < <(grep -E '^sophia_live_session schema=(10|11|12) status=bounded_complete ' "$EVIDENCE_FILE" || true)
+mapfile -t lines < <(grep -E '^sophia_live_session schema=(10|11|12|13) status=bounded_complete ' "$EVIDENCE_FILE" || true)
 if [[ "${#lines[@]}" -ne 1 ]]; then
     echo "two-xterm proof expected exactly one current completion record, got ${#lines[@]}" >&2
     exit 1
@@ -29,6 +29,7 @@ fi
 
 cpu_layers=""
 elapsed_msec=""
+startup_ready_msec=""
 cpu_max_compose_msec=""
 expected=""
 flushed=""
@@ -36,6 +37,7 @@ for field in ${lines[0]}; do
     case "$field" in
         cpu_layers=*) cpu_layers="${field#cpu_layers=}" ;;
         elapsed_msec=*) elapsed_msec="${field#elapsed_msec=}" ;;
+        startup_ready_msec=*) startup_ready_msec="${field#startup_ready_msec=}" ;;
         cpu_max_compose_msec=*) cpu_max_compose_msec="${field#cpu_max_compose_msec=}" ;;
         input_events_expected=*) expected="${field#input_events_expected=}" ;;
         input_events_flushed=*) flushed="${field#input_events_flushed=}" ;;
@@ -51,8 +53,12 @@ if [[ ! "$expected" =~ ^[0-9]+$ ]] || [[ ! "$flushed" =~ ^[0-9]+$ ]] \
     echo "two-xterm proof expected every injected X11 event to flush, got expected=${expected:-missing} flushed=${flushed:-missing}" >&2
     exit 1
 fi
-if [[ ! "$elapsed_msec" =~ ^[0-9]+$ ]] || (( elapsed_msec > STARTUP_BUDGET_MSEC )); then
-    echo "two-xterm proof exceeded startup-to-echo budget: elapsed_msec=${elapsed_msec:-missing} budget_msec=$STARTUP_BUDGET_MSEC" >&2
+startup_msec="$elapsed_msec"
+if [[ " ${lines[0]} " == *" schema=13 "* ]]; then
+    startup_msec="$startup_ready_msec"
+fi
+if [[ ! "$startup_msec" =~ ^[0-9]+$ ]] || (( startup_msec > STARTUP_BUDGET_MSEC )); then
+    echo "two-xterm proof exceeded startup readiness budget: startup_msec=${startup_msec:-missing} budget_msec=$STARTUP_BUDGET_MSEC" >&2
     exit 1
 fi
 if [[ ! "$cpu_max_compose_msec" =~ ^[0-9]+$ ]] \
@@ -61,4 +67,4 @@ if [[ ! "$cpu_max_compose_msec" =~ ^[0-9]+$ ]] \
     exit 1
 fi
 
-echo "sophia_two_xterm_hardware_proof status=passed cpu_layers=$cpu_layers input_events_flushed=$flushed elapsed_msec=$elapsed_msec cpu_max_compose_msec=$cpu_max_compose_msec evidence=$EVIDENCE_FILE"
+echo "sophia_two_xterm_hardware_proof status=passed cpu_layers=$cpu_layers input_events_flushed=$flushed startup_msec=$startup_msec elapsed_msec=$elapsed_msec cpu_max_compose_msec=$cpu_max_compose_msec evidence=$EVIDENCE_FILE"

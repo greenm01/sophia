@@ -11,7 +11,7 @@ verify_profile() {
 
     "$ROOT_DIR/tools/verify_live_session_two_xterm_evidence.sh" "$evidence" >/dev/null
     local completion
-    completion="$(grep -E '^sophia_live_session schema=12 status=bounded_complete ' "$evidence")"
+    completion="$(grep -E '^sophia_live_session schema=13 status=bounded_complete ' "$evidence")"
     if [[ " $completion " != *" namespace_profile=$profile "* ]]; then
         echo "Milestone 3 evidence expected namespace_profile=$profile: $evidence" >&2
         exit 1
@@ -28,6 +28,17 @@ verify_profile() {
         echo "Milestone 3 evidence requires a committed configure-plus-pixels resize: $evidence" >&2
         exit 1
     fi
+    for required in \
+        "injected_input=false" \
+        "physical_input=enabled" \
+        "pointer_proof=enabled" \
+        "input_text_match=true" \
+        "pointer_pixel_change=true"; do
+        if [[ " $completion " != *" $required "* ]]; then
+            echo "Milestone 3 evidence is missing required physical proof field $required: $evidence" >&2
+            exit 1
+        fi
+    done
 }
 
 verify_profile "$CLASSIC_EVIDENCE" classic_shared
