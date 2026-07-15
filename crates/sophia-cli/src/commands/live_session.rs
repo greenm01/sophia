@@ -42,6 +42,7 @@ const SESSION_INPUT_DELIVERY_TIMEOUT_MSEC: u64 = 1_000;
 const SESSION_SEAT_RAW: u64 = 1;
 const SESSION_KEYBOARD_DEVICE_RAW: u64 = 1;
 const SESSION_POINTER_DEVICE_RAW: u64 = 2;
+const SECONDARY_POINTER_WITNESS_SCRIPT: &str = "printf '\033[?1003h\033[?1006hPointer witness: move or click here\n'; dd bs=1 count=1 >/dev/null 2>&1; printf '\033[?1003l\033[?1006lPointer input received\n'; sleep 300";
 static NEXT_SESSION_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 struct LiveXAdmissionPolicy {
@@ -909,16 +910,8 @@ fn spawn_secondary_xterm(
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
-    if let Some(text) = input_proof {
-        command
-            .args([
-                "-e",
-                "sh",
-                "-c",
-                "printf 'secondary: type %s then Return: ' \"$1\"; IFS= read -r line; printf '\\nsecondary received:%s\\n' \"$line\"; sleep 300",
-                "sophia-secondary-input-proof",
-            ])
-            .arg(text);
+    if input_proof.is_some() {
+        command.args(["-e", "sh", "-c", SECONDARY_POINTER_WITNESS_SCRIPT]);
     } else {
         command.args([
             "-e",
@@ -4825,13 +4818,13 @@ impl Drop for SessionProcessGuard {
 mod tests {
     use super::{
         BufferSource, CommittedSurfaceState, LiveXAuthorityFile, PersistentBackendRuntime,
-        PersistentCpuScene, PersistentXtermSessionConfig, Rect, Region, Size,
-        authority_transaction_count, center_geometry_without_scaling,
-        cpu_frame_matches_visible_output, cpu_frame_submission_ready,
-        layer_snapshots_from_committed, physical_input_may_route_after_primary_exit,
-        pointer_offset_for_geometry, required_wayland_presentation_submission,
-        retain_latest_wayland_presentation, seed_missing_committed_surfaces,
-        successful_primary_exit_ends_session,
+        PersistentCpuScene, PersistentXtermSessionConfig, Rect, Region,
+        SECONDARY_POINTER_WITNESS_SCRIPT, Size, authority_transaction_count,
+        center_geometry_without_scaling, cpu_frame_matches_visible_output,
+        cpu_frame_submission_ready, layer_snapshots_from_committed,
+        physical_input_may_route_after_primary_exit, pointer_offset_for_geometry,
+        required_wayland_presentation_submission, retain_latest_wayland_presentation,
+        seed_missing_committed_surfaces, successful_primary_exit_ends_session,
     };
     use sophia_protocol::{
         AuthorityKind, NamespaceCapabilities, NamespaceProfile, Point, SurfaceId,
@@ -4888,6 +4881,13 @@ mod tests {
         );
         assert_eq!(raw.x + offset.x, 560.0);
         assert_eq!(raw.y + offset.y, 380.0);
+    }
+
+    #[test]
+    fn secondary_terminal_is_a_pointer_witness_without_a_text_prompt() {
+        assert!(SECONDARY_POINTER_WITNESS_SCRIPT.contains("?1003h"));
+        assert!(SECONDARY_POINTER_WITNESS_SCRIPT.contains("Pointer input received"));
+        assert!(!SECONDARY_POINTER_WITNESS_SCRIPT.contains("read -r line"));
     }
 
     #[test]
