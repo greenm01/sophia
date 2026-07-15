@@ -4634,6 +4634,19 @@ impl SessionPointerPlacement {
     }
 }
 
+fn place_pointer_event_for_routing(
+    event: &mut sophia_protocol::InputEventPacket,
+    focused_surface: Option<SurfaceId>,
+    input_layers: &[LayerSnapshot],
+    pointer: &mut SessionPointerPlacement,
+    buttons_only: bool,
+) -> bool {
+    if let Some(raw) = event.global_position {
+        event.global_position = Some(pointer.place(raw, focused_surface, input_layers));
+    }
+    !(buttons_only && matches!(event.kind, sophia_protocol::InputEventKind::PointerMotion))
+}
+
 fn route_physical_input<P: NonBlockingInputPoller>(
     poller: &mut P,
     focus: &InputFocusState,
@@ -4760,19 +4773,17 @@ fn route_input_events(
                 if !pointer_routing_enabled {
                     continue;
                 }
-                if pointer_buttons_only
-                    && matches!(kind, sophia_protocol::InputEventKind::PointerMotion)
-                {
+                let focused_surface = focus.focused_surface(event.seat);
+                if !place_pointer_event_for_routing(
+                    &mut event,
+                    focused_surface,
+                    input_layers,
+                    pointer,
+                    pointer_buttons_only,
+                ) {
                     continue;
-                }
-                if let Some(raw) = event.global_position {
-                    event.global_position =
-                        Some(pointer.place(raw, focus.focused_surface(event.seat), input_layers));
                 }
                 let route = sophia_engine::hit_test_scene_surface_for_input(&event, input_layers);
-                if route.target_surface != focus.focused_surface(event.seat) {
-                    continue;
-                }
                 let (Some(global), Some(local)) = (event.global_position, route.local_position)
                 else {
                     continue;
@@ -4867,17 +4878,19 @@ mod tests {
     use super::{
         BufferSource, CommittedSurfaceState, LiveXAuthorityFile, PRIMARY_INPUT_PROOF_SCRIPT,
         PersistentBackendRuntime, PersistentCpuScene, PersistentXtermSessionConfig, Rect, Region,
-        SECONDARY_POINTER_WITNESS_SCRIPT, Size, authority_transaction_count,
-        center_geometry_without_scaling, cpu_frame_matches_visible_output,
-        cpu_frame_submission_ready, incremental_runtime_commits, layer_snapshots_from_committed,
-        physical_input_may_route_after_primary_exit, physical_input_pixels_already_changed,
+        SECONDARY_POINTER_WITNESS_SCRIPT, SessionPointerPlacement, Size,
+        authority_transaction_count, center_geometry_without_scaling,
+        cpu_frame_matches_visible_output, cpu_frame_submission_ready, incremental_runtime_commits,
+        layer_snapshots_from_committed, physical_input_may_route_after_primary_exit,
+        physical_input_pixels_already_changed, place_pointer_event_for_routing,
         pointer_offset_for_geometry, required_wayland_presentation_submission,
         retain_latest_wayland_presentation, seed_missing_committed_surfaces,
         successful_primary_exit_ends_session,
     };
     use sophia_protocol::{
-        AuthorityKind, NamespaceCapabilities, NamespaceProfile, Point, SurfaceId,
-        SurfaceTransaction, SurfaceTransactionReadiness,
+        AuthorityKind, DeviceId, InputEventKind, InputEventPacket, NamespaceCapabilities,
+        NamespaceProfile, Point, SeatId, SurfaceId, SurfaceTransaction,
+        SurfaceTransactionReadiness,
     };
     use sophia_x_authority::{
         X_AUTHORITY_CPU_BUFFER_FORMAT_XRGB8888, XAuthorityCpuBufferSnapshot, XResourceId,
@@ -4955,6 +4968,32 @@ mod tests {
         );
         assert_eq!(raw.x + offset.x, 560.0);
         assert_eq!(raw.y + offset.y, 380.0);
+    }
+
+    #[test]
+    fn button_only_pointer_proof_tracks_motion_without_routing_it() {
+        let mut pointer = SessionPointerPlacement {
+            offset: Some(Point { x: 10.0, y: 20.0 }),
+        };
+        let mut motion = InputEventPacket {
+            serial: 1,
+            seat: SeatId::from_raw(1),
+            device: DeviceId::from_raw(2),
+            time_msec: 1,
+            kind: InputEventKind::PointerMotion,
+            global_position: Some(Point { x: 30.0, y: 40.0 }),
+            target_surface: None,
+            local_position: None,
+        };
+
+        assert!(!place_pointer_event_for_routing(
+            &mut motion,
+            None,
+            &[],
+            &mut pointer,
+            true,
+        ));
+        assert_eq!(motion.global_position, Some(Point { x: 40.0, y: 60.0 }));
     }
 
     #[test]
