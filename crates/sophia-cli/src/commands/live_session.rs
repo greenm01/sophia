@@ -1900,19 +1900,11 @@ fn run_session_loop(
                     physical_sequence_completed_at = Some(completed_at);
                     input_delivery_wait_started_at = Some(completed_at);
                     input_delivery_source = Some("physical");
-                    // Measure the final proof key against the latest frame that
-                    // existed when its complete physical sequence was routed.
-                    // Earlier letters must not satisfy the presented-latency
-                    // gate before Return reaches the client.
-                    injection_checksum = scene.last_report.as_ref().map(|report| report.checksum);
-                    input_surface = focus.focused_surface(seat);
-                    input_surface_generation =
-                        input_surface.and_then(|surface| scene.surface_buffer_generation(surface));
-                    input_pixel_change = false;
-                    input_surface_pixel_change = false;
-                    input_change_submission_baseline = None;
-                    input_batch_baseline = Some(batches);
-                    input_cpu_update_baseline = Some(cpu_buffer_updates);
+                    // Keep the baseline captured immediately before physical
+                    // input became ready. Xterm can render the earlier letters
+                    // before the poller observes Return; rebasing here discards
+                    // that causal pixel evidence and can falsely report a
+                    // static terminal after exact text delivery succeeded.
                 }
                 if report.pointer_events > 0 {
                     println!(
@@ -2538,6 +2530,8 @@ fn run_session_loop(
                     key_routed_reported = true;
                 }
             } else {
+                input_batch_baseline = Some(batches);
+                input_cpu_update_baseline = Some(cpu_buffer_updates);
                 physical_input_ready_at = Some(Instant::now());
                 println!(
                     "sophia_live_session_input schema=1 status=ready source=physical text={}",
