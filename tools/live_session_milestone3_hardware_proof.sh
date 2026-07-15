@@ -8,6 +8,22 @@ UPDATE_SIZE="${SOPHIA_MILESTONE3_OUTPUT_SIZE:-1024x768}"
 SURFACE_SIZE="${SOPHIA_MILESTONE3_SURFACE_SIZE:-960x640}"
 INPUT_DEVICES="${SOPHIA_MILESTONE3_INPUT_DEVICES:-/dev/input/by-path/platform-i8042-serio-0-event-kbd,/dev/input/by-path/platform-i8042-serio-1-event-mouse}"
 
+keyd_was_running=false
+restore_keyd() {
+    local status=$?
+    if [[ "$keyd_was_running" == true ]]; then
+        echo
+        echo "Restoring keyd..."
+        if ! sudo sv up keyd; then
+            echo "WARNING: keyd could not be restored; run: sudo sv up keyd" >&2
+            status=1
+        fi
+    fi
+    return "$status"
+}
+
+trap restore_keyd EXIT
+
 echo "Sophia Milestone 3 paired hardware proof"
 echo "This runs two exclusive-DRM sessions: classic shared-X, then fresh confined."
 echo "For each session, type sophia and Return in the prompted terminal, then move/click the pointer."
@@ -20,6 +36,16 @@ for input_path in "${input_paths[@]}"; do
         exit 1
     fi
 done
+
+# keyd takes an exclusive evdev grab. The device remains openable and readable,
+# but Sophia receives no events while that grab is active. Release it for the
+# paired proof and restore the service on every exit path.
+if pgrep -x keyd >/dev/null 2>&1; then
+    echo "Temporarily stopping keyd so Sophia can own the physical keyboard..."
+    sudo -v
+    sudo sv down keyd
+    keyd_was_running=true
+fi
 
 SOPHIA_LIVE_SESSION_PERSISTENT_EVIDENCE="$CLASSIC_EVIDENCE" \
     "$ROOT_DIR/tools/live_session_two_xterm_hardware_proof.sh" \
