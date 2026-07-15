@@ -1874,6 +1874,7 @@ fn run_session_loop(
                     &mut modifiers,
                     &mut emergency_chord,
                     &mut pointer,
+                    pointer_checksum.is_some(),
                     &mut next_input_delivery,
                     physical_text_proof.as_mut(),
                 )?;
@@ -2528,6 +2529,7 @@ fn run_session_loop(
                     &mut modifiers,
                     &mut emergency_chord,
                     &mut pointer,
+                    false,
                     &mut next_input_delivery,
                     None,
                 )?;
@@ -4610,6 +4612,7 @@ fn route_physical_input<P: NonBlockingInputPoller>(
     modifiers: &mut XCoreKeyboardMapper,
     emergency_chord: &mut EmergencyChordState,
     pointer: &mut SessionPointerPlacement,
+    pointer_routing_enabled: bool,
     next_input_delivery: &mut u64,
     physical_text_proof: Option<&mut PhysicalTextProof>,
 ) -> Result<PhysicalInputRouteReport, Box<dyn std::error::Error>> {
@@ -4624,6 +4627,7 @@ fn route_physical_input<P: NonBlockingInputPoller>(
         modifiers,
         emergency_chord,
         pointer,
+        pointer_routing_enabled,
         next_input_delivery,
         physical_text_proof,
     )
@@ -4640,6 +4644,7 @@ fn route_input_events(
     modifiers: &mut XCoreKeyboardMapper,
     emergency_chord: &mut EmergencyChordState,
     pointer: &mut SessionPointerPlacement,
+    pointer_routing_enabled: bool,
     next_input_delivery: &mut u64,
     mut physical_text_proof: Option<&mut PhysicalTextProof>,
 ) -> Result<PhysicalInputRouteReport, Box<dyn std::error::Error>> {
@@ -4717,6 +4722,9 @@ fn route_input_events(
             kind @ (sophia_protocol::InputEventKind::PointerMotion
             | sophia_protocol::InputEventKind::PointerButton { .. }) => {
                 report.pointer_events = report.pointer_events.saturating_add(1);
+                if !pointer_routing_enabled {
+                    continue;
+                }
                 if let Some(raw) = event.global_position {
                     event.global_position =
                         Some(pointer.place(raw, focus.focused_surface(event.seat), input_layers));
