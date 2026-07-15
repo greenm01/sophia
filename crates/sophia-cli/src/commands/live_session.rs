@@ -1877,7 +1877,8 @@ fn run_session_loop(
                     &mut modifiers,
                     &mut emergency_chord,
                     &mut pointer,
-                    pointer_checksum.is_some(),
+                    !config.expect_physical_pointer || pointer_checksum.is_some(),
+                    config.expect_physical_pointer,
                     &mut next_input_delivery,
                     physical_text_proof.as_mut(),
                 )?;
@@ -2532,6 +2533,7 @@ fn run_session_loop(
                     &mut modifiers,
                     &mut emergency_chord,
                     &mut pointer,
+                    false,
                     false,
                     &mut next_input_delivery,
                     None,
@@ -4616,6 +4618,7 @@ fn route_physical_input<P: NonBlockingInputPoller>(
     emergency_chord: &mut EmergencyChordState,
     pointer: &mut SessionPointerPlacement,
     pointer_routing_enabled: bool,
+    pointer_buttons_only: bool,
     next_input_delivery: &mut u64,
     physical_text_proof: Option<&mut PhysicalTextProof>,
 ) -> Result<PhysicalInputRouteReport, Box<dyn std::error::Error>> {
@@ -4631,6 +4634,7 @@ fn route_physical_input<P: NonBlockingInputPoller>(
         emergency_chord,
         pointer,
         pointer_routing_enabled,
+        pointer_buttons_only,
         next_input_delivery,
         physical_text_proof,
     )
@@ -4648,6 +4652,7 @@ fn route_input_events(
     emergency_chord: &mut EmergencyChordState,
     pointer: &mut SessionPointerPlacement,
     pointer_routing_enabled: bool,
+    pointer_buttons_only: bool,
     next_input_delivery: &mut u64,
     mut physical_text_proof: Option<&mut PhysicalTextProof>,
 ) -> Result<PhysicalInputRouteReport, Box<dyn std::error::Error>> {
@@ -4726,6 +4731,11 @@ fn route_input_events(
             | sophia_protocol::InputEventKind::PointerButton { .. }) => {
                 report.pointer_events = report.pointer_events.saturating_add(1);
                 if !pointer_routing_enabled {
+                    continue;
+                }
+                if pointer_buttons_only
+                    && matches!(kind, sophia_protocol::InputEventKind::PointerMotion)
+                {
                     continue;
                 }
                 if let Some(raw) = event.global_position {
