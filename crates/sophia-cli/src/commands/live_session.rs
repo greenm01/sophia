@@ -2,6 +2,7 @@ use super::prelude::*;
 
 use sophia_cli::emergency_input::{EmergencyChordAction, EmergencyChordState};
 use sophia_cli::input_proof::{PhysicalTextProof, PhysicalTextProofEvent};
+use sophia_cli::resize_transaction::ResizeRollbackCoordinator;
 use sophia_engine::{
     FocusedInputRoute, InputFocusDecision, InputFocusState, NonBlockingInputPoller,
 };
@@ -1154,7 +1155,7 @@ struct PendingLiveWmLayout {
 #[derive(Default)]
 struct PersistentLiveLayout {
     layers: BTreeMap<SurfaceId, LayerSnapshot>,
-    authority_sizes: BTreeMap<SurfaceId, Size>,
+    resize: ResizeRollbackCoordinator,
     client_routes: XAuthorityClientSurfaceRoutes,
     unmanaged_surfaces: BTreeSet<SurfaceId>,
     pending: Option<PendingLiveWmLayout>,
@@ -1162,8 +1163,6 @@ struct PersistentLiveLayout {
     stage_new_surfaces_offset: bool,
     center_first_surface_in: Option<Size>,
     committed_resize_replay: Option<(Vec<SurfaceTransaction>, Vec<XAuthorityCpuBufferUpdate>)>,
-    rollback_sizes: BTreeMap<SurfaceId, Size>,
-    next_rollback_transaction: u64,
 }
 
 impl PersistentLiveLayout {
@@ -1171,7 +1170,6 @@ impl PersistentLiveLayout {
         Self {
             stage_new_surfaces_offset,
             center_first_surface_in,
-            next_rollback_transaction: 1 << 63,
             ..Self::default()
         }
     }
@@ -1188,11 +1186,8 @@ impl PersistentLiveLayout {
                 width: transaction.target_geometry.width,
                 height: transaction.target_geometry.height,
             };
-            if let Some(rollback_size) = self.rollback_sizes.get(&transaction.surface).copied() {
-                if size != rollback_size {
-                    continue;
-                }
-                self.rollback_sizes.remove(&transaction.surface);
+            if !self.resize.accept_observation(transaction.surface, size) {
+                continue;
             }
             let staged_for_resize = self.pending.as_ref().is_some_and(|pending| {
                 pending.requested_sizes.get(&transaction.surface) == Some(&size)
@@ -1213,7 +1208,7 @@ impl PersistentLiveLayout {
                 }
                 continue;
             }
-            self.authority_sizes.insert(transaction.surface, size);
+            self.resize.record_committed(transaction.surface, size);
             match self.layers.get_mut(&transaction.surface) {
                 Some(layer) => {
                     layer.source = transaction.target_buffer;
@@ -1276,12 +1271,11 @@ impl PersistentLiveLayout {
         }
         self.layers
             .retain(|surface, _| !removed_surfaces.contains(surface));
-        self.authority_sizes
-            .retain(|surface, _| !removed_surfaces.contains(surface));
+        for surface in removed_surfaces {
+            self.resize.remove(*surface);
+        }
         self.unmanaged_surfaces
             .retain(|surface| !removed_surfaces.contains(surface));
-        self.rollback_sizes
-            .retain(|surface, _| !removed_surfaces.contains(surface));
         if self
             .focus_to_apply
             .is_some_and(|(_, surface)| removed_surfaces.contains(&surface))
@@ -1321,7 +1315,7 @@ impl PersistentLiveLayout {
         }
         proposal
             .requested_sizes
-            .retain(|surface, size| self.authority_sizes.get(surface) != Some(size));
+            .retain(|surface, size| self.resize.committed_size(*surface) != Some(*size));
         for (surface, size) in &proposal.requested_sizes {
             let client = self
                 .client_routes
@@ -1357,7 +1351,7 @@ impl PersistentLiveLayout {
         let ready = proposal
             .requested_sizes
             .iter()
-            .all(|(surface, size)| self.authority_sizes.get(surface) == Some(size));
+            .all(|(surface, size)| self.resize.committed_size(*surface) == Some(*size));
         if ready {
             return Ok(Some(self.commit_proposal(proposal)));
         }
@@ -1406,17 +1400,16 @@ impl PersistentLiveLayout {
             return Ok(None);
         }
         let pending = self.pending.take().expect("checked above");
-        let rollback_transaction = TransactionId::from_raw(self.next_rollback_transaction);
-        self.next_rollback_transaction = self
-            .next_rollback_transaction
-            .checked_add(1)
-            .ok_or("live WM rollback transaction ID exhausted")?;
-        for surface in pending.requested_sizes.keys().copied() {
-            let size = self
-                .authority_sizes
-                .get(&surface)
-                .copied()
-                .ok_or("live WM rollback surface has no committed authority size")?;
+        let rollback = self
+            .resize
+            .begin_rollback(pending.requested_sizes.keys().copied())?;
+        let rollback_transaction = rollback
+            .first()
+            .map(|request| request.transaction)
+            .unwrap_or(pending.transaction);
+        for request in rollback {
+            let surface = request.surface;
+            let size = request.size;
             let client = self
                 .client_routes
                 .client_for_surface(surface)
@@ -1429,7 +1422,6 @@ impl PersistentLiveLayout {
                     size,
                 },
             })?;
-            self.rollback_sizes.insert(surface, size);
         }
         for _ in 0..pending.requested_sizes.len() {
             let acknowledgement = control_ack_receiver.recv_timeout(Duration::from_millis(500))?;
@@ -1447,7 +1439,7 @@ impl PersistentLiveLayout {
             .requested_sizes
             .iter()
             .map(|(surface, expected)| {
-                let observed = self.authority_sizes.get(surface).copied().unwrap_or(Size {
+                let observed = self.resize.committed_size(*surface).unwrap_or(Size {
                     width: 0,
                     height: 0,
                 });
@@ -1493,7 +1485,7 @@ impl PersistentLiveLayout {
     fn commit_pending(&mut self, pending: PendingLiveWmLayout) -> WmTransactionUpdate {
         if !pending.staged_transactions.is_empty() {
             for transaction in pending.staged_transactions.values() {
-                self.authority_sizes.insert(
+                self.resize.record_committed(
                     transaction.surface,
                     Size {
                         width: transaction.target_geometry.width,
@@ -1551,7 +1543,7 @@ impl PersistentLiveLayout {
                 .cpu_buffer_updates
                 .retain(|update| !staged_handles.contains(&update.handle()));
         }
-        let rollback_surfaces = self.rollback_sizes.keys().copied().collect::<BTreeSet<_>>();
+        let rollback_surfaces = self.resize.rollback_surfaces().collect::<BTreeSet<_>>();
         let rollback_handles = projected
             .transactions
             .iter()

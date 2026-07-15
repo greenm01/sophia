@@ -792,3 +792,11 @@ notifications through each client's bounded protocol queue. A deterministic
 `--inject-output-size=WIDTHxHEIGHT` live-session hook applies a validated
 generation update after client startup, so update behavior can be retained as
 evidence without requiring a physical connector hotplug.
+
+The live resize rollback fence is now an exported coordinator rather than
+private layout bookkeeping. It owns committed sizes, monotonic compensating
+transaction IDs, abandoned-size filtering, and disconnect cleanup. Integration
+tests cover successful advancement, timeout rollback construction, rejection of
+late abandoned pixels until the old size is confirmed, and cleanup while a
+rollback is pending. The live layout uses this coordinator for its existing
+geometry-plus-pixels quarantine and compensating configure path.
