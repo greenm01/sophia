@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIXTURE_DIR="$ROOT_DIR/tools/fixtures"
+TEMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TEMP_DIR"' EXIT
 
 expect_pass() {
     local verifier="$1"
@@ -87,6 +89,24 @@ expect_fail tools/verify_live_session_persistent_evidence.sh live_session_persis
 expect_pass tools/verify_live_session_two_xterm_evidence.sh live_session_two_xterm_evidence_pass.log
 expect_fail tools/verify_live_session_two_xterm_evidence.sh live_session_two_xterm_evidence_slow_startup.log
 expect_fail tools/verify_live_session_two_xterm_evidence.sh live_session_two_xterm_evidence_slow_compose.log
+
+cp "$FIXTURE_DIR/live_session_two_xterm_evidence_pass.log" "$TEMP_DIR/classic.log"
+sed 's/namespace_profile=classic_shared/namespace_profile=confined/g' \
+    "$FIXTURE_DIR/live_session_two_xterm_evidence_pass.log" > "$TEMP_DIR/confined.log"
+"$ROOT_DIR/tools/verify_live_session_milestone3_evidence.sh" \
+    "$TEMP_DIR/classic.log" "$TEMP_DIR/confined.log" >/dev/null
+if "$ROOT_DIR/tools/verify_live_session_milestone3_evidence.sh" \
+    "$TEMP_DIR/classic.log" "$TEMP_DIR/classic.log" >/dev/null 2>&1; then
+    echo "Milestone 3 verifier accepted classic evidence as confined evidence" >&2
+    exit 1
+fi
+sed 's/namespace_request_capabilities=0/namespace_request_capabilities=1/' \
+    "$TEMP_DIR/confined.log" > "$TEMP_DIR/confined-capability.log"
+if "$ROOT_DIR/tools/verify_live_session_milestone3_evidence.sh" \
+    "$TEMP_DIR/classic.log" "$TEMP_DIR/confined-capability.log" >/dev/null 2>&1; then
+    echo "Milestone 3 verifier accepted a capability-bearing confined namespace" >&2
+    exit 1
+fi
 
 expect_pass tools/verify_qemu_session_evidence.sh qemu_session_evidence_pass.log
 expect_fail tools/verify_qemu_session_evidence.sh qemu_session_evidence_wrong_ticks.log
