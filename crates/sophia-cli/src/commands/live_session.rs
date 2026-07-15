@@ -1773,6 +1773,17 @@ fn incremental_runtime_commits(cumulative: u64, startup_snapshot: u64) -> u64 {
     cumulative.saturating_sub(startup_snapshot)
 }
 
+fn physical_input_pixels_already_changed(
+    baseline_checksum: Option<u64>,
+    current_checksum: Option<u64>,
+    input_surface_changed: bool,
+) -> bool {
+    input_surface_changed
+        && baseline_checksum
+            .zip(current_checksum)
+            .is_some_and(|(baseline, current)| baseline != current)
+}
+
 fn run_session_loop(
     config: &PersistentXtermSessionConfig,
     authority_receiver: &Receiver<XAuthorityObservedTransactionBatch>,
@@ -1926,6 +1937,13 @@ fn run_session_loop(
                     // before the poller observes Return; rebasing here discards
                     // that causal pixel evidence and can falsely report a
                     // static terminal after exact text delivery succeeded.
+                    if physical_input_pixels_already_changed(
+                        injection_checksum,
+                        scene.last_report.as_ref().map(|report| report.checksum),
+                        input_surface_pixel_change,
+                    ) {
+                        input_pixel_change = true;
+                    }
                 }
                 if report.pointer_events > 0 {
                     println!(
@@ -2289,12 +2307,6 @@ fn run_session_loop(
                         || physical_sequence_completed_at.is_some())
                 {
                     input_pixel_change = true;
-                    input_change_submission_baseline.get_or_insert_with(|| {
-                        native_scanout
-                            .as_ref()
-                            .and_then(|native| native.heads.first())
-                            .map_or(0, |head| head.submissions)
-                    });
                 }
                 if let Some(before_frame) = pointer_checksum
                     && report.checksum != before_frame
@@ -2526,6 +2538,10 @@ fn run_session_loop(
             && terminal_content_ready
         {
             injection_checksum = scene.last_report.as_ref().map(|report| report.checksum);
+            input_change_submission_baseline = native_scanout
+                .as_ref()
+                .and_then(|native| native.heads.first())
+                .map(|head| head.presented_submissions);
             input_surface = focus.focused_surface(seat);
             input_surface_generation =
                 input_surface.and_then(|surface| scene.surface_buffer_generation(surface));
@@ -4854,9 +4870,10 @@ mod tests {
         SECONDARY_POINTER_WITNESS_SCRIPT, Size, authority_transaction_count,
         center_geometry_without_scaling, cpu_frame_matches_visible_output,
         cpu_frame_submission_ready, incremental_runtime_commits, layer_snapshots_from_committed,
-        physical_input_may_route_after_primary_exit, pointer_offset_for_geometry,
-        required_wayland_presentation_submission, retain_latest_wayland_presentation,
-        seed_missing_committed_surfaces, successful_primary_exit_ends_session,
+        physical_input_may_route_after_primary_exit, physical_input_pixels_already_changed,
+        pointer_offset_for_geometry, required_wayland_presentation_submission,
+        retain_latest_wayland_presentation, seed_missing_committed_surfaces,
+        successful_primary_exit_ends_session,
     };
     use sophia_protocol::{
         AuthorityKind, NamespaceCapabilities, NamespaceProfile, Point, SurfaceId,
@@ -4903,6 +4920,25 @@ mod tests {
     fn runtime_commit_accounting_excludes_startup_snapshot() {
         assert_eq!(incremental_runtime_commits(167, 1), 166);
         assert_eq!(incremental_runtime_commits(0, 1), 0);
+    }
+
+    #[test]
+    fn completed_physical_input_reconciles_pixels_that_arrived_before_return() {
+        assert!(physical_input_pixels_already_changed(
+            Some(10),
+            Some(20),
+            true
+        ));
+        assert!(!physical_input_pixels_already_changed(
+            Some(10),
+            Some(20),
+            false
+        ));
+        assert!(!physical_input_pixels_already_changed(
+            Some(10),
+            Some(10),
+            true
+        ));
     }
 
     #[test]
