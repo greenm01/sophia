@@ -1769,8 +1769,8 @@ fn authority_transaction_count(transactions: &[SurfaceTransaction]) -> usize {
     transactions.len()
 }
 
-fn incremental_runtime_commits(cumulative: u64, startup_snapshot: u64) -> u64 {
-    cumulative.saturating_sub(startup_snapshot)
+fn record_runtime_commits(committed: u64, accepted_transactions: usize) -> u64 {
+    committed.saturating_add(u64::try_from(accepted_transactions).unwrap_or(u64::MAX))
 }
 
 fn physical_input_pixels_already_changed(
@@ -1840,7 +1840,6 @@ fn run_session_loop(
     let mut input_batch_baseline = None;
     let mut input_cpu_update_baseline = None;
     let mut backend_ticks = 0usize;
-    let mut runtime_startup_committed = 0u64;
     let mut runtime_committed = 0u64;
     let mut runtime_surfaces = 0u64;
     let mut focus = InputFocusState::new();
@@ -2316,8 +2315,6 @@ fn run_session_loop(
                 }
 
                 if runtime.is_none() {
-                    runtime_startup_committed = u64::try_from(batch.transactions.len())
-                        .map_err(|_| "runtime startup transaction count exceeds u64")?;
                     runtime = Some(PersistentBackendRuntime::new(
                         &outputs,
                         &batch.transactions,
@@ -2331,12 +2328,9 @@ fn run_session_loop(
                 let tick =
                     runtime.run_batch(&batch, native_scanout.as_mut(), native_frames, wm_update)?;
                 backend_ticks = backend_ticks.saturating_add(1);
-                runtime_committed = incremental_runtime_commits(
-                    tick.engine
-                        .runtime
-                        .runtime_state
-                        .authority_transactions_committed,
-                    runtime_startup_committed,
+                runtime_committed = record_runtime_commits(
+                    runtime_committed,
+                    authority_transaction_count(&batch.transactions),
                 );
                 runtime_surfaces = tick.engine.runtime.runtime_state.authority_surfaces_applied;
                 for surface in removed_surfaces {
@@ -2442,13 +2436,6 @@ fn run_session_loop(
                     {
                         let tick = runtime.run_native_idle(native_scanout)?;
                         backend_ticks = backend_ticks.saturating_add(1);
-                        runtime_committed = incremental_runtime_commits(
-                            tick.engine
-                                .runtime
-                                .runtime_state
-                                .authority_transactions_committed,
-                            runtime_startup_committed,
-                        );
                         runtime_surfaces =
                             tick.engine.runtime.runtime_state.authority_surfaces_applied;
                     }
@@ -4880,12 +4867,12 @@ mod tests {
         PersistentBackendRuntime, PersistentCpuScene, PersistentXtermSessionConfig, Rect, Region,
         SECONDARY_POINTER_WITNESS_SCRIPT, SessionPointerPlacement, Size,
         authority_transaction_count, center_geometry_without_scaling,
-        cpu_frame_matches_visible_output, cpu_frame_submission_ready, incremental_runtime_commits,
+        cpu_frame_matches_visible_output, cpu_frame_submission_ready,
         layer_snapshots_from_committed, physical_input_may_route_after_primary_exit,
         physical_input_pixels_already_changed, place_pointer_event_for_routing,
-        pointer_offset_for_geometry, required_wayland_presentation_submission,
-        retain_latest_wayland_presentation, seed_missing_committed_surfaces,
-        successful_primary_exit_ends_session,
+        pointer_offset_for_geometry, record_runtime_commits,
+        required_wayland_presentation_submission, retain_latest_wayland_presentation,
+        seed_missing_committed_surfaces, successful_primary_exit_ends_session,
     };
     use sophia_protocol::{
         AuthorityKind, DeviceId, InputEventKind, InputEventPacket, NamespaceCapabilities,
@@ -4930,9 +4917,9 @@ mod tests {
     }
 
     #[test]
-    fn runtime_commit_accounting_excludes_startup_snapshot() {
-        assert_eq!(incremental_runtime_commits(167, 1), 166);
-        assert_eq!(incremental_runtime_commits(0, 1), 0);
+    fn runtime_commit_accounting_records_only_accepted_batches() {
+        assert_eq!(record_runtime_commits(166, 1), 167);
+        assert_eq!(record_runtime_commits(167, 0), 167);
     }
 
     #[test]
