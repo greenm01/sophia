@@ -2578,7 +2578,6 @@ fn run_session_loop(
             && input_pixel_change
             && pointer_checksum.is_none()
             && scene.last_report.is_some()
-            && last_authority_update.elapsed() >= Duration::from_millis(config.input_quiet_msec)
         {
             pointer_checksum = scene.last_report.as_ref().map(|report| report.checksum);
             println!(
