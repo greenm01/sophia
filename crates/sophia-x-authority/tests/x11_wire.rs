@@ -43,6 +43,84 @@ fn x11_request_reader_receives_bounded_scm_rights_with_the_request_header() {
     assert_eq!(received.fds.len(), 1);
 }
 
+#[cfg(unix)]
+#[test]
+fn x11_output_record_sends_bounded_scm_rights_with_the_first_bytes() {
+    use std::fs::File;
+    use std::io::IoSliceMut;
+    use std::mem::MaybeUninit;
+    use std::os::fd::OwnedFd;
+    use std::os::unix::net::UnixStream;
+
+    for fd_count in [1, sophia_protocol::DMA_BUF_MAX_PLANES] {
+        let (mut sender, receiver) = UnixStream::pair().unwrap();
+        let payload = vec![0x5a; X_CLIENT_OUTPUT_RECORD_LEN];
+        let fds = (0..fd_count)
+            .map(|_| OwnedFd::from(File::open("/dev/null").unwrap()))
+            .collect();
+        let record = X11SocketOutputRecord::new(payload.clone(), fds).unwrap();
+        assert_eq!(record.bytes(), payload);
+        assert_eq!(record.fd_count(), fd_count);
+
+        write_x11_socket_output_record(&mut sender, record).unwrap();
+
+        let mut bytes = [0; X_CLIENT_OUTPUT_RECORD_LEN];
+        let mut iov = [IoSliceMut::new(&mut bytes)];
+        let mut ancillary_space = [MaybeUninit::uninit();
+            rustix::cmsg_space!(ScmRights(sophia_protocol::DMA_BUF_MAX_PLANES))];
+        let mut ancillary = rustix::net::RecvAncillaryBuffer::new(&mut ancillary_space);
+        let received = rustix::net::recvmsg(
+            receiver,
+            &mut iov,
+            &mut ancillary,
+            rustix::net::RecvFlags::CMSG_CLOEXEC,
+        )
+        .unwrap();
+        assert_eq!(received.bytes, payload.len());
+        assert_eq!(bytes, payload.as_slice());
+        let received_fds = ancillary
+            .drain()
+            .flat_map(|message| match message {
+                rustix::net::RecvAncillaryMessage::ScmRights(fds) => fds.collect::<Vec<_>>(),
+                _ => Vec::new(),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(received_fds.len(), fd_count);
+        for fd in received_fds {
+            File::from(fd).metadata().unwrap();
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn x11_output_record_rejects_empty_bytes_and_excess_descriptors() {
+    use std::fs::File;
+    use std::os::fd::OwnedFd;
+
+    assert!(X11SocketOutputRecord::new(Vec::new(), Vec::new()).is_err());
+    let fds = (0..=sophia_protocol::DMA_BUF_MAX_PLANES)
+        .map(|_| OwnedFd::from(File::open("/dev/null").unwrap()))
+        .collect();
+    let error = X11SocketOutputRecord::new(vec![0], fds).unwrap_err();
+    assert!(error.to_string().contains("maximum is"));
+}
+
+#[cfg(unix)]
+#[test]
+fn x11_output_record_preserves_byte_only_output() {
+    use std::io::Read;
+    use std::os::unix::net::UnixStream;
+
+    let (mut sender, mut receiver) = UnixStream::pair().unwrap();
+    let payload = vec![0xa5; X_CLIENT_OUTPUT_RECORD_LEN];
+    let record = X11SocketOutputRecord::try_from(payload.clone()).unwrap();
+    write_x11_socket_output_record(&mut sender, record).unwrap();
+    let mut observed = vec![0; payload.len()];
+    receiver.read_exact(&mut observed).unwrap();
+    assert_eq!(observed, payload);
+}
+
 #[test]
 fn mit_shm_completion_uses_the_advertised_extension_event_layout() {
     for byte_order in [XByteOrder::LittleEndian, XByteOrder::BigEndian] {
@@ -1991,6 +2069,133 @@ fn x11_dispatch_negotiates_standard_dri3_and_present_1_2() {
 }
 
 #[test]
+fn dri3_open_decodes_default_provider_and_encodes_one_fd_reply() {
+    let namespace = NamespaceId::from_raw(45);
+    let request = decode_x11_core_request(
+        context(namespace, 529, XByteOrder::LittleEndian),
+        &dri3_open_request(XByteOrder::LittleEndian, X_SETUP_DEFAULT_ROOT, 0),
+    )
+    .unwrap();
+    assert_eq!(request.required_fd_count(), 0);
+    assert_eq!(
+        request,
+        XWireRequest::Dri3Open {
+            drawable: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+            provider: 0,
+        }
+    );
+
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 7, XByteOrder::LittleEndian, X_DRI3_MAJOR_OPCODE),
+        request,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded.len(), 1);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(encoded[0][1], 1);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][2..4]), 7);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][4..8]), 0);
+}
+
+#[test]
+fn dri3_open_rejects_nondefault_provider() {
+    let namespace = NamespaceId::from_raw(45);
+    let request = decode_x11_core_request(
+        context(namespace, 529, XByteOrder::LittleEndian),
+        &dri3_open_request(XByteOrder::LittleEndian, X_SETUP_DEFAULT_ROOT, 99),
+    )
+    .unwrap();
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 8, XByteOrder::LittleEndian, X_DRI3_MAJOR_OPCODE),
+        request,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][0], 0);
+    assert_eq!(encoded[0][1], XErrorCode::BadValue.wire_code());
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][4..8]), 99);
+    assert_eq!(
+        read_u16(XByteOrder::LittleEndian, &encoded[0][8..10]),
+        u16::from(X_DRI3_OPEN_MINOR_OPCODE)
+    );
+}
+
+#[test]
+fn dri3_get_supported_modifiers_reports_linear_and_implicit_screen_layouts() {
+    let namespace = NamespaceId::from_raw(45);
+    let request = decode_x11_core_request(
+        context(namespace, 529, XByteOrder::LittleEndian),
+        &dri3_get_supported_modifiers_request(
+            XByteOrder::LittleEndian,
+            X_SETUP_DEFAULT_ROOT,
+            24,
+            32,
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        request,
+        XWireRequest::Dri3GetSupportedModifiers {
+            window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+            depth: 24,
+            bits_per_pixel: 32,
+        }
+    );
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 9, XByteOrder::LittleEndian, X_DRI3_MAJOR_OPCODE),
+        request,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0].len(), 48);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][4..8]), 4);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][8..12]), 0);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][12..16]), 2);
+    assert_eq!(read_u64(XByteOrder::LittleEndian, &encoded[0][32..40]), 0);
+    assert_eq!(
+        read_u64(XByteOrder::LittleEndian, &encoded[0][40..48]),
+        0x00ff_ffff_ffff_ffff
+    );
+
+    let invalid = decode_x11_core_request(
+        context(namespace, 530, XByteOrder::LittleEndian),
+        &dri3_get_supported_modifiers_request(
+            XByteOrder::LittleEndian,
+            X_SETUP_DEFAULT_ROOT,
+            16,
+            16,
+        ),
+    )
+    .unwrap();
+    let invalid = dispatch_x11_wire_request(
+        dispatch_context(namespace, 10, XByteOrder::LittleEndian, X_DRI3_MAJOR_OPCODE),
+        invalid,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    )
+    .encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(invalid[0][0], 0);
+    assert_eq!(invalid[0][1], XErrorCode::BadValue.wire_code());
+}
+
+#[test]
 fn dri3_pixmap_from_buffer_requires_one_fd_and_preserves_bounded_metadata() {
     let namespace = NamespaceId::from_raw(45);
     let request = decode_x11_core_request(
@@ -2022,6 +2227,70 @@ fn dri3_pixmap_from_buffer_requires_one_fd_and_preserves_bounded_metadata() {
             bits_per_pixel: 32,
         }
     );
+}
+
+#[test]
+fn dri3_pixmap_from_buffers_preserves_modifier_and_plane_metadata() {
+    let namespace = NamespaceId::from_raw(45);
+    let pixmap = XResourceId::new(0x220803, 1);
+    let request = decode_x11_core_request(
+        context(namespace, 531, XByteOrder::LittleEndian),
+        &dri3_pixmap_from_buffers_request(
+            XByteOrder::LittleEndian,
+            0x220803,
+            X_SETUP_DEFAULT_ROOT,
+            1,
+            64,
+            48,
+            [256, 0, 0, 0],
+            [0, 0, 0, 0],
+            24,
+            32,
+            0,
+        ),
+    )
+    .unwrap();
+    assert_eq!(request.required_fd_count(), 1);
+    assert_eq!(
+        request,
+        XWireRequest::Dri3PixmapFromBuffers {
+            pixmap,
+            window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+            num_buffers: 1,
+            width: 64,
+            height: 48,
+            strides: [256, 0, 0, 0],
+            offsets: [0, 0, 0, 0],
+            depth: 24,
+            bits_per_pixel: 32,
+            modifier: 0,
+        }
+    );
+
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 3, XByteOrder::LittleEndian, X_DRI3_MAJOR_OPCODE),
+        request,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert!(result.outputs.is_empty());
+    let descriptor = runtime.dri3_pixmap_descriptor(namespace, pixmap).unwrap();
+    assert_eq!(
+        descriptor.size,
+        Size {
+            width: 64,
+            height: 48,
+        }
+    );
+    assert_eq!(descriptor.format, sophia_protocol::DRM_FORMAT_XRGB8888);
+    assert_eq!(descriptor.modifier, 0);
+    assert_eq!(descriptor.plane_count, 1);
+    assert_eq!(descriptor.planes[0].unwrap().stride, 256);
+    assert_eq!(descriptor.planes[0].unwrap().offset, 0);
 }
 
 #[test]
@@ -4906,6 +5175,23 @@ fn x_authority_transaction_emitter_reports_backpressure() {
 
 #[cfg(unix)]
 #[test]
+fn protocol_router_remains_usable_after_route_broker_moves_or_drops() {
+    use std::num::NonZeroUsize;
+
+    let broker = XServerFrontendRouteBroker::new(NonZeroUsize::new(4).unwrap());
+    let router = broker.protocol_router();
+    let second = router.clone();
+    drop(broker);
+
+    assert_eq!(
+        router.route_present_complete(SurfaceId::new(91, 1), 10, 20),
+        Ok(false)
+    );
+    assert_eq!(second.route_present_idle(SurfaceId::new(91, 1)), Ok(false));
+}
+
+#[cfg(unix)]
+#[test]
 fn x_server_frontend_config_requires_a_socket_path_and_namespace() {
     assert!(XServerFrontendConfig::new("", NamespaceId::from_raw(1)).is_err());
     assert!(XServerFrontendConfig::new("/tmp/sophia-x11.sock", NamespaceId::INVALID).is_err());
@@ -4944,6 +5230,158 @@ fn x_server_frontend_config_accepts_a_session_namespace_context() {
 
     assert_eq!(config.namespace(), namespace.id);
     assert_eq!(config.namespace_context(), namespace);
+}
+
+#[cfg(unix)]
+#[test]
+fn x_server_frontend_dri3_open_sends_backend_owned_render_device_fd() {
+    use std::fs::File;
+    use std::io::{IoSliceMut, Write};
+    use std::mem::MaybeUninit;
+    use std::os::fd::OwnedFd;
+    use std::os::unix::net::UnixStream;
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TestRenderDeviceProvider;
+
+    impl XServerFrontendRenderDeviceProvider for TestRenderDeviceProvider {
+        fn duplicate_render_device_fd(&self) -> Result<OwnedFd, XServerFrontendRenderDeviceError> {
+            File::open("/dev/null")
+                .map(OwnedFd::from)
+                .map_err(|_| XServerFrontendRenderDeviceError::Unavailable)
+        }
+    }
+
+    let path = std::env::temp_dir().join(format!(
+        "sophia-x-server-dri3-open-test-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let config = XServerFrontendConfig::new(&path, NamespaceId::from_raw(822))
+        .unwrap()
+        .with_render_device_provider(Arc::new(TestRenderDeviceProvider));
+    let mut frontend = XServerFrontend::bind(config).unwrap();
+    let server = thread::spawn(move || frontend.serve_next());
+
+    wait_for_socket(&path);
+    let mut stream = UnixStream::connect(&path).unwrap();
+    stream
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    read_setup_success(&mut stream, XByteOrder::LittleEndian);
+    stream
+        .write_all(&dri3_open_request(
+            XByteOrder::LittleEndian,
+            X_SETUP_DEFAULT_ROOT,
+            0,
+        ))
+        .unwrap();
+
+    let mut reply = [0; X_CLIENT_OUTPUT_RECORD_LEN];
+    let mut iov = [IoSliceMut::new(&mut reply)];
+    let mut ancillary_space = [MaybeUninit::uninit();
+        rustix::cmsg_space!(ScmRights(sophia_protocol::DMA_BUF_MAX_PLANES))];
+    let mut ancillary = rustix::net::RecvAncillaryBuffer::new(&mut ancillary_space);
+    let received = rustix::net::recvmsg(
+        &stream,
+        &mut iov,
+        &mut ancillary,
+        rustix::net::RecvFlags::CMSG_CLOEXEC,
+    )
+    .unwrap();
+    assert_eq!(received.bytes, X_CLIENT_OUTPUT_RECORD_LEN);
+    assert_eq!(reply[0], 1);
+    assert_eq!(reply[1], 1);
+    let received_fds = ancillary
+        .drain()
+        .flat_map(|message| match message {
+            rustix::net::RecvAncillaryMessage::ScmRights(fds) => fds.collect::<Vec<_>>(),
+            _ => Vec::new(),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(received_fds.len(), 1);
+    File::from(received_fds.into_iter().next().unwrap())
+        .metadata()
+        .unwrap();
+
+    drop(stream);
+    server.join().unwrap().unwrap();
+    std::fs::remove_file(path).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn x_server_frontend_assigns_batched_scm_rights_to_fd_bearing_requests() {
+    use std::fs::File;
+    use std::io::{IoSlice, Write};
+    use std::mem::MaybeUninit;
+    use std::net::Shutdown;
+    use std::os::fd::AsFd;
+    use std::os::unix::net::UnixStream;
+    use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let path = std::env::temp_dir().join(format!(
+        "sophia-x-server-batched-rights-test-{}-{}.sock",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let config = XServerFrontendConfig::new(&path, NamespaceId::from_raw(823)).unwrap();
+    let mut frontend = XServerFrontend::bind(config).unwrap();
+    let server = thread::spawn(move || frontend.serve_next());
+
+    wait_for_socket(&path);
+    let mut stream = UnixStream::connect(&path).unwrap();
+    stream
+        .write_all(&setup_request(XByteOrder::LittleEndian, 11, 0, b"", b""))
+        .unwrap();
+    read_setup_success(&mut stream, XByteOrder::LittleEndian);
+
+    let mut requests = xfixes_create_region_request(XByteOrder::LittleEndian, 0x220810, &[]);
+    requests.extend_from_slice(&dri3_pixmap_from_buffer_request(
+        XByteOrder::LittleEndian,
+        0x220811,
+        X_SETUP_DEFAULT_ROOT,
+        64 * 48 * 4,
+        64,
+        48,
+        256,
+        24,
+        32,
+    ));
+    requests.extend_from_slice(&dri3_fence_from_fd_request(
+        XByteOrder::LittleEndian,
+        X_SETUP_DEFAULT_ROOT,
+        0x220812,
+        false,
+    ));
+    let pixmap_fd = File::open("/dev/null").unwrap();
+    let fence_fd = File::open("/dev/null").unwrap();
+    let borrowed = [pixmap_fd.as_fd(), fence_fd.as_fd()];
+    let mut space = [MaybeUninit::uninit();
+        rustix::cmsg_space!(ScmRights(sophia_protocol::DMA_BUF_MAX_PLANES))];
+    let mut ancillary = rustix::net::SendAncillaryBuffer::new(&mut space);
+    assert!(ancillary.push(rustix::net::SendAncillaryMessage::ScmRights(&borrowed)));
+    let sent = rustix::net::sendmsg(
+        &stream,
+        &[IoSlice::new(&requests)],
+        &mut ancillary,
+        rustix::net::SendFlags::empty(),
+    )
+    .unwrap();
+    assert_eq!(sent, requests.len());
+    stream.shutdown(Shutdown::Write).unwrap();
+
+    server.join().unwrap().unwrap();
+    std::fs::remove_file(path).unwrap();
 }
 
 #[cfg(unix)]
@@ -8280,6 +8718,32 @@ fn extension_query_version_request(
     out
 }
 
+fn dri3_open_request(byte_order: XByteOrder, drawable: u32, provider: u32) -> Vec<u8> {
+    let mut out = vec![X_DRI3_MAJOR_OPCODE, X_DRI3_OPEN_MINOR_OPCODE];
+    push_u16(&mut out, byte_order, 3);
+    push_u32(&mut out, byte_order, drawable);
+    push_u32(&mut out, byte_order, provider);
+    out
+}
+
+fn dri3_get_supported_modifiers_request(
+    byte_order: XByteOrder,
+    window: u32,
+    depth: u8,
+    bits_per_pixel: u8,
+) -> Vec<u8> {
+    let mut out = vec![
+        X_DRI3_MAJOR_OPCODE,
+        X_DRI3_GET_SUPPORTED_MODIFIERS_MINOR_OPCODE,
+    ];
+    push_u16(&mut out, byte_order, 3);
+    push_u32(&mut out, byte_order, window);
+    out.push(depth);
+    out.push(bits_per_pixel);
+    out.extend_from_slice(&[0; 2]);
+    out
+}
+
 #[allow(clippy::too_many_arguments)]
 fn dri3_pixmap_from_buffer_request(
     byte_order: XByteOrder,
@@ -8305,6 +8769,39 @@ fn dri3_pixmap_from_buffer_request(
     out
 }
 
+#[allow(clippy::too_many_arguments)]
+fn dri3_pixmap_from_buffers_request(
+    byte_order: XByteOrder,
+    pixmap: u32,
+    window: u32,
+    num_buffers: u8,
+    width: u16,
+    height: u16,
+    strides: [u32; sophia_protocol::DMA_BUF_MAX_PLANES],
+    offsets: [u32; sophia_protocol::DMA_BUF_MAX_PLANES],
+    depth: u8,
+    bits_per_pixel: u8,
+    modifier: u64,
+) -> Vec<u8> {
+    let mut out = vec![X_DRI3_MAJOR_OPCODE, X_DRI3_PIXMAP_FROM_BUFFERS_MINOR_OPCODE];
+    push_u16(&mut out, byte_order, 16);
+    push_u32(&mut out, byte_order, pixmap);
+    push_u32(&mut out, byte_order, window);
+    out.push(num_buffers);
+    out.extend_from_slice(&[0; 3]);
+    push_u16(&mut out, byte_order, width);
+    push_u16(&mut out, byte_order, height);
+    for (stride, offset) in strides.into_iter().zip(offsets) {
+        push_u32(&mut out, byte_order, stride);
+        push_u32(&mut out, byte_order, offset);
+    }
+    out.push(depth);
+    out.push(bits_per_pixel);
+    out.extend_from_slice(&[0; 2]);
+    push_u64(&mut out, byte_order, modifier);
+    out
+}
+
 fn dri3_fence_from_fd_request(
     byte_order: XByteOrder,
     drawable: u32,
@@ -8317,6 +8814,23 @@ fn dri3_fence_from_fd_request(
     push_u32(&mut out, byte_order, fence);
     out.push(u8::from(initially_triggered));
     out.extend_from_slice(&[0; 3]);
+    out
+}
+
+fn xfixes_create_region_request(
+    byte_order: XByteOrder,
+    region: u32,
+    rectangles: &[Rect],
+) -> Vec<u8> {
+    let mut out = vec![X_XFIXES_MAJOR_OPCODE, X_XFIXES_CREATE_REGION_MINOR_OPCODE];
+    push_u16(&mut out, byte_order, (2 + rectangles.len() * 2) as u16);
+    push_u32(&mut out, byte_order, region);
+    for rectangle in rectangles {
+        push_i16(&mut out, byte_order, rectangle.x as i16);
+        push_i16(&mut out, byte_order, rectangle.y as i16);
+        push_u16(&mut out, byte_order, rectangle.width as u16);
+        push_u16(&mut out, byte_order, rectangle.height as u16);
+    }
     out
 }
 

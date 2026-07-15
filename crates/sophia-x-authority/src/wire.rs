@@ -127,8 +127,11 @@ pub const X_GENERIC_EVENT_QUERY_VERSION_MINOR_OPCODE: u8 = 0;
 pub const X_DRI3_EXTENSION_NAME: &str = "DRI3";
 pub const X_DRI3_MAJOR_OPCODE: u8 = 137;
 pub const X_DRI3_QUERY_VERSION_MINOR_OPCODE: u8 = 0;
+pub const X_DRI3_OPEN_MINOR_OPCODE: u8 = 1;
 pub const X_DRI3_PIXMAP_FROM_BUFFER_MINOR_OPCODE: u8 = 2;
 pub const X_DRI3_FENCE_FROM_FD_MINOR_OPCODE: u8 = 4;
+pub const X_DRI3_GET_SUPPORTED_MODIFIERS_MINOR_OPCODE: u8 = 6;
+pub const X_DRI3_PIXMAP_FROM_BUFFERS_MINOR_OPCODE: u8 = 7;
 pub const X_PRESENT_EXTENSION_NAME: &str = "Present";
 pub const X_PRESENT_MAJOR_OPCODE: u8 = 138;
 pub const X_PRESENT_FIRST_EVENT: u8 = 0;
@@ -136,6 +139,11 @@ pub const X_PRESENT_QUERY_VERSION_MINOR_OPCODE: u8 = 0;
 pub const X_PRESENT_PIXMAP_MINOR_OPCODE: u8 = 1;
 pub const X_PRESENT_SELECT_INPUT_MINOR_OPCODE: u8 = 3;
 pub const X_PRESENT_QUERY_CAPABILITIES_MINOR_OPCODE: u8 = 4;
+pub const X_XFIXES_EXTENSION_NAME: &str = "XFIXES";
+pub const X_XFIXES_MAJOR_OPCODE: u8 = 139;
+pub const X_XFIXES_QUERY_VERSION_MINOR_OPCODE: u8 = 0;
+pub const X_XFIXES_CREATE_REGION_MINOR_OPCODE: u8 = 5;
+pub const X_XFIXES_DESTROY_REGION_MINOR_OPCODE: u8 = 10;
 
 const X_CREATE_WINDOW_REQ_LEN: usize = 32;
 const X_CHANGE_WINDOW_ATTRIBUTES_REQ_LEN: usize = 12;
@@ -545,6 +553,10 @@ pub enum XWireRequest {
         major_version: u32,
         minor_version: u32,
     },
+    Dri3Open {
+        drawable: XResourceId,
+        provider: u32,
+    },
     Dri3PixmapFromBuffer {
         pixmap: XResourceId,
         drawable: XResourceId,
@@ -555,10 +567,38 @@ pub enum XWireRequest {
         depth: u8,
         bits_per_pixel: u8,
     },
+    Dri3PixmapFromBuffers {
+        pixmap: XResourceId,
+        window: XResourceId,
+        num_buffers: u8,
+        width: u16,
+        height: u16,
+        strides: [u32; sophia_protocol::DMA_BUF_MAX_PLANES],
+        offsets: [u32; sophia_protocol::DMA_BUF_MAX_PLANES],
+        depth: u8,
+        bits_per_pixel: u8,
+        modifier: u64,
+    },
     Dri3FenceFromFd {
         drawable: XResourceId,
         fence: XResourceId,
         initially_triggered: bool,
+    },
+    Dri3GetSupportedModifiers {
+        window: XResourceId,
+        depth: u8,
+        bits_per_pixel: u8,
+    },
+    XfixesQueryVersion {
+        major_version: u32,
+        minor_version: u32,
+    },
+    XfixesCreateRegion {
+        region: XResourceId,
+        rectangles: Vec<Rect>,
+    },
+    XfixesDestroyRegion {
+        region: XResourceId,
     },
     PresentQueryVersion {
         major_version: u32,
@@ -881,7 +921,58 @@ pub fn decode_x11_core_request(
         }
         X_DRI3_MAJOR_OPCODE => decode_dri3(context, bytes),
         X_PRESENT_MAJOR_OPCODE => decode_present(context, bytes),
+        X_XFIXES_MAJOR_OPCODE => decode_xfixes(context, bytes),
         other => Err(XWireParseError::UnknownOpcode(other)),
+    }
+}
+
+fn decode_xfixes(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    match bytes[1] {
+        X_XFIXES_QUERY_VERSION_MINOR_OPCODE => decode_extension_query_version(
+            context,
+            bytes,
+            X_XFIXES_MAJOR_OPCODE,
+            X_XFIXES_QUERY_VERSION_MINOR_OPCODE,
+            |major_version, minor_version| XWireRequest::XfixesQueryVersion {
+                major_version,
+                minor_version,
+            },
+        ),
+        X_XFIXES_CREATE_REGION_MINOR_OPCODE => {
+            require_len(X_XFIXES_MAJOR_OPCODE, 8, bytes.len())?;
+            if (bytes.len() - 8) % 8 != 0 {
+                return Err(XWireParseError::InvalidLength {
+                    opcode: X_XFIXES_MAJOR_OPCODE,
+                    expected_at_least: 8,
+                    actual: bytes.len(),
+                });
+            }
+            let region = context.byte_order.u32(&bytes[4..8]);
+            context.validate_new_resource_id(region)?;
+            let rectangles = bytes[8..]
+                .chunks_exact(8)
+                .map(|rectangle| Rect {
+                    x: i32::from(context.byte_order.i16(&rectangle[0..2])),
+                    y: i32::from(context.byte_order.i16(&rectangle[2..4])),
+                    width: i32::from(context.byte_order.u16(&rectangle[4..6])),
+                    height: i32::from(context.byte_order.u16(&rectangle[6..8])),
+                })
+                .collect();
+            Ok(XWireRequest::XfixesCreateRegion {
+                region: XResourceId::new(u64::from(region), 1),
+                rectangles,
+            })
+        }
+        X_XFIXES_DESTROY_REGION_MINOR_OPCODE => {
+            require_exact_len(X_XFIXES_MAJOR_OPCODE, 8, bytes.len())?;
+            Ok(XWireRequest::XfixesDestroyRegion {
+                region: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+            })
+        }
+        _ => Err(XWireParseError::UnknownOpcode(bytes[1])),
     }
 }
 
@@ -897,6 +988,13 @@ fn decode_dri3(context: XWireClientContext, bytes: &[u8]) -> Result<XWireRequest
                 minor_version,
             },
         ),
+        X_DRI3_OPEN_MINOR_OPCODE => {
+            require_exact_len(X_DRI3_MAJOR_OPCODE, 12, bytes.len())?;
+            Ok(XWireRequest::Dri3Open {
+                drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+                provider: context.byte_order.u32(&bytes[8..12]),
+            })
+        }
         X_DRI3_PIXMAP_FROM_BUFFER_MINOR_OPCODE => {
             require_exact_len(X_DRI3_MAJOR_OPCODE, 24, bytes.len())?;
             let pixmap = context.byte_order.u32(&bytes[4..8]);
@@ -920,6 +1018,45 @@ fn decode_dri3(context: XWireClientContext, bytes: &[u8]) -> Result<XWireRequest
                 drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
                 fence: XResourceId::new(u64::from(fence), 1),
                 initially_triggered: bytes[12] != 0,
+            })
+        }
+        X_DRI3_GET_SUPPORTED_MODIFIERS_MINOR_OPCODE => {
+            require_exact_len(X_DRI3_MAJOR_OPCODE, 12, bytes.len())?;
+            Ok(XWireRequest::Dri3GetSupportedModifiers {
+                window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+                depth: bytes[8],
+                bits_per_pixel: bytes[9],
+            })
+        }
+        X_DRI3_PIXMAP_FROM_BUFFERS_MINOR_OPCODE => {
+            require_exact_len(X_DRI3_MAJOR_OPCODE, 64, bytes.len())?;
+            let pixmap = context.byte_order.u32(&bytes[4..8]);
+            context.validate_new_resource_id(pixmap)?;
+            let num_buffers = bytes[12];
+            if num_buffers == 0 || usize::from(num_buffers) > sophia_protocol::DMA_BUF_MAX_PLANES {
+                return Err(XWireParseError::InvalidValue(u32::from(num_buffers)));
+            }
+            Ok(XWireRequest::Dri3PixmapFromBuffers {
+                pixmap: XResourceId::new(u64::from(pixmap), 1),
+                window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
+                num_buffers,
+                width: context.byte_order.u16(&bytes[16..18]),
+                height: context.byte_order.u16(&bytes[18..20]),
+                strides: [
+                    context.byte_order.u32(&bytes[20..24]),
+                    context.byte_order.u32(&bytes[28..32]),
+                    context.byte_order.u32(&bytes[36..40]),
+                    context.byte_order.u32(&bytes[44..48]),
+                ],
+                offsets: [
+                    context.byte_order.u32(&bytes[24..28]),
+                    context.byte_order.u32(&bytes[32..36]),
+                    context.byte_order.u32(&bytes[40..44]),
+                    context.byte_order.u32(&bytes[48..52]),
+                ],
+                depth: bytes[52],
+                bits_per_pixel: bytes[53],
+                modifier: context.byte_order.u64(&bytes[56..64]),
             })
         }
         _ => Err(XWireParseError::UnknownOpcode(bytes[1])),
@@ -1007,6 +1144,7 @@ impl XWireRequest {
     pub const fn required_fd_count(&self) -> usize {
         match self {
             Self::Dri3PixmapFromBuffer { .. } | Self::Dri3FenceFromFd { .. } => 1,
+            Self::Dri3PixmapFromBuffers { num_buffers, .. } => *num_buffers as usize,
             _ => 0,
         }
     }

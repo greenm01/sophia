@@ -932,3 +932,52 @@ authority-owned pixmap identity. The native FD remains borrowed through the
 socket trace seam for renderer-side duplication and never enters authority
 runtime state. DRI3 fences, PresentPixmap/events, and the live renderer handoff
 remain the next transport checkpoint.
+
+## 2026-07-15: DRI3 1.2 Vulkan Transport Proof
+
+The X11 socket output boundary now sends a bounded byte record plus up to four
+SCM_RIGHTS descriptors. Standard DRI3 `Open` obtains a duplicated render-device
+FD only from the live backend provider and returns it in a one-FD reply; neither
+the authority runtime nor Engine stores a device path or native handle.
+
+Mesa's DRI3 1.2 startup required `GetSupportedModifiers`, modifier-bearing
+`PixmapFromBuffers`, and the small XFIXES region lifecycle used by Present. The
+portable modifier reply advertises linear plus the implicit-modifier sentinel,
+and the multi-buffer decoder retains bounded plane strides, offsets, and the
+wire modifier in the reduced DMA-BUF descriptor.
+
+The first Vulkan failures were caused by Unix-stream FD association rather than
+an AMD modifier. A single `sendmsg` can attach descriptors to bytes preceding
+the X11 request that consumes them. The server now queues ancillary FDs in
+stream order, leaves them pending across no-FD requests, and drains exactly the
+declared arity for each later FD-bearing request. A deterministic regression
+sends two descriptors alongside an earlier no-FD XFIXES request and proves that
+the following DRI3 pixmap and fence requests consume one each.
+
+On the Void Linux X13 with Mesa RADV, the bounded DRI3 1.2 `vkcube` run remained
+healthy for its eight-second proof window: 68 requests, three imported pixmaps
+and fences, one accepted standard Present transaction, one committed runtime
+surface, and `first_error=none`. This proves Vulkan transport into the Engine
+transaction seam; it does not yet claim native KMS presentation of the Vulkan
+pixels.
+
+## 2026-07-15: Reusable Renderer-Private DMA-BUF Sources
+
+The renderer lifetime boundary now distinguishes a persistent DRI3 pixmap
+source from one in-flight presentation. Plane FDs remain renderer-private and
+reusable across Presents, while every presentation receives duplicated plane
+and acquire-fence ownership in the existing bounded registry. Page-flip
+retirement removes only the in-flight ownership; explicit source removal or
+disconnect releases each persistent source once.
+
+External tests use a real xshmfence to prove that an unsignaled acquire fence
+holds submission, a trigger makes the presentation ready, page-flip retirement
+allows the same source to be presented again, an in-use source cannot be
+removed, and disconnect cleanup is idempotent. The complete offline all-feature
+workspace suite passes with this reusable lifetime model. Live-session import,
+mixed CPU/GPU composition, and page-flip-driven Present feedback remain open.
+The X frontend also exposes a cloneable protocol-only feedback router that can
+emit Present Complete and Idle after the broker moves into its service thread.
+It is intentionally not attached to the current CPU fallback submission: doing
+so would acknowledge a page flip that did not contain the imported Vulkan
+pixels.

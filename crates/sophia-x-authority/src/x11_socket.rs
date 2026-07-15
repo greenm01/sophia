@@ -11,10 +11,10 @@ use std::sync::mpsc::{
 #[cfg(unix)]
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
-    io::{ErrorKind, IoSliceMut, Read, Write},
+    io::{ErrorKind, IoSlice, IoSliceMut, Read, Write},
     mem::MaybeUninit,
     num::NonZeroUsize,
-    os::fd::OwnedFd,
+    os::fd::{AsFd, OwnedFd},
     panic::{AssertUnwindSafe, catch_unwind},
     path::{Path, PathBuf},
     sync::{
@@ -51,6 +51,54 @@ const X_SERVER_FRONTEND_DEFAULT_MAX_CONCURRENT_CLIENTS: NonZeroUsize = match Non
     Some(value) => value,
     None => unreachable!(),
 };
+
+/// One ordered X11 socket write and the descriptors attached to its first byte.
+///
+/// Protocol dispatch remains byte-only and data-oriented. Native descriptor
+/// ownership starts at this Unix-socket boundary and ends after the record is
+/// sent or rejected, so descriptors cannot leak into authority runtime state.
+#[cfg(unix)]
+#[derive(Debug)]
+pub struct X11SocketOutputRecord {
+    bytes: Vec<u8>,
+    fds: Vec<OwnedFd>,
+}
+
+#[cfg(unix)]
+impl X11SocketOutputRecord {
+    pub fn new(bytes: Vec<u8>, fds: Vec<OwnedFd>) -> Result<Self, X11SetupSocketError> {
+        if bytes.is_empty() {
+            return Err(X11SetupSocketError::new(
+                "X11 socket output record cannot be empty",
+            ));
+        }
+        if fds.len() > sophia_protocol::DMA_BUF_MAX_PLANES {
+            return Err(X11SetupSocketError::new(format!(
+                "X11 socket output record carried {} file descriptors; maximum is {}",
+                fds.len(),
+                sophia_protocol::DMA_BUF_MAX_PLANES,
+            )));
+        }
+        Ok(Self { bytes, fds })
+    }
+
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    pub fn fd_count(&self) -> usize {
+        self.fds.len()
+    }
+}
+
+#[cfg(unix)]
+impl TryFrom<Vec<u8>> for X11SocketOutputRecord {
+    type Error = X11SetupSocketError;
+
+    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
+        Self::new(bytes, Vec::new())
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct X11SetupSocketError {
@@ -203,6 +251,36 @@ pub trait XServerFrontendAdmissionPolicy: Send + Sync + 'static {
     fn revoke(&self, context: ClientAdmissionContext) -> Result<(), XServerFrontendAdmissionError>;
 }
 
+/// Backend-owned capability for duplicating the Engine-selected render device.
+///
+/// The frontend receives a one-shot descriptor and never learns or retains a
+/// device path. Implementations remain owned by the live Engine/backend
+/// assembly and may refuse duplication when the device is unavailable.
+#[cfg(unix)]
+pub trait XServerFrontendRenderDeviceProvider: Send + Sync + 'static {
+    fn duplicate_render_device_fd(&self) -> Result<OwnedFd, XServerFrontendRenderDeviceError>;
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum XServerFrontendRenderDeviceError {
+    Unavailable,
+    DuplicationFailed,
+}
+
+#[cfg(unix)]
+impl core::fmt::Display for XServerFrontendRenderDeviceError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Unavailable => formatter.write_str("render device unavailable"),
+            Self::DuplicationFailed => formatter.write_str("render device duplication failed"),
+        }
+    }
+}
+
+#[cfg(unix)]
+impl std::error::Error for XServerFrontendRenderDeviceError {}
+
 #[cfg(unix)]
 fn x11_authorization_data_eq(actual: &[u8], expected: &[u8]) -> bool {
     actual.len() == expected.len()
@@ -227,6 +305,7 @@ pub struct XServerFrontendConfig {
     namespace: NamespaceContext,
     setup_authorization: XServerFrontendSetupAuthorization,
     admission_policy: Option<Arc<dyn XServerFrontendAdmissionPolicy>>,
+    render_device_provider: Option<Arc<dyn XServerFrontendRenderDeviceProvider>>,
     max_concurrent_clients: NonZeroUsize,
     output_topology: sophia_protocol::OutputTopologySnapshot,
     xkb_config: crate::XkbRmlvoConfig,
@@ -241,6 +320,10 @@ impl core::fmt::Debug for XServerFrontendConfig {
             .field("namespace", &self.namespace)
             .field("setup_authorization", &self.setup_authorization)
             .field("has_admission_policy", &self.admission_policy.is_some())
+            .field(
+                "has_render_device_provider",
+                &self.render_device_provider.is_some(),
+            )
             .field("max_concurrent_clients", &self.max_concurrent_clients)
             .field("output_topology", &self.output_topology)
             .field("xkb_config", &self.xkb_config)
@@ -285,6 +368,7 @@ impl XServerFrontendConfig {
             namespace,
             setup_authorization: XServerFrontendSetupAuthorization::default(),
             admission_policy: None,
+            render_device_provider: None,
             max_concurrent_clients: X_SERVER_FRONTEND_DEFAULT_MAX_CONCURRENT_CLIENTS,
             output_topology: sophia_protocol::OutputTopologySnapshot::deterministic(),
             xkb_config: crate::XkbRmlvoConfig::default(),
@@ -304,6 +388,14 @@ impl XServerFrontendConfig {
         admission_policy: Arc<dyn XServerFrontendAdmissionPolicy>,
     ) -> Self {
         self.admission_policy = Some(admission_policy);
+        self
+    }
+
+    pub fn with_render_device_provider(
+        mut self,
+        provider: Arc<dyn XServerFrontendRenderDeviceProvider>,
+    ) -> Self {
+        self.render_device_provider = Some(provider);
         self
     }
 
@@ -365,6 +457,10 @@ impl XServerFrontendConfig {
 
     fn admission_policy(&self) -> Option<Arc<dyn XServerFrontendAdmissionPolicy>> {
         self.admission_policy.clone()
+    }
+
+    fn render_device_provider(&self) -> Option<Arc<dyn XServerFrontendRenderDeviceProvider>> {
+        self.render_device_provider.clone()
     }
 
     pub const fn max_concurrent_clients(&self) -> NonZeroUsize {
@@ -463,7 +559,8 @@ impl XServerFrontend {
         let state = X11CoreSocketServerState::with_output_topology_and_xkb_config(
             config.output_topology().clone(),
             config.xkb_config(),
-        )?;
+        )?
+        .with_optional_render_device_provider(config.render_device_provider());
         let (worker_completion_sender, worker_completions) = std::sync::mpsc::channel();
         let (worker_admission_event_sender, worker_admission_events) = std::sync::mpsc::channel();
         Ok(Self {
@@ -1152,6 +1249,7 @@ pub struct X11CoreDispatchTrace<'a> {
     pub dri3_pixmap_import: Option<XAuthorityDri3PixmapImport>,
     pub dri3_fence_import: Option<XAuthorityDri3FenceImport>,
     pub present_submission: Option<XAuthorityPresentSubmission>,
+    pub server_reply_fd_count: usize,
 }
 
 #[cfg(unix)]
@@ -1443,6 +1541,36 @@ pub struct XServerFrontendRouteBroker {
     source_payload_receiver: Receiver<crate::ClipboardSourcePayload>,
 }
 
+/// Cloneable protocol-feedback handle for Engine/backend presentation code.
+///
+/// This handle can outlive the broker value moved into the X11 service loop,
+/// but it exposes only frontend protocol completion. It cannot route input,
+/// mutate scene state, submit scanout, or access native renderer resources.
+#[cfg(unix)]
+#[derive(Clone)]
+pub struct XServerFrontendProtocolRouter {
+    registry: XServerFrontendRouteRegistry,
+}
+
+#[cfg(unix)]
+impl XServerFrontendProtocolRouter {
+    pub fn route_present_complete(
+        &self,
+        surface: SurfaceId,
+        ust: u64,
+        msc: u64,
+    ) -> Result<bool, XServerFrontendRouteError> {
+        self.registry.route_present_complete(surface, ust, msc)
+    }
+
+    pub fn route_present_idle(
+        &self,
+        surface: SurfaceId,
+    ) -> Result<bool, XServerFrontendRouteError> {
+        self.registry.route_present_idle(surface)
+    }
+}
+
 #[cfg(unix)]
 impl XServerFrontendRouteBroker {
     pub fn new(queue_capacity: NonZeroUsize) -> Self {
@@ -1615,6 +1743,12 @@ impl XServerFrontendRouteBroker {
 
     pub fn registered_client_count(&self) -> usize {
         self.registry.registered_client_count()
+    }
+
+    pub fn protocol_router(&self) -> XServerFrontendProtocolRouter {
+        XServerFrontendProtocolRouter {
+            registry: self.registry.clone(),
+        }
     }
 
     pub fn route_present_complete(
@@ -2867,12 +3001,30 @@ impl From<XAuthorityKeyEvent> for XAuthorityInputEvent {
 /// Authority-owned state shared by every client accepted by one X11 socket
 /// listener. Client sequence numbers remain connection-local.
 #[cfg(unix)]
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct X11CoreSocketServerState {
     runtime: Arc<Mutex<XAuthorityRuntime>>,
     atoms: Arc<Mutex<XAtomTable>>,
     properties: Arc<Mutex<XPropertyTable>>,
     clients: Arc<Mutex<X11CoreClientLeaseState>>,
+    render_device_provider: Option<Arc<dyn XServerFrontendRenderDeviceProvider>>,
+}
+
+#[cfg(unix)]
+impl core::fmt::Debug for X11CoreSocketServerState {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("X11CoreSocketServerState")
+            .field("runtime", &self.runtime)
+            .field("atoms", &self.atoms)
+            .field("properties", &self.properties)
+            .field("clients", &self.clients)
+            .field(
+                "has_render_device_provider",
+                &self.render_device_provider.is_some(),
+            )
+            .finish()
+    }
 }
 
 /// The small part of socket state that must be serialized across connection
@@ -2898,6 +3050,7 @@ impl Default for X11CoreSocketServerState {
                 next_client_id: 1,
                 client_leases: Default::default(),
             })),
+            render_device_provider: None,
         }
     }
 }
@@ -2906,6 +3059,29 @@ impl Default for X11CoreSocketServerState {
 impl X11CoreSocketServerState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_render_device_provider(
+        mut self,
+        provider: Arc<dyn XServerFrontendRenderDeviceProvider>,
+    ) -> Self {
+        self.render_device_provider = Some(provider);
+        self
+    }
+
+    fn with_optional_render_device_provider(
+        mut self,
+        provider: Option<Arc<dyn XServerFrontendRenderDeviceProvider>>,
+    ) -> Self {
+        self.render_device_provider = provider;
+        self
+    }
+
+    fn duplicate_render_device_fd(&self) -> Result<OwnedFd, XServerFrontendRenderDeviceError> {
+        self.render_device_provider
+            .as_ref()
+            .ok_or(XServerFrontendRenderDeviceError::Unavailable)?
+            .duplicate_render_device_fd()
     }
 
     pub fn with_output_topology(
@@ -3189,6 +3365,33 @@ pub fn run_x11_core_socket_server_once_traced_with_idle_timeout(
     run_x11_core_socket_server_once_with_trace_observer(
         path,
         namespace,
+        Some(idle_timeout),
+        observer,
+    )
+}
+
+/// Runs one bounded client against an explicitly assembled frontend config.
+///
+/// This retains the external-probe idle timeout while allowing a caller to
+/// inject backend-owned capabilities such as the DRI3 render-device provider.
+#[cfg(unix)]
+pub fn run_x11_core_socket_server_once_config_traced_with_idle_timeout(
+    config: XServerFrontendConfig,
+    idle_timeout: Duration,
+    observer: impl FnMut(X11CoreDispatchTrace<'_>) -> Result<(), X11SetupSocketError>,
+) -> Result<(), X11SetupSocketError> {
+    let listener = bind_x11_core_socket_server(config.socket_path())?;
+    let state = X11CoreSocketServerState::with_output_topology_and_xkb_config(
+        config.output_topology().clone(),
+        config.xkb_config(),
+    )?
+    .with_optional_render_device_provider(config.render_device_provider());
+    serve_x11_core_socket_listener_once_with_setup_authorization(
+        &listener,
+        config.namespace(),
+        &state,
+        config.setup_authorization(),
+        config.admission_policy(),
         Some(idle_timeout),
         observer,
     )
@@ -3925,10 +4128,17 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
     }
 
     let result = (|| {
+        // SCM_RIGHTS on a Unix stream is an in-band barrier, but recvmsg can
+        // return the descriptors alongside bytes that precede the request
+        // which consumes them. Retain those descriptors until the decoded X11
+        // request declares its FD arity instead of binding them to the first
+        // header returned by recvmsg.
+        let mut pending_request_fds = Vec::new();
         while let Some(received) = read_x11_core_request(stream, setup.byte_order)? {
             let major_opcode = received.major_opcode;
             let request = received.bytes;
-            let received_fds = received.fds;
+            let ancillary_fds = received.fds;
+            let mut received_fds = Vec::new();
             loop {
                 let server_owner = state
                     .runtime
@@ -3958,6 +4168,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 dri3_pixmap_import,
                 dri3_fence_import,
                 present_submission,
+                mut server_reply_fds,
             ) = match decode_x11_core_request(
                 XWireClientContext {
                     byte_order: setup.byte_order,
@@ -3968,16 +4179,32 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 &request,
             ) {
                 Ok(request) => {
-                    if request.required_fd_count() != received_fds.len() {
+                    let required_fd_count = request.required_fd_count();
+                    pending_request_fds.extend(ancillary_fds);
+                    const MAX_PENDING_REQUEST_FDS: usize = sophia_protocol::DMA_BUF_MAX_PLANES * 16;
+                    if pending_request_fds.len() > MAX_PENDING_REQUEST_FDS {
+                        return Err(X11SetupSocketError::new(
+                            "X11 request stream carried too many pending file descriptors",
+                        ));
+                    }
+                    if required_fd_count != 0 {
+                        let take = required_fd_count.min(pending_request_fds.len());
+                        received_fds.extend(pending_request_fds.drain(..take));
+                    }
+                    if required_fd_count != received_fds.len() {
                         return Err(X11SetupSocketError::new(format!(
                             "X11 request opcode {major_opcode} required {} file descriptors but received {}",
-                            request.required_fd_count(),
+                            required_fd_count,
                             received_fds.len()
                         )));
                     }
                     let event_selection = x11_core_event_selection_update(&request);
+                    let dri3_open = matches!(&request, crate::XWireRequest::Dri3Open { .. });
                     let dri3_pixmap = match &request {
-                        crate::XWireRequest::Dri3PixmapFromBuffer { pixmap, .. } => Some(*pixmap),
+                        crate::XWireRequest::Dri3PixmapFromBuffer { pixmap, .. }
+                        | crate::XWireRequest::Dri3PixmapFromBuffers { pixmap, .. } => {
+                            Some(*pixmap)
+                        }
                         _ => None,
                     };
                     let dri3_fence_import = match &request {
@@ -4123,6 +4350,24 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                         &mut atoms,
                         &mut properties,
                     );
+                    if let Some(crate::XClientOutput::Reply(crate::XClientReply::GetGeometry {
+                        geometry,
+                        ..
+                    })) = output.outputs.iter().find(|output| {
+                        matches!(
+                            output,
+                            crate::XClientOutput::Reply(crate::XClientReply::GetGeometry { .. })
+                        )
+                    }) {
+                        request_detail = Some(format!(
+                            "{}:reply={}x{}+{}+{}",
+                            request_detail.as_deref().unwrap_or("GetGeometry"),
+                            geometry.width,
+                            geometry.height,
+                            geometry.x,
+                            geometry.y
+                        ));
+                    }
                     if xkb_get_state {
                         for client_output in &mut output.outputs {
                             if let crate::XClientOutput::Reply(crate::XClientReply::XkbGetState {
@@ -4225,12 +4470,29 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                             .ok()
                             .map(|descriptor| XAuthorityDri3PixmapImport { pixmap, descriptor })
                     });
+                    let mut server_reply_fds = Vec::new();
+                    if dispatch_succeeded && dri3_open {
+                        match state.duplicate_render_device_fd() {
+                            Ok(fd) => server_reply_fds.push(fd),
+                            Err(_) => {
+                                output.outputs =
+                                    vec![crate::XClientOutput::Error(crate::XClientError {
+                                        code: crate::XErrorCode::BadImplementation,
+                                        sequence,
+                                        resource_id: 0,
+                                        minor_code: u16::from(crate::X_DRI3_OPEN_MINOR_OPCODE),
+                                        major_code: crate::X_DRI3_MAJOR_OPCODE,
+                                    })];
+                            }
+                        }
+                    }
                     (
                         output,
                         cpu_buffer_update,
                         dri3_pixmap_import,
                         dri3_fence_import,
                         dispatch_succeeded.then_some(present_submission).flatten(),
+                        server_reply_fds,
                     )
                 }
                 Err(error) => {
@@ -4247,6 +4509,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                         None,
                         None,
                         None,
+                        Vec::new(),
                     )
                 }
             };
@@ -4337,12 +4600,23 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 dri3_pixmap_import,
                 dri3_fence_import,
                 present_submission,
+                server_reply_fd_count: server_reply_fds.len(),
             })?;
             let mut output_stream = output_stream
                 .lock()
                 .map_err(|_| X11SetupSocketError::new("X11 output socket lock poisoned"))?;
-            for record in output.encoded_outputs(setup.byte_order) {
-                if let Err(error) = output_stream.write_all(&record) {
+            for (index, bytes) in output
+                .encoded_outputs(setup.byte_order)
+                .into_iter()
+                .enumerate()
+            {
+                let fds = if index == 0 {
+                    core::mem::take(&mut server_reply_fds)
+                } else {
+                    Vec::new()
+                };
+                let record = X11SocketOutputRecord::new(bytes, fds)?;
+                if let Err(error) = write_x11_socket_output_record(&mut output_stream, record) {
                     if is_x11_client_disconnect(&error) {
                         return Ok(());
                     }
@@ -4351,6 +4625,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                     )));
                 }
             }
+            debug_assert!(server_reply_fds.is_empty());
             if let Err(error) = output_stream.flush() {
                 if matches!(
                     error.kind(),
@@ -4424,6 +4699,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
             dri3_pixmap_import: None,
             dri3_fence_import: None,
             present_submission: None,
+            server_reply_fd_count: 0,
         })
     };
     let admission_result = admission_lease.as_mut().map_or(Ok(()), |lease| {
@@ -5694,6 +5970,35 @@ fn x11_core_request_trace_detail(request: &crate::XWireRequest) -> Option<String
             )),
         },
         crate::XWireRequest::QueryExtension { name } => Some(format!("QueryExtension:{name}")),
+        crate::XWireRequest::GetGeometry { drawable } => {
+            Some(format!("GetGeometry:drawable={:#x}", drawable.local.raw()))
+        }
+        crate::XWireRequest::XfixesQueryVersion { .. } => Some("XFIXES:QueryVersion".to_owned()),
+        crate::XWireRequest::XfixesCreateRegion { region, rectangles } => Some(format!(
+            "XFIXES:CreateRegion:region={:#x}:rectangles={}",
+            region.local.raw(),
+            rectangles.len()
+        )),
+        crate::XWireRequest::XfixesDestroyRegion { region } => Some(format!(
+            "XFIXES:DestroyRegion:region={:#x}",
+            region.local.raw()
+        )),
+        crate::XWireRequest::Dri3PixmapFromBuffers {
+            pixmap,
+            window,
+            num_buffers,
+            width,
+            height,
+            modifier,
+            ..
+        } => Some(format!(
+            "DRI3:PixmapFromBuffers:pixmap={:#x}:window={:#x}:buffers={}:{}x{}:modifier={modifier:#x}",
+            pixmap.local.raw(),
+            window.local.raw(),
+            num_buffers,
+            width,
+            height
+        )),
         crate::XWireRequest::InternAtom { name, .. } => Some(format!("InternAtom:{name}")),
         crate::XWireRequest::ChangeWindowAttributes { window, .. } => Some(format!(
             "ChangeWindowAttributes:window={:#x}",
@@ -5858,6 +6163,18 @@ fn x11_core_request_trace_detail(request: &crate::XWireRequest) -> Option<String
             drawable.local.raw(),
             segment.local.raw()
         )),
+        crate::XWireRequest::Dri3Open { drawable, provider } => Some(format!(
+            "DRI3:Open:drawable={:#x}:provider={provider:#x}",
+            drawable.local.raw()
+        )),
+        crate::XWireRequest::Dri3GetSupportedModifiers {
+            window,
+            depth,
+            bits_per_pixel,
+        } => Some(format!(
+            "DRI3:GetSupportedModifiers:window={:#x}:depth={depth}:bpp={bits_per_pixel}",
+            window.local.raw()
+        )),
         crate::XWireRequest::RandrQueryVersion { .. } => Some("RANDR:QueryVersion".to_string()),
         crate::XWireRequest::RandrSelectInput { window, .. } => {
             Some(format!("RANDR:SelectInput:{:#x}", window.local.raw()))
@@ -5911,6 +6228,57 @@ pub fn read_x11_setup_request(
         })?;
     parse_x11_setup_request(&bytes)
         .map_err(|error| X11SetupSocketError::new(format!("invalid X11 setup request: {error}")))
+}
+
+/// Send one X11 output record while attaching its descriptors exactly once.
+///
+/// `SCM_RIGHTS` accompanies the first successful byte range. If the stream
+/// accepts only part of the byte payload, the remainder is written without
+/// ancillary data so the receiver cannot observe duplicate descriptors.
+#[cfg(unix)]
+pub fn write_x11_socket_output_record(
+    stream: &mut UnixStream,
+    record: X11SocketOutputRecord,
+) -> std::io::Result<()> {
+    let X11SocketOutputRecord { bytes, fds } = record;
+    if fds.is_empty() {
+        return stream.write_all(&bytes);
+    }
+
+    let borrowed = fds.iter().map(AsFd::as_fd).collect::<Vec<_>>();
+    let mut ancillary_space = [MaybeUninit::uninit();
+        rustix::cmsg_space!(ScmRights(sophia_protocol::DMA_BUF_MAX_PLANES))];
+    let mut ancillary = rustix::net::SendAncillaryBuffer::new(&mut ancillary_space);
+    if !ancillary.push(rustix::net::SendAncillaryMessage::ScmRights(&borrowed)) {
+        return Err(std::io::Error::other(
+            "failed to encode X11 output file descriptors",
+        ));
+    }
+
+    let sent = loop {
+        match rustix::net::sendmsg(
+            &*stream,
+            &[IoSlice::new(&bytes)],
+            &mut ancillary,
+            rustix::net::SendFlags::empty(),
+        ) {
+            Ok(sent) => break sent,
+            Err(error) => {
+                let error = std::io::Error::from(error);
+                if error.kind() == ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(error);
+            }
+        }
+    };
+    if sent == 0 {
+        return Err(std::io::Error::new(
+            ErrorKind::WriteZero,
+            "failed to write X11 output record",
+        ));
+    }
+    stream.write_all(&bytes[sent..])
 }
 
 #[cfg(unix)]

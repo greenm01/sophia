@@ -16,9 +16,9 @@ use sophia_x_authority::{
     XAuthorityClientSurfaceRoutes, XAuthorityControlCommand, XAuthorityControlOutcome,
     XAuthorityInputDeliveryId, XAuthorityInputDeliveryOutcome, XAuthorityRoutedInput,
     XCoreKeyboardMapper, XServerFrontendAdmissionError, XServerFrontendAdmissionPolicy,
-    XServerFrontendAdmissionRequest, XServerFrontendConfig, XServerFrontendRouteBroker,
-    XServerFrontendServiceCommand, XServerFrontendSetupAuthorization,
-    run_x_server_frontend_routed_until_stopped,
+    XServerFrontendAdmissionRequest, XServerFrontendConfig, XServerFrontendRenderDeviceError,
+    XServerFrontendRenderDeviceProvider, XServerFrontendRouteBroker, XServerFrontendServiceCommand,
+    XServerFrontendSetupAuthorization, run_x_server_frontend_routed_until_stopped,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
@@ -80,6 +80,21 @@ impl XServerFrontendAdmissionPolicy for LiveXAdmissionPolicy {
             .revoke_admission(context.client_id)
             .map(|_| ())
             .map_err(|_| XServerFrontendAdmissionError::Unavailable)
+    }
+}
+
+struct LiveXRenderDeviceProvider {
+    device: std::fs::File,
+}
+
+impl XServerFrontendRenderDeviceProvider for LiveXRenderDeviceProvider {
+    fn duplicate_render_device_fd(
+        &self,
+    ) -> Result<std::os::fd::OwnedFd, XServerFrontendRenderDeviceError> {
+        self.device
+            .try_clone()
+            .map(std::os::fd::OwnedFd::from)
+            .map_err(|_| XServerFrontendRenderDeviceError::DuplicationFailed)
     }
 }
 
@@ -334,7 +349,7 @@ pub(crate) fn run_persistent_xterm_session(
         namespace: x_namespace.id,
         session_user_id,
     });
-    let frontend_config =
+    let mut frontend_config =
         XServerFrontendConfig::new_with_namespace_context(&server_path, x_namespace)?
             .with_output_topology(output_topology.clone())?
             .with_xkb_config(config.xkb_config.clone())?
@@ -342,6 +357,12 @@ pub(crate) fn run_persistent_xterm_session(
                 xauthority_cookie,
             ))
             .with_admission_policy(admission_policy);
+    if let Some(native_scanout) = native_scanout.as_ref() {
+        frontend_config =
+            frontend_config.with_render_device_provider(Arc::new(LiveXRenderDeviceProvider {
+                device: native_scanout.clone_render_device_file()?,
+            }));
+    }
     let (authority_sender, authority_receiver) = sync_channel(SESSION_AUTHORITY_CAPACITY);
     let (control_ack_sender, control_ack_receiver) = sync_channel(SESSION_CONTROL_CAPACITY);
     let (input_delivery_sender, input_delivery_receiver) = sync_channel(SESSION_KEY_CAPACITY);
@@ -3989,6 +4010,15 @@ impl PersistentNativeScanout {
             vsync_overlap_rejections: 0,
             page_flip_phase_rejections: 0,
         })
+    }
+
+    fn clone_render_device_file(&self) -> std::io::Result<std::fs::File> {
+        self.groups
+            .first()
+            .ok_or_else(|| std::io::Error::other("native scanout has no DRM device group"))?
+            .session
+            .card()
+            .try_clone_file()
     }
 
     fn outputs(&self) -> Vec<sophia_engine::HeadlessOutput> {

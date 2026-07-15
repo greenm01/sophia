@@ -963,6 +963,57 @@ impl XAuthorityRuntime {
         Ok(descriptor)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_dri3_pixmap_from_buffers(
+        &mut self,
+        namespace: NamespaceId,
+        pixmap: crate::XResourceId,
+        generation: u64,
+        num_buffers: u8,
+        width: u16,
+        height: u16,
+        strides: [u32; sophia_protocol::DMA_BUF_MAX_PLANES],
+        offsets: [u32; sophia_protocol::DMA_BUF_MAX_PLANES],
+        depth: u8,
+        bits_per_pixel: u8,
+        modifier: u64,
+    ) -> Result<sophia_protocol::DmaBufDescriptor, XAuthorityRuntimeError> {
+        let format = match (depth, bits_per_pixel) {
+            (24, 32) => sophia_protocol::DRM_FORMAT_XRGB8888,
+            (32, 32) => sophia_protocol::DRM_FORMAT_ARGB8888,
+            _ => return Err(XAuthorityRuntimeError::InvalidResource),
+        };
+        if num_buffers == 0 || usize::from(num_buffers) > sophia_protocol::DMA_BUF_MAX_PLANES {
+            return Err(XAuthorityRuntimeError::InvalidResource);
+        }
+        let handle = self.next_dma_buf_handle.max(1);
+        let mut planes = [None; sophia_protocol::DMA_BUF_MAX_PLANES];
+        for index in 0..usize::from(num_buffers) {
+            planes[index] = Some(sophia_protocol::DmaBufPlaneDescriptor {
+                offset: offsets[index],
+                stride: strides[index],
+            });
+        }
+        let descriptor = sophia_protocol::DmaBufDescriptor {
+            handle: sophia_protocol::BufferHandle::from_raw(handle),
+            size: Size {
+                width: i32::from(width),
+                height: i32::from(height),
+            },
+            format,
+            modifier,
+            plane_count: num_buffers,
+            planes,
+        };
+        descriptor
+            .validate()
+            .map_err(|_| XAuthorityRuntimeError::InvalidResource)?;
+        self.create_pixmap(namespace, pixmap, generation)?;
+        self.next_dma_buf_handle = handle.saturating_add(1).max(1);
+        self.dri3_pixmaps.insert(pixmap, descriptor);
+        Ok(descriptor)
+    }
+
     pub fn dri3_pixmap_descriptor(
         &self,
         namespace: NamespaceId,

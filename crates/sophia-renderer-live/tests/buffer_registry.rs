@@ -7,6 +7,7 @@ use sophia_protocol::{
 };
 use sophia_renderer_live::{
     LiveBufferRegistry, LiveBufferRegistryError, LiveBufferState, LiveCpuBufferLifetimeRegistry,
+    LiveDmaBufPresentationRegistry,
 };
 
 fn fd() -> OwnedFd {
@@ -121,4 +122,74 @@ fn real_xshmfence_poll_holds_submission_until_triggered() {
     sophia_xshmfence::trigger(&trigger).unwrap();
     assert_eq!(registry.poll_acquire_fence(handle), Ok(true));
     registry.submit(handle).unwrap();
+}
+
+#[test]
+fn reusable_dmabuf_source_survives_fenced_present_retirement() {
+    let handle = BufferHandle::from_raw(31);
+    let fence_id = 41;
+    let fence = sophia_xshmfence::allocate().unwrap();
+    let trigger = fence.try_clone().unwrap();
+    let mut registry = LiveDmaBufPresentationRegistry::default();
+    registry
+        .register_source(descriptor(handle.raw()), vec![fd()])
+        .unwrap();
+    registry.register_fence(fence_id, false, fence).unwrap();
+
+    registry.begin_present(handle, Some(fence_id)).unwrap();
+    assert_eq!(
+        registry.state(handle),
+        Some(LiveBufferState::WaitingForAcquireFence)
+    );
+    assert_eq!(registry.poll_acquire_fence(handle), Ok(false));
+    sophia_xshmfence::trigger(&trigger).unwrap();
+    assert_eq!(registry.poll_acquire_fence(handle), Ok(true));
+    registry.submit(handle).unwrap();
+    registry.try_clone_plane_fd(handle, 0).unwrap();
+    assert_eq!(
+        registry.retire_page_flip(handle),
+        Some(BufferSource::DmaBuf {
+            handle: handle.raw()
+        })
+    );
+    assert_eq!(registry.presentation_count(), 0);
+    assert_eq!(registry.source_count(), 1);
+
+    registry.begin_present(handle, None).unwrap();
+    assert_eq!(registry.state(handle), Some(LiveBufferState::Ready));
+    registry.submit(handle).unwrap();
+    assert!(registry.retire_page_flip(handle).is_some());
+    assert_eq!(
+        registry.remove_source(handle),
+        Ok(Some(BufferSource::DmaBuf {
+            handle: handle.raw()
+        }))
+    );
+    assert!(registry.remove_fence(fence_id));
+}
+
+#[test]
+fn persistent_dmabuf_disconnect_releases_each_source_once() {
+    let mut registry = LiveDmaBufPresentationRegistry::default();
+    registry
+        .register_source(descriptor(51), vec![fd()])
+        .unwrap();
+    registry
+        .register_source(descriptor(52), vec![fd()])
+        .unwrap();
+    registry
+        .begin_present(BufferHandle::from_raw(51), None)
+        .unwrap();
+    assert_eq!(
+        registry.remove_source(BufferHandle::from_raw(51)),
+        Err(LiveBufferRegistryError::SourceInUse)
+    );
+    assert_eq!(
+        registry.disconnect(),
+        vec![
+            BufferSource::DmaBuf { handle: 51 },
+            BufferSource::DmaBuf { handle: 52 },
+        ]
+    );
+    assert!(registry.disconnect().is_empty());
 }

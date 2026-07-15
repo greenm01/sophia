@@ -45,11 +45,10 @@ compatibility provider; no XLibre integration work is active.
 - [ ] Route real backend page-flip completion through a cloneable frontend
   protocol router, emit Present Complete before Idle, trigger the idle fence,
   and retire each imported buffer exactly once.
-- [ ] Implement FD-bearing server replies and standard DRI3 `Open` (then the
+- [x] Implement FD-bearing server replies and standard DRI3 `Open` (then the
   smallest modifier/multi-plane requests proven necessary by the client
-  trace). This is the next resume point and the current blocker for Mesa/Vulkan
-  clients such as `vkcube`; do not invent a permanent private presentation
-  path.
+  trace). Retain the bounded X13 `vkcube` trace as the transport proof; do not
+  invent a permanent private presentation path.
 - [ ] Keep renderer import, frame scheduling, DRM/KMS, and page-flip retirement
   exclusively in Engine/backend ownership.
 - [ ] Prove slow, stale, rejected, and disconnected buffers preserve the last
@@ -58,12 +57,14 @@ compatibility provider; no XLibre integration work is active.
   GPU-backed `vkcube` run on the X13 native KMS target, including startup,
   resize, delayed-fence, failure-recovery, and clean-teardown evidence.
 
-Resume checkpoint: `7828f00` on `master` passes `cargo fmt --check`,
-`git diff --check`, offline metadata, and the full offline workspace test suite.
-Begin by extending the X11 socket output abstraction from byte-only writes to a
-bounded byte-plus-SCM_RIGHTS record, then implement and externally test DRI3
-`Open` against `/usr/share/xcb/dri3.xml` before wiring it to an Engine-selected
-render node.
+Resume checkpoint: the X11 socket carries bounded byte-plus-SCM_RIGHTS records
+in both directions, DRI3 `Open` returns the backend-selected render device, and
+DRI3 1.2 modifier-bearing `PixmapFromBuffers` reaches a standard Present
+transaction in the bounded X13 `vkcube` proof with `first_error=none`. The full
+offline all-feature workspace suite passes. Resume by connecting the transferred
+DMA-BUF/fence registrations and reusable renderer-private source registry to the
+persistent native session, then bind Present completion and idle retirement to
+real page-flip feedback.
 
 Exit: one software-backed and one GPU-backed real X11 client pass normal
 startup, resize, presentation, delayed release, failure recovery, and teardown

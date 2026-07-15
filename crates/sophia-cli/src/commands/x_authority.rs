@@ -1,14 +1,23 @@
 use super::prelude::*;
 use sophia_x_authority::{
     XAuthorityClientInputEvent, XAuthorityClientSurfaceRoutes, XAuthorityInputDeliveryId,
-    XAuthorityInputDeliveryOutcome, XServerFrontendConfig, XServerFrontendRouteBroker,
-    XServerFrontendServiceCommand, run_x_server_frontend_routed_until_stopped,
+    XAuthorityInputDeliveryOutcome, XServerFrontendConfig, XServerFrontendRenderDeviceError,
+    XServerFrontendRenderDeviceProvider, XServerFrontendRouteBroker, XServerFrontendServiceCommand,
+    run_x_server_frontend_routed_until_stopped,
+    run_x11_core_socket_server_once_config_traced_with_idle_timeout,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroUsize;
 use std::os::unix::fs::OpenOptionsExt;
+use std::sync::Arc;
 
 pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
+    if args.iter().any(|arg| arg == "x-authority-vkcube-smoke") {
+        let report = run_x_authority_vkcube_smoke()?;
+        print_external_probe_smoke_report("x-authority-vkcube-smoke", &report);
+        return Ok(true);
+    }
+
     if args
         .iter()
         .any(|arg| arg == "x-authority-xterm-two-client-smoke")
@@ -900,7 +909,66 @@ fn run_x_authority_external_probe_smoke_spec(
         spec.pixel_proof,
         spec.allow_proof_kill_without_transactions,
         spec.allow_client_failure_without_x_error,
+        None,
     )
+}
+
+struct ExternalProbeRenderDeviceProvider {
+    device: std::fs::File,
+}
+
+impl XServerFrontendRenderDeviceProvider for ExternalProbeRenderDeviceProvider {
+    fn duplicate_render_device_fd(
+        &self,
+    ) -> Result<std::os::fd::OwnedFd, XServerFrontendRenderDeviceError> {
+        self.device
+            .try_clone()
+            .map(std::os::fd::OwnedFd::from)
+            .map_err(|_| XServerFrontendRenderDeviceError::DuplicationFailed)
+    }
+}
+
+fn run_x_authority_vkcube_smoke()
+-> Result<XAuthorityExternalProbeSmokeReport, Box<dyn std::error::Error>> {
+    let command = resolve_external_probe_binary("vkcube", "vkcube")?;
+    let render_node = first_openable_render_node()?;
+    let provider = Arc::new(ExternalProbeRenderDeviceProvider {
+        device: render_node,
+    });
+    let (display, socket_path) = temp_xauthority_display(6680)?;
+    run_x_authority_external_probe_smoke(
+        "vkcube",
+        &command,
+        ExternalProbeDisplayMode::Environment,
+        &["--wsi", "xcb", "--c", "2", "--suppress_popups"],
+        display,
+        socket_path,
+        NamespaceId::from_raw(58),
+        false,
+        ExternalProbePixelProof::None,
+        true,
+        false,
+        Some(provider),
+    )
+}
+
+fn first_openable_render_node() -> Result<std::fs::File, Box<dyn std::error::Error>> {
+    let mut candidates = std::fs::read_dir("/dev/dri")?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("renderD"))
+        })
+        .collect::<Vec<_>>();
+    candidates.sort();
+    for path in candidates {
+        if let Ok(device) = std::fs::File::options().read(true).write(true).open(&path) {
+            return Ok(device);
+        }
+    }
+    Err("vkcube probe found no openable DRM render node".into())
 }
 
 #[cfg(feature = "atomic-scanout-live")]
@@ -925,6 +993,7 @@ pub(crate) fn collect_x_authority_xterm_render_authority_batches(
         spec.pixel_proof,
         spec.allow_proof_kill_without_transactions,
         spec.allow_client_failure_without_x_error,
+        None,
     )?;
     let authority_batches =
         authority_intakes_from_observed_transactions(&report.observed_transactions);
@@ -1553,16 +1622,20 @@ fn run_x_authority_external_probe_smoke(
     pixel_proof: ExternalProbePixelProof,
     allow_proof_kill_without_transactions: bool,
     allow_client_failure_without_x_error: bool,
+    render_device_provider: Option<Arc<dyn XServerFrontendRenderDeviceProvider>>,
 ) -> Result<XAuthorityExternalProbeSmokeReport, Box<dyn std::error::Error>> {
     let server_path = socket_path.clone();
     // One X request can produce an opcode, detail, transaction, and buffer
     // update. Keep the diagnostic channel large enough that a replacement
     // update cannot be dropped while a later patch is retained.
     let (sender, receiver) = sync_channel(4_096);
+    let mut server_config = XServerFrontendConfig::new(&server_path, namespace)?;
+    if let Some(provider) = render_device_provider {
+        server_config = server_config.with_render_device_provider(provider);
+    }
     let server = std::thread::spawn(move || {
-        run_x11_core_socket_server_once_traced_with_idle_timeout(
-            &server_path,
-            namespace,
+        run_x11_core_socket_server_once_config_traced_with_idle_timeout(
+            server_config,
             Duration::from_secs(8),
             |trace| {
                 let _ = sender.try_send(ExternalProbeObservation::Opcode(trace.major_opcode));
@@ -1681,11 +1754,11 @@ fn run_x_authority_external_probe_smoke(
     let status = output.status.code().unwrap_or(-1);
 
     let _ = std::fs::remove_file(&socket_path);
-    if !allow_proof_kill_without_transactions {
+    if !allow_proof_kill_without_transactions || !proof_window_killed {
         server
             .join()
-            .map_err(|_| "X authority xclock socket server thread panicked")?
-            .map_err(|error| format!("X authority xclock socket server failed: {error}"))?;
+            .map_err(|_| format!("X authority {label} socket server thread panicked"))?
+            .map_err(|error| format!("X authority {label} socket server failed: {error}"))?;
     }
 
     while let Ok(observation) = receiver.try_recv() {
