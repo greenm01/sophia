@@ -21,7 +21,7 @@ if [[ "$(grep -Ec '^sophia_live_session schema=7 status=running .* secondary_ter
     exit 1
 fi
 
-mapfile -t lines < <(grep -E '^sophia_live_session schema=(10|11) status=bounded_complete ' "$EVIDENCE_FILE" || true)
+mapfile -t lines < <(grep -E '^sophia_live_session schema=(10|11|12) status=bounded_complete ' "$EVIDENCE_FILE" || true)
 if [[ "${#lines[@]}" -ne 1 ]]; then
     echo "two-xterm proof expected exactly one current completion record, got ${#lines[@]}" >&2
     exit 1

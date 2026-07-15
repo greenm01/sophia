@@ -836,3 +836,11 @@ sibling/stack modes. Engine-selected target surfaces begin core propagation at
 their owning window, ancestor selection is bounded against malformed cycles,
 and root focus resolves through the current mapped stacking order. Scene-level
 restack acknowledgement remains an Engine integration/evidence gate.
+
+Retained live-session completion is now schema 12. It binds each completion to
+its `classic_shared` or `confined` namespace profile and records whether the
+deterministic Engine topology update was applied. The paired Milestone 3 runner
+executes the same guarded two-xterm proof once per profile; its verifier requires
+the confined startup record to have zero request and publish capabilities, both
+runs to include an applied output update, and both to satisfy the existing
+startup, composition, input-flush, presentation, resize, and cleanup checks.
