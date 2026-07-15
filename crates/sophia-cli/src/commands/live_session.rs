@@ -1760,6 +1760,13 @@ fn successful_primary_exit_ends_session(input_proof_requested: bool) -> bool {
     !input_proof_requested
 }
 
+fn authority_commit_event_count(
+    transactions: &[SurfaceTransaction],
+    removed_surfaces: &[SurfaceId],
+) -> usize {
+    transactions.len().saturating_add(removed_surfaces.len())
+}
+
 fn run_session_loop(
     config: &PersistentXtermSessionConfig,
     authority_receiver: &Receiver<XAuthorityObservedTransactionBatch>,
@@ -2167,7 +2174,10 @@ fn run_session_loop(
                 }
                 last_authority_update = Instant::now();
                 batches = batches.saturating_add(1);
-                transactions = transactions.saturating_add(batch.transactions.len());
+                transactions = transactions.saturating_add(authority_commit_event_count(
+                    &batch.transactions,
+                    &batch.removed_surfaces,
+                ));
                 cpu_buffer_updates =
                     cpu_buffer_updates.saturating_add(batch.cpu_buffer_updates.len());
                 let removed_surfaces = batch.removed_surfaces.clone();
@@ -3006,10 +3016,7 @@ impl PersistentBackendRuntime {
             batch.transaction,
             &batch.transactions,
             &batch.removed_surfaces,
-            batch
-                .transactions
-                .len()
-                .saturating_add(batch.removed_surfaces.len()),
+            authority_commit_event_count(&batch.transactions, &batch.removed_surfaces),
             native_scanout,
             native_frames,
             wm_update,
@@ -4773,10 +4780,11 @@ mod tests {
     use super::{
         BufferSource, CommittedSurfaceState, LiveXAuthorityFile, PersistentBackendRuntime,
         PersistentCpuScene, PersistentXtermSessionConfig, Rect, Region, Size,
-        center_geometry_without_scaling, cpu_frame_matches_visible_output,
-        cpu_frame_submission_ready, layer_snapshots_from_committed,
-        required_wayland_presentation_submission, retain_latest_wayland_presentation,
-        seed_missing_committed_surfaces, successful_primary_exit_ends_session,
+        authority_commit_event_count, center_geometry_without_scaling,
+        cpu_frame_matches_visible_output, cpu_frame_submission_ready,
+        layer_snapshots_from_committed, required_wayland_presentation_submission,
+        retain_latest_wayland_presentation, seed_missing_committed_surfaces,
+        successful_primary_exit_ends_session,
     };
     use sophia_protocol::{
         AuthorityKind, NamespaceCapabilities, NamespaceProfile, SurfaceId, SurfaceTransaction,
@@ -4791,6 +4799,14 @@ mod tests {
     fn successful_primary_exit_keeps_requested_input_proof_alive() {
         assert!(successful_primary_exit_ends_session(false));
         assert!(!successful_primary_exit_ends_session(true));
+    }
+
+    #[test]
+    fn authority_commit_accounting_includes_surface_removals() {
+        assert_eq!(
+            authority_commit_event_count(&[], &[SurfaceId::new(2, 1)]),
+            1
+        );
     }
 
     #[test]
