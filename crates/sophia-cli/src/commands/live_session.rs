@@ -1768,11 +1768,8 @@ fn physical_input_may_route_after_primary_exit(
     !primary_child_exited || focused_surface != proof_surface
 }
 
-fn authority_commit_event_count(
-    transactions: &[SurfaceTransaction],
-    removed_surfaces: &[SurfaceId],
-) -> usize {
-    transactions.len().saturating_add(removed_surfaces.len())
+fn authority_transaction_count(transactions: &[SurfaceTransaction]) -> usize {
+    transactions.len()
 }
 
 fn run_session_loop(
@@ -2184,10 +2181,8 @@ fn run_session_loop(
             Ok(batch) => {
                 last_authority_update = Instant::now();
                 batches = batches.saturating_add(1);
-                transactions = transactions.saturating_add(authority_commit_event_count(
-                    &batch.transactions,
-                    &batch.removed_surfaces,
-                ));
+                transactions =
+                    transactions.saturating_add(authority_transaction_count(&batch.transactions));
                 cpu_buffer_updates =
                     cpu_buffer_updates.saturating_add(batch.cpu_buffer_updates.len());
                 let removed_surfaces = batch.removed_surfaces.clone();
@@ -3026,7 +3021,7 @@ impl PersistentBackendRuntime {
             batch.transaction,
             &batch.transactions,
             &batch.removed_surfaces,
-            authority_commit_event_count(&batch.transactions, &batch.removed_surfaces),
+            authority_transaction_count(&batch.transactions),
             native_scanout,
             native_frames,
             wm_update,
@@ -4831,7 +4826,7 @@ mod tests {
     use super::{
         BufferSource, CommittedSurfaceState, LiveXAuthorityFile, PersistentBackendRuntime,
         PersistentCpuScene, PersistentXtermSessionConfig, Rect, Region, Size,
-        authority_commit_event_count, center_geometry_without_scaling,
+        authority_transaction_count, center_geometry_without_scaling,
         cpu_frame_matches_visible_output, cpu_frame_submission_ready,
         layer_snapshots_from_committed, physical_input_may_route_after_primary_exit,
         pointer_offset_for_geometry, required_wayland_presentation_submission,
@@ -4875,11 +4870,8 @@ mod tests {
     }
 
     #[test]
-    fn authority_commit_accounting_includes_surface_removals() {
-        assert_eq!(
-            authority_commit_event_count(&[], &[SurfaceId::new(2, 1)]),
-            1
-        );
+    fn authority_transaction_accounting_excludes_surface_removals() {
+        assert_eq!(authority_transaction_count(&[]), 0);
     }
 
     #[test]
