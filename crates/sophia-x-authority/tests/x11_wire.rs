@@ -2020,6 +2020,125 @@ fn x11_dispatch_advertises_probe_backed_xkeyboard_extension() {
 }
 
 #[test]
+fn xkb_state_names_and_state_subscription_use_standard_wire_layouts() {
+    let namespace = NamespaceId::from_raw(45);
+    let order = XByteOrder::LittleEndian;
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+
+    let get_state = decode_x11_core_request(
+        context(namespace, 1, order),
+        &[
+            X_KEYBOARD_MAJOR_OPCODE,
+            X_KEYBOARD_GET_STATE_MINOR_OPCODE,
+            2,
+            0,
+            3,
+            0,
+            0,
+            0,
+        ],
+    )
+    .unwrap();
+    assert_eq!(get_state, XWireRequest::XkbGetState);
+    let state = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, order, X_KEYBOARD_MAJOR_OPCODE),
+        get_state,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    )
+    .encoded_outputs(order);
+    assert_eq!(state[0].len(), 32);
+    assert_eq!(state[0][1], 3);
+
+    let names = decode_x11_core_request(
+        context(namespace, 2, order),
+        &[
+            X_KEYBOARD_MAJOR_OPCODE,
+            X_KEYBOARD_GET_NAMES_MINOR_OPCODE,
+            3,
+            0,
+            3,
+            0,
+            0,
+            0,
+            0x3f,
+            0,
+            0,
+            0,
+        ],
+    )
+    .unwrap();
+    assert_eq!(names, XWireRequest::XkbGetNames { which: 0x3f });
+    let names = dispatch_x11_wire_request(
+        dispatch_context(namespace, 2, order, X_KEYBOARD_MAJOR_OPCODE),
+        names,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    )
+    .encoded_outputs(order);
+    assert_eq!(read_u32(order, &names[0][8..12]), 0x3f);
+    assert_eq!(names[0].len(), 56);
+    assert_eq!(names[0][12], 8);
+    assert_eq!(names[0][13], u8::MAX);
+
+    let select = decode_x11_core_request(
+        context(namespace, 3, order),
+        &[
+            X_KEYBOARD_MAJOR_OPCODE,
+            X_KEYBOARD_SELECT_EVENTS_MINOR_OPCODE,
+            5,
+            0,
+            3,
+            0,
+            4,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            1,
+            0,
+        ],
+    )
+    .unwrap();
+    assert_eq!(
+        select,
+        XWireRequest::XkbSelectEvents {
+            affect_which: 4,
+            clear: 0,
+            select_all: 0,
+            state_details: Some((1, 1)),
+        }
+    );
+
+    let notify = encode_x_client_event(
+        order,
+        XClientEvent::XkbStateNotify {
+            sequence: 7,
+            time: 11,
+            modifiers: 1,
+            changed: 1,
+            keycode: 50,
+            event_type: 2,
+        },
+    );
+    assert_eq!(notify[0], X_KEYBOARD_FIRST_EVENT);
+    assert_eq!(notify[1], 2);
+    assert_eq!(read_u16(order, &notify[24..26]), 1);
+    assert_eq!(notify[26], 50);
+}
+
+#[test]
 fn xge_and_xi2_report_versioned_master_device_classes() {
     let namespace = NamespaceId::from_raw(45);
     let mut runtime = XAuthorityRuntime::new();

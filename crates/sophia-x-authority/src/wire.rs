@@ -102,7 +102,9 @@ pub const X_KEYBOARD_MAJOR_OPCODE: u8 = 133;
 pub const X_KEYBOARD_FIRST_EVENT: u8 = 80;
 pub const X_KEYBOARD_USE_EXTENSION_MINOR_OPCODE: u8 = 0;
 pub const X_KEYBOARD_SELECT_EVENTS_MINOR_OPCODE: u8 = 1;
+pub const X_KEYBOARD_GET_STATE_MINOR_OPCODE: u8 = 4;
 pub const X_KEYBOARD_GET_MAP_MINOR_OPCODE: u8 = 8;
+pub const X_KEYBOARD_GET_NAMES_MINOR_OPCODE: u8 = 17;
 pub const X_KEYBOARD_PER_CLIENT_FLAGS_MINOR_OPCODE: u8 = 21;
 pub const X_BIG_REQUESTS_EXTENSION_NAME: &str = "BIG-REQUESTS";
 pub const X_BIG_REQUESTS_MAJOR_OPCODE: u8 = 134;
@@ -586,7 +588,16 @@ pub enum XWireRequest {
         full: u16,
         partial: u16,
     },
-    XkbSelectEvents,
+    XkbGetState,
+    XkbGetNames {
+        which: u32,
+    },
+    XkbSelectEvents {
+        affect_which: u16,
+        clear: u16,
+        select_all: u16,
+        state_details: Option<(u16, u16)>,
+    },
     XkbPerClientFlags {
         change: u32,
         value: u32,
@@ -955,13 +966,40 @@ fn decode_x_keyboard(
                 partial: context.byte_order.u16(&bytes[8..10]),
             })
         }
+        X_KEYBOARD_GET_STATE_MINOR_OPCODE => {
+            require_exact_len(X_KEYBOARD_MAJOR_OPCODE, 8, bytes.len())?;
+            Ok(XWireRequest::XkbGetState)
+        }
+        X_KEYBOARD_GET_NAMES_MINOR_OPCODE => {
+            require_exact_len(X_KEYBOARD_MAJOR_OPCODE, 12, bytes.len())?;
+            Ok(XWireRequest::XkbGetNames {
+                which: context.byte_order.u32(&bytes[8..12]),
+            })
+        }
         X_KEYBOARD_SELECT_EVENTS_MINOR_OPCODE => {
             require_len(
                 X_KEYBOARD_MAJOR_OPCODE,
                 X_KEYBOARD_SELECT_EVENTS_REQ_LEN,
                 bytes.len(),
             )?;
-            Ok(XWireRequest::XkbSelectEvents)
+            let affect_which = context.byte_order.u16(&bytes[6..8]);
+            let state_details = if affect_which & 4 != 0 {
+                let offset = 16 + if affect_which & 1 != 0 { 4 } else { 0 };
+                (bytes.len() >= offset + 4).then(|| {
+                    (
+                        context.byte_order.u16(&bytes[offset..offset + 2]),
+                        context.byte_order.u16(&bytes[offset + 2..offset + 4]),
+                    )
+                })
+            } else {
+                None
+            };
+            Ok(XWireRequest::XkbSelectEvents {
+                affect_which,
+                clear: context.byte_order.u16(&bytes[8..10]),
+                select_all: context.byte_order.u16(&bytes[10..12]),
+                state_details,
+            })
         }
         X_KEYBOARD_PER_CLIENT_FLAGS_MINOR_OPCODE => {
             require_exact_len(

@@ -76,6 +76,14 @@ pub enum XClientEvent {
         event: XResourceId,
         mode: u8,
     },
+    XkbStateNotify {
+        sequence: u16,
+        time: XTimestamp,
+        modifiers: u8,
+        changed: u16,
+        keycode: u8,
+        event_type: u8,
+    },
     PointerMotion {
         sequence: u16,
         time: XTimestamp,
@@ -321,6 +329,17 @@ pub enum XClientReply {
         present: u16,
         keysyms: Vec<[u32; 2]>,
         modifier_map: Vec<(u8, u8)>,
+    },
+    XkbGetState {
+        sequence: u16,
+        modifiers: u8,
+    },
+    XkbGetNames {
+        sequence: u16,
+        which: u32,
+        min_keycode: u8,
+        max_keycode: u8,
+        atoms: Vec<u32>,
     },
     XkbPerClientFlags {
         sequence: u16,
@@ -1017,6 +1036,37 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             out.extend_from_slice(&body);
             out
         }
+        XClientReply::XkbGetState {
+            sequence,
+            modifiers,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            out[1] = 3;
+            out[8] = modifiers;
+            out[9] = modifiers;
+            out[18] = modifiers;
+            out[20] = modifiers;
+            out
+        }
+        XClientReply::XkbGetNames {
+            sequence,
+            which,
+            min_keycode,
+            max_keycode,
+            atoms,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, atoms.len() as u32);
+            out[1] = 3;
+            put_u32(byte_order, &mut out[8..12], which);
+            out[12] = min_keycode;
+            out[13] = max_keycode;
+            for atom in atoms {
+                push_u32(byte_order, &mut out, atom);
+            }
+            out
+        }
         XClientReply::XkbPerClientFlags {
             sequence,
             supported,
@@ -1460,6 +1510,31 @@ pub fn encode_x_client_event(
             );
             put_resource(byte_order, &mut out[4..8], event);
             out[8] = mode;
+        }
+        XClientEvent::XkbStateNotify {
+            sequence,
+            time,
+            modifiers,
+            changed,
+            keycode,
+            event_type,
+        } => {
+            write_event_header(
+                byte_order,
+                &mut out,
+                crate::X_KEYBOARD_FIRST_EVENT,
+                2,
+                sequence,
+            );
+            put_u32(byte_order, &mut out[4..8], time);
+            out[8] = 3;
+            out[9] = modifiers;
+            out[10] = modifiers;
+            out[16] = modifiers;
+            out[18] = modifiers;
+            put_u16(byte_order, &mut out[24..26], changed);
+            out[26] = keycode;
+            out[27] = event_type;
         }
         XClientEvent::PointerMotion {
             sequence,

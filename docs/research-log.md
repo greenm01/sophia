@@ -818,3 +818,14 @@ root/local coordinates as FP16.16 values and follow core grab redirection. One
 input delivery acknowledgement is returned only after the writer flushes the
 core event and every selected XI2 record generated from it. Raw, touch, and
 gesture events remain deliberately outside Milestone 3.
+
+## 2026-07-14: XKB State, Names, And Subscriptions
+
+The X authority now implements the generic XKEYBOARD 1.0 state/name path rather
+than a toolkit-specific startup exception. `GetState` reports the last
+authority-translated effective modifier state, `GetNames` publishes interned
+component atoms derived from the configured session RMLVO, and bounded
+`SelectEvents` parsing persists each client's StateNotify detail mask. Modifier
+transitions emit the standard 32-byte StateNotify record only when the selected
+state detail changed. Focus/hierarchy policy and retained classic/confined
+session evidence remain separate open gates.

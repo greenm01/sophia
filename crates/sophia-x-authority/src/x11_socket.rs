@@ -3590,6 +3590,8 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
     let event_sequence = Arc::new(AtomicU16::new(0));
     let focused_surface_window = Arc::new(AtomicU64::new(u64::from(X_SETUP_DEFAULT_ROOT)));
     let core_event_selections = Arc::new(Mutex::new(XCoreEventSelectionState::default()));
+    let xkb_state_details = Arc::new(AtomicU16::new(0));
+    let xkb_modifiers = Arc::new(AtomicU16::new(0));
     let surface_windows = Arc::new(Mutex::new(BTreeMap::new()));
     let output_stream = Arc::new(Mutex::new(stream.try_clone().map_err(|error| {
         X11SetupSocketError::new(format!("failed to clone X11 output socket: {error}"))
@@ -3629,6 +3631,8 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 event_sequence.clone(),
                 focused_surface_window.clone(),
                 core_event_selections.clone(),
+                xkb_state_details.clone(),
+                xkb_modifiers.clone(),
                 surface_windows.clone(),
                 client,
                 receiver,
@@ -3712,6 +3716,16 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                         }
                         _ => None,
                     };
+                    let xkb_selection = match &request {
+                        crate::XWireRequest::XkbSelectEvents {
+                            affect_which,
+                            clear,
+                            select_all,
+                            state_details,
+                        } => Some((*affect_which, *clear, *select_all, *state_details)),
+                        _ => None,
+                    };
+                    let xkb_get_state = matches!(request, crate::XWireRequest::XkbGetState);
                     let mapped_window = match &request {
                         crate::XWireRequest::Authority(crate::XAuthorityRequestPacket {
                             kind: crate::XAuthorityRequestKind::MapWindow { window, .. },
@@ -3762,13 +3776,24 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                     let mut properties = state.properties.lock().map_err(|_| {
                         X11SetupSocketError::new("X11 property table lock poisoned")
                     })?;
-                    let output = dispatch_x11_wire_request(
+                    let mut output = dispatch_x11_wire_request(
                         dispatch_context,
                         request,
                         &mut runtime,
                         &mut atoms,
                         &mut properties,
                     );
+                    if xkb_get_state {
+                        for client_output in &mut output.outputs {
+                            if let crate::XClientOutput::Reply(crate::XClientReply::XkbGetState {
+                                modifiers,
+                                ..
+                            }) = client_output
+                            {
+                                *modifiers = xkb_modifiers.load(Ordering::Acquire) as u8;
+                            }
+                        }
+                    }
                     if std::env::var_os("SOPHIA_LIVE_SESSION_DIAGNOSTIC").is_some()
                         && let Some(detail) = request_detail.as_deref()
                         && detail.starts_with("GetKeyboardMapping:")
@@ -3802,6 +3827,21 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                                         "failed to update RandR subscription: {error}"
                                     ))
                                 })?;
+                        }
+                        if let Some((affect_which, clear, select_all, state)) = xkb_selection {
+                            let mut details = xkb_state_details.load(Ordering::Acquire);
+                            if clear & 4 != 0 {
+                                details = 0;
+                            }
+                            if select_all & 4 != 0 {
+                                details = u16::MAX;
+                            }
+                            if affect_which & 4 != 0
+                                && let Some((affect, selected)) = state
+                            {
+                                details = (details & !affect) | (selected & affect);
+                            }
+                            xkb_state_details.store(details, Ordering::Release);
                         }
                     }
                     // The CPU update belongs to this dispatch. Keep it under
@@ -4377,6 +4417,8 @@ fn spawn_x11_input_event_writer(
     sequence: Arc<AtomicU16>,
     focused_surface_window: Arc<AtomicU64>,
     core_event_selections: Arc<Mutex<XCoreEventSelectionState>>,
+    xkb_state_details: Arc<AtomicU16>,
+    xkb_modifiers: Arc<AtomicU16>,
     surface_windows: Arc<Mutex<BTreeMap<SurfaceId, XResourceId>>>,
     client: XServerFrontendClientId,
     receiver: X11InputEventReceiver,
@@ -4576,6 +4618,29 @@ fn spawn_x11_input_event_writer(
                 stream.write_all(&record).map_err(|error| {
                     X11SetupSocketError::new(format!("failed to write X11 input event: {error}"))
                 })?;
+                if let XAuthorityInputEvent::Key(key) = event {
+                    let previous = xkb_modifiers.swap(key.state, Ordering::AcqRel);
+                    let changed = previous ^ key.state;
+                    let selected = xkb_state_details.load(Ordering::Acquire);
+                    if changed != 0 && selected & 1 != 0 {
+                        let state_notify = encode_x_client_event(
+                            byte_order,
+                            XClientEvent::XkbStateNotify {
+                                sequence,
+                                time: key.time_msec,
+                                modifiers: key.state as u8,
+                                changed: 1,
+                                keycode: key.keycode,
+                                event_type: if key.pressed { 2 } else { 3 },
+                            },
+                        );
+                        stream.write_all(&state_notify).map_err(|error| {
+                            X11SetupSocketError::new(format!(
+                                "failed to write XKB state notification: {error}"
+                            ))
+                        })?;
+                    }
+                }
                 if let Some(event_type) = xi_event_type {
                     let generic = encode_xi_device_event(
                         byte_order,

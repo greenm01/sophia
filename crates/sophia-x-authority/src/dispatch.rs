@@ -1687,7 +1687,48 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
-        XWireRequest::XkbSelectEvents => XDispatchResult {
+        XWireRequest::XkbGetState => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::XkbGetState {
+                sequence: context.sequence,
+                modifiers: 0,
+            })],
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::XkbGetNames { which } => {
+            let config = runtime.xkb_keymap().config();
+            let layout = if config.variant.is_empty() {
+                config.layout.clone()
+            } else {
+                format!("{}({})", config.layout, config.variant)
+            };
+            let components = [
+                (1, config.rules.clone()),
+                (2, config.model.clone()),
+                (4, layout.clone()),
+                (8, layout),
+                (16, "complete".to_owned()),
+                (32, "complete".to_owned()),
+            ];
+            let present = which & 0x3f;
+            let atoms = components
+                .iter()
+                .filter(|(mask, _)| present & mask != 0)
+                .filter_map(|(_, name)| atoms.intern(name, false).ok().flatten())
+                .collect();
+            XDispatchResult {
+                response: None,
+                outputs: vec![XClientOutput::Reply(XClientReply::XkbGetNames {
+                    sequence: context.sequence,
+                    which: present,
+                    min_keycode: runtime.xkb_keymap().min_keycode(),
+                    max_keycode: runtime.xkb_keymap().max_keycode(),
+                    atoms,
+                })],
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::XkbSelectEvents { .. } => XDispatchResult {
             response: None,
             outputs: Vec::new(),
             metadata_candidates: Vec::new(),
