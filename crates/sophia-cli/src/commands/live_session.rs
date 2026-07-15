@@ -1756,6 +1756,10 @@ fn rect_is_within(bounds: Rect, geometry: Rect) -> bool {
         && bottom <= bounds_bottom
 }
 
+fn successful_primary_exit_ends_session(input_proof_requested: bool) -> bool {
+    !input_proof_requested
+}
+
 fn run_session_loop(
     config: &PersistentXtermSessionConfig,
     authority_receiver: &Receiver<XAuthorityObservedTransactionBatch>,
@@ -1847,6 +1851,7 @@ fn run_session_loop(
     let mut startup_ready_msec = None;
     let mut terminal_content_ready_reported = false;
     let mut input_text_match = false;
+    let mut primary_child_exited = false;
 
     macro_rules! drain_physical_input {
         () => {{
@@ -1972,11 +1977,21 @@ fn run_session_loop(
     }
 
     'session: loop {
-        if let Some(status) = child.try_wait()? {
-            if status.success() {
+        if !primary_child_exited && let Some(status) = child.try_wait()? {
+            if status.success()
+                && successful_primary_exit_ends_session(config.input_proof_requested())
+            {
                 break;
             }
-            return Err(format!("xterm exited during live session with status {status}").into());
+            if !status.success() {
+                return Err(
+                    format!("xterm exited during live session with status {status}").into(),
+                );
+            }
+            // The proof helper intentionally exits after displaying its
+            // received text. Keep the session and secondary terminal alive so
+            // the final native frame can retire and pointer evidence can run.
+            primary_child_exited = true;
         }
         for (index, secondary) in secondary_children.iter_mut().enumerate() {
             if let Some(status) = secondary.try_wait()? {
@@ -2582,6 +2597,20 @@ fn run_session_loop(
 
     if let (Some(runtime), Some(native_scanout)) = (runtime.as_mut(), native_scanout.as_mut()) {
         runtime.drain_native_scanout(native_scanout, Duration::from_secs(2))?;
+    }
+    if input_presented_latency.is_none()
+        && input_pixel_change
+        && let Some(started) = input_proof_started_at
+        && native_scanout.as_ref().is_none_or(|native| {
+            input_change_submission_baseline.is_some_and(|baseline| {
+                native
+                    .heads
+                    .first()
+                    .is_some_and(|head| head.presented_submissions > baseline)
+            })
+        })
+    {
+        input_presented_latency = Some(started.elapsed());
     }
 
     let report = scene
@@ -4747,7 +4776,7 @@ mod tests {
         center_geometry_without_scaling, cpu_frame_matches_visible_output,
         cpu_frame_submission_ready, layer_snapshots_from_committed,
         required_wayland_presentation_submission, retain_latest_wayland_presentation,
-        seed_missing_committed_surfaces,
+        seed_missing_committed_surfaces, successful_primary_exit_ends_session,
     };
     use sophia_protocol::{
         AuthorityKind, NamespaceCapabilities, NamespaceProfile, SurfaceId, SurfaceTransaction,
@@ -4757,6 +4786,12 @@ mod tests {
         X_AUTHORITY_CPU_BUFFER_FORMAT_XRGB8888, XAuthorityCpuBufferSnapshot, XResourceId,
     };
     use std::collections::BTreeMap;
+
+    #[test]
+    fn successful_primary_exit_keeps_requested_input_proof_alive() {
+        assert!(successful_primary_exit_ends_session(false));
+        assert!(!successful_primary_exit_ends_session(true));
+    }
 
     #[test]
     fn live_x_session_profiles_are_explicit_and_fail_closed() {
