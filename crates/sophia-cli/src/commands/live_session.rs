@@ -549,11 +549,14 @@ pub(crate) fn run_persistent_xterm_session(
         initial_authority_batch,
         output_notifications,
     );
-    process.terminate()?;
     drop(randr_witness);
+    // Stop frontend routing before terminating its clients. Pointer motion can
+    // leave a bounded burst in the Engine ingress queue; killing xterm first
+    // turns that normal shutdown backlog into a client-queue disconnect.
     let _ = service_command_sender.send(XServerFrontendServiceCommand::StopAccepting);
     drop(input_sender);
     drop(control_sender);
+    process.terminate()?;
     let server_result = server
         .take()
         .expect("X Server Frontend handle is retained after startup")
