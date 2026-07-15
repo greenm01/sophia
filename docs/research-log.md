@@ -844,3 +844,6 @@ executes the same guarded two-xterm proof once per profile; its verifier require
 the confined startup record to have zero request and publish capabilities, both
 runs to include an applied output update, and both to satisfy the existing
 startup, composition, input-flush, presentation, resize, and cleanup checks.
+The output-update acknowledgement now also carries the number of RandR records
+queued to live subscribers. Schema 12 retains that count, and promotion rejects
+an accepted topology update that reached no X11 client.

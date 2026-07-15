@@ -6853,7 +6853,10 @@ fn routed_service_applies_topology_update_and_notifies_randr_subscriber() {
         .unwrap();
     assert_eq!(
         ack_receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
-        XAuthorityOutputUpdateOutcome::Applied { generation: 2 }
+        XAuthorityOutputUpdateOutcome::Applied {
+            generation: 2,
+            notifications: 4,
+        }
     );
     let event = read_x_record(&mut stream);
     assert_eq!(event[0], X_RANDR_FIRST_EVENT, "event={event:?}");

@@ -494,7 +494,10 @@ impl XServerFrontend {
             .lock()
             .map_err(|_| X11SetupSocketError::new("X11 authority runtime lock poisoned"))?;
         match runtime.update_output_topology(snapshot) {
-            Ok(true) => Ok(XAuthorityOutputUpdateOutcome::Applied { generation }),
+            Ok(true) => Ok(XAuthorityOutputUpdateOutcome::Applied {
+                generation,
+                notifications: 0,
+            }),
             Ok(false) => Ok(XAuthorityOutputUpdateOutcome::RejectedStale { generation }),
             Err(error) => Ok(XAuthorityOutputUpdateOutcome::RejectedInvalid { generation, error }),
         }
@@ -890,6 +893,9 @@ impl XServerFrontend {
 pub enum XAuthorityOutputUpdateOutcome {
     Applied {
         generation: u64,
+        /// RandR records queued to subscribed live clients by the routed
+        /// service. Direct frontend updates retain zero.
+        notifications: usize,
     },
     RejectedStale {
         generation: u64,
@@ -3118,12 +3124,19 @@ pub fn run_x_server_frontend_routed_until_stopped(
                 snapshot,
                 acknowledgement,
             }) => {
-                let outcome = frontend.update_output_topology(snapshot.clone())?;
+                let mut outcome = frontend.update_output_topology(snapshot.clone())?;
                 if matches!(outcome, XAuthorityOutputUpdateOutcome::Applied { .. }) {
-                    let _delivered = broker
+                    let notifications = broker
                         .registry
                         .broadcast_randr_update(&snapshot)
                         .map_err(|error| X11SetupSocketError::new(error.to_string()))?;
+                    if let XAuthorityOutputUpdateOutcome::Applied {
+                        notifications: delivered,
+                        ..
+                    } = &mut outcome
+                    {
+                        *delivered = notifications;
+                    }
                 }
                 acknowledgement.try_send(outcome).map_err(|error| {
                     X11SetupSocketError::new(format!(

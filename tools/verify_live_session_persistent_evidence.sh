@@ -70,7 +70,7 @@ if [[ "${observed[schema]:-}" == "7" || "${observed[schema]:-}" == "8" || "${obs
     expected_keys+=(wm_policy wm_requests wm_committed wm_restarts wm_degraded)
 fi
 if [[ "${observed[schema]:-}" == "12" ]]; then
-    expected_keys+=(namespace_profile output_update)
+    expected_keys+=(namespace_profile output_update output_notifications)
 fi
 if [[ "${#observed[@]}" -ne "${#expected_keys[@]}" ]]; then
     echo "persistent live-session evidence has an unknown or missing field" >&2
@@ -94,7 +94,7 @@ if [[ "${observed[schema]}" == "12" ]]; then
     [[ "${observed[namespace_profile]}" == "classic_shared" || "${observed[namespace_profile]}" == "confined" ]]
     [[ "${observed[output_update]}" == "applied" || "${observed[output_update]}" == "disabled" ]]
     if [[ "${observed[output_update]}" == "applied" ]] \
-        && [[ "$(grep -Ec '^sophia_live_output_update schema=1 status=applied width=[1-9][0-9]* height=[1-9][0-9]*$' "$EVIDENCE_FILE" || true)" -ne 1 ]]; then
+        && [[ "$(grep -Ec '^sophia_live_output_update schema=2 status=applied width=[1-9][0-9]* height=[1-9][0-9]* notifications=[1-9][0-9]*$' "$EVIDENCE_FILE" || true)" -ne 1 ]]; then
         echo "persistent live-session evidence is missing its applied output update" >&2
         exit 1
     fi
@@ -117,6 +117,9 @@ numeric_keys=(
     native_callback_rejected native_callback_queue_saturated
     native_nonzero_exports native_export_attempts
 )
+if [[ "${observed[schema]}" == "12" ]]; then
+    numeric_keys+=(output_notifications)
+fi
 if [[ "${observed[schema]}" == "8" ]]; then
     numeric_keys+=(input_presented_latency_msec)
 fi
@@ -180,6 +183,16 @@ for key in "${numeric_keys[@]}"; do
         exit 1
     fi
 done
+if [[ "${observed[schema]}" == "12" ]]; then
+    if [[ "${observed[output_update]}" == "applied" ]] && (( observed[output_notifications] == 0 )); then
+        echo "persistent live-session output update reached no subscribed X11 client" >&2
+        exit 1
+    fi
+    if [[ "${observed[output_update]}" == "disabled" ]] && (( observed[output_notifications] != 0 )); then
+        echo "persistent live-session reported output notifications without an update" >&2
+        exit 1
+    fi
+fi
 
 if [[ "${observed[injected_input]}" == "false" ]]; then
     if [[ "${observed[physical_input]}" != "enabled" ]] || (( observed[physical_keys_routed] == 0 )); then

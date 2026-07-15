@@ -438,6 +438,7 @@ pub(crate) fn run_persistent_xterm_session(
         )?);
     }
 
+    let mut output_notifications = 0usize;
     if let Some(size) = config.inject_output_size {
         let mut snapshot = output_topology.clone();
         snapshot.generation = snapshot.generation.saturating_add(1);
@@ -459,15 +460,18 @@ pub(crate) fn run_persistent_xterm_session(
             acknowledgement: ack_sender,
         })?;
         let outcome = ack_receiver.recv_timeout(Duration::from_secs(1))?;
-        if !matches!(
-            outcome,
-            sophia_x_authority::XAuthorityOutputUpdateOutcome::Applied { .. }
-        ) {
-            return Err(format!("live output injection was rejected: {outcome:?}").into());
-        }
+        let notifications = match outcome {
+            sophia_x_authority::XAuthorityOutputUpdateOutcome::Applied {
+                notifications, ..
+            } => notifications,
+            outcome => {
+                return Err(format!("live output injection was rejected: {outcome:?}").into());
+            }
+        };
+        output_notifications = notifications;
         println!(
-            "sophia_live_output_update schema=1 status=applied width={} height={}",
-            size.width, size.height
+            "sophia_live_output_update schema=2 status=applied width={} height={} notifications={}",
+            size.width, size.height, notifications
         );
     }
 
@@ -534,6 +538,7 @@ pub(crate) fn run_persistent_xterm_session(
         input_proof_result.as_ref(),
         false,
         initial_authority_batch,
+        output_notifications,
     );
     process.terminate()?;
     let _ = service_command_sender.send(XServerFrontendServiceCommand::StopAccepting);
@@ -1683,6 +1688,7 @@ fn run_session_loop(
     input_proof_result: Option<&LiveInputProofResult>,
     require_startup_focus: bool,
     mut initial_authority_batch: Option<XAuthorityObservedTransactionBatch>,
+    output_notifications: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let started = Instant::now();
     let deadline = config.max_runtime.map(|duration| started + duration);
@@ -2516,7 +2522,7 @@ fn run_session_loop(
         PersistentNativeScanout::persistent_render_metrics,
     );
     println!(
-        "sophia_live_session schema=12 status=bounded_complete display={} elapsed_msec={} session_ticks={} authority_batches={} authority_transactions={} authority_queue_capacity={} authority_batches_dropped=0 backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_max_nonzero_pixel_bytes={} cpu_nonzero_frames={} cpu_checksum={} cpu_max_compose_msec={} injected_input={} input_events_expected={} input_events_flushed={} input_flush_latency_msec={} input_pixel_change={} input_text_match={} input_presented_latency_msec={} input_dispatch_max_gap_msec={} input_queue_max_depth={} input_queue_dwell_max_msec={} physical_events={} physical_keys_routed={} pointer_pixel_change={} physical_pointer_events={} physical_pointer_routed={} pointer_proof={} native_presentation={} native_submissions={} native_submit_deferred={} native_submit_failures={} native_retirements={} native_retire_failures={} native_max_in_flight_ticks={} native_max_submit_to_page_flip_msec={} native_max_upload_msec={} native_target_creations={} native_target_recreations={} native_pipeline_creations={} native_frame_uploads={} native_callback_accepted={} native_callback_rejected={} native_callback_queue_saturated={} native_nonzero_exports={} native_export_attempts={} native_in_flight={} native_cleanup_pending={} physical_input={} wm_policy={} wm_requests={} wm_committed={} wm_restarts={} wm_degraded={} namespace_profile={} output_update={}",
+        "sophia_live_session schema=12 status=bounded_complete display={} elapsed_msec={} session_ticks={} authority_batches={} authority_transactions={} authority_queue_capacity={} authority_batches_dropped=0 backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_max_nonzero_pixel_bytes={} cpu_nonzero_frames={} cpu_checksum={} cpu_max_compose_msec={} injected_input={} input_events_expected={} input_events_flushed={} input_flush_latency_msec={} input_pixel_change={} input_text_match={} input_presented_latency_msec={} input_dispatch_max_gap_msec={} input_queue_max_depth={} input_queue_dwell_max_msec={} physical_events={} physical_keys_routed={} pointer_pixel_change={} physical_pointer_events={} physical_pointer_routed={} pointer_proof={} native_presentation={} native_submissions={} native_submit_deferred={} native_submit_failures={} native_retirements={} native_retire_failures={} native_max_in_flight_ticks={} native_max_submit_to_page_flip_msec={} native_max_upload_msec={} native_target_creations={} native_target_recreations={} native_pipeline_creations={} native_frame_uploads={} native_callback_accepted={} native_callback_rejected={} native_callback_queue_saturated={} native_nonzero_exports={} native_export_attempts={} native_in_flight={} native_cleanup_pending={} physical_input={} wm_policy={} wm_requests={} wm_committed={} wm_restarts={} wm_degraded={} namespace_profile={} output_update={} output_notifications={}",
         config.display,
         started.elapsed().as_millis(),
         session_ticks,
@@ -2629,6 +2635,7 @@ fn run_session_loop(
         } else {
             "disabled"
         },
+        output_notifications,
     );
     if let (Some(runtime), Some(native_scanout)) = (runtime.as_ref(), native_scanout.as_ref())
         && (native_scanout.submissions == 0

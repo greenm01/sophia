@@ -20,6 +20,10 @@ verify_profile() {
         echo "Milestone 3 evidence requires the deterministic Engine output update: $evidence" >&2
         exit 1
     fi
+    if [[ ! " $completion " =~ [[:space:]]output_notifications=[1-9][0-9]*[[:space:]] ]]; then
+        echo "Milestone 3 evidence requires delivered RandR update records: $evidence" >&2
+        exit 1
+    fi
 }
 
 verify_profile "$CLASSIC_EVIDENCE" classic_shared
