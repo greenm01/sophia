@@ -42,6 +42,7 @@ const SESSION_INPUT_DELIVERY_TIMEOUT_MSEC: u64 = 1_000;
 const SESSION_SEAT_RAW: u64 = 1;
 const SESSION_KEYBOARD_DEVICE_RAW: u64 = 1;
 const SESSION_POINTER_DEVICE_RAW: u64 = 2;
+const PRIMARY_INPUT_PROOF_SCRIPT: &str = r#"printf 'type %s then Return: ' "$1"; IFS= read -r line; umask 077; printf '%s' "$line" > "$2"; printf '\nreceived:%s\n' "$line"; sleep 300"#;
 const SECONDARY_POINTER_WITNESS_SCRIPT: &str = r#"saved=$(stty -g); stty raw -echo; printf '\033[?1000h\033[?1006hPointer witness: click here\r\n'; dd bs=1 count=1 >/dev/null 2>&1; printf '\033[?1000l\033[?1006l'; stty "$saved"; printf 'Pointer input received\n'; sleep 300"#;
 static NEXT_SESSION_GENERATION: AtomicU64 = AtomicU64::new(1);
 
@@ -393,7 +394,7 @@ pub(crate) fn run_persistent_xterm_session(
                 "-e",
                 "sh",
                 "-c",
-                "printf 'type %s then Return: ' \"$1\"; IFS= read -r line; umask 077; printf '%s' \"$line\" > \"$2\"; printf '\\nreceived:%s\\n' \"$line\"; sleep 5",
+                PRIMARY_INPUT_PROOF_SCRIPT,
                 "sophia-input-proof",
             ])
             .arg(proof_text)
@@ -4848,8 +4849,8 @@ impl Drop for SessionProcessGuard {
 #[cfg(test)]
 mod tests {
     use super::{
-        BufferSource, CommittedSurfaceState, LiveXAuthorityFile, PersistentBackendRuntime,
-        PersistentCpuScene, PersistentXtermSessionConfig, Rect, Region,
+        BufferSource, CommittedSurfaceState, LiveXAuthorityFile, PRIMARY_INPUT_PROOF_SCRIPT,
+        PersistentBackendRuntime, PersistentCpuScene, PersistentXtermSessionConfig, Rect, Region,
         SECONDARY_POINTER_WITNESS_SCRIPT, Size, authority_transaction_count,
         center_geometry_without_scaling, cpu_frame_matches_visible_output,
         cpu_frame_submission_ready, incremental_runtime_commits, layer_snapshots_from_committed,
@@ -4927,6 +4928,12 @@ mod tests {
         assert!(SECONDARY_POINTER_WITNESS_SCRIPT.contains("Pointer input received"));
         assert!(!SECONDARY_POINTER_WITNESS_SCRIPT.contains("read -r line"));
         assert!(!SECONDARY_POINTER_WITNESS_SCRIPT.contains('\0'));
+    }
+
+    #[test]
+    fn primary_input_proof_remains_visible_until_session_completion() {
+        assert!(PRIMARY_INPUT_PROOF_SCRIPT.contains("sleep 300"));
+        assert!(!PRIMARY_INPUT_PROOF_SCRIPT.contains("sleep 5"));
     }
 
     #[test]
