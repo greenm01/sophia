@@ -1879,8 +1879,20 @@ fn x11_dispatch_advertises_randr_and_replies_to_query_version() {
     );
     let encoded = monitors.encoded_outputs(XByteOrder::LittleEndian);
     assert_eq!(encoded[0][0], 1);
-    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][12..16]), 0);
-    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][16..20]), 0);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][12..16]), 1);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][16..20]), 1);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][4..8]), 7);
+    assert_eq!(encoded[0][36], 1, "the deterministic monitor is primary");
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][38..40]), 1);
+    assert_eq!(
+        read_u16(XByteOrder::LittleEndian, &encoded[0][44..46]),
+        1280
+    );
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][46..48]), 720);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &encoded[0][56..60]),
+        0x2000_0001
+    );
 }
 
 #[test]
@@ -6548,7 +6560,7 @@ fn routed_service_applies_topology_update_and_notifies_randr_subscriber() {
         .write_all(&randr_select_input_request(
             XByteOrder::LittleEndian,
             X_SETUP_DEFAULT_ROOT,
-            1,
+            0x47,
         ))
         .unwrap();
     stream
@@ -6595,6 +6607,26 @@ fn routed_service_applies_topology_update_and_notifies_randr_subscriber() {
     assert_eq!(read_u32(XByteOrder::LittleEndian, &event[8..12]), 2);
     assert_eq!(read_u16(XByteOrder::LittleEndian, &event[24..26]), 1600);
     assert_eq!(read_u16(XByteOrder::LittleEndian, &event[26..28]), 900);
+    let crtc = read_x_record(&mut stream);
+    assert_eq!(crtc[0], X_RANDR_FIRST_EVENT + 1);
+    assert_eq!(crtc[1], 0);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &crtc[12..16]),
+        0x1000_0009
+    );
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &crtc[28..30]), 1600);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &crtc[30..32]), 900);
+    let output = read_x_record(&mut stream);
+    assert_eq!(output[0], X_RANDR_FIRST_EVENT + 1);
+    assert_eq!(output[1], 1);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &output[16..20]),
+        0x2000_0009
+    );
+    let resources = read_x_record(&mut stream);
+    assert_eq!(resources[0], X_RANDR_FIRST_EVENT + 1);
+    assert_eq!(resources[1], 5);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &resources[4..8]), 2);
 
     drop(stream);
     service_sender

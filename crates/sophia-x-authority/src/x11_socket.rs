@@ -1762,7 +1762,7 @@ impl XServerFrontendRouteRegistry {
         Ok(())
     }
 
-    fn broadcast_randr_screen_change(
+    fn broadcast_randr_update(
         &self,
         snapshot: &sophia_protocol::OutputTopologySnapshot,
     ) -> Result<usize, XServerFrontendRouteError> {
@@ -1789,24 +1789,75 @@ impl XServerFrontendRouteRegistry {
             .clone();
         let mut delivered = 0usize;
         for (client, (window, mask)) in subscriptions {
-            if mask & 1 == 0 {
-                continue;
+            if mask & 1 != 0 {
+                self.route_protocol(
+                    client,
+                    XClientEvent::RandrScreenChange {
+                        sequence: 0,
+                        timestamp,
+                        config_timestamp: timestamp,
+                        root: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+                        request_window: window,
+                        width,
+                        height,
+                        mm_width,
+                        mm_height,
+                    },
+                )?;
+                delivered = delivered.saturating_add(1);
             }
-            self.route_protocol(
-                client,
-                XClientEvent::RandrScreenChange {
-                    sequence: 0,
-                    timestamp,
-                    config_timestamp: timestamp,
-                    root: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
-                    request_window: window,
-                    width,
-                    height,
-                    mm_width,
-                    mm_height,
-                },
-            )?;
-            delivered = delivered.saturating_add(1);
+            for output in &snapshot.outputs {
+                let identity = crate::dispatch::stable_randr_identity(output.output.raw());
+                let crtc = 0x1000_0000 | identity;
+                let output_id = 0x2000_0000 | identity;
+                let mode = crate::dispatch::stable_randr_mode_id(
+                    output.logical.width,
+                    output.logical.height,
+                    output.refresh_millihz,
+                );
+                if mask & (1 << 1) != 0 {
+                    self.route_protocol(
+                        client,
+                        XClientEvent::RandrCrtcChange {
+                            sequence: 0,
+                            timestamp,
+                            window,
+                            crtc,
+                            mode,
+                            x: i16::try_from(output.logical.x).unwrap_or(i16::MAX),
+                            y: i16::try_from(output.logical.y).unwrap_or(i16::MAX),
+                            width: u16::try_from(output.logical.width).unwrap_or(u16::MAX),
+                            height: u16::try_from(output.logical.height).unwrap_or(u16::MAX),
+                        },
+                    )?;
+                    delivered = delivered.saturating_add(1);
+                }
+                if mask & (1 << 2) != 0 {
+                    self.route_protocol(
+                        client,
+                        XClientEvent::RandrOutputChange {
+                            sequence: 0,
+                            timestamp,
+                            window,
+                            output: output_id,
+                            crtc,
+                            mode,
+                        },
+                    )?;
+                    delivered = delivered.saturating_add(1);
+                }
+            }
+            if mask & (1 << 6) != 0 {
+                self.route_protocol(
+                    client,
+                    XClientEvent::RandrResourceChange {
+                        sequence: 0,
+                        timestamp,
+                        window,
+                    },
+                )?;
+                delivered = delivered.saturating_add(1);
+            }
         }
         Ok(delivered)
     }
@@ -2629,7 +2680,7 @@ pub fn run_x_server_frontend_routed_until_stopped(
                 if matches!(outcome, XAuthorityOutputUpdateOutcome::Applied { .. }) {
                     let _delivered = broker
                         .registry
-                        .broadcast_randr_screen_change(&snapshot)
+                        .broadcast_randr_update(&snapshot)
                         .map_err(|error| X11SetupSocketError::new(error.to_string()))?;
                 }
                 acknowledgement.try_send(outcome).map_err(|error| {
@@ -3655,7 +3706,10 @@ fn set_x11_protocol_event_sequence(event: &mut XClientEvent, value: u16) {
         XClientEvent::SelectionClear { sequence, .. }
         | XClientEvent::SelectionRequest { sequence, .. }
         | XClientEvent::SelectionNotify { sequence, .. }
-        | XClientEvent::RandrScreenChange { sequence, .. } => *sequence = value,
+        | XClientEvent::RandrScreenChange { sequence, .. }
+        | XClientEvent::RandrCrtcChange { sequence, .. }
+        | XClientEvent::RandrOutputChange { sequence, .. }
+        | XClientEvent::RandrResourceChange { sequence, .. } => *sequence = value,
         _ => unreachable!("protocol routing received a non-routable event"),
     }
 }

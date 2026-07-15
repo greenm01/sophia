@@ -785,3 +785,10 @@ does not renumber an unchanged output. Focus state is also namespace-local and
 window destruction resets only its namespace. Dynamic RandR event diffs,
 complete XKB state/name notifications, grabs, and XI2 event delivery remain
 Milestone 3 work.
+
+The follow-up dynamic path now acknowledges newer Engine snapshots, populates
+`GetMonitors`, and sends mask-selected RandR screen, CRTC, output, and resource
+notifications through each client's bounded protocol queue. A deterministic
+`--inject-output-size=WIDTHxHEIGHT` live-session hook applies a validated
+generation update after client startup, so update behavior can be retained as
+evidence without requiring a physical connector hotplug.

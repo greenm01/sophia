@@ -333,7 +333,7 @@ pub(crate) fn run_persistent_xterm_session(
     });
     let frontend_config =
         XServerFrontendConfig::new_with_namespace_context(&server_path, x_namespace)?
-            .with_output_topology(output_topology)?
+            .with_output_topology(output_topology.clone())?
             .with_xkb_config(config.xkb_config.clone())?
             .with_setup_authorization(XServerFrontendSetupAuthorization::MitMagicCookie(
                 xauthority_cookie,
@@ -435,6 +435,39 @@ pub(crate) fn run_persistent_xterm_session(
                 .as_deref()
                 .or(config.expect_physical_text.as_deref()),
         )?);
+    }
+
+    if let Some(size) = config.inject_output_size {
+        let mut snapshot = output_topology.clone();
+        snapshot.generation = snapshot.generation.saturating_add(1);
+        let primary_id = snapshot.primary;
+        let primary = snapshot
+            .outputs
+            .iter_mut()
+            .find(|entry| entry.output == primary_id)
+            .ok_or("live output injection lost the primary output")?;
+        primary.logical.width = size.width;
+        primary.logical.height = size.height;
+        primary.pixel_size = size;
+        snapshot
+            .validate()
+            .map_err(|error| format!("invalid --inject-output-size topology: {error:?}"))?;
+        let (ack_sender, ack_receiver) = sync_channel(1);
+        service_command_sender.send(XServerFrontendServiceCommand::UpdateOutputTopology {
+            snapshot,
+            acknowledgement: ack_sender,
+        })?;
+        let outcome = ack_receiver.recv_timeout(Duration::from_secs(1))?;
+        if !matches!(
+            outcome,
+            sophia_x_authority::XAuthorityOutputUpdateOutcome::Applied { .. }
+        ) {
+            return Err(format!("live output injection was rejected: {outcome:?}").into());
+        }
+        println!(
+            "sophia_live_output_update schema=1 status=applied width={} height={}",
+            size.width, size.height
+        );
     }
 
     println!(
@@ -590,6 +623,7 @@ struct PersistentXtermSessionConfig {
     namespace_profile: NamespaceProfile,
     namespace_capabilities: NamespaceCapabilities,
     xkb_config: sophia_x_authority::XkbRmlvoConfig,
+    inject_output_size: Option<Size>,
 }
 
 impl PersistentXtermSessionConfig {
@@ -649,6 +683,10 @@ impl PersistentXtermSessionConfig {
             options: arg_value(args, "--xkb-options").unwrap_or(defaults.options),
         };
         xkb_config.validate()?;
+        let inject_output_size = arg_value(args, "--inject-output-size")
+            .as_deref()
+            .map(parse_output_size)
+            .transpose()?;
         let wm_process = arg_value(args, "--wm-process");
         let wm_process_args = args
             .iter()
@@ -738,12 +776,27 @@ impl PersistentXtermSessionConfig {
             namespace_profile,
             namespace_capabilities: NamespaceCapabilities::NONE,
             xkb_config,
+            inject_output_size,
         })
     }
 
     fn input_proof_requested(&self) -> bool {
         self.inject_text.is_some() || self.expect_physical_text.is_some()
     }
+}
+
+fn parse_output_size(value: &str) -> Result<Size, Box<dyn std::error::Error>> {
+    let (width, height) = value
+        .split_once('x')
+        .ok_or("--inject-output-size expects WIDTHxHEIGHT")?;
+    let size = Size {
+        width: width.parse()?,
+        height: height.parse()?,
+    };
+    if size.width <= 0 || size.height <= 0 || size.width > 16_384 || size.height > 16_384 {
+        return Err("--inject-output-size accepts dimensions from 1 through 16384".into());
+    }
+    Ok(size)
 }
 
 fn spawn_secondary_xterm(
@@ -4563,6 +4616,28 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("expected classic or confined")
+        );
+    }
+
+    #[test]
+    fn live_x_output_injection_is_bounded_and_explicit() {
+        let config =
+            PersistentXtermSessionConfig::from_args(&["--inject-output-size=1600x900".to_owned()])
+                .unwrap();
+        assert_eq!(
+            config.inject_output_size,
+            Some(Size {
+                width: 1600,
+                height: 900
+            })
+        );
+        assert!(
+            PersistentXtermSessionConfig::from_args(&["--inject-output-size=0x900".to_owned(),])
+                .is_err()
+        );
+        assert!(
+            PersistentXtermSessionConfig::from_args(&["--inject-output-size=wide".to_owned(),])
+                .is_err()
         );
     }
 

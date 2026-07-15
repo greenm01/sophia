@@ -172,6 +172,30 @@ pub enum XClientEvent {
         mm_width: u16,
         mm_height: u16,
     },
+    RandrCrtcChange {
+        sequence: u16,
+        timestamp: u32,
+        window: XResourceId,
+        crtc: u32,
+        mode: u32,
+        x: i16,
+        y: i16,
+        width: u16,
+        height: u16,
+    },
+    RandrOutputChange {
+        sequence: u16,
+        timestamp: u32,
+        window: XResourceId,
+        output: u32,
+        crtc: u32,
+        mode: u32,
+    },
+    RandrResourceChange {
+        sequence: u16,
+        timestamp: u32,
+        window: XResourceId,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -280,6 +304,7 @@ pub enum XClientReply {
     RandrGetMonitors {
         sequence: u16,
         timestamp: u32,
+        monitors: Vec<XRandrMonitorInfo>,
     },
     XkbUseExtension {
         sequence: u16,
@@ -415,6 +440,19 @@ pub struct XRandrModeInfo {
     pub height: u16,
     pub refresh_millihz: u32,
     pub name: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct XRandrMonitorInfo {
+    pub name: u32,
+    pub primary: bool,
+    pub x: i16,
+    pub y: i16,
+    pub width: u16,
+    pub height: u16,
+    pub mm_width: u32,
+    pub mm_height: u32,
+    pub outputs: Vec<u32>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -806,12 +844,59 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
         XClientReply::RandrGetMonitors {
             sequence,
             timestamp,
+            monitors,
         } => {
-            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
-            write_reply_header(byte_order, &mut out, sequence, 0);
+            let payload_len: usize = monitors
+                .iter()
+                .map(|monitor| 24 + monitor.outputs.len() * 4)
+                .sum();
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN + payload_len];
+            write_reply_header(byte_order, &mut out, sequence, (payload_len / 4) as u32);
             put_u32(byte_order, &mut out[8..12], timestamp);
-            put_u32(byte_order, &mut out[12..16], 0);
-            put_u32(byte_order, &mut out[16..20], 0);
+            put_u32(byte_order, &mut out[12..16], monitors.len() as u32);
+            put_u32(
+                byte_order,
+                &mut out[16..20],
+                monitors.iter().map(|m| m.outputs.len() as u32).sum(),
+            );
+            let mut offset = 32;
+            for monitor in monitors {
+                put_u32(byte_order, &mut out[offset..offset + 4], monitor.name);
+                out[offset + 4] = u8::from(monitor.primary);
+                out[offset + 5] = 1;
+                put_u16(
+                    byte_order,
+                    &mut out[offset + 6..offset + 8],
+                    monitor.outputs.len() as u16,
+                );
+                put_i16(byte_order, &mut out[offset + 8..offset + 10], monitor.x);
+                put_i16(byte_order, &mut out[offset + 10..offset + 12], monitor.y);
+                put_u16(
+                    byte_order,
+                    &mut out[offset + 12..offset + 14],
+                    monitor.width,
+                );
+                put_u16(
+                    byte_order,
+                    &mut out[offset + 14..offset + 16],
+                    monitor.height,
+                );
+                put_u32(
+                    byte_order,
+                    &mut out[offset + 16..offset + 20],
+                    monitor.mm_width,
+                );
+                put_u32(
+                    byte_order,
+                    &mut out[offset + 20..offset + 24],
+                    monitor.mm_height,
+                );
+                offset += 24;
+                for output in monitor.outputs {
+                    put_u32(byte_order, &mut out[offset..offset + 4], output);
+                    offset += 4;
+                }
+            }
             out
         }
         XClientReply::XkbUseExtension {
@@ -1475,6 +1560,74 @@ pub fn encode_x_client_event(
             put_u16(byte_order, &mut out[26..28], height);
             put_u16(byte_order, &mut out[28..30], mm_width);
             put_u16(byte_order, &mut out[30..32], mm_height);
+        }
+        XClientEvent::RandrCrtcChange {
+            sequence,
+            timestamp,
+            window,
+            crtc,
+            mode,
+            x,
+            y,
+            width,
+            height,
+        } => {
+            write_event_header(
+                byte_order,
+                &mut out,
+                crate::X_RANDR_FIRST_EVENT + 1,
+                0,
+                sequence,
+            );
+            put_u32(byte_order, &mut out[4..8], timestamp);
+            put_resource(byte_order, &mut out[8..12], window);
+            put_u32(byte_order, &mut out[12..16], crtc);
+            put_u32(byte_order, &mut out[16..20], mode);
+            put_u16(byte_order, &mut out[20..22], 1);
+            put_i16(byte_order, &mut out[24..26], x);
+            put_i16(byte_order, &mut out[26..28], y);
+            put_u16(byte_order, &mut out[28..30], width);
+            put_u16(byte_order, &mut out[30..32], height);
+        }
+        XClientEvent::RandrOutputChange {
+            sequence,
+            timestamp,
+            window,
+            output,
+            crtc,
+            mode,
+        } => {
+            write_event_header(
+                byte_order,
+                &mut out,
+                crate::X_RANDR_FIRST_EVENT + 1,
+                1,
+                sequence,
+            );
+            put_u32(byte_order, &mut out[4..8], timestamp);
+            put_u32(byte_order, &mut out[8..12], timestamp);
+            put_resource(byte_order, &mut out[12..16], window);
+            put_u32(byte_order, &mut out[16..20], output);
+            put_u32(byte_order, &mut out[20..24], crtc);
+            put_u32(byte_order, &mut out[24..28], mode);
+            put_u16(byte_order, &mut out[28..30], 1);
+            out[30] = 0;
+            out[31] = 0;
+        }
+        XClientEvent::RandrResourceChange {
+            sequence,
+            timestamp,
+            window,
+        } => {
+            write_event_header(
+                byte_order,
+                &mut out,
+                crate::X_RANDR_FIRST_EVENT + 1,
+                5,
+                sequence,
+            );
+            put_u32(byte_order, &mut out[4..8], timestamp);
+            put_resource(byte_order, &mut out[8..12], window);
         }
     }
     out

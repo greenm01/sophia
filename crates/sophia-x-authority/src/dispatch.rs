@@ -1,13 +1,14 @@
 use crate::{
-    X_BIG_REQUESTS_EXTENSION_NAME, X_BIG_REQUESTS_MAJOR_OPCODE, X_MIT_SHM_EXTENSION_NAME,
-    X_MIT_SHM_MAJOR_OPCODE, X_RANDR_EXTENSION_NAME, X_RANDR_MAJOR_OPCODE, X_SETUP_DEFAULT_COLORMAP,
-    X_SETUP_DEFAULT_ROOT, X_SETUP_DEFAULT_VISUAL, X_SOPHIA_PRESENT_EXTENSION_NAME,
-    X_SOPHIA_PRESENT_MAJOR_OPCODE, XAtomTable, XAuthorityRequestKind, XAuthorityResponseOutcome,
-    XAuthorityResponsePacket, XAuthorityRuntime, XAuthorityRuntimeError, XByteOrder, XClientEvent,
-    XClientOutput, XClientReply, XErrorCode, XMetadataPropertyCandidate, XPropertyError,
-    XPropertyTable, XRandrModeInfo, XResourceId, XWireParseError, XWireRequest, XXiDeviceInfo,
-    encode_x_client_output, metadata_property_candidate, x_error_from_runtime,
-    x_error_from_wire_parse, x_selection_failure_event,
+    X_ATOM_NONE, X_BIG_REQUESTS_EXTENSION_NAME, X_BIG_REQUESTS_MAJOR_OPCODE,
+    X_MIT_SHM_EXTENSION_NAME, X_MIT_SHM_MAJOR_OPCODE, X_RANDR_EXTENSION_NAME, X_RANDR_MAJOR_OPCODE,
+    X_SETUP_DEFAULT_COLORMAP, X_SETUP_DEFAULT_ROOT, X_SETUP_DEFAULT_VISUAL,
+    X_SOPHIA_PRESENT_EXTENSION_NAME, X_SOPHIA_PRESENT_MAJOR_OPCODE, XAtomTable,
+    XAuthorityRequestKind, XAuthorityResponseOutcome, XAuthorityResponsePacket, XAuthorityRuntime,
+    XAuthorityRuntimeError, XByteOrder, XClientEvent, XClientOutput, XClientReply, XErrorCode,
+    XMetadataPropertyCandidate, XPropertyError, XPropertyTable, XRandrModeInfo, XRandrMonitorInfo,
+    XResourceId, XWireParseError, XWireRequest, XXiDeviceInfo, encode_x_client_output,
+    metadata_property_candidate, x_error_from_runtime, x_error_from_wire_parse,
+    x_selection_failure_event,
 };
 use sophia_protocol::{NamespaceId, OutputTopologySnapshot, Rect, Region, TransactionId};
 
@@ -1383,10 +1384,15 @@ pub fn dispatch_x11_wire_request(
             }
         }
         XWireRequest::RandrGetMonitors { window, .. } => {
+            let timestamp = u32::try_from(runtime.output_topology().generation)
+                .unwrap_or(u32::MAX)
+                .max(1);
+            let monitors = randr_monitors(runtime.output_topology(), atoms);
             let output = if window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
                 XClientOutput::Reply(XClientReply::RandrGetMonitors {
                     sequence: context.sequence,
-                    timestamp: 0,
+                    timestamp,
+                    monitors: monitors.clone(),
                 })
             } else if let Err(error) = runtime.validate_window_access(context.namespace, window) {
                 XClientOutput::Error(x_error_from_runtime(
@@ -1398,7 +1404,8 @@ pub fn dispatch_x11_wire_request(
             } else {
                 XClientOutput::Reply(XClientReply::RandrGetMonitors {
                     sequence: context.sequence,
-                    timestamp: 0,
+                    timestamp,
+                    monitors,
                 })
             };
             XDispatchResult {
@@ -2209,12 +2216,12 @@ fn randr_resources(snapshot: &OutputTopologySnapshot) -> XRandrResources {
     }
 }
 
-fn stable_randr_identity(raw: u64) -> u32 {
+pub(crate) fn stable_randr_identity(raw: u64) -> u32 {
     let folded = raw ^ (raw >> 32);
     (u32::try_from(folded & 0x0fff_ffff).unwrap_or(0)).max(1)
 }
 
-fn stable_randr_mode_id(width: i32, height: i32, refresh_millihz: u32) -> u32 {
+pub(crate) fn stable_randr_mode_id(width: i32, height: i32, refresh_millihz: u32) -> u32 {
     let mut hash = 0x811c_9dc5u32;
     for value in [width as u32, height as u32, refresh_millihz] {
         hash ^= value;
@@ -2227,6 +2234,34 @@ fn logical_pixels_to_millimeters(pixels: i32) -> u32 {
     u32::try_from(i64::from(pixels).saturating_mul(254).saturating_add(480) / 960)
         .unwrap_or(u32::MAX)
         .max(1)
+}
+
+fn randr_monitors(
+    snapshot: &OutputTopologySnapshot,
+    atoms: &mut XAtomTable,
+) -> Vec<XRandrMonitorInfo> {
+    snapshot
+        .outputs
+        .iter()
+        .map(|entry| {
+            let name = atoms
+                .intern(&format!("SOPHIA-{}", entry.output.raw()), false)
+                .ok()
+                .flatten()
+                .unwrap_or(X_ATOM_NONE);
+            XRandrMonitorInfo {
+                name,
+                primary: entry.output == snapshot.primary,
+                x: i16::try_from(entry.logical.x).unwrap_or(i16::MAX),
+                y: i16::try_from(entry.logical.y).unwrap_or(i16::MAX),
+                width: u16::try_from(entry.logical.width).unwrap_or(u16::MAX),
+                height: u16::try_from(entry.logical.height).unwrap_or(u16::MAX),
+                mm_width: logical_pixels_to_millimeters(entry.logical.width),
+                mm_height: logical_pixels_to_millimeters(entry.logical.height),
+                outputs: vec![0x2000_0000 | stable_randr_identity(entry.output.raw())],
+            }
+        })
+        .collect()
 }
 
 pub fn dispatch_x11_parse_error(
