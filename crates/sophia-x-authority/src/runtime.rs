@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use sophia_portal::ClipboardPortal;
 use sophia_protocol::{
@@ -53,6 +54,7 @@ pub struct XAuthorityRuntime {
     output_topology: OutputTopologySnapshot,
     input_focus: BTreeMap<NamespaceId, (crate::XResourceId, u8)>,
     xkb_keymap: crate::XkbKeymapSnapshot,
+    input_authority: Arc<Mutex<crate::XInputAuthorityState>>,
 }
 
 impl Default for XAuthorityRuntime {
@@ -74,6 +76,7 @@ impl Default for XAuthorityRuntime {
             input_focus: Default::default(),
             xkb_keymap: crate::XkbKeymapSnapshot::new(&crate::XkbRmlvoConfig::default())
                 .expect("the deterministic default XKB keymap must compile"),
+            input_authority: Arc::new(Mutex::new(crate::XInputAuthorityState::default())),
         }
     }
 }
@@ -94,6 +97,19 @@ impl XAuthorityRuntime {
 
     pub const fn xkb_keymap(&self) -> &crate::XkbKeymapSnapshot {
         &self.xkb_keymap
+    }
+
+    pub fn input_authority_mut(&self) -> MutexGuard<'_, crate::XInputAuthorityState> {
+        self.input_authority
+            .lock()
+            .expect("X11 input authority lock poisoned")
+    }
+
+    pub fn set_input_authority(
+        &mut self,
+        input_authority: Arc<Mutex<crate::XInputAuthorityState>>,
+    ) {
+        self.input_authority = input_authority;
     }
 
     pub fn with_output_topology(

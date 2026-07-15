@@ -29,8 +29,15 @@ const X_SET_SELECTION_OWNER: u8 = 22;
 const X_GET_SELECTION_OWNER: u8 = 23;
 const X_CONVERT_SELECTION: u8 = 24;
 const X_SEND_EVENT: u8 = 25;
+const X_GRAB_POINTER: u8 = 26;
+const X_UNGRAB_POINTER: u8 = 27;
 const X_GRAB_BUTTON: u8 = 28;
 const X_UNGRAB_BUTTON: u8 = 29;
+const X_GRAB_KEYBOARD: u8 = 31;
+const X_UNGRAB_KEYBOARD: u8 = 32;
+const X_GRAB_KEY: u8 = 33;
+const X_UNGRAB_KEY: u8 = 34;
+const X_ALLOW_EVENTS: u8 = 35;
 const X_GRAB_SERVER: u8 = 36;
 const X_UNGRAB_SERVER: u8 = 37;
 const X_TRANSLATE_COORDINATES: u8 = 40;
@@ -135,6 +142,13 @@ const X_CONVERT_SELECTION_REQ_LEN: usize = 24;
 const X_SEND_EVENT_REQ_LEN: usize = 44;
 const X_GRAB_BUTTON_REQ_LEN: usize = 24;
 const X_UNGRAB_BUTTON_REQ_LEN: usize = 12;
+const X_GRAB_POINTER_REQ_LEN: usize = 24;
+const X_UNGRAB_POINTER_REQ_LEN: usize = 8;
+const X_GRAB_KEYBOARD_REQ_LEN: usize = 16;
+const X_UNGRAB_KEYBOARD_REQ_LEN: usize = 8;
+const X_GRAB_KEY_REQ_LEN: usize = 16;
+const X_UNGRAB_KEY_REQ_LEN: usize = 12;
+const X_ALLOW_EVENTS_REQ_LEN: usize = 8;
 const X_GRAB_SERVER_REQ_LEN: usize = 4;
 const X_UNGRAB_SERVER_REQ_LEN: usize = 4;
 const X_TRANSLATE_COORDINATES_REQ_LEN: usize = 16;
@@ -302,17 +316,57 @@ pub enum XWireRequest {
         event_mask: u32,
         event: XClientEvent,
     },
+    GrabPointer {
+        window: XResourceId,
+        event_mask: u16,
+        owner_events: bool,
+        pointer_mode: u8,
+        keyboard_mode: u8,
+        time: u32,
+    },
+    UngrabPointer {
+        time: u32,
+    },
     GrabButton {
         window: XResourceId,
         event_mask: u16,
         button: u8,
         modifiers: u16,
         owner_events: bool,
+        pointer_mode: u8,
+        keyboard_mode: u8,
     },
     UngrabButton {
         window: XResourceId,
         button: u8,
         modifiers: u16,
+    },
+    GrabKeyboard {
+        window: XResourceId,
+        owner_events: bool,
+        pointer_mode: u8,
+        keyboard_mode: u8,
+        time: u32,
+    },
+    UngrabKeyboard {
+        time: u32,
+    },
+    GrabKey {
+        window: XResourceId,
+        key: u8,
+        modifiers: u16,
+        owner_events: bool,
+        pointer_mode: u8,
+        keyboard_mode: u8,
+    },
+    UngrabKey {
+        window: XResourceId,
+        key: u8,
+        modifiers: u16,
+    },
+    AllowEvents {
+        mode: u8,
+        time: u32,
     },
     GrabServer,
     UngrabServer,
@@ -670,8 +724,15 @@ pub fn decode_x11_core_request(
         X_GET_SELECTION_OWNER => decode_get_selection_owner(context, bytes),
         X_CONVERT_SELECTION => decode_convert_selection(context, bytes),
         X_SEND_EVENT => decode_send_event(context, bytes),
+        X_GRAB_POINTER => decode_grab_pointer(context, bytes),
+        X_UNGRAB_POINTER => decode_ungrab_pointer(context, bytes),
         X_GRAB_BUTTON => decode_grab_button(context, bytes),
         X_UNGRAB_BUTTON => decode_ungrab_button(context, bytes),
+        X_GRAB_KEYBOARD => decode_grab_keyboard(context, bytes),
+        X_UNGRAB_KEYBOARD => decode_ungrab_keyboard(context, bytes),
+        X_GRAB_KEY => decode_grab_key(context, bytes),
+        X_UNGRAB_KEY => decode_ungrab_key(context, bytes),
+        X_ALLOW_EVENTS => decode_allow_events(context, bytes),
         X_GRAB_SERVER => decode_grab_server(bytes),
         X_UNGRAB_SERVER => decode_ungrab_server(bytes),
         X_TRANSLATE_COORDINATES => decode_translate_coordinates(context, bytes),
@@ -2292,6 +2353,33 @@ fn decode_grab_button(
         button: bytes[20],
         modifiers: context.byte_order.u16(&bytes[22..24]),
         owner_events: bytes[1] != 0,
+        pointer_mode: bytes[10],
+        keyboard_mode: bytes[11],
+    })
+}
+
+fn decode_grab_pointer(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_GRAB_POINTER, X_GRAB_POINTER_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::GrabPointer {
+        window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        event_mask: context.byte_order.u16(&bytes[8..10]),
+        owner_events: bytes[1] != 0,
+        pointer_mode: bytes[10],
+        keyboard_mode: bytes[11],
+        time: context.byte_order.u32(&bytes[20..24]),
+    })
+}
+
+fn decode_ungrab_pointer(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_UNGRAB_POINTER, X_UNGRAB_POINTER_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::UngrabPointer {
+        time: context.byte_order.u32(&bytes[4..8]),
     })
 }
 
@@ -2304,6 +2392,68 @@ fn decode_ungrab_button(
         window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
         button: bytes[1],
         modifiers: context.byte_order.u16(&bytes[8..10]),
+    })
+}
+
+fn decode_grab_keyboard(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_GRAB_KEYBOARD, X_GRAB_KEYBOARD_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::GrabKeyboard {
+        window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        owner_events: bytes[1] != 0,
+        time: context.byte_order.u32(&bytes[8..12]),
+        pointer_mode: bytes[12],
+        keyboard_mode: bytes[13],
+    })
+}
+
+fn decode_ungrab_keyboard(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_UNGRAB_KEYBOARD, X_UNGRAB_KEYBOARD_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::UngrabKeyboard {
+        time: context.byte_order.u32(&bytes[4..8]),
+    })
+}
+
+fn decode_grab_key(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_GRAB_KEY, X_GRAB_KEY_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::GrabKey {
+        window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        modifiers: context.byte_order.u16(&bytes[8..10]),
+        key: bytes[10],
+        pointer_mode: bytes[11],
+        keyboard_mode: bytes[12],
+        owner_events: bytes[1] != 0,
+    })
+}
+
+fn decode_ungrab_key(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_UNGRAB_KEY, X_UNGRAB_KEY_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::UngrabKey {
+        window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        key: bytes[1],
+        modifiers: context.byte_order.u16(&bytes[8..10]),
+    })
+}
+
+fn decode_allow_events(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_ALLOW_EVENTS, X_ALLOW_EVENTS_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::AllowEvents {
+        mode: bytes[1],
+        time: context.byte_order.u32(&bytes[4..8]),
     })
 }
 

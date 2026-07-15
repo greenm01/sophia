@@ -18,6 +18,7 @@ pub struct XDispatchContext {
     pub namespace: NamespaceId,
     pub sequence: u16,
     pub major_opcode: u8,
+    pub client_id: u64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -608,9 +609,124 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
-        XWireRequest::GrabButton { window, .. } | XWireRequest::UngrabButton { window, .. } => {
+        XWireRequest::GrabPointer {
+            window,
+            event_mask,
+            owner_events,
+            pointer_mode,
+            keyboard_mode,
+            ..
+        } => {
+            let status = if validate_grab_window(runtime, context.namespace, window).is_err() {
+                3
+            } else {
+                runtime
+                    .input_authority_mut()
+                    .grab_pointer(
+                        context.namespace,
+                        crate::XActiveInputGrab {
+                            owner: context.client_id,
+                            window,
+                            owner_events,
+                            pointer_mode,
+                            keyboard_mode,
+                            event_mask,
+                        },
+                    )
+                    .map_or(1, |_| 0)
+            };
+            XDispatchResult {
+                response: None,
+                outputs: vec![XClientOutput::Reply(XClientReply::GrabStatus {
+                    sequence: context.sequence,
+                    status,
+                })],
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::UngrabPointer { .. } => {
+            runtime
+                .input_authority_mut()
+                .ungrab_pointer(context.namespace, context.client_id);
+            XDispatchResult {
+                response: None,
+                outputs: Vec::new(),
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::GrabKeyboard {
+            window,
+            owner_events,
+            pointer_mode,
+            keyboard_mode,
+            ..
+        } => {
+            let status = if validate_grab_window(runtime, context.namespace, window).is_err() {
+                3
+            } else {
+                runtime
+                    .input_authority_mut()
+                    .grab_keyboard(
+                        context.namespace,
+                        crate::XActiveInputGrab {
+                            owner: context.client_id,
+                            window,
+                            owner_events,
+                            pointer_mode,
+                            keyboard_mode,
+                            event_mask: 0,
+                        },
+                    )
+                    .map_or(1, |_| 0)
+            };
+            XDispatchResult {
+                response: None,
+                outputs: vec![XClientOutput::Reply(XClientReply::GrabStatus {
+                    sequence: context.sequence,
+                    status,
+                })],
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::UngrabKeyboard { .. } => {
+            runtime
+                .input_authority_mut()
+                .ungrab_keyboard(context.namespace, context.client_id);
+            XDispatchResult {
+                response: None,
+                outputs: Vec::new(),
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::GrabButton {
+            window,
+            event_mask,
+            button,
+            modifiers,
+            owner_events,
+            pointer_mode,
+            keyboard_mode,
+        } => {
             let outputs = if window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
-                Vec::new()
+                runtime
+                    .input_authority_mut()
+                    .grab_button(
+                        context.namespace,
+                        crate::XPassiveInputGrab {
+                            owner: context.client_id,
+                            window,
+                            detail: button,
+                            modifiers,
+                            owner_events,
+                            pointer_mode,
+                            keyboard_mode,
+                            event_mask,
+                        },
+                    )
+                    .err()
+                    .map(|_| grab_access_error(&context, window))
+                    .into_iter()
+                    .collect()
             } else if let Err(error) = runtime.validate_window_access(context.namespace, window) {
                 vec![XClientOutput::Error(x_error_from_runtime(
                     error,
@@ -619,7 +735,25 @@ pub fn dispatch_x11_wire_request(
                     u32::try_from(window.local.raw()).unwrap_or(0),
                 ))]
             } else {
-                Vec::new()
+                runtime
+                    .input_authority_mut()
+                    .grab_button(
+                        context.namespace,
+                        crate::XPassiveInputGrab {
+                            owner: context.client_id,
+                            window,
+                            detail: button,
+                            modifiers,
+                            owner_events,
+                            pointer_mode,
+                            keyboard_mode,
+                            event_mask,
+                        },
+                    )
+                    .err()
+                    .map(|_| grab_access_error(&context, window))
+                    .into_iter()
+                    .collect()
             };
             XDispatchResult {
                 response: None,
@@ -627,11 +761,125 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
-        XWireRequest::GrabServer | XWireRequest::UngrabServer => XDispatchResult {
-            response: None,
-            outputs: Vec::new(),
-            metadata_candidates: Vec::new(),
-        },
+        XWireRequest::UngrabButton {
+            window,
+            button,
+            modifiers,
+        } => {
+            runtime.input_authority_mut().ungrab_button(
+                context.namespace,
+                context.client_id,
+                window,
+                button,
+                modifiers,
+            );
+            XDispatchResult {
+                response: None,
+                outputs: Vec::new(),
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::GrabKey {
+            window,
+            key,
+            modifiers,
+            owner_events,
+            pointer_mode,
+            keyboard_mode,
+        } => {
+            let outputs = match validate_grab_window(runtime, context.namespace, window) {
+                Err(error) => vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(window.local.raw()).unwrap_or(0),
+                ))],
+                Ok(()) => runtime
+                    .input_authority_mut()
+                    .grab_key(
+                        context.namespace,
+                        crate::XPassiveInputGrab {
+                            owner: context.client_id,
+                            window,
+                            detail: key,
+                            modifiers,
+                            owner_events,
+                            pointer_mode,
+                            keyboard_mode,
+                            event_mask: 0,
+                        },
+                    )
+                    .err()
+                    .map(|_| grab_access_error(&context, window))
+                    .into_iter()
+                    .collect(),
+            };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::UngrabKey {
+            window,
+            key,
+            modifiers,
+        } => {
+            runtime.input_authority_mut().ungrab_key(
+                context.namespace,
+                context.client_id,
+                window,
+                key,
+                modifiers,
+            );
+            XDispatchResult {
+                response: None,
+                outputs: Vec::new(),
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::AllowEvents { mode, .. } => {
+            let invalid = runtime
+                .input_authority_mut()
+                .allow_events(context.namespace, context.client_id, mode)
+                .is_err();
+            XDispatchResult {
+                response: None,
+                outputs: invalid
+                    .then(|| {
+                        XClientOutput::Error(crate::XClientError {
+                            code: XErrorCode::BadValue,
+                            sequence: context.sequence,
+                            resource_id: u32::from(mode),
+                            minor_code: 0,
+                            major_code: context.major_opcode,
+                        })
+                    })
+                    .into_iter()
+                    .collect(),
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::GrabServer => {
+            let _ = runtime
+                .input_authority_mut()
+                .grab_server(context.namespace, context.client_id);
+            XDispatchResult {
+                response: None,
+                outputs: Vec::new(),
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::UngrabServer => {
+            runtime
+                .input_authority_mut()
+                .ungrab_server(context.namespace, context.client_id);
+            XDispatchResult {
+                response: None,
+                outputs: Vec::new(),
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::CreateGraphicsContext {
             gc,
             drawable,
@@ -2062,6 +2310,28 @@ fn dispatch_text_draw(
         outputs,
         metadata_candidates: Vec::new(),
     }
+}
+
+fn validate_grab_window(
+    runtime: &XAuthorityRuntime,
+    namespace: NamespaceId,
+    window: XResourceId,
+) -> Result<(), XAuthorityRuntimeError> {
+    if window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
+        Ok(())
+    } else {
+        runtime.validate_window_access(namespace, window)
+    }
+}
+
+fn grab_access_error(context: &XDispatchContext, window: XResourceId) -> XClientOutput {
+    XClientOutput::Error(crate::XClientError {
+        code: XErrorCode::BadAccess,
+        sequence: context.sequence,
+        resource_id: u32::try_from(window.local.raw()).unwrap_or(0),
+        minor_code: 0,
+        major_code: context.major_opcode,
+    })
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

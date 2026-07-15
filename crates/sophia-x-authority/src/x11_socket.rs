@@ -10,7 +10,7 @@ use std::sync::mpsc::{
 };
 #[cfg(unix)]
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     io::{ErrorKind, Read, Write},
     num::NonZeroUsize,
     panic::{AssertUnwindSafe, catch_unwind},
@@ -1187,6 +1187,7 @@ pub enum XAuthorityInputEvent {
 pub struct XAuthorityClientInputEvent {
     pub client: XServerFrontendClientId,
     pub event: XAuthorityInputEvent,
+    pub target_window: Option<XResourceId>,
     /// Opaque Engine-assigned token used to prove that the owning X11 worker
     /// flushed this event to its client socket. It deliberately carries no
     /// X11 resource, key, or text identity.
@@ -1475,6 +1476,8 @@ impl XServerFrontendRouteBroker {
                 surfaces: Arc::new(Mutex::new(BTreeMap::new())),
                 randr_subscriptions: Arc::new(Mutex::new(BTreeMap::new())),
                 pointer_state: Arc::new(Mutex::new(BTreeMap::new())),
+                input_authority: Arc::new(Mutex::new(crate::XInputAuthorityState::default())),
+                frozen_input: Arc::new(Mutex::new(VecDeque::new())),
                 xkb_config: crate::XkbRmlvoConfig::default(),
                 xkb_worker: XkbKeyboardWorker::spawn(crate::XkbRmlvoConfig::default()),
                 acknowledgement_sender,
@@ -1558,6 +1561,11 @@ impl XServerFrontendRouteBroker {
                 }
                 Err(TryRecvError::Empty | TryRecvError::Disconnected) => {}
             }
+            let thawed = self.registry.drain_thawed_input()?;
+            if thawed != 0 {
+                routed = routed.saturating_add(thawed);
+                progressed = true;
+            }
             if !progressed {
                 return Ok(routed);
             }
@@ -1573,15 +1581,32 @@ impl XServerFrontendRouteBroker {
 #[derive(Clone)]
 struct XServerFrontendRouteRegistry {
     clients: Arc<Mutex<BTreeMap<XServerFrontendClientId, XServerFrontendClientRouteSenders>>>,
-    surfaces: Arc<Mutex<BTreeMap<SurfaceId, XServerFrontendClientId>>>,
+    surfaces: Arc<Mutex<BTreeMap<SurfaceId, XServerFrontendSurfaceRoute>>>,
     randr_subscriptions: Arc<Mutex<BTreeMap<XServerFrontendClientId, (XResourceId, u16)>>>,
     pointer_state: Arc<Mutex<BTreeMap<SeatId, crate::XCorePointerMapper>>>,
+    input_authority: Arc<Mutex<crate::XInputAuthorityState>>,
+    frozen_input: Arc<Mutex<VecDeque<XDeferredRoutedInput>>>,
     xkb_config: crate::XkbRmlvoConfig,
     xkb_worker: XkbKeyboardWorker,
     acknowledgement_sender: SyncSender<XAuthorityClientControlAck>,
     input_delivery_sender: Option<SyncSender<XAuthorityClientInputDelivery>>,
     per_client_queue_capacity: NonZeroUsize,
     source_payload_sender: SyncSender<crate::ClipboardSourcePayload>,
+}
+
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug)]
+struct XServerFrontendSurfaceRoute {
+    client: XServerFrontendClientId,
+    namespace: NamespaceId,
+    window: XResourceId,
+}
+
+#[cfg(unix)]
+#[derive(Clone, Debug)]
+struct XDeferredRoutedInput {
+    client: XServerFrontendClientId,
+    route: XAuthorityRoutedInput,
 }
 
 #[cfg(unix)]
@@ -1603,8 +1628,9 @@ struct XServerFrontendClientRouteChannels {
 struct XServerFrontendClientRouteRegistration {
     client: XServerFrontendClientId,
     clients: Arc<Mutex<BTreeMap<XServerFrontendClientId, XServerFrontendClientRouteSenders>>>,
-    surfaces: Arc<Mutex<BTreeMap<SurfaceId, XServerFrontendClientId>>>,
+    surfaces: Arc<Mutex<BTreeMap<SurfaceId, XServerFrontendSurfaceRoute>>>,
     randr_subscriptions: Arc<Mutex<BTreeMap<XServerFrontendClientId, (XResourceId, u16)>>>,
+    frozen_input: Arc<Mutex<VecDeque<XDeferredRoutedInput>>>,
 }
 
 #[cfg(unix)]
@@ -1715,6 +1741,7 @@ impl XServerFrontendRouteRegistry {
                 clients: self.clients.clone(),
                 surfaces: self.surfaces.clone(),
                 randr_subscriptions: self.randr_subscriptions.clone(),
+                frozen_input: self.frozen_input.clone(),
             },
             XServerFrontendClientRouteChannels {
                 input,
@@ -1735,12 +1762,21 @@ impl XServerFrontendRouteRegistry {
     fn register_surface(
         &self,
         client: XServerFrontendClientId,
+        namespace: NamespaceId,
         surface: SurfaceId,
+        window: XResourceId,
     ) -> Result<(), XServerFrontendRouteError> {
         self.surfaces
             .lock()
             .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
-            .insert(surface, client);
+            .insert(
+                surface,
+                XServerFrontendSurfaceRoute {
+                    client,
+                    namespace,
+                    window,
+                },
+            );
         Ok(())
     }
 
@@ -1866,7 +1902,7 @@ impl XServerFrontendRouteRegistry {
         &self,
         route: XAuthorityRoutedInput,
     ) -> Result<(), XServerFrontendRouteError> {
-        let client = self
+        let surface_route = self
             .surfaces
             .lock()
             .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
@@ -1875,6 +1911,30 @@ impl XServerFrontendRouteRegistry {
             .ok_or(XServerFrontendRouteError::UnknownSurface {
                 surface: route.request.target_surface,
             })?;
+        if self.route_is_frozen(&route, surface_route.namespace)? {
+            let mut frozen = self
+                .frozen_input
+                .lock()
+                .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?;
+            if frozen.len() >= self.per_client_queue_capacity.get() {
+                drop(frozen);
+                self.send_input_delivery(
+                    surface_route.client,
+                    route.delivery,
+                    XAuthorityInputDeliveryOutcome::RouteRejected,
+                )?;
+                return Err(XServerFrontendRouteError::ClientQueueFull {
+                    client: surface_route.client,
+                });
+            }
+            frozen.push_back(XDeferredRoutedInput {
+                client: surface_route.client,
+                route,
+            });
+            return Ok(());
+        }
+        let mut client = surface_route.client;
+        let mut target_window = None;
         let mut pointers = self
             .pointer_state
             .lock()
@@ -1885,6 +1945,19 @@ impl XServerFrontendRouteRegistry {
         let time_msec = u32::try_from(route.request.time_msec).unwrap_or(u32::MAX);
         let event = match route.request.kind {
             InputEventKind::Key { keycode, pressed } => {
+                if let Some(grab) = self
+                    .input_authority
+                    .lock()
+                    .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
+                    .keyboard_grab(surface_route.namespace)
+                {
+                    client = XServerFrontendClientId(grab.owner);
+                    target_window = Some(if grab.owner_events && client == surface_route.client {
+                        surface_route.window
+                    } else {
+                        grab.window
+                    });
+                }
                 let Some((keycode, state)) = self.xkb_worker.request(XkbWorkerCommand::Key {
                     seat: route.request.seat,
                     keycode,
@@ -1897,6 +1970,28 @@ impl XServerFrontendRouteRegistry {
                         XAuthorityInputDeliveryOutcome::RouteRejected,
                     );
                 };
+                let passive = if pressed {
+                    self.input_authority
+                        .lock()
+                        .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
+                        .activate_key(surface_route.namespace, keycode, state & 0xff)
+                } else {
+                    None
+                };
+                if let Some(grab) = passive {
+                    client = XServerFrontendClientId(grab.owner);
+                    target_window = Some(if grab.owner_events && client == surface_route.client {
+                        surface_route.window
+                    } else {
+                        grab.window
+                    });
+                }
+                if !pressed {
+                    self.input_authority
+                        .lock()
+                        .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
+                        .release_key(surface_route.namespace, keycode);
+                }
                 XAuthorityInputEvent::Key(XAuthorityKeyEvent {
                     keycode,
                     pressed,
@@ -1905,6 +2000,19 @@ impl XServerFrontendRouteRegistry {
                 })
             }
             InputEventKind::PointerMotion => {
+                if let Some(grab) = self
+                    .input_authority
+                    .lock()
+                    .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
+                    .pointer_grab(surface_route.namespace)
+                {
+                    client = XServerFrontendClientId(grab.owner);
+                    target_window = Some(if grab.owner_events && client == surface_route.client {
+                        surface_route.window
+                    } else {
+                        grab.window
+                    });
+                }
                 XAuthorityInputEvent::Pointer(XAuthorityPointerEvent {
                     kind: XAuthorityPointerEventKind::Motion,
                     surface: route.request.target_surface,
@@ -1923,6 +2031,19 @@ impl XServerFrontendRouteRegistry {
                 })
             }
             InputEventKind::PointerButton { button, pressed } => {
+                if let Some(grab) = self
+                    .input_authority
+                    .lock()
+                    .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
+                    .pointer_grab(surface_route.namespace)
+                {
+                    client = XServerFrontendClientId(grab.owner);
+                    target_window = Some(if grab.owner_events && client == surface_route.client {
+                        surface_route.window
+                    } else {
+                        grab.window
+                    });
+                }
                 let Some((button, state)) = pointer.map_evdev_button(button, pressed) else {
                     return self.send_input_delivery(
                         client,
@@ -1930,6 +2051,36 @@ impl XServerFrontendRouteRegistry {
                         XAuthorityInputDeliveryOutcome::RouteRejected,
                     );
                 };
+                if pressed {
+                    let grab = self
+                        .input_authority
+                        .lock()
+                        .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
+                        .activate_button(
+                            surface_route.namespace,
+                            button,
+                            state & 0xff,
+                            crate::XActiveInputGrab {
+                                owner: surface_route.client.raw(),
+                                window: surface_route.window,
+                                owner_events: true,
+                                pointer_mode: 1,
+                                keyboard_mode: 1,
+                                event_mask: u16::MAX,
+                            },
+                        );
+                    client = XServerFrontendClientId(grab.owner);
+                    target_window = Some(if grab.owner_events && client == surface_route.client {
+                        surface_route.window
+                    } else {
+                        grab.window
+                    });
+                } else {
+                    self.input_authority
+                        .lock()
+                        .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
+                        .release_button(surface_route.namespace, button);
+                }
                 XAuthorityInputEvent::Pointer(XAuthorityPointerEvent {
                     kind: XAuthorityPointerEventKind::Button { button, pressed },
                     surface: route.request.target_surface,
@@ -1952,8 +2103,71 @@ impl XServerFrontendRouteRegistry {
         self.route_input(XAuthorityClientInputEvent {
             client,
             event,
+            target_window,
             delivery: route.delivery,
         })
+    }
+
+    fn route_is_frozen(
+        &self,
+        route: &XAuthorityRoutedInput,
+        namespace: NamespaceId,
+    ) -> Result<bool, XServerFrontendRouteError> {
+        let authority = self
+            .input_authority
+            .lock()
+            .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?;
+        Ok(match route.request.kind {
+            InputEventKind::Key { .. } => authority.keyboard_frozen(namespace),
+            InputEventKind::PointerMotion | InputEventKind::PointerButton { .. } => {
+                authority.pointer_frozen(namespace)
+            }
+        })
+    }
+
+    fn drain_thawed_input(&self) -> Result<usize, XServerFrontendRouteError> {
+        let queued = self
+            .frozen_input
+            .lock()
+            .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
+            .len();
+        let mut routed = 0usize;
+        for _ in 0..queued {
+            let deferred = self
+                .frozen_input
+                .lock()
+                .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
+                .pop_front();
+            let Some(deferred) = deferred else { break };
+            let route = deferred.route;
+            let surface_route = self
+                .surfaces
+                .lock()
+                .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
+                .get(&route.request.target_surface)
+                .copied();
+            let Some(surface_route) = surface_route else {
+                self.send_input_delivery(
+                    deferred.client,
+                    route.delivery,
+                    XAuthorityInputDeliveryOutcome::RouteRejected,
+                )?;
+                continue;
+            };
+            if self.route_is_frozen(&route, surface_route.namespace)? {
+                self.frozen_input
+                    .lock()
+                    .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
+                    .push_back(XDeferredRoutedInput {
+                        client: deferred.client,
+                        route,
+                    });
+            } else {
+                self.route_engine_input(route)?;
+                routed = routed.saturating_add(1);
+            }
+        }
+        Ok(routed)
     }
 
     fn route_control(
@@ -2043,10 +2257,13 @@ impl Drop for XServerFrontendClientRouteRegistration {
             clients.remove(&self.client);
         }
         if let Ok(mut surfaces) = self.surfaces.lock() {
-            surfaces.retain(|_, client| *client != self.client);
+            surfaces.retain(|_, route| route.client != self.client);
         }
         if let Ok(mut subscriptions) = self.randr_subscriptions.lock() {
             subscriptions.remove(&self.client);
+        }
+        if let Ok(mut frozen) = self.frozen_input.lock() {
+            frozen.retain(|route| route.client != self.client);
         }
     }
 }
@@ -2075,18 +2292,25 @@ impl X11InputEventReceiver {
     fn recv_timeout(
         &self,
         client: XServerFrontendClientId,
-    ) -> Result<(XAuthorityInputEvent, Option<XAuthorityInputDeliveryId>), RecvTimeoutError> {
+    ) -> Result<
+        (
+            XAuthorityInputEvent,
+            Option<XResourceId>,
+            Option<XAuthorityInputDeliveryId>,
+        ),
+        RecvTimeoutError,
+    > {
         loop {
             match self {
                 Self::Plain(receiver) => {
                     return receiver
                         .recv_timeout(Duration::from_millis(10))
-                        .map(|event| (event, None));
+                        .map(|event| (event, None, None));
                 }
                 Self::Routed { receiver, .. } => {
                     match receiver.recv_timeout(Duration::from_millis(10)) {
                         Ok(route) if route.client == client => {
-                            return Ok((route.event, route.delivery));
+                            return Ok((route.event, route.target_window, route.delivery));
                         }
                         // Drop one misaddressed route, then let the writer loop
                         // observe its stop flag before it receives again.
@@ -2622,6 +2846,12 @@ pub fn run_x11_core_socket_server_once_routed(
 ) -> Result<(), X11SetupSocketError> {
     let config = XServerFrontendConfig::new(path.as_ref().to_path_buf(), namespace)?;
     let mut frontend = XServerFrontend::bind(config)?;
+    frontend
+        .state
+        .runtime
+        .lock()
+        .map_err(|_| X11SetupSocketError::new("X11 authority runtime lock poisoned"))?
+        .set_input_authority(broker.registry.input_authority.clone());
     let observer: Arc<X11CoreTraceObserver> = Arc::new(move |trace| {
         try_emit_x_authority_trace(&transaction_sender, &trace)
             .map(|_| ())
@@ -2657,6 +2887,12 @@ pub fn run_x_server_frontend_routed_until_stopped(
     service_commands: Receiver<XServerFrontendServiceCommand>,
 ) -> Result<(), X11SetupSocketError> {
     let mut frontend = XServerFrontend::bind(config)?;
+    frontend
+        .state
+        .runtime
+        .lock()
+        .map_err(|_| X11SetupSocketError::new("X11 authority runtime lock poisoned"))?
+        .set_input_authority(broker.registry.input_authority.clone());
     let observer: Arc<X11CoreTraceObserver> = Arc::new(move |trace| {
         try_emit_x_authority_trace(&transaction_sender, &trace)
             .map(|_| ())
@@ -3233,6 +3469,18 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
 
     let result = (|| {
         while let Some((major_opcode, request)) = read_x11_core_request(stream, setup.byte_order)? {
+            loop {
+                let server_owner = state
+                    .runtime
+                    .lock()
+                    .map_err(|_| X11SetupSocketError::new("X11 authority runtime lock poisoned"))?
+                    .input_authority_mut()
+                    .server_owner(namespace);
+                if server_owner.is_none_or(|owner| owner == client.raw()) {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
             sequence = sequence.wrapping_add(1);
             event_sequence.store(sequence, Ordering::Release);
             let dispatch_context = XDispatchContext {
@@ -3240,6 +3488,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 namespace,
                 sequence,
                 major_opcode,
+                client_id: client.raw(),
             };
             let mut parse_error = None;
             let mut request_detail = None;
@@ -3291,7 +3540,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                             .insert(*surface, *window);
                         if let Some(routing) = protocol_routing.as_ref() {
                             routing
-                                .register_surface(client, *surface)
+                                .register_surface(client, namespace, *surface, *window)
                                 .map_err(|error| {
                                     X11SetupSocketError::new(format!(
                                         "failed to register X11 surface route: {error}"
@@ -3502,6 +3751,12 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
         }
         Ok(())
     })();
+    state
+        .runtime
+        .lock()
+        .map_err(|_| X11SetupSocketError::new("X11 authority runtime lock poisoned"))?
+        .input_authority_mut()
+        .cleanup_owner(client.raw());
     let client_lease = state.release_client(client)?;
     debug_assert_eq!(client_lease.resource_id_range, resource_id_range);
     let release = release_x11_client_lease(state, namespace, client_lease)?;
@@ -3928,7 +4183,7 @@ fn spawn_x11_input_event_writer(
     let thread = std::thread::spawn(move || {
         let mut focus_sent_to = None;
         while !writer_stop.load(Ordering::Acquire) {
-            let (event, delivery) = match receiver.recv_timeout(client) {
+            let (event, target_window, delivery) = match receiver.recv_timeout(client) {
                 Ok(event) => event,
                 Err(RecvTimeoutError::Timeout) => continue,
                 Err(RecvTimeoutError::Disconnected) => return Ok(()),
@@ -3949,6 +4204,7 @@ fn spawn_x11_input_event_writer(
                 );
             }
             let root = XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1);
+            let delivered_focus = target_window.unwrap_or(focused_window);
             let sequence = sequence.load(Ordering::Acquire);
             let record = encode_x_client_event(
                 byte_order,
@@ -3959,7 +4215,7 @@ fn spawn_x11_input_event_writer(
                         keycode: event.keycode,
                         time: event.time_msec,
                         root,
-                        event: focused_window,
+                        event: target_window.unwrap_or(focused_window),
                         state: event.state,
                     },
                     XAuthorityInputEvent::Pointer(XAuthorityPointerEvent {
@@ -3975,15 +4231,19 @@ fn spawn_x11_input_event_writer(
                         sequence,
                         time: time_msec,
                         root,
-                        event: *surface_windows
-                            .lock()
-                            .map_err(|_| {
-                                X11SetupSocketError::new("X11 surface/window map lock poisoned")
-                            })?
-                            .get(&surface)
-                            .ok_or_else(|| {
-                                X11SetupSocketError::new("X11 pointer target surface is unknown")
-                            })?,
+                        event: target_window.unwrap_or(
+                            *surface_windows
+                                .lock()
+                                .map_err(|_| {
+                                    X11SetupSocketError::new("X11 surface/window map lock poisoned")
+                                })?
+                                .get(&surface)
+                                .ok_or_else(|| {
+                                    X11SetupSocketError::new(
+                                        "X11 pointer target surface is unknown",
+                                    )
+                                })?,
+                        ),
                         root_x,
                         root_y,
                         event_x,
@@ -4005,15 +4265,19 @@ fn spawn_x11_input_event_writer(
                         button,
                         time: time_msec,
                         root,
-                        event: *surface_windows
-                            .lock()
-                            .map_err(|_| {
-                                X11SetupSocketError::new("X11 surface/window map lock poisoned")
-                            })?
-                            .get(&surface)
-                            .ok_or_else(|| {
-                                X11SetupSocketError::new("X11 pointer target surface is unknown")
-                            })?,
+                        event: target_window.unwrap_or(
+                            *surface_windows
+                                .lock()
+                                .map_err(|_| {
+                                    X11SetupSocketError::new("X11 surface/window map lock poisoned")
+                                })?
+                                .get(&surface)
+                                .ok_or_else(|| {
+                                    X11SetupSocketError::new(
+                                        "X11 pointer target surface is unknown",
+                                    )
+                                })?,
+                        ),
                         root_x,
                         root_y,
                         event_x,
@@ -4027,7 +4291,7 @@ fn spawn_x11_input_event_writer(
                     .lock()
                     .map_err(|_| X11SetupSocketError::new("X11 output socket lock poisoned"))?;
                 if matches!(event, XAuthorityInputEvent::Key(_))
-                    && focus_sent_to != Some(focused_window)
+                    && focus_sent_to != Some(delivered_focus)
                 {
                     let focus = encode_x_client_event(
                         byte_order,
@@ -4035,7 +4299,7 @@ fn spawn_x11_input_event_writer(
                             sequence,
                             focused: true,
                             detail: 3,
-                            event: focused_window,
+                            event: delivered_focus,
                             mode: 0,
                         },
                     );
@@ -4044,7 +4308,7 @@ fn spawn_x11_input_event_writer(
                             "failed to write X11 focus event: {error}"
                         ))
                     })?;
-                    focus_sent_to = Some(focused_window);
+                    focus_sent_to = Some(delivered_focus);
                 }
                 stream.write_all(&record).map_err(|error| {
                     X11SetupSocketError::new(format!("failed to write X11 input event: {error}"))
@@ -4085,6 +4349,7 @@ fn is_x11_client_disconnect(error: &std::io::Error) -> bool {
 #[cfg(all(test, unix))]
 mod routing_tests {
     use super::*;
+    use sophia_protocol::{DeviceId, Point};
     use std::sync::mpsc::sync_channel;
 
     #[test]
@@ -4102,6 +4367,7 @@ mod routing_tests {
                     time_msec: 1,
                 }
                 .into(),
+                target_window: None,
                 delivery: None,
             })
             .unwrap();
@@ -4115,6 +4381,7 @@ mod routing_tests {
                     time_msec: 2,
                 }
                 .into(),
+                target_window: None,
                 delivery: None,
             })
             .unwrap();
@@ -4133,6 +4400,7 @@ mod routing_tests {
                     state: 0,
                     time_msec: 2,
                 }),
+                None,
                 None,
             )
         );
@@ -4204,6 +4472,7 @@ mod routing_tests {
             .send(XAuthorityClientInputEvent {
                 client,
                 event: input,
+                target_window: None,
                 delivery: None,
             })
             .unwrap();
@@ -4218,6 +4487,7 @@ mod routing_tests {
             XAuthorityClientInputEvent {
                 client,
                 event: input,
+                target_window: None,
                 delivery: None,
             }
         );
@@ -4250,6 +4520,7 @@ mod routing_tests {
             .send(XAuthorityClientInputEvent {
                 client,
                 event: input,
+                target_window: None,
                 delivery: None,
             })
             .unwrap();
@@ -4276,6 +4547,7 @@ mod routing_tests {
                         time_msec,
                     }
                     .into(),
+                    target_window: None,
                     delivery: None,
                 })
                 .unwrap();
@@ -4312,6 +4584,7 @@ mod routing_tests {
                     time_msec: 1,
                 }
                 .into(),
+                target_window: None,
                 delivery: Some(delivery),
             })
             .unwrap();
@@ -4328,6 +4601,130 @@ mod routing_tests {
                 outcome: XAuthorityInputDeliveryOutcome::RouteRejected,
             }
         );
+    }
+
+    #[test]
+    fn active_keyboard_grab_redirects_engine_routed_input_and_window() {
+        let namespace = NamespaceId::from_raw(9);
+        let focused = XServerFrontendClientId(1);
+        let grabber = XServerFrontendClientId(2);
+        let surface = SurfaceId::new(10, 1);
+        let grab_window = XResourceId::new(0x400001, 1);
+        let mut broker = XServerFrontendRouteBroker::new(NonZeroUsize::new(4).unwrap());
+        let (_focused_registration, focused_channels) =
+            broker.registry.register_client(focused).unwrap();
+        let (_grab_registration, grab_channels) = broker.registry.register_client(grabber).unwrap();
+        broker
+            .registry
+            .register_surface(focused, namespace, surface, XResourceId::new(0x200001, 1))
+            .unwrap();
+        broker
+            .registry
+            .input_authority
+            .lock()
+            .unwrap()
+            .grab_keyboard(
+                namespace,
+                crate::XActiveInputGrab {
+                    owner: grabber.raw(),
+                    window: grab_window,
+                    owner_events: false,
+                    pointer_mode: 1,
+                    keyboard_mode: 1,
+                    event_mask: 0,
+                },
+            )
+            .unwrap();
+        broker
+            .routed_input_sender()
+            .send(XAuthorityRoutedInput {
+                request: RoutedInputRequest {
+                    serial: 1,
+                    seat: SeatId::from_raw(1),
+                    device: DeviceId::from_raw(1),
+                    time_msec: 1,
+                    target_surface: surface,
+                    global_position: Point::default(),
+                    local_position: Point::default(),
+                    kind: InputEventKind::Key {
+                        keycode: 30,
+                        pressed: true,
+                    },
+                },
+                delivery: None,
+            })
+            .unwrap();
+        assert_eq!(broker.route_pending(), Ok(1));
+        assert!(matches!(
+            focused_channels.input.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
+        let routed = grab_channels.input.recv().unwrap();
+        assert_eq!(routed.client, grabber);
+        assert_eq!(routed.target_window, Some(grab_window));
+    }
+
+    #[test]
+    fn synchronous_keyboard_grab_queues_until_allow_events() {
+        let namespace = NamespaceId::from_raw(10);
+        let client = XServerFrontendClientId(3);
+        let surface = SurfaceId::new(11, 1);
+        let mut broker = XServerFrontendRouteBroker::new(NonZeroUsize::new(2).unwrap());
+        let (_registration, channels) = broker.registry.register_client(client).unwrap();
+        broker
+            .registry
+            .register_surface(client, namespace, surface, XResourceId::new(0x200001, 1))
+            .unwrap();
+        broker
+            .registry
+            .input_authority
+            .lock()
+            .unwrap()
+            .grab_keyboard(
+                namespace,
+                crate::XActiveInputGrab {
+                    owner: client.raw(),
+                    window: XResourceId::new(0x200001, 1),
+                    owner_events: false,
+                    pointer_mode: 1,
+                    keyboard_mode: 0,
+                    event_mask: 0,
+                },
+            )
+            .unwrap();
+        broker
+            .routed_input_sender()
+            .send(XAuthorityRoutedInput {
+                request: RoutedInputRequest {
+                    serial: 2,
+                    seat: SeatId::from_raw(1),
+                    device: DeviceId::from_raw(1),
+                    time_msec: 2,
+                    target_surface: surface,
+                    global_position: Point::default(),
+                    local_position: Point::default(),
+                    kind: InputEventKind::Key {
+                        keycode: 30,
+                        pressed: true,
+                    },
+                },
+                delivery: None,
+            })
+            .unwrap();
+        assert_eq!(broker.route_pending(), Ok(1));
+        assert!(matches!(
+            channels.input.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
+        broker
+            .registry
+            .input_authority
+            .lock()
+            .unwrap()
+            .allow_events(namespace, client.raw(), 3)
+            .unwrap();
+        assert_eq!(broker.route_pending(), Ok(1));
+        assert_eq!(channels.input.recv().unwrap().client, client);
     }
 
     #[test]
@@ -4521,6 +4918,7 @@ fn x11_core_request_trace_detail(request: &crate::XWireRequest) -> Option<String
             button,
             modifiers,
             owner_events,
+            ..
         } => Some(format!(
             "GrabButton:window={:#x}:button={button}:modifiers={modifiers:#x}:event_mask={event_mask:#x}:owner_events={owner_events}",
             window.local.raw()

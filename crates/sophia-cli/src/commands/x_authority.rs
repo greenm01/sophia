@@ -1393,6 +1393,7 @@ fn send_xterm_text_to_client(
                     time_msec: *time_msec,
                 }
                 .into(),
+                target_window: None,
                 delivery: Some(delivery),
             })?;
             *time_msec = time_msec.saturating_add(1);

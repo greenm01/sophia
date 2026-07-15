@@ -200,6 +200,10 @@ pub enum XClientEvent {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum XClientReply {
+    GrabStatus {
+        sequence: u16,
+        status: u8,
+    },
     InternAtom {
         sequence: u16,
         atom: u32,
@@ -472,6 +476,12 @@ pub fn encode_x_client_output(byte_order: XByteOrder, output: XClientOutput) -> 
 
 pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec<u8> {
     match reply {
+        XClientReply::GrabStatus { sequence, status } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            out[1] = status;
+            out
+        }
         XClientReply::InternAtom { sequence, atom } => {
             let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
             write_reply_header(byte_order, &mut out, sequence, 0);

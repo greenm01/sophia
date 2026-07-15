@@ -800,3 +800,12 @@ tests cover successful advancement, timeout rollback construction, rejection of
 late abandoned pixels until the old size is confirmed, and cleanup while a
 rollback is pending. The live layout uses this coordinator for its existing
 geometry-plus-pixels quarantine and compensating configure path.
+
+Core input grabs now have connection identity and namespace-scoped authority
+state instead of validation-only request handling. Active pointer/keyboard,
+passive key/button with Any detail/modifier conflict checks, implicit button,
+owner-events routing, synchronous freeze with bounded deferred input and
+`AllowEvents`, ungrabs, and namespace-local `GrabServer` ownership all clean up
+on disconnect. Engine still chooses the ordinary target surface and local
+coordinates; the authority redirects only when X grab semantics require it.
+XI2 generic-event delivery remains the next input-compatibility boundary.

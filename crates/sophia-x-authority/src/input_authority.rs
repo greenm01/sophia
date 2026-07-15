@@ -1,0 +1,415 @@
+use std::collections::BTreeMap;
+
+use sophia_protocol::NamespaceId;
+
+use crate::XResourceId;
+
+pub const X_ANY_MODIFIER: u16 = 0x8000;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum XInputGrabError {
+    AlreadyGrabbed,
+    AccessConflict,
+    InvalidMode,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XActiveInputGrab {
+    pub owner: u64,
+    pub window: XResourceId,
+    pub owner_events: bool,
+    pub pointer_mode: u8,
+    pub keyboard_mode: u8,
+    pub event_mask: u16,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XPassiveInputGrab {
+    pub owner: u64,
+    pub window: XResourceId,
+    pub detail: u8,
+    pub modifiers: u16,
+    pub owner_events: bool,
+    pub pointer_mode: u8,
+    pub keyboard_mode: u8,
+    pub event_mask: u16,
+}
+
+#[derive(Clone, Debug, Default)]
+struct XNamespaceInputAuthority {
+    pointer: Option<XActiveInputGrab>,
+    keyboard: Option<XActiveInputGrab>,
+    buttons: Vec<XPassiveInputGrab>,
+    keys: Vec<XPassiveInputGrab>,
+    server_owner: Option<u64>,
+    pointer_frozen: bool,
+    keyboard_frozen: bool,
+    pointer_implicit: bool,
+    pointer_passive_detail: Option<u8>,
+    keyboard_passive_detail: Option<u8>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct XInputAuthorityState {
+    namespaces: BTreeMap<NamespaceId, XNamespaceInputAuthority>,
+}
+
+impl XInputAuthorityState {
+    pub fn grab_pointer(
+        &mut self,
+        namespace: NamespaceId,
+        grab: XActiveInputGrab,
+    ) -> Result<(), XInputGrabError> {
+        validate_modes(grab.pointer_mode, grab.keyboard_mode)?;
+        let state = self.namespaces.entry(namespace).or_default();
+        if state
+            .pointer
+            .is_some_and(|active| active.owner != grab.owner)
+        {
+            return Err(XInputGrabError::AlreadyGrabbed);
+        }
+        state.pointer = Some(grab);
+        state.pointer_implicit = false;
+        state.pointer_passive_detail = None;
+        state.pointer_frozen = grab.pointer_mode == 0;
+        state.keyboard_frozen |= grab.keyboard_mode == 0;
+        Ok(())
+    }
+
+    pub fn ungrab_pointer(&mut self, namespace: NamespaceId, owner: u64) {
+        if let Some(state) = self.namespaces.get_mut(&namespace)
+            && state.pointer.is_some_and(|grab| grab.owner == owner)
+        {
+            state.pointer = None;
+            state.pointer_implicit = false;
+            state.pointer_passive_detail = None;
+            state.pointer_frozen = false;
+            if state.keyboard.is_none() {
+                state.keyboard_frozen = false;
+            }
+        }
+    }
+
+    pub fn grab_keyboard(
+        &mut self,
+        namespace: NamespaceId,
+        grab: XActiveInputGrab,
+    ) -> Result<(), XInputGrabError> {
+        validate_modes(grab.pointer_mode, grab.keyboard_mode)?;
+        let state = self.namespaces.entry(namespace).or_default();
+        if state
+            .keyboard
+            .is_some_and(|active| active.owner != grab.owner)
+        {
+            return Err(XInputGrabError::AlreadyGrabbed);
+        }
+        state.keyboard = Some(grab);
+        state.keyboard_passive_detail = None;
+        state.keyboard_frozen = grab.keyboard_mode == 0;
+        state.pointer_frozen |= grab.pointer_mode == 0;
+        Ok(())
+    }
+
+    pub fn ungrab_keyboard(&mut self, namespace: NamespaceId, owner: u64) {
+        if let Some(state) = self.namespaces.get_mut(&namespace)
+            && state.keyboard.is_some_and(|grab| grab.owner == owner)
+        {
+            state.keyboard = None;
+            state.keyboard_passive_detail = None;
+            state.keyboard_frozen = false;
+            if state.pointer.is_none() {
+                state.pointer_frozen = false;
+            }
+        }
+    }
+
+    pub fn grab_button(
+        &mut self,
+        namespace: NamespaceId,
+        grab: XPassiveInputGrab,
+    ) -> Result<(), XInputGrabError> {
+        validate_modes(grab.pointer_mode, grab.keyboard_mode)?;
+        insert_passive(
+            &mut self.namespaces.entry(namespace).or_default().buttons,
+            grab,
+        )
+    }
+
+    pub fn grab_key(
+        &mut self,
+        namespace: NamespaceId,
+        grab: XPassiveInputGrab,
+    ) -> Result<(), XInputGrabError> {
+        validate_modes(grab.pointer_mode, grab.keyboard_mode)?;
+        insert_passive(
+            &mut self.namespaces.entry(namespace).or_default().keys,
+            grab,
+        )
+    }
+
+    pub fn ungrab_button(
+        &mut self,
+        namespace: NamespaceId,
+        owner: u64,
+        window: XResourceId,
+        detail: u8,
+        modifiers: u16,
+    ) {
+        if let Some(state) = self.namespaces.get_mut(&namespace) {
+            remove_passive(&mut state.buttons, owner, window, detail, modifiers);
+        }
+    }
+
+    pub fn ungrab_key(
+        &mut self,
+        namespace: NamespaceId,
+        owner: u64,
+        window: XResourceId,
+        detail: u8,
+        modifiers: u16,
+    ) {
+        if let Some(state) = self.namespaces.get_mut(&namespace) {
+            remove_passive(&mut state.keys, owner, window, detail, modifiers);
+        }
+    }
+
+    pub fn grab_server(
+        &mut self,
+        namespace: NamespaceId,
+        owner: u64,
+    ) -> Result<(), XInputGrabError> {
+        let state = self.namespaces.entry(namespace).or_default();
+        if state.server_owner.is_some_and(|active| active != owner) {
+            return Err(XInputGrabError::AlreadyGrabbed);
+        }
+        state.server_owner = Some(owner);
+        Ok(())
+    }
+
+    pub fn ungrab_server(&mut self, namespace: NamespaceId, owner: u64) {
+        if let Some(state) = self.namespaces.get_mut(&namespace)
+            && state.server_owner == Some(owner)
+        {
+            state.server_owner = None;
+        }
+    }
+
+    pub fn allow_events(
+        &mut self,
+        namespace: NamespaceId,
+        owner: u64,
+        mode: u8,
+    ) -> Result<(), XInputGrabError> {
+        if mode > 7 {
+            return Err(XInputGrabError::InvalidMode);
+        }
+        let Some(state) = self.namespaces.get_mut(&namespace) else {
+            return Ok(());
+        };
+        let owns_pointer = state.pointer.is_some_and(|grab| grab.owner == owner);
+        let owns_keyboard = state.keyboard.is_some_and(|grab| grab.owner == owner);
+        match mode {
+            0..=2 if owns_pointer => state.pointer_frozen = false,
+            3..=5 if owns_keyboard => state.keyboard_frozen = false,
+            6 | 7 => {
+                if owns_pointer {
+                    state.pointer_frozen = false;
+                }
+                if owns_keyboard {
+                    state.keyboard_frozen = false;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    pub fn pointer_grab(&self, namespace: NamespaceId) -> Option<XActiveInputGrab> {
+        self.namespaces
+            .get(&namespace)
+            .and_then(|state| state.pointer)
+    }
+
+    pub fn keyboard_grab(&self, namespace: NamespaceId) -> Option<XActiveInputGrab> {
+        self.namespaces
+            .get(&namespace)
+            .and_then(|state| state.keyboard)
+    }
+
+    pub fn pointer_frozen(&self, namespace: NamespaceId) -> bool {
+        self.namespaces
+            .get(&namespace)
+            .is_some_and(|state| state.pointer_frozen)
+    }
+
+    pub fn keyboard_frozen(&self, namespace: NamespaceId) -> bool {
+        self.namespaces
+            .get(&namespace)
+            .is_some_and(|state| state.keyboard_frozen)
+    }
+
+    pub fn server_owner(&self, namespace: NamespaceId) -> Option<u64> {
+        self.namespaces
+            .get(&namespace)
+            .and_then(|state| state.server_owner)
+    }
+
+    pub fn activate_key(
+        &mut self,
+        namespace: NamespaceId,
+        key: u8,
+        modifiers: u16,
+    ) -> Option<XActiveInputGrab> {
+        let state = self.namespaces.get_mut(&namespace)?;
+        let passive = state.keys.iter().copied().find(|grab| {
+            (grab.detail == 0 || grab.detail == key)
+                && (grab.modifiers == X_ANY_MODIFIER || grab.modifiers == modifiers)
+        })?;
+        let active = active_from_passive(passive);
+        state.keyboard = Some(active);
+        state.keyboard_passive_detail = Some(key);
+        state.keyboard_frozen = active.keyboard_mode == 0;
+        state.pointer_frozen |= active.pointer_mode == 0;
+        Some(active)
+    }
+
+    pub fn release_key(&mut self, namespace: NamespaceId, key: u8) {
+        if let Some(state) = self.namespaces.get_mut(&namespace)
+            && state.keyboard_passive_detail == Some(key)
+        {
+            state.keyboard = None;
+            state.keyboard_passive_detail = None;
+            state.keyboard_frozen = false;
+        }
+    }
+
+    pub fn activate_button(
+        &mut self,
+        namespace: NamespaceId,
+        button: u8,
+        modifiers: u16,
+        implicit: XActiveInputGrab,
+    ) -> XActiveInputGrab {
+        let state = self.namespaces.entry(namespace).or_default();
+        let (active, is_implicit) = state
+            .buttons
+            .iter()
+            .copied()
+            .find(|grab| {
+                (grab.detail == 0 || grab.detail == button)
+                    && (grab.modifiers == X_ANY_MODIFIER || grab.modifiers == modifiers)
+            })
+            .map(|grab| (active_from_passive(grab), false))
+            .unwrap_or((implicit, true));
+        state.pointer = Some(active);
+        state.pointer_implicit = is_implicit;
+        state.pointer_passive_detail = (!is_implicit).then_some(button);
+        state.pointer_frozen = active.pointer_mode == 0;
+        state.keyboard_frozen |= active.keyboard_mode == 0;
+        active
+    }
+
+    pub fn release_button(&mut self, namespace: NamespaceId, button: u8) {
+        if let Some(state) = self.namespaces.get_mut(&namespace)
+            && (state.pointer_implicit || state.pointer_passive_detail == Some(button))
+        {
+            state.pointer = None;
+            state.pointer_implicit = false;
+            state.pointer_passive_detail = None;
+            state.pointer_frozen = false;
+        }
+    }
+
+    pub fn cleanup_owner(&mut self, owner: u64) {
+        self.namespaces.retain(|_, state| {
+            if state.pointer.is_some_and(|grab| grab.owner == owner) {
+                state.pointer = None;
+                state.pointer_frozen = false;
+                state.pointer_implicit = false;
+                state.pointer_passive_detail = None;
+            }
+            if state.keyboard.is_some_and(|grab| grab.owner == owner) {
+                state.keyboard = None;
+                state.keyboard_frozen = false;
+                state.keyboard_passive_detail = None;
+            }
+            state.buttons.retain(|grab| grab.owner != owner);
+            state.keys.retain(|grab| grab.owner != owner);
+            if state.server_owner == Some(owner) {
+                state.server_owner = None;
+            }
+            if state.pointer.is_none() && state.keyboard.is_none() {
+                state.pointer_frozen = false;
+                state.keyboard_frozen = false;
+            }
+            state.pointer.is_some()
+                || state.keyboard.is_some()
+                || !state.buttons.is_empty()
+                || !state.keys.is_empty()
+                || state.server_owner.is_some()
+        });
+    }
+}
+
+fn active_from_passive(grab: XPassiveInputGrab) -> XActiveInputGrab {
+    XActiveInputGrab {
+        owner: grab.owner,
+        window: grab.window,
+        owner_events: grab.owner_events,
+        pointer_mode: grab.pointer_mode,
+        keyboard_mode: grab.keyboard_mode,
+        event_mask: grab.event_mask,
+    }
+}
+
+fn validate_modes(pointer: u8, keyboard: u8) -> Result<(), XInputGrabError> {
+    if pointer > 1 || keyboard > 1 {
+        Err(XInputGrabError::InvalidMode)
+    } else {
+        Ok(())
+    }
+}
+
+fn patterns_overlap(a: XPassiveInputGrab, b: XPassiveInputGrab) -> bool {
+    (a.detail == 0 || b.detail == 0 || a.detail == b.detail)
+        && (a.modifiers == X_ANY_MODIFIER
+            || b.modifiers == X_ANY_MODIFIER
+            || a.modifiers == b.modifiers)
+        && a.window == b.window
+}
+
+fn insert_passive(
+    grabs: &mut Vec<XPassiveInputGrab>,
+    grab: XPassiveInputGrab,
+) -> Result<(), XInputGrabError> {
+    if grabs
+        .iter()
+        .copied()
+        .any(|existing| existing.owner != grab.owner && patterns_overlap(existing, grab))
+    {
+        return Err(XInputGrabError::AccessConflict);
+    }
+    grabs.retain(|existing| {
+        !(existing.owner == grab.owner
+            && existing.window == grab.window
+            && existing.detail == grab.detail
+            && existing.modifiers == grab.modifiers)
+    });
+    grabs.push(grab);
+    Ok(())
+}
+
+fn remove_passive(
+    grabs: &mut Vec<XPassiveInputGrab>,
+    owner: u64,
+    window: XResourceId,
+    detail: u8,
+    modifiers: u16,
+) {
+    grabs.retain(|grab| {
+        grab.owner != owner
+            || grab.window != window
+            || !(detail == 0 || grab.detail == detail)
+            || !(modifiers == X_ANY_MODIFIER || grab.modifiers == modifiers)
+    });
+}

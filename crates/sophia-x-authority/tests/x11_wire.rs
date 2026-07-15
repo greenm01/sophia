@@ -559,6 +559,8 @@ fn x11_core_decoder_maps_selection_requests_to_authority_packets() {
             button: 1,
             modifiers: 0x0040,
             owner_events: true,
+            pointer_mode: 1,
+            keyboard_mode: 1,
         }
     );
     assert_eq!(
@@ -571,6 +573,72 @@ fn x11_core_decoder_maps_selection_requests_to_authority_packets() {
     );
     assert_eq!(grab, XWireRequest::GrabServer);
     assert_eq!(ungrab, XWireRequest::UngrabServer);
+}
+
+#[test]
+fn active_keyboard_pointer_key_and_allow_events_requests_decode() {
+    let namespace = NamespaceId::from_raw(45);
+    let window = X_SETUP_DEFAULT_ROOT;
+    let mut grab_pointer = vec![26, 1, 6, 0];
+    grab_pointer.extend_from_slice(&window.to_le_bytes());
+    grab_pointer.extend_from_slice(&0x004cu16.to_le_bytes());
+    grab_pointer.extend_from_slice(&[1, 0]);
+    grab_pointer.extend_from_slice(&[0; 8]);
+    grab_pointer.extend_from_slice(&7u32.to_le_bytes());
+    assert_eq!(
+        decode_x11_core_request(
+            context(namespace, 1, XByteOrder::LittleEndian),
+            &grab_pointer
+        )
+        .unwrap(),
+        XWireRequest::GrabPointer {
+            window: XResourceId::new(u64::from(window), 1),
+            event_mask: 0x004c,
+            owner_events: true,
+            pointer_mode: 1,
+            keyboard_mode: 0,
+            time: 7,
+        }
+    );
+    let mut grab_keyboard = vec![31, 0, 4, 0];
+    grab_keyboard.extend_from_slice(&window.to_le_bytes());
+    grab_keyboard.extend_from_slice(&8u32.to_le_bytes());
+    grab_keyboard.extend_from_slice(&[0, 1, 0, 0]);
+    assert_eq!(
+        decode_x11_core_request(
+            context(namespace, 2, XByteOrder::LittleEndian),
+            &grab_keyboard
+        )
+        .unwrap(),
+        XWireRequest::GrabKeyboard {
+            window: XResourceId::new(u64::from(window), 1),
+            owner_events: false,
+            pointer_mode: 0,
+            keyboard_mode: 1,
+            time: 8,
+        }
+    );
+    let mut grab_key = vec![33, 1, 4, 0];
+    grab_key.extend_from_slice(&window.to_le_bytes());
+    grab_key.extend_from_slice(&0x8000u16.to_le_bytes());
+    grab_key.extend_from_slice(&[38, 1, 0, 0, 0, 0]);
+    assert_eq!(
+        decode_x11_core_request(context(namespace, 3, XByteOrder::LittleEndian), &grab_key)
+            .unwrap(),
+        XWireRequest::GrabKey {
+            window: XResourceId::new(u64::from(window), 1),
+            key: 38,
+            modifiers: 0x8000,
+            owner_events: true,
+            pointer_mode: 1,
+            keyboard_mode: 0,
+        }
+    );
+    let allow = [35, 6, 2, 0, 9, 0, 0, 0];
+    assert_eq!(
+        decode_x11_core_request(context(namespace, 4, XByteOrder::LittleEndian), &allow).unwrap(),
+        XWireRequest::AllowEvents { mode: 6, time: 9 }
+    );
 }
 
 #[test]
@@ -6975,6 +7043,7 @@ fn dispatch_context(
         namespace,
         sequence,
         major_opcode,
+        client_id: 1,
     }
 }
 
