@@ -1946,6 +1946,7 @@ pub fn dispatch_x11_wire_request(
             depth,
             format,
             offset,
+            send_event,
             ..
         } => {
             let transaction = TransactionId::from_raw(u64::from(context.sequence));
@@ -1969,9 +1970,18 @@ pub fn dispatch_x11_wire_request(
                 .validate_pixmap_access(context.namespace, drawable)
                 .is_ok()
             {
+                let outputs = send_event
+                    .then_some(XClientOutput::Event(XClientEvent::ShmCompletion {
+                        sequence: context.sequence,
+                        drawable,
+                        segment,
+                        offset,
+                    }))
+                    .into_iter()
+                    .collect();
                 return XDispatchResult {
                     response: Some(XAuthorityResponsePacket::accepted(transaction)),
-                    outputs: Vec::new(),
+                    outputs,
                     metadata_candidates: Vec::new(),
                 };
             }
@@ -2012,6 +2022,13 @@ pub fn dispatch_x11_wire_request(
                     context.major_opcode,
                     u32::try_from(drawable.local.raw()).unwrap_or(0),
                 ))]
+            } else if send_event {
+                vec![XClientOutput::Event(XClientEvent::ShmCompletion {
+                    sequence: context.sequence,
+                    drawable,
+                    segment,
+                    offset,
+                })]
             } else {
                 Vec::new()
             };
@@ -2433,7 +2450,7 @@ fn extension_query_result(name: &str) -> XExtensionQueryResult {
         X_MIT_SHM_EXTENSION_NAME => XExtensionQueryResult {
             present: true,
             major_opcode: X_MIT_SHM_MAJOR_OPCODE,
-            first_event: 0,
+            first_event: crate::X_MIT_SHM_FIRST_EVENT,
             first_error: 0,
         },
         X_RANDR_EXTENSION_NAME => XExtensionQueryResult {

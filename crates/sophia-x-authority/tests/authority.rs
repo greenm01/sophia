@@ -415,7 +415,7 @@ fn engine_size_control_updates_authority_geometry_without_consuming_client_gener
 }
 
 #[test]
-fn cpu_buffer_patches_materialize_and_resize_replacements_keep_generation_order() {
+fn cpu_buffer_submissions_are_immutable_and_keep_generation_order() {
     let namespace = NamespaceId::from_raw(19);
     let window = XResourceId::new(0x63, 1);
     let mut runtime = XAuthorityRuntime::new();
@@ -452,6 +452,7 @@ fn cpu_buffer_patches_materialize_and_resize_replacements_keep_generation_order(
     );
     let first = runtime.take_cpu_buffer_update().unwrap();
     assert!(matches!(first, XAuthorityCpuBufferUpdate::Replace(_)));
+    let first_handle = first.handle();
     runtime.apply_core_draw(
         TransactionId::from_raw(22),
         namespace,
@@ -464,13 +465,16 @@ fn cpu_buffer_patches_materialize_and_resize_replacements_keep_generation_order(
         }),
     );
     let second = runtime.take_cpu_buffer_update().unwrap();
-    assert!(matches!(second, XAuthorityCpuBufferUpdate::Patch(_)));
+    assert!(matches!(second, XAuthorityCpuBufferUpdate::Replace(_)));
+    assert_ne!(second.handle(), first_handle);
 
     let mut materialized = std::collections::BTreeMap::new();
     first.apply_to(&mut materialized).unwrap();
+    let first_bytes = materialized.get(&first_handle).unwrap().bytes.clone();
     second.apply_to(&mut materialized).unwrap();
-    assert_eq!(materialized.len(), 1);
-    assert_eq!(materialized.values().next().unwrap().generation, 2);
+    assert_eq!(materialized.len(), 2);
+    assert_eq!(materialized.get(&first_handle).unwrap().bytes, first_bytes);
+    assert_eq!(materialized.get(&second.handle()).unwrap().generation, 2);
 
     runtime
         .configure_window_size_from_engine(
@@ -495,9 +499,10 @@ fn cpu_buffer_patches_materialize_and_resize_replacements_keep_generation_order(
     );
     let replacement = runtime.take_cpu_buffer_update().unwrap();
     assert!(matches!(replacement, XAuthorityCpuBufferUpdate::Replace(_)));
+    assert_ne!(replacement.handle(), second.handle());
     assert_eq!(replacement.generation(), 3);
     replacement.apply_to(&mut materialized).unwrap();
-    let resized = materialized.values().next().unwrap();
+    let resized = materialized.get(&replacement.handle()).unwrap();
     assert_eq!(resized.size.width, 120);
     assert_eq!(resized.size.height, 70);
 }

@@ -82,6 +82,45 @@ fn attach_damage_and_commit_reduce_to_protocol_neutral_transaction() {
 }
 
 #[test]
+fn explicit_backend_release_is_forwarded_once() {
+    let mut reducer = WaylandAuthorityReducer::new();
+    create(&mut reducer);
+    let source = BufferSource::CpuBuffer { handle: 44 };
+    reducer
+        .apply_surface_event(WaylandSurfaceEvent::Attach {
+            local_id: local(),
+            buffer: source,
+        })
+        .unwrap();
+    let transaction = TransactionId::from_raw(11);
+    reducer
+        .apply_surface_event(WaylandSurfaceEvent::Commit {
+            local_id: local(),
+            transaction,
+            timeout_msec: 250,
+        })
+        .unwrap();
+    reducer
+        .apply_feedback(commit_feedback(transaction))
+        .unwrap();
+    let feedback = BufferReleaseFeedback {
+        surface: surface(),
+        source,
+    };
+
+    assert_eq!(
+        reducer
+            .apply_feedback(AuthorityFeedback::BufferReleased(feedback))
+            .unwrap(),
+        vec![WaylandAuthorityAction::BufferReleased(feedback)]
+    );
+    assert_eq!(
+        reducer.apply_feedback(AuthorityFeedback::BufferReleased(feedback)),
+        Err(WaylandAuthorityError::StalePresentation)
+    );
+}
+
+#[test]
 fn unacknowledged_configure_keeps_previous_geometry_ready() {
     let mut reducer = WaylandAuthorityReducer::new();
     create(&mut reducer);
@@ -166,11 +205,9 @@ fn acknowledged_configure_commits_and_presentation_finishes_frame() {
         .apply_feedback(commit_feedback(transaction))
         .unwrap();
     let actions = reducer
-        .apply_feedback(AuthorityFeedback::Presented(SurfacePresentationFeedback {
-            surface: surface(),
-            generation: 1,
-            presentation_msec: 500,
-        }))
+        .apply_feedback(AuthorityFeedback::Presented(
+            SurfacePresentationFeedback::from_millis(surface(), 1, 500, 1),
+        ))
         .unwrap();
     assert_eq!(
         actions,
@@ -209,11 +246,7 @@ fn scheduled_frame_completes_callback_before_page_flip_without_releasing_buffer(
         .apply_feedback(commit_feedback(transaction))
         .unwrap();
 
-    let scheduled = SurfacePresentationFeedback {
-        surface: surface(),
-        generation: 1,
-        presentation_msec: 400,
-    };
+    let scheduled = SurfacePresentationFeedback::from_millis(surface(), 1, 400, 1);
     assert_eq!(
         reducer
             .apply_feedback(AuthorityFeedback::FrameScheduled(scheduled))
@@ -228,11 +261,9 @@ fn scheduled_frame_completes_callback_before_page_flip_without_releasing_buffer(
     // buffer that is still displayed.
     assert_eq!(
         reducer
-            .apply_feedback(AuthorityFeedback::Presented(SurfacePresentationFeedback {
-                surface: surface(),
-                generation: 1,
-                presentation_msec: 500,
-            }))
+            .apply_feedback(AuthorityFeedback::Presented(
+                SurfacePresentationFeedback::from_millis(surface(), 1, 500, 1),
+            ))
             .unwrap(),
         Vec::new()
     );
@@ -270,11 +301,9 @@ fn presenting_latest_generation_releases_coalesced_buffers_and_callbacks() {
     }
 
     let actions = reducer
-        .apply_feedback(AuthorityFeedback::Presented(SurfacePresentationFeedback {
-            surface: surface(),
-            generation: 3,
-            presentation_msec: 500,
-        }))
+        .apply_feedback(AuthorityFeedback::Presented(
+            SurfacePresentationFeedback::from_millis(surface(), 3, 500, 3),
+        ))
         .unwrap();
     assert_eq!(
         actions,
@@ -371,11 +400,9 @@ fn stale_presentation_is_rejected_and_overlapping_commits_are_ordered() {
         .apply_feedback(commit_feedback(TransactionId::from_raw(30)))
         .unwrap();
     assert_eq!(
-        reducer.apply_feedback(AuthorityFeedback::Presented(SurfacePresentationFeedback {
-            surface: surface(),
-            generation: 0,
-            presentation_msec: 500,
-        },)),
+        reducer.apply_feedback(AuthorityFeedback::Presented(
+            SurfacePresentationFeedback::from_millis(surface(), 0, 500, 0),
+        )),
         Err(WaylandAuthorityError::StalePresentation)
     );
 }

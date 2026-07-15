@@ -169,6 +169,12 @@ pub enum XClientEvent {
         sequence: u16,
         bytes: [u8; X_CLIENT_OUTPUT_RECORD_LEN],
     },
+    ShmCompletion {
+        sequence: u16,
+        drawable: XResourceId,
+        segment: XResourceId,
+        offset: u32,
+    },
     RandrScreenChange {
         sequence: u16,
         timestamp: u32,
@@ -1706,6 +1712,29 @@ pub fn encode_x_client_event(
         XClientEvent::ClientMessage { sequence, bytes } => {
             out = bytes;
             put_u16(byte_order, &mut out[2..4], sequence);
+        }
+        XClientEvent::ShmCompletion {
+            sequence,
+            drawable,
+            segment,
+            offset,
+        } => {
+            write_event_header(
+                byte_order,
+                &mut out,
+                crate::X_MIT_SHM_FIRST_EVENT,
+                0,
+                sequence,
+            );
+            put_resource(byte_order, &mut out[4..8], drawable);
+            put_u16(
+                byte_order,
+                &mut out[8..10],
+                u16::from(crate::X_MIT_SHM_PUT_IMAGE_MINOR_OPCODE),
+            );
+            out[10] = crate::X_MIT_SHM_MAJOR_OPCODE;
+            put_resource(byte_order, &mut out[12..16], segment);
+            put_u32(byte_order, &mut out[16..20], offset);
         }
         XClientEvent::RandrScreenChange {
             sequence,

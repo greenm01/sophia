@@ -98,11 +98,12 @@ impl XSoftwareBufferStore {
         damage: &[Rect],
         gc: &XGraphicsContextValues,
     ) -> Option<XAuthorityCpuBufferUpdate> {
-        let (buffer, replaced) = self.ensure(drawable, size)?;
+        let handle = self.allocate_handle();
+        let (buffer, replaced) = self.ensure(drawable, size, handle)?;
         for rect in damage {
             fill_rect(buffer, *rect, gc.foreground, gc);
         }
-        finish_update(buffer, replaced, union_rects(damage))
+        finish_immutable_update(buffer, handle, replaced, union_rects(damage))
     }
 
     pub fn clear(
@@ -112,9 +113,10 @@ impl XSoftwareBufferStore {
         rect: Rect,
         pixel: u32,
     ) -> Option<XAuthorityCpuBufferUpdate> {
-        let (buffer, replaced) = self.ensure(drawable, size)?;
+        let handle = self.allocate_handle();
+        let (buffer, replaced) = self.ensure(drawable, size, handle)?;
         fill_rect(buffer, rect, pixel, &XGraphicsContextValues::default());
-        finish_update(buffer, replaced, Some(rect))
+        finish_immutable_update(buffer, handle, replaced, Some(rect))
     }
 
     pub fn draw_text(
@@ -127,7 +129,8 @@ impl XSoftwareBufferStore {
         opaque: bool,
         gc: &XGraphicsContextValues,
     ) -> Option<XAuthorityCpuBufferUpdate> {
-        let (buffer, replaced) = self.ensure(drawable, size)?;
+        let handle = self.allocate_handle();
+        let (buffer, replaced) = self.ensure(drawable, size, handle)?;
         let top = i32::from(baseline).saturating_sub(10);
         for (index, byte) in text.iter().copied().enumerate() {
             let cell_x = i32::from(x)
@@ -147,8 +150,9 @@ impl XSoftwareBufferStore {
             }
             draw_fixed_glyph(buffer, cell_x, top, byte, gc.foreground, gc);
         }
-        finish_update(
+        finish_immutable_update(
             buffer,
+            handle,
             replaced,
             Some(Rect {
                 x: i32::from(x),
@@ -166,9 +170,10 @@ impl XSoftwareBufferStore {
         destination: Rect,
         data: &[u8],
     ) -> Option<XAuthorityCpuBufferUpdate> {
-        let (buffer, replaced) = self.ensure(drawable, size)?;
+        let handle = self.allocate_handle();
+        let (buffer, replaced) = self.ensure(drawable, size, handle)?;
         copy_xrgb8888(buffer, destination, data);
-        finish_update(buffer, replaced, Some(destination))
+        finish_immutable_update(buffer, handle, replaced, Some(destination))
     }
 
     pub fn draw_lines(
@@ -179,12 +184,13 @@ impl XSoftwareBufferStore {
         gc: &XGraphicsContextValues,
     ) -> Option<XAuthorityCpuBufferUpdate> {
         let damage = point_bounds(points, gc.line_width)?;
-        let (buffer, replaced) = self.ensure(drawable, size)?;
+        let handle = self.allocate_handle();
+        let (buffer, replaced) = self.ensure(drawable, size, handle)?;
         let width = i32::from(gc.line_width.max(1));
         for pair in points.windows(2) {
             draw_line(buffer, pair[0], pair[1], width, gc);
         }
-        finish_update(buffer, replaced, Some(damage))
+        finish_immutable_update(buffer, handle, replaced, Some(damage))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -199,7 +205,8 @@ impl XSoftwareBufferStore {
         gc: &XGraphicsContextValues,
     ) -> Option<XAuthorityCpuBufferUpdate> {
         let source = self.buffers.get(&source)?.clone();
-        let (buffer, replaced) = self.ensure(destination, destination_size)?;
+        let handle = self.allocate_handle();
+        let (buffer, replaced) = self.ensure(destination, destination_size, handle)?;
         let (left, top, right, bottom) = clipped_bounds(source.size, source_rect)?;
         let source_stride = usize::try_from(source.stride).ok()?;
         for source_y in top..bottom {
@@ -223,8 +230,9 @@ impl XSoftwareBufferStore {
                 set_pixel(buffer, target_x, target_y, pixel, gc);
             }
         }
-        finish_update(
+        finish_immutable_update(
             buffer,
+            handle,
             replaced,
             Some(Rect {
                 x: i32::from(dst_x),
@@ -239,6 +247,7 @@ impl XSoftwareBufferStore {
         &mut self,
         drawable: XResourceId,
         size: Size,
+        handle: u64,
     ) -> Option<(&mut XAuthorityCpuBufferSnapshot, bool)> {
         let width = usize::try_from(size.width).ok()?;
         let height = usize::try_from(size.height).ok()?;
@@ -257,11 +266,6 @@ impl XSoftwareBufferStore {
             .is_none_or(|buffer| buffer.size != size);
         if replace {
             let previous = self.buffers.get(&drawable);
-            let handle = previous.map(|buffer| buffer.handle).unwrap_or_else(|| {
-                let handle = self.next_handle.max(1);
-                self.next_handle = handle.saturating_add(1).max(1);
-                handle
-            });
             let generation = previous.map_or(0, |buffer| buffer.generation);
             self.buffers.insert(
                 drawable,
@@ -280,19 +284,26 @@ impl XSoftwareBufferStore {
             .get_mut(&drawable)
             .map(|buffer| (buffer, replace))
     }
+
+    fn allocate_handle(&mut self) -> u64 {
+        let handle = self.next_handle.max(1);
+        self.next_handle = handle.saturating_add(1).max(1);
+        handle
+    }
 }
 
-fn finish_update(
+fn finish_immutable_update(
     buffer: &mut XAuthorityCpuBufferSnapshot,
+    handle: u64,
     replaced: bool,
     damage: Option<Rect>,
 ) -> Option<XAuthorityCpuBufferUpdate> {
-    buffer.generation = buffer.generation.checked_add(1)?;
-    if replaced {
-        return Some(XAuthorityCpuBufferUpdate::Replace(buffer.clone()));
+    if !replaced {
+        packed_patch(buffer, damage?)?;
     }
-    let rect = damage?;
-    packed_patch(buffer, rect).map(XAuthorityCpuBufferUpdate::Patch)
+    buffer.generation = buffer.generation.checked_add(1)?;
+    buffer.handle = handle;
+    Some(XAuthorityCpuBufferUpdate::Replace(buffer.clone()))
 }
 
 fn fill_rect(

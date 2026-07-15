@@ -12,6 +12,77 @@ fn simple_ids_start_after_zero() {
 }
 
 #[test]
+fn buffer_and_fence_handles_are_typed_and_nonzero() {
+    let mut buffers = IdAllocator::<BufferHandle>::new();
+    let mut fences = IdAllocator::<FenceHandle>::new();
+
+    assert_eq!(buffers.next_id().raw(), 1);
+    assert_eq!(fences.next_id().raw(), 1);
+    assert!(!BufferHandle::INVALID.is_valid());
+    assert!(!FenceHandle::INVALID.is_valid());
+}
+
+#[test]
+fn dma_buf_descriptor_validation_is_bounded() {
+    let valid = DmaBufDescriptor {
+        handle: BufferHandle::from_raw(7),
+        size: Size {
+            width: 640,
+            height: 480,
+        },
+        format: DRM_FORMAT_XRGB8888,
+        modifier: DRM_FORMAT_MOD_INVALID,
+        plane_count: 1,
+        planes: [
+            Some(DmaBufPlaneDescriptor {
+                offset: 0,
+                stride: 2560,
+            }),
+            None,
+            None,
+            None,
+        ],
+    };
+    assert_eq!(valid.validate(), Ok(()));
+
+    assert_eq!(
+        DmaBufDescriptor {
+            plane_count: 0,
+            ..valid
+        }
+        .validate(),
+        Err(DmaBufDescriptorError::InvalidPlaneCount)
+    );
+    assert_eq!(
+        DmaBufDescriptor {
+            planes: [
+                Some(DmaBufPlaneDescriptor {
+                    offset: 0,
+                    stride: 64,
+                }),
+                None,
+                None,
+                None,
+            ],
+            ..valid
+        }
+        .validate(),
+        Err(DmaBufDescriptorError::InvalidStride)
+    );
+    assert_eq!(
+        DmaBufDescriptor {
+            size: Size {
+                width: DMA_BUF_MAX_DIMENSION + 1,
+                height: 1,
+            },
+            ..valid
+        }
+        .validate(),
+        Err(DmaBufDescriptorError::InvalidSize)
+    );
+}
+
+#[test]
 fn namespace_capabilities_are_directional_and_bounded() {
     let capabilities = NamespaceCapabilities::NONE
         .with_request(NamespacePortalCapability::Clipboard)

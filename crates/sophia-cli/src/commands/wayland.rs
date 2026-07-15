@@ -188,12 +188,12 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
             apply_wayland_feedback(
                 &mut frontend,
                 &mut scene,
-                AuthorityFeedback::Presented(SurfacePresentationFeedback {
+                AuthorityFeedback::Presented(SurfacePresentationFeedback::from_millis(
                     surface,
                     generation,
-                    presentation_msec: u64::try_from(started.elapsed().as_millis())
-                        .unwrap_or(u64::MAX),
-                }),
+                    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                    0,
+                )),
             )?;
         }
         if max_runtime.is_some_and(|limit| started.elapsed() >= limit) {
@@ -449,14 +449,15 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                                     apply_wayland_feedback(
                                         &mut frontend,
                                         &mut scene,
-                                        AuthorityFeedback::Presented(SurfacePresentationFeedback {
-                                            surface,
-                                            generation,
-                                            presentation_msec: u64::try_from(
-                                                started.elapsed().as_millis(),
-                                            )
-                                            .unwrap_or(u64::MAX),
-                                        }),
+                                        AuthorityFeedback::Presented(
+                                            SurfacePresentationFeedback::from_millis(
+                                                surface,
+                                                generation,
+                                                u64::try_from(started.elapsed().as_millis())
+                                                    .unwrap_or(u64::MAX),
+                                                0,
+                                            ),
+                                        ),
                                     )?;
                                     continue;
                                 }
@@ -488,12 +489,15 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                             apply_wayland_feedback(
                                 &mut frontend,
                                 &mut scene,
-                                AuthorityFeedback::Presented(SurfacePresentationFeedback {
-                                    surface,
-                                    generation,
-                                    presentation_msec: u64::try_from(started.elapsed().as_millis())
-                                        .unwrap_or(u64::MAX),
-                                }),
+                                AuthorityFeedback::Presented(
+                                    SurfacePresentationFeedback::from_millis(
+                                        surface,
+                                        generation,
+                                        u64::try_from(started.elapsed().as_millis())
+                                            .unwrap_or(u64::MAX),
+                                        0,
+                                    ),
+                                ),
                             )?;
                         } else {
                             presentation_observations.insert((surface, generation), None);
@@ -563,12 +567,12 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                     apply_wayland_feedback(
                         &mut frontend,
                         &mut scene,
-                        AuthorityFeedback::Presented(SurfacePresentationFeedback {
+                        AuthorityFeedback::Presented(SurfacePresentationFeedback::from_millis(
                             surface,
                             generation,
-                            presentation_msec: u64::try_from(started.elapsed().as_millis())
-                                .unwrap_or(u64::MAX),
-                        }),
+                            u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+                            0,
+                        )),
                     )?;
                 } else {
                     if frame_scheduled {
@@ -578,12 +582,15 @@ pub(crate) fn run_session(args: &[String]) -> Result<(), Box<dyn std::error::Err
                         apply_wayland_feedback(
                             &mut frontend,
                             &mut scene,
-                            AuthorityFeedback::FrameScheduled(SurfacePresentationFeedback {
-                                surface,
-                                generation,
-                                presentation_msec: u64::try_from(started.elapsed().as_millis())
-                                    .unwrap_or(u64::MAX),
-                            }),
+                            AuthorityFeedback::FrameScheduled(
+                                SurfacePresentationFeedback::from_millis(
+                                    surface,
+                                    generation,
+                                    u64::try_from(started.elapsed().as_millis())
+                                        .unwrap_or(u64::MAX),
+                                    0,
+                                ),
+                            ),
                         )?;
                     }
                     presentation_observations.insert((surface, generation), checksum);

@@ -9,6 +9,31 @@ use sophia_protocol::{
 use sophia_x_authority::*;
 
 #[test]
+fn mit_shm_completion_uses_the_advertised_extension_event_layout() {
+    for byte_order in [XByteOrder::LittleEndian, XByteOrder::BigEndian] {
+        let event = encode_x_client_event(
+            byte_order,
+            XClientEvent::ShmCompletion {
+                sequence: 0x1234,
+                drawable: XResourceId::new(0x220701, 1),
+                segment: XResourceId::new(0x440001, 1),
+                offset: 128,
+            },
+        );
+        assert_eq!(event[0], X_MIT_SHM_FIRST_EVENT);
+        assert_eq!(read_u16(byte_order, &event[2..4]), 0x1234);
+        assert_eq!(read_u32(byte_order, &event[4..8]), 0x220701);
+        assert_eq!(
+            read_u16(byte_order, &event[8..10]),
+            u16::from(X_MIT_SHM_PUT_IMAGE_MINOR_OPCODE)
+        );
+        assert_eq!(event[10], X_MIT_SHM_MAJOR_OPCODE);
+        assert_eq!(read_u32(byte_order, &event[12..16]), 0x440001);
+        assert_eq!(read_u32(byte_order, &event[16..20]), 128);
+    }
+}
+
+#[test]
 fn selection_request_and_clear_events_use_core_x11_layout() {
     let owner = XResourceId::new(0x200001, 1);
     let requestor = XResourceId::new(0x400001, 1);

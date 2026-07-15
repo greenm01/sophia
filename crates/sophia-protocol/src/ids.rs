@@ -32,6 +32,8 @@ simple_id!(TransactionId);
 simple_id!(PortalTransferId);
 simple_id!(WorkspaceId);
 simple_id!(IconTokenId);
+simple_id!(BufferHandle);
+simple_id!(FenceHandle);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SurfaceId {
@@ -134,3 +136,5 @@ allocator_next!(TransactionId);
 allocator_next!(PortalTransferId);
 allocator_next!(WorkspaceId);
 allocator_next!(IconTokenId);
+allocator_next!(BufferHandle);
+allocator_next!(FenceHandle);

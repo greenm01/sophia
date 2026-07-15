@@ -298,7 +298,43 @@ impl WaylandAuthorityReducer {
             AuthorityFeedback::Transaction(commit) => self.apply_transaction_commit(commit),
             AuthorityFeedback::FrameScheduled(scheduled) => self.apply_frame_scheduled(scheduled),
             AuthorityFeedback::Presented(presented) => self.apply_presented(presented),
+            AuthorityFeedback::BufferReleased(released) => self.apply_buffer_released(released),
         }
+    }
+
+    fn apply_buffer_released(
+        &mut self,
+        released: BufferReleaseFeedback,
+    ) -> Result<Vec<WaylandAuthorityAction>, WaylandAuthorityError> {
+        let Some(local_id) = self.surface_to_local.get(&released.surface).copied() else {
+            return Err(WaylandAuthorityError::UnknownSurface);
+        };
+        if matches!(released.source, BufferSource::None) {
+            return Err(WaylandAuthorityError::StalePresentation);
+        }
+        let state = self.surface_mut(local_id)?;
+        let tracked = state
+            .committed_buffers
+            .values()
+            .any(|source| *source == released.source)
+            || state
+                .presented
+                .as_ref()
+                .is_some_and(|presented| presented.source == released.source);
+        if !tracked {
+            return Err(WaylandAuthorityError::StalePresentation);
+        }
+        state
+            .committed_buffers
+            .retain(|_, source| *source != released.source);
+        if state
+            .presented
+            .as_ref()
+            .is_some_and(|presented| presented.source == released.source)
+        {
+            state.presented = None;
+        }
+        Ok(vec![WaylandAuthorityAction::BufferReleased(released)])
     }
 
     fn commit(
