@@ -855,3 +855,11 @@ acknowledgement, and keeps the new geometry quarantined until a transaction
 with matching resized pixels arrives. Schema 12 reports `surface_resize` only
 after that commit; the promotion verifier requires the configure acknowledgement
 and pixels marker in both namespace profiles.
+
+The topology path now opens a dedicated authenticated RandR witness before the
+Engine update, uses a reply-producing core request as a subscription barrier,
+and reads back the resized ScreenChangeNotify record. This replaced the earlier
+timing-dependent assumption that xterm itself would subscribe. The witness is
+closed before frontend drain; a two-xterm headless live smoke then completed
+with four queued RandR records, a matching wire event, committed resized
+pixels, and clean process teardown.

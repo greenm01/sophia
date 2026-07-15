@@ -1,5 +1,5 @@
 sophia_live_session schema=7 status=running display=:181 terminal=xterm runtime=persistent authority_capacity=256 input_capacity=64 control_capacity=32 native_presentation=enabled physical_input=disabled pointer_proof=disabled secondary_terminal=enabled wm_policy=disabled namespace_profile=classic_shared namespace_request_capabilities=0 namespace_publish_capabilities=0
-sophia_live_output_update schema=2 status=applied width=1024 height=768 notifications=4
+sophia_live_output_update schema=3 status=applied width=1024 height=768 notifications=4 witness=true
 sophia_live_outputs schema=2 status=ready discovered=1 presentation=1 native_owned=1 multi_output_scanout=enabled layout=extended_horizontal
 sophia_live_session_input_pipeline schema=1 status=focus_ready
 sophia_live_session_input_pipeline schema=1 status=terminal_content_ready

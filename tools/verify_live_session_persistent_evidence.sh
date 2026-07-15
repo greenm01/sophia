@@ -95,7 +95,7 @@ if [[ "${observed[schema]}" == "12" ]]; then
     [[ "${observed[output_update]}" == "applied" || "${observed[output_update]}" == "disabled" ]]
     [[ "${observed[surface_resize]}" == "committed" || "${observed[surface_resize]}" == "disabled" ]]
     if [[ "${observed[output_update]}" == "applied" ]] \
-        && [[ "$(grep -Ec '^sophia_live_output_update schema=2 status=applied width=[1-9][0-9]* height=[1-9][0-9]* notifications=[1-9][0-9]*$' "$EVIDENCE_FILE" || true)" -ne 1 ]]; then
+        && [[ "$(grep -Ec '^sophia_live_output_update schema=3 status=applied width=[1-9][0-9]* height=[1-9][0-9]* notifications=[1-9][0-9]* witness=true$' "$EVIDENCE_FILE" || true)" -ne 1 ]]; then
         echo "persistent live-session evidence is missing its applied output update" >&2
         exit 1
     fi

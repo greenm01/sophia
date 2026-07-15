@@ -21,7 +21,7 @@ use sophia_x_authority::{
     run_x_server_frontend_routed_until_stopped,
 };
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::num::NonZeroUsize;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::process::{Child, Stdio};
@@ -438,6 +438,10 @@ pub(crate) fn run_persistent_xterm_session(
         )?);
     }
 
+    let mut randr_witness = config
+        .inject_output_size
+        .map(|_| open_randr_update_witness(&config.socket_path, xauthority_cookie))
+        .transpose()?;
     let mut output_notifications = 0usize;
     if let Some(size) = config.inject_output_size {
         let mut snapshot = output_topology.clone();
@@ -469,8 +473,12 @@ pub(crate) fn run_persistent_xterm_session(
             }
         };
         output_notifications = notifications;
+        let witness = randr_witness
+            .as_mut()
+            .ok_or("live output injection lost its RandR witness")?;
+        confirm_randr_update_witness(witness, size)?;
         println!(
-            "sophia_live_output_update schema=2 status=applied width={} height={} notifications={}",
+            "sophia_live_output_update schema=3 status=applied width={} height={} notifications={} witness=true",
             size.width, size.height, notifications
         );
     }
@@ -541,6 +549,7 @@ pub(crate) fn run_persistent_xterm_session(
         output_notifications,
     );
     process.terminate()?;
+    drop(randr_witness);
     let _ = service_command_sender.send(XServerFrontendServiceCommand::StopAccepting);
     drop(input_sender);
     drop(control_sender);
@@ -809,6 +818,74 @@ fn parse_output_size(value: &str) -> Result<Size, Box<dyn std::error::Error>> {
         return Err("--inject-output-size accepts dimensions from 1 through 16384".into());
     }
     Ok(size)
+}
+
+fn open_randr_update_witness(
+    socket_path: &std::path::Path,
+    cookie: [u8; 16],
+) -> Result<std::os::unix::net::UnixStream, Box<dyn std::error::Error>> {
+    let mut stream = std::os::unix::net::UnixStream::connect(socket_path)?;
+    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+    let auth_name = b"MIT-MAGIC-COOKIE-1";
+    let mut setup = Vec::with_capacity(48);
+    setup.extend_from_slice(&[b'l', 0]);
+    setup.extend_from_slice(&11u16.to_le_bytes());
+    setup.extend_from_slice(&0u16.to_le_bytes());
+    setup.extend_from_slice(&(auth_name.len() as u16).to_le_bytes());
+    setup.extend_from_slice(&(cookie.len() as u16).to_le_bytes());
+    setup.extend_from_slice(&[0, 0]);
+    setup.extend_from_slice(auth_name);
+    setup.resize((setup.len() + 3) & !3, 0);
+    setup.extend_from_slice(&cookie);
+    stream.write_all(&setup)?;
+    stream.flush()?;
+
+    let mut header = [0u8; 8];
+    stream.read_exact(&mut header)?;
+    if header[0] != 1 {
+        return Err("RandR witness X11 setup was rejected".into());
+    }
+    let extra = usize::from(u16::from_le_bytes([header[6], header[7]])) * 4;
+    let mut body = vec![0; extra];
+    stream.read_exact(&mut body)?;
+
+    let root = sophia_x_authority::X_SETUP_DEFAULT_ROOT;
+    let mut select = Vec::with_capacity(12);
+    select.extend_from_slice(&[
+        sophia_x_authority::X_RANDR_MAJOR_OPCODE,
+        sophia_x_authority::X_RANDR_SELECT_INPUT_MINOR_OPCODE,
+    ]);
+    select.extend_from_slice(&3u16.to_le_bytes());
+    select.extend_from_slice(&root.to_le_bytes());
+    select.extend_from_slice(&0x47u16.to_le_bytes());
+    select.extend_from_slice(&[0, 0]);
+    stream.write_all(&select)?;
+    // A reply-producing core request is a deterministic barrier proving the
+    // preceding void RandR selection was dispatched before Engine updates.
+    stream.write_all(&[43, 0, 1, 0])?;
+    stream.flush()?;
+    let mut barrier = [0u8; 32];
+    stream.read_exact(&mut barrier)?;
+    if barrier[0] != 1 {
+        return Err("RandR witness barrier request failed".into());
+    }
+    Ok(stream)
+}
+
+fn confirm_randr_update_witness(
+    stream: &mut std::os::unix::net::UnixStream,
+    size: Size,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut event = [0u8; 32];
+    stream.read_exact(&mut event)?;
+    if event[0] != sophia_x_authority::X_RANDR_FIRST_EVENT
+        || u16::from_le_bytes([event[24], event[25]]) != u16::try_from(size.width)?
+        || u16::from_le_bytes([event[26], event[27]]) != u16::try_from(size.height)?
+    {
+        return Err(format!("RandR witness received an unexpected update: {event:?}").into());
+    }
+    Ok(())
 }
 
 fn spawn_secondary_xterm(
