@@ -33,6 +33,7 @@ pub enum XResourceKind {
     Font,
     Cursor,
     Fence,
+    Region,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

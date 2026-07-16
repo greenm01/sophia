@@ -12,6 +12,15 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::sync::Arc;
 
 pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
+    if args
+        .iter()
+        .any(|arg| arg == "x-authority-zenity-render-smoke")
+    {
+        let report = run_x_authority_zenity_render_smoke()?;
+        print_external_probe_smoke_report("x-authority-zenity-render-smoke", &report);
+        return Ok(true);
+    }
+
     if args.iter().any(|arg| arg == "x-authority-vkcube-smoke") {
         let report = run_x_authority_vkcube_smoke()?;
         print_external_probe_smoke_report("x-authority-vkcube-smoke", &report);
@@ -930,6 +939,35 @@ impl XServerFrontendRenderDeviceProvider for ExternalProbeRenderDeviceProvider {
             .map(std::os::fd::OwnedFd::from)
             .map_err(|_| XServerFrontendRenderDeviceError::OpenFailed)
     }
+}
+
+fn run_x_authority_zenity_render_smoke()
+-> Result<XAuthorityExternalProbeSmokeReport, Box<dyn std::error::Error>> {
+    let command = resolve_external_probe_binary("zenity_render", "zenity")?;
+    let provider = Arc::new(ExternalProbeRenderDeviceProvider {
+        device: first_openable_render_node()?,
+    });
+    let (display, socket_path) = temp_xauthority_display(7760)?;
+    run_x_authority_external_probe_smoke(
+        "zenity_render",
+        &command,
+        ExternalProbeDisplayMode::Environment,
+        &[
+            "--entry",
+            "--title",
+            "Sophia zenity render",
+            "--text",
+            "Sophia GTK render-provider probe",
+        ],
+        display,
+        socket_path,
+        NamespaceId::from_raw(60),
+        true,
+        ExternalProbePixelProof::Nonzero,
+        false,
+        false,
+        Some(provider),
+    )
 }
 
 fn run_x_authority_vkcube_smoke()

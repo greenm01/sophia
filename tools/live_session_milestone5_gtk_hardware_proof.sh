@@ -12,6 +12,7 @@ guard_armed_file="$runtime_dir/input-guard.armed"
 guard_triggered_file="$runtime_dir/input-guard.triggered"
 devices="${SOPHIA_M5_GTK_INPUT_DEVICES:-}"
 runtime_msec="${SOPHIA_M5_GTK_RUNTIME_MSEC:-30000}"
+mode="${SOPHIA_M5_GTK_MODE:-paired}"
 
 keyd_was_running=false
 tty_state=""
@@ -118,6 +119,14 @@ done
     echo "SOPHIA_M5_GTK_RUNTIME_MSEC must be 15000-120000" >&2
     exit 1
 }
+case "$mode" in
+    paired|classic|confined) ;;
+    *)
+        echo "SOPHIA_M5_GTK_MODE must be paired, classic, or confined" >&2
+        exit 1
+        ;;
+esac
+
 
 if [[ -z "$devices" ]]; then
     mapfile -t keyboards < <(
@@ -224,6 +233,7 @@ run_profile() {
     setsid env SOPHIA_LIVE_SESSION_PERSISTENT_EVIDENCE="$evidence" \
       SOPHIA_LIVE_SESSION_RUNTIME_MSEC="$runtime_msec" \
       SOPHIA_LIVE_SESSION_SKIP_BUILD=1 SOPHIA_ATOMIC_SCANOUT_SKIP_PREFLIGHT=1 \
+      SOPHIA_X11_AUTHORITY_TRACE=1 \
       "$root/tools/live_session_persistent_hardware_proof.sh" \
       --namespace-profile="$profile" --client=zenity --client-arg=--entry \
       --client-arg=--title --client-arg='Sophia GTK proof' \
@@ -249,8 +259,18 @@ run_profile() {
     return 1
 }
 
-run_profile classic-shared "$classic" "$@"
-run_profile confined "$confined" "$@"
+case "$mode" in
+    paired)
+        run_profile classic-shared "$classic" "$@"
+        run_profile confined "$confined" "$@"
+        ;;
+    classic) run_profile classic-shared "$classic" "$@" ;;
+    confined) run_profile confined "$confined" "$@" ;;
+esac
 cleanup 0
-"$root/tools/verify_live_session_milestone5_gtk_evidence.sh" "$classic" "$confined"
+if [[ "$mode" == paired ]]; then
+    "$root/tools/verify_live_session_milestone5_gtk_evidence.sh" "$classic" "$confined"
+else
+    echo "Milestone 5 GTK diagnostic profile completed: $mode"
+fi
 "$root/tools/verify_live_session_milestone5_tty_recovery.sh" "$recovery_log"

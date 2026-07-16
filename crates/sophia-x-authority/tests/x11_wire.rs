@@ -2568,6 +2568,81 @@ fn randr_output_property_returns_bounded_empty_edid_fallback() {
 }
 
 #[test]
+fn xfixes_regions_support_create_set_and_destroy_lifecycle() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let region = 0x220100;
+    let rectangles = [Rect {
+        x: 0,
+        y: 0,
+        width: 310,
+        height: 257,
+    }];
+
+    for (sequence, request) in [
+        xfixes_create_region_request(XByteOrder::LittleEndian, region, &[]),
+        xfixes_set_region_request(XByteOrder::LittleEndian, region, &rectangles),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let request = decode_x11_core_request(
+            context(namespace, 540 + sequence as u64, XByteOrder::LittleEndian),
+            &request,
+        )
+        .unwrap();
+        if sequence == 1 {
+            assert!(matches!(
+                request,
+                XWireRequest::XfixesSetRegion {
+                    rectangles: ref decoded,
+                    ..
+                } if decoded == &rectangles
+            ));
+        }
+        let result = dispatch_x11_wire_request(
+            dispatch_context(
+                namespace,
+                5 + sequence as u16,
+                XByteOrder::LittleEndian,
+                X_XFIXES_MAJOR_OPCODE,
+            ),
+            request,
+            &mut runtime,
+            &mut atoms,
+            &mut properties,
+        );
+        assert!(result.outputs.is_empty());
+    }
+
+    let region_id = XResourceId::new(u64::from(region), 1);
+    assert_eq!(
+        runtime.validate_xfixes_region_access(namespace, region_id),
+        Ok(())
+    );
+    let destroy = XWireRequest::XfixesDestroyRegion { region: region_id };
+    let result = dispatch_x11_wire_request(
+        dispatch_context(
+            namespace,
+            7,
+            XByteOrder::LittleEndian,
+            X_XFIXES_MAJOR_OPCODE,
+        ),
+        destroy,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert!(result.outputs.is_empty());
+    assert_eq!(
+        runtime.validate_xfixes_region_access(namespace, region_id),
+        Err(XAuthorityRuntimeError::UnknownResource)
+    );
+}
+
+#[test]
 fn xfixes_selection_subscription_accepts_known_window_atom_and_mask() {
     let namespace = NamespaceId::from_raw(45);
     let mut runtime = XAuthorityRuntime::new();
@@ -4240,7 +4315,7 @@ fn x11_client_event_encoders_emit_32_byte_records() {
 
 #[test]
 fn x11_client_error_encoder_and_parse_mapping_use_core_error_shape() {
-    let error = x_error_from_wire_parse(&XWireParseError::UnknownOpcode(99), 11, 99);
+    let error = x_error_from_wire_parse(&XWireParseError::UnknownOpcode(99), 11, 99, 7);
     assert_eq!(error.code, XErrorCode::BadRequest);
 
     let encoded = encode_x_client_output(XByteOrder::LittleEndian, XClientOutput::Error(error));
@@ -4248,6 +4323,7 @@ fn x11_client_error_encoder_and_parse_mapping_use_core_error_shape() {
     assert_eq!(encoded[0], 0);
     assert_eq!(encoded[1], 1);
     assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[2..4]), 11);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[8..10]), 7);
     assert_eq!(encoded[10], 99);
 
     let bad_length = x_error_from_wire_parse(
@@ -4258,6 +4334,7 @@ fn x11_client_error_encoder_and_parse_mapping_use_core_error_shape() {
         },
         12,
         8,
+        0,
     );
     assert_eq!(bad_length.code, XErrorCode::BadLength);
 }
@@ -8940,6 +9017,19 @@ fn xfixes_create_region_request(
     rectangles: &[Rect],
 ) -> Vec<u8> {
     let mut out = vec![X_XFIXES_MAJOR_OPCODE, X_XFIXES_CREATE_REGION_MINOR_OPCODE];
+    push_u16(&mut out, byte_order, (2 + rectangles.len() * 2) as u16);
+    push_u32(&mut out, byte_order, region);
+    for rectangle in rectangles {
+        push_i16(&mut out, byte_order, rectangle.x as i16);
+        push_i16(&mut out, byte_order, rectangle.y as i16);
+        push_u16(&mut out, byte_order, rectangle.width as u16);
+        push_u16(&mut out, byte_order, rectangle.height as u16);
+    }
+    out
+}
+
+fn xfixes_set_region_request(byte_order: XByteOrder, region: u32, rectangles: &[Rect]) -> Vec<u8> {
+    let mut out = vec![X_XFIXES_MAJOR_OPCODE, X_XFIXES_SET_REGION_MINOR_OPCODE];
     push_u16(&mut out, byte_order, (2 + rectangles.len() * 2) as u16);
     push_u32(&mut out, byte_order, region);
     for rectangle in rectangles {

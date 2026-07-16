@@ -37,12 +37,12 @@ compatibility provider; no XLibre integration work is active.
 - [x] Guard GTK hardware takeover with independently armed emergency input,
   bounded process-group termination, verified KD/termios/keyd restoration, and
   durable recovery evidence.
-- [ ] Resolve the native-session-only Zenity XFixes QueryVersion failure:
-  two guarded X13 classic runs abort at serial 304 with `BadRequest`, major
-  opcode 139 and minor opcode 0, while the release-profile `zenity --entry`
-  engine smoke accepts opcode 139 with `first_error=none`. Next session, retain
-  live parse/dispatch detail and compare native render-device advertisement
-  and live protocol routing before changing XFixes semantics.
+- [x] Resolve the native render-provider Zenity XFixes failure. Raw-minor
+  tracing identified request 11 (`SetRegion`), not request 0 (`QueryVersion`);
+  authority-owned region lifecycle, Present-region validation, and the raw-zero
+  optional-region fix now carry the same X13 sequence through Present with
+  `first_error=none`. The non-KMS render smoke reaches the Engine transaction
+  but intentionally cannot satisfy a scanout pixel proof.
 - [ ] Capture fresh classic shared-X and confined Zenity entry-dialog sessions
   with exact physical text, a physical OK click, `first_error=none`, CPU/SHM
   redraw after resize, native presentation, normal exit, and clean teardown.

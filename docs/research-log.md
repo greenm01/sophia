@@ -1181,11 +1181,6 @@ chord restored KD mode 0, the exact termios state, keyd, and all Sophia
 processes; the recovery record is complete. The earlier false keyd failure was
 a service-start race, so the runner now waits boundedly for keyd after `sv up`.
 
-The failure is specific to the native live-session path. The same X13 release
-profile passes the real `zenity --entry` engine smoke with 323 requests, opcode
-139 observed, one 318,680-byte nonzero CPU/SHM buffer, and
-`first_error=none`. The smoke now uses the entry dialog so it preserves this
-comparison. The next session must retain live parse and dispatch detail around
-sequence 304 and compare native render-device extension advertisement and live
-protocol routing with the passing engine smoke. Do not broaden XFixes or claim
-GTK session promotion until that evidence identifies the divergent path.
+The retained diagnosis was incomplete because wire-parse errors discarded the extension minor opcode and always encoded minor zero. A raw-minor trace on the X13 render-provider path reproduced XFixes request 11 (`SetRegion`) immediately after `CreateRegion`; `QueryVersion` had already succeeded. Sophia now retains extension minor codes, owns namespace-scoped XFixes region lifecycle, validates Present region references, and reclaims regions with the client resource range.
+
+The first corrected run exposed a separate sentinel bug: raw region zero was converted with generation one and compared structurally to the generation-zero `NONE` value. Validity-based optional-resource checks fixed that rejection. The exact X13 sequence now accepts CreateRegion, SetRegion, DRI3 pixmap and fence resources, and Present with `first_error=none`. The non-KMS render-provider smoke reaches an Engine transaction but has no scanout consumer, so its remaining pixel-proof failure is expected and is not session evidence. Fresh guarded classic and confined hardware captures remain required before GTK promotion.

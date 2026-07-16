@@ -1451,10 +1451,62 @@ pub fn dispatch_x11_wire_request(
             })],
             metadata_candidates: Vec::new(),
         },
-        XWireRequest::XfixesCreateRegion { .. } | XWireRequest::XfixesDestroyRegion { .. } => {
+        XWireRequest::XfixesCreateRegion { region, rectangles } => {
+            let output = runtime
+                .create_xfixes_region(
+                    context.namespace,
+                    region,
+                    rectangles,
+                    u64::from(context.sequence),
+                )
+                .err()
+                .map(|error| {
+                    XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(region.local.raw()).unwrap_or(0),
+                    ))
+                });
             XDispatchResult {
                 response: None,
-                outputs: Vec::new(),
+                outputs: output.into_iter().collect(),
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::XfixesSetRegion { region, rectangles } => {
+            let output = runtime
+                .set_xfixes_region(context.namespace, region, rectangles)
+                .err()
+                .map(|error| {
+                    XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(region.local.raw()).unwrap_or(0),
+                    ))
+                });
+            XDispatchResult {
+                response: None,
+                outputs: output.into_iter().collect(),
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::XfixesDestroyRegion { region } => {
+            let output = runtime
+                .destroy_xfixes_region(context.namespace, region)
+                .err()
+                .map(|error| {
+                    XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(region.local.raw()).unwrap_or(0),
+                    ))
+                });
+            XDispatchResult {
+                response: None,
+                outputs: output.into_iter().collect(),
                 metadata_candidates: Vec::new(),
             }
         }
@@ -1768,17 +1820,33 @@ pub fn dispatch_x11_wire_request(
             remainder,
             ..
         } => {
-            let invalid_value = valid_region != 0
-                || update_region != 0
-                || target_crtc != 0
+            let invalid_value = target_crtc != 0
                 || options & !0x0f != 0
                 || (divisor == 0 && remainder != 0)
                 || (divisor != 0 && remainder >= divisor);
             let validation = if invalid_value {
                 Err(XAuthorityRuntimeError::InvalidResource)
             } else {
+                let valid_region = XResourceId::new(u64::from(valid_region), 1);
+                let update_region = XResourceId::new(u64::from(update_region), 1);
                 runtime
                     .validate_window_access(context.namespace, window)
+                    .and_then(|()| {
+                        valid_region
+                            .is_valid()
+                            .then_some(valid_region)
+                            .map_or(Ok(()), |region| {
+                                runtime.validate_xfixes_region_access(context.namespace, region)
+                            })
+                    })
+                    .and_then(|()| {
+                        update_region
+                            .is_valid()
+                            .then_some(update_region)
+                            .map_or(Ok(()), |region| {
+                                runtime.validate_xfixes_region_access(context.namespace, region)
+                            })
+                    })
                     .and_then(|()| runtime.validate_pixmap_access(context.namespace, pixmap))
                     .and_then(|()| {
                         wait_fence.map_or(Ok(()), |fence| {
@@ -1792,6 +1860,33 @@ pub fn dispatch_x11_wire_request(
                     })
             };
             if let Err(error) = validation {
+                if std::env::var_os("SOPHIA_X11_AUTHORITY_TRACE").is_some() {
+                    eprintln!(
+                        "sophia_present_validation schema=1 sequence={} invalid={} target_crtc={:#x} options={:#x} divisor={} remainder={} window={:?} pixmap={:?} valid_region={:?} update_region={:?} wait_fence={:?} idle_fence={:?}",
+                        context.sequence,
+                        invalid_value,
+                        target_crtc,
+                        options,
+                        divisor,
+                        remainder,
+                        runtime.validate_window_access(context.namespace, window),
+                        runtime.validate_pixmap_access(context.namespace, pixmap),
+                        (valid_region != 0).then(|| runtime.validate_xfixes_region_access(
+                            context.namespace,
+                            XResourceId::new(u64::from(valid_region), 1)
+                        )),
+                        (update_region != 0).then(|| runtime.validate_xfixes_region_access(
+                            context.namespace,
+                            XResourceId::new(u64::from(update_region), 1)
+                        )),
+                        wait_fence
+                            .map(|fence| runtime
+                                .validate_dri3_fence_access(context.namespace, fence)),
+                        idle_fence
+                            .map(|fence| runtime
+                                .validate_dri3_fence_access(context.namespace, fence)),
+                    );
+                }
                 return XDispatchResult {
                     response: None,
                     outputs: vec![XClientOutput::Error(x_error_from_runtime(
@@ -3083,6 +3178,7 @@ fn randr_monitors(
 
 pub fn dispatch_x11_parse_error(
     context: XDispatchContext,
+    minor_code: u16,
     error: XWireParseError,
 ) -> XDispatchResult {
     XDispatchResult {
@@ -3091,6 +3187,7 @@ pub fn dispatch_x11_parse_error(
             &error,
             context.sequence,
             context.major_opcode,
+            minor_code,
         ))],
         metadata_candidates: Vec::new(),
     }

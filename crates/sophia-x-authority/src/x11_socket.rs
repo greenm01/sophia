@@ -4166,6 +4166,11 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
         while let Some(received) = read_x11_core_request(stream, setup.byte_order)? {
             let major_opcode = received.major_opcode;
             let request = received.bytes;
+            let request_minor_code = if major_opcode >= 128 {
+                u16::from(request[1])
+            } else {
+                0
+            };
             let ancillary_fds = received.fds;
             let mut received_fds = Vec::new();
             loop {
@@ -4604,7 +4609,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                         .join("");
                     parse_error = Some(format!("{error:?}:len={}:head={head}", request.len()));
                     (
-                        dispatch_x11_parse_error(dispatch_context, error),
+                        dispatch_x11_parse_error(dispatch_context, request_minor_code, error),
                         None,
                         None,
                         None,
@@ -4682,9 +4687,46 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 output.outputs.remove(index);
             }
             if std::env::var_os("SOPHIA_X11_AUTHORITY_TRACE").is_some() {
+                let request_head = request
+                    .iter()
+                    .take(24)
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>();
+                let replies = output
+                    .outputs
+                    .iter()
+                    .filter(|item| matches!(item, crate::XClientOutput::Reply(_)))
+                    .count();
+                let errors = output
+                    .outputs
+                    .iter()
+                    .filter(|item| matches!(item, crate::XClientOutput::Error(_)))
+                    .count();
+                let events = output
+                    .outputs
+                    .iter()
+                    .filter(|item| matches!(item, crate::XClientOutput::Event(_)))
+                    .count();
+                let first_error = output.outputs.iter().find_map(|item| match item {
+                    crate::XClientOutput::Error(error) => {
+                        Some(format!("{:?}:minor={}", error.code, error.minor_code))
+                    }
+                    _ => None,
+                });
                 eprintln!(
-                    "sophia-x-authority: seq={} opcode={}",
-                    sequence, major_opcode
+                    "sophia_x11_dispatch schema=1 sequence={} major={} minor={} request_len={} request_head={} parse={} detail={} replies={} errors={} events={} first_error={} response={}",
+                    sequence,
+                    major_opcode,
+                    request_minor_code,
+                    request.len(),
+                    request_head,
+                    x11_trace_token(parse_error.as_deref()),
+                    x11_trace_token(request_detail.as_deref()),
+                    replies,
+                    errors,
+                    events,
+                    first_error.as_deref().unwrap_or("none"),
+                    output.response.is_some(),
                 );
             }
             observer(X11CoreDispatchTrace {
@@ -6032,6 +6074,26 @@ mod routing_tests {
 }
 
 #[cfg(unix)]
+fn x11_trace_token(value: Option<&str>) -> String {
+    value
+        .unwrap_or("none")
+        .chars()
+        .take(512)
+        .map(|character| {
+            if character.is_ascii_alphanumeric()
+                || matches!(
+                    character,
+                    '-' | '_' | '.' | ':' | '=' | ',' | '{' | '}' | '[' | ']'
+                )
+            {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 fn x11_core_request_trace_detail(request: &crate::XWireRequest) -> Option<String> {
     match request {
         crate::XWireRequest::CreateWindow { packet, .. } => match &packet.kind {
@@ -6081,6 +6143,25 @@ fn x11_core_request_trace_detail(request: &crate::XWireRequest) -> Option<String
         crate::XWireRequest::GetGeometry { drawable } => {
             Some(format!("GetGeometry:drawable={:#x}", drawable.local.raw()))
         }
+        crate::XWireRequest::PresentPixmap {
+            window,
+            pixmap,
+            valid_region,
+            update_region,
+            target_crtc,
+            wait_fence,
+            idle_fence,
+            options,
+            divisor,
+            remainder,
+            ..
+        } => Some(format!(
+            "PRESENT:Pixmap:window={:#x}:pixmap={:#x}:valid={valid_region:#x}:update={update_region:#x}:crtc={target_crtc:#x}:wait={:#x}:idle={:#x}:options={options:#x}:divisor={divisor}:remainder={remainder}",
+            window.local.raw(),
+            pixmap.local.raw(),
+            wait_fence.map_or(0, |fence| fence.local.raw()),
+            idle_fence.map_or(0, |fence| fence.local.raw()),
+        )),
         crate::XWireRequest::XfixesQueryVersion { .. } => Some("XFIXES:QueryVersion".to_owned()),
         crate::XWireRequest::XfixesCreateRegion { region, rectangles } => Some(format!(
             "XFIXES:CreateRegion:region={:#x}:rectangles={}",
@@ -6090,6 +6171,11 @@ fn x11_core_request_trace_detail(request: &crate::XWireRequest) -> Option<String
         crate::XWireRequest::XfixesDestroyRegion { region } => Some(format!(
             "XFIXES:DestroyRegion:region={:#x}",
             region.local.raw()
+        )),
+        crate::XWireRequest::XfixesSetRegion { region, rectangles } => Some(format!(
+            "XFIXES:SetRegion:region={:#x}:rectangles={}",
+            region.local.raw(),
+            rectangles.len()
         )),
         crate::XWireRequest::Dri3PixmapFromBuffers {
             pixmap,

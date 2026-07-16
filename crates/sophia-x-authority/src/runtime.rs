@@ -55,6 +55,7 @@ pub struct XAuthorityRuntime {
     dri3_pixmaps: BTreeMap<crate::XResourceId, sophia_protocol::DmaBufDescriptor>,
     next_dma_buf_handle: u64,
     dri3_fences: BTreeMap<crate::XResourceId, sophia_protocol::FenceHandle>,
+    xfixes_regions: BTreeMap<crate::XResourceId, Region>,
     next_fence_handle: u64,
     graphics_contexts: XGraphicsContextTable,
     window_background_pixels: BTreeMap<crate::XResourceId, u32>,
@@ -80,6 +81,7 @@ impl Default for XAuthorityRuntime {
             dri3_pixmaps: Default::default(),
             next_dma_buf_handle: 1,
             dri3_fences: Default::default(),
+            xfixes_regions: Default::default(),
             next_fence_handle: 1,
             graphics_contexts: Default::default(),
             window_background_pixels: Default::default(),
@@ -835,6 +837,10 @@ impl XAuthorityRuntime {
                         release.released_fences.push(handle);
                     }
                 }
+                XResourceKind::Region => {
+                    self.resources.remove(record.id);
+                    self.xfixes_regions.remove(&record.id);
+                }
             }
         }
         Ok(release)
@@ -1082,6 +1088,54 @@ impl XAuthorityRuntime {
             record.generation,
             250,
         ))
+    }
+
+    pub fn create_xfixes_region(
+        &mut self,
+        namespace: NamespaceId,
+        region: crate::XResourceId,
+        rectangles: Vec<Rect>,
+        generation: u64,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        self.resources
+            .insert(region, XResourceKind::Region, namespace, generation)?;
+        self.xfixes_regions
+            .insert(region, Region { rects: rectangles });
+        Ok(())
+    }
+
+    pub fn set_xfixes_region(
+        &mut self,
+        namespace: NamespaceId,
+        region: crate::XResourceId,
+        rectangles: Vec<Rect>,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        self.validate_xfixes_region_access(namespace, region)?;
+        self.xfixes_regions
+            .insert(region, Region { rects: rectangles });
+        Ok(())
+    }
+
+    pub fn destroy_xfixes_region(
+        &mut self,
+        namespace: NamespaceId,
+        region: crate::XResourceId,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        self.validate_xfixes_region_access(namespace, region)?;
+        self.resources.remove(region);
+        self.xfixes_regions.remove(&region);
+        Ok(())
+    }
+
+    pub fn validate_xfixes_region_access(
+        &self,
+        namespace: NamespaceId,
+        region: crate::XResourceId,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        self.resources
+            .lookup(namespace, region, XResourceKind::Region)
+            .map(|_| ())
+            .map_err(Into::into)
     }
 
     pub fn create_dri3_fence(

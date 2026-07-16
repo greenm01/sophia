@@ -450,6 +450,9 @@ pub(crate) fn run_persistent_xterm_session(
         .stderr(Stdio::inherit());
     if config.client.is_some() {
         terminal_command
+            .env("GDK_BACKEND", "x11")
+            .env("GTK_USE_PORTAL", "0")
+            .env_remove("WAYLAND_DISPLAY")
             .args(&config.client_args)
             .stdout(Stdio::piped());
     } else {

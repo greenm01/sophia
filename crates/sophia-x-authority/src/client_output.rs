@@ -2062,6 +2062,7 @@ pub fn x_error_from_wire_parse(
     error: &XWireParseError,
     sequence: u16,
     major_code: u8,
+    minor_code: u16,
 ) -> XClientError {
     let code = match error {
         XWireParseError::Truncated { .. }
@@ -2080,7 +2081,7 @@ pub fn x_error_from_wire_parse(
         code,
         sequence,
         resource_id: 0,
-        minor_code: 0,
+        minor_code,
         major_code,
     }
 }
