@@ -17,6 +17,15 @@ pub(crate) struct PersistentXrgb8888GlPipeline {
 }
 
 #[cfg(feature = "gbm-platform")]
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct GlCompositionRect {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+#[cfg(feature = "gbm-platform")]
 impl PersistentXrgb8888GlPipeline {
     pub(crate) unsafe fn new(
         gl: glow::Context,
@@ -116,6 +125,7 @@ impl PersistentXrgb8888GlPipeline {
         if pixels.len() != expected {
             return Err(NativeEglDrawSmokeStatus::GlUnavailable);
         }
+        self.begin_composition();
         unsafe {
             self.gl
                 .viewport(0, 0, self.width as i32, self.height as i32);
@@ -133,7 +143,68 @@ impl PersistentXrgb8888GlPipeline {
                 glow::PixelUnpackData::Slice(Some(pixels)),
             );
         }
-        self.draw_bound_texture()
+        self.draw_bound_texture(
+            GlCompositionRect {
+                x: 0,
+                y: 0,
+                width: self.width as i32,
+                height: self.height as i32,
+            },
+            None,
+            1.0,
+            false,
+        )?;
+        self.finish_composition()
+    }
+
+    pub(crate) fn begin_composition(&self) {
+        unsafe {
+            self.gl
+                .viewport(0, 0, self.width as i32, self.height as i32);
+            self.gl.disable(glow::BLEND);
+            self.gl.disable(glow::SCISSOR_TEST);
+            self.gl.clear_color(0.0, 0.0, 0.0, 1.0);
+            self.gl.clear(glow::COLOR_BUFFER_BIT);
+        }
+    }
+
+    pub(crate) fn draw_cpu_layer(
+        &self,
+        width: u32,
+        height: u32,
+        stride: u32,
+        pixels: &[u8],
+        target: GlCompositionRect,
+        clip: Option<GlCompositionRect>,
+        alpha: f32,
+        has_alpha: bool,
+    ) -> Result<(), NativeEglDrawSmokeStatus> {
+        let expected_stride = width
+            .checked_mul(4)
+            .ok_or(NativeEglDrawSmokeStatus::GlUnavailable)?;
+        let expected = usize::try_from(stride)
+            .ok()
+            .and_then(|stride| stride.checked_mul(usize::try_from(height).ok()?))
+            .ok_or(NativeEglDrawSmokeStatus::GlUnavailable)?;
+        if width == 0 || height == 0 || stride != expected_stride || pixels.len() != expected {
+            return Err(NativeEglDrawSmokeStatus::GlUnavailable);
+        }
+        unsafe {
+            self.gl.active_texture(glow::TEXTURE0);
+            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+            self.gl.tex_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                glow::RGBA as i32,
+                width as i32,
+                height as i32,
+                0,
+                glow::BGRA,
+                glow::UNSIGNED_BYTE,
+                glow::PixelUnpackData::Slice(Some(pixels)),
+            );
+        }
+        self.draw_bound_texture(target, clip, alpha, has_alpha)
     }
 
     pub(crate) unsafe fn draw_egl_image(
@@ -177,26 +248,131 @@ impl PersistentXrgb8888GlPipeline {
             );
             image_target(glow::TEXTURE_2D, image);
         }
-        let draw = self.draw_bound_texture();
+        self.begin_composition();
+        let draw = self.draw_bound_texture(
+            GlCompositionRect {
+                x: 0,
+                y: 0,
+                width: self.width as i32,
+                height: self.height as i32,
+            },
+            None,
+            1.0,
+            false,
+        );
         unsafe {
             self.gl.bind_texture(glow::TEXTURE_2D, None);
             self.gl.delete_texture(image_texture);
+        }
+        draw?;
+        self.finish_composition()
+    }
+
+    pub(crate) unsafe fn draw_egl_image_layer(
+        &self,
+        image_target: unsafe extern "system" fn(u32, *const c_void),
+        image: *const c_void,
+        target: GlCompositionRect,
+        clip: Option<GlCompositionRect>,
+        alpha: f32,
+        has_alpha: bool,
+    ) -> Result<(), NativeEglDrawSmokeStatus> {
+        let texture = unsafe {
+            self.gl
+                .create_texture()
+                .map_err(|_| NativeEglDrawSmokeStatus::GlUnavailable)?
+        };
+        unsafe {
+            self.gl.active_texture(glow::TEXTURE0);
+            self.gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+            for (parameter, value) in [
+                (glow::TEXTURE_MIN_FILTER, glow::NEAREST),
+                (glow::TEXTURE_MAG_FILTER, glow::NEAREST),
+                (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
+                (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
+            ] {
+                self.gl
+                    .tex_parameter_i32(glow::TEXTURE_2D, parameter, value as i32);
+            }
+            image_target(glow::TEXTURE_2D, image);
+        }
+        let draw = self.draw_bound_texture(target, clip, alpha, has_alpha);
+        unsafe {
+            self.gl.bind_texture(glow::TEXTURE_2D, None);
+            self.gl.delete_texture(texture);
+        }
+        draw
+    }
+
+    pub(crate) fn finish_composition(&self) -> Result<(), NativeEglDrawSmokeStatus> {
+        unsafe {
+            self.gl.disable(glow::BLEND);
+            self.gl.disable(glow::SCISSOR_TEST);
             self.gl.finish();
             if self.gl.get_error() != glow::NO_ERROR {
                 return Err(NativeEglDrawSmokeStatus::GlUnavailable);
             }
         }
-        draw
+        Ok(())
     }
 
-    fn draw_bound_texture(&self) -> Result<(), NativeEglDrawSmokeStatus> {
+    fn draw_bound_texture(
+        &self,
+        target: GlCompositionRect,
+        clip: Option<GlCompositionRect>,
+        alpha: f32,
+        has_alpha: bool,
+    ) -> Result<(), NativeEglDrawSmokeStatus> {
+        if target.width <= 0 || target.height <= 0 || !alpha.is_finite() || alpha <= 0.0 {
+            return Ok(());
+        }
+        let left = -1.0 + 2.0 * target.x as f32 / self.width as f32;
+        let right = -1.0 + 2.0 * (target.x + target.width) as f32 / self.width as f32;
+        let top = 1.0 - 2.0 * target.y as f32 / self.height as f32;
+        let bottom = 1.0 - 2.0 * (target.y + target.height) as f32 / self.height as f32;
+        let vertices: [f32; 16] = [
+            left, bottom, 0.0, 1.0, right, bottom, 1.0, 1.0, left, top, 0.0, 0.0, right, top, 1.0,
+            0.0,
+        ];
+        let vertex_bytes = unsafe {
+            std::slice::from_raw_parts(
+                vertices.as_ptr().cast::<u8>(),
+                vertices.len() * std::mem::size_of::<f32>(),
+            )
+        };
         unsafe {
+            if has_alpha || alpha < 1.0 {
+                self.gl.enable(glow::BLEND);
+                self.gl
+                    .blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+            } else {
+                self.gl.disable(glow::BLEND);
+            }
+            if let Some(clip) = clip {
+                self.gl.enable(glow::SCISSOR_TEST);
+                self.gl.scissor(
+                    clip.x,
+                    self.height as i32 - clip.y - clip.height,
+                    clip.width.max(0),
+                    clip.height.max(0),
+                );
+            } else {
+                self.gl.disable(glow::SCISSOR_TEST);
+            }
             self.gl
                 .bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
+            self.gl
+                .buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::STREAM_DRAW);
             self.gl.use_program(Some(self.program));
             self.gl.uniform_1_i32(
                 self.gl.get_uniform_location(self.program, "frame").as_ref(),
                 0,
+            );
+            self.gl.uniform_1_f32(
+                self.gl
+                    .get_uniform_location(self.program, "opacity")
+                    .as_ref(),
+                alpha.clamp(0.0, 1.0),
             );
             self.gl.enable_vertex_attrib_array(0);
             self.gl
@@ -205,11 +381,6 @@ impl PersistentXrgb8888GlPipeline {
             self.gl
                 .vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, 16, 8);
             self.gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
-            // The atomic path does not carry an EGL native fence into the KMS
-            // IN_FENCE_FD property yet. Complete rendering before exporting the
-            // GBM front buffer so scanout and framebuffer retirement cannot race
-            // outstanding GPU work.
-            self.gl.finish();
             if self.gl.get_error() != glow::NO_ERROR {
                 return Err(NativeEglDrawSmokeStatus::GlUnavailable);
             }
@@ -426,9 +597,10 @@ void main() {
 #[cfg(feature = "gbm-platform")]
 const FRAGMENT_SHADER: &str = r#"#version 110
 uniform sampler2D frame;
+uniform float opacity;
 varying vec2 texture_position;
 void main() {
-    gl_FragColor = texture2D(frame, texture_position);
+    gl_FragColor = texture2D(frame, texture_position) * opacity;
 }
 "#;
 

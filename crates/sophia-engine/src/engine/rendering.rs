@@ -145,6 +145,8 @@ impl HeadlessEngine {
                 kind: command.kind,
                 source: command.source,
                 target: command.target.clone(),
+                clip: command.clip.clone(),
+                transform: command.transform,
                 alpha: command.alpha,
             });
         }

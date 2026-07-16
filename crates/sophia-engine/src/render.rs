@@ -1,5 +1,6 @@
 use crate::EngineError;
 use crate::prelude::*;
+use sophia_protocol::Transform;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReplayStep {
@@ -7,6 +8,8 @@ pub struct ReplayStep {
     pub kind: RenderCommandKind,
     pub source: Option<SurfaceId>,
     pub target: Region,
+    pub clip: Option<Region>,
+    pub transform: Transform,
     pub alpha: f32,
 }
 

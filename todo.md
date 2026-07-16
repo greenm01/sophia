@@ -38,39 +38,53 @@ compatibility provider; no XLibre integration work is active.
 - [x] Add a safe dynamically loaded xshmfence adapter plus a renderer-private
   DMA-BUF registry that owns plane FDs and polls acquire fences without
   blocking; prove pending fences hold submission in external tests.
-- [ ] Connect the observed DMA-BUF/fence registrations to the persistent live
+- [x] Connect the observed DMA-BUF/fence registrations to the persistent live
   renderer path. Hold a Present transaction until its acquire fence signals,
   preserve the last committed frame on rejection, and submit mixed CPU/GPU
   scene layers without exposing native objects to the Engine or X authority.
-- [ ] Route real backend page-flip completion through a cloneable frontend
+- [x] Route real backend page-flip completion through a cloneable frontend
   protocol router, emit Present Complete before Idle, trigger the idle fence,
   and retire each imported buffer exactly once.
 - [x] Implement FD-bearing server replies and standard DRI3 `Open` (then the
   smallest modifier/multi-plane requests proven necessary by the client
   trace). Retain the bounded X13 `vkcube` trace as the transport proof; do not
   invent a permanent private presentation path.
-- [ ] Keep renderer import, frame scheduling, DRM/KMS, and page-flip retirement
+- [x] Keep renderer import, frame scheduling, DRM/KMS, and page-flip retirement
   exclusively in Engine/backend ownership.
-- [ ] Prove slow, stale, rejected, and disconnected buffers preserve the last
+- [x] Prove slow, stale, rejected, and disconnected buffers preserve the last
   committed good geometry-plus-pixels state and release every resource once.
 - [ ] Automate and retain one software-backed real-client run and one
   GPU-backed `vkcube` run on the X13 native KMS target, including startup,
   resize, delayed-fence, failure-recovery, and clean-teardown evidence.
 
-Resume checkpoint: the X11 socket carries bounded byte-plus-SCM_RIGHTS records
-in both directions, DRI3 `Open` returns the backend-selected render device, and
-DRI3 1.2 modifier-bearing `PixmapFromBuffers` reaches a standard Present
-transaction in the bounded X13 `vkcube` proof with `first_error=none`. The full
-offline all-feature workspace suite passes. Resume by connecting the transferred
-DMA-BUF/fence registrations and reusable renderer-private source registry to the
-persistent native session, then bind Present completion and idle retirement to
-real page-flip feedback.
+Implementation checkpoint: the persistent session transfers typed source and
+fence handles into `LivePresentationResourceSession`, quarantines each Present
+by exact `TransactionId`, and submits a mixed CPU/DMA-BUF frame through the
+persistent native EGL/GBM exporter. Engine prepared commits become authoritative
+only after the matching KMS page flip; rejection preserves prior state, while
+unrelated surfaces may continue committing. Page-flip retirement routes
+Complete before Idle, triggers the idle fence, and releases deferred resources
+exactly once. The schema-14 session summary fails closed on cleanup debt, and
+the full offline all-feature workspace suite passes.
+
+`tools/live_session_milestone4_hardware_proof.sh` now automates the remaining
+X13 exit: an established software xterm/resize pass followed by a mixed
+`vkcube` plus CPU-xterm pass with a controlled first acquire delay and one
+forced rejection/recovery. Its strict verifier requires a successful mixed
+export, later Flip completion, matching Idle lifecycle, idle-fence activity,
+and zero live resources. Run this from a dedicated local text TTY with
+exclusive DRM/KMS ownership, retain both logs, then promote the final unchecked
+item and archive Milestone 4. No sudo command is expected when the current user
+already has DRM and input access.
 
 Exit: one software-backed and one GPU-backed real X11 client pass normal
 startup, resize, presentation, delayed release, failure recovery, and teardown
 through Engine-owned KMS without a private permanent presentation extension.
 
 ## Milestone 5: Application Compatibility
+
+Milestone 5 remains blocked until the Milestone 4 software and GPU session exit
+passes through Engine-owned KMS.
 
 - [ ] Advance Render, XFixes, selections/INCR, Xdnd, GLX, and toolkit-specific
   behavior only from captured gaps in `docs/x11-compatibility-matrix.md`.

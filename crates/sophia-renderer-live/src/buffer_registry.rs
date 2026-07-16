@@ -2,8 +2,11 @@ use std::collections::BTreeMap;
 use std::os::fd::OwnedFd;
 
 use sophia_protocol::{
-    BufferHandle, BufferSource, DmaBufDescriptor, DmaBufDescriptorError, SurfaceId,
+    BufferHandle, BufferSource, DmaBufDescriptor, DmaBufDescriptorError, FenceHandle, SurfaceId,
+    TransactionId,
 };
+
+pub const LIVE_PRESENTATION_REGISTRY_CAPACITY: usize = 256;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LiveBufferState {
@@ -33,7 +36,20 @@ pub enum LiveBufferRegistryError {
     DuplicateFence,
     UnknownFence,
     SourceInUse,
+    DuplicatePresentation,
+    UnknownPresentation,
+    CapacityExceeded,
+    SourceReleasePending,
+    FenceReleasePending,
 }
+
+impl std::fmt::Display for LiveBufferRegistryError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{self:?}")
+    }
+}
+
+impl std::error::Error for LiveBufferRegistryError {}
 
 #[derive(Debug, Default)]
 pub struct LiveBufferRegistry {
@@ -44,12 +60,75 @@ pub struct LiveBufferRegistry {
 struct LiveDmaBufSourceRegistration {
     descriptor: DmaBufDescriptor,
     plane_fds: Vec<OwnedFd>,
+    references: usize,
+    release_pending: bool,
 }
 
 #[derive(Debug)]
 struct LiveFenceSourceRegistration {
-    initially_triggered: bool,
     fd: OwnedFd,
+    references: usize,
+    release_pending: bool,
+}
+
+#[derive(Debug)]
+struct LivePresentRegistration {
+    source: BufferHandle,
+    acquire_fence: Option<FenceHandle>,
+    idle_fence: Option<FenceHandle>,
+    plane_fds: Vec<OwnedFd>,
+    acquire_fence_fd: Option<OwnedFd>,
+    idle_fence_fd: Option<OwnedFd>,
+    state: LiveBufferState,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LivePresentationRegistryLimits {
+    pub sources: usize,
+    pub fences: usize,
+    pub presentations: usize,
+}
+
+impl Default for LivePresentationRegistryLimits {
+    fn default() -> Self {
+        Self {
+            sources: LIVE_PRESENTATION_REGISTRY_CAPACITY,
+            fences: LIVE_PRESENTATION_REGISTRY_CAPACITY,
+            presentations: LIVE_PRESENTATION_REGISTRY_CAPACITY,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveResourceReleaseStatus {
+    Unknown,
+    Deferred,
+    Released,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveIdleFenceStatus {
+    NotRequested,
+    Triggered,
+    TriggerFailed,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LivePresentationRetirement {
+    pub transaction: TransactionId,
+    pub source: BufferSource,
+    pub idle_fence: LiveIdleFenceStatus,
+    pub released_source: bool,
+    pub released_fences: Vec<FenceHandle>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct LivePresentationDisconnectReport {
+    pub retired_presentations: usize,
+    pub triggered_idle_fences: usize,
+    pub failed_idle_fences: usize,
+    pub released_sources: Vec<BufferSource>,
+    pub released_fences: Vec<FenceHandle>,
 }
 
 /// Renderer-private reusable DMA-BUF sources plus their in-flight Present
@@ -57,15 +136,22 @@ struct LiveFenceSourceRegistration {
 ///
 /// DRI3 pixmaps outlive any single Present request. Source plane descriptors
 /// therefore remain registered while each presentation receives its own
-/// duplicated plane and acquire-fence ownership in [`LiveBufferRegistry`]. A
+/// duplicated plane and fence ownership in a transaction-keyed presentation. A
 /// page-flip retirement drops only that presentation ownership, allowing the
 /// same pixmap to be presented again without exposing native FDs outside the
 /// renderer boundary.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct LiveDmaBufPresentationRegistry {
     sources: BTreeMap<BufferHandle, LiveDmaBufSourceRegistration>,
-    fences: BTreeMap<u64, LiveFenceSourceRegistration>,
-    presentations: LiveBufferRegistry,
+    fences: BTreeMap<FenceHandle, LiveFenceSourceRegistration>,
+    presentations: BTreeMap<TransactionId, LivePresentRegistration>,
+    limits: LivePresentationRegistryLimits,
+}
+
+impl Default for LiveDmaBufPresentationRegistry {
+    fn default() -> Self {
+        Self::with_limits(LivePresentationRegistryLimits::default())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -273,6 +359,15 @@ impl LiveBufferRegistry {
 }
 
 impl LiveDmaBufPresentationRegistry {
+    pub fn with_limits(limits: LivePresentationRegistryLimits) -> Self {
+        Self {
+            sources: BTreeMap::new(),
+            fences: BTreeMap::new(),
+            presentations: BTreeMap::new(),
+            limits,
+        }
+    }
+
     pub fn register_source(
         &mut self,
         descriptor: DmaBufDescriptor,
@@ -287,11 +382,16 @@ impl LiveDmaBufPresentationRegistry {
         if self.sources.contains_key(&descriptor.handle) {
             return Err(LiveBufferRegistryError::DuplicateHandle);
         }
+        if self.sources.len() >= self.limits.sources {
+            return Err(LiveBufferRegistryError::CapacityExceeded);
+        }
         self.sources.insert(
             descriptor.handle,
             LiveDmaBufSourceRegistration {
                 descriptor,
                 plane_fds,
+                references: 0,
+                release_pending: false,
             },
         );
         Ok(())
@@ -299,18 +399,22 @@ impl LiveDmaBufPresentationRegistry {
 
     pub fn register_fence(
         &mut self,
-        fence: u64,
-        initially_triggered: bool,
+        fence: FenceHandle,
+        _initially_triggered: bool,
         fd: OwnedFd,
     ) -> Result<(), LiveBufferRegistryError> {
         if self.fences.contains_key(&fence) {
             return Err(LiveBufferRegistryError::DuplicateFence);
         }
+        if self.fences.len() >= self.limits.fences {
+            return Err(LiveBufferRegistryError::CapacityExceeded);
+        }
         self.fences.insert(
             fence,
             LiveFenceSourceRegistration {
-                initially_triggered,
                 fd,
+                references: 0,
+                release_pending: false,
             },
         );
         Ok(())
@@ -318,88 +422,195 @@ impl LiveDmaBufPresentationRegistry {
 
     pub fn begin_present(
         &mut self,
+        transaction: TransactionId,
         handle: BufferHandle,
-        acquire_fence: Option<u64>,
+        acquire_fence: Option<FenceHandle>,
+        idle_fence: Option<FenceHandle>,
     ) -> Result<(), LiveBufferRegistryError> {
+        if self.presentations.contains_key(&transaction) {
+            return Err(LiveBufferRegistryError::DuplicatePresentation);
+        }
+        if self.presentations.len() >= self.limits.presentations {
+            return Err(LiveBufferRegistryError::CapacityExceeded);
+        }
         let source = self
             .sources
             .get(&handle)
             .ok_or(LiveBufferRegistryError::UnknownHandle)?;
+        if source.release_pending {
+            return Err(LiveBufferRegistryError::SourceReleasePending);
+        }
         let plane_fds = source
             .plane_fds
             .iter()
             .map(OwnedFd::try_clone)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| LiveBufferRegistryError::FdCloneFailed)?;
-        let acquire_fence = acquire_fence
+        let acquire_fence_fd = acquire_fence
             .map(|fence| {
                 let fence = self
                     .fences
                     .get(&fence)
                     .ok_or(LiveBufferRegistryError::UnknownFence)?;
-                if fence.initially_triggered {
-                    Ok(None)
-                } else {
-                    fence
-                        .fd
-                        .try_clone()
-                        .map(Some)
-                        .map_err(|_| LiveBufferRegistryError::FdCloneFailed)
+                if fence.release_pending {
+                    return Err(LiveBufferRegistryError::FenceReleasePending);
                 }
+                fence
+                    .fd
+                    .try_clone()
+                    .map(Some)
+                    .map_err(|_| LiveBufferRegistryError::FdCloneFailed)
             })
             .transpose()?
             .flatten();
-        self.presentations
-            .register(source.descriptor, plane_fds, acquire_fence)
+        let idle_fence_fd = idle_fence
+            .map(|fence| {
+                let fence = self
+                    .fences
+                    .get(&fence)
+                    .ok_or(LiveBufferRegistryError::UnknownFence)?;
+                if fence.release_pending {
+                    return Err(LiveBufferRegistryError::FenceReleasePending);
+                }
+                fence
+                    .fd
+                    .try_clone()
+                    .map_err(|_| LiveBufferRegistryError::FdCloneFailed)
+            })
+            .transpose()?;
+        let acquire_ready = acquire_fence_fd
+            .as_ref()
+            .map(|fd| {
+                sophia_xshmfence::query(fd).map_err(|_| LiveBufferRegistryError::FenceQueryFailed)
+            })
+            .transpose()?
+            .unwrap_or(true);
+        let acquire_fence_fd = (!acquire_ready).then_some(acquire_fence_fd).flatten();
+
+        self.sources
+            .get_mut(&handle)
+            .expect("validated source must remain registered")
+            .references += 1;
+        for fence in [acquire_fence, idle_fence].into_iter().flatten() {
+            self.fences
+                .get_mut(&fence)
+                .expect("validated fence must remain registered")
+                .references += 1;
+        }
+        self.presentations.insert(
+            transaction,
+            LivePresentRegistration {
+                source: handle,
+                acquire_fence,
+                idle_fence,
+                plane_fds,
+                acquire_fence_fd,
+                idle_fence_fd,
+                state: if acquire_ready {
+                    LiveBufferState::Ready
+                } else {
+                    LiveBufferState::WaitingForAcquireFence
+                },
+            },
+        );
+        Ok(())
     }
 
     pub fn poll_acquire_fence(
         &mut self,
-        handle: BufferHandle,
+        transaction: TransactionId,
     ) -> Result<bool, LiveBufferRegistryError> {
-        self.presentations.poll_acquire_fence(handle)
-    }
-
-    pub fn submit(&mut self, handle: BufferHandle) -> Result<(), LiveBufferRegistryError> {
-        self.presentations.submit(handle)
-    }
-
-    pub fn retire_page_flip(&mut self, handle: BufferHandle) -> Option<BufferSource> {
-        self.presentations.retire_page_flip(handle)
-    }
-
-    pub fn reject(&mut self, handle: BufferHandle) -> Option<BufferSource> {
-        self.presentations.reject(handle)
-    }
-
-    pub fn remove_source(
-        &mut self,
-        handle: BufferHandle,
-    ) -> Result<Option<BufferSource>, LiveBufferRegistryError> {
-        if self.presentations.state(handle).is_some() {
-            return Err(LiveBufferRegistryError::SourceInUse);
+        let presentation = self
+            .presentations
+            .get_mut(&transaction)
+            .ok_or(LiveBufferRegistryError::UnknownPresentation)?;
+        if presentation.state != LiveBufferState::WaitingForAcquireFence {
+            return Ok(true);
         }
-        Ok(self.sources.remove(&handle).map(|_| BufferSource::DmaBuf {
-            handle: handle.raw(),
-        }))
+        let signaled = sophia_xshmfence::query(
+            presentation
+                .acquire_fence_fd
+                .as_ref()
+                .ok_or(LiveBufferRegistryError::FenceQueryFailed)?,
+        )
+        .map_err(|_| LiveBufferRegistryError::FenceQueryFailed)?;
+        if signaled {
+            presentation.acquire_fence_fd.take();
+            presentation.state = LiveBufferState::Ready;
+        }
+        Ok(signaled)
     }
 
-    pub fn remove_fence(&mut self, fence: u64) -> bool {
-        self.fences.remove(&fence).is_some()
+    pub fn submit(&mut self, transaction: TransactionId) -> Result<(), LiveBufferRegistryError> {
+        let presentation = self
+            .presentations
+            .get_mut(&transaction)
+            .ok_or(LiveBufferRegistryError::UnknownPresentation)?;
+        match presentation.state {
+            LiveBufferState::WaitingForAcquireFence => {
+                Err(LiveBufferRegistryError::AcquireFencePending)
+            }
+            LiveBufferState::Ready => {
+                presentation.state = LiveBufferState::Submitted;
+                Ok(())
+            }
+            LiveBufferState::Submitted => Err(LiveBufferRegistryError::AlreadySubmitted),
+        }
+    }
+
+    pub fn retire_page_flip(
+        &mut self,
+        transaction: TransactionId,
+    ) -> Option<LivePresentationRetirement> {
+        let submitted = self
+            .presentations
+            .get(&transaction)
+            .is_some_and(|presentation| presentation.state == LiveBufferState::Submitted);
+        submitted.then(|| self.finish_present(transaction))
+    }
+
+    pub fn reject(&mut self, transaction: TransactionId) -> Option<LivePresentationRetirement> {
+        self.presentations
+            .contains_key(&transaction)
+            .then(|| self.finish_present(transaction))
+    }
+
+    pub fn remove_source(&mut self, handle: BufferHandle) -> LiveResourceReleaseStatus {
+        let Some(source) = self.sources.get_mut(&handle) else {
+            return LiveResourceReleaseStatus::Unknown;
+        };
+        if source.references > 0 {
+            source.release_pending = true;
+            return LiveResourceReleaseStatus::Deferred;
+        }
+        self.sources.remove(&handle);
+        LiveResourceReleaseStatus::Released
+    }
+
+    pub fn remove_fence(&mut self, fence: FenceHandle) -> LiveResourceReleaseStatus {
+        let Some(registration) = self.fences.get_mut(&fence) else {
+            return LiveResourceReleaseStatus::Unknown;
+        };
+        if registration.references > 0 {
+            registration.release_pending = true;
+            return LiveResourceReleaseStatus::Deferred;
+        }
+        self.fences.remove(&fence);
+        LiveResourceReleaseStatus::Released
     }
 
     pub fn descriptor(&self, handle: BufferHandle) -> Option<DmaBufDescriptor> {
         self.sources.get(&handle).map(|source| source.descriptor)
     }
 
-    pub fn try_clone_plane_fd(
+    pub fn try_clone_presentation_plane_fd(
         &self,
-        handle: BufferHandle,
+        transaction: TransactionId,
         plane: usize,
     ) -> Result<OwnedFd, LiveBufferRegistryError> {
-        self.sources
-            .get(&handle)
-            .ok_or(LiveBufferRegistryError::UnknownHandle)?
+        self.presentations
+            .get(&transaction)
+            .ok_or(LiveBufferRegistryError::UnknownPresentation)?
             .plane_fds
             .get(plane)
             .ok_or(LiveBufferRegistryError::PlaneFdCountMismatch)?
@@ -407,8 +618,16 @@ impl LiveDmaBufPresentationRegistry {
             .map_err(|_| LiveBufferRegistryError::FdCloneFailed)
     }
 
-    pub fn state(&self, handle: BufferHandle) -> Option<LiveBufferState> {
-        self.presentations.state(handle)
+    pub fn state(&self, transaction: TransactionId) -> Option<LiveBufferState> {
+        self.presentations
+            .get(&transaction)
+            .map(|presentation| presentation.state)
+    }
+
+    pub fn source_for_presentation(&self, transaction: TransactionId) -> Option<BufferHandle> {
+        self.presentations
+            .get(&transaction)
+            .map(|presentation| presentation.source)
     }
 
     pub fn source_count(&self) -> usize {
@@ -423,16 +642,84 @@ impl LiveDmaBufPresentationRegistry {
         self.presentations.len()
     }
 
-    pub fn disconnect(&mut self) -> Vec<BufferSource> {
-        let _ = self.presentations.disconnect();
+    pub fn disconnect(&mut self) -> LivePresentationDisconnectReport {
+        let mut report = LivePresentationDisconnectReport::default();
+        let transactions = self.presentations.keys().copied().collect::<Vec<_>>();
+        for transaction in transactions {
+            let retirement = self.finish_present(transaction);
+            report.retired_presentations += 1;
+            match retirement.idle_fence {
+                LiveIdleFenceStatus::Triggered => report.triggered_idle_fences += 1,
+                LiveIdleFenceStatus::TriggerFailed => report.failed_idle_fences += 1,
+                LiveIdleFenceStatus::NotRequested => {}
+            }
+            if retirement.released_source {
+                report.released_sources.push(retirement.source);
+            }
+            report
+                .released_fences
+                .extend(retirement.released_fences.iter().copied());
+        }
         let handles = self.sources.keys().copied().collect::<Vec<_>>();
+        let fences = self.fences.keys().copied().collect::<Vec<_>>();
         self.sources.clear();
         self.fences.clear();
-        handles
-            .into_iter()
-            .map(|handle| BufferSource::DmaBuf {
+        report
+            .released_sources
+            .extend(handles.into_iter().map(|handle| BufferSource::DmaBuf {
                 handle: handle.raw(),
-            })
-            .collect()
+            }));
+        report.released_fences.extend(fences);
+        report
+    }
+
+    fn finish_present(&mut self, transaction: TransactionId) -> LivePresentationRetirement {
+        let presentation = self
+            .presentations
+            .remove(&transaction)
+            .expect("known presentation must remain registered until retirement");
+        let idle_fence = match presentation.idle_fence_fd.as_ref() {
+            None => LiveIdleFenceStatus::NotRequested,
+            Some(fd) if sophia_xshmfence::trigger(fd).is_ok() => LiveIdleFenceStatus::Triggered,
+            Some(_) => LiveIdleFenceStatus::TriggerFailed,
+        };
+
+        let source = BufferSource::DmaBuf {
+            handle: presentation.source.raw(),
+        };
+        let released_source = {
+            let registration = self
+                .sources
+                .get_mut(&presentation.source)
+                .expect("presentation source must remain registered");
+            registration.references = registration.references.saturating_sub(1);
+            registration.references == 0 && registration.release_pending
+        };
+        if released_source {
+            self.sources.remove(&presentation.source);
+        }
+
+        let mut released_fences = Vec::new();
+        for fence in [presentation.acquire_fence, presentation.idle_fence]
+            .into_iter()
+            .flatten()
+        {
+            let Some(registration) = self.fences.get_mut(&fence) else {
+                continue;
+            };
+            registration.references = registration.references.saturating_sub(1);
+            if registration.references == 0 && registration.release_pending {
+                self.fences.remove(&fence);
+                released_fences.push(fence);
+            }
+        }
+
+        LivePresentationRetirement {
+            transaction,
+            source,
+            idle_fence,
+            released_source,
+            released_fences,
+        }
     }
 }

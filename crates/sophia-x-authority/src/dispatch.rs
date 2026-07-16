@@ -1196,7 +1196,7 @@ pub fn dispatch_x11_wire_request(
         }
         XWireRequest::FreePixmap { pixmap } => {
             let outputs = match runtime.free_pixmap(context.namespace, pixmap) {
-                Ok(()) => Vec::new(),
+                Ok(_) => Vec::new(),
                 Err(error) => vec![XClientOutput::Error(x_error_from_runtime(
                     error,
                     context.sequence,

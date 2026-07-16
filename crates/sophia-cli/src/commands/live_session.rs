@@ -15,12 +15,13 @@ use sophia_x_authority::{
     XAuthorityClientControlAck, XAuthorityClientControlCommand, XAuthorityClientInputDelivery,
     XAuthorityClientSurfaceRoutes, XAuthorityControlCommand, XAuthorityControlOutcome,
     XAuthorityInputDeliveryId, XAuthorityInputDeliveryOutcome, XAuthorityRoutedInput,
-    XCoreKeyboardMapper, XServerFrontendAdmissionError, XServerFrontendAdmissionPolicy,
-    XServerFrontendAdmissionRequest, XServerFrontendConfig, XServerFrontendRenderDeviceError,
+    XCoreKeyboardMapper, XPresentCompletionMode, XServerFrontendAdmissionError,
+    XServerFrontendAdmissionPolicy, XServerFrontendAdmissionRequest, XServerFrontendConfig,
+    XServerFrontendProtocolRouter, XServerFrontendRenderDeviceError,
     XServerFrontendRenderDeviceProvider, XServerFrontendRouteBroker, XServerFrontendServiceCommand,
     XServerFrontendSetupAuthorization, run_x_server_frontend_routed_until_stopped,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io::{Read, Write};
 use std::num::NonZeroUsize;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
@@ -375,6 +376,7 @@ pub(crate) fn run_persistent_xterm_session(
         )?;
     let input_sender = broker.routed_input_sender();
     let control_sender = broker.control_sender();
+    let protocol_router = broker.protocol_router();
     let (service_command_sender, service_command_receiver) = sync_channel(1);
     let mut server = Some(std::thread::spawn(move || {
         run_x_server_frontend_routed_until_stopped(
@@ -566,6 +568,7 @@ pub(crate) fn run_persistent_xterm_session(
         &mut physical_input,
         &mut native_scanout,
         &mut wm_session,
+        protocol_router,
         input_proof_result.as_ref(),
         false,
         initial_authority_batch,
@@ -666,6 +669,8 @@ struct PersistentXtermSessionConfig {
     xkb_config: sophia_x_authority::XkbRmlvoConfig,
     inject_output_size: Option<Size>,
     inject_surface_resize: Option<Size>,
+    m4_first_acquire_delay: Option<Duration>,
+    m4_reject_first_present: bool,
 }
 
 impl PersistentXtermSessionConfig {
@@ -733,6 +738,16 @@ impl PersistentXtermSessionConfig {
             .as_deref()
             .map(parse_output_size)
             .transpose()?;
+        let m4_first_acquire_delay = arg_value(args, "--m4-first-acquire-delay-ms")
+            .as_deref()
+            .map(parse_u64)
+            .transpose()?
+            .map(Duration::from_millis);
+        if m4_first_acquire_delay.is_some_and(|delay| delay.is_zero() || delay.as_millis() > 2_000)
+        {
+            return Err("--m4-first-acquire-delay-ms accepts 1-2000 milliseconds".into());
+        }
+        let m4_reject_first_present = args.iter().any(|arg| arg == "--m4-reject-first-present");
         let wm_process = arg_value(args, "--wm-process");
         let wm_process_args = args
             .iter()
@@ -768,6 +783,13 @@ impl PersistentXtermSessionConfig {
         }
         if terminal_exec.is_some() && (inject_text.is_some() || expect_physical_text.is_some()) {
             return Err("--terminal-exec cannot be combined with input-proof commands".into());
+        }
+        if (m4_first_acquire_delay.is_some() || m4_reject_first_present)
+            && (!native_scanout || terminal_exec.is_none())
+        {
+            return Err(
+                "M4 Present proof controls require --native-scanout and --terminal-exec".into(),
+            );
         }
         if (inject_text.is_some() || expect_physical_text.is_some())
             && max_runtime.is_none()
@@ -824,6 +846,8 @@ impl PersistentXtermSessionConfig {
             xkb_config,
             inject_output_size,
             inject_surface_resize,
+            m4_first_acquire_delay,
+            m4_reject_first_present,
         })
     }
 
@@ -1817,6 +1841,7 @@ fn run_session_loop(
     physical_input: &mut Option<SessionPhysicalInput>,
     native_scanout: &mut Option<PersistentNativeScanout>,
     wm_session: &mut Option<LiveWmSession>,
+    protocol_router: XServerFrontendProtocolRouter,
     input_proof_result: Option<&LiveInputProofResult>,
     require_startup_focus: bool,
     mut initial_authority_batch: Option<XAuthorityObservedTransactionBatch>,
@@ -2138,6 +2163,12 @@ fn run_session_loop(
         {
             runtime.retire_native_scanout(native_scanout)?;
         }
+        if let (Some(runtime), Some(native_scanout)) = (runtime.as_mut(), native_scanout.as_mut())
+            && !runtime.queued_gpu_presentations.is_empty()
+            && !runtime.native_scanout_in_flight()
+        {
+            let _ = runtime.drive_gpu_presentation(Some(native_scanout))?;
+        }
         let input_baseline_presented_before_wait =
             scene.last_report.as_ref().is_some_and(|report| {
                 report.nonzero_pixel_bytes > 0
@@ -2336,12 +2367,19 @@ fn run_session_loop(
                 }
 
                 if runtime.is_none() {
-                    runtime = Some(PersistentBackendRuntime::new(
-                        &outputs,
-                        &batch.transactions,
-                        native_scanout.as_mut(),
-                        native_frames.clone(),
-                    )?);
+                    runtime = Some(
+                        PersistentBackendRuntime::new(
+                            &outputs,
+                            &batch.transactions,
+                            native_scanout.as_mut(),
+                            native_frames.clone(),
+                        )?
+                        .with_protocol_router(protocol_router.clone())
+                        .with_m4_proof_controls(
+                            config.m4_first_acquire_delay,
+                            config.m4_reject_first_present,
+                        ),
+                    );
                 }
                 let runtime = runtime
                     .as_mut()
@@ -2449,11 +2487,15 @@ fn run_session_loop(
                     if runtime.native_scanout_in_flight() || runtime.native_cleanup_pending() {
                         runtime.retire_native_scanout(native_scanout)?;
                     }
+                    if !runtime.queued_gpu_presentations.is_empty()
+                        && !runtime.native_scanout_in_flight()
+                    {
+                        let _ = runtime.drive_gpu_presentation(Some(native_scanout))?;
+                    }
                     if !runtime.native_scanout_in_flight()
-                        && native_scanout
-                            .heads
-                            .iter()
-                            .any(|head| head.exporter.pending_cpu_frame())
+                        && native_scanout.heads.iter().any(|head| {
+                            head.exporter.pending_cpu_frame() || head.exporter.pending_mixed_frame()
+                        })
                     {
                         let tick = runtime.run_native_idle(native_scanout)?;
                         backend_ticks = backend_ticks.saturating_add(1);
@@ -2648,6 +2690,9 @@ fn run_session_loop(
     if let (Some(runtime), Some(native_scanout)) = (runtime.as_mut(), native_scanout.as_mut()) {
         runtime.drain_native_scanout(native_scanout, Duration::from_secs(2))?;
     }
+    if let Some(runtime) = runtime.as_mut() {
+        runtime.shutdown_presentations();
+    }
     if input_presented_latency.is_none()
         && input_pixel_change
         && let Some(started) = input_proof_started_at
@@ -2746,7 +2791,7 @@ fn run_session_loop(
         PersistentNativeScanout::persistent_render_metrics,
     );
     println!(
-        "sophia_live_session schema=13 status=bounded_complete display={} elapsed_msec={} startup_ready_msec={} session_ticks={} authority_batches={} authority_transactions={} authority_queue_capacity={} authority_batches_dropped=0 backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_max_nonzero_pixel_bytes={} cpu_nonzero_frames={} cpu_checksum={} cpu_max_compose_msec={} injected_input={} input_events_expected={} input_events_flushed={} input_flush_latency_msec={} input_pixel_change={} input_text_match={} input_presented_latency_msec={} input_dispatch_max_gap_msec={} input_queue_max_depth={} input_queue_dwell_max_msec={} physical_events={} physical_keys_routed={} pointer_pixel_change={} physical_pointer_events={} physical_pointer_routed={} pointer_proof={} native_presentation={} native_submissions={} native_submit_deferred={} native_submit_failures={} native_retirements={} native_retire_failures={} native_max_in_flight_ticks={} native_max_submit_to_page_flip_msec={} native_max_upload_msec={} native_target_creations={} native_target_recreations={} native_pipeline_creations={} native_frame_uploads={} native_callback_accepted={} native_callback_rejected={} native_callback_queue_saturated={} native_nonzero_exports={} native_export_attempts={} native_in_flight={} native_cleanup_pending={} physical_input={} wm_policy={} wm_requests={} wm_committed={} wm_restarts={} wm_degraded={} namespace_profile={} output_update={} output_notifications={} surface_resize={}",
+        "sophia_live_session schema=14 status=bounded_complete display={} elapsed_msec={} startup_ready_msec={} session_ticks={} authority_batches={} authority_transactions={} authority_queue_capacity={} authority_batches_dropped=0 backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_max_nonzero_pixel_bytes={} cpu_nonzero_frames={} cpu_checksum={} cpu_max_compose_msec={} injected_input={} input_events_expected={} input_events_flushed={} input_flush_latency_msec={} input_pixel_change={} input_text_match={} input_presented_latency_msec={} input_dispatch_max_gap_msec={} input_queue_max_depth={} input_queue_dwell_max_msec={} physical_events={} physical_keys_routed={} pointer_pixel_change={} physical_pointer_events={} physical_pointer_routed={} pointer_proof={} native_presentation={} native_submissions={} native_submit_deferred={} native_submit_failures={} native_retirements={} native_retire_failures={} native_max_in_flight_ticks={} native_max_submit_to_page_flip_msec={} native_max_upload_msec={} native_target_creations={} native_target_recreations={} native_pipeline_creations={} native_frame_uploads={} native_callback_accepted={} native_callback_rejected={} native_callback_queue_saturated={} native_nonzero_exports={} native_mixed_exports={} native_export_attempts={} native_in_flight={} native_cleanup_pending={} physical_input={} wm_policy={} wm_requests={} wm_committed={} wm_restarts={} wm_degraded={} namespace_profile={} output_update={} output_notifications={} surface_resize={} present_complete_flip={} present_complete_skip={} present_idle={} present_idle_fence_triggers={} present_disconnect_sources={} present_disconnect_fences={} present_disconnect_failures={} present_live_sources={} present_live_fences={} present_live_transactions={} present_acquire_waits={} present_controlled_rejections={}",
         config.display,
         started.elapsed().as_millis(),
         startup_ready_msec.ok_or("persistent live session never reached startup readiness")?,
@@ -2830,6 +2875,9 @@ fn run_session_loop(
             .map_or(0, |native| native.nonzero_exports),
         native_scanout
             .as_ref()
+            .map_or(0, PersistentNativeScanout::mixed_exports),
+        native_scanout
+            .as_ref()
             .map_or(0, PersistentNativeScanout::export_attempts),
         runtime
             .as_ref()
@@ -2866,7 +2914,53 @@ fn run_session_loop(
         } else {
             "disabled"
         },
+        runtime
+            .as_ref()
+            .map_or(0, |runtime| runtime.present_complete_flip),
+        runtime
+            .as_ref()
+            .map_or(0, |runtime| runtime.present_complete_skip),
+        runtime.as_ref().map_or(0, |runtime| runtime.present_idle),
+        runtime
+            .as_ref()
+            .map_or(0, |runtime| runtime.idle_fence_triggers),
+        runtime
+            .as_ref()
+            .map_or(0, |runtime| runtime.presentation_disconnect_sources),
+        runtime
+            .as_ref()
+            .map_or(0, |runtime| runtime.presentation_disconnect_fences),
+        runtime
+            .as_ref()
+            .map_or(0, |runtime| runtime.presentation_disconnect_failures),
+        runtime
+            .as_ref()
+            .map_or(0, |runtime| runtime.presentation_resources.source_count()),
+        runtime
+            .as_ref()
+            .map_or(0, |runtime| runtime.presentation_resources.fence_count()),
+        runtime.as_ref().map_or(0, |runtime| {
+            runtime.presentation_resources.presentation_count()
+        }),
+        runtime
+            .as_ref()
+            .map_or(0, |runtime| runtime.present_acquire_waits),
+        runtime
+            .as_ref()
+            .map_or(0, |runtime| runtime.present_controlled_rejections),
     );
+    if let Some(runtime) = runtime.as_ref()
+        && (runtime.presentation_disconnect_failures != 0
+            || runtime.presentation_resources.source_count() != 0
+            || runtime.presentation_resources.fence_count() != 0
+            || runtime.presentation_resources.presentation_count() != 0
+            || runtime.present_idle
+                != runtime
+                    .present_complete_flip
+                    .saturating_add(runtime.present_complete_skip))
+    {
+        return Err("persistent Present resources did not retire exactly once".into());
+    }
     if let (Some(runtime), Some(native_scanout)) = (runtime.as_ref(), native_scanout.as_ref())
         && (native_scanout.submissions == 0
             || native_scanout.retirements == 0
@@ -2945,6 +3039,36 @@ struct PersistentBackendRuntime {
     outputs: BTreeMap<OutputId, PersistentOutputRuntime>,
     layers: BTreeMap<SurfaceId, SurfaceTransaction>,
     committed_snapshot_layers: Option<Vec<LayerSnapshot>>,
+    presentation_resources: sophia_backend_live::LivePresentationResourceSession,
+    queued_gpu_presentations: VecDeque<QueuedGpuPresentation>,
+    submitted_gpu_presentation: Option<SubmittedGpuPresentation>,
+    protocol_router: Option<XServerFrontendProtocolRouter>,
+    present_complete_flip: usize,
+    present_complete_skip: usize,
+    present_idle: usize,
+    idle_fence_triggers: usize,
+    presentation_disconnect_sources: usize,
+    presentation_disconnect_fences: usize,
+    presentation_disconnect_failures: usize,
+    first_acquire_delay: Option<Duration>,
+    first_acquire_delay_applied: bool,
+    reject_first_present: bool,
+    present_acquire_waits: usize,
+    present_controlled_rejections: usize,
+}
+
+struct QueuedGpuPresentation {
+    submission: sophia_backend_live::LivePresentationSubmission,
+    transactions: Vec<SurfaceTransaction>,
+    cpu_background: Option<sophia_backend_live::LiveCpuComposedFrame>,
+    target: Rect,
+    deadline: Instant,
+    not_before: Instant,
+}
+
+struct SubmittedGpuPresentation {
+    transaction: TransactionId,
+    prepared: BTreeMap<OutputId, sophia_engine::PreparedSurfaceCommit>,
 }
 
 impl PersistentBackendRuntime {
@@ -3042,16 +3166,95 @@ impl PersistentBackendRuntime {
             outputs: output_runtimes,
             layers: BTreeMap::new(),
             committed_snapshot_layers: None,
+            presentation_resources: Default::default(),
+            queued_gpu_presentations: VecDeque::new(),
+            submitted_gpu_presentation: None,
+            protocol_router: None,
+            present_complete_flip: 0,
+            present_complete_skip: 0,
+            present_idle: 0,
+            idle_fence_triggers: 0,
+            presentation_disconnect_sources: 0,
+            presentation_disconnect_fences: 0,
+            presentation_disconnect_failures: 0,
+            first_acquire_delay: None,
+            first_acquire_delay_applied: false,
+            reject_first_present: false,
+            present_acquire_waits: 0,
+            present_controlled_rejections: 0,
         })
+    }
+
+    fn with_protocol_router(mut self, router: XServerFrontendProtocolRouter) -> Self {
+        self.protocol_router = Some(router);
+        self
+    }
+
+    fn with_m4_proof_controls(
+        mut self,
+        first_acquire_delay: Option<Duration>,
+        reject_first_present: bool,
+    ) -> Self {
+        self.first_acquire_delay = first_acquire_delay;
+        self.reject_first_present = reject_first_present;
+        self
     }
 
     fn run_batch(
         &mut self,
         batch: &XAuthorityObservedTransactionBatch,
-        native_scanout: Option<&mut PersistentNativeScanout>,
+        mut native_scanout: Option<&mut PersistentNativeScanout>,
         native_frames: Option<Vec<ObservedComposedFrame>>,
         wm_update: Option<WmTransactionUpdate>,
     ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
+        self.observe_presentation_resources(batch)?;
+        if !batch.present_submissions.is_empty() {
+            let cpu_background = native_frames
+                .as_ref()
+                .and_then(|frames| frames.first())
+                .map(|frame| frame.frame.clone());
+            for submission in &batch.present_submissions {
+                let transaction = batch
+                    .transactions
+                    .iter()
+                    .find(|transaction| transaction.surface == submission.surface)
+                    .ok_or("Present submission has no matching Engine transaction")?;
+                let live_submission = sophia_backend_live::LivePresentationSubmission {
+                    transaction: submission.transaction,
+                    buffer: submission.buffer,
+                    acquire_fence: submission.acquire_fence,
+                    idle_fence: submission.idle_fence,
+                };
+                self.presentation_resources.begin(live_submission)?;
+                let acquire_delay = if !self.first_acquire_delay_applied
+                    && live_submission.acquire_fence.is_some()
+                {
+                    self.first_acquire_delay_applied = true;
+                    self.first_acquire_delay.unwrap_or(Duration::ZERO)
+                } else {
+                    Duration::ZERO
+                };
+                let not_before = Instant::now() + acquire_delay;
+                self.queued_gpu_presentations
+                    .push_back(QueuedGpuPresentation {
+                        submission: live_submission,
+                        transactions: batch.transactions.clone(),
+                        cpu_background: cpu_background.clone(),
+                        target: transaction.target_geometry,
+                        deadline: not_before
+                            + Duration::from_millis(u64::from(
+                                transaction.timeout_msec.clamp(100, 2_000),
+                            )),
+                        not_before,
+                    });
+            }
+            self.layers
+                .retain(|surface, _| !batch.removed_surfaces.contains(surface));
+            for transaction in &batch.transactions {
+                self.layers.insert(transaction.surface, transaction.clone());
+            }
+            return self.drive_gpu_presentation(native_scanout.as_deref_mut());
+        }
         self.run_authority_transactions(
             batch.transaction,
             &batch.transactions,
@@ -3061,6 +3264,198 @@ impl PersistentBackendRuntime {
             native_frames,
             wm_update,
         )
+    }
+
+    fn observe_presentation_resources(
+        &mut self,
+        batch: &XAuthorityObservedTransactionBatch,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        for registration in &batch.dma_buf_registrations {
+            let plane_fds = registration
+                .plane_fds
+                .iter()
+                .map(|fd| fd.as_ref().try_clone())
+                .collect::<Result<Vec<_>, _>>()?;
+            self.presentation_resources
+                .register_source(registration.descriptor, plane_fds)?;
+        }
+        for registration in &batch.fence_registrations {
+            self.presentation_resources.register_fence(
+                registration.handle,
+                registration.initially_triggered,
+                registration.fd.as_ref().try_clone()?,
+            )?;
+        }
+        for handle in &batch.released_dma_bufs {
+            let _ = self.presentation_resources.release_source(*handle);
+        }
+        for handle in &batch.released_fences {
+            let _ = self.presentation_resources.release_fence(*handle);
+        }
+        Ok(())
+    }
+
+    fn drive_gpu_presentation(
+        &mut self,
+        mut native_scanout: Option<&mut PersistentNativeScanout>,
+    ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
+        if self.submitted_gpu_presentation.is_some() {
+            return self.run_observation_tick();
+        }
+        let Some(queued) = self.queued_gpu_presentations.front() else {
+            return self.run_observation_tick();
+        };
+        let transaction = queued.submission.transaction;
+        if Instant::now() < queued.not_before {
+            self.present_acquire_waits = self.present_acquire_waits.saturating_add(1);
+            return self.run_observation_tick();
+        }
+        if !self
+            .presentation_resources
+            .poll_acquire_fence(transaction)?
+        {
+            self.present_acquire_waits = self.present_acquire_waits.saturating_add(1);
+            if Instant::now() >= queued.deadline {
+                self.queued_gpu_presentations.pop_front();
+                self.reject_gpu_presentation(transaction, 0, 0);
+            }
+            return self.run_observation_tick();
+        }
+        if self.reject_first_present {
+            self.reject_first_present = false;
+            self.present_controlled_rejections =
+                self.present_controlled_rejections.saturating_add(1);
+            self.queued_gpu_presentations.pop_front();
+            self.reject_gpu_presentation(transaction, 0, 0);
+            return self.run_observation_tick();
+        }
+        let Some(native_scanout) = native_scanout.as_deref_mut() else {
+            self.queued_gpu_presentations.pop_front();
+            self.reject_gpu_presentation(transaction, 0, 0);
+            return self.run_observation_tick();
+        };
+        if self.native_scanout_in_flight() {
+            return self.run_observation_tick();
+        }
+
+        let mut prepared = BTreeMap::new();
+        for (output_id, output) in &self.outputs {
+            let assembly = output.runtime.assembly();
+            let candidate = assembly.engine().prepare_surface_transactions(
+                transaction,
+                &queued.transactions,
+                assembly.committed_surfaces(),
+            );
+            if !candidate.is_ready() {
+                self.queued_gpu_presentations.pop_front();
+                self.reject_gpu_presentation(transaction, 0, 0);
+                return self.run_observation_tick();
+            }
+            prepared.insert(*output_id, candidate);
+        }
+        let mixed = self.presentation_resources.build_mixed_frame(
+            transaction,
+            queued.cpu_background.clone(),
+            queued.target,
+            None,
+            1.0,
+        )?;
+        native_scanout.queue_mixed_frame(0, mixed);
+
+        let transactions = self.layers.values().cloned().collect::<Vec<_>>();
+        let first_output = self
+            .outputs
+            .values_mut()
+            .next()
+            .ok_or("persistent backend runtime has no outputs")?;
+        let report = native_scanout.run_tick(
+            0,
+            &mut first_output.runtime,
+            compositor_tick_input(&transactions, 0, None),
+        )?;
+        use sophia_backend_live::LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus as Status;
+        match report
+            .rendered_primary_plane_scanout_submit
+            .map(|submit| submit.status)
+        {
+            Some(Status::SubmittedWaitingForPageFlip) => {
+                // run_tick polls callbacks before it submits this frame. Any
+                // feedback already queued here therefore belongs to an older
+                // CPU frame and must not retire this Present transaction.
+                native_scanout.discard_presentation_feedback(self.outputs.keys().next().copied());
+                self.presentation_resources.mark_submitted(transaction)?;
+                self.queued_gpu_presentations.pop_front();
+                self.submitted_gpu_presentation = Some(SubmittedGpuPresentation {
+                    transaction,
+                    prepared,
+                });
+            }
+            Some(Status::AlreadyInFlight | Status::CleanupPending) | None => {}
+            Some(_) => {
+                self.queued_gpu_presentations.pop_front();
+                self.reject_gpu_presentation(transaction, 0, 0);
+            }
+        }
+        Ok(report)
+    }
+
+    fn run_observation_tick(
+        &mut self,
+    ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
+        let transactions = self.layers.values().cloned().collect::<Vec<_>>();
+        let output = self
+            .outputs
+            .values_mut()
+            .next()
+            .ok_or("persistent backend runtime has no outputs")?;
+        Ok(output
+            .runtime
+            .run_tick(compositor_tick_input(&transactions, 0, None))?)
+    }
+
+    fn reject_gpu_presentation(&mut self, transaction: TransactionId, ust: u64, msc: u64) {
+        if let Some(router) = self.protocol_router.as_ref() {
+            let _ =
+                router.route_present_complete(transaction, ust, msc, XPresentCompletionMode::Skip);
+        }
+        self.present_complete_skip = self.present_complete_skip.saturating_add(1);
+        if let Some(retirement) = self.presentation_resources.reject(transaction)
+            && retirement.idle_fence == sophia_backend_live::LiveIdleFenceStatus::Triggered
+        {
+            self.idle_fence_triggers = self.idle_fence_triggers.saturating_add(1);
+        }
+        if let Some(router) = self.protocol_router.as_ref() {
+            let _ = router.route_present_idle(transaction);
+        }
+        self.present_idle = self.present_idle.saturating_add(1);
+    }
+
+    fn shutdown_presentations(&mut self) {
+        let queued = self
+            .queued_gpu_presentations
+            .drain(..)
+            .map(|queued| queued.submission.transaction)
+            .collect::<Vec<_>>();
+        for transaction in queued {
+            self.reject_gpu_presentation(transaction, 0, 0);
+        }
+        if let Some(submitted) = self.submitted_gpu_presentation.take() {
+            self.reject_gpu_presentation(submitted.transaction, 0, 0);
+        }
+
+        let report = self.presentation_resources.disconnect();
+        self.idle_fence_triggers = self
+            .idle_fence_triggers
+            .saturating_add(report.triggered_idle_fences);
+        self.presentation_disconnect_sources = self
+            .presentation_disconnect_sources
+            .saturating_add(report.released_sources.len());
+        self.presentation_disconnect_fences = self
+            .presentation_disconnect_fences
+            .saturating_add(report.released_fences.len());
+        self.presentation_disconnect_failures = self
+            .presentation_disconnect_failures
+            .saturating_add(report.failed_idle_fences);
     }
 
     fn run_authority_transactions(
@@ -3292,6 +3687,58 @@ impl PersistentBackendRuntime {
                 }
             }
         }
+        if let Some(primary) = self.outputs.keys().next().copied()
+            && let Some((ust, msc)) = native_scanout.take_presentation_feedback(primary)
+        {
+            self.finalize_gpu_page_flip(ust, msc)?;
+        }
+        Ok(())
+    }
+
+    fn finalize_gpu_page_flip(
+        &mut self,
+        ust: u64,
+        msc: u64,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let Some(submitted) = self.submitted_gpu_presentation.take() else {
+            return Ok(());
+        };
+        for (output_id, prepared) in submitted.prepared {
+            let output = self
+                .outputs
+                .get_mut(&output_id)
+                .ok_or("prepared presentation referenced an unknown output")?;
+            let engine = output.runtime.assembly().engine().clone();
+            let mut committed = output.runtime.assembly().committed_surfaces().to_vec();
+            let commit = engine.apply_prepared_surface_commit(prepared, &mut committed);
+            if commit.outcome != TransactionOutcome::Committed {
+                return Err("page flip could not apply its prepared Engine commit".into());
+            }
+            output
+                .runtime
+                .assembly_mut()
+                .replace_committed_surfaces(committed);
+        }
+        if let Some(router) = self.protocol_router.as_ref() {
+            let _ = router.route_present_complete(
+                submitted.transaction,
+                ust,
+                msc,
+                XPresentCompletionMode::Flip,
+            );
+        }
+        self.present_complete_flip = self.present_complete_flip.saturating_add(1);
+        if let Some(retirement) = self
+            .presentation_resources
+            .retire_page_flip(submitted.transaction)
+            && retirement.idle_fence == sophia_backend_live::LiveIdleFenceStatus::Triggered
+        {
+            self.idle_fence_triggers = self.idle_fence_triggers.saturating_add(1);
+        }
+        if let Some(router) = self.protocol_router.as_ref() {
+            let _ = router.route_present_idle(submitted.transaction);
+        }
+        self.present_idle = self.present_idle.saturating_add(1);
         Ok(())
     }
 
@@ -3841,6 +4288,7 @@ struct PersistentNativeScanout {
     presentation_started: Instant,
     vsync_overlap_rejections: usize,
     page_flip_phase_rejections: usize,
+    presentation_feedback: VecDeque<(OutputId, u64, u64)>,
 }
 
 struct PersistentNativeGroup {
@@ -4009,6 +4457,7 @@ impl PersistentNativeScanout {
             presentation_started: Instant::now(),
             vsync_overlap_rejections: 0,
             page_flip_phase_rejections: 0,
+            presentation_feedback: VecDeque::new(),
         })
     }
 
@@ -4184,6 +4633,10 @@ impl PersistentNativeScanout {
                     self.page_flip_phase_rejections =
                         self.page_flip_phase_rejections.saturating_add(1);
                 }
+                let ust = u64::try_from(self.presentation_started.elapsed().as_micros())
+                    .unwrap_or(u64::MAX);
+                self.presentation_feedback
+                    .push_back((output, ust, kernel_sequence));
             }
             if let Some(frame_serial) = self.heads[index].scheduled_frame.take()
                 && !matches!(
@@ -4248,15 +4701,54 @@ impl PersistentNativeScanout {
             .set_pending_cpu_frame_with_checksum(frame.frame, frame.checksum);
     }
 
+    fn queue_mixed_frame(
+        &mut self,
+        index: usize,
+        frame: sophia_backend_live::LiveOwnedMixedCompositionFrame,
+    ) {
+        self.heads[index].exporter.set_pending_mixed_frame(frame);
+    }
+
+    fn take_presentation_feedback(&mut self, output: OutputId) -> Option<(u64, u64)> {
+        let index = self
+            .presentation_feedback
+            .iter()
+            .position(|(candidate, _, _)| *candidate == output)?;
+        let (_, ust, msc) = self.presentation_feedback.remove(index)?;
+        Some((ust, msc))
+    }
+
+    fn discard_presentation_feedback(&mut self, output: Option<OutputId>) {
+        match output {
+            Some(output) => self
+                .presentation_feedback
+                .retain(|(candidate, _, _)| *candidate != output),
+            None => self.presentation_feedback.clear(),
+        }
+    }
+
     fn pending_frame(&self, index: usize) -> bool {
         self.heads[index].exporter.pending_cpu_frame()
             || self.heads[index].exporter.pending_dmabuf_frame()
+            || self.heads[index].exporter.pending_mixed_frame()
     }
 
     fn export_attempts(&self) -> usize {
         self.heads
             .iter()
             .map(|head| head.exporter.cpu_frame_export_attempts())
+            .chain(
+                self.heads
+                    .iter()
+                    .map(|head| head.exporter.mixed_frame_export_attempts()),
+            )
+            .sum()
+    }
+
+    fn mixed_exports(&self) -> usize {
+        self.heads
+            .iter()
+            .map(|head| head.exporter.mixed_frame_exports())
             .sum()
     }
 

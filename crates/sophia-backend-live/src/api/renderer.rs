@@ -18,6 +18,7 @@ pub use sophia_renderer_live::{
 };
 #[cfg(feature = "gbm-probe")]
 pub use sophia_renderer_live::{
-    GbmCapabilityProbeReport, LiveDmaBufFrame, LiveOwnedDmaBufFrame, NativeGbmCapabilityProbe,
+    GbmCapabilityProbeReport, LiveDmaBufFrame, LiveIdleFenceStatus, LiveOwnedDmaBufFrame,
+    LiveOwnedMixedCompositionFrame, LiveResourceReleaseStatus, NativeGbmCapabilityProbe,
     NativeGbmRenderedScanoutContextStatus,
 };

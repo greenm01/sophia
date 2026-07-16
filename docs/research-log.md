@@ -981,3 +981,66 @@ emit Present Complete and Idle after the broker moves into its service thread.
 It is intentionally not attached to the current CPU fallback submission: doing
 so would acknowledge a page flip that did not contain the imported Vulkan
 pixels.
+
+## 2026-07-15: Milestone 4 Live-Presentation Handoff
+
+Commit `11f93ee` leaves Milestone 4 at the boundary between proven protocol
+transport and unimplemented native GPU presentation. The frontend publishes
+DMA-BUF registrations, fence registrations, and Present submissions through
+`XAuthorityObservedTransactionBatch`. `LiveDmaBufPresentationRegistry` owns the
+reusable source and per-Present FD model, and
+`XServerFrontendProtocolRouter` owns protocol-only completion delivery. No
+persistent-session consumer currently connects those pieces, so the bounded
+`vkcube` result remains Engine-transaction evidence rather than proof that its
+Vulkan pixels reached KMS.
+
+The current live-session assembly is also an explicit architecture debt.
+`PersistentNativeScanout` and `PersistentCpuScene` remain in the CLI command;
+the latter retains a CPU-only `SurfaceId` projection outside the normative
+Engine scene owner. Moving the entire session loop before proving GPU
+presentation would broaden the active milestone, while wiring more durable
+scene and renderer authority directly into the CLI would deepen the debt.
+
+The chosen continuation is a narrow hybrid extraction. Establish an
+Engine/backend-owned live-presentation seam, then move only DMA-BUF import,
+acquire-fence polling, mixed CPU/GPU composition, KMS submission correlation,
+and page-flip retirement through it. Source and fence FDs transfer immediately
+into renderer-private ownership. Engine preserves the last committed
+geometry-plus-pixels state while a presentation is pending or rejected. Only a
+real page flip containing the imported pixels may route Present Complete, then
+Idle, trigger the idle fence, and retire the presentation exactly once. Broader
+CLI session-loop extraction and Milestone 5 compatibility work remain deferred
+until the software-plus-`vkcube` native KMS matrix passes.
+
+## 2026-07-15: Milestone 4 Mixed-Presentation Implementation
+
+The narrow handoff is now implemented without moving protocol or native object
+ownership into Engine. The X frontend assigns typed buffer/fence handles and
+routes feedback by exact `TransactionId`. `LivePresentationResourceSession`
+immediately duplicates frontend registrations into renderer-private ownership,
+polls xshmfences, builds mixed CPU/DMA-BUF frames, and retains reusable DRI3
+sources separately from individual Present lifetimes. The native EGL path
+supports one-to-four-plane EGLImages, clipped placement, alpha blending, and a
+single persistent output composition pass.
+
+Engine now exposes a prepared surface commit for asynchronous presentation.
+Preparation does not mutate committed state. Page-flip application revalidates
+only surfaces touched by the prepared transaction, which prevents stale GPU
+callbacks from overwriting a newer version of the same surface while allowing
+unrelated CPU surfaces to continue committing. Rejection and disconnect drop
+the candidate. Successful native feedback applies the candidate, routes Present
+Complete with Flip mode, retires the renderer presentation and idle fence, then
+routes Idle. Teardown converts remaining queued work to Skip/Idle and asserts
+that no source, fence, presentation, or cleanup debt remains.
+
+The offline all-feature workspace suite passes, including prepared-commit
+merge/stale regressions, real xshmfence wait/trigger tests, repeated-pixmap and
+deferred-release tests, mixed-frame backend ownership, multi-plane renderer
+validation, and exact transaction routing. The schema-14 session evidence adds
+mixed-export, acquire-wait, completion, idle-fence, and live-resource counters.
+`tools/live_session_milestone4_hardware_proof.sh` pairs the established software
+resize proof with a `vkcube`/CPU mixed session, controlled first acquire delay,
+one rejected Present, required later Flip recovery, and strict teardown checks.
+Its verifier passes positive and missing-mixed-export fixtures. The exclusive
+TTY X13 run is deliberately still unclaimed and is the remaining Milestone 4
+exit action.

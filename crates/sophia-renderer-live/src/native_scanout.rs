@@ -1,9 +1,10 @@
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 
 use crate::{
-    LiveGbmEglFrameTargetRecord, LiveRendererScanoutBufferDescriptor,
+    LiveCpuBufferSourceRef, LiveGbmEglFrameTargetRecord, LiveRendererScanoutBufferDescriptor,
     LiveRendererScanoutBufferExportDetail, LiveRendererScanoutBufferExportStatus, Size,
 };
+use sophia_protocol::{DRM_FORMAT_ARGB8888, DRM_FORMAT_XRGB8888, Rect, Transform};
 
 #[derive(Debug)]
 pub struct NativeGbmOwnedScanoutBuffer {
@@ -98,6 +99,67 @@ pub struct LiveOwnedDmaBufFrame {
     pub fd: OwnedFd,
     pub offset: u32,
     pub stride: u32,
+}
+
+#[derive(Debug)]
+pub struct LiveOwnedDmaBufPlane {
+    pub fd: OwnedFd,
+    pub offset: u32,
+    pub stride: u32,
+}
+
+#[derive(Debug)]
+pub struct LiveOwnedMultiPlaneDmaBufFrame {
+    pub width: u32,
+    pub height: u32,
+    pub format: u32,
+    pub modifier: u64,
+    pub plane_count: u8,
+    pub planes: [Option<LiveOwnedDmaBufPlane>; 4],
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct LiveCompositionPlacement {
+    pub target: Rect,
+    pub clip: Option<Rect>,
+    pub transform: Transform,
+    pub alpha: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum LiveMixedCompositionLayer<'a> {
+    Cpu {
+        buffer: LiveCpuBufferSourceRef<'a>,
+        placement: LiveCompositionPlacement,
+    },
+    DmaBuf {
+        frame: &'a LiveOwnedMultiPlaneDmaBufFrame,
+        placement: LiveCompositionPlacement,
+    },
+}
+
+#[derive(Debug)]
+pub enum LiveOwnedMixedCompositionLayer {
+    Cpu {
+        buffer: crate::LiveCpuBufferSource,
+        placement: LiveCompositionPlacement,
+    },
+    DmaBuf {
+        frame: LiveOwnedMultiPlaneDmaBufFrame,
+        placement: LiveCompositionPlacement,
+    },
+}
+
+#[derive(Debug, Default)]
+pub struct LiveOwnedMixedCompositionFrame {
+    pub layers: Vec<LiveOwnedMixedCompositionLayer>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LiveMixedCompositionError {
+    InvalidOutput,
+    InvalidLayer,
+    UnsupportedTransform,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -278,6 +340,122 @@ where
         )
     }
 
+    pub fn export_mixed_owned_scanout_buffer_with_modifiers(
+        &mut self,
+        target: LiveGbmEglFrameTargetRecord,
+        layers: &[LiveMixedCompositionLayer<'_>],
+        preferred_modifiers: &[u64],
+    ) -> Result<NativeGbmOwnedScanoutBufferExportReport, LiveMixedCompositionError> {
+        if !target.is_valid_scanout_target() {
+            return Err(LiveMixedCompositionError::InvalidOutput);
+        }
+        let native_layers = layers
+            .iter()
+            .map(|layer| match layer {
+                LiveMixedCompositionLayer::Cpu { buffer, placement } => {
+                    validate_placement(*placement)?;
+                    if buffer.size.width <= 0
+                        || buffer.size.height <= 0
+                        || !matches!(buffer.format, DRM_FORMAT_XRGB8888 | DRM_FORMAT_ARGB8888)
+                    {
+                        return Err(LiveMixedCompositionError::InvalidLayer);
+                    }
+                    Ok(sophia_renderer_native_egl::NativeCompositionLayer::Cpu(
+                        sophia_renderer_native_egl::NativeCpuCompositionLayer {
+                            width: buffer.size.width as u32,
+                            height: buffer.size.height as u32,
+                            stride: buffer.stride,
+                            format: buffer.format,
+                            pixels: buffer.bytes,
+                            target: native_rect(placement.target),
+                            clip: placement.clip.map(native_rect),
+                            alpha: placement.alpha,
+                        },
+                    ))
+                }
+                LiveMixedCompositionLayer::DmaBuf { frame, placement } => {
+                    validate_placement(*placement)?;
+                    if frame.width == 0
+                        || frame.height == 0
+                        || frame.plane_count == 0
+                        || usize::from(frame.plane_count) > frame.planes.len()
+                    {
+                        return Err(LiveMixedCompositionError::InvalidLayer);
+                    }
+                    let planes = std::array::from_fn(|index| {
+                        frame.planes[index].as_ref().map(|plane| {
+                            sophia_renderer_native_egl::NativeDmaBufPlane {
+                                fd: plane.fd.as_fd(),
+                                offset: plane.offset,
+                                stride: plane.stride,
+                            }
+                        })
+                    });
+                    Ok(sophia_renderer_native_egl::NativeCompositionLayer::DmaBuf(
+                        sophia_renderer_native_egl::NativeDmaBufCompositionLayer {
+                            frame: sophia_renderer_native_egl::NativeMultiPlaneDmaBufFrame {
+                                width: frame.width,
+                                height: frame.height,
+                                format: frame.format,
+                                modifier: frame.modifier,
+                                plane_count: frame.plane_count,
+                                planes,
+                            },
+                            target: native_rect(placement.target),
+                            clip: placement.clip.map(native_rect),
+                            alpha: placement.alpha,
+                        },
+                    ))
+                }
+            })
+            .collect::<Result<Vec<_>, LiveMixedCompositionError>>()?;
+        Ok(reduced_native_owned_scanout_buffer_export_report(
+            self.inner
+                .export_composed_owned_scanout_buffer_with_modifiers(
+                    sophia_renderer_native_egl::NativeCompositionFrame {
+                        width: target.size.width as u32,
+                        height: target.size.height as u32,
+                        layers: &native_layers,
+                    },
+                    preferred_modifiers,
+                ),
+        ))
+    }
+
+    pub fn export_owned_mixed_frame_with_modifiers(
+        &mut self,
+        target: LiveGbmEglFrameTargetRecord,
+        frame: &LiveOwnedMixedCompositionFrame,
+        preferred_modifiers: &[u64],
+    ) -> Result<NativeGbmOwnedScanoutBufferExportReport, LiveMixedCompositionError> {
+        let layers = frame
+            .layers
+            .iter()
+            .map(|layer| match layer {
+                LiveOwnedMixedCompositionLayer::Cpu { buffer, placement } => {
+                    LiveMixedCompositionLayer::Cpu {
+                        buffer: LiveCpuBufferSourceRef {
+                            handle: buffer.handle,
+                            size: buffer.size,
+                            stride: buffer.stride,
+                            format: buffer.format,
+                            generation: buffer.generation,
+                            bytes: &buffer.bytes,
+                        },
+                        placement: *placement,
+                    }
+                }
+                LiveOwnedMixedCompositionLayer::DmaBuf { frame, placement } => {
+                    LiveMixedCompositionLayer::DmaBuf {
+                        frame,
+                        placement: *placement,
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+        self.export_mixed_owned_scanout_buffer_with_modifiers(target, &layers, preferred_modifiers)
+    }
+
     pub fn export_rendered_owned_scanout_buffer_with_modifiers_from_backend_device_result<
         Device: AsFd,
     >(
@@ -301,6 +479,27 @@ where
                 preferred_modifiers,
             ),
         )
+    }
+}
+
+fn validate_placement(
+    placement: LiveCompositionPlacement,
+) -> Result<(), LiveMixedCompositionError> {
+    if placement.transform != Transform::IDENTITY {
+        return Err(LiveMixedCompositionError::UnsupportedTransform);
+    }
+    if placement.target.is_empty() || !placement.alpha.is_finite() {
+        return Err(LiveMixedCompositionError::InvalidLayer);
+    }
+    Ok(())
+}
+
+const fn native_rect(rect: Rect) -> sophia_renderer_native_egl::NativeCompositionRect {
+    sophia_renderer_native_egl::NativeCompositionRect {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
     }
 }
 

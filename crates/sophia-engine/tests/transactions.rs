@@ -573,6 +573,103 @@ fn pending_surface_transaction_preserves_committed_state() {
 }
 
 #[test]
+fn prepared_surface_transaction_does_not_mutate_until_applied() {
+    let engine = HeadlessEngine::default();
+    let old_layer = test_layer(0, 0, 0, Region::empty());
+    let mut committed = vec![engine.committed_state_from_layer(&old_layer)];
+    let before = committed.clone();
+    let mut next_layer = old_layer.clone();
+    next_layer.geometry.width = 500;
+    next_layer.source = BufferSource::DmaBuf { handle: 91 };
+    let transaction = next_layer.to_surface_transaction(
+        TransactionId::from_raw(701),
+        AuthorityKind::SophiaX,
+        SurfaceTransactionReadiness::Ready,
+        250,
+        1,
+    );
+
+    let prepared = engine.prepare_surface_transactions(
+        TransactionId::from_raw(701),
+        &[transaction],
+        &committed,
+    );
+
+    assert!(prepared.is_ready());
+    assert_eq!(committed, before);
+    assert_eq!(prepared.candidate()[0].geometry.width, 500);
+    assert_eq!(
+        prepared.candidate()[0].buffer,
+        BufferSource::DmaBuf { handle: 91 }
+    );
+
+    let commit = engine.apply_prepared_surface_commit(prepared, &mut committed);
+    assert_eq!(commit.outcome, TransactionOutcome::Committed);
+    assert_eq!(committed[0].geometry.width, 500);
+}
+
+#[test]
+fn prepared_surface_transaction_rejects_a_changed_baseline() {
+    let engine = HeadlessEngine::default();
+    let old_layer = test_layer(0, 0, 0, Region::empty());
+    let mut committed = vec![engine.committed_state_from_layer(&old_layer)];
+    let transaction = old_layer.to_surface_transaction(
+        TransactionId::from_raw(702),
+        AuthorityKind::SophiaX,
+        SurfaceTransactionReadiness::Ready,
+        250,
+        1,
+    );
+    let prepared = engine.prepare_surface_transactions(
+        TransactionId::from_raw(702),
+        &[transaction],
+        &committed,
+    );
+    committed[0].committed_generation = 2;
+    let changed = committed.clone();
+
+    let commit = engine.apply_prepared_surface_commit(prepared, &mut committed);
+
+    assert_eq!(commit.outcome, TransactionOutcome::RejectedStaleSurface);
+    assert!(commit.applied_surfaces.is_empty());
+    assert_eq!(committed, changed);
+}
+
+#[test]
+fn prepared_surface_transaction_preserves_an_unrelated_newer_commit() {
+    let engine = HeadlessEngine::default();
+    let old_layer = test_layer(0, 0, 0, Region::empty());
+    let unrelated_layer = test_layer(1, 1, 0, Region::empty());
+    let mut committed = vec![
+        engine.committed_state_from_layer(&old_layer),
+        engine.committed_state_from_layer(&unrelated_layer),
+    ];
+    let mut next_layer = old_layer.clone();
+    next_layer.source = BufferSource::DmaBuf { handle: 92 };
+    let transaction = next_layer.to_surface_transaction(
+        TransactionId::from_raw(703),
+        AuthorityKind::SophiaX,
+        SurfaceTransactionReadiness::Ready,
+        250,
+        1,
+    );
+    let prepared = engine.prepare_surface_transactions(
+        TransactionId::from_raw(703),
+        &[transaction],
+        &committed,
+    );
+    committed[1].committed_generation = 9;
+    committed[1].geometry.x = 77;
+
+    let commit = engine.apply_prepared_surface_commit(prepared, &mut committed);
+
+    assert_eq!(commit.outcome, TransactionOutcome::Committed);
+    assert_eq!(committed[0].buffer, BufferSource::DmaBuf { handle: 92 });
+    assert_eq!(committed[1].committed_generation, 9);
+    assert_eq!(committed[1].geometry.x, 77);
+}
+
+#[test]
 fn failed_surface_transaction_preserves_committed_state() {
     let engine = HeadlessEngine::default();
     let old_layer = test_layer(0, 0, 0, Region::empty());

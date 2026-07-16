@@ -249,14 +249,21 @@ Sophia is split by authority, not by convenience.
 
 Sophia is a research prototype. The primary development track is now the native
 Sophia X Server Frontend. The bounded portal reference flow is complete; X11
-session correctness is the active milestone.
-The frontend runs two concurrent real xterms through Engine-owned composition
-and KMS with client-targeted input. Retained dedicated-TTY evidence completes in
-1,487 ms with 10 ms maximum composition, 23 ms input-to-presentation, all 14
-X11 input events flushed, and clean teardown. This is hardware evidence, not a
-complete desktop session: Engine-derived output/RandR facts, normal resize,
-XKB, grabs, and presentation feedback remain. Confined routing has bounded
-socket evidence but not yet a corresponding hardware session proof.
+buffer and presentation semantics are the active milestone. The completed
+session-correctness milestone retains paired classic-shared and fresh confined
+two-xterm evidence through Engine-owned composition and KMS. Both profiles use
+physical keyboard and pointer input, Engine-derived output facts, authenticated
+RandR delivery, configure-plus-pixels resize, and clean teardown; retained X13
+runs reported 94/90 ms startup readiness and 13 ms maximum composition.
+
+Standard DRI3 1.2 now carries FD-bearing `Open`, modifier-bearing multi-plane
+pixmaps, xshmfences, and Present transactions through the native frontend. The
+persistent renderer imports those typed resources, gates acquire fences,
+composes DMA-BUF and CPU layers, and applies the prepared Engine state only
+after matching native page-flip feedback. Complete-before-Idle delivery,
+idle-fence triggering, rejection preservation, and exact teardown are covered
+by the offline suite. The remaining Milestone 4 boundary is running and
+retaining the guarded software-plus-`vkcube` X13 KMS matrix.
 
 The namespace-keyed X resource model, profile/capability/admission types,
 session-owned in-memory registry, explicit classic/confined live launch

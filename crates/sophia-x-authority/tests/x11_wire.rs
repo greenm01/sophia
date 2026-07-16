@@ -4416,6 +4416,8 @@ fn x11_dispatch_accepts_destroy_window_for_known_namespace_window() {
             dma_buf_registrations: Vec::new(),
             fence_registrations: Vec::new(),
             present_submissions: Vec::new(),
+            released_dma_bufs: Vec::new(),
+            released_fences: Vec::new(),
         })
     );
 }
@@ -5184,10 +5186,18 @@ fn protocol_router_remains_usable_after_route_broker_moves_or_drops() {
     drop(broker);
 
     assert_eq!(
-        router.route_present_complete(SurfaceId::new(91, 1), 10, 20),
+        router.route_present_complete(
+            TransactionId::from_raw(91),
+            10,
+            20,
+            XPresentCompletionMode::Flip,
+        ),
         Ok(false)
     );
-    assert_eq!(second.route_present_idle(SurfaceId::new(91, 1)), Ok(false));
+    assert_eq!(
+        second.route_present_idle(TransactionId::from_raw(91)),
+        Ok(false)
+    );
 }
 
 #[cfg(unix)]
@@ -7267,6 +7277,8 @@ fn x11_core_socket_channel_sees_sophia_present_transaction_batch() {
         dma_buf_registrations: Vec::new(),
         fence_registrations: Vec::new(),
         present_submissions: Vec::new(),
+        released_dma_bufs: Vec::new(),
+        released_fences: Vec::new(),
     });
     assert!(routes.is_empty());
 }

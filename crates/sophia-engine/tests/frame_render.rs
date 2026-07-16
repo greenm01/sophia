@@ -122,4 +122,6 @@ fn frame_snapshot_replays_with_mock_surfaces() {
     assert_eq!(replay.frame_serial, 11);
     assert_eq!(replay.steps.len(), 2);
     assert_eq!(replay.steps[0].source, Some(frame.layers[0].surface));
+    assert_eq!(replay.steps[0].clip, frame.commands[0].clip);
+    assert_eq!(replay.steps[0].transform, frame.commands[0].transform);
 }

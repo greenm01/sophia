@@ -31,13 +31,16 @@ impl Eq for XAuthorityDmaBufRegistration {}
 #[derive(Clone, Debug)]
 pub struct XAuthorityFenceRegistration {
     pub fence: crate::XResourceId,
+    pub handle: sophia_protocol::FenceHandle,
     pub initially_triggered: bool,
     pub fd: Arc<OwnedFd>,
 }
 
 impl PartialEq for XAuthorityFenceRegistration {
     fn eq(&self, other: &Self) -> bool {
-        self.fence == other.fence && self.initially_triggered == other.initially_triggered
+        self.fence == other.fence
+            && self.handle == other.handle
+            && self.initially_triggered == other.initially_triggered
     }
 }
 
@@ -57,6 +60,8 @@ pub struct XAuthorityObservedTransactionBatch {
     pub dma_buf_registrations: Vec<XAuthorityDmaBufRegistration>,
     pub fence_registrations: Vec<XAuthorityFenceRegistration>,
     pub present_submissions: Vec<crate::XAuthorityPresentSubmission>,
+    pub released_dma_bufs: Vec<sophia_protocol::BufferHandle>,
+    pub released_fences: Vec<sophia_protocol::FenceHandle>,
 }
 
 impl XAuthorityObservedTransactionBatch {
@@ -75,6 +80,8 @@ impl XAuthorityObservedTransactionBatch {
             dma_buf_registrations: Vec::new(),
             fence_registrations: Vec::new(),
             present_submissions: Vec::new(),
+            released_dma_bufs: Vec::new(),
+            released_fences: Vec::new(),
         })
     }
 
@@ -101,6 +108,7 @@ impl XAuthorityObservedTransactionBatch {
             .and_then(|import| {
                 Some(XAuthorityFenceRegistration {
                     fence: import.fence,
+                    handle: import.handle,
                     initially_triggered: import.initially_triggered,
                     fd: Arc::new(trace.received_fds.first()?.try_clone().ok()?),
                 })
@@ -112,6 +120,8 @@ impl XAuthorityObservedTransactionBatch {
             && dma_buf_registrations.is_empty()
             && fence_registrations.is_empty()
             && trace.present_submission.is_none()
+            && trace.released_dma_bufs.is_empty()
+            && trace.released_fences.is_empty()
         {
             return None;
         }
@@ -126,6 +136,8 @@ impl XAuthorityObservedTransactionBatch {
             && dma_buf_registrations.is_empty()
             && fence_registrations.is_empty()
             && trace.present_submission.is_none()
+            && trace.released_dma_bufs.is_empty()
+            && trace.released_fences.is_empty()
         {
             return None;
         }
@@ -141,6 +153,8 @@ impl XAuthorityObservedTransactionBatch {
             dma_buf_registrations,
             fence_registrations,
             present_submissions: trace.present_submission.into_iter().collect(),
+            released_dma_bufs: trace.released_dma_bufs.to_vec(),
+            released_fences: trace.released_fences.to_vec(),
         })
     }
 }

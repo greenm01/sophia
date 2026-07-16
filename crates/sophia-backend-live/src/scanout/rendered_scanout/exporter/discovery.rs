@@ -26,10 +26,13 @@ where
     last_export_status: Option<LiveRendererScanoutBufferExportStatus>,
     pending_cpu_frame: Option<LiveCpuComposedFrame>,
     pending_dmabuf_frame: Option<sophia_renderer_live::LiveOwnedDmaBufFrame>,
+    pending_mixed_frame: Option<sophia_renderer_live::LiveOwnedMixedCompositionFrame>,
     pending_cpu_frame_checksum: Option<u64>,
     cpu_frame_export_attempts: usize,
     dmabuf_frame_export_attempts: usize,
     dmabuf_frame_exports: usize,
+    mixed_frame_export_attempts: usize,
+    mixed_frame_exports: usize,
     last_cpu_frame_checksum: Option<u64>,
     last_cpu_frame_export_status: Option<LiveRendererScanoutBufferExportStatus>,
 }
@@ -52,10 +55,13 @@ where
             last_export_status: None,
             pending_cpu_frame: None,
             pending_dmabuf_frame: None,
+            pending_mixed_frame: None,
             pending_cpu_frame_checksum: None,
             cpu_frame_export_attempts: 0,
             dmabuf_frame_export_attempts: 0,
             dmabuf_frame_exports: 0,
+            mixed_frame_export_attempts: 0,
+            mixed_frame_exports: 0,
             last_cpu_frame_checksum: None,
             last_cpu_frame_export_status: None,
         }
@@ -135,6 +141,17 @@ where
         self.pending_dmabuf_frame.is_some()
     }
 
+    pub fn set_pending_mixed_frame(
+        &mut self,
+        frame: sophia_renderer_live::LiveOwnedMixedCompositionFrame,
+    ) {
+        self.pending_mixed_frame = Some(frame);
+    }
+
+    pub const fn pending_mixed_frame(&self) -> bool {
+        self.pending_mixed_frame.is_some()
+    }
+
     pub const fn cpu_frame_export_attempts(&self) -> usize {
         self.cpu_frame_export_attempts
     }
@@ -145,6 +162,14 @@ where
 
     pub const fn dmabuf_frame_exports(&self) -> usize {
         self.dmabuf_frame_exports
+    }
+
+    pub const fn mixed_frame_export_attempts(&self) -> usize {
+        self.mixed_frame_export_attempts
+    }
+
+    pub const fn mixed_frame_exports(&self) -> usize {
+        self.mixed_frame_exports
     }
 
     pub const fn last_cpu_frame_checksum(&self) -> Option<u64> {
@@ -215,37 +240,60 @@ where
             );
         };
 
-        let report = match self.pending_dmabuf_frame.take() {
+        let report = match self.pending_mixed_frame.take() {
             Some(frame) => {
-                self.dmabuf_frame_export_attempts =
-                    self.dmabuf_frame_export_attempts.saturating_add(1);
-                let report = context.export_dmabuf_owned_scanout_buffer_with_modifiers(
+                self.mixed_frame_export_attempts =
+                    self.mixed_frame_export_attempts.saturating_add(1);
+                match context.export_owned_mixed_frame_with_modifiers(
                     target,
-                    frame.as_frame(),
+                    &frame,
                     &self.preferred_modifiers,
-                );
-                if report.status == LiveRendererScanoutBufferExportStatus::Exported {
-                    self.dmabuf_frame_exports = self.dmabuf_frame_exports.saturating_add(1);
+                ) {
+                    Ok(report) => {
+                        if report.status == LiveRendererScanoutBufferExportStatus::Exported {
+                            self.mixed_frame_exports = self.mixed_frame_exports.saturating_add(1);
+                        }
+                        report
+                    }
+                    Err(_) => sophia_renderer_live::NativeGbmOwnedScanoutBufferExportReport::new(
+                        LiveRendererScanoutBufferExportStatus::InvalidTarget,
+                        LiveRendererScanoutBufferExportDetail::InvalidTarget,
+                        None,
+                    ),
                 }
-                report
             }
-            None => match self.pending_cpu_frame.take() {
+            None => match self.pending_dmabuf_frame.take() {
                 Some(frame) => {
-                    self.cpu_frame_export_attempts =
-                        self.cpu_frame_export_attempts.saturating_add(1);
-                    self.last_cpu_frame_checksum = self.pending_cpu_frame_checksum.take();
-                    let report = context.export_xrgb8888_owned_scanout_buffer_with_modifiers(
+                    self.dmabuf_frame_export_attempts =
+                        self.dmabuf_frame_export_attempts.saturating_add(1);
+                    let report = context.export_dmabuf_owned_scanout_buffer_with_modifiers(
                         target,
-                        &frame,
+                        frame.as_frame(),
                         &self.preferred_modifiers,
                     );
-                    self.last_cpu_frame_export_status = Some(report.status);
+                    if report.status == LiveRendererScanoutBufferExportStatus::Exported {
+                        self.dmabuf_frame_exports = self.dmabuf_frame_exports.saturating_add(1);
+                    }
                     report
                 }
-                None => context.export_rendered_owned_scanout_buffer_with_modifiers(
-                    target,
-                    &self.preferred_modifiers,
-                ),
+                None => match self.pending_cpu_frame.take() {
+                    Some(frame) => {
+                        self.cpu_frame_export_attempts =
+                            self.cpu_frame_export_attempts.saturating_add(1);
+                        self.last_cpu_frame_checksum = self.pending_cpu_frame_checksum.take();
+                        let report = context.export_xrgb8888_owned_scanout_buffer_with_modifiers(
+                            target,
+                            &frame,
+                            &self.preferred_modifiers,
+                        );
+                        self.last_cpu_frame_export_status = Some(report.status);
+                        report
+                    }
+                    None => context.export_rendered_owned_scanout_buffer_with_modifiers(
+                        target,
+                        &self.preferred_modifiers,
+                    ),
+                },
             },
         };
         let descriptor = report.buffer.as_ref().map(|buffer| buffer.descriptor());

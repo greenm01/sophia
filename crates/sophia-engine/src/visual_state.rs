@@ -48,6 +48,54 @@ pub struct SurfaceVisualStateTable {
     entries: BTreeMap<SurfaceId, SurfaceVisualStateEntry>,
 }
 
+/// A validated visual-state candidate that has not yet become authoritative.
+///
+/// Presentation backends may render this candidate and retain it across an
+/// asynchronous KMS submission. Applying it revalidates the committed baseline
+/// for every surface touched by the transaction, so a stale page-flip callback
+/// cannot overwrite newer state while unrelated surfaces may continue to
+/// commit. Dropping the value is the explicit discard operation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PreparedSurfaceCommit {
+    pub(crate) commit: TransactionCommit,
+    pub(crate) baseline: Vec<CommittedSurfaceState>,
+    pub(crate) candidate: Vec<CommittedSurfaceState>,
+}
+
+impl PreparedSurfaceCommit {
+    pub(crate) fn new(
+        commit: TransactionCommit,
+        baseline: Vec<CommittedSurfaceState>,
+        candidate: Vec<CommittedSurfaceState>,
+    ) -> Self {
+        Self {
+            commit,
+            baseline,
+            candidate,
+        }
+    }
+
+    pub const fn transaction(&self) -> TransactionId {
+        self.commit.transaction
+    }
+
+    pub const fn commit(&self) -> &TransactionCommit {
+        &self.commit
+    }
+
+    pub fn baseline(&self) -> &[CommittedSurfaceState] {
+        &self.baseline
+    }
+
+    pub fn candidate(&self) -> &[CommittedSurfaceState] {
+        &self.candidate
+    }
+
+    pub const fn is_ready(&self) -> bool {
+        matches!(self.commit.outcome, TransactionOutcome::Committed)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SurfaceTransactionCommitReadiness {
     Ready,

@@ -59,15 +59,19 @@ Sophia Engine:
 | Direction | Contract | Owner and rule |
 | --- | --- | --- |
 | X11 client → frontend | local Unix connection, setup authentication, X11 requests, and X resource lifetime | The frontend owns parsing, client identity, XIDs, atoms, windows, properties, selections, grabs, and client-visible replies/events. Production setup authentication must be explicit; an owner-only socket is a transport guard, not a replacement for X11 authorization. |
-| Frontend → Engine | `XAuthorityObservedTransactionBatch` containing the originating frontend client when available, `SurfaceTransaction` values, surface removals, and any CPU buffer update | This is the only visual ingress. The batch is bounded; backpressure is an error rather than an unbounded queue. Engine receives Sophia surface data, never raw X11 request parsing or XID ownership. |
+| Frontend → Engine/live-presentation intake | `XAuthorityObservedTransactionBatch` containing the originating frontend client when available, `SurfaceTransaction` values, surface removals, CPU buffer updates, DMA-BUF registrations, fence registrations, and Present submissions | This is the only visual ingress. The batch is bounded; backpressure is an error rather than an unbounded queue. A live consumer must transfer native FDs immediately into renderer-private ownership; Engine scene records receive Sophia surface and buffer facts, never raw X11 parsing, XID ownership, or native renderer objects. |
 | Engine → frontend | `RoutedInputRequest` plus `XAuthorityClientControlCommand` | Engine selects the physical-input surface and owns global/local coordinates. The frontend resolves the surface to its connection, applies authority-local XKB/pointer state, and requests X-visible focus or configure results. It returns client-labeled delivery/control acknowledgements. |
-| Engine → frontend | bounded `OutputTopologySnapshot` | Engine remains the source of physical output facts. Setup and populated RandR resources are derived from the current validated generation; dynamic RandR subscription events remain incomplete. |
-| Engine → frontend (next) | presentation/buffer-release feedback | Engine owns frame retirement and buffer lifetime. The frontend must never infer scanout completion itself. |
+| Engine → frontend | bounded `OutputTopologySnapshot` | Engine remains the source of physical output facts. Setup and populated RandR resources derive from the current validated generation; accepted live updates produce mask-selected screen, CRTC, output, and resource notifications. |
+| Engine/backend → frontend | `XServerFrontendProtocolRouter` presentation feedback | The cloneable protocol-only router emits Present Complete and Idle by exact `TransactionId`. It cannot route input, mutate scene state, import buffers, or submit scanout. The persistent session calls Complete only after the imported frame receives real page-flip feedback, then triggers release and calls Idle. |
 
-The existing implementation covers the second and third rows for the
-persistent native session: X11 socket dispatch emits bounded, client-attributed
-transaction batches, and Engine routes key/pointer events plus focus/configure
-commands back to the owning client. The frontend supports bounded concurrent
+The existing implementation covers every row. X11 socket dispatch
+emits bounded, client-attributed transaction batches; Engine routes key/pointer
+events plus focus/configure commands back to the owning client; accepted Engine
+topology updates drive RandR notifications; and the broker can clone a
+protocol-only Present feedback router. The persistent native session transfers
+registrations into backend-owned resource storage, renders mixed CPU/DMA-BUF
+frames, and routes the final row only from matching page-flip retirement. The
+frontend supports bounded concurrent
 workers: callers use
 `serve_next_concurrently[_traced]` to accept independent clients and
 `wait_for_clients` to reap the accepted batch. It shares only independently
@@ -91,13 +95,12 @@ surfaces, routes distinct key sequences by client ID, and proves two successive
 pixel changes before draining the service. The live launcher still starts one
 xterm by default, but `--secondary-terminal` starts and supervises a second
 xterm on the same bounded frontend. `tools/live_session_two_xterm_hardware_proof.sh`
-is the operator gate for KMS-backed evidence: it requires normal persistent
-session validation plus at least two composed CPU layers. Retained hardware
-evidence passes in 1,487 ms with 10 ms maximum composition, 23 ms
-input-to-presentation, all 14 X11 events flushed, and clean KMS teardown. This
-is `hardware`, not full `session`, evidence because dynamic output events,
-normal resize proof, full XKB wire compatibility, grabs, XI2, and confined
-admission remain incomplete. Initial Engine focus is now
+remains the earlier KMS-backed CPU-layer gate. The stricter
+`tools/live_session_milestone3_hardware_proof.sh` now supplies paired `session`
+evidence under classic-shared and fresh zero-capability confined profiles. Both
+runs require physical keyboard and pointer input, authenticated RandR delivery,
+configure-plus-pixels resize, two retained CPU layers, and clean KMS teardown.
+Initial Engine focus is
 acknowledged by the owning X11 client before the input proof begins, so
 either focused terminal can demonstrate delivery. X11 map/configure lifecycle
 updates no longer overwrite a surface's committed-pixel generation. Live setup
@@ -133,8 +136,8 @@ record. Legacy smoke helpers still default to unauthenticated local sockets.
 The live supervisor publishes a fresh kernel-random cookie in a standard
 owner-only Xauthority record, supplies only the path to launched terminals, and
 removes the file on teardown. Multiple independently credentialed confined
-groups on one listener and Engine-derived output facts remain before treating
-the listener as a general local X server.
+groups on one listener remain before treating the listener as a general local
+X server.
 
 The live launcher accepts `--namespace-profile=classic|confined`. Classic is
 the default and intentionally shares its namespace among launched terminals.
@@ -193,8 +196,9 @@ The two session profiles have these precise semantics:
 - **Confined:** the launch/authentication layer assigns a distinct namespace
   and explicit capabilities for a client group. Cross-namespace discovery,
   properties, selections, and input are denied unless a narrow portal grants a
-  transfer. This profile needs client-aware connection routing before it can be
-  enabled; it is not an alias for the current shared listener.
+  transfer. This profile is explicitly launchable, uses client-aware routing,
+  and has paired Milestone 3 session evidence; it is not an alias for the
+  classic shared namespace.
 
 ## Modern X11 Compatibility Subset
 
@@ -337,8 +341,11 @@ surface boundary.
 
 The normative broker and grant lifecycle is in
 [namespaces-and-portals.md](namespaces-and-portals.md). The native X frontend
-owns namespace-keyed selection state today; the session broker and concrete
-cross-namespace executor remain roadmap work.
+owns namespace-keyed selection state. The session broker, bounded
+policy-provider IPC, expiry/revocation lifecycle, and first concrete
+cross-namespace `CLIPBOARD`/`PRIMARY` source-proxy executor are complete for
+`TARGETS`, `UTF8_STRING`, and bounded UTF-8 `text/plain`. Other portal kinds
+still require their own evidence-driven executors.
 
 Selections, clipboard, drag-and-drop, URI open, notifications, screenshots, and
 file handoff are protocol-specific inputs to Sophia Portals.
@@ -547,22 +554,38 @@ X11 reply on success. The compiled Xlib `XPutImage` smoke validates that the
 observed transaction commits in Sophia Engine and increments Sophia Runtime's
 authority transaction counters.
 
-A private `SOPHIA-PRESENT` extension now models the first explicit buffer
-handoff without claiming full X Present support. `QueryExtension` advertises a
-fixed private major opcode for that extension only. Minor opcode `0` presents an
-XPixmap handle for a namespace-owned window, emits a ready
-`BufferSource::XPixmap` transaction, and remains reply-free on success. The CLI
-present-pixmap smoke validates the raw X11 socket path through Engine commit and
-Runtime authority counters.
+A private `SOPHIA-PRESENT` extension remains as historical prototype evidence
+for the first explicit buffer-handoff reducer. It is not the forward path and
+must not be extended or used for application promotion. The CLI
+present-pixmap smoke retains only its bounded regression value.
+
+Standard DRI3 1.2 and Present are the active path. The socket boundary uses
+`recvmsg`/`sendmsg` to carry bounded SCM_RIGHTS records in both directions,
+queues ancillary FDs in Unix-stream order across requests that consume none,
+and drains exactly the declared arity for each FD-bearing request. DRI3 `Open`
+gets one duplicated render-device FD from a backend provider without storing a
+device path in Engine or the authority runtime. `PixmapFromBuffer`,
+modifier-bearing `PixmapFromBuffers`, `FenceFromFD`, supported-modifier queries,
+Present `Pixmap`/`SelectInput`/`QueryCapabilities`, and the bounded XFIXES region
+lifecycle required by Mesa are implemented.
+
+The Mesa RADV `x-authority-vkcube-smoke` reaches one accepted standard Present
+transaction and one committed runtime surface with `first_error=none`; it
+remains the transport-only proof. `LiveDmaBufPresentationRegistry` owns reusable
+source and per-Present FD lifetimes. The persistent session now connects it to
+mixed rendering and exact page-flip retirement, while
+`tools/live_session_milestone4_hardware_proof.sh` is the stricter GPU-to-KMS
+promotion gate. That guarded run has not yet been retained.
 
 ## Runtime Transport
 
 The long-running X Server Frontend path uses a bounded side channel for observed
-surface transactions. Successful X11 drawing and present requests still write no
-client-visible success reply when the X11 protocol does not require one. Instead
-the authority packages ready `SurfaceTransaction` values into
-`XAuthorityObservedTransactionBatch` records and attempts a nonblocking send to
-the runtime-owned queue.
+surface transactions and buffer-lifetime facts. Successful X11 drawing and
+present requests still write no client-visible success reply when the X11
+protocol does not require one. Instead the authority packages ready
+`SurfaceTransaction` values, CPU updates, DMA-BUF/fence registrations, Present
+submissions, and removals into `XAuthorityObservedTransactionBatch` records and
+attempts a nonblocking send to the runtime-owned queue.
 
 Backpressure is explicit. If the queue is full, the authority reports
 `Backpressure` and stops the socket helper rather than allocating an unbounded
@@ -591,34 +614,32 @@ are not the production transport shape.
 
 ## MIT-SHM Negotiation
 
-The frontend advertises a minimal `MIT-SHM` extension surface. This is a
-compatibility step, not a shared-memory import implementation.
+The frontend advertises a bounded `MIT-SHM` software-image surface. It performs
+an immutable copy for each admitted update rather than retaining a client
+shared-memory mapping.
 
-`QueryExtension("MIT-SHM")` returns a private major opcode, and minor opcode `0`
-replies to `ShmQueryVersion` with protocol version `1.2`, `shared_pixmaps =
+`QueryExtension("MIT-SHM")` returns its assigned major opcode, and minor opcode
+`0` replies to `ShmQueryVersion` with protocol version `1.2`, `shared_pixmaps =
 false`. Unsupported minor opcodes fail closed as native X request errors.
 
-`ShmAttach` records only namespace-local segment metadata: the synthetic segment
-XID, the client-provided `shmid`, the read-only bit, and a generation. The
-authority does not call `shmat`, map host memory, or expose the segment to
-Sophia Engine in this first pass.
+`ShmAttach` records namespace-local segment metadata: the synthetic segment
+XID, client-provided `shmid`, read-only bit, and generation. For an admitted
+`XShmPutImage`, a narrow SysV SHM adapter validates segment size, attaches
+read-only, copies only the bounded image range into a new immutable CPU-buffer
+generation, and detaches immediately. The authority and Engine do not retain a
+client mapping.
 
-`XShmPutImage` is decoded and admitted as a bounded draw transaction when the
-segment is namespace-local and the target is a known window. The transaction uses
-the requested destination rectangle as damage and a reduced CPU-buffer handle; it
-does not map or trust the client-provided shared-memory bytes. A missing or
-cross-namespace segment returns a bounded `BadAccess` error. Pixmap targets are
-accepted as local resource activity without emitting a surface transaction.
-Invalid or already-gone detach requests are ignored as cleanup no-ops, while
-cross-namespace detach remains rejected.
+A missing, malformed, or cross-namespace segment returns a bounded native X11
+error. Pixmap targets remain local resource activity without a surface
+transaction. Invalid or already-gone detach requests are cleanup no-ops, while
+cross-namespace detach is rejected. When notification was requested, an
+accepted window update produces the standard MIT-SHM Completion event; a
+rejected update does not.
 
-Real MIT-SHM import is deferred until Sophia has a compositor backend that can
-consume the mapped bytes through a bounded renderer import path. Mapping
-client-provided shared memory with `shmat` would add host-memory lifetime,
-detach, namespace cleanup, and crash-recovery obligations before the engine can
-use the data. Until that backend exists, core `PutImage`, reduced `ShmPutImage`
-transactions, and private `SOPHIA-PRESENT` remain the supported pixel handoff
-seams.
+The GTK Zenity probe retains nonzero software pixels with `first_error=none`.
+Core `PutImage` and MIT-SHM therefore form the software baseline. Standard
+DRI3/Present is the GPU handoff path; the private `SOPHIA-PRESENT` prototype is
+not a production alternative.
 
 ## External xclock Probe
 
@@ -718,11 +739,13 @@ read-only compatibility surface. The probe added only the request surface xrandr
 actually exercised: minimal `RANDR` extension advertisement,
 `RRGetScreenSizeRange`, and `RRGetScreenResources`.
 
-RandR size range and screen resources now sample a validated, bounded Engine
+RandR size range and screen resources sample a validated, bounded Engine
 topology generation. Replies contain synthetic protocol-local CRTC, output,
 mode, and name IDs plus output and CRTC detail; those IDs do not claim ownership
-of native connectors or KMS objects. Dynamic topology intake and RandR
-subscription events remain the next output-correctness boundary.
+of native connectors or KMS objects. Accepted live topology updates emit the
+selected screen, CRTC, output, and resource notifications. The paired
+Milestone 3 session retains an authenticated witness for those events and
+configure-plus-pixels resize evidence.
 
 The external probe trace now includes bounded parse-error request heads. That
 keeps future extension work probe-driven when Xlib labels an extension failure

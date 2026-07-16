@@ -35,6 +35,10 @@ pub struct XAuthorityClientResourceRelease {
     pub released_cursors: usize,
     pub released_graphics_contexts: usize,
     pub released_shm_segments: usize,
+    /// Renderer-visible DRI3 sources released by disconnect cleanup.
+    pub released_dma_bufs: Vec<sophia_protocol::BufferHandle>,
+    /// Renderer-visible xshmfences released by disconnect cleanup.
+    pub released_fences: Vec<sophia_protocol::FenceHandle>,
 }
 
 #[derive(Debug)]
@@ -50,6 +54,8 @@ pub struct XAuthorityRuntime {
     software_buffers: XSoftwareBufferStore,
     dri3_pixmaps: BTreeMap<crate::XResourceId, sophia_protocol::DmaBufDescriptor>,
     next_dma_buf_handle: u64,
+    dri3_fences: BTreeMap<crate::XResourceId, sophia_protocol::FenceHandle>,
+    next_fence_handle: u64,
     graphics_contexts: XGraphicsContextTable,
     window_background_pixels: BTreeMap<crate::XResourceId, u32>,
     last_cpu_buffer_update: Option<XAuthorityCpuBufferUpdate>,
@@ -73,6 +79,8 @@ impl Default for XAuthorityRuntime {
             software_buffers: Default::default(),
             dri3_pixmaps: Default::default(),
             next_dma_buf_handle: 1,
+            dri3_fences: Default::default(),
+            next_fence_handle: 1,
             graphics_contexts: Default::default(),
             window_background_pixels: Default::default(),
             last_cpu_buffer_update: None,
@@ -802,7 +810,9 @@ impl XAuthorityRuntime {
                     release.removed_surfaces.push(surface);
                 }
                 XResourceKind::Pixmap => {
-                    self.free_pixmap(namespace, record.id)?;
+                    if let Some(handle) = self.free_pixmap(namespace, record.id)? {
+                        release.released_dma_bufs.push(handle);
+                    }
                     release.released_pixmaps = release.released_pixmaps.saturating_add(1);
                 }
                 XResourceKind::Font => {
@@ -816,11 +826,14 @@ impl XAuthorityRuntime {
                 // The reduced frontend does not currently persist client atoms,
                 // colormaps, or GCs in the resource table. Remove any future
                 // record in this range rather than retaining a disconnect leak.
-                XResourceKind::Atom
-                | XResourceKind::Property
-                | XResourceKind::GraphicsContext
-                | XResourceKind::Fence => {
+                XResourceKind::Atom | XResourceKind::Property | XResourceKind::GraphicsContext => {
                     self.resources.remove(record.id);
+                }
+                XResourceKind::Fence => {
+                    self.resources.remove(record.id);
+                    if let Some(handle) = self.dri3_fences.remove(&record.id) {
+                        release.released_fences.push(handle);
+                    }
                 }
             }
         }
@@ -894,12 +907,14 @@ impl XAuthorityRuntime {
         &mut self,
         namespace: NamespaceId,
         pixmap: crate::XResourceId,
-    ) -> Result<(), XAuthorityRuntimeError> {
+    ) -> Result<Option<sophia_protocol::BufferHandle>, XAuthorityRuntimeError> {
         self.resources
             .lookup(namespace, pixmap, XResourceKind::Pixmap)?;
         self.resources.remove(pixmap);
-        self.dri3_pixmaps.remove(&pixmap);
-        Ok(())
+        Ok(self
+            .dri3_pixmaps
+            .remove(&pixmap)
+            .map(|descriptor| descriptor.handle))
     }
 
     pub fn validate_pixmap_access(
@@ -1074,10 +1089,14 @@ impl XAuthorityRuntime {
         namespace: NamespaceId,
         fence: crate::XResourceId,
         generation: u64,
-    ) -> Result<(), XAuthorityRuntimeError> {
+    ) -> Result<sophia_protocol::FenceHandle, XAuthorityRuntimeError> {
         self.resources
             .insert(fence, XResourceKind::Fence, namespace, generation)
-            .map_err(Into::into)
+            .map_err(XAuthorityRuntimeError::from)?;
+        let handle = sophia_protocol::FenceHandle::from_raw(self.next_fence_handle.max(1));
+        self.next_fence_handle = handle.raw().saturating_add(1).max(1);
+        self.dri3_fences.insert(fence, handle);
+        Ok(handle)
     }
 
     pub fn validate_dri3_fence_access(
@@ -1089,6 +1108,18 @@ impl XAuthorityRuntime {
             .lookup(namespace, fence, XResourceKind::Fence)
             .map(|_| ())
             .map_err(Into::into)
+    }
+
+    pub fn dri3_fence_handle(
+        &self,
+        namespace: NamespaceId,
+        fence: crate::XResourceId,
+    ) -> Result<sophia_protocol::FenceHandle, XAuthorityRuntimeError> {
+        self.validate_dri3_fence_access(namespace, fence)?;
+        self.dri3_fences
+            .get(&fence)
+            .copied()
+            .ok_or(XAuthorityRuntimeError::UnknownResource)
     }
 
     pub fn open_font(

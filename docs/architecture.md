@@ -71,10 +71,11 @@ or layout policy.
 - The native Sophia X Server Frontend accepts bounded concurrent local X11
   clients, owns X resource tables, emits `SurfaceTransaction` batches, routes
   client-targeted input/control, and renders two real xterms through Engine and
-  KMS.
-- The two-xterm hardware proof completes startup-through-echo in 1,487 ms with
-  10 ms maximum composition, 23 ms input-to-presentation, all 14 input events
-  flushed, and clean KMS teardown.
+  KMS. The retained paired Milestone 3 proof passes under both classic-shared
+  and fresh zero-capability confined profiles with physical keyboard and
+  pointer input, authenticated RandR delivery, configure-plus-pixels resize,
+  and clean teardown. Its X13 runs report 94/90 ms startup readiness and 13 ms
+  maximum composition.
 - X resources and selection state are namespace-keyed. Protocol values and a
   runtime registry model immutable profiles, directional portal capabilities,
   admission provenance, and revocation. After X setup authentication, the
@@ -100,27 +101,65 @@ or layout policy.
   bounded root/output/mode facts from an Engine output-topology snapshot. Engine
   hit-testing also crosses the boundary as a `RoutedInputRequest`; the frontend
   resolves the owning client and applies deterministic authority-local XKB
-  modifier state before emitting core events.
+  modifier state before emitting core and selected XI2 events. Live topology
+  updates produce mask-selected RandR notifications, and surface resize keeps
+  new geometry quarantined until matching pixels commit.
 - `sophia-portal` has deterministic reducers for clipboard, drag-and-drop, file
-  handoff, screen capture, URI open, and notifications. A session broker,
-  policy-provider IPC, expiry lifecycle, and native-X executor are not complete.
+  handoff, screen capture, URI open, and notifications. Owner-only bounded
+  broker IPC, policy-provider IPC, expiry/revocation lifecycle, and the first
+  native-X `CLIPBOARD`/`PRIMARY` source-proxy executor are complete. The other
+  portal kinds do not yet have complete native executors.
+- Standard DRI3 1.2 carries FD-bearing `Open`, modifier-bearing multi-plane
+  pixmaps, xshmfences, and Present submissions through bounded frontend batches.
+  A Mesa RADV `vkcube` trace reaches an Engine transaction without an X11 error.
+  The reusable renderer-private DMA-BUF registry and cloneable Present feedback
+  router now feed the persistent mixed CPU/DMA-BUF renderer and page-flip
+  retirement path. The guarded X13 GPU-to-KMS evidence run remains to be
+  retained before the milestone is complete.
 - The Smithay-backed Wayland Authority runs real Kitty with SHM, routed input,
   frame callbacks, buffer release, and native KMS. Controlled DMA-BUF
   direct-scanout evidence exists, but arbitrary client GPU composition does not.
 - XLibre is absent from the production workspace and launcher. Its frozen
   prototype remains under `research/xlibre` as historical evidence.
 
+### Active Milestone 4 Integration Seam
+
+The live executable still contains transitional compositor assembly.
+`PersistentNativeScanout` owns persistent native output state, while
+`PersistentCpuScene` retains a second CPU-only `SurfaceId` projection and
+drives composition from `crates/sophia-cli/src/commands/live_session.rs`. This
+is current implementation location, not normative ownership: the CLI must not
+become the lasting scene, renderer-import, frame-scheduling, or scanout owner.
+
+Milestone 4 uses a narrow hybrid extraction. The Engine/backend-owned
+live-presentation seam contains DMA-BUF import, acquire-fence polling, mixed
+CPU/GPU composition, KMS submission correlation, and page-flip retirement.
+`sophia-renderer-live` retains imported sources and performs
+renderer-private composition; `sophia-backend-live` retains native KMS
+submission and retirement; Engine remains the sole committed scene truth. The
+CLI is limited to launch, supervision, and bounded coordination. Broader
+session-loop extraction waits until the GPU presentation exit is proven.
+
+An asynchronous GPU Present uses `PreparedSurfaceCommit`. Preparation validates
+and snapshots only protocol-neutral visual state without mutating the committed
+scene. A matching page flip revalidates every touched surface and merges the
+candidate while preserving unrelated newer commits. Timeout, rejection,
+disconnect, or a changed touched baseline discards the candidate and retains
+the last committed geometry-plus-pixels state.
+
 ### Target
 
-- Session-owned namespace admission supplies an immutable context to every
-  protocol client before useful resources are created.
-- Classic shared-X and confined profiles are both launchable and explicit.
-- Cross-namespace operations use revocable, generation-bound portal grants.
-- The native X frontend grows from application evidence toward complete XKB
-  wire compatibility, focus/grabs, dynamic RandR notifications, XI2, SHM,
-  DRI3/Present, and toolkit behavior.
+- Standard X11 DMA-BUF registrations and Present submissions enter the
+  renderer-private live path without placing native objects in Engine scene
+  records or the X authority runtime.
+- Acquire fences quarantine unready frames while Engine preserves the last
+  committed geometry-plus-pixels state.
+- Real KMS page-flip feedback drives Present Complete before Idle, idle-fence
+  triggering, and exact-once imported-buffer retirement.
+- One software client and GPU-backed `vkcube` pass startup, resize, delayed
+  readiness, recovery, and teardown through the same Engine-owned KMS session.
 - Wayland remains a supported frontend through Smithay, but it is a maintenance
-  lane while the X11, namespace, and portal foundations mature.
+  lane while X11 presentation semantics are completed.
 
 ## Load-Bearing Ownership Rules
 
@@ -310,12 +349,16 @@ credentials, titles, PIDs, paths, payloads, icons, or buffer contents.
 
 The active critical path is:
 
-1. freeze the namespace, admission, capability, and portal contracts;
-2. make classic and confined X admission launchable;
-3. complete the broker and X11 `CLIPBOARD`/`PRIMARY` reference flow;
-4. complete XKB, input/grab, Engine-output, RandR, resize, and session behavior;
-5. implement explicit SHM and DRI3/Present lifetime/presentation semantics;
-6. expand application compatibility from the evidence matrix.
+1. completed: freeze the namespace, admission, capability, and portal
+   contracts;
+2. completed: make classic and confined X admission launchable;
+3. completed: complete the broker and X11 `CLIPBOARD`/`PRIMARY` reference flow;
+4. completed: complete XKB, input/grab, Engine-output, RandR, resize, and
+   session behavior;
+5. active: complete explicit SHM and DRI3/Present lifetime and native
+   presentation semantics through the hybrid Engine/backend seam; and
+6. next: expand application compatibility from the evidence matrix after the
+   Milestone 4 hardware exit.
 
 Wayland remains under maintenance gates during this work. XLibre remains
 documented and deferred.

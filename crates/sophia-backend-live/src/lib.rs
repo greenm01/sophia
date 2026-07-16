@@ -16,9 +16,13 @@ mod drm;
 mod hardware_validation;
 mod input;
 mod prelude;
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+mod presentation;
 mod runtime;
 mod scanout;
 mod session_loop;
 mod startup;
 
 pub use api::*;
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+pub use presentation::*;
