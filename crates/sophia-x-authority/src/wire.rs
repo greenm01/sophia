@@ -94,6 +94,7 @@ pub const X_RANDR_SELECT_INPUT_MINOR_OPCODE: u8 = 4;
 pub const X_RANDR_GET_SCREEN_SIZE_RANGE_MINOR_OPCODE: u8 = 6;
 pub const X_RANDR_GET_SCREEN_RESOURCES_MINOR_OPCODE: u8 = 8;
 pub const X_RANDR_GET_OUTPUT_INFO_MINOR_OPCODE: u8 = 9;
+pub const X_RANDR_GET_OUTPUT_PROPERTY_MINOR_OPCODE: u8 = 15;
 pub const X_RANDR_GET_CRTC_INFO_MINOR_OPCODE: u8 = 20;
 pub const X_RANDR_GET_SCREEN_RESOURCES_CURRENT_MINOR_OPCODE: u8 = 25;
 pub const X_RANDR_GET_OUTPUT_PRIMARY_MINOR_OPCODE: u8 = 31;
@@ -142,6 +143,7 @@ pub const X_PRESENT_QUERY_CAPABILITIES_MINOR_OPCODE: u8 = 4;
 pub const X_XFIXES_EXTENSION_NAME: &str = "XFIXES";
 pub const X_XFIXES_MAJOR_OPCODE: u8 = 139;
 pub const X_XFIXES_QUERY_VERSION_MINOR_OPCODE: u8 = 0;
+pub const X_XFIXES_SELECT_SELECTION_INPUT_MINOR_OPCODE: u8 = 2;
 pub const X_XFIXES_CREATE_REGION_MINOR_OPCODE: u8 = 5;
 pub const X_XFIXES_DESTROY_REGION_MINOR_OPCODE: u8 = 10;
 
@@ -222,6 +224,7 @@ const X_RANDR_SELECT_INPUT_REQ_LEN: usize = 12;
 const X_RANDR_GET_SCREEN_SIZE_RANGE_REQ_LEN: usize = 8;
 const X_RANDR_GET_SCREEN_RESOURCES_REQ_LEN: usize = 8;
 const X_RANDR_GET_OUTPUT_INFO_REQ_LEN: usize = 12;
+const X_RANDR_GET_OUTPUT_PROPERTY_REQ_LEN: usize = 28;
 const X_RANDR_GET_CRTC_INFO_REQ_LEN: usize = 12;
 const X_RANDR_GET_OUTPUT_PRIMARY_REQ_LEN: usize = 8;
 const X_RANDR_GET_MONITORS_REQ_LEN: usize = 12;
@@ -593,6 +596,11 @@ pub enum XWireRequest {
         major_version: u32,
         minor_version: u32,
     },
+    XfixesSelectSelectionInput {
+        window: XResourceId,
+        selection: XAtom,
+        event_mask: u32,
+    },
     XfixesCreateRegion {
         region: XResourceId,
         rectangles: Vec<Rect>,
@@ -672,6 +680,15 @@ pub enum XWireRequest {
     RandrGetOutputInfo {
         output: u32,
         config_timestamp: u32,
+    },
+    RandrGetOutputProperty {
+        output: u32,
+        property: XAtom,
+        property_type: XAtom,
+        long_offset: u32,
+        long_length: u32,
+        delete: bool,
+        pending: bool,
     },
     RandrGetCrtcInfo {
         crtc: u32,
@@ -941,6 +958,14 @@ fn decode_xfixes(
                 minor_version,
             },
         ),
+        X_XFIXES_SELECT_SELECTION_INPUT_MINOR_OPCODE => {
+            require_exact_len(X_XFIXES_MAJOR_OPCODE, 16, bytes.len())?;
+            Ok(XWireRequest::XfixesSelectSelectionInput {
+                window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+                selection: context.byte_order.u32(&bytes[8..12]),
+                event_mask: context.byte_order.u32(&bytes[12..16]),
+            })
+        }
         X_XFIXES_CREATE_REGION_MINOR_OPCODE => {
             require_len(X_XFIXES_MAJOR_OPCODE, 8, bytes.len())?;
             if (bytes.len() - 8) % 8 != 0 {
@@ -1422,6 +1447,22 @@ fn decode_randr(
             Ok(XWireRequest::RandrGetOutputInfo {
                 output: context.byte_order.u32(&bytes[4..8]),
                 config_timestamp: context.byte_order.u32(&bytes[8..12]),
+            })
+        }
+        X_RANDR_GET_OUTPUT_PROPERTY_MINOR_OPCODE => {
+            require_exact_len(
+                X_RANDR_MAJOR_OPCODE,
+                X_RANDR_GET_OUTPUT_PROPERTY_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::RandrGetOutputProperty {
+                output: context.byte_order.u32(&bytes[4..8]),
+                property: context.byte_order.u32(&bytes[8..12]),
+                property_type: context.byte_order.u32(&bytes[12..16]),
+                long_offset: context.byte_order.u32(&bytes[16..20]),
+                long_length: context.byte_order.u32(&bytes[20..24]),
+                delete: bytes[24] != 0,
+                pending: bytes[25] != 0,
             })
         }
         X_RANDR_GET_CRTC_INFO_MINOR_OPCODE => {

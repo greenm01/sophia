@@ -3109,6 +3109,10 @@ impl X11CoreSocketServerState {
             .open_render_device_fd()
     }
 
+    fn has_render_device_provider(&self) -> bool {
+        self.render_device_provider.is_some()
+    }
+
     pub fn with_output_topology(
         output_topology: sophia_protocol::OutputTopologySnapshot,
     ) -> Result<Self, X11SetupSocketError> {
@@ -4226,6 +4230,11 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                     }
                     let event_selection = x11_core_event_selection_update(&request);
                     let dri3_open = matches!(&request, crate::XWireRequest::Dri3Open { .. });
+                    let dri3_query = matches!(
+                        &request,
+                        crate::XWireRequest::QueryExtension { name }
+                            if name == crate::X_DRI3_EXTENSION_NAME
+                    );
                     let dri3_pixmap = match &request {
                         crate::XWireRequest::Dri3PixmapFromBuffer { pixmap, .. }
                         | crate::XWireRequest::Dri3PixmapFromBuffers { pixmap, .. } => {
@@ -4374,6 +4383,25 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                         &mut atoms,
                         &mut properties,
                     );
+                    if dri3_query && !state.has_render_device_provider() {
+                        for client_output in &mut output.outputs {
+                            if let crate::XClientOutput::Reply(
+                                crate::XClientReply::QueryExtension {
+                                    present,
+                                    major_opcode,
+                                    first_event,
+                                    first_error,
+                                    ..
+                                },
+                            ) = client_output
+                            {
+                                *present = false;
+                                *major_opcode = 0;
+                                *first_event = 0;
+                                *first_error = 0;
+                            }
+                        }
+                    }
                     if let Some(crate::XClientOutput::Reply(crate::XClientReply::GetGeometry {
                         geometry,
                         ..

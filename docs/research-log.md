@@ -1127,7 +1127,7 @@ completions, one controlled Skip, 77 matching Idle events and idle-fence
 triggers, nine acquire-gate waits, zero submit/retire failures, and zero live
 sources, fences, or transactions. The established software xterm/resize half
 also passes, completing the Milestone 4 hardware exit.
-# 2026-07-16: GTK3 Application Promotion Contract
+## 2026-07-16: GTK3 Application Promotion Contract
 
 Milestone 5 uses a direct, bounded Sophia-X client launcher instead of wrapping
 applications in xterm. Application evidence correlates the existing live
@@ -1139,3 +1139,16 @@ as reduced code/opcode/sequence facts but never create empty Engine commits.
 Zenity entry dialogs run under fresh classic shared-X and confined sessions;
 the operator types without Return and completes the action with a physical OK
 click.
+
+## 2026-07-16: Zenity Probe-Driven RandR And XFixes Gaps
+
+The current GTK3 Zenity engine probe exposed two bounded requests after its
+package became available locally: RandR `GetOutputProperty` for EDID and XFixes
+`SelectSelectionInput`. Sophia now returns a valid empty output-property reply
+when no EDID payload is retained and validates the selection window, atom, and
+three-bit event mask. The same probe showed that advertising DRI3 without a
+render-device provider creates an avoidable `BadImplementation`; socket
+advertisement now withholds DRI3 in that configuration so GTK selects MIT-SHM.
+The repeated probe commits one surface with 288,920 nonzero software bytes and
+`first_error=none`; no broader RandR property store or XFixes event expansion
+was inferred.

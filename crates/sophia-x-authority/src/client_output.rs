@@ -349,6 +349,13 @@ pub enum XClientReply {
         modes: Vec<u32>,
         name: Vec<u8>,
     },
+    RandrGetOutputProperty {
+        sequence: u16,
+        property_type: u32,
+        bytes_after: u32,
+        format: u8,
+        data: Vec<u8>,
+    },
     RandrGetCrtcInfo {
         sequence: u16,
         timestamp: u32,
@@ -973,6 +980,33 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             let reply_units = (out.len().saturating_sub(32) + 3) / 4;
             out.resize(32 + reply_units * 4, 0);
             put_u32(byte_order, &mut out[4..8], reply_units as u32);
+            out
+        }
+        XClientReply::RandrGetOutputProperty {
+            sequence,
+            property_type,
+            bytes_after,
+            format,
+            data,
+        } => {
+            let padded_len = (data.len() + 3) & !3;
+            let mut out = vec![0; 32 + padded_len];
+            write_reply_header(byte_order, &mut out, sequence, (padded_len / 4) as u32);
+            out[1] = format;
+            put_u32(byte_order, &mut out[8..12], property_type);
+            put_u32(byte_order, &mut out[12..16], bytes_after);
+            let item_width = usize::from(format).checked_div(8).unwrap_or(0);
+            let items = if item_width == 0 {
+                0
+            } else {
+                data.len() / item_width
+            };
+            put_u32(
+                byte_order,
+                &mut out[16..20],
+                u32::try_from(items).unwrap_or(u32::MAX),
+            );
+            out[32..32 + data.len()].copy_from_slice(&data);
             out
         }
         XClientReply::RandrGetCrtcInfo {

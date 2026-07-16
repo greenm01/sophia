@@ -1458,6 +1458,45 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
+        XWireRequest::XfixesSelectSelectionInput {
+            window,
+            selection,
+            event_mask,
+        } => {
+            let output = if event_mask & !0b111 != 0 {
+                Some(XClientOutput::Error(crate::XClientError {
+                    code: XErrorCode::BadValue,
+                    sequence: context.sequence,
+                    resource_id: event_mask,
+                    minor_code: crate::X_XFIXES_SELECT_SELECTION_INPUT_MINOR_OPCODE.into(),
+                    major_code: context.major_opcode,
+                }))
+            } else if atoms.name(selection).is_none() {
+                Some(XClientOutput::Error(crate::XClientError {
+                    code: XErrorCode::BadAtom,
+                    sequence: context.sequence,
+                    resource_id: selection,
+                    minor_code: crate::X_XFIXES_SELECT_SELECTION_INPUT_MINOR_OPCODE.into(),
+                    major_code: context.major_opcode,
+                }))
+            } else if let Err(error) = runtime.validate_window_access(context.namespace, window) {
+                let mut error = x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(window.local.raw()).unwrap_or(0),
+                );
+                error.minor_code = crate::X_XFIXES_SELECT_SELECTION_INPUT_MINOR_OPCODE.into();
+                Some(XClientOutput::Error(error))
+            } else {
+                None
+            };
+            XDispatchResult {
+                response: None,
+                outputs: output.into_iter().collect(),
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::Dri3Open { drawable, provider } => {
             let outputs = if provider != 0 {
                 vec![XClientOutput::Error(crate::XClientError {
@@ -1910,6 +1949,40 @@ pub fn dispatch_x11_wire_request(
                         major_code: context.major_opcode,
                     })
                 });
+            XDispatchResult {
+                response: None,
+                outputs: vec![client_output],
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::RandrGetOutputProperty {
+            output,
+            property,
+            property_type: _,
+            long_offset: _,
+            long_length: _,
+            delete: _,
+            pending: _,
+        } => {
+            let resources = randr_resources(runtime.output_topology());
+            let client_output =
+                if resources.outputs.contains(&output) && atoms.name(property).is_some() {
+                    XClientOutput::Reply(XClientReply::RandrGetOutputProperty {
+                        sequence: context.sequence,
+                        property_type: 0,
+                        bytes_after: 0,
+                        format: 0,
+                        data: Vec::new(),
+                    })
+                } else {
+                    XClientOutput::Error(crate::XClientError {
+                        code: XErrorCode::BadValue,
+                        sequence: context.sequence,
+                        resource_id: output,
+                        minor_code: crate::X_RANDR_GET_OUTPUT_PROPERTY_MINOR_OPCODE.into(),
+                        major_code: context.major_opcode,
+                    })
+                };
             XDispatchResult {
                 response: None,
                 outputs: vec![client_output],

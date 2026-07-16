@@ -2530,6 +2530,96 @@ fn x11_dispatch_advertises_randr_and_replies_to_query_version() {
 }
 
 #[test]
+fn randr_output_property_returns_bounded_empty_edid_fallback() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let edid = atoms.intern("EDID", false).unwrap().unwrap();
+    let request = decode_x11_core_request(
+        context(namespace, 543, XByteOrder::LittleEndian),
+        &randr_get_output_property_request(XByteOrder::LittleEndian, 0x2000_0001, edid, 128),
+    )
+    .unwrap();
+    assert!(matches!(
+        request,
+        XWireRequest::RandrGetOutputProperty {
+            output: 0x2000_0001,
+            property,
+            long_length: 128,
+            ..
+        } if property == edid
+    ));
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 6, XByteOrder::LittleEndian, X_RANDR_MAJOR_OPCODE),
+        request,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0].len(), 32);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(encoded[0][1], 0);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][4..8]), 0);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][8..12]), 0);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][12..16]), 0);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][16..20]), 0);
+}
+
+#[test]
+fn xfixes_selection_subscription_accepts_known_window_atom_and_mask() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let window = 0x220101;
+    let create = decode_x11_core_request(
+        context(namespace, 543, XByteOrder::LittleEndian),
+        &create_window_request(XByteOrder::LittleEndian, window, 0, 0, 1, 1),
+    )
+    .unwrap();
+    dispatch_x11_wire_request(
+        dispatch_context(namespace, 6, XByteOrder::LittleEndian, 1),
+        create,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let request = decode_x11_core_request(
+        context(namespace, 544, XByteOrder::LittleEndian),
+        &xfixes_select_selection_input_request(
+            XByteOrder::LittleEndian,
+            window,
+            X_ATOM_PRIMARY,
+            0b111,
+        ),
+    )
+    .unwrap();
+    assert!(matches!(
+        request,
+        XWireRequest::XfixesSelectSelectionInput {
+            selection: X_ATOM_PRIMARY,
+            event_mask: 0b111,
+            ..
+        }
+    ));
+    let result = dispatch_x11_wire_request(
+        dispatch_context(
+            namespace,
+            7,
+            XByteOrder::LittleEndian,
+            X_XFIXES_MAJOR_OPCODE,
+        ),
+        request,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert!(result.outputs.is_empty());
+}
+
+#[test]
 fn x11_dispatch_advertises_probe_backed_xkeyboard_extension() {
     let namespace = NamespaceId::from_raw(45);
     let mut runtime = XAuthorityRuntime::new();
@@ -8858,6 +8948,43 @@ fn xfixes_create_region_request(
         push_u16(&mut out, byte_order, rectangle.width as u16);
         push_u16(&mut out, byte_order, rectangle.height as u16);
     }
+    out
+}
+
+fn xfixes_select_selection_input_request(
+    byte_order: XByteOrder,
+    window: u32,
+    selection: u32,
+    event_mask: u32,
+) -> Vec<u8> {
+    let mut out = vec![
+        X_XFIXES_MAJOR_OPCODE,
+        X_XFIXES_SELECT_SELECTION_INPUT_MINOR_OPCODE,
+    ];
+    push_u16(&mut out, byte_order, 4);
+    push_u32(&mut out, byte_order, window);
+    push_u32(&mut out, byte_order, selection);
+    push_u32(&mut out, byte_order, event_mask);
+    out
+}
+
+fn randr_get_output_property_request(
+    byte_order: XByteOrder,
+    output: u32,
+    property: u32,
+    long_length: u32,
+) -> Vec<u8> {
+    let mut out = vec![
+        X_RANDR_MAJOR_OPCODE,
+        X_RANDR_GET_OUTPUT_PROPERTY_MINOR_OPCODE,
+    ];
+    push_u16(&mut out, byte_order, 7);
+    push_u32(&mut out, byte_order, output);
+    push_u32(&mut out, byte_order, property);
+    push_u32(&mut out, byte_order, 0);
+    push_u32(&mut out, byte_order, 0);
+    push_u32(&mut out, byte_order, long_length);
+    out.extend_from_slice(&[0, 0, 0, 0]);
     out
 }
 
