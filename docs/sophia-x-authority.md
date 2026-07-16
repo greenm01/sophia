@@ -576,6 +576,11 @@ source and per-Present FD lifetimes. The persistent session now connects it to
 mixed rendering and exact page-flip retirement, while
 `tools/live_session_milestone4_hardware_proof.sh` is the stricter GPU-to-KMS
 promotion gate. That guarded run has not yet been retained.
+The software half passes and a DMA-BUF-only isolation run completes repeated
+Flip/Idle lifecycles, but the required CPU-plus-Vulkan mixed draw is currently
+blocked by an AMDGPU command-stream rejection in the renderer before native
+submission. Authority transport is not being weakened to route around that
+renderer/hardware boundary.
 
 ## Runtime Transport
 

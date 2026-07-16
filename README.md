@@ -262,8 +262,10 @@ persistent renderer imports those typed resources, gates acquire fences,
 composes DMA-BUF and CPU layers, and applies the prepared Engine state only
 after matching native page-flip feedback. Complete-before-Idle delivery,
 idle-fence triggering, rejection preservation, and exact teardown are covered
-by the offline suite. The remaining Milestone 4 boundary is running and
-retaining the guarded software-plus-`vkcube` X13 KMS matrix.
+by the offline suite. The software X13 half and an isolated DMA-BUF-only run
+pass, but the required CPU-plus-`vkcube` mixed draw currently reaches a Radeon
+command-stream rejection in `glFinish`; that native-EGL blocker is the
+remaining Milestone 4 boundary.
 
 The namespace-keyed X resource model, profile/capability/admission types,
 session-owned in-memory registry, explicit classic/confined live launch

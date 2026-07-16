@@ -3351,9 +3351,14 @@ impl PersistentBackendRuntime {
         let mut prepared = BTreeMap::new();
         for (output_id, output) in &self.outputs {
             let assembly = output.runtime.assembly();
+            let transactions =
+                sophia_cli::presentation_transaction::rebase_full_state_present_transactions(
+                    &queued.transactions,
+                    assembly.committed_surfaces(),
+                );
             let candidate = assembly.engine().prepare_surface_transactions(
                 transaction,
-                &queued.transactions,
+                &transactions,
                 assembly.committed_surfaces(),
             );
             if !candidate.is_ready() {

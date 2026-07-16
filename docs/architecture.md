@@ -114,8 +114,9 @@ or layout policy.
   A Mesa RADV `vkcube` trace reaches an Engine transaction without an X11 error.
   The reusable renderer-private DMA-BUF registry and cloneable Present feedback
   router now feed the persistent mixed CPU/DMA-BUF renderer and page-flip
-  retirement path. The guarded X13 GPU-to-KMS evidence run remains to be
-  retained before the milestone is complete.
+  retirement path. The software hardware gate and isolated DMA-BUF-only
+  composition pass; the guarded CPU-plus-Vulkan mixed draw is blocked by an
+  AMDGPU command-stream rejection before KMS submission.
 - The Smithay-backed Wayland Authority runs real Kitty with SHM, routed input,
   frame callbacks, buffer release, and native KMS. Controlled DMA-BUF
   direct-scanout evidence exists, but arbitrary client GPU composition does not.
@@ -139,6 +140,13 @@ renderer-private composition; `sophia-backend-live` retains native KMS
 submission and retirement; Engine remains the sole committed scene truth. The
 CLI is limited to launch, supervision, and bounded coordination. Broader
 session-loop extraction waits until the GPU presentation exit is proven.
+
+The current hardware blocker is below the Engine/authority boundary. An
+isolated Present DMA-BUF reaches repeated mixed exports, page flips, Complete,
+Idle, and exact retirement, while adding the CPU background layer makes Radeon
+reject the GL command stream during `glFinish`. The promotion gate therefore
+still requires real mixed pixels; dropping the CPU layer is diagnostic evidence
+only, not an acceptable compatibility path.
 
 An asynchronous GPU Present uses `PreparedSurfaceCommit`. Preparation validates
 and snapshots only protocol-neutral visual state without mutating the committed

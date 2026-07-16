@@ -67,15 +67,24 @@ Complete before Idle, triggers the idle fence, and releases deferred resources
 exactly once. The schema-14 session summary fails closed on cleanup debt, and
 the full offline all-feature workspace suite passes.
 
-`tools/live_session_milestone4_hardware_proof.sh` now automates the remaining
-X13 exit: an established software xterm/resize pass followed by a mixed
-`vkcube` plus CPU-xterm pass with a controlled first acquire delay and one
-forced rejection/recovery. Its strict verifier requires a successful mixed
-export, later Flip completion, matching Idle lifecycle, idle-fence activity,
-and zero live resources. Run this from a dedicated local text TTY with
-exclusive DRM/KMS ownership, retain both logs, then promote the final unchecked
-item and archive Milestone 4. No sudo command is expected when the current user
-already has DRM and input access.
+`tools/live_session_milestone4_hardware_proof.sh` automates the remaining X13
+exit: an established software xterm/resize pass followed by a mixed `vkcube`
+plus CPU-xterm pass with a controlled first acquire delay and one forced
+rejection/recovery. The 2026-07-15 hardware checkpoint proves the software
+half and an isolated DMA-BUF-only mixed export, including 86 Flip completions,
+one Skip, 87 matching Idle events, 87 idle-fence triggers, and zero live
+resources. The real CPU-plus-Vulkan mixed draw still aborts in Radeon
+`glFinish` with `amdgpu: The CS has been rejected ... (-2)` before KMS submit.
+
+Next continuation: capture the privileged kernel validator record immediately
+after the failure with `sudo dmesg -T`, reduce the failing two-layer draw to a
+native-EGL hardware regression, and correct the rejected resource/state
+transition without weakening the required mixed-pixel gate. DCC disablement,
+CPU/import submission splits, frame-local CPU textures, frame-local VBOs, and
+reversed layer order did not clear the rejection and should not be repeated as
+blind hardware experiments. Retain a normal paired run only after the strict
+schema-14 verifier passes, then promote the final unchecked item and archive
+Milestone 4.
 
 Exit: one software-backed and one GPU-backed real X11 client pass normal
 startup, resize, presentation, delayed release, failure recovery, and teardown
@@ -83,8 +92,8 @@ through Engine-owned KMS without a private permanent presentation extension.
 
 ## Milestone 5: Application Compatibility
 
-Milestone 5 remains blocked until the Milestone 4 software and GPU session exit
-passes through Engine-owned KMS.
+Milestone 5 remains blocked until the Milestone 4 software and mixed GPU
+session exit passes through Engine-owned KMS.
 
 - [ ] Advance Render, XFixes, selections/INCR, Xdnd, GLX, and toolkit-specific
   behavior only from captured gaps in `docs/x11-compatibility-matrix.md`.

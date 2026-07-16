@@ -7,6 +7,11 @@ use std::{
 use crate::NativeEglDrawSmokeStatus;
 
 #[cfg(feature = "gbm-platform")]
+const FULLSCREEN_QUAD_VERTICES: [f32; 16] = [
+    -1.0, -1.0, 0.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0,
+];
+
+#[cfg(feature = "gbm-platform")]
 pub(crate) struct PersistentXrgb8888GlPipeline {
     gl: glow::Context,
     program: glow::NativeProgram,
@@ -57,13 +62,10 @@ impl PersistentXrgb8888GlPipeline {
         }
         let texture = unsafe { gl.create_texture()? };
         let vertex_buffer = unsafe { gl.create_buffer()? };
-        let vertices: [f32; 16] = [
-            -1.0, -1.0, 0.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0,
-        ];
         let vertex_bytes = unsafe {
             std::slice::from_raw_parts(
-                vertices.as_ptr().cast::<u8>(),
-                vertices.len() * std::mem::size_of::<f32>(),
+                FULLSCREEN_QUAD_VERTICES.as_ptr().cast::<u8>(),
+                FULLSCREEN_QUAD_VERTICES.len() * std::mem::size_of::<f32>(),
             )
         };
         unsafe {
@@ -125,7 +127,6 @@ impl PersistentXrgb8888GlPipeline {
         if pixels.len() != expected {
             return Err(NativeEglDrawSmokeStatus::GlUnavailable);
         }
-        self.begin_composition();
         unsafe {
             self.gl
                 .viewport(0, 0, self.width as i32, self.height as i32);
@@ -143,18 +144,47 @@ impl PersistentXrgb8888GlPipeline {
                 glow::PixelUnpackData::Slice(Some(pixels)),
             );
         }
-        self.draw_bound_texture(
-            GlCompositionRect {
-                x: 0,
-                y: 0,
-                width: self.width as i32,
-                height: self.height as i32,
-            },
-            None,
-            1.0,
-            false,
-        )?;
-        self.finish_composition()
+        self.draw_fullscreen_bound_texture()
+    }
+
+    fn draw_fullscreen_bound_texture(&self) -> Result<(), NativeEglDrawSmokeStatus> {
+        let vertex_bytes = unsafe {
+            std::slice::from_raw_parts(
+                FULLSCREEN_QUAD_VERTICES.as_ptr().cast::<u8>(),
+                FULLSCREEN_QUAD_VERTICES.len() * std::mem::size_of::<f32>(),
+            )
+        };
+        unsafe {
+            self.gl.disable(glow::BLEND);
+            self.gl.disable(glow::SCISSOR_TEST);
+            self.gl
+                .bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
+            self.gl
+                .buffer_sub_data_u8_slice(glow::ARRAY_BUFFER, 0, vertex_bytes);
+            self.gl.use_program(Some(self.program));
+            self.gl.uniform_1_i32(
+                self.gl.get_uniform_location(self.program, "frame").as_ref(),
+                0,
+            );
+            self.gl.uniform_1_f32(
+                self.gl
+                    .get_uniform_location(self.program, "opacity")
+                    .as_ref(),
+                1.0,
+            );
+            self.gl.enable_vertex_attrib_array(0);
+            self.gl
+                .vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, 16, 0);
+            self.gl.enable_vertex_attrib_array(1);
+            self.gl
+                .vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, 16, 8);
+            self.gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+            self.gl.finish();
+            if self.gl.get_error() != glow::NO_ERROR {
+                return Err(NativeEglDrawSmokeStatus::GlUnavailable);
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn begin_composition(&self) {
@@ -296,7 +326,13 @@ impl PersistentXrgb8888GlPipeline {
             }
             image_target(glow::TEXTURE_2D, image);
         }
-        let draw = self.draw_bound_texture(target, clip, alpha, has_alpha);
+        // The texture and its EGLImage sibling must remain alive until the GPU
+        // has finished sampling them. The single-image path already enforces
+        // this order; mixed composition must not defer its finish until after
+        // the caller destroys the EGLImage.
+        let draw = self
+            .draw_bound_texture(target, clip, alpha, has_alpha)
+            .and_then(|()| self.finish_composition());
         unsafe {
             self.gl.bind_texture(glow::TEXTURE_2D, None);
             self.gl.delete_texture(texture);

@@ -85,6 +85,7 @@ cargo run --offline -q -p sophia-cli --features atomic-scanout-live -- sophia-li
 tools/live_session_content_hardware_proof.sh
 tools/live_session_persistent_hardware_proof.sh
 tools/live_session_two_xterm_hardware_proof.sh
+tools/live_session_milestone4_hardware_proof.sh
 tools/operator_keyboard_hardware_proof.sh
 tools/vrr_hardware_proof.sh
 tools/build_qemu_session_initramfs.sh
@@ -95,6 +96,14 @@ tools/audit_no_xlibre_runtime.sh
 # Dedicated text TTY with SOPHIA_INPUT_DEVICES set:
 tools/wayland_kitty_hardware_proof.sh
 ```
+
+The Milestone 4 proof must pass both the software verifier and the strict
+schema-14 GPU verifier. A DMA-BUF-only mixed-export diagnostic does not satisfy
+the gate: the retained GPU run must include the CPU background layer, positive
+acquire waiting, rejection recovery, Flip/Idle and idle-fence activity, and
+zero live resources. On an AMDGPU command-stream rejection, capture
+`sudo dmesg -T` immediately before another graphical session obscures the
+kernel validator record.
 
 The retained two-xterm hardware proof must preserve its 2,000 ms startup,
 25 ms maximum-composition, 100 ms input-to-presentation, complete event-flush,
