@@ -1168,3 +1168,24 @@ The isolated QEMU emergency gate then exposed five modifier deliveries queued
 before the final Backspace trigger. Emergency completion now waits for those
 deliveries to flush before frontend teardown. The repeated gate proves guard
 arm/trigger, exact five-of-five settlement, clean two-head KMS retirement, zero
+native cleanup debt, and clean guest shutdown.
+
+## 2026-07-16: Milestone 5 Native Zenity Blocker Retained
+
+Two guarded X13 classic shared-X attempts reached one Engine-owned native KMS
+output and then showed a blank screen because Zenity aborted before presenting
+a dialog. Both retained logs report GTK thaw-update assertions followed by
+`BadRequest` at serial 304, request code 139 (`XFIXES`), minor code 0
+(`QueryVersion`). The confined profile never started. The second emergency
+chord restored KD mode 0, the exact termios state, keyd, and all Sophia
+processes; the recovery record is complete. The earlier false keyd failure was
+a service-start race, so the runner now waits boundedly for keyd after `sv up`.
+
+The failure is specific to the native live-session path. The same X13 release
+profile passes the real `zenity --entry` engine smoke with 323 requests, opcode
+139 observed, one 318,680-byte nonzero CPU/SHM buffer, and
+`first_error=none`. The smoke now uses the entry dialog so it preserves this
+comparison. The next session must retain live parse and dispatch detail around
+sequence 304 and compare native render-device extension advertisement and live
+protocol routing with the passing engine smoke. Do not broaden XFixes or claim
+GTK session promotion until that evidence identifies the divergent path.

@@ -63,6 +63,11 @@ cleanup() {
         if ! sudo sv up keyd; then
             echo "WARNING: keyd could not be restored; run: sudo sv up keyd" >&2
             status=1
+        else
+            for _ in {1..40}; do
+                pgrep -x keyd >/dev/null 2>&1 && break
+                sleep 0.05
+            done
         fi
     fi
 

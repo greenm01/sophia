@@ -528,7 +528,7 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         binary: "zenity",
         display_mode: ExternalProbeDisplayMode::Environment,
         args: &[
-            "--info",
+            "--entry",
             "--title",
             "Sophia zenity",
             "--text",
