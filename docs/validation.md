@@ -52,13 +52,17 @@ dbus-run-session -- cargo run --offline -q -p sophia-cli -- x-authority-zenity-s
 ```
 
 Milestone 5 adds a physical GTK3 application-session proof. From the dedicated
-TTY/X13 target, set `SOPHIA_M5_GTK_INPUT_DEVICES` to the comma-separated stable
-keyboard and pointer event paths, then run:
+TTY on X13, run:
 
 ```sh
 tools/live_session_milestone5_gtk_hardware_proof.sh
 tools/check_live_session_milestone5_verifier.sh
 ```
+
+The runner discovers the single stable keyboard plus available mouse/touchpad
+paths, temporarily releases a running `keyd` service, restores it on every exit
+path, and allows 30 seconds for each dialog. Set
+`SOPHIA_M5_GTK_INPUT_DEVICES` only when automatic discovery is ambiguous.
 
 For each Zenity dialog, type `sophia` without Return, move the physical pointer,
 and click OK. The paired verifier requires classic shared-X and confined
