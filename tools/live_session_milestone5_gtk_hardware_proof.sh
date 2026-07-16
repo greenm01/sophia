@@ -233,7 +233,7 @@ run_profile() {
     setsid env SOPHIA_LIVE_SESSION_PERSISTENT_EVIDENCE="$evidence" \
       SOPHIA_LIVE_SESSION_RUNTIME_MSEC="$runtime_msec" \
       SOPHIA_LIVE_SESSION_SKIP_BUILD=1 SOPHIA_ATOMIC_SCANOUT_SKIP_PREFLIGHT=1 \
-      SOPHIA_X11_AUTHORITY_TRACE=1 \
+      SOPHIA_X11_AUTHORITY_TRACE=1 SOPHIA_LIVE_SESSION_DIAGNOSTIC=1 \
       "$root/tools/live_session_persistent_hardware_proof.sh" \
       --namespace-profile="$profile" --client=zenity --client-arg=--entry \
       --client-arg=--title --client-arg='Sophia GTK proof' \
