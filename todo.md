@@ -18,9 +18,10 @@ Engine remains the sole owner of physical input, scene state, rendering, and
 scanout.
 
 The namespace, admission, portal lifecycle, bounded X11 `CLIPBOARD` plus
-`PRIMARY` reference flow, and native X11 session-correctness milestone are
-established. The active track now advances standard X11 buffer and presentation
-semantics without weakening those boundaries.
+`PRIMARY` reference flow, native X11 session correctness, and mixed Vulkan
+presentation baseline are established. The active track promotes GTK3 software
+applications through captured compatibility gaps without weakening those
+boundaries.
 
 The Smithay-backed Wayland Authority remains supported under a maintenance
 lane. XLibre is a retired prototype and documented possible future
@@ -28,14 +29,19 @@ compatibility provider; no XLibre integration work is active.
 
 ## Milestone 5: Application Compatibility
 
-- [ ] Advance Render, XFixes, selections/INCR, Xdnd, GLX, and toolkit-specific
-  behavior only from captured gaps in `docs/x11-compatibility-matrix.md`.
-- [ ] Require a focused wire/authority regression, a reproducible real-client
-  probe with `first_error=none`, and the smallest compatible implementation for
-  every admitted request or extension.
-- [ ] Define application-class promotion using protocol coverage, namespace
-  behavior, input/grab correctness, buffer lifetime, latency, recovery, and
-  classic shared-X behavior where selected.
+- [x] Add a bounded direct X client launcher, reduced protocol-error
+  observations, and strict application-session evidence without bypassing the
+  Engine transaction path.
+- [x] Add fixture-backed paired GTK3 and aggregate three-class evidence
+  verifiers covering retained xterm, Vulkan, and GTK3 software sessions.
+- [ ] Capture fresh classic shared-X and confined Zenity entry-dialog sessions
+  with exact physical text, a physical OK click, `first_error=none`, CPU/SHM
+  redraw after resize, native presentation, normal exit, and clean teardown.
+- [ ] Advance Render, XFixes, selections/INCR, Xdnd, GLX, or toolkit behavior
+  only when that captured Zenity session exposes a focused matrix gap; require
+  the smallest compatible change and a wire/authority regression.
+- [ ] Run the aggregate three-class verifier and promote GTK3 software from
+  `engine` to `session` in `docs/x11-compatibility-matrix.md`.
 
 Exit: each promoted application class has reproducible `session` evidence and
 no undocumented dependency on XLibre, fixed output facts, injected input, or a

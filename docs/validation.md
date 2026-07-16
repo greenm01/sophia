@@ -51,6 +51,22 @@ cargo run --offline -q -p sophia-cli -- x-authority-xterm-two-client-smoke
 dbus-run-session -- cargo run --offline -q -p sophia-cli -- x-authority-zenity-smoke
 ```
 
+Milestone 5 adds a physical GTK3 application-session proof. From the dedicated
+TTY/X13 target, set `SOPHIA_M5_GTK_INPUT_DEVICES` to the comma-separated stable
+keyboard and pointer event paths, then run:
+
+```sh
+tools/live_session_milestone5_gtk_hardware_proof.sh
+tools/check_live_session_milestone5_verifier.sh
+```
+
+For each Zenity dialog, type `sophia` without Return, move the physical pointer,
+and click OK. The paired verifier requires classic shared-X and confined
+records with exact stdout, normal exit, zero protocol errors, committed resize,
+native presentation, and clean teardown. After retaining those logs, combine
+them with the M3 and M4 evidence using
+`tools/verify_live_session_three_class_baseline.sh`.
+
 The real-client smokes are regression smokes, not full X server conformance
 tests. Their reduced output must keep `first_error=none`, report the
 proof-window outcome explicitly, and include request/opcode counters so future

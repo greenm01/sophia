@@ -6,10 +6,35 @@ use std::sync::mpsc::{SyncSender, TrySendError};
 use sophia_protocol::{SurfaceId, SurfaceTransaction, TransactionId};
 
 use crate::{
-    X11CoreDispatchTrace, XAuthorityCpuBufferUpdate, XDispatchResult, XServerFrontendClientId,
+    X11CoreDispatchTrace, XAuthorityCpuBufferUpdate, XClientOutput, XDispatchResult,
+    XServerFrontendClientId,
 };
 
 pub const X_AUTHORITY_OBSERVED_TRANSACTION_CHANNEL_CAPACITY: usize = 256;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XAuthorityProtocolErrorObservation {
+    pub code: u8,
+    pub sequence: u16,
+    pub minor_code: u16,
+    pub major_code: u8,
+}
+
+fn reduce_protocol_errors(outputs: &[XClientOutput]) -> Vec<XAuthorityProtocolErrorObservation> {
+    outputs
+        .iter()
+        .filter_map(|output| match output {
+            XClientOutput::Error(error) => Some(XAuthorityProtocolErrorObservation {
+                code: error.code.wire_code(),
+                sequence: error.sequence,
+                minor_code: error.minor_code,
+                major_code: error.major_code,
+            }),
+            _ => None,
+        })
+        .take(16)
+        .collect()
+}
 
 #[derive(Clone, Debug)]
 pub struct XAuthorityDmaBufRegistration {
@@ -62,6 +87,9 @@ pub struct XAuthorityObservedTransactionBatch {
     pub present_submissions: Vec<crate::XAuthorityPresentSubmission>,
     pub released_dma_bufs: Vec<sophia_protocol::BufferHandle>,
     pub released_fences: Vec<sophia_protocol::FenceHandle>,
+    /// Reduced protocol errors. Resource IDs and request payloads deliberately
+    /// remain inside the X frontend boundary.
+    pub protocol_errors: Vec<XAuthorityProtocolErrorObservation>,
 }
 
 impl XAuthorityObservedTransactionBatch {
@@ -82,6 +110,7 @@ impl XAuthorityObservedTransactionBatch {
             present_submissions: Vec::new(),
             released_dma_bufs: Vec::new(),
             released_fences: Vec::new(),
+            protocol_errors: Vec::new(),
         })
     }
 
@@ -116,12 +145,14 @@ impl XAuthorityObservedTransactionBatch {
             .into_iter()
             .collect::<Vec<_>>();
         let response = trace.result.response.as_ref();
+        let protocol_errors = reduce_protocol_errors(&trace.result.outputs);
         if response.is_none()
             && dma_buf_registrations.is_empty()
             && fence_registrations.is_empty()
             && trace.present_submission.is_none()
             && trace.released_dma_bufs.is_empty()
             && trace.released_fences.is_empty()
+            && protocol_errors.is_empty()
         {
             return None;
         }
@@ -138,6 +169,7 @@ impl XAuthorityObservedTransactionBatch {
             && trace.present_submission.is_none()
             && trace.released_dma_bufs.is_empty()
             && trace.released_fences.is_empty()
+            && protocol_errors.is_empty()
         {
             return None;
         }
@@ -155,7 +187,35 @@ impl XAuthorityObservedTransactionBatch {
             present_submissions: trace.present_submission.into_iter().collect(),
             released_dma_bufs: trace.released_dma_bufs.to_vec(),
             released_fences: trace.released_fences.to_vec(),
+            protocol_errors,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{XClientError, XErrorCode};
+
+    #[test]
+    fn protocol_error_observations_are_reduced_and_bounded() {
+        let outputs = (0..20)
+            .map(|sequence| {
+                XClientOutput::Error(XClientError {
+                    code: XErrorCode::BadWindow,
+                    sequence,
+                    resource_id: 0xdead_beef,
+                    minor_code: 7,
+                    major_code: 42,
+                })
+            })
+            .collect::<Vec<_>>();
+        let observed = reduce_protocol_errors(&outputs);
+        assert_eq!(observed.len(), 16);
+        assert_eq!(observed[0].code, XErrorCode::BadWindow.wire_code());
+        assert_eq!(observed[0].sequence, 0);
+        assert_eq!(observed[0].minor_code, 7);
+        assert_eq!(observed[0].major_code, 42);
     }
 }
 

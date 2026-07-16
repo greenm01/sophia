@@ -50,6 +50,14 @@ pub struct PhysicalTextProof {
 
 impl PhysicalTextProof {
     pub fn new(text: &str) -> Result<Self, PhysicalTextProofBuildError> {
+        Self::build(text, true)
+    }
+
+    pub fn new_without_submit(text: &str) -> Result<Self, PhysicalTextProofBuildError> {
+        Self::build(text, false)
+    }
+
+    fn build(text: &str, submit: bool) -> Result<Self, PhysicalTextProofBuildError> {
         if text.is_empty() || text.len() > 24 || !text.bytes().all(|byte| byte.is_ascii_lowercase())
         {
             return Err(PhysicalTextProofBuildError::InvalidText);
@@ -61,7 +69,9 @@ impl PhysicalTextProof {
                 .ok_or(PhysicalTextProofBuildError::UnsupportedCharacter(byte))?;
             push_key_pair(&mut expected, keycode);
         }
-        push_key_pair(&mut expected, 36);
+        if submit {
+            push_key_pair(&mut expected, 36);
+        }
 
         Ok(Self {
             expected,

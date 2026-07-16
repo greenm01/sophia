@@ -332,7 +332,14 @@ pub(crate) fn run_persistent_xterm_session(
     args: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let config = PersistentXtermSessionConfig::from_args(args)?;
-    let terminal = super::x_authority::resolve_external_probe_binary("xterm", &config.terminal)?;
+    let terminal = if config.client.is_none() {
+        Some(super::x_authority::resolve_external_probe_binary(
+            "xterm",
+            &config.terminal,
+        )?)
+    } else {
+        None
+    };
     prepare_display_socket(&config.socket_path)?;
     let display_number = parse_display_number(&config.display)?;
     let (mut xauthority, xauthority_cookie) = LiveXAuthorityFile::create(display_number)?;
@@ -428,25 +435,40 @@ pub(crate) fn run_persistent_xterm_session(
         .input_proof_requested()
         .then(|| LiveInputProofResult::create(display_number))
         .transpose()?;
-    let mut terminal_command = std::process::Command::new(&terminal);
+    let mut terminal_command = match config.client.as_deref() {
+        Some(client) => std::process::Command::new(client),
+        None => {
+            std::process::Command::new(terminal.as_deref().expect("xterm executable is resolved"))
+        }
+    };
     terminal_command
         .env("DISPLAY", &config.display)
         .env("XAUTHORITY", xauthority.path())
-        .args([
-            "-cm",
-            "-dc",
-            "-geometry",
-            "120x36+80+60",
-            "-title",
-            "Sophia Terminal",
-        ])
+        .env_remove("ENV")
+        .env_remove("BASH_ENV")
         .stdin(Stdio::null())
-        .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
-    if let Some(proof_text) = config
-        .inject_text
-        .as_deref()
-        .or(config.expect_physical_text.as_deref())
+    if config.client.is_some() {
+        terminal_command
+            .args(&config.client_args)
+            .stdout(Stdio::piped());
+    } else {
+        terminal_command
+            .args([
+                "-cm",
+                "-dc",
+                "-geometry",
+                "120x36+80+60",
+                "-title",
+                "Sophia Terminal",
+            ])
+            .stdout(Stdio::inherit());
+    }
+    if config.client.is_none()
+        && let Some(proof_text) = config
+            .inject_text
+            .as_deref()
+            .or(config.expect_physical_text.as_deref())
     {
         terminal_command
             .args([
@@ -489,7 +511,9 @@ pub(crate) fn run_persistent_xterm_session(
     };
     if config.secondary_terminal {
         process.add_secondary_child(spawn_secondary_xterm(
-            &terminal,
+            terminal
+                .as_deref()
+                .expect("secondary terminal requires xterm"),
             &config.display,
             xauthority.path(),
             config
@@ -687,6 +711,10 @@ struct PersistentXtermSessionConfig {
     terminal: String,
     terminal_exec: Option<String>,
     terminal_exec_args: Vec<String>,
+    client: Option<String>,
+    client_args: Vec<String>,
+    expect_client_stdout: Option<String>,
+    require_client_normal_exit: bool,
     secondary_terminal: bool,
     max_runtime: Option<Duration>,
     max_ticks: Option<usize>,
@@ -769,6 +797,31 @@ impl PersistentXtermSessionConfig {
             .filter_map(|arg| arg.strip_prefix("--terminal-exec-arg="))
             .map(ToOwned::to_owned)
             .collect::<Vec<_>>();
+        let client = arg_value(args, "--client");
+        let client_args = args
+            .iter()
+            .filter_map(|arg| arg.strip_prefix("--client-arg="))
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        let expect_client_stdout = arg_value(args, "--expect-client-stdout");
+        let require_client_normal_exit =
+            args.iter().any(|arg| arg == "--require-client-normal-exit");
+        if client.is_none()
+            && (!client_args.is_empty()
+                || expect_client_stdout.is_some()
+                || require_client_normal_exit)
+        {
+            return Err("client proof options require --client".into());
+        }
+        if client_args.len() > 64 || client_args.iter().any(|argument| argument.len() > 4_096) {
+            return Err("--client accepts at most 64 bounded arguments".into());
+        }
+        if expect_client_stdout
+            .as_ref()
+            .is_some_and(|text| text.len() > 4_096)
+        {
+            return Err("--expect-client-stdout accepts at most 4096 bytes".into());
+        }
         if terminal_exec.is_none() && !terminal_exec_args.is_empty() {
             return Err("--terminal-exec-arg requires --terminal-exec".into());
         }
@@ -859,6 +912,16 @@ impl PersistentXtermSessionConfig {
         if terminal_exec.is_some() && (inject_text.is_some() || expect_physical_text.is_some()) {
             return Err("--terminal-exec cannot be combined with input-proof commands".into());
         }
+        if client.is_some()
+            && (terminal_exec.is_some()
+                || secondary_terminal
+                || inject_text.is_some()
+                || args.iter().any(|arg| arg.starts_with("--terminal=")))
+        {
+            return Err(
+                "--client cannot be combined with terminal-specific session options".into(),
+            );
+        }
         if (m4_first_acquire_delay.is_some()
             || m4_reject_first_present
             || m4_diagnose_first_mixed_export)
@@ -902,6 +965,10 @@ impl PersistentXtermSessionConfig {
             terminal: arg_value(args, "--terminal").unwrap_or_else(|| "xterm".to_owned()),
             terminal_exec,
             terminal_exec_args,
+            client,
+            client_args,
+            expect_client_stdout,
+            require_client_normal_exit,
             secondary_terminal,
             max_runtime,
             max_ticks,
@@ -931,6 +998,10 @@ impl PersistentXtermSessionConfig {
 
     fn input_proof_requested(&self) -> bool {
         self.inject_text.is_some() || self.expect_physical_text.is_some()
+    }
+
+    fn application_proof_requested(&self) -> bool {
+        self.client.is_some()
     }
 }
 
@@ -1948,7 +2019,13 @@ fn run_session_loop(
     let mut physical_text_proof = config
         .expect_physical_text
         .as_deref()
-        .map(PhysicalTextProof::new)
+        .map(|text| {
+            if config.application_proof_requested() {
+                PhysicalTextProof::new_without_submit(text)
+            } else {
+                PhysicalTextProof::new(text)
+            }
+        })
         .transpose()?;
     let mut physical_sequence_completed_at: Option<Instant> = None;
     let mut physical_input_completion_reported = false;
@@ -2004,6 +2081,10 @@ fn run_session_loop(
     let mut terminal_content_ready_reported = false;
     let mut input_text_match = false;
     let mut primary_child_exited = false;
+    let mut primary_exit_status = None;
+    let mut client_stdout = Vec::new();
+    let mut protocol_error_count = 0usize;
+    let mut first_protocol_error = None;
 
     macro_rules! drain_physical_input {
         () => {{
@@ -2139,20 +2220,42 @@ fn run_session_loop(
 
     loop {
         if !primary_child_exited && let Some(status) = child.try_wait()? {
+            primary_exit_status = Some(status);
+            if config.application_proof_requested() {
+                if let Some(stdout) = child.stdout.take() {
+                    stdout.take(4_097).read_to_end(&mut client_stdout)?;
+                }
+                if client_stdout.len() > 4_096 {
+                    return Err("application stdout exceeded the 4096-byte evidence bound".into());
+                }
+            }
             if status.success()
                 && successful_primary_exit_ends_session(config.input_proof_requested())
             {
                 break;
             }
             if !status.success() {
-                return Err(
-                    format!("xterm exited during live session with status {status}").into(),
-                );
+                return Err(format!(
+                    "session client exited during live session with status {status}"
+                )
+                .into());
             }
             // The proof helper intentionally exits after displaying its
             // received text. Keep the session and secondary terminal alive so
             // the final native frame can retire and pointer evidence can run.
             primary_child_exited = true;
+        }
+        if config.application_proof_requested()
+            && !input_text_match
+            && physical_text_proof
+                .as_ref()
+                .is_some_and(PhysicalTextProof::is_complete)
+        {
+            input_text_match = true;
+            println!(
+                "sophia_live_session_input schema=3 status=semantic_complete source=physical text_match=true bytes={}",
+                config.expect_physical_text.as_ref().map_or(0, String::len)
+            );
         }
         for (index, secondary) in secondary_children.iter_mut().enumerate() {
             if let Some(status) = secondary.try_wait()? {
@@ -2340,6 +2443,21 @@ fn run_session_loop(
         );
         match authority_batch {
             Ok(batch) => {
+                for error in &batch.protocol_errors {
+                    protocol_error_count = protocol_error_count.saturating_add(1);
+                    first_protocol_error.get_or_insert(*error);
+                }
+                let has_engine_work = !batch.transactions.is_empty()
+                    || !batch.removed_surfaces.is_empty()
+                    || !batch.cpu_buffer_updates.is_empty()
+                    || !batch.dma_buf_registrations.is_empty()
+                    || !batch.fence_registrations.is_empty()
+                    || !batch.present_submissions.is_empty()
+                    || !batch.released_dma_bufs.is_empty()
+                    || !batch.released_fences.is_empty();
+                if !has_engine_work {
+                    continue;
+                }
                 last_authority_update = Instant::now();
                 batches = batches.saturating_add(1);
                 transactions =
@@ -2856,6 +2974,26 @@ fn run_session_loop(
         )
         .into());
     }
+    if config.application_proof_requested() {
+        let status =
+            primary_exit_status.ok_or("application proof ended before the client exited")?;
+        if config.require_client_normal_exit && !status.success() {
+            return Err(format!("application did not exit normally: {status}").into());
+        }
+        if let Some(expected) = config.expect_client_stdout.as_deref()
+            && client_stdout != expected.as_bytes()
+        {
+            return Err(format!(
+                "application stdout mismatch: expected_bytes={} received_bytes={}",
+                expected.len(),
+                client_stdout.len()
+            )
+            .into());
+        }
+        if protocol_error_count != 0 {
+            return Err(format!("application emitted {protocol_error_count} X protocol errors; first={first_protocol_error:?}").into());
+        }
+    }
     if config.inject_surface_resize.is_some() && !resize_proof_complete {
         return Err(
             "persistent live session did not commit configured surface resize pixels".into(),
@@ -3108,6 +3246,35 @@ fn run_session_loop(
         if checksums.len() != native_scanout.heads.len() {
             return Err("native output frames are not independently distinguishable".into());
         }
+    }
+    if let Some(client) = config.client.as_deref() {
+        let client_name = std::path::Path::new(client)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("client");
+        println!(
+            "sophia_x_application_session schema=1 status=passed class=gtk3_software client={} profile={} child_outcome=normal exit_code=0 stdout_match={} protocol_errors=0 first_error=none physical_text={} pointer_button={} surface_resize={} buffer_path=cpu_shm native_presentation={} cleanup=clean",
+            client_name,
+            match config.namespace_profile {
+                NamespaceProfile::ClassicShared => "classic_shared",
+                NamespaceProfile::Confined => "confined",
+            },
+            config.expect_client_stdout.is_some(),
+            physical_text_proof
+                .as_ref()
+                .is_some_and(PhysicalTextProof::is_complete),
+            physical_pointer_routed > 0,
+            if resize_proof_complete {
+                "committed"
+            } else {
+                "disabled"
+            },
+            if native_scanout.is_some() {
+                "enabled"
+            } else {
+                "disabled"
+            },
+        );
     }
     Ok(())
 }
@@ -5724,6 +5891,36 @@ mod tests {
         assert!(
             PersistentXtermSessionConfig::from_args(&["--inject-output-size=wide".to_owned(),])
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn live_x_application_client_contract_is_bounded_and_exclusive() {
+        let config = PersistentXtermSessionConfig::from_args(&[
+            "--client=zenity".to_owned(),
+            "--client-arg=--entry".to_owned(),
+            "--expect-client-stdout=sophia\n".to_owned(),
+            "--require-client-normal-exit".to_owned(),
+            "--expect-physical-text=sophia".to_owned(),
+            "--expect-physical-pointer".to_owned(),
+            "--input-devices=/dev/input/event0,/dev/input/event1".to_owned(),
+            "--max-runtime-ms=30000".to_owned(),
+        ])
+        .unwrap();
+        assert_eq!(config.client.as_deref(), Some("zenity"));
+        assert_eq!(config.client_args, ["--entry"]);
+        assert_eq!(config.expect_client_stdout.as_deref(), Some("sophia\n"));
+        assert!(config.require_client_normal_exit);
+
+        assert!(
+            PersistentXtermSessionConfig::from_args(&[
+                "--client=zenity".to_owned(),
+                "--terminal=xterm".to_owned(),
+            ])
+            .is_err()
+        );
+        assert!(
+            PersistentXtermSessionConfig::from_args(&["--client-arg=--entry".to_owned(),]).is_err()
         );
     }
 

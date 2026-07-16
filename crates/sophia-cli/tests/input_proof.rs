@@ -46,6 +46,17 @@ fn accepts_exact_lowercase_text_and_return_pairs() {
 }
 
 #[test]
+fn application_text_completes_without_a_submit_key() {
+    let mut proof = PhysicalTextProof::new_without_submit("sophia").unwrap();
+    let events = sophia_events();
+    assert_eq!(proof.expected_events(), 12);
+    for event in events.into_iter().take(12) {
+        proof.observe(event).unwrap();
+    }
+    assert!(proof.is_complete());
+}
+
+#[test]
 fn rejects_wrong_key_modifier_release_order_and_repeat() {
     for wrong in [
         event(40, true),

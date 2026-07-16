@@ -4418,6 +4418,7 @@ fn x11_dispatch_accepts_destroy_window_for_known_namespace_window() {
             present_submissions: Vec::new(),
             released_dma_bufs: Vec::new(),
             released_fences: Vec::new(),
+            protocol_errors: Vec::new(),
         })
     );
 }
@@ -7279,6 +7280,7 @@ fn x11_core_socket_channel_sees_sophia_present_transaction_batch() {
         present_submissions: Vec::new(),
         released_dma_bufs: Vec::new(),
         released_fences: Vec::new(),
+        protocol_errors: Vec::new(),
     });
     assert!(routes.is_empty());
 }
@@ -7417,17 +7419,30 @@ fn routed_service_confines_input_and_control_to_two_workers_and_drains() {
         .unwrap();
 
     let mut routes = Vec::new();
-    for _ in 0..2 {
+    let mut observed_protocol_error = false;
+    while routes.len() < 2 || !observed_protocol_error {
         let batch = transaction_receiver
             .recv_timeout(Duration::from_secs(1))
             .unwrap();
-        routes.push((
-            batch
-                .client
-                .expect("routed worker must identify its client"),
-            batch.transactions[0].surface,
-        ));
+        if batch.transactions.is_empty() {
+            assert_eq!(batch.protocol_errors.len(), 1);
+            assert_eq!(
+                batch.protocol_errors[0].code,
+                XErrorCode::BadAccess.wire_code()
+            );
+            observed_protocol_error = true;
+            continue;
+        }
+        if routes.len() < 2 {
+            routes.push((
+                batch
+                    .client
+                    .expect("routed worker must identify its client"),
+                batch.transactions[0].surface,
+            ));
+        }
     }
+    assert!(observed_protocol_error);
     routes.sort_by_key(|(client, _)| client.raw());
     assert_ne!(routes[0].0, routes[1].0);
     for (index, (_, surface)) in routes.iter().copied().enumerate() {
