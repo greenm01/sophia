@@ -1802,6 +1802,10 @@ fn successful_primary_exit_ends_session(input_proof_requested: bool) -> bool {
     !input_proof_requested
 }
 
+fn global_runtime_deadline_ends_session(input_proof_requested: bool) -> bool {
+    !input_proof_requested
+}
+
 fn physical_input_may_route_after_primary_exit(
     primary_child_exited: bool,
     focused_surface: Option<SurfaceId>,
@@ -2148,7 +2152,13 @@ fn run_session_loop(
                         .into(),
                 );
             }
-            break;
+            // The global runtime budget bounds startup. Once input has been
+            // injected, its delivery and pixel/semantic stages own narrower
+            // explicit deadlines. Ending here can strand already-routed keys
+            // without giving the frontend a chance to acknowledge them.
+            if global_runtime_deadline_ends_session(config.input_proof_requested()) {
+                break;
+            }
         }
         if physical_input_may_route_after_primary_exit(
             primary_child_exited,
@@ -5390,9 +5400,9 @@ mod tests {
         SECONDARY_POINTER_WITNESS_SCRIPT, SessionPointerPlacement, Size,
         authority_transaction_count, center_geometry_without_scaling,
         cpu_frame_matches_visible_output, cpu_frame_submission_ready,
-        layer_snapshots_from_committed, physical_input_may_route_after_primary_exit,
-        physical_input_pixels_already_changed, place_pointer_event_for_routing,
-        pointer_offset_for_geometry, record_runtime_commits,
+        global_runtime_deadline_ends_session, layer_snapshots_from_committed,
+        physical_input_may_route_after_primary_exit, physical_input_pixels_already_changed,
+        place_pointer_event_for_routing, pointer_offset_for_geometry, record_runtime_commits,
         required_wayland_presentation_submission, retain_latest_wayland_presentation,
         seed_missing_committed_surfaces, successful_primary_exit_ends_session,
     };
@@ -5410,6 +5420,12 @@ mod tests {
     fn successful_primary_exit_keeps_requested_input_proof_alive() {
         assert!(successful_primary_exit_ends_session(false));
         assert!(!successful_primary_exit_ends_session(true));
+    }
+
+    #[test]
+    fn global_runtime_deadline_does_not_strand_an_active_input_proof() {
+        assert!(global_runtime_deadline_ends_session(false));
+        assert!(!global_runtime_deadline_ends_session(true));
     }
 
     #[test]
