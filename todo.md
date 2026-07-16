@@ -34,6 +34,9 @@ compatibility provider; no XLibre integration work is active.
   Engine transaction path.
 - [x] Add fixture-backed paired GTK3 and aggregate three-class evidence
   verifiers covering retained xterm, Vulkan, and GTK3 software sessions.
+- [x] Guard GTK hardware takeover with independently armed emergency input,
+  bounded process-group termination, verified KD/termios/keyd restoration, and
+  durable recovery evidence.
 - [ ] Capture fresh classic shared-X and confined Zenity entry-dialog sessions
   with exact physical text, a physical OK click, `first_error=none`, CPU/SHM
   redraw after resize, native presentation, normal exit, and clean teardown.

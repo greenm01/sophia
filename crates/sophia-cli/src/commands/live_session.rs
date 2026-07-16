@@ -2085,10 +2085,11 @@ fn run_session_loop(
     let mut client_stdout = Vec::new();
     let mut protocol_error_count = 0usize;
     let mut first_protocol_error = None;
+    let mut emergency_exit_requested = false;
 
     macro_rules! drain_physical_input {
         () => {{
-            let mut emergency_exit = false;
+            let emergency_exit = false;
             if let (Some(poller), Some(runtime)) = (physical_input.as_mut(), runtime.as_ref())
                 && (config.expect_physical_text.is_none() || physical_input_ready_at.is_some())
             {
@@ -2129,7 +2130,10 @@ fn run_session_loop(
                 if report.emergency_exit {
                     println!("sophia_live_session_input_pipeline schema=1 status=emergency_exit");
                     std::io::stdout().flush()?;
-                    emergency_exit = true;
+                    emergency_exit_requested = true;
+                    let requested_at = Instant::now();
+                    input_delivery_wait_started_at = Some(requested_at);
+                    input_delivery_source = Some("emergency");
                 }
                 if physical_sequence_completed_at.is_none()
                     && physical_text_proof
@@ -2267,6 +2271,9 @@ fn run_session_loop(
             }
         }
         drain_input_deliveries!();
+        if emergency_exit_requested && pending_input_deliveries.is_empty() {
+            break;
+        }
         if !input_text_match
             && let (Some(expected), Some(result)) = (
                 config

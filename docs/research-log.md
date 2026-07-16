@@ -1127,6 +1127,7 @@ completions, one controlled Skip, 77 matching Idle events and idle-fence
 triggers, nine acquire-gate waits, zero submit/retire failures, and zero live
 sources, fences, or transactions. The established software xterm/resize half
 also passes, completing the Milestone 4 hardware exit.
+
 ## 2026-07-16: GTK3 Application Promotion Contract
 
 Milestone 5 uses a direct, bounded Sophia-X client launcher instead of wrapping
@@ -1152,3 +1153,18 @@ advertisement now withholds DRI3 in that configuration so GTK selects MIT-SHM.
 The repeated probe commits one surface with 288,920 nonzero software bytes and
 `first_error=none`; no broader RandR property store or XFixes event expansion
 was inferred.
+
+## 2026-07-16: Sophia X TTY Recovery Is An Acceptance Gate
+
+The first GTK hardware attempt could leave the active text VT black until a
+power cycle because the X proof called the raw persistent KMS runner without
+the guarded TTY lifecycle already used by native Wayland. The GTK runner now
+builds and preflights before takeover, requires an independent
+Ctrl-Alt-Backspace guard to arm, saves KD and termios state, runs each Sophia
+session in a bounded process group, restores keyd and the console on every exit
+path, and records a strict durable recovery line.
+
+The isolated QEMU emergency gate then exposed five modifier deliveries queued
+before the final Backspace trigger. Emergency completion now waits for those
+deliveries to flush before frontend teardown. The repeated gate proves guard
+arm/trigger, exact five-of-five settlement, clean two-head KMS retirement, zero

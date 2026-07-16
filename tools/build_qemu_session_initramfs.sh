@@ -17,6 +17,7 @@ require_command() {
 require_command cargo
 require_command dracut
 require_command xterm
+require_command readlink
 
 if [[ ! -r "$KERNEL_IMAGE" ]]; then
     echo "guest kernel is not readable: $KERNEL_IMAGE" >&2
@@ -52,6 +53,11 @@ for file in "${runtime_files[@]}"; do
     fi
 done
 
+XKB_DATA_DIR="$(readlink -f /usr/share/X11/xkb)"
+if [[ ! -d "$XKB_DATA_DIR" ]]; then
+    echo "xkeyboard-config data is missing: /usr/share/X11/xkb" >&2
+    exit 1
+fi
 dracut --force --no-hostonly --no-hostonly-cmdline --no-early-microcode \
     --kver "$KERNEL_VERSION" \
     --tmpdir "$OUT_DIR/dracut-tmp" \
@@ -65,6 +71,7 @@ dracut --force --no-hostonly --no-hostonly-cmdline --no-early-microcode \
     --include /usr/share/glvnd /usr/share/glvnd \
     --include /usr/share/libinput /usr/share/libinput \
     --include /usr/share/X11/app-defaults /usr/share/X11/app-defaults \
+    --include "$XKB_DATA_DIR" "$XKB_DATA_DIR" \
     "$INITRAMFS"
 
 echo "Sophia QEMU guest initramfs built"

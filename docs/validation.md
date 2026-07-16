@@ -59,10 +59,15 @@ tools/live_session_milestone5_gtk_hardware_proof.sh
 tools/check_live_session_milestone5_verifier.sh
 ```
 
-The runner discovers the single stable keyboard plus available mouse/touchpad
-paths, temporarily releases a running `keyd` service, restores it on every exit
-path, and allows 30 seconds for each dialog. Set
-`SOPHIA_M5_GTK_INPUT_DEVICES` only when automatic discovery is ambiguous.
+The runner builds and preflights before graphics takeover, then asks for one
+Ctrl-Alt-Backspace press/release to arm an independent input guard. During
+either dialog, press the chord again for emergency termination and TTY
+restoration. The runner saves and verifies KD mode plus termios, terminates the
+Sophia process group, restores `keyd`, and writes durable evidence below
+`${XDG_STATE_HOME:-~/.local/state}/sophia/milestone5-gtk`. It discovers the
+single stable keyboard plus available mouse/touchpad paths and allows 30 seconds
+for each dialog. Set `SOPHIA_M5_GTK_INPUT_DEVICES` only when discovery is
+ambiguous.
 
 For each Zenity dialog, type `sophia` without Return, move the physical pointer,
 and click OK. The paired verifier requires classic shared-X and confined

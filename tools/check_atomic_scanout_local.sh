@@ -36,6 +36,11 @@ bash -n tools/diagnose_void_dmabuf_heap.sh
 bash -n tools/run_void_dmabuf_lifetime_proof.sh
 bash -n tools/verify_wayland_kitty_evidence.sh
 bash -n tools/install_sophia_session.sh
+bash -n tools/live_session_persistent_hardware_proof.sh
+bash -n tools/live_session_milestone5_gtk_hardware_proof.sh
+bash -n tools/verify_live_session_milestone5_tty_recovery.sh
+bash -n tools/check_live_session_milestone5_verifier.sh
+tools/check_live_session_milestone5_verifier.sh
 if ! grep -q 'SOPHIA_KITTY_REQUIRE_DMABUF=0' tools/wayland_kitty_hardware_proof.sh; then
     echo "Interactive Kitty proof must not enable output-sized direct DMA-BUF scanout." >&2
     exit 1

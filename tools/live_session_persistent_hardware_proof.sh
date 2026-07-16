@@ -6,6 +6,7 @@ EVIDENCE_FILE="${SOPHIA_LIVE_SESSION_PERSISTENT_EVIDENCE:-/tmp/sophia-live-sessi
 DISPLAY_NAME="${SOPHIA_LIVE_SESSION_DISPLAY:-:181}"
 RUNTIME_MSEC="${SOPHIA_LIVE_SESSION_RUNTIME_MSEC:-5000}"
 SKIP_PREFLIGHT="${SOPHIA_ATOMIC_SCANOUT_SKIP_PREFLIGHT:-0}"
+SKIP_BUILD="${SOPHIA_LIVE_SESSION_SKIP_BUILD:-0}"
 
 mkdir -p "$(dirname "$EVIDENCE_FILE")"
 : > "$EVIDENCE_FILE"
@@ -17,8 +18,10 @@ echo "Evidence: $EVIDENCE_FILE"
 # Compile before taking DRM/KMS ownership so build time is never presented as
 # a blank native frame. Persistent rendering evidence must measure optimized
 # code; the debug CPU compositor is intentionally not a performance target.
-cargo build --quiet --release --offline --manifest-path "$ROOT_DIR/Cargo.toml" -p sophia-cli \
-    --features "atomic-scanout-live"
+if [[ "$SKIP_BUILD" != "1" ]]; then
+    cargo build --quiet --release --offline --manifest-path "$ROOT_DIR/Cargo.toml" -p sophia-cli \
+        --features "atomic-scanout-live"
+fi
 
 input_proof_args=(--inject-text=sophia)
 for arg in "$@"; do
