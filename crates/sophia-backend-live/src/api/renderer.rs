@@ -13,12 +13,13 @@ pub use sophia_renderer_live::{
     LiveRendererImportBoundary, LiveRendererImportDecision, LiveRendererImportHealth,
     LiveRendererImportPathStatus, LiveRendererImportRejection, LiveRendererImportStartupStatus,
     LiveRendererPresentationReport, LiveRendererPresentationStatus, LiveRendererRuntimeObservation,
-    LiveRendererScanoutBufferExportDetail, LiveRendererSelectionObservation,
-    compose_live_cpu_frame, compose_live_cpu_frame_ref, compose_live_cpu_frame_ref_with_cursor,
+    LiveRendererScanoutBufferExportDetail, LiveRendererScanoutBufferExportStatus,
+    LiveRendererSelectionObservation, compose_live_cpu_frame, compose_live_cpu_frame_ref,
+    compose_live_cpu_frame_ref_with_cursor,
 };
 #[cfg(feature = "gbm-probe")]
 pub use sophia_renderer_live::{
     GbmCapabilityProbeReport, LiveDmaBufFrame, LiveIdleFenceStatus, LiveOwnedDmaBufFrame,
-    LiveOwnedMixedCompositionFrame, LiveResourceReleaseStatus, NativeGbmCapabilityProbe,
-    NativeGbmRenderedScanoutContextStatus,
+    LiveOwnedMixedCompositionFrame, LiveOwnedMixedCompositionLayer, LiveResourceReleaseStatus,
+    NativeGbmCapabilityProbe, NativeGbmRenderedScanoutContextStatus,
 };

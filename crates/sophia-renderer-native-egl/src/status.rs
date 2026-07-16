@@ -67,6 +67,12 @@ pub enum NativeGbmScanoutBufferExportDetail {
     EglContextUnavailable,
     EglMakeCurrentFailed,
     GlSmokeFailed,
+    CpuLayerUploadFailed,
+    DmaBufImageCreateFailed,
+    DmaBufImageBindFailed,
+    CompositionDrawFailed,
+    CompositionFinishFailed,
+    EglImageDestroyFailed,
     DmaBufImportFailed,
     EglSwapBuffersFailed,
     FrontBufferLockFailed,
@@ -91,6 +97,12 @@ impl NativeGbmScanoutBufferExportDetail {
             | Self::EglContextUnavailable
             | Self::EglMakeCurrentFailed
             | Self::GlSmokeFailed
+            | Self::CpuLayerUploadFailed
+            | Self::DmaBufImageCreateFailed
+            | Self::DmaBufImageBindFailed
+            | Self::CompositionDrawFailed
+            | Self::CompositionFinishFailed
+            | Self::EglImageDestroyFailed
             | Self::DmaBufImportFailed
             | Self::EglSwapBuffersFailed
             | Self::FrontBufferLockFailed

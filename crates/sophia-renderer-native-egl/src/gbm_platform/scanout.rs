@@ -1394,7 +1394,7 @@ fn render_persistent_target_composition<T: std::os::fd::AsFd>(
                     layer.alpha,
                     layer.format == 0x3432_5241,
                 )
-                .map_err(|_| NativeGbmScanoutBufferExportDetail::GlSmokeFailed),
+                .map_err(|_| NativeGbmScanoutBufferExportDetail::CpuLayerUploadFailed),
             NativeCompositionLayer::DmaBuf(layer) => {
                 draw_composition_dmabuf_layer(egl, display, &target.pipeline, *layer)
             }
@@ -1405,7 +1405,7 @@ fn render_persistent_target_composition<T: std::os::fd::AsFd>(
             target
                 .pipeline
                 .finish_composition()
-                .map_err(|_| NativeGbmScanoutBufferExportDetail::GlSmokeFailed)
+                .map_err(|_| NativeGbmScanoutBufferExportDetail::CompositionFinishFailed)
         })
         .and_then(|()| {
             egl.swap_buffers(display, egl_surface)
@@ -1483,10 +1483,10 @@ fn draw_composition_dmabuf_layer(
             no_buffer,
             &attributes,
         )
-        .map_err(|_| NativeGbmScanoutBufferExportDetail::DmaBufImportFailed)?;
+        .map_err(|_| NativeGbmScanoutBufferExportDetail::DmaBufImageCreateFailed)?;
     let draw =
         egl.get_proc_address("glEGLImageTargetTexture2DOES")
-            .ok_or(NativeGbmScanoutBufferExportDetail::DmaBufImportFailed)
+            .ok_or(NativeGbmScanoutBufferExportDetail::DmaBufImageBindFailed)
             .map(|image_target| unsafe {
                 std::mem::transmute::<
                     extern "system" fn(),
@@ -1504,13 +1504,13 @@ fn draw_composition_dmabuf_layer(
                         layer.frame.format == 0x3432_5241,
                     )
                 }
-                .map_err(|_| NativeGbmScanoutBufferExportDetail::DmaBufImportFailed)
+                .map_err(|_| NativeGbmScanoutBufferExportDetail::CompositionDrawFailed)
             });
     let destroyed = egl.destroy_image(display, image).is_ok();
     match (draw, destroyed) {
         (Ok(()), true) => Ok(()),
         (Err(detail), _) => Err(detail),
-        (Ok(()), false) => Err(NativeGbmScanoutBufferExportDetail::DmaBufImportFailed),
+        (Ok(()), false) => Err(NativeGbmScanoutBufferExportDetail::EglImageDestroyFailed),
     }
 }
 

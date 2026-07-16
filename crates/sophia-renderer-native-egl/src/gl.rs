@@ -16,6 +16,7 @@ pub(crate) struct PersistentXrgb8888GlPipeline {
     gl: glow::Context,
     program: glow::NativeProgram,
     texture: glow::NativeTexture,
+    cpu_layer_texture: glow::NativeTexture,
     vertex_buffer: glow::NativeBuffer,
     width: u32,
     height: u32,
@@ -61,6 +62,7 @@ impl PersistentXrgb8888GlPipeline {
             gl.delete_shader(fragment_shader);
         }
         let texture = unsafe { gl.create_texture()? };
+        let cpu_layer_texture = unsafe { gl.create_texture()? };
         let vertex_buffer = unsafe { gl.create_buffer()? };
         let vertex_bytes = unsafe {
             std::slice::from_raw_parts(
@@ -105,6 +107,38 @@ impl PersistentXrgb8888GlPipeline {
                 glow::UNSIGNED_BYTE,
                 glow::PixelUnpackData::Slice(None),
             );
+            gl.bind_texture(glow::TEXTURE_2D, Some(cpu_layer_texture));
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MIN_FILTER,
+                glow::NEAREST as i32,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MAG_FILTER,
+                glow::NEAREST as i32,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_WRAP_S,
+                glow::CLAMP_TO_EDGE as i32,
+            );
+            gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_WRAP_T,
+                glow::CLAMP_TO_EDGE as i32,
+            );
+            gl.tex_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                glow::RGBA as i32,
+                width as i32,
+                height as i32,
+                0,
+                glow::BGRA,
+                glow::UNSIGNED_BYTE,
+                glow::PixelUnpackData::Slice(None),
+            );
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer));
             gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::STATIC_DRAW);
         }
@@ -112,6 +146,7 @@ impl PersistentXrgb8888GlPipeline {
             gl,
             program,
             texture,
+            cpu_layer_texture,
             vertex_buffer,
             width,
             height,
@@ -219,16 +254,25 @@ impl PersistentXrgb8888GlPipeline {
         if width == 0 || height == 0 || stride != expected_stride || pixels.len() != expected {
             return Err(NativeEglDrawSmokeStatus::GlUnavailable);
         }
+        if width != self.width || height != self.height {
+            return Err(NativeEglDrawSmokeStatus::GlUnavailable);
+        }
         unsafe {
             self.gl.active_texture(glow::TEXTURE0);
-            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
-            self.gl.tex_image_2d(
+            // Mixed composition owns a dedicated, fixed-size CPU texture.
+            // Keep its allocation distinct and stable while the same command
+            // stream samples an imported EGLImage. The live seam currently
+            // supplies one full-output CPU background, so fail closed for any
+            // other size.
+            self.gl
+                .bind_texture(glow::TEXTURE_2D, Some(self.cpu_layer_texture));
+            self.gl.tex_sub_image_2d(
                 glow::TEXTURE_2D,
                 0,
-                glow::RGBA as i32,
+                0,
+                0,
                 width as i32,
                 height as i32,
-                0,
                 glow::BGRA,
                 glow::UNSIGNED_BYTE,
                 glow::PixelUnpackData::Slice(Some(pixels)),

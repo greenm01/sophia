@@ -77,14 +77,18 @@ resources. The real CPU-plus-Vulkan mixed draw still aborts in Radeon
 `glFinish` with `amdgpu: The CS has been rejected ... (-2)` before KMS submit.
 
 Next continuation: capture the privileged kernel validator record immediately
-after the failure with `sudo dmesg -T`, reduce the failing two-layer draw to a
-native-EGL hardware regression, and correct the rejected resource/state
-transition without weakening the required mixed-pixel gate. DCC disablement,
-CPU/import submission splits, frame-local CPU textures, frame-local VBOs, and
-reversed layer order did not clear the rejection and should not be repeated as
-blind hardware experiments. Retain a normal paired run only after the strict
-schema-14 verifier passes, then promote the final unchecked item and archive
-Milestone 4.
+after the failure with `sudo dmesg -T`. The feature-gated
+`native-egl-vkcube-mixed-smoke` now reduces the real DRI3 handoff to the native
+mixed exporter, stops before KMS submission, isolates driver aborts in a
+watchdog child, and emits strict schema-1 evidence. Mixed CPU upload storage is
+also isolated from the fullscreen upload texture and composition failures name
+their exact CPU/EGLImage/draw/finish stage. Run the focused X13 smoke first;
+its wrapper and the normal paired proof now retain privileged before/after
+kernel logs. DCC disablement, CPU/import submission splits, frame-local CPU
+textures, frame-local VBOs, and reversed layer order did not clear the earlier
+rejection and should not be repeated as blind hardware experiments. Retain a
+normal paired run only after the focused smoke and strict schema-14 verifier
+pass, then promote the final unchecked item and archive Milestone 4.
 
 Exit: one software-backed and one GPU-backed real X11 client pass normal
 startup, resize, presentation, delayed release, failure recovery, and teardown

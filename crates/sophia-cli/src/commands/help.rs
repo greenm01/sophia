@@ -33,6 +33,10 @@ pub(crate) fn print(verbose: bool) {
     println!(
         "commands: sophia-live-session [--client-backend=wayland|sophia-x] [--client=PATH] [--client-arg=ARG ...] [--display=:77] [--terminal=xterm] [--terminal-exec=PATH] [--terminal-exec-arg=ARG ...] [--secondary-terminal] [--namespace-profile=classic|confined] [--input-devices=/dev/input/eventN,...] [--native-scanout] [--wm-process=PATH] [--wm-process-arg=ARG ...] [--max-runtime-ms=N] [--max-ticks=N] [--inject-text=lowercase|--expect-physical-text=lowercase] [--expect-physical-pointer] [--exit-after-input-proof] [--proof]"
     );
+    #[cfg(feature = "atomic-scanout-live")]
+    println!(
+        "commands: native-egl-vkcube-mixed-smoke [--display=:184] [--terminal=xterm] [--max-runtime-ms=6000]"
+    );
     println!(
         "commands: sophia-wayland-session --client=PATH [--client-arg=ARG ...] [--wayland-display=sophia-0] [--input-devices=/dev/input/eventN,...] [--native-scanout] [--experimental-dmabuf] [--resize=WIDTHxHEIGHT] [--resize-after-ms=N] [--expect-keycodes=CODE,...] [--expect-pointer-input] [--expect-input-presentation|--expect-input-pixel-change] [--max-input-latency-ms=100] [--max-runtime-ms=N]"
     );

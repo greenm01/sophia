@@ -7,6 +7,9 @@ DISPLAY_NAME="${SOPHIA_M4_DISPLAY:-:184}"
 RUNTIME_MSEC="${SOPHIA_M4_RUNTIME_MSEC:-6000}"
 SOFTWARE_EVIDENCE="$EVIDENCE_DIR/software-xterm.log"
 GPU_EVIDENCE="$EVIDENCE_DIR/gpu-vkcube.log"
+KERNEL_BEFORE="$EVIDENCE_DIR/kernel-before.log"
+KERNEL_AFTER="$EVIDENCE_DIR/kernel-after.log"
+ENVIRONMENT_EVIDENCE="$EVIDENCE_DIR/environment.log"
 
 if [[ ! -t 0 ]]; then
     echo "Run this proof interactively from a dedicated local text TTY." >&2
@@ -20,6 +23,10 @@ command -v xterm >/dev/null || {
     echo "xterm is required for the Milestone 4 proof." >&2
     exit 1
 }
+command -v sudo >/dev/null || {
+    echo "sudo is required to retain the AMDGPU validator record." >&2
+    exit 1
+}
 VKCUBE="$(command -v vkcube || true)"
 if [[ -z "$VKCUBE" ]]; then
     echo "vkcube is required for the Milestone 4 GPU proof." >&2
@@ -29,6 +36,14 @@ fi
 mkdir -p "$EVIDENCE_DIR"
 : >"$SOFTWARE_EVIDENCE"
 : >"$GPU_EVIDENCE"
+sudo -v
+{
+    uname -a
+    printf 'vkcube=%s\n' "$VKCUBE"
+    command -v lspci >/dev/null && lspci -nnk | grep -A3 -E 'VGA|3D|Display' || true
+    command -v modinfo >/dev/null && modinfo amdgpu | grep -E '^(filename|version|srcversion|vermagic):' || true
+} >"$ENVIRONMENT_EVIDENCE" 2>&1
+sudo dmesg -T >"$KERNEL_BEFORE"
 
 echo "Sophia Milestone 4 software + Vulkan hardware proof"
 echo "This proof requires exclusive DRM/KMS ownership on the active TTY."
@@ -57,6 +72,10 @@ set +e
         --m4-reject-first-present
 ) 2>&1 | tee "$GPU_EVIDENCE"
 proof_status="${PIPESTATUS[0]}"
+if ! sudo dmesg -T >"$KERNEL_AFTER"; then
+    echo "Failed to retain post-run kernel log in $KERNEL_AFTER" >&2
+    proof_status=1
+fi
 set -e
 
 if (( proof_status == 0 )); then

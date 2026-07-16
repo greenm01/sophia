@@ -105,6 +105,15 @@ zero live resources. On an AMDGPU command-stream rejection, capture
 `sudo dmesg -T` immediately before another graphical session obscures the
 kernel validator record.
 
+Before repeating the full paired proof, run
+`tools/native_egl_vkcube_mixed_smoke.sh` from the same dedicated text TTY. It
+uses the real native-X `vkcube` DRI3 handoff, executes the CPU-plus-DMA-BUF
+native EGL export in a watchdog child, stops before KMS submit, and verifies a
+single `sophia_native_egl_mixed schema=1` line with positive CPU and DMA-BUF
+layers plus zero live presentation resources. The full proof preauthorizes
+`sudo` and retains `kernel-before.log`, `kernel-after.log`, and environment
+identity beside the software and GPU session logs.
+
 The retained two-xterm hardware proof must preserve its 2,000 ms startup,
 25 ms maximum-composition, 100 ms input-to-presentation, complete event-flush,
 two-layer, and clean-teardown gates. Its current retained result is 1,487 ms,

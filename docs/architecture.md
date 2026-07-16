@@ -148,6 +148,12 @@ reject the GL command stream during `glFinish`. The promotion gate therefore
 still requires real mixed pixels; dropping the CPU layer is diagnostic evidence
 only, not an acceptable compatibility path.
 
+The focused `native-egl-vkcube-mixed-smoke` retains the real X frontend DRI3
+source and renderer-private FD transfer, then invokes the mixed exporter without
+an Engine commit or KMS submit. Its watchdog and stage-specific export detail
+separate CPU upload, EGLImage creation/binding, draw, finish, swap, and buffer
+lock failures without moving native handles into Engine or protocol state.
+
 An asynchronous GPU Present uses `PreparedSurfaceCommit`. Preparation validates
 and snapshots only protocol-neutral visual state without mutating the committed
 scene. A matching page flip revalidates every touched surface and merges the

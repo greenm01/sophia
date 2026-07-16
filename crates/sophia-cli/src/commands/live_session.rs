@@ -671,7 +671,43 @@ struct PersistentXtermSessionConfig {
     inject_surface_resize: Option<Size>,
     m4_first_acquire_delay: Option<Duration>,
     m4_reject_first_present: bool,
+    m4_diagnose_first_mixed_export: bool,
 }
+
+#[derive(Debug)]
+pub(crate) struct NativeEglMixedSmokeComplete {
+    pub status: sophia_backend_live::LiveRendererScanoutBufferExportStatus,
+    pub detail: sophia_backend_live::LiveRendererScanoutBufferExportDetail,
+    pub cpu_layers: usize,
+    pub dmabuf_layers: usize,
+    pub live_sources: usize,
+    pub live_fences: usize,
+    pub live_transactions: usize,
+}
+
+impl NativeEglMixedSmokeComplete {
+    pub fn reduced_log_line(&self, child_outcome: &str) -> String {
+        format!(
+            "sophia_native_egl_mixed schema=1 case=mixed status={:?} stage={:?} cpu_layers={} dmabuf_layers={} child_outcome={} live_sources={} live_fences={} live_transactions={}",
+            self.status,
+            self.detail,
+            self.cpu_layers,
+            self.dmabuf_layers,
+            child_outcome,
+            self.live_sources,
+            self.live_fences,
+            self.live_transactions,
+        )
+    }
+}
+
+impl std::fmt::Display for NativeEglMixedSmokeComplete {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.reduced_log_line("completed"))
+    }
+}
+
+impl std::error::Error for NativeEglMixedSmokeComplete {}
 
 impl PersistentXtermSessionConfig {
     fn from_args(args: &[String]) -> Result<Self, Box<dyn std::error::Error>> {
@@ -748,6 +784,9 @@ impl PersistentXtermSessionConfig {
             return Err("--m4-first-acquire-delay-ms accepts 1-2000 milliseconds".into());
         }
         let m4_reject_first_present = args.iter().any(|arg| arg == "--m4-reject-first-present");
+        let m4_diagnose_first_mixed_export = args
+            .iter()
+            .any(|arg| arg == "--m4-diagnose-first-mixed-export");
         let wm_process = arg_value(args, "--wm-process");
         let wm_process_args = args
             .iter()
@@ -784,7 +823,9 @@ impl PersistentXtermSessionConfig {
         if terminal_exec.is_some() && (inject_text.is_some() || expect_physical_text.is_some()) {
             return Err("--terminal-exec cannot be combined with input-proof commands".into());
         }
-        if (m4_first_acquire_delay.is_some() || m4_reject_first_present)
+        if (m4_first_acquire_delay.is_some()
+            || m4_reject_first_present
+            || m4_diagnose_first_mixed_export)
             && (!native_scanout || terminal_exec.is_none())
         {
             return Err(
@@ -848,6 +889,7 @@ impl PersistentXtermSessionConfig {
             inject_surface_resize,
             m4_first_acquire_delay,
             m4_reject_first_present,
+            m4_diagnose_first_mixed_export,
         })
     }
 
@@ -2388,6 +2430,7 @@ fn run_session_loop(
                         .with_m4_proof_controls(
                             config.m4_first_acquire_delay,
                             config.m4_reject_first_present,
+                            config.m4_diagnose_first_mixed_export,
                         ),
                     );
                 }
@@ -3065,6 +3108,7 @@ struct PersistentBackendRuntime {
     reject_first_present: bool,
     present_acquire_waits: usize,
     present_controlled_rejections: usize,
+    diagnose_first_mixed_export: bool,
 }
 
 struct QueuedGpuPresentation {
@@ -3192,6 +3236,7 @@ impl PersistentBackendRuntime {
             reject_first_present: false,
             present_acquire_waits: 0,
             present_controlled_rejections: 0,
+            diagnose_first_mixed_export: false,
         })
     }
 
@@ -3204,9 +3249,11 @@ impl PersistentBackendRuntime {
         mut self,
         first_acquire_delay: Option<Duration>,
         reject_first_present: bool,
+        diagnose_first_mixed_export: bool,
     ) -> Self {
         self.first_acquire_delay = first_acquire_delay;
         self.reject_first_present = reject_first_present;
+        self.diagnose_first_mixed_export = diagnose_first_mixed_export;
         self
     }
 
@@ -3375,6 +3422,34 @@ impl PersistentBackendRuntime {
             None,
             1.0,
         )?;
+        if self.diagnose_first_mixed_export {
+            self.diagnose_first_mixed_export = false;
+            let (cpu_layers, dmabuf_layers) =
+                mixed
+                    .layers
+                    .iter()
+                    .fold((0usize, 0usize), |(cpu, dmabuf), layer| match layer {
+                        sophia_backend_live::LiveOwnedMixedCompositionLayer::Cpu { .. } => {
+                            (cpu.saturating_add(1), dmabuf)
+                        }
+                        sophia_backend_live::LiveOwnedMixedCompositionLayer::DmaBuf { .. } => {
+                            (cpu, dmabuf.saturating_add(1))
+                        }
+                    });
+            let (status, detail) = native_scanout.diagnose_mixed_frame(0, mixed);
+            self.queued_gpu_presentations.pop_front();
+            let _ = self.presentation_resources.reject(transaction);
+            let _ = self.presentation_resources.disconnect();
+            return Err(Box::new(NativeEglMixedSmokeComplete {
+                status,
+                detail,
+                cpu_layers,
+                dmabuf_layers,
+                live_sources: self.presentation_resources.source_count(),
+                live_fences: self.presentation_resources.fence_count(),
+                live_transactions: self.presentation_resources.presentation_count(),
+            }));
+        }
         native_scanout.queue_mixed_frame(0, mixed);
 
         let transactions = self.layers.values().cloned().collect::<Vec<_>>();
@@ -4722,6 +4797,27 @@ impl PersistentNativeScanout {
         frame: sophia_backend_live::LiveOwnedMixedCompositionFrame,
     ) {
         self.heads[index].exporter.set_pending_mixed_frame(frame);
+    }
+
+    fn diagnose_mixed_frame(
+        &mut self,
+        index: usize,
+        frame: sophia_backend_live::LiveOwnedMixedCompositionFrame,
+    ) -> (
+        sophia_backend_live::LiveRendererScanoutBufferExportStatus,
+        sophia_backend_live::LiveRendererScanoutBufferExportDetail,
+    ) {
+        use sophia_backend_live::LiveRenderedScanoutBufferExporter as _;
+
+        let head = &mut self.heads[index];
+        head.exporter.set_pending_mixed_frame(frame);
+        let export = head.exporter.export_rendered_scanout_buffer(
+            sophia_backend_live::LiveGbmEglFrameTargetRecord::new(head.output.size),
+        );
+        let status = export.status;
+        let detail = export.detail;
+        drop(export);
+        (status, detail)
     }
 
     fn take_presentation_feedback(&mut self, output: OutputId) -> Option<(u64, u64)> {

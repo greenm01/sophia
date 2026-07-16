@@ -57,6 +57,52 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
     }
 
     #[cfg(feature = "atomic-scanout-live")]
+    if args
+        .iter()
+        .any(|arg| arg == "native-egl-vkcube-mixed-smoke")
+    {
+        run_native_egl_vkcube_mixed_smoke_parent(args)?;
+        return Ok(true);
+    }
+
+    #[cfg(feature = "atomic-scanout-live")]
+    if args
+        .iter()
+        .any(|arg| arg == "native-egl-vkcube-mixed-smoke-child")
+    {
+        if std::env::var_os("SOPHIA_NATIVE_EGL_MIXED_CHILD").is_none() {
+            return Ok(true);
+        }
+        let result = super::live_session::run_persistent_xterm_session(args);
+        match result {
+            Err(error) => {
+                let Some(report) =
+                    error.downcast_ref::<super::live_session::NativeEglMixedSmokeComplete>()
+                else {
+                    return Err(error);
+                };
+                println!("{}", report.reduced_log_line("completed"));
+                if report.status
+                    != sophia_backend_live::LiveRendererScanoutBufferExportStatus::Exported
+                    || report.cpu_layers == 0
+                    || report.dmabuf_layers == 0
+                    || report.live_sources != 0
+                    || report.live_fences != 0
+                    || report.live_transactions != 0
+                {
+                    return Err("native EGL mixed composition diagnostic did not pass".into());
+                }
+            }
+            Ok(()) => {
+                return Err(
+                    "native EGL mixed composition diagnostic observed no vkcube Present".into(),
+                );
+            }
+        }
+        return Ok(true);
+    }
+
+    #[cfg(feature = "atomic-scanout-live")]
     if args.iter().any(|arg| arg == "sophia-live-session") {
         if args.iter().any(|arg| arg == "--proof") {
             run_sophia_live_session_bootstrap(args)?;
@@ -203,6 +249,59 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
     }
 
     Ok(false)
+}
+
+#[cfg(feature = "atomic-scanout-live")]
+fn run_native_egl_vkcube_mixed_smoke_parent(
+    args: &[String],
+) -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::var_os("SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE").is_none() {
+        return Err(
+            "set SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 to run the native EGL mixed hardware smoke"
+                .into(),
+        );
+    }
+    let vkcube = super::x_authority::resolve_external_probe_binary("vkcube", "vkcube")?;
+    let display = arg_value(args, "--display").unwrap_or_else(|| ":184".to_owned());
+    let runtime_msec = arg_value(args, "--max-runtime-ms").unwrap_or_else(|| "6000".to_owned());
+    let terminal = arg_value(args, "--terminal").unwrap_or_else(|| "xterm".to_owned());
+    let mut child = std::process::Command::new(std::env::current_exe()?)
+        .arg("native-egl-vkcube-mixed-smoke-child")
+        .arg(format!("--display={display}"))
+        .arg(format!("--terminal={terminal}"))
+        .arg("--native-scanout")
+        .arg("--secondary-terminal")
+        .arg(format!("--terminal-exec={}", vkcube.display()))
+        .arg(format!("--max-runtime-ms={runtime_msec}"))
+        .arg("--m4-diagnose-first-mixed-export")
+        .env("SOPHIA_NATIVE_EGL_MIXED_CHILD", "1")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        if let Some(status) = child.try_wait()? {
+            if status.success() {
+                return Ok(());
+            }
+            println!(
+                "sophia_native_egl_mixed schema=1 case=mixed status=child_failed stage=process_exit cpu_layers=0 dmabuf_layers=0 child_outcome={status} live_sources=unknown live_fences=unknown live_transactions=unknown"
+            );
+            return Err(
+                format!("native EGL mixed composition child failed with status {status}").into(),
+            );
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            println!(
+                "sophia_native_egl_mixed schema=1 case=mixed status=child_failed stage=watchdog cpu_layers=0 dmabuf_layers=0 child_outcome=timeout live_sources=unknown live_fences=unknown live_transactions=unknown"
+            );
+            return Err("native EGL mixed composition child timed out".into());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
 }
 
 #[cfg(feature = "atomic-scanout-live")]

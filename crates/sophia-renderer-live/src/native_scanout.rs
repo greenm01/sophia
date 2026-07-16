@@ -653,6 +653,24 @@ fn reduced_native_owned_scanout_buffer_export_detail(
         sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::GlSmokeFailed => {
             LiveRendererScanoutBufferExportDetail::GlSmokeFailed
         }
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::CpuLayerUploadFailed => {
+            LiveRendererScanoutBufferExportDetail::CpuLayerUploadFailed
+        }
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::DmaBufImageCreateFailed => {
+            LiveRendererScanoutBufferExportDetail::DmaBufImageCreateFailed
+        }
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::DmaBufImageBindFailed => {
+            LiveRendererScanoutBufferExportDetail::DmaBufImageBindFailed
+        }
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::CompositionDrawFailed => {
+            LiveRendererScanoutBufferExportDetail::CompositionDrawFailed
+        }
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::CompositionFinishFailed => {
+            LiveRendererScanoutBufferExportDetail::CompositionFinishFailed
+        }
+        sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::EglImageDestroyFailed => {
+            LiveRendererScanoutBufferExportDetail::EglImageDestroyFailed
+        }
         sophia_renderer_native_egl::NativeGbmScanoutBufferExportDetail::DmaBufImportFailed => {
             LiveRendererScanoutBufferExportDetail::DmaBufImportFailed
         }
