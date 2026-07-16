@@ -251,21 +251,23 @@ pub trait XServerFrontendAdmissionPolicy: Send + Sync + 'static {
     fn revoke(&self, context: ClientAdmissionContext) -> Result<(), XServerFrontendAdmissionError>;
 }
 
-/// Backend-owned capability for duplicating the Engine-selected render device.
+/// Backend-owned capability for independently opening the Engine-selected render device.
 ///
 /// The frontend receives a one-shot descriptor and never learns or retains a
-/// device path. Implementations remain owned by the live Engine/backend
-/// assembly and may refuse duplication when the device is unavailable.
+/// device path. Each call must return a new kernel file description rather
+/// than `dup`ing the backend's descriptor: DRM driver contexts and virtual
+/// address state are scoped to that file description and must not be shared
+/// between the server renderer and a DRI3 client.
 #[cfg(unix)]
 pub trait XServerFrontendRenderDeviceProvider: Send + Sync + 'static {
-    fn duplicate_render_device_fd(&self) -> Result<OwnedFd, XServerFrontendRenderDeviceError>;
+    fn open_render_device_fd(&self) -> Result<OwnedFd, XServerFrontendRenderDeviceError>;
 }
 
 #[cfg(unix)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum XServerFrontendRenderDeviceError {
     Unavailable,
-    DuplicationFailed,
+    OpenFailed,
 }
 
 #[cfg(unix)]
@@ -273,7 +275,7 @@ impl core::fmt::Display for XServerFrontendRenderDeviceError {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Unavailable => formatter.write_str("render device unavailable"),
-            Self::DuplicationFailed => formatter.write_str("render device duplication failed"),
+            Self::OpenFailed => formatter.write_str("render device open failed"),
         }
     }
 }
@@ -3100,11 +3102,11 @@ impl X11CoreSocketServerState {
         self
     }
 
-    fn duplicate_render_device_fd(&self) -> Result<OwnedFd, XServerFrontendRenderDeviceError> {
+    fn open_render_device_fd(&self) -> Result<OwnedFd, XServerFrontendRenderDeviceError> {
         self.render_device_provider
             .as_ref()
             .ok_or(XServerFrontendRenderDeviceError::Unavailable)?
-            .duplicate_render_device_fd()
+            .open_render_device_fd()
     }
 
     pub fn with_output_topology(
@@ -4541,7 +4543,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                         });
                     let mut server_reply_fds = Vec::new();
                     if dispatch_succeeded && dri3_open {
-                        match state.duplicate_render_device_fd() {
+                        match state.open_render_device_fd() {
                             Ok(fd) => server_reply_fds.push(fd),
                             Err(_) => {
                                 output.outputs =

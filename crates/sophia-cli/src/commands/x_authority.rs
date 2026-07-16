@@ -918,13 +918,17 @@ struct ExternalProbeRenderDeviceProvider {
 }
 
 impl XServerFrontendRenderDeviceProvider for ExternalProbeRenderDeviceProvider {
-    fn duplicate_render_device_fd(
+    fn open_render_device_fd(
         &self,
     ) -> Result<std::os::fd::OwnedFd, XServerFrontendRenderDeviceError> {
-        self.device
-            .try_clone()
+        use std::os::fd::AsRawFd as _;
+
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(format!("/proc/self/fd/{}", self.device.as_raw_fd()))
             .map(std::os::fd::OwnedFd::from)
-            .map_err(|_| XServerFrontendRenderDeviceError::DuplicationFailed)
+            .map_err(|_| XServerFrontendRenderDeviceError::OpenFailed)
     }
 }
 

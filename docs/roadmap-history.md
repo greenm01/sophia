@@ -567,6 +567,13 @@ not the long-term target architecture.
 
 ## Completed Milestones
 
+- [x] Milestone 4 X11 buffer and presentation semantics: standard DRI3 1.2 and
+  Present feed renderer-private DMA-BUF/fence ownership, mixed CPU/GPU
+  composition, Engine-prepared commits, KMS page-flip completion, Complete
+  before Idle, and exact teardown. Retained paired X13 software and Vulkan
+  evidence passes controlled acquire delay and rejection recovery without a
+  private presentation extension.
+
 - [x] Protocol-neutral authority boundary: Engine routed input now targets
   `SurfaceId`, visual layers carry `AuthorityLocalId`, and Engine source has no
   XLibre, X-window, Wayland, Smithay, or Kitty types. XLibre wire encoding is

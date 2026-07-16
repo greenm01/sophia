@@ -89,13 +89,49 @@ struct LiveXRenderDeviceProvider {
 }
 
 impl XServerFrontendRenderDeviceProvider for LiveXRenderDeviceProvider {
-    fn duplicate_render_device_fd(
+    fn open_render_device_fd(
         &self,
     ) -> Result<std::os::fd::OwnedFd, XServerFrontendRenderDeviceError> {
-        self.device
-            .try_clone()
+        use std::os::fd::AsRawFd as _;
+
+        let proc_path = format!("/proc/self/fd/{}", self.device.as_raw_fd());
+        let selected_node = std::fs::read_link(&proc_path)
+            .map_err(|_| XServerFrontendRenderDeviceError::Unavailable)?;
+        let selected_name = selected_node
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or(XServerFrontendRenderDeviceError::Unavailable)?;
+
+        let render_node = if selected_name.starts_with("renderD") {
+            selected_node
+        } else {
+            let selected_device =
+                std::fs::canonicalize(format!("/sys/class/drm/{selected_name}/device"))
+                    .map_err(|_| XServerFrontendRenderDeviceError::Unavailable)?;
+            std::fs::read_dir("/sys/class/drm")
+                .map_err(|_| XServerFrontendRenderDeviceError::Unavailable)?
+                .filter_map(Result::ok)
+                .take(64)
+                .find_map(|entry| {
+                    let name = entry.file_name();
+                    let name = name.to_str()?;
+                    if !name.starts_with("renderD") {
+                        return None;
+                    }
+                    let device = std::fs::canonicalize(entry.path().join("device")).ok()?;
+                    (device == selected_device).then(|| std::path::Path::new("/dev/dri").join(name))
+                })
+                .ok_or(XServerFrontendRenderDeviceError::Unavailable)?
+        };
+
+        // A fresh render-node open gives each DRI3 client its own DRM file
+        // description and withholds the compositor's primary/KMS node.
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(render_node)
             .map(std::os::fd::OwnedFd::from)
-            .map_err(|_| XServerFrontendRenderDeviceError::DuplicationFailed)
+            .map_err(|_| XServerFrontendRenderDeviceError::OpenFailed)
     }
 }
 
@@ -3283,14 +3319,17 @@ impl PersistentBackendRuntime {
                     idle_fence: submission.idle_fence,
                 };
                 self.presentation_resources.begin(live_submission)?;
-                let acquire_delay = if !self.first_acquire_delay_applied
-                    && live_submission.acquire_fence.is_some()
-                {
-                    self.first_acquire_delay_applied = true;
-                    self.first_acquire_delay.unwrap_or(Duration::ZERO)
-                } else {
-                    Duration::ZERO
-                };
+                // The hardware proof holds the first Present at the acquire
+                // gate even when Mesa omits the optional wait-fence handle.
+                // When a handle is present, normal fence polling still runs
+                // after this bounded scheduling delay.
+                let acquire_delay =
+                    if !self.first_acquire_delay_applied && self.first_acquire_delay.is_some() {
+                        self.first_acquire_delay_applied = true;
+                        self.first_acquire_delay.unwrap_or(Duration::ZERO)
+                    } else {
+                        Duration::ZERO
+                    };
                 let not_before = Instant::now() + acquire_delay;
                 self.queued_gpu_presentations
                     .push_back(QueuedGpuPresentation {

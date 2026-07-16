@@ -5257,7 +5257,7 @@ fn x_server_frontend_dri3_open_sends_backend_owned_render_device_fd() {
     struct TestRenderDeviceProvider;
 
     impl XServerFrontendRenderDeviceProvider for TestRenderDeviceProvider {
-        fn duplicate_render_device_fd(&self) -> Result<OwnedFd, XServerFrontendRenderDeviceError> {
+        fn open_render_device_fd(&self) -> Result<OwnedFd, XServerFrontendRenderDeviceError> {
             File::open("/dev/null")
                 .map(OwnedFd::from)
                 .map_err(|_| XServerFrontendRenderDeviceError::Unavailable)

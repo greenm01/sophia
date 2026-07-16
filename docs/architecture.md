@@ -114,16 +114,16 @@ or layout policy.
   A Mesa RADV `vkcube` trace reaches an Engine transaction without an X11 error.
   The reusable renderer-private DMA-BUF registry and cloneable Present feedback
   router now feed the persistent mixed CPU/DMA-BUF renderer and page-flip
-  retirement path. The software hardware gate and isolated DMA-BUF-only
-  composition pass; the guarded CPU-plus-Vulkan mixed draw is blocked by an
-  AMDGPU command-stream rejection before KMS submission.
+  retirement path. The paired software and CPU-plus-Vulkan hardware gate now
+  passes through Engine-owned KMS with controlled rejection recovery and exact
+  resource retirement.
 - The Smithay-backed Wayland Authority runs real Kitty with SHM, routed input,
   frame callbacks, buffer release, and native KMS. Controlled DMA-BUF
   direct-scanout evidence exists, but arbitrary client GPU composition does not.
 - XLibre is absent from the production workspace and launcher. Its frozen
   prototype remains under `research/xlibre` as historical evidence.
 
-### Active Milestone 4 Integration Seam
+### Native X11 Presentation Integration Seam
 
 The live executable still contains transitional compositor assembly.
 `PersistentNativeScanout` owns persistent native output state, while
@@ -139,14 +139,16 @@ CPU/GPU composition, KMS submission correlation, and page-flip retirement.
 renderer-private composition; `sophia-backend-live` retains native KMS
 submission and retirement; Engine remains the sole committed scene truth. The
 CLI is limited to launch, supervision, and bounded coordination. Broader
-session-loop extraction waits until the GPU presentation exit is proven.
+session-loop extraction remains follow-up architecture work after the proven
+GPU presentation exit.
 
-The current hardware blocker is below the Engine/authority boundary. An
-isolated Present DMA-BUF reaches repeated mixed exports, page flips, Complete,
-Idle, and exact retirement, while adding the CPU background layer makes Radeon
-reject the GL command stream during `glFinish`. The promotion gate therefore
-still requires real mixed pixels; dropping the CPU layer is diagnostic evidence
-only, not an acceptable compatibility path.
+The X13 gate exposed a Radeon context-lifetime hazard: reusing a GL context
+after an imported mixed frame caused the following CPU upload's asynchronous
+command stream to be rejected. The renderer now retires that context after the
+mixed export while the independently owned GBM scanout buffer remains alive
+through KMS retirement. Real CPU-plus-Vulkan pixels, controlled recovery, and
+exact teardown now pass; dropping the CPU layer remains diagnostic evidence
+only.
 
 The focused `native-egl-vkcube-mixed-smoke` retains the real X frontend DRI3
 source and renderer-private FD transfer, then invokes the mixed exporter without

@@ -563,8 +563,8 @@ Standard DRI3 1.2 and Present are the active path. The socket boundary uses
 `recvmsg`/`sendmsg` to carry bounded SCM_RIGHTS records in both directions,
 queues ancillary FDs in Unix-stream order across requests that consume none,
 and drains exactly the declared arity for each FD-bearing request. DRI3 `Open`
-gets one duplicated render-device FD from a backend provider without storing a
-device path in Engine or the authority runtime. `PixmapFromBuffer`,
+gets one independently opened same-GPU render-node FD from a backend provider
+without storing a device path in Engine or the authority runtime. `PixmapFromBuffer`,
 modifier-bearing `PixmapFromBuffers`, `FenceFromFD`, supported-modifier queries,
 Present `Pixmap`/`SelectInput`/`QueryCapabilities`, and the bounded XFIXES region
 lifecycle required by Mesa are implemented.
@@ -575,12 +575,11 @@ remains the transport-only proof. `LiveDmaBufPresentationRegistry` owns reusable
 source and per-Present FD lifetimes. The persistent session now connects it to
 mixed rendering and exact page-flip retirement, while
 `tools/live_session_milestone4_hardware_proof.sh` is the stricter GPU-to-KMS
-promotion gate. That guarded run has not yet been retained.
-The software half passes and a DMA-BUF-only isolation run completes repeated
-Flip/Idle lifecycles, but the required CPU-plus-Vulkan mixed draw is currently
-blocked by an AMDGPU command-stream rejection in the renderer before native
-submission. Authority transport is not being weakened to route around that
-renderer/hardware boundary.
+promotion gate. The retained X13 run completes repeated CPU-plus-Vulkan mixed
+exports and page flips, one controlled Skip/recovery, matching Complete/Idle
+and idle-fence activity, and exact cleanup. Imported-image GL context state is
+retired at the mixed-export boundary while the GBM scanout owner remains alive
+through KMS retirement.
 
 ## Runtime Transport
 

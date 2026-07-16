@@ -487,11 +487,13 @@ where
                 &mut target,
                 frame,
             );
+            // The exported GBM owner keeps the scanout surface alive. Retire
+            // the context here so Radeon cannot carry imported-image command
+            // stream state into the next CPU upload.
             if result.is_ok() {
-                self.target = Some(target);
-            } else {
-                self.destroy_persistent_target(target);
+                self.stats.target_recreations = self.stats.target_recreations.saturating_add(1);
             }
+            self.destroy_persistent_target(target);
             return result;
         }
 
@@ -537,7 +539,8 @@ where
                     self.stats.target_creations = self.stats.target_creations.saturating_add(1);
                     self.stats.gl_pipeline_creations =
                         self.stats.gl_pipeline_creations.saturating_add(1);
-                    self.target = Some(target);
+                    self.stats.target_recreations = self.stats.target_recreations.saturating_add(1);
+                    self.destroy_persistent_target(target);
                     return Ok(buffer);
                 }
                 Ok(_) => {
@@ -1375,28 +1378,42 @@ fn render_persistent_target_composition<T: std::os::fd::AsFd>(
         return Err(NativeGbmScanoutBufferExportDetail::EglMakeCurrentFailed);
     }
 
+    trace_native_lifecycle("composition_surface_current");
     target.pipeline.begin_composition();
+    trace_native_lifecycle("composition_started");
     let mut draw_result = Ok(());
     for layer in frame.layers {
         if draw_result.is_err() {
             break;
         }
         draw_result = match layer {
-            NativeCompositionLayer::Cpu(layer) => target
-                .pipeline
-                .draw_cpu_layer(
-                    layer.width,
-                    layer.height,
-                    layer.stride,
-                    layer.pixels,
-                    layer.target.into(),
-                    layer.clip.map(Into::into),
-                    layer.alpha,
-                    layer.format == 0x3432_5241,
-                )
-                .map_err(|_| NativeGbmScanoutBufferExportDetail::CpuLayerUploadFailed),
+            NativeCompositionLayer::Cpu(layer) => {
+                trace_native_lifecycle("composition_cpu_layer_started");
+                let result = target
+                    .pipeline
+                    .draw_cpu_layer(
+                        layer.width,
+                        layer.height,
+                        layer.stride,
+                        layer.pixels,
+                        layer.target.into(),
+                        layer.clip.map(Into::into),
+                        layer.alpha,
+                        layer.format == 0x3432_5241,
+                    )
+                    .map_err(|_| NativeGbmScanoutBufferExportDetail::CpuLayerUploadFailed);
+                if result.is_ok() {
+                    trace_native_lifecycle("composition_cpu_layer_finished");
+                }
+                result
+            }
             NativeCompositionLayer::DmaBuf(layer) => {
-                draw_composition_dmabuf_layer(egl, display, &target.pipeline, *layer)
+                trace_native_lifecycle("composition_dmabuf_layer_started");
+                let result = draw_composition_dmabuf_layer(egl, display, &target.pipeline, *layer);
+                if result.is_ok() {
+                    trace_native_lifecycle("composition_dmabuf_layer_finished");
+                }
+                result
             }
         };
     }
@@ -1408,12 +1425,15 @@ fn render_persistent_target_composition<T: std::os::fd::AsFd>(
                 .map_err(|_| NativeGbmScanoutBufferExportDetail::CompositionFinishFailed)
         })
         .and_then(|()| {
+            trace_native_lifecycle("composition_finished");
             egl.swap_buffers(display, egl_surface)
                 .map_err(|_| NativeGbmScanoutBufferExportDetail::EglSwapBuffersFailed)
         })
         .and_then(|()| {
+            trace_native_lifecycle("composition_surface_swapped");
             let buffer = unsafe { gbm_surface.lock_front_buffer() }
                 .map_err(|_| NativeGbmScanoutBufferExportDetail::FrontBufferLockFailed)?;
+            trace_native_lifecycle("composition_front_buffer_locked");
             native_owned_scanout_buffer_from_bo(
                 target.width,
                 target.height,
