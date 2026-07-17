@@ -1993,6 +1993,18 @@ fn physical_input_pixels_already_changed(
             .is_some_and(|(baseline, current)| baseline != current)
 }
 
+fn pointer_proof_rejects_key(
+    pointer_proof_required: bool,
+    keycode: u32,
+    pressed: bool,
+    physical_text_proof: Option<&PhysicalTextProof>,
+) -> bool {
+    pointer_proof_required
+        && pressed
+        && keycode == 28
+        && physical_text_proof.is_some_and(PhysicalTextProof::is_complete)
+}
+
 fn run_session_loop(
     config: &PersistentXtermSessionConfig,
     authority_receiver: &Receiver<XAuthorityObservedTransactionBatch>,
@@ -2116,6 +2128,7 @@ fn run_session_loop(
                     &mut emergency_chord,
                     &mut pointer,
                     !config.expect_physical_pointer || pointer_checksum.is_some(),
+                    config.expect_physical_pointer,
                     false,
                     &mut next_input_delivery,
                     physical_text_proof.as_mut(),
@@ -2571,28 +2584,9 @@ fn run_session_loop(
                     );
                 }
                 let batch = layout.projected_batch(&batch);
-                if config.expect_physical_pointer
-                    && physical_pointer_buttons_routed == 0
-                    && input_surface
-                        .is_some_and(|surface| batch.removed_surfaces.contains(&surface))
-                {
-                    return Err(
-                        "proof surface closed before the required physical pointer selection"
-                            .into(),
-                    );
-                }
                 scene.observe(&batch)?;
                 let compose_started = Instant::now();
                 let report = scene.compose()?.clone();
-                if config.expect_physical_pointer
-                    && physical_input_completion_reported
-                    && physical_pointer_buttons_routed == 0
-                    && report.nonzero_pixel_bytes == 0
-                {
-                    return Err(
-                        "proof frame cleared before the required physical pointer selection".into(),
-                    );
-                }
                 max_compose = max_compose.max(compose_started.elapsed());
                 if let (Some(surface), Some(before_surface)) =
                     (input_surface, input_surface_generation)
@@ -2866,6 +2860,7 @@ fn run_session_loop(
                     &mut modifiers,
                     &mut emergency_chord,
                     &mut pointer,
+                    false,
                     false,
                     false,
                     &mut next_input_delivery,
@@ -5535,6 +5530,7 @@ fn route_physical_input<P: NonBlockingInputPoller>(
     emergency_chord: &mut EmergencyChordState,
     pointer: &mut SessionPointerPlacement,
     pointer_routing_enabled: bool,
+    pointer_proof_required: bool,
     pointer_buttons_only: bool,
     next_input_delivery: &mut u64,
     physical_text_proof: Option<&mut PhysicalTextProof>,
@@ -5551,6 +5547,7 @@ fn route_physical_input<P: NonBlockingInputPoller>(
         emergency_chord,
         pointer,
         pointer_routing_enabled,
+        pointer_proof_required,
         pointer_buttons_only,
         next_input_delivery,
         physical_text_proof,
@@ -5569,6 +5566,7 @@ fn route_input_events(
     emergency_chord: &mut EmergencyChordState,
     pointer: &mut SessionPointerPlacement,
     pointer_routing_enabled: bool,
+    pointer_proof_required: bool,
     pointer_buttons_only: bool,
     next_input_delivery: &mut u64,
     mut physical_text_proof: Option<&mut PhysicalTextProof>,
@@ -5591,13 +5589,12 @@ fn route_input_events(
                     report.emergency_exit = true;
                     continue;
                 }
-                if pointer_routing_enabled
-                    && pressed
-                    && keycode == 28
-                    && physical_text_proof
-                        .as_ref()
-                        .is_some_and(|proof| proof.is_complete())
-                {
+                if pointer_proof_rejects_key(
+                    pointer_proof_required,
+                    keycode,
+                    pressed,
+                    physical_text_proof.as_deref(),
+                ) {
                     return Err(
                         "Return is disabled during the required physical pointer selection".into(),
                     );
@@ -5776,10 +5773,12 @@ mod tests {
         cpu_frame_matches_visible_output, cpu_frame_submission_ready,
         global_runtime_deadline_ends_session, layer_snapshots_from_committed,
         physical_input_may_route_after_primary_exit, physical_input_pixels_already_changed,
-        place_pointer_event_for_routing, pointer_offset_for_geometry, record_runtime_commits,
-        required_wayland_presentation_submission, retain_latest_wayland_presentation,
-        seed_missing_committed_surfaces, successful_primary_exit_ends_session,
+        place_pointer_event_for_routing, pointer_offset_for_geometry, pointer_proof_rejects_key,
+        record_runtime_commits, required_wayland_presentation_submission,
+        retain_latest_wayland_presentation, seed_missing_committed_surfaces,
+        successful_primary_exit_ends_session,
     };
+    use sophia_cli::input_proof::{PhysicalTextProof, PhysicalTextProofEvent};
     use sophia_protocol::{
         AuthorityKind, DeviceId, InputEventKind, InputEventPacket, NamespaceCapabilities,
         NamespaceProfile, Point, SeatId, SurfaceId, SurfaceTransaction,
@@ -5853,6 +5852,35 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn same_batch_text_tab_and_return_rejects_keyboard_activation() {
+        let incomplete_proof = PhysicalTextProof::new_without_submit("sophia").unwrap();
+        assert!(!pointer_proof_rejects_key(
+            true,
+            28,
+            true,
+            Some(&incomplete_proof)
+        ));
+
+        let mut proof = PhysicalTextProof::new_without_submit("sophia").unwrap();
+        for keycode in [39, 32, 33, 43, 31, 38] {
+            for pressed in [true, false] {
+                proof
+                    .observe(PhysicalTextProofEvent {
+                        keycode,
+                        pressed,
+                        state: 0,
+                    })
+                    .unwrap();
+            }
+        }
+
+        assert!(proof.is_complete());
+        assert!(!pointer_proof_rejects_key(true, 15, true, Some(&proof)));
+        assert!(pointer_proof_rejects_key(true, 28, true, Some(&proof)));
+        assert!(!pointer_proof_rejects_key(true, 28, false, Some(&proof)));
+        assert!(!pointer_proof_rejects_key(false, 28, true, Some(&proof)));
+    }
     #[test]
     fn physical_pointer_starts_at_focused_surface_center() {
         let raw = Point { x: -4.0, y: 6.0 };
