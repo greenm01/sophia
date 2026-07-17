@@ -2571,6 +2571,16 @@ fn run_session_loop(
                     );
                 }
                 let batch = layout.projected_batch(&batch);
+                if config.expect_physical_pointer
+                    && physical_pointer_buttons_routed == 0
+                    && input_surface
+                        .is_some_and(|surface| batch.removed_surfaces.contains(&surface))
+                {
+                    return Err(
+                        "proof surface closed before the required physical pointer selection"
+                            .into(),
+                    );
+                }
                 scene.observe(&batch)?;
                 let compose_started = Instant::now();
                 let report = scene.compose()?.clone();
