@@ -2932,6 +2932,43 @@ fn xge_and_xi2_report_versioned_master_device_classes() {
 }
 
 #[test]
+fn xkb_get_map_encodes_schema_aligned_types_symbols_and_modifier_map() {
+    let namespace = NamespaceId::from_raw(45);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let result = dispatch_x11_wire_request(
+        dispatch_context(
+            namespace,
+            4,
+            XByteOrder::LittleEndian,
+            X_KEYBOARD_MAJOR_OPCODE,
+        ),
+        XWireRequest::XkbGetMap {
+            full: 0x47,
+            partial: 0,
+        },
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
+    let reply = &encoded[0];
+    assert_eq!(reply[8], 8);
+    assert_eq!(reply[9], u8::MAX);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &reply[10..12]), 0x43);
+    assert_eq!(&reply[12..16], &[0, 1, 1, 8]);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &reply[16..18]), 496);
+    assert_eq!(reply[18], 248);
+    assert_eq!(&reply[29..32], &[8, 248, 10]);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &reply[4..8]) as usize,
+        (reply.len() - 32) / 4
+    );
+    assert_eq!(&reply[40..48], &[1, 1, 0, 0, 2, 1, 0, 0]);
+}
+
+#[test]
 fn xkb_state_uses_deterministic_rmlvo_and_tracks_effective_modifiers() {
     let mut keyboard = XkbKeyboardState::new(&XkbRmlvoConfig::default()).unwrap();
     assert_eq!(keyboard.map_evdev_key(42, true), Some((50, 0)));

@@ -1125,7 +1125,7 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
         } => {
             let include_types = present & 1 != 0;
             let include_syms = present & 2 != 0;
-            let include_modmap = present & 4 != 0;
+            let include_modmap = present & 0x40 != 0;
             let mut body = Vec::new();
             if include_types {
                 body.extend_from_slice(&[1, 1]);
@@ -1157,30 +1157,30 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             out[1] = 3;
             put_u16(byte_order, &mut out[2..4], sequence);
             put_u32(byte_order, &mut out[4..8], reply_units);
-            out[10] = 8;
-            out[11] = u8::MAX;
-            put_u16(byte_order, &mut out[12..14], present);
-            out[14] = 0;
-            out[15] = u8::from(include_types);
-            out[16] = u8::from(include_types);
-            out[17] = 8;
+            out[8] = 8;
+            out[9] = u8::MAX;
+            put_u16(byte_order, &mut out[10..12], present);
+            out[12] = 0;
+            out[13] = u8::from(include_types);
+            out[14] = u8::from(include_types);
+            out[15] = 8;
             put_u16(
                 byte_order,
-                &mut out[18..20],
+                &mut out[16..18],
                 if include_syms {
                     u16::try_from(keysyms.len().saturating_mul(2)).unwrap_or(u16::MAX)
                 } else {
                     0
                 },
             );
-            out[20] = if include_syms {
+            out[18] = if include_syms {
                 u8::try_from(keysyms.len()).unwrap_or(u8::MAX)
             } else {
                 0
             };
-            out[31] = 8;
-            out[32] = if include_modmap { 248 } else { 0 };
-            out[33] = if include_modmap {
+            out[29] = 8;
+            out[30] = if include_modmap { 248 } else { 0 };
+            out[31] = if include_modmap {
                 u8::try_from(modifier_map.len()).unwrap_or(u8::MAX)
             } else {
                 0
