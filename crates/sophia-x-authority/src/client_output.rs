@@ -426,6 +426,11 @@ pub enum XClientReply {
         sequence: u16,
         devices: Vec<XXiDeviceInfo>,
     },
+    XiQueryPointer {
+        sequence: u16,
+        root: XResourceId,
+        child: XResourceId,
+    },
     XiGetFocus {
         sequence: u16,
         focus: XResourceId,
@@ -1364,6 +1369,18 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
                 u16::try_from(devices.len()).unwrap_or(0),
             );
             out.extend_from_slice(&body);
+            out
+        }
+        XClientReply::XiQueryPointer {
+            sequence,
+            root,
+            child,
+        } => {
+            let mut out = vec![0; 56];
+            write_reply_header(byte_order, &mut out, sequence, 6);
+            put_resource(byte_order, &mut out[8..12], root);
+            put_resource(byte_order, &mut out[12..16], child);
+            out[32] = 1;
             out
         }
         XClientReply::XiGetFocus { sequence, focus } => {

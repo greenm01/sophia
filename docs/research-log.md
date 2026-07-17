@@ -1207,4 +1207,23 @@ A bounded local Zenity entry proof then routed and flushed all fourteen
 synthetic press/release events for `sophia` plus Return. GTK continued issuing
 geometry, property, and SHM redraw requests but never exited or produced the
 expected stdout before the semantic timeout. The throughput and lock fixes are
-therefore retained, while GTK entry submission remains an explicit Milestone 5
+therefore retained, while GTK entry submission remains an explicit Milestone 5 compatibility gap.
+
+## 2026-07-17: Unattended GTK Input Acceptance In QEMU
+
+A direct-kernel, diskless, networkless QEMU guest now runs the real Zenity
+entry dialog under both `classic_shared` and `confined` namespace profiles.
+The host harness uses QMP only to drive virtio keyboard and mouse devices; the
+guest receives those events through the normal physical-input poller. Both
+profiles type exact `sophia`, observe changed pixels, route a physical OK-button
+click, match Zenity stdout, exit normally, and cleanly retire both virtio-gpu
+outputs with `protocol_errors=0`.
+
+The trace-driven compatibility slices added core ChangeGC and CreateCursor,
+XIChangeCursor, bounded opaque non-input SendEvent delivery, XIUngrabDevice,
+and a protocol-shaped XIQueryPointer reply. It also exposed a proof-loop bug:
+Return suppression was scoped to the entire pointer-proof run rather than only
+the pre-selection phase. Suppression now ends when pointer selection becomes
+ready, and an application proof cannot complete before its primary child exits.
+The QEMU result closes the deterministic semantic gap; guarded target-hardware
+classic/confined captures with resize remain the promotion gate.

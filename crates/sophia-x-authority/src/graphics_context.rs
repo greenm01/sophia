@@ -97,6 +97,50 @@ impl XGraphicsContextTable {
         Ok(record)
     }
 
+    pub fn change(
+        &mut self,
+        namespace: NamespaceId,
+        id: XResourceId,
+        mask: u32,
+        values: XGraphicsContextValues,
+    ) -> Result<(), XAuthorityAccessError> {
+        let record = self
+            .records
+            .get_mut(&id)
+            .ok_or(XAuthorityAccessError::UnknownResource)?;
+        if record.namespace != namespace {
+            return Err(XAuthorityAccessError::CrossNamespaceDenied);
+        }
+        if mask & (1 << 0) != 0 {
+            record.values.function = values.function;
+        }
+        if mask & (1 << 1) != 0 {
+            record.values.plane_mask = values.plane_mask;
+        }
+        if mask & (1 << 2) != 0 {
+            record.values.foreground = values.foreground;
+        }
+        if mask & (1 << 3) != 0 {
+            record.values.background = values.background;
+        }
+        if mask & (1 << 4) != 0 {
+            record.values.line_width = values.line_width;
+        }
+        if mask & (1 << 8) != 0 {
+            record.values.fill_style = values.fill_style;
+        }
+        if mask & (1 << 14) != 0 {
+            record.values.font = values.font;
+        }
+        if mask & (1 << 17) != 0 {
+            record.values.clip_x_origin = values.clip_x_origin;
+        }
+        if mask & (1 << 18) != 0 {
+            record.values.clip_y_origin = values.clip_y_origin;
+        }
+        Ok(())
+    }
+
     pub fn set_clip_rectangles(
         &mut self,
         namespace: NamespaceId,

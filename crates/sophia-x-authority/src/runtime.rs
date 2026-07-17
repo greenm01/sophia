@@ -1294,6 +1294,23 @@ impl XAuthorityRuntime {
             .map_err(Into::into)
     }
 
+    pub fn change_graphics_context(
+        &mut self,
+        namespace: NamespaceId,
+        gc: crate::XResourceId,
+        mask: u32,
+        values: XGraphicsContextValues,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        if mask & (1 << 14) != 0
+            && let Some(font) = values.font
+        {
+            self.validate_font_access(namespace, font)?;
+        }
+        self.graphics_contexts
+            .change(namespace, gc, mask, values)
+            .map_err(Into::into)
+    }
+
     pub fn set_graphics_context_clip_rectangles(
         &mut self,
         namespace: NamespaceId,

@@ -8,8 +8,8 @@ KERNEL_IMAGE="${SOPHIA_QEMU_KERNEL:-/boot/vmlinuz-$KERNEL_VERSION}"
 INITRAMFS="${SOPHIA_QEMU_INITRAMFS:-$OUT_DIR/sophia-$KERNEL_VERSION.img}"
 SCENARIO="${SOPHIA_QEMU_SCENARIO:-session}"
 TWO_XTERM="${SOPHIA_QEMU_TWO_XTERM:-0}"
-if [[ "$SCENARIO" != "session" && "$SCENARIO" != "emergency-recovery" ]]; then
-    echo "SOPHIA_QEMU_SCENARIO must be session or emergency-recovery" >&2
+if [[ "$SCENARIO" != "session" && "$SCENARIO" != "emergency-recovery" && "$SCENARIO" != "gtk-classic" && "$SCENARIO" != "gtk-confined" ]]; then
+    echo "SOPHIA_QEMU_SCENARIO must be session, emergency-recovery, gtk-classic, or gtk-confined" >&2
     exit 1
 fi
 if [[ "$TWO_XTERM" != "0" && "$TWO_XTERM" != "1" ]]; then
@@ -22,6 +22,8 @@ if [[ "$SCENARIO" == "emergency-recovery" && "$TWO_XTERM" != "0" ]]; then
 fi
 if [[ "$SCENARIO" == "emergency-recovery" ]]; then
     DEFAULT_EVIDENCE_FILE="/tmp/sophia-qemu-emergency-recovery.log"
+elif [[ "$SCENARIO" == gtk-* ]]; then
+    DEFAULT_EVIDENCE_FILE="/tmp/sophia-qemu-$SCENARIO.log"
 else
     DEFAULT_EVIDENCE_FILE="/tmp/sophia-qemu-session.log"
 fi
@@ -78,6 +80,8 @@ mkfifo "$SERIAL_FIFO"
 
 if [[ "$SCENARIO" == "emergency-recovery" ]]; then
     echo "sophia_qemu_recovery schema=1 status=starting isolation=headless control=qmp-unix host_drm=none host_vt=none keyboard=virtio chord=ctrl-alt-backspace" | tee -a "$EVIDENCE_FILE"
+elif [[ "$SCENARIO" == gtk-* ]]; then
+    echo "sophia_qemu_gtk schema=1 status=starting isolation=headless control=qmp-unix host_drm=none host_vt=none keyboard=virtio mouse=virtio scenario=$SCENARIO" | tee -a "$EVIDENCE_FILE"
 else
     echo "sophia_qemu_session schema=3 status=starting isolation=headless display_sink=vnc-unix control=qmp-unix host_drm=none host_vt=none guest_network=none storage=none gpu=virtio-gpu gpu_devices=2 gpu_heads=2 keyboard=virtio mouse=virtio ticks=300" | tee -a "$EVIDENCE_FILE"
 fi
@@ -176,6 +180,66 @@ if [[ "$SCENARIO" == "emergency-recovery" ]]; then
 
     echo "sophia_qemu_recovery schema=1 status=complete qemu_exit=0" | tee -a "$EVIDENCE_FILE"
     "$ROOT_DIR/tools/verify_qemu_emergency_recovery_evidence.sh" "$EVIDENCE_FILE"
+    exit 0
+fi
+
+if [[ "$SCENARIO" == gtk-* ]]; then
+    input_ready=false
+    for _ in $(seq 1 600); do
+        if grep -q '^sophia_live_session_input schema=1 status=ready source=physical text=sophia$' "$EVIDENCE_FILE"; then
+            input_ready=true
+            break
+        fi
+        if ! kill -0 "$QEMU_PID" 2>/dev/null; then break; fi
+        sleep 0.05
+    done
+    if [[ "$input_ready" != true ]]; then
+        echo "sophia_qemu_gtk schema=1 status=failed reason=input_readiness_timeout scenario=$SCENARIO" | tee -a "$EVIDENCE_FILE"
+        exit 1
+    fi
+
+    "$ROOT_DIR/tools/qemu_qmp_pointer.py" "$QMP_SOCKET" 1 1 1
+    echo "sophia_qemu_gtk_pointer schema=1 status=sent phase=entry_focus source=qmp clicks=1" | tee -a "$EVIDENCE_FILE"
+    "$ROOT_DIR/tools/qemu_qmp_type.py" "$QMP_SOCKET" sophia
+    echo "sophia_qemu_gtk_input schema=1 status=sent source=qmp text=sophia events=14" | tee -a "$EVIDENCE_FILE"
+
+    pointer_ready=false
+    for _ in $(seq 1 200); do
+        if grep -q '^sophia_live_session_pointer schema=1 status=ready source=physical action=select$' "$EVIDENCE_FILE"; then
+            pointer_ready=true
+            break
+        fi
+        if ! kill -0 "$QEMU_PID" 2>/dev/null; then break; fi
+        sleep 0.05
+    done
+    if [[ "$pointer_ready" != true ]]; then
+        echo "sophia_qemu_gtk schema=1 status=failed reason=pointer_readiness_timeout scenario=$SCENARIO" | tee -a "$EVIDENCE_FILE"
+        exit 1
+    fi
+
+    "$ROOT_DIR/tools/qemu_qmp_pointer.py" "$QMP_SOCKET" 171 183 1
+    echo "sophia_qemu_gtk_pointer schema=1 status=sent phase=ok_select source=qmp clicks=1" | tee -a "$EVIDENCE_FILE"
+
+    set +e
+    wait "$QEMU_PID"
+    qemu_status=$?
+    QEMU_PID=""
+    wait "$LOGGER_PID"
+    logger_status=$?
+    LOGGER_PID=""
+    set -e
+    cleanup
+
+    if [[ "$qemu_status" -ne 0 || "$logger_status" -ne 0 ]]; then
+        echo "sophia_qemu_gtk schema=1 status=failed reason=guest_exit scenario=$SCENARIO qemu_exit=$qemu_status logger_exit=$logger_status" | tee -a "$EVIDENCE_FILE"
+        exit 1
+    fi
+    if ! grep -q "^sophia_qemu_guest schema=1 status=complete scenario=$SCENARIO$" "$EVIDENCE_FILE" \
+        || ! grep -q '^sophia_x_application_session schema=1 status=passed class=gtk3_software client=zenity ' "$EVIDENCE_FILE"; then
+        echo "sophia_qemu_gtk schema=1 status=failed reason=semantic_evidence scenario=$SCENARIO" | tee -a "$EVIDENCE_FILE"
+        exit 1
+    fi
+    echo "sophia_qemu_gtk schema=1 status=complete scenario=$SCENARIO qemu_exit=0" | tee -a "$EVIDENCE_FILE"
     exit 0
 fi
 

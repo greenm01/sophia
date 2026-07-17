@@ -2133,7 +2133,7 @@ fn run_session_loop(
                     &mut emergency_chord,
                     &mut pointer,
                     !config.expect_physical_pointer || pointer_checksum.is_some(),
-                    config.expect_physical_pointer,
+                    config.expect_physical_pointer && pointer_checksum.is_none(),
                     false,
                     &mut next_input_delivery,
                     physical_text_proof.as_mut(),
@@ -3020,6 +3020,7 @@ fn run_session_loop(
             && input_text_match
             && (config.expect_physical_text.is_none() || physical_input_completion_reported)
             && (!config.expect_physical_pointer || pointer_pixel_change)
+            && (!config.application_proof_requested() || primary_child_exited)
         {
             break;
         }

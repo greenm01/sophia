@@ -51,6 +51,7 @@ const X_LIST_FONTS_WITH_INFO: u8 = 50;
 const X_CREATE_PIXMAP: u8 = 53;
 const X_FREE_PIXMAP: u8 = 54;
 const X_CREATE_GC: u8 = 55;
+const X_CHANGE_GC: u8 = 56;
 const X_SET_CLIP_RECTANGLES: u8 = 59;
 const X_FREE_GC: u8 = 60;
 const X_CLEAR_AREA: u8 = 61;
@@ -67,6 +68,7 @@ const X_CREATE_COLORMAP: u8 = 78;
 const X_ALLOC_COLOR: u8 = 84;
 const X_ALLOC_NAMED_COLOR: u8 = 85;
 const X_QUERY_COLORS: u8 = 91;
+const X_CREATE_CURSOR: u8 = 93;
 const X_CREATE_GLYPH_CURSOR: u8 = 94;
 const X_FREE_CURSOR: u8 = 95;
 const X_RECOLOR_CURSOR: u8 = 96;
@@ -116,11 +118,17 @@ pub const X_INPUT_MAJOR_OPCODE: u8 = 135;
 pub const X_INPUT_FIRST_EVENT: u8 = 96;
 pub const X_INPUT_FIRST_ERROR: u8 = 160;
 pub const X_INPUT_GET_EXTENSION_VERSION_MINOR_OPCODE: u8 = 1;
+pub const X_INPUT_QUERY_POINTER_MINOR_OPCODE: u8 = 40;
+pub const X_INPUT_CHANGE_CURSOR_MINOR_OPCODE: u8 = 42;
+const X_INPUT_QUERY_POINTER_REQ_LEN: usize = 12;
+const X_INPUT_CHANGE_CURSOR_REQ_LEN: usize = 16;
+const X_INPUT_UNGRAB_DEVICE_REQ_LEN: usize = 12;
 pub const X_INPUT_SELECT_EVENTS_MINOR_OPCODE: u8 = 46;
 pub const X_INPUT_GET_CLIENT_POINTER_MINOR_OPCODE: u8 = 45;
 pub const X_INPUT_QUERY_VERSION_MINOR_OPCODE: u8 = 47;
 pub const X_INPUT_QUERY_DEVICE_MINOR_OPCODE: u8 = 48;
 pub const X_INPUT_GET_FOCUS_MINOR_OPCODE: u8 = 50;
+pub const X_INPUT_UNGRAB_DEVICE_MINOR_OPCODE: u8 = 52;
 pub const X_INPUT_GET_PROPERTY_MINOR_OPCODE: u8 = 59;
 pub const X_GENERIC_EVENT_EXTENSION_NAME: &str = "Generic Event Extension";
 pub const X_GENERIC_EVENT_MAJOR_OPCODE: u8 = 136;
@@ -191,6 +199,7 @@ const X_LIST_FONTS_WITH_INFO_REQ_LEN: usize = 8;
 const X_CREATE_PIXMAP_REQ_LEN: usize = 16;
 const X_FREE_PIXMAP_REQ_LEN: usize = 8;
 const X_CREATE_GC_REQ_LEN: usize = 16;
+const X_CHANGE_GC_REQ_LEN: usize = 12;
 const X_SET_CLIP_RECTANGLES_REQ_LEN: usize = 12;
 const X_FREE_GC_REQ_LEN: usize = 8;
 const X_CLEAR_AREA_REQ_LEN: usize = 16;
@@ -207,6 +216,7 @@ const X_CREATE_COLORMAP_REQ_LEN: usize = 16;
 const X_ALLOC_COLOR_REQ_LEN: usize = 16;
 const X_ALLOC_NAMED_COLOR_REQ_LEN: usize = 12;
 const X_QUERY_COLORS_REQ_LEN: usize = 8;
+const X_CREATE_CURSOR_REQ_LEN: usize = 32;
 const X_CREATE_GLYPH_CURSOR_REQ_LEN: usize = 32;
 const X_FREE_CURSOR_REQ_LEN: usize = 8;
 const X_RECOLOR_CURSOR_REQ_LEN: usize = 20;
@@ -407,6 +417,11 @@ pub enum XWireRequest {
     CreateGraphicsContext {
         gc: XResourceId,
         drawable: XResourceId,
+        values: XGraphicsContextValues,
+    },
+    ChangeGraphicsContext {
+        gc: XResourceId,
+        value_mask: u32,
         values: XGraphicsContextValues,
     },
     SetClipRectangles {
@@ -732,7 +747,19 @@ pub enum XWireRequest {
         major_version: u16,
         minor_version: u16,
     },
+    XiQueryPointer {
+        window: XResourceId,
+        device_id: u16,
+    },
     XiGetClientPointer,
+    XiUngrabDevice {
+        device_id: u16,
+        time: u32,
+    },
+    XiChangeCursor {
+        window: XResourceId,
+        cursor: Option<XResourceId>,
+    },
     XiGetExtensionVersion,
     XiQueryDevice {
         device_id: u16,
@@ -753,6 +780,11 @@ pub enum XWireRequest {
     QueryColors {
         colormap: XResourceId,
         pixels: Vec<u32>,
+    },
+    CreateCursor {
+        cursor: XResourceId,
+        source: XResourceId,
+        mask: Option<XResourceId>,
     },
     CreateGlyphCursor {
         cursor: XResourceId,
@@ -898,6 +930,7 @@ pub fn decode_x11_core_request(
         X_FREE_PIXMAP => decode_free_pixmap(context, bytes),
         X_CREATE_GC => decode_create_gc(context, bytes),
         X_SET_CLIP_RECTANGLES => decode_set_clip_rectangles(context, bytes),
+        X_CHANGE_GC => decode_change_gc(context, bytes),
         X_FREE_GC => decode_free_gc(context, bytes),
         X_CLEAR_AREA => decode_clear_area(context, bytes),
         X_COPY_AREA => decode_copy_area(context, bytes),
@@ -913,6 +946,7 @@ pub fn decode_x11_core_request(
         X_ALLOC_COLOR => decode_alloc_color(context, bytes),
         X_ALLOC_NAMED_COLOR => decode_alloc_named_color(context, bytes),
         X_QUERY_COLORS => decode_query_colors(context, bytes),
+        X_CREATE_CURSOR => decode_create_cursor(context, bytes),
         X_CREATE_GLYPH_CURSOR => decode_create_glyph_cursor(context, bytes),
         X_FREE_CURSOR => decode_free_cursor(context, bytes),
         X_RECOLOR_CURSOR => decode_recolor_cursor(context, bytes),
@@ -1225,6 +1259,29 @@ fn decode_x_input(
     bytes: &[u8],
 ) -> Result<XWireRequest, XWireParseError> {
     match bytes[1] {
+        X_INPUT_QUERY_POINTER_MINOR_OPCODE => {
+            require_exact_len(
+                X_INPUT_MAJOR_OPCODE,
+                X_INPUT_QUERY_POINTER_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::XiQueryPointer {
+                window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+                device_id: context.byte_order.u16(&bytes[8..10]),
+            })
+        }
+        X_INPUT_CHANGE_CURSOR_MINOR_OPCODE => {
+            require_exact_len(
+                X_INPUT_MAJOR_OPCODE,
+                X_INPUT_CHANGE_CURSOR_REQ_LEN,
+                bytes.len(),
+            )?;
+            let cursor = context.byte_order.u32(&bytes[8..12]);
+            Ok(XWireRequest::XiChangeCursor {
+                window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+                cursor: (cursor != 0).then(|| XResourceId::new(u64::from(cursor), 1)),
+            })
+        }
         X_INPUT_GET_CLIENT_POINTER_MINOR_OPCODE => {
             require_exact_len(
                 X_INPUT_MAJOR_OPCODE,
@@ -1232,6 +1289,17 @@ fn decode_x_input(
                 bytes.len(),
             )?;
             Ok(XWireRequest::XiGetClientPointer)
+        }
+        X_INPUT_UNGRAB_DEVICE_MINOR_OPCODE => {
+            require_exact_len(
+                X_INPUT_MAJOR_OPCODE,
+                X_INPUT_UNGRAB_DEVICE_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::XiUngrabDevice {
+                device_id: context.byte_order.u16(&bytes[8..10]),
+                time: context.byte_order.u32(&bytes[4..8]),
+            })
         }
         X_INPUT_GET_EXTENSION_VERSION_MINOR_OPCODE => {
             require_len(X_INPUT_MAJOR_OPCODE, 8, bytes.len())?;
@@ -2131,6 +2199,21 @@ fn decode_alloc_color(
     })
 }
 
+fn decode_create_cursor(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_CREATE_CURSOR, X_CREATE_CURSOR_REQ_LEN, bytes.len())?;
+    let cursor = context.byte_order.u32(&bytes[4..8]);
+    context.validate_new_resource_id(cursor)?;
+    let mask = context.byte_order.u32(&bytes[12..16]);
+    Ok(XWireRequest::CreateCursor {
+        cursor: XResourceId::new(u64::from(cursor), 1),
+        source: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
+        mask: (mask != 0).then(|| XResourceId::new(u64::from(mask), 1)),
+    })
+}
+
 fn decode_create_glyph_cursor(
     context: XWireClientContext,
     bytes: &[u8],
@@ -2474,6 +2557,52 @@ fn decode_create_gc(
     Ok(XWireRequest::CreateGraphicsContext {
         gc: XResourceId::new(u64::from(gc), 1),
         drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
+        values,
+    })
+}
+
+fn decode_change_gc(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_len(X_CHANGE_GC, X_CHANGE_GC_REQ_LEN, bytes.len())?;
+    let value_mask = context.byte_order.u32(&bytes[8..12]);
+    if value_mask & !0x007f_ffff != 0 {
+        return Err(XWireParseError::InvalidValue(value_mask));
+    }
+    let value_count = usize::try_from(value_mask.count_ones()).unwrap_or(usize::MAX);
+    let expected_len = X_CHANGE_GC_REQ_LEN.saturating_add(value_count.saturating_mul(4));
+    if bytes.len() != expected_len {
+        return Err(XWireParseError::InvalidLength {
+            opcode: X_CHANGE_GC,
+            expected_at_least: expected_len,
+            actual: bytes.len(),
+        });
+    }
+    let mut values = XGraphicsContextValues::default();
+    let mut cursor = X_CHANGE_GC_REQ_LEN;
+    for bit in 0..23 {
+        if value_mask & (1 << bit) == 0 {
+            continue;
+        }
+        let value = context.byte_order.u32(&bytes[cursor..cursor + 4]);
+        cursor += 4;
+        match bit {
+            0 => values.function = u8::try_from(value).unwrap_or(u8::MAX),
+            1 => values.plane_mask = value,
+            2 => values.foreground = value,
+            3 => values.background = value,
+            4 => values.line_width = u16::try_from(value).unwrap_or(u16::MAX),
+            8 => values.fill_style = u8::try_from(value).unwrap_or(u8::MAX),
+            14 => values.font = (value != 0).then(|| XResourceId::new(u64::from(value), 1)),
+            17 => values.clip_x_origin = value as i16,
+            18 => values.clip_y_origin = value as i16,
+            _ => {}
+        }
+    }
+    Ok(XWireRequest::ChangeGraphicsContext {
+        gc: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        value_mask,
         values,
     })
 }
@@ -2980,11 +3109,11 @@ fn decode_send_event(
 ) -> Result<XWireRequest, XWireParseError> {
     require_exact_len(X_SEND_EVENT, X_SEND_EVENT_REQ_LEN, bytes.len())?;
     let event_type = bytes[12] & 0x7f;
-    if event_type != 18 && event_type != 31 && event_type != 33 {
+    if event_type < 9 {
         return Err(XWireParseError::InvalidEventType(event_type));
     }
     let destination = XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1);
-    if event_type == 18 || event_type == 33 {
+    if event_type != 31 {
         let mut event = [0; 32];
         event.copy_from_slice(&bytes[12..44]);
         return Ok(XWireRequest::SendSelectionNotify {

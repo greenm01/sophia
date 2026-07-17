@@ -43,20 +43,17 @@ compatibility provider; no XLibre integration work is active.
   optional-region fix now carry the same X13 sequence through Present with
   `first_error=none`. The non-KMS render smoke reaches the Engine transaction
   but intentionally cannot satisfy a scanout pixel proof.
+- [x] Close the deterministic GTK input and protocol gap in isolated QEMU.
+  Classic shared-X and confined Zenity entry dialogs now accept exact physical
+  `sophia` text and a physical OK click, exit normally with matching stdout,
+  present through native virtio-gpu outputs, and tear down with zero X protocol
+  errors. The retained regressions cover ChangeGC, core and XI cursor requests,
+  opaque non-input SendEvent delivery, XIQueryPointer, and XIUngrabDevice.
 - [ ] Capture fresh classic shared-X and confined Zenity entry-dialog sessions
-  with exact physical text, a physical OK click, `first_error=none`, CPU/SHM
-  redraw after resize, native presentation, normal exit, and clean teardown.
-  The latest classic run reached the dialog but stalled after five physical
-  key presses. Its 15-second trace contained 984 X requests, 252 outputless
-  requests, 62 SHM PutImage requests, 31 CPU compositions, and 30 KMS
-  submissions. Input polling now runs on a bounded worker, outputless X
-  requests no longer take the socket-output lock, software-only authority
-  batches coalesce without reordering Engine transactions, cursor-only changes
-  redraw, and Return is nonfatal while pointer proof is required. Raw wire and
-  native lifecycle tracing are opt-in. A headless Zenity regression confirms
-  all synthetic keys flush while GTK continues redrawing, but GTK still does
-  not submit the entry; do not repeat hardware takeover until that semantic gap
-  has a deterministic fix.
+  on target hardware with exact physical text, a physical OK click,
+  `first_error=none`, CPU/SHM redraw after resize, native presentation, normal
+  exit, and clean teardown. QEMU closes the semantic and unattended-regression
+  gap but does not replace the guarded VT/DRM hardware evidence.
 - [ ] Advance Render, XFixes, selections/INCR, Xdnd, GLX, or toolkit behavior
   only when that captured Zenity session exposes a focused matrix gap; require
   the smallest compatible change and a wire/authority regression.

@@ -22,6 +22,8 @@ cmdline=""
 IFS= read -r cmdline < /proc/cmdline || true
 case " $cmdline " in
     *" sophia.scenario=emergency-recovery "*) scenario="emergency-recovery" ;;
+    *" sophia.scenario=gtk-classic "*) scenario="gtk-classic" ;;
+    *" sophia.scenario=gtk-confined "*) scenario="gtk-confined" ;;
 esac
 case " $cmdline " in
     *" sophia.two_xterm=1 "*) two_xterm=true ;;
@@ -29,6 +31,8 @@ esac
 
 if [ "$scenario" = "emergency-recovery" ]; then
     echo "sophia_qemu_guest schema=1 status=booting gpu=virtio-gpu scenario=emergency-recovery"
+elif [ "$scenario" = "gtk-classic" ] || [ "$scenario" = "gtk-confined" ]; then
+    echo "sophia_qemu_guest schema=1 status=booting gpu=virtio-gpu scenario=$scenario"
 else
     echo "sophia_qemu_guest schema=1 status=booting gpu=virtio-gpu ticks=300"
 fi
@@ -116,6 +120,20 @@ if [ "$scenario" = "emergency-recovery" ]; then
     fi
     set -- sophia-live-session --display=:181 --native-scanout --max-runtime-ms=30000
     echo "sophia_qemu_guest_recovery schema=1 status=running chord=ctrl-alt-backspace"
+elif [ "$scenario" = "gtk-classic" ] || [ "$scenario" = "gtk-confined" ]; then
+    profile="classic"
+    [ "$scenario" = "gtk-confined" ] && profile="confined"
+    expected_stdout="$(printf 'sophia\n.')"
+    expected_stdout="${expected_stdout%.}"
+    set -- sophia-live-session --display=:181 --native-scanout --max-runtime-ms=30000 \
+        --namespace-profile="$profile" --software-client-rendering \
+        --client=zenity --client-arg=--entry --client-arg=--title \
+        --client-arg='Sophia GTK proof' --client-arg=--text \
+        --client-arg='Type sophia, then click OK' \
+        --expect-client-stdout="$expected_stdout" --require-client-normal-exit \
+        --expect-physical-text=sophia --expect-physical-pointer \
+        --exit-after-input-proof
+    echo "sophia_qemu_gtk schema=1 status=running profile=$profile"
 else
     set -- sophia-live-session --display=:181 --native-scanout --max-ticks=300 \
         --expect-physical-text=sophia --expect-physical-pointer
@@ -165,6 +183,12 @@ if [ "$scenario" = "emergency-recovery" ]; then
         echo "sophia_qemu_guest_recovery schema=1 status=complete exit_status=0 guard_exit_status=0"
     else
         echo "sophia_qemu_guest_recovery schema=1 status=failed reason=recovery_exit exit_status=$status guard_exit_status=$guard_status"
+    fi
+elif [ "$scenario" = "gtk-classic" ] || [ "$scenario" = "gtk-confined" ]; then
+    if [ "$status" -eq 0 ]; then
+        echo "sophia_qemu_guest schema=1 status=complete scenario=$scenario"
+    else
+        echo "sophia_qemu_guest schema=1 status=failed reason=gtk_session_exit scenario=$scenario exit_status=$status"
     fi
 elif [ "$status" -eq 0 ]; then
     echo "sophia_qemu_guest schema=1 status=complete ticks=300"

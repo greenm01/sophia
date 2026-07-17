@@ -282,10 +282,49 @@ fn send_event_accepts_selection_notify_and_rejects_input_events() {
         }
     );
 
+    request[12] = 0xf0;
+    let mut extension_event = [0; 32];
+    extension_event.copy_from_slice(&request[12..44]);
+    assert_eq!(
+        decode_x11_core_request(context(namespace, 1, byte_order), &request).unwrap(),
+        XWireRequest::SendSelectionNotify {
+            destination: XResourceId::new(0x200001, 1),
+            event_mask: 0x0018_0000,
+            event: XClientEvent::ClientMessage {
+                sequence: 0,
+                bytes: extension_event,
+            },
+        }
+    );
+
     request[12] = 2;
     assert_eq!(
         decode_x11_core_request(context(namespace, 1, byte_order), &request),
         Err(XWireParseError::InvalidEventType(2))
+    );
+}
+
+#[test]
+fn xi2_decoder_accepts_query_pointer_and_ungrab_device() {
+    let namespace = NamespaceId::from_raw(44);
+    let mut request = vec![135, 40, 3, 0, 1, 0, 0x20, 0, 2, 0, 0, 0];
+
+    assert_eq!(
+        decode_x11_core_request(context(namespace, 1, XByteOrder::LittleEndian), &request).unwrap(),
+        XWireRequest::XiQueryPointer {
+            window: XResourceId::new(0x200001, 1),
+            device_id: 2,
+        }
+    );
+
+    request[1] = 52;
+    request[4..8].copy_from_slice(&7u32.to_le_bytes());
+    assert_eq!(
+        decode_x11_core_request(context(namespace, 2, XByteOrder::LittleEndian), &request).unwrap(),
+        XWireRequest::XiUngrabDevice {
+            device_id: 2,
+            time: 7,
+        }
     );
 }
 
@@ -1092,6 +1131,35 @@ fn x11_core_decoder_preserves_gc_raster_values_in_both_byte_orders() {
         assert_eq!(values.background, 0x0065_4321);
         assert_eq!(values.line_width, 3);
         assert_eq!(values.font, Some(XResourceId::new(0x220021, 1)));
+    }
+}
+
+#[test]
+fn x11_core_decoder_preserves_change_gc_mask_and_values_in_both_byte_orders() {
+    let namespace = NamespaceId::from_raw(45);
+    for byte_order in [XByteOrder::LittleEndian, XByteOrder::BigEndian] {
+        let decoded = decode_x11_core_request(
+            context(namespace, 508, byte_order),
+            &change_gc_request(
+                byte_order,
+                0x220020,
+                (1 << 2) | (1 << 17),
+                &[0x0012_3456, 7],
+            ),
+        )
+        .unwrap();
+        let XWireRequest::ChangeGraphicsContext {
+            gc,
+            value_mask,
+            values,
+        } = decoded
+        else {
+            panic!("expected ChangeGC");
+        };
+        assert_eq!(gc, XResourceId::new(0x220020, 1));
+        assert_eq!(value_mask, (1 << 2) | (1 << 17));
+        assert_eq!(values.foreground, 0x0012_3456);
+        assert_eq!(values.clip_x_origin, 7);
     }
 }
 
@@ -8507,6 +8575,21 @@ fn create_gc_values_request(
         function, plane_mask, foreground, background, line_width, font,
     ] {
         push_u32(&mut out, byte_order, value);
+    }
+    out
+}
+
+fn change_gc_request(byte_order: XByteOrder, gc: u32, mask: u32, values: &[u32]) -> Vec<u8> {
+    let mut out = vec![56, 0];
+    push_u16(
+        &mut out,
+        byte_order,
+        u16::try_from(3 + values.len()).unwrap(),
+    );
+    push_u32(&mut out, byte_order, gc);
+    push_u32(&mut out, byte_order, mask);
+    for value in values {
+        push_u32(&mut out, byte_order, *value);
     }
     out
 }

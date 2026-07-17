@@ -16,7 +16,7 @@ require_command() {
 
 require_command cargo
 require_command dracut
-require_command xterm
+require_command zenity
 require_command readlink
 
 if [[ ! -r "$KERNEL_IMAGE" ]]; then
@@ -41,12 +41,15 @@ runtime_files=(
     /usr/lib/libEGL_mesa.so.0
     /usr/lib/libGLdispatch.so.0
     /usr/lib/libgbm.so.1
+    /usr/lib/libGLESv2.so.2
     /usr/lib/libgallium-*.so
     /usr/lib/libdrm.so.2
     /usr/lib/libinput.so.10
     /usr/lib/libudev.so.1
+    /usr/bin/zenity
 )
 install_files=()
+command -v xterm >/dev/null 2>&1 && runtime_files+=("$(command -v xterm)")
 for file in "${runtime_files[@]}"; do
     if [[ -e "$file" ]]; then
         install_files+=("$file")
@@ -62,15 +65,20 @@ dracut --force --no-hostonly --no-hostonly-cmdline --no-early-microcode \
     --kver "$KERNEL_VERSION" \
     --tmpdir "$OUT_DIR/dracut-tmp" \
     --force-drivers "virtio_pci virtio_gpu virtio_input evdev" \
-    --install "/bin/sh /usr/bin/chmod /usr/bin/mount /usr/bin/modprobe /usr/bin/poweroff /usr/bin/sleep /usr/bin/sync /usr/bin/xterm ${install_files[*]}" \
+    --install "/bin/sh /usr/bin/chmod /usr/bin/mount /usr/bin/modprobe /usr/bin/poweroff /usr/bin/sleep /usr/bin/sync ${install_files[*]}" \
     --include "$ROOT_DIR/tools/qemu_guest_init.sh" /sbin/sophia-qemu-init \
     --include "$SOPHIA_BIN" /usr/bin/sophia \
     --include /usr/lib/dri /usr/lib/dri \
     --include /usr/lib/gbm /usr/lib/gbm \
     --include /etc/fonts /etc/fonts \
+    --include /usr/share/fonts/cantarell /usr/share/fonts/cantarell \
+    --include /usr/share/fonts/noto/NotoSans-Regular.ttf \
+      /usr/share/fonts/noto/NotoSans-Regular.ttf \
+    --include /var/lib/dbus/machine-id /var/lib/dbus/machine-id \
     --include /usr/share/glvnd /usr/share/glvnd \
     --include /usr/share/libinput /usr/share/libinput \
-    --include /usr/share/X11/app-defaults /usr/share/X11/app-defaults \
+    --include /usr/share/glib-2.0/schemas /usr/share/glib-2.0/schemas \
+    --include /usr/share/icons/Adwaita /usr/share/icons/Adwaita \
     --include "$XKB_DATA_DIR" "$XKB_DATA_DIR" \
     "$INITRAMFS"
 

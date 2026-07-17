@@ -906,6 +906,30 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
+        XWireRequest::ChangeGraphicsContext {
+            gc,
+            value_mask,
+            values,
+        } => {
+            let outputs = runtime
+                .change_graphics_context(context.namespace, gc, value_mask, values)
+                .err()
+                .map(|error| {
+                    XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(gc.local.raw()).unwrap_or(0),
+                    ))
+                })
+                .into_iter()
+                .collect();
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::SetClipRectangles { gc, rectangles } => {
             let outputs = runtime
                 .set_graphics_context_clip_rectangles(context.namespace, gc, rectangles)
@@ -1051,6 +1075,39 @@ pub fn dispatch_x11_wire_request(
             XDispatchResult {
                 response: None,
                 outputs: vec![output],
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::CreateCursor {
+            cursor,
+            source,
+            mask,
+        } => {
+            let result = runtime
+                .validate_drawable_access(context.namespace, source)
+                .and_then(|()| {
+                    mask.map_or(Ok(()), |mask| {
+                        runtime.validate_drawable_access(context.namespace, mask)
+                    })
+                })
+                .and_then(|()| {
+                    runtime.create_cursor(context.namespace, cursor, u64::from(context.sequence))
+                });
+            let outputs = result
+                .err()
+                .map(|error| {
+                    XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(cursor.local.raw()).unwrap_or(0),
+                    ))
+                })
+                .into_iter()
+                .collect();
+            XDispatchResult {
+                response: None,
+                outputs,
                 metadata_candidates: Vec::new(),
             }
         }
@@ -2272,6 +2329,48 @@ pub fn dispatch_x11_wire_request(
             })],
             metadata_candidates: Vec::new(),
         },
+        XWireRequest::XiQueryPointer { window, .. } => {
+            let output = if window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT)
+                || runtime
+                    .validate_window_access(context.namespace, window)
+                    .is_ok()
+            {
+                XClientOutput::Reply(XClientReply::XiQueryPointer {
+                    sequence: context.sequence,
+                    root: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+                    child: XResourceId::NONE,
+                })
+            } else {
+                XClientOutput::Error(crate::XClientError {
+                    code: XErrorCode::BadWindow,
+                    sequence: context.sequence,
+                    resource_id: u32::try_from(window.local.raw()).unwrap_or(0),
+                    minor_code: crate::X_INPUT_QUERY_POINTER_MINOR_OPCODE.into(),
+                    major_code: context.major_opcode,
+                })
+            };
+            XDispatchResult {
+                response: None,
+                outputs: vec![output],
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::XiUngrabDevice { device_id, .. } => {
+            match device_id {
+                2 => runtime
+                    .input_authority_mut()
+                    .ungrab_pointer(context.namespace, context.client_id),
+                3 => runtime
+                    .input_authority_mut()
+                    .ungrab_keyboard(context.namespace, context.client_id),
+                _ => {}
+            }
+            XDispatchResult {
+                response: None,
+                outputs: Vec::new(),
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::XiGetClientPointer => XDispatchResult {
             response: None,
             outputs: vec![XClientOutput::Reply(XClientReply::XiGetClientPointer {
@@ -2280,6 +2379,36 @@ pub fn dispatch_x11_wire_request(
             })],
             metadata_candidates: Vec::new(),
         },
+        XWireRequest::XiChangeCursor { window, cursor } => {
+            let result = runtime
+                .validate_window_access(context.namespace, window)
+                .and_then(|()| {
+                    cursor.map_or(Ok(()), |cursor| {
+                        runtime.validate_cursor_access(context.namespace, cursor)
+                    })
+                });
+            let resource_id = cursor.map_or_else(
+                || u32::try_from(window.local.raw()).unwrap_or(0),
+                |cursor| u32::try_from(cursor.local.raw()).unwrap_or(0),
+            );
+            let outputs = result
+                .err()
+                .map(|error| {
+                    XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        resource_id,
+                    ))
+                })
+                .into_iter()
+                .collect();
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::GeQueryVersion { .. } => XDispatchResult {
             response: None,
             outputs: vec![XClientOutput::Reply(XClientReply::GeQueryVersion {

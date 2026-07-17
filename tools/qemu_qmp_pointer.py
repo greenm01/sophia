@@ -21,11 +21,20 @@ def send(qmp, events):
 
 
 def main():
-    if len(sys.argv) != 2:
-        fail("usage: qemu_qmp_pointer.py QMP_SOCKET")
-    with QmpClient(sys.argv[1]) as qmp:
-        send(qmp, [relative("x", 40), relative("y", 18)])
-        for _ in range(2):
+    if len(sys.argv) not in (2, 5):
+        fail("usage: qemu_qmp_pointer.py QMP_SOCKET [DX DY CLICKS]")
+    socket_path = sys.argv[1]
+    dx, dy, clicks = (40, 18, 2)
+    if len(sys.argv) == 5:
+        try:
+            dx, dy, clicks = map(int, sys.argv[2:])
+        except ValueError:
+            fail("DX, DY, and CLICKS must be integers")
+        if not -4096 <= dx <= 4096 or not -4096 <= dy <= 4096 or not 1 <= clicks <= 4:
+            fail("pointer movement must be within +/-4096 and clicks within 1-4")
+    with QmpClient(socket_path) as qmp:
+        send(qmp, [relative("x", dx), relative("y", dy)])
+        for _ in range(clicks):
             send(qmp, [button(True)])
             send(qmp, [button(False)])
 
