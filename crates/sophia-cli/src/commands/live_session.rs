@@ -5591,6 +5591,17 @@ fn route_input_events(
                     report.emergency_exit = true;
                     continue;
                 }
+                if pointer_routing_enabled
+                    && pressed
+                    && keycode == 28
+                    && physical_text_proof
+                        .as_ref()
+                        .is_some_and(|proof| proof.is_complete())
+                {
+                    return Err(
+                        "Return is disabled during the required physical pointer selection".into(),
+                    );
+                }
                 let FocusedInputRoute::Routed(event) =
                     focus.route_keyboard_event(event, committed_surfaces)
                 else {
