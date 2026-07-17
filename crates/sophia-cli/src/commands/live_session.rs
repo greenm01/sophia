@@ -2584,6 +2584,15 @@ fn run_session_loop(
                 scene.observe(&batch)?;
                 let compose_started = Instant::now();
                 let report = scene.compose()?.clone();
+                if config.expect_physical_pointer
+                    && physical_input_completion_reported
+                    && physical_pointer_buttons_routed == 0
+                    && report.nonzero_pixel_bytes == 0
+                {
+                    return Err(
+                        "proof frame cleared before the required physical pointer selection".into(),
+                    );
+                }
                 max_compose = max_compose.max(compose_started.elapsed());
                 if let (Some(surface), Some(before_surface)) =
                     (input_surface, input_surface_generation)
