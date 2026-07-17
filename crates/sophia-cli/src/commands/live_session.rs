@@ -2236,6 +2236,11 @@ fn run_session_loop(
     loop {
         if !primary_child_exited && let Some(status) = child.try_wait()? {
             primary_exit_status = Some(status);
+            if status.success() && config.expect_physical_pointer && physical_pointer_routed == 0 {
+                return Err(
+                    "session client exited before the required physical pointer selection".into(),
+                );
+            }
             if config.application_proof_requested() {
                 if let Some(stdout) = child.stdout.take() {
                     stdout.take(4_097).read_to_end(&mut client_stdout)?;
