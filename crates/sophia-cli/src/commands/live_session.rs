@@ -2115,7 +2115,7 @@ fn run_session_loop(
                     &mut emergency_chord,
                     &mut pointer,
                     !config.expect_physical_pointer || pointer_checksum.is_some(),
-                    config.expect_physical_pointer,
+                    false,
                     &mut next_input_delivery,
                     physical_text_proof.as_mut(),
                 )?;
@@ -5569,16 +5569,14 @@ fn route_input_events(
                     continue;
                 };
                 if let Some(proof) = physical_text_proof.as_deref_mut() {
-                    if proof.is_complete() {
-                        continue;
-                    }
-                    let observed = PhysicalTextProofEvent {
-                        keycode,
-                        pressed,
-                        state,
-                    };
-                    if let Err(mismatch) = proof.observe(observed) {
-                        return Err(format!(
+                    if !proof.is_complete() {
+                        let observed = PhysicalTextProofEvent {
+                            keycode,
+                            pressed,
+                            state,
+                        };
+                        if let Err(mismatch) = proof.observe(observed) {
+                            return Err(format!(
                             "physical text proof sequence mismatch at event {}: expected keycode={} pressed={} state={} observed keycode={} pressed={} state={}",
                             mismatch.event_index,
                             mismatch.expected.keycode,
@@ -5589,6 +5587,7 @@ fn route_input_events(
                             mismatch.observed.state,
                         )
                         .into());
+                        }
                     }
                 }
                 let delivery = XAuthorityInputDeliveryId::from_raw(*next_input_delivery);
@@ -5821,7 +5820,7 @@ mod tests {
     }
 
     #[test]
-    fn button_only_pointer_proof_tracks_motion_without_routing_it() {
+    fn interactive_pointer_proof_routes_motion_after_placement() {
         let mut pointer = SessionPointerPlacement {
             offset: Some(Point { x: 10.0, y: 20.0 }),
         };
@@ -5836,12 +5835,12 @@ mod tests {
             local_position: None,
         };
 
-        assert!(!place_pointer_event_for_routing(
+        assert!(place_pointer_event_for_routing(
             &mut motion,
             None,
             &[],
             &mut pointer,
-            true,
+            false,
         ));
         assert_eq!(motion.global_position, Some(Point { x: 40.0, y: 60.0 }));
     }
