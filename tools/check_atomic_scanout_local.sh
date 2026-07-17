@@ -38,6 +38,10 @@ bash -n tools/verify_wayland_kitty_evidence.sh
 bash -n tools/install_sophia_session.sh
 bash -n tools/live_session_persistent_hardware_proof.sh
 bash -n tools/live_session_milestone5_gtk_hardware_proof.sh
+if ! grep -Fq '--namespace-profile="" --software-client-rendering' tools/live_session_milestone5_gtk_hardware_proof.sh; then
+    echo "Milestone 5 GTK proof must retain the selected namespace profile in software-rendering mode." >&2
+    exit 1
+fi
 bash -n tools/verify_live_session_milestone5_tty_recovery.sh
 bash -n tools/check_live_session_milestone5_verifier.sh
 tools/check_live_session_milestone5_verifier.sh
