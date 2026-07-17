@@ -579,8 +579,8 @@ pub fn dispatch_x11_wire_request(
             });
             let outputs = match validation {
                 Ok(())
-                    if (requestor.is_none() || event_mask == 0)
-                        && requestor.is_none_or(|requestor| destination == requestor) =>
+                    if requestor
+                        .is_none_or(|requestor| event_mask == 0 && destination == requestor) =>
                 {
                     match &mut event {
                         XClientEvent::SelectionNotify { sequence, .. }

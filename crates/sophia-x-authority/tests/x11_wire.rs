@@ -266,6 +266,22 @@ fn send_event_accepts_selection_notify_and_rejects_input_events() {
         }
     );
 
+    request[8..12].copy_from_slice(&0x0018_0000u32.to_le_bytes());
+    request[12] = 18;
+    let mut unmap = [0; 32];
+    unmap.copy_from_slice(&request[12..44]);
+    assert_eq!(
+        decode_x11_core_request(context(namespace, 1, byte_order), &request).unwrap(),
+        XWireRequest::SendSelectionNotify {
+            destination: XResourceId::new(0x200001, 1),
+            event_mask: 0x0018_0000,
+            event: XClientEvent::ClientMessage {
+                sequence: 0,
+                bytes: unmap,
+            },
+        }
+    );
+
     request[12] = 2;
     assert_eq!(
         decode_x11_core_request(context(namespace, 1, byte_order), &request),

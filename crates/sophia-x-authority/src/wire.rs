@@ -2980,11 +2980,11 @@ fn decode_send_event(
 ) -> Result<XWireRequest, XWireParseError> {
     require_exact_len(X_SEND_EVENT, X_SEND_EVENT_REQ_LEN, bytes.len())?;
     let event_type = bytes[12] & 0x7f;
-    if event_type != 31 && event_type != 33 {
+    if event_type != 18 && event_type != 31 && event_type != 33 {
         return Err(XWireParseError::InvalidEventType(event_type));
     }
     let destination = XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1);
-    if event_type == 33 {
+    if event_type == 18 || event_type == 33 {
         let mut event = [0; 32];
         event.copy_from_slice(&bytes[12..44]);
         return Ok(XWireRequest::SendSelectionNotify {
