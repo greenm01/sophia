@@ -1128,12 +1128,14 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             let include_modmap = present & 0x40 != 0;
             let mut body = Vec::new();
             if include_types {
-                body.extend_from_slice(&[1, 1]);
-                push_u16(byte_order, &mut body, 0);
-                body.extend_from_slice(&[2, 1, 0, 0]);
-                body.extend_from_slice(&[1, 1, 1, 1]);
-                push_u16(byte_order, &mut body, 0);
-                body.extend_from_slice(&[0, 0]);
+                for _ in 0..4 {
+                    body.extend_from_slice(&[1, 1]);
+                    push_u16(byte_order, &mut body, 0);
+                    body.extend_from_slice(&[2, 1, 0, 0]);
+                    body.extend_from_slice(&[1, 1, 1, 1]);
+                    push_u16(byte_order, &mut body, 0);
+                    body.extend_from_slice(&[0, 0]);
+                }
             }
             if include_syms {
                 for syms in &keysyms {
@@ -1161,8 +1163,8 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             out[11] = u8::MAX;
             put_u16(byte_order, &mut out[12..14], present);
             out[14] = 0;
-            out[15] = u8::from(include_types);
-            out[16] = u8::from(include_types);
+            out[15] = if include_types { 4 } else { 0 };
+            out[16] = if include_types { 4 } else { 0 };
             out[17] = 8;
             put_u16(
                 byte_order,

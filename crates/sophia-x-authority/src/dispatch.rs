@@ -2194,7 +2194,7 @@ pub fn dispatch_x11_wire_request(
             metadata_candidates: Vec::new(),
         },
         XWireRequest::XkbGetMap { full, partial } => {
-            let present = (full | partial) & 0x0047;
+            let present = (full | partial) & 0x0043;
             let keysyms = runtime.xkb_keymap().xkb_keysyms();
             let modifier_map = runtime.xkb_keymap().modifier_map();
             XDispatchResult {
