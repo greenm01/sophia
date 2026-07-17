@@ -2066,6 +2066,7 @@ fn run_session_loop(
     let mut physical_keys_routed = 0usize;
     let mut physical_pointer_events = 0usize;
     let mut physical_pointer_routed = 0usize;
+    let mut physical_pointer_buttons_routed = 0usize;
     let mut session_ticks = 0usize;
     let seat = SeatId::from_raw(SESSION_SEAT_RAW);
     let mut focus_deadline_started_at = None;
@@ -2125,6 +2126,8 @@ fn run_session_loop(
                     physical_pointer_events.saturating_add(report.pointer_events);
                 physical_pointer_routed =
                     physical_pointer_routed.saturating_add(report.pointer_routed);
+                physical_pointer_buttons_routed =
+                    physical_pointer_buttons_routed.saturating_add(report.pointer_buttons_routed);
                 input_events_expected =
                     input_events_expected.saturating_add(report.deliveries.len());
                 pending_input_deliveries.extend(report.deliveries.iter().copied());
@@ -2236,7 +2239,10 @@ fn run_session_loop(
     loop {
         if !primary_child_exited && let Some(status) = child.try_wait()? {
             primary_exit_status = Some(status);
-            if status.success() && config.expect_physical_pointer && physical_pointer_routed == 0 {
+            if status.success()
+                && config.expect_physical_pointer
+                && physical_pointer_buttons_routed == 0
+            {
                 return Err(
                     "session client exited before the required physical pointer selection".into(),
                 );
@@ -2991,9 +2997,11 @@ fn run_session_loop(
     {
         return Err("persistent live session did not complete exact physical text proof".into());
     }
-    if config.expect_physical_pointer && (!pointer_pixel_change || physical_pointer_routed == 0) {
+    if config.expect_physical_pointer
+        && (!pointer_pixel_change || physical_pointer_buttons_routed == 0)
+    {
         return Err(format!(
-            "persistent live session pointer input did not change pixels: baseline={pointer_checksum:?} routed={physical_pointer_routed} observed={physical_pointer_events}"
+            "persistent live session pointer input did not change pixels: baseline={pointer_checksum:?} routed={physical_pointer_routed} buttons={physical_pointer_buttons_routed} observed={physical_pointer_events}"
         )
         .into());
     }
@@ -3286,7 +3294,7 @@ fn run_session_loop(
             physical_text_proof
                 .as_ref()
                 .is_some_and(PhysicalTextProof::is_complete),
-            physical_pointer_routed > 0,
+            physical_pointer_buttons_routed > 0,
             if resize_proof_complete {
                 "committed"
             } else {
@@ -5444,6 +5452,7 @@ fn synthetic_text_input_events(
 struct PhysicalInputRouteReport {
     events: usize,
     keys_observed: usize,
+    pointer_buttons_routed: usize,
     keys_routed: usize,
     pointer_events: usize,
     pointer_routed: usize,
@@ -5559,6 +5568,7 @@ fn route_input_events(
         keys_routed: 0,
         pointer_events: 0,
         pointer_routed: 0,
+        pointer_buttons_routed: 0,
         deliveries: Vec::new(),
         emergency_exit: false,
     };
@@ -5625,6 +5635,8 @@ fn route_input_events(
             }
             kind @ (sophia_protocol::InputEventKind::PointerMotion
             | sophia_protocol::InputEventKind::PointerButton { .. }) => {
+                let is_button =
+                    matches!(kind, sophia_protocol::InputEventKind::PointerButton { .. });
                 report.pointer_events = report.pointer_events.saturating_add(1);
                 if !pointer_routing_enabled {
                     continue;
@@ -5665,6 +5677,9 @@ fn route_input_events(
                     delivery: Some(delivery),
                 })?;
                 report.pointer_routed = report.pointer_routed.saturating_add(1);
+                if is_button {
+                    report.pointer_buttons_routed = report.pointer_buttons_routed.saturating_add(1);
+                }
                 report.deliveries.push(delivery);
             }
         }
