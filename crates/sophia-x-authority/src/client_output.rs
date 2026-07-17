@@ -1137,7 +1137,7 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             }
             if include_syms {
                 for syms in &keysyms {
-                    body.extend_from_slice(&[0, 0, 0, 0, 0, 2]);
+                    body.extend_from_slice(&[0, 0, 0, 0, 1, 2]);
                     push_u16(byte_order, &mut body, 2);
                     push_u32(byte_order, &mut body, syms[0]);
                     push_u32(byte_order, &mut body, syms[1]);

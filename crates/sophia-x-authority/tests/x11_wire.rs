@@ -2967,6 +2967,7 @@ fn xkb_get_map_encodes_schema_aligned_types_symbols_and_modifier_map() {
         (reply.len() - 32) / 4
     );
     assert_eq!(&reply[40..48], &[1, 1, 0, 0, 2, 1, 0, 0]);
+    assert_eq!(&reply[56..64], &[0, 0, 0, 0, 1, 2, 2, 0]);
 }
 
 #[test]
