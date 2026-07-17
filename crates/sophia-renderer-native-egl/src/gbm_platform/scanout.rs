@@ -290,6 +290,8 @@ struct PersistentNativeFrameTarget {
     config: khronos_egl::Config,
     candidate: RenderedScanoutCandidate,
     egl_context: khronos_egl::Context,
+    egl_surface: khronos_egl::Surface,
+    gbm_surface: gbm::Surface<()>,
     pipeline: PersistentXrgb8888GlPipeline,
 }
 
@@ -768,6 +770,8 @@ where
         trace_native_lifecycle("persistent_target_destroy_started");
         let _ = self.egl.make_current(self.display, None, None, None);
         drop(target.pipeline);
+        let _ = self.egl.destroy_surface(self.display, target.egl_surface);
+        trace_native_lifecycle("egl_surface_destroyed");
         let _ = self.egl.destroy_context(self.display, target.egl_context);
         trace_native_lifecycle("egl_context_destroyed");
     }
@@ -1156,8 +1160,6 @@ fn create_persistent_target<T: std::os::fd::AsFd>(
         }
     };
     let _ = egl.make_current(display, None, None, None);
-    let _ = egl.destroy_surface(display, egl_surface);
-    drop(gbm_surface);
     trace_native_lifecycle("persistent_context_created");
     Ok(PersistentNativeFrameTarget {
         width,
@@ -1166,6 +1168,8 @@ fn create_persistent_target<T: std::os::fd::AsFd>(
         config,
         candidate,
         egl_context,
+        egl_surface,
+        gbm_surface,
         pipeline,
     })
 }
@@ -1173,24 +1177,11 @@ fn create_persistent_target<T: std::os::fd::AsFd>(
 fn render_persistent_target_frame<T: std::os::fd::AsFd>(
     egl: &khronos_egl::DynamicInstance<khronos_egl::EGL1_5>,
     display: khronos_egl::Display,
-    gbm_device: &gbm::Device<T>,
+    _gbm_device: &gbm::Device<T>,
     target: &mut PersistentNativeFrameTarget,
     pixels: &[u8],
 ) -> Result<NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExportDetail> {
-    use gbm::AsRaw as _;
-
-    let gbm_surface = create_rendered_scanout_surface(
-        gbm_device,
-        target.width,
-        target.height,
-        target.candidate.format,
-        &target.candidate.modifiers,
-        target.candidate.usage,
-    )?;
-    let native_window = gbm_surface.as_raw() as khronos_egl::NativeWindowType;
-    let egl_surface =
-        unsafe { egl.create_window_surface(display, target.config, native_window, None) }
-            .map_err(|_| NativeGbmScanoutBufferExportDetail::EglSurfaceUnavailable)?;
+    let egl_surface = target.egl_surface;
     if egl
         .make_current(
             display,
@@ -1215,18 +1206,13 @@ fn render_persistent_target_frame<T: std::os::fd::AsFd>(
         })
         .and_then(|()| {
             trace_native_lifecycle("egl_surface_swapped");
-            let buffer = unsafe { gbm_surface.lock_front_buffer() }
+            let buffer = unsafe { target.gbm_surface.lock_front_buffer() }
                 .map_err(|_| NativeGbmScanoutBufferExportDetail::FrontBufferLockFailed)?;
             trace_native_lifecycle("scanout_front_buffer_locked");
-            native_owned_scanout_buffer_from_bo(
-                target.width,
-                target.height,
-                buffer,
-                Some(gbm_surface),
-            )
+            native_owned_scanout_buffer_from_bo(target.width, target.height, buffer, None)
         });
     let _ = egl.make_current(display, None, None, None);
-    retain_egl_surface_until_scanout_release(egl, display, egl_surface, result)
+    result
 }
 
 fn retain_egl_surface_until_scanout_release(
