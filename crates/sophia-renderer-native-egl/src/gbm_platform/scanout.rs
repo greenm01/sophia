@@ -417,7 +417,11 @@ where
             };
         }
         let started = Instant::now();
-        let result = self.render_persistent_xrgb8888(width, height, pixels, preferred_modifiers);
+        let result = self
+            .write_cpu_xrgb8888_scanout_buffer(width, height, pixels)
+            .or_else(|_| {
+                self.render_persistent_xrgb8888(width, height, pixels, preferred_modifiers)
+            });
         self.stats.max_upload = self.stats.max_upload.max(started.elapsed());
         match result {
             Ok(buffer) => exported_scanout_buffer_report(buffer),
@@ -667,6 +671,57 @@ where
             }
         }
         Err(last_detail)
+    }
+
+    fn write_cpu_xrgb8888_scanout_buffer(
+        &mut self,
+        width: u32,
+        height: u32,
+        pixels: &[u8],
+    ) -> Result<NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExportDetail> {
+        let mut buffer = self
+            .gbm_device
+            .create_buffer_object::<()>(
+                width,
+                height,
+                gbm::Format::Xrgb8888,
+                gbm::BufferObjectFlags::SCANOUT
+                    | gbm::BufferObjectFlags::WRITE
+                    | gbm::BufferObjectFlags::LINEAR,
+            )
+            .map_err(|_| NativeGbmScanoutBufferExportDetail::GbmSurfaceUnavailable)?;
+        let source_stride = usize::try_from(width)
+            .ok()
+            .and_then(|width| width.checked_mul(4))
+            .ok_or(NativeGbmScanoutBufferExportDetail::InvalidTarget)?;
+        let target_stride = usize::try_from(buffer.stride())
+            .map_err(|_| NativeGbmScanoutBufferExportDetail::InvalidBufferDescriptor)?;
+        if target_stride < source_stride {
+            return Err(NativeGbmScanoutBufferExportDetail::InvalidBufferDescriptor);
+        }
+        let upload = if target_stride == source_stride {
+            pixels.to_vec()
+        } else {
+            let mut padded = vec![
+                0;
+                target_stride
+                    .checked_mul(usize::try_from(height).unwrap_or(0))
+                    .ok_or(NativeGbmScanoutBufferExportDetail::InvalidTarget)?
+            ];
+            for row in 0..usize::try_from(height).unwrap_or(0) {
+                let source = row * source_stride;
+                let target = row * target_stride;
+                padded[target..target + source_stride]
+                    .copy_from_slice(&pixels[source..source + source_stride]);
+            }
+            padded
+        };
+        buffer
+            .write(&upload)
+            .map_err(|_| NativeGbmScanoutBufferExportDetail::CpuLayerUploadFailed)?;
+        trace_native_lifecycle("cpu_frame_direct_written");
+        self.stats.frame_uploads = self.stats.frame_uploads.saturating_add(1);
+        native_owned_scanout_buffer_from_bo(width, height, buffer, None)
     }
 
     fn render_persistent_xrgb8888(
