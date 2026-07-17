@@ -401,7 +401,9 @@ pub(crate) fn run_persistent_xterm_session(
                 xauthority_cookie,
             ))
             .with_admission_policy(admission_policy);
-    if let Some(native_scanout) = native_scanout.as_ref() {
+    if !config.software_client_rendering
+        && let Some(native_scanout) = native_scanout.as_ref()
+    {
         frontend_config =
             frontend_config.with_render_device_provider(Arc::new(LiveXRenderDeviceProvider {
                 device: native_scanout.clone_render_device_file()?,
@@ -727,6 +729,7 @@ struct PersistentXtermSessionConfig {
     exit_after_input_proof: bool,
     input_devices: Vec<std::path::PathBuf>,
     native_scanout: bool,
+    software_client_rendering: bool,
     wm_process: Option<String>,
     wm_process_args: Vec<String>,
     wm_socket_path: std::path::PathBuf,
@@ -801,6 +804,7 @@ impl PersistentXtermSessionConfig {
             .map(ToOwned::to_owned)
             .collect::<Vec<_>>();
         let client = arg_value(args, "--client");
+        let software_client_rendering = args.iter().any(|arg| arg == "--software-client-rendering");
         let client_args = args
             .iter()
             .filter_map(|arg| arg.strip_prefix("--client-arg="))
@@ -809,6 +813,9 @@ impl PersistentXtermSessionConfig {
         let expect_client_stdout = arg_value(args, "--expect-client-stdout");
         let require_client_normal_exit =
             args.iter().any(|arg| arg == "--require-client-normal-exit");
+        if software_client_rendering && client.is_none() {
+            return Err("--software-client-rendering requires --client".into());
+        }
         if client.is_none()
             && (!client_args.is_empty()
                 || expect_client_stdout.is_some()
@@ -981,6 +988,7 @@ impl PersistentXtermSessionConfig {
             exit_after_input_proof,
             input_devices,
             native_scanout,
+            software_client_rendering,
             wm_process,
             wm_process_args,
             wm_socket_path: std::env::temp_dir().join(format!(

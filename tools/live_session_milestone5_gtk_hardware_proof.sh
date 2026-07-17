@@ -235,7 +235,7 @@ run_profile() {
       SOPHIA_LIVE_SESSION_SKIP_BUILD=1 SOPHIA_ATOMIC_SCANOUT_SKIP_PREFLIGHT=1 \
       SOPHIA_X11_AUTHORITY_TRACE=1 SOPHIA_LIVE_SESSION_DIAGNOSTIC=1 \
       "$root/tools/live_session_persistent_hardware_proof.sh" \
-      --namespace-profile="$profile" --client=zenity --client-arg=--entry \
+      --namespace-profile="" --software-client-rendering --client=zenity --client-arg=--entry \
       --client-arg=--title --client-arg='Sophia GTK proof' \
       --client-arg=--text --client-arg='Type sophia, then click OK' \
       --expect-client-stdout=$'sophia\n' --require-client-normal-exit \
