@@ -34,7 +34,23 @@ pub struct NativeGbmOwnedScanoutBuffer {
     modifier: Option<u64>,
     // Drop explicitly releases the locked front buffer before its surface.
     _buffer: Option<gbm::BufferObject<()>>,
+    _egl_surface: Option<NativeEglSurfaceOwner>,
     _surface: Option<gbm::Surface<()>>,
+}
+
+#[derive(Debug)]
+struct NativeEglSurfaceOwner {
+    destroy_surface: unsafe extern "system" fn(*mut c_void, *mut c_void) -> u32,
+    display: khronos_egl::Display,
+    surface: khronos_egl::Surface,
+}
+
+impl Drop for NativeEglSurfaceOwner {
+    fn drop(&mut self) {
+        unsafe {
+            (self.destroy_surface)(self.display.as_ptr(), self.surface.as_ptr());
+        }
+    }
 }
 
 impl Drop for NativeGbmOwnedScanoutBuffer {
@@ -42,6 +58,8 @@ impl Drop for NativeGbmOwnedScanoutBuffer {
         trace_native_lifecycle("scanout_owner_drop_started");
         drop(self._buffer.take());
         trace_native_lifecycle("front_buffer_released");
+        drop(self._egl_surface.take());
+        trace_native_lifecycle("egl_surface_destroyed");
         drop(self._surface.take());
         trace_native_lifecycle("originating_surface_released");
     }
@@ -897,6 +915,7 @@ fn native_owned_scanout_buffer_from_bo(
         plane_fds,
         modifier: normalized_scanout_modifier(buffer.modifier()),
         _buffer: Some(buffer),
+        _egl_surface: None,
         _surface: surface,
     })
 }
@@ -1207,8 +1226,38 @@ fn render_persistent_target_frame<T: std::os::fd::AsFd>(
             )
         });
     let _ = egl.make_current(display, None, None, None);
-    let _ = egl.destroy_surface(display, egl_surface);
-    result
+    retain_egl_surface_until_scanout_release(egl, display, egl_surface, result)
+}
+
+fn retain_egl_surface_until_scanout_release(
+    egl: &khronos_egl::DynamicInstance<khronos_egl::EGL1_5>,
+    display: khronos_egl::Display,
+    surface: khronos_egl::Surface,
+    result: Result<NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExportDetail>,
+) -> Result<NativeGbmOwnedScanoutBuffer, NativeGbmScanoutBufferExportDetail> {
+    match result {
+        Ok(mut buffer) => {
+            let Some(destroy_surface) = egl.get_proc_address("eglDestroySurface") else {
+                let _ = egl.destroy_surface(display, surface);
+                return Err(NativeGbmScanoutBufferExportDetail::EglSurfaceUnavailable);
+            };
+            buffer._egl_surface = Some(NativeEglSurfaceOwner {
+                destroy_surface: unsafe {
+                    std::mem::transmute::<
+                        extern "system" fn(),
+                        unsafe extern "system" fn(*mut c_void, *mut c_void) -> u32,
+                    >(destroy_surface)
+                },
+                display,
+                surface,
+            });
+            Ok(buffer)
+        }
+        Err(detail) => {
+            let _ = egl.destroy_surface(display, surface);
+            Err(detail)
+        }
+    }
 }
 
 fn render_persistent_target_dmabuf<T: std::os::fd::AsFd>(
@@ -1340,8 +1389,7 @@ fn render_persistent_target_dmabuf<T: std::os::fd::AsFd>(
         Err(detail) => Err(detail),
     };
     let _ = egl.make_current(display, None, None, None);
-    let _ = egl.destroy_surface(display, egl_surface);
-    result
+    retain_egl_surface_until_scanout_release(egl, display, egl_surface, result)
 }
 
 fn render_persistent_target_composition<T: std::os::fd::AsFd>(
@@ -1442,8 +1490,7 @@ fn render_persistent_target_composition<T: std::os::fd::AsFd>(
             )
         });
     let _ = egl.make_current(display, None, None, None);
-    let _ = egl.destroy_surface(display, egl_surface);
-    result
+    retain_egl_surface_until_scanout_release(egl, display, egl_surface, result)
 }
 
 fn draw_composition_dmabuf_layer(
