@@ -2567,7 +2567,7 @@ fn run_session_loop(
                 let batch = layout.projected_batch(&batch);
                 scene.observe(&batch)?;
                 let compose_started = Instant::now();
-                let report = scene.compose()?.clone();
+                let report = scene.compose(pointer.position)?.clone();
                 max_compose = max_compose.max(compose_started.elapsed());
                 if let (Some(surface), Some(before_surface)) =
                     (input_surface, input_surface_generation)
@@ -5236,6 +5236,7 @@ impl PersistentCpuScene {
 
     fn compose(
         &mut self,
+        cursor_position: Option<Point>,
     ) -> Result<&sophia_backend_live::LiveCpuCompositionReport, Box<dyn std::error::Error>> {
         let mut surface_order = self
             .surfaces
@@ -5267,8 +5268,12 @@ impl PersistentCpuScene {
             })
             .collect::<Vec<_>>();
         self.last_report = Some(
-            sophia_backend_live::compose_live_cpu_frame_ref(self.output_size, &layers)
-                .map_err(|error| format!("persistent CPU composition failed: {error:?}"))?,
+            sophia_backend_live::compose_live_cpu_frame_ref_with_cursor(
+                self.output_size,
+                &layers,
+                cursor_position,
+            )
+            .map_err(|error| format!("persistent CPU composition failed: {error:?}"))?,
         );
         let nonzero_pixel_bytes = self
             .last_report
@@ -5449,6 +5454,7 @@ struct PhysicalInputRouteReport {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct SessionPointerPlacement {
     offset: Option<Point>,
+    position: Option<Point>,
 }
 
 fn pointer_offset_for_geometry(raw: Point, geometry: Rect) -> Point {
@@ -5476,10 +5482,12 @@ impl SessionPointerPlacement {
             };
             pointer_offset_for_geometry(raw, geometry)
         });
-        Point {
+        let position = Point {
             x: raw.x + offset.x,
             y: raw.y + offset.y,
-        }
+        };
+        self.position = Some(position);
+        position
     }
 }
 
@@ -5828,6 +5836,7 @@ mod tests {
     fn interactive_pointer_proof_routes_motion_after_placement() {
         let mut pointer = SessionPointerPlacement {
             offset: Some(Point { x: 10.0, y: 20.0 }),
+            position: None,
         };
         let mut motion = InputEventPacket {
             serial: 1,
@@ -6142,12 +6151,12 @@ mod tests {
             .insert(2, test_cpu_buffer(2, secondary_pixels));
 
         assert_eq!(
-            scene.compose().unwrap().frame.bytes,
+            scene.compose(None).unwrap().frame.bytes,
             secondary_pixels.to_vec()
         );
         scene.raise_surface(focused);
         assert_eq!(
-            scene.compose().unwrap().frame.bytes,
+            scene.compose(None).unwrap().frame.bytes,
             focused_pixels.to_vec()
         );
     }
