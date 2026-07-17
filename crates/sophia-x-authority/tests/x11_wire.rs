@@ -2954,13 +2954,14 @@ fn xkb_get_map_encodes_schema_aligned_types_symbols_and_modifier_map() {
     );
     let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
     let reply = &encoded[0];
-    assert_eq!(reply[8], 8);
-    assert_eq!(reply[9], u8::MAX);
-    assert_eq!(read_u16(XByteOrder::LittleEndian, &reply[10..12]), 0x43);
-    assert_eq!(&reply[12..16], &[0, 1, 1, 8]);
-    assert_eq!(read_u16(XByteOrder::LittleEndian, &reply[16..18]), 496);
-    assert_eq!(reply[18], 248);
-    assert_eq!(&reply[29..32], &[8, 248, 10]);
+    assert_eq!(&reply[8..10], &[0, 0]);
+    assert_eq!(reply[10], 8);
+    assert_eq!(reply[11], u8::MAX);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &reply[12..14]), 0x43);
+    assert_eq!(&reply[14..18], &[0, 1, 1, 8]);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &reply[18..20]), 496);
+    assert_eq!(reply[20], 248);
+    assert_eq!(&reply[31..34], &[8, 248, 10]);
     assert_eq!(
         read_u32(XByteOrder::LittleEndian, &reply[4..8]) as usize,
         (reply.len() - 32) / 4
