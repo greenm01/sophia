@@ -4747,40 +4747,41 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 released_fences: &[],
                 server_reply_fd_count: server_reply_fds.len(),
             })?;
-            let mut output_stream = output_stream
-                .lock()
-                .map_err(|_| X11SetupSocketError::new("X11 output socket lock poisoned"))?;
-            for (index, bytes) in output
-                .encoded_outputs(setup.byte_order)
-                .into_iter()
-                .enumerate()
-            {
-                let fds = if index == 0 {
-                    core::mem::take(&mut server_reply_fds)
-                } else {
-                    Vec::new()
-                };
-                let record = X11SocketOutputRecord::new(bytes, fds)?;
-                if let Err(error) = write_x11_socket_output_record(&mut output_stream, record) {
-                    if is_x11_client_disconnect(&error) {
+            let encoded_outputs = output.encoded_outputs(setup.byte_order);
+            if !encoded_outputs.is_empty() || !server_reply_fds.is_empty() {
+                let mut output_stream = output_stream
+                    .lock()
+                    .map_err(|_| X11SetupSocketError::new("X11 output socket lock poisoned"))?;
+                for (index, bytes) in encoded_outputs.into_iter().enumerate() {
+                    let fds = if index == 0 {
+                        core::mem::take(&mut server_reply_fds)
+                    } else {
+                        Vec::new()
+                    };
+                    let record = X11SocketOutputRecord::new(bytes, fds)?;
+                    if let Err(error) = write_x11_socket_output_record(&mut output_stream, record) {
+                        if is_x11_client_disconnect(&error) {
+                            return Ok(());
+                        }
+                        return Err(X11SetupSocketError::new(format!(
+                            "failed to write X11 output: {error}"
+                        )));
+                    }
+                }
+                debug_assert!(server_reply_fds.is_empty());
+                if let Err(error) = output_stream.flush() {
+                    if matches!(
+                        error.kind(),
+                        ErrorKind::BrokenPipe
+                            | ErrorKind::ConnectionReset
+                            | ErrorKind::UnexpectedEof
+                    ) {
                         return Ok(());
                     }
                     return Err(X11SetupSocketError::new(format!(
-                        "failed to write X11 output: {error}"
+                        "failed to flush X11 output: {error}"
                     )));
                 }
-            }
-            debug_assert!(server_reply_fds.is_empty());
-            if let Err(error) = output_stream.flush() {
-                if matches!(
-                    error.kind(),
-                    ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::UnexpectedEof
-                ) {
-                    return Ok(());
-                }
-                return Err(X11SetupSocketError::new(format!(
-                    "failed to flush X11 output: {error}"
-                )));
             }
         }
         Ok(())

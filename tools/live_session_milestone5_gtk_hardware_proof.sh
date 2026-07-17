@@ -13,6 +13,7 @@ guard_triggered_file="$runtime_dir/input-guard.triggered"
 devices="${SOPHIA_M5_GTK_INPUT_DEVICES:-}"
 runtime_msec="${SOPHIA_M5_GTK_RUNTIME_MSEC:-30000}"
 mode="${SOPHIA_M5_GTK_MODE:-paired}"
+diagnostic="${SOPHIA_M5_GTK_DIAGNOSTIC:-0}"
 
 keyd_was_running=false
 tty_state=""
@@ -117,6 +118,10 @@ for command in cargo zenity python3 stty setsid; do
 done
 [[ "$runtime_msec" =~ ^[0-9]+$ ]] && (( runtime_msec >= 15000 && runtime_msec <= 120000 )) || {
     echo "SOPHIA_M5_GTK_RUNTIME_MSEC must be 15000-120000" >&2
+    exit 1
+}
+[[ "$diagnostic" == 0 || "$diagnostic" == 1 ]] || {
+    echo "SOPHIA_M5_GTK_DIAGNOSTIC must be 0 or 1" >&2
     exit 1
 }
 case "$mode" in
@@ -230,10 +235,14 @@ stty raw -echo
 run_profile() {
     local profile="$1" evidence="$2"
     shift 2
+    local diagnostic_env=()
+    if [[ "$diagnostic" == 1 ]]; then
+        diagnostic_env=(SOPHIA_X11_AUTHORITY_TRACE=1 SOPHIA_LIVE_SESSION_DIAGNOSTIC=1)
+    fi
     setsid env SOPHIA_LIVE_SESSION_PERSISTENT_EVIDENCE="$evidence" \
       SOPHIA_LIVE_SESSION_RUNTIME_MSEC="$runtime_msec" \
       SOPHIA_LIVE_SESSION_SKIP_BUILD=1 SOPHIA_ATOMIC_SCANOUT_SKIP_PREFLIGHT=1 \
-      SOPHIA_X11_AUTHORITY_TRACE=1 SOPHIA_LIVE_SESSION_DIAGNOSTIC=1 \
+      "${diagnostic_env[@]}" \
       "$root/tools/live_session_persistent_hardware_proof.sh" \
       --namespace-profile="$profile" --software-client-rendering --client=zenity --client-arg=--entry \
       --client-arg=--title --client-arg='Sophia GTK proof' \

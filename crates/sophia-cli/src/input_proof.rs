@@ -18,6 +18,10 @@ pub struct PhysicalTextProofMismatch {
     pub observed: PhysicalTextProofEvent,
 }
 
+pub fn pointer_proof_suppresses_return(required: bool, keycode: u32, text_complete: bool) -> bool {
+    required && text_complete && keycode == 28
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PhysicalTextProofBuildError {
     InvalidText,

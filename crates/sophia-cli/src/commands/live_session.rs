@@ -305,17 +305,13 @@ fn push_xauthority_field(
 }
 
 enum SessionPhysicalInput {
-    Direct(
-        sophia_backend_live::NativeLibinputEventPoller<
-            sophia_backend_live::NativeLibinputEventReader,
-        >,
-    ),
+    Threaded(sophia_backend_live::ThreadedNativeLibinputEventPoller),
 }
 
 impl NonBlockingInputPoller for SessionPhysicalInput {
     fn poll_ready(&mut self) -> std::io::Result<Vec<sophia_protocol::InputEventPacket>> {
         match self {
-            Self::Direct(poller) => poller.poll_ready(),
+            Self::Threaded(poller) => poller.poll_ready(),
         }
     }
 }
@@ -323,7 +319,7 @@ impl NonBlockingInputPoller for SessionPhysicalInput {
 impl SessionPhysicalInput {
     fn stats(&self) -> sophia_backend_live::ThreadedNativeInputStats {
         match self {
-            Self::Direct(_) => Default::default(),
+            Self::Threaded(poller) => poller.stats(),
         }
     }
 }
@@ -350,8 +346,8 @@ pub(crate) fn run_persistent_xterm_session(
     let mut physical_input = if config.input_devices.is_empty() {
         None
     } else {
-        Some(SessionPhysicalInput::Direct(
-            sophia_backend_live::open_native_libinput_path_poller(
+        Some(SessionPhysicalInput::Threaded(
+            sophia_backend_live::open_threaded_native_libinput_path_poller(
                 &config.input_devices,
                 sophia_backend_live::NativeLibinputDeviceMap::new(SeatId::from_raw(
                     SESSION_SEAT_RAW,
@@ -359,6 +355,7 @@ pub(crate) fn run_persistent_xterm_session(
                 .with_keyboard_device(DeviceId::from_raw(SESSION_KEYBOARD_DEVICE_RAW))
                 .with_pointer_device(DeviceId::from_raw(SESSION_POINTER_DEVICE_RAW)),
                 64,
+                256,
             )?,
         ))
     };
@@ -433,8 +430,7 @@ pub(crate) fn run_persistent_xterm_session(
     }));
     wait_for_x_server_socket(&config.socket_path, &mut server)?;
 
-    let input_proof_result = config
-        .input_proof_requested()
+    let input_proof_result = (config.input_proof_requested() && config.client.is_none())
         .then(|| LiveInputProofResult::create(display_number))
         .transpose()?;
     let mut terminal_command = match config.client.as_deref() {
@@ -813,6 +809,7 @@ impl PersistentXtermSessionConfig {
         let expect_client_stdout = arg_value(args, "--expect-client-stdout");
         let require_client_normal_exit =
             args.iter().any(|arg| arg == "--require-client-normal-exit");
+        let proof_mode = args.iter().any(|arg| arg == "--proof");
         if software_client_rendering && client.is_none() {
             return Err("--software-client-rendering requires --client".into());
         }
@@ -925,12 +922,17 @@ impl PersistentXtermSessionConfig {
         if client.is_some()
             && (terminal_exec.is_some()
                 || secondary_terminal
-                || inject_text.is_some()
                 || args.iter().any(|arg| arg.starts_with("--terminal=")))
         {
             return Err(
                 "--client cannot be combined with terminal-specific session options".into(),
             );
+        }
+        if client.is_some() && inject_text.is_some() && !proof_mode {
+            return Err("--client with --inject-text requires explicit --proof mode".into());
+        }
+        if client.is_some() && inject_text.is_some() && expect_client_stdout.is_none() {
+            return Err("--client with --inject-text requires --expect-client-stdout".into());
         }
         if (m4_first_acquire_delay.is_some()
             || m4_reject_first_present
@@ -1993,16 +1995,14 @@ fn physical_input_pixels_already_changed(
             .is_some_and(|(baseline, current)| baseline != current)
 }
 
-fn pointer_proof_rejects_key(
-    pointer_proof_required: bool,
-    keycode: u32,
-    pressed: bool,
-    physical_text_proof: Option<&PhysicalTextProof>,
-) -> bool {
-    pointer_proof_required
-        && pressed
-        && keycode == 28
-        && physical_text_proof.is_some_and(PhysicalTextProof::is_complete)
+fn software_batch_may_coalesce(batch: &XAuthorityObservedTransactionBatch) -> bool {
+    batch.removed_surfaces.is_empty()
+        && batch.dma_buf_registrations.is_empty()
+        && batch.fence_registrations.is_empty()
+        && batch.present_submissions.is_empty()
+        && batch.released_dma_bufs.is_empty()
+        && batch.released_fences.is_empty()
+        && (!batch.transactions.is_empty() || !batch.cpu_buffer_updates.is_empty())
 }
 
 fn run_session_loop(
@@ -2065,6 +2065,8 @@ fn run_session_loop(
     let mut batches = 0usize;
     let mut transactions = 0usize;
     let mut cpu_buffer_updates = 0usize;
+    let mut cpu_compositions = 0usize;
+    let mut coalesced_batches = 0usize;
     let mut input_batch_baseline = None;
     let mut input_cpu_update_baseline = None;
     let mut backend_ticks = 0usize;
@@ -2110,6 +2112,9 @@ fn run_session_loop(
     let mut protocol_error_count = 0usize;
     let mut first_protocol_error = None;
     let mut emergency_exit_requested = false;
+    let mut return_suppressed_reported = false;
+    let mut cursor_dirty = false;
+    let mut pending_authority_batches = VecDeque::new();
 
     macro_rules! drain_physical_input {
         () => {{
@@ -2144,6 +2149,14 @@ fn run_session_loop(
                 input_events_expected =
                     input_events_expected.saturating_add(report.deliveries.len());
                 pending_input_deliveries.extend(report.deliveries.iter().copied());
+                cursor_dirty |= report.pointer_routed > 0;
+                if report.return_suppressed && !return_suppressed_reported {
+                    println!(
+                        "sophia_live_session_input_pipeline schema=1 status=return_suppressed"
+                    );
+                    std::io::stdout().flush()?;
+                    return_suppressed_reported = true;
+                }
                 if !key_observed_reported && report.keys_observed > 0 {
                     println!("sophia_live_session_input_pipeline schema=1 status=key_observed");
                     std::io::stdout().flush()?;
@@ -2266,6 +2279,17 @@ fn run_session_loop(
                 }
                 if client_stdout.len() > 4_096 {
                     return Err("application stdout exceeded the 4096-byte evidence bound".into());
+                }
+                if let (Some(text), Some(expected)) = (
+                    config.inject_text.as_deref(),
+                    config.expect_client_stdout.as_deref(),
+                ) && client_stdout == expected.as_bytes()
+                {
+                    input_text_match = true;
+                    println!(
+                        "sophia_live_session_input schema=3 status=semantic_complete source=synthetic text_match=true bytes={}",
+                        text.len()
+                    );
                 }
             }
             if status.success()
@@ -2402,6 +2426,26 @@ fn run_session_loop(
         {
             let _ = runtime.drive_gpu_presentation(Some(native_scanout))?;
         }
+        if cursor_dirty
+            && let (Some(runtime), Some(native_scanout), Some(position)) =
+                (runtime.as_mut(), native_scanout.as_mut(), pointer.position)
+        {
+            let compose_started = Instant::now();
+            let report = scene.compose(Some(position))?.clone();
+            max_compose = max_compose.max(compose_started.elapsed());
+            if pointer_checksum.is_some_and(|baseline| baseline != report.checksum)
+                && physical_pointer_routed > 0
+            {
+                pointer_pixel_change = true;
+            }
+            let frames = scene.frames_for_outputs(&outputs)?;
+            let committed = runtime.committed_surfaces().to_vec();
+            let _ =
+                runtime.run_committed_snapshot(&committed, Some(native_scanout), Some(frames))?;
+            backend_ticks = backend_ticks.saturating_add(1);
+            cursor_dirty = false;
+        }
+
         let input_baseline_presented_before_wait =
             scene.last_report.as_ref().is_some_and(|report| {
                 report.nonzero_pixel_bytes > 0
@@ -2479,12 +2523,34 @@ fn run_session_loop(
             session_ticks = session_ticks.saturating_add(1);
         }
 
-        let authority_batch = initial_authority_batch.take().map_or_else(
-            || authority_receiver.recv_timeout(Duration::from_millis(25)),
-            Ok,
-        );
+        let authority_batch = initial_authority_batch
+            .take()
+            .or_else(|| pending_authority_batches.pop_front())
+            .map_or_else(
+                || authority_receiver.recv_timeout(Duration::from_millis(25)),
+                Ok,
+            );
         match authority_batch {
             Ok(batch) => {
+                let drain_started = Instant::now();
+                while pending_authority_batches.len() < 64
+                    && drain_started.elapsed() < Duration::from_millis(2)
+                {
+                    match authority_receiver.try_recv() {
+                        Ok(queued) => pending_authority_batches.push_back(queued),
+                        Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                            return Err(
+                                "persistent X authority transaction channel disconnected".into()
+                            );
+                        }
+                    }
+                }
+                let defer_cpu_frame = runtime.is_some()
+                    && software_batch_may_coalesce(&batch)
+                    && pending_authority_batches
+                        .front()
+                        .is_some_and(software_batch_may_coalesce);
                 for error in &batch.protocol_errors {
                     protocol_error_count = protocol_error_count.saturating_add(1);
                     first_protocol_error.get_or_insert(*error);
@@ -2585,9 +2651,19 @@ fn run_session_loop(
                 }
                 let batch = layout.projected_batch(&batch);
                 scene.observe(&batch)?;
-                let compose_started = Instant::now();
-                let report = scene.compose()?.clone();
-                max_compose = max_compose.max(compose_started.elapsed());
+                let report = if defer_cpu_frame {
+                    coalesced_batches = coalesced_batches.saturating_add(1);
+                    scene
+                        .last_report
+                        .clone()
+                        .ok_or("software redraw coalescing has no prior composed frame")?
+                } else {
+                    let compose_started = Instant::now();
+                    let report = scene.compose(pointer.position)?.clone();
+                    max_compose = max_compose.max(compose_started.elapsed());
+                    cpu_compositions = cpu_compositions.saturating_add(1);
+                    report
+                };
                 if let (Some(surface), Some(before_surface)) =
                     (input_surface, input_surface_generation)
                     && scene
@@ -2596,10 +2672,14 @@ fn run_session_loop(
                 {
                     input_surface_pixel_change = true;
                 }
-                let native_frames = native_scanout
-                    .as_ref()
-                    .map(|_| scene.frames_for_outputs(&outputs))
-                    .transpose()?;
+                let native_frames = if defer_cpu_frame {
+                    None
+                } else {
+                    native_scanout
+                        .as_ref()
+                        .map(|_| scene.frames_for_outputs(&outputs))
+                        .transpose()?
+                };
                 if let Some(before_frame) = injection_checksum
                     && report.checksum != before_frame
                     && (config.expect_physical_text.is_none()
@@ -2633,8 +2713,16 @@ fn run_session_loop(
                 let runtime = runtime
                     .as_mut()
                     .expect("persistent backend runtime was initialized above");
-                let tick =
-                    runtime.run_batch(&batch, native_scanout.as_mut(), native_frames, wm_update)?;
+                let tick = runtime.run_batch(
+                    &batch,
+                    if defer_cpu_frame {
+                        None
+                    } else {
+                        native_scanout.as_mut()
+                    },
+                    native_frames,
+                    wm_update,
+                )?;
                 backend_ticks = backend_ticks.saturating_add(1);
                 runtime_committed = record_runtime_commits(
                     runtime_committed,
@@ -3062,6 +3150,10 @@ fn run_session_loop(
         (0, 0, 0, 0, Duration::ZERO),
         PersistentNativeScanout::persistent_render_metrics,
     );
+    println!(
+        "sophia_live_session_scheduler schema=1 authority_batches={batches} cpu_compositions={cpu_compositions} coalesced_batches={coalesced_batches}"
+    );
+
     println!(
         "sophia_live_session schema=14 status=bounded_complete display={} elapsed_msec={} startup_ready_msec={} session_ticks={} authority_batches={} authority_transactions={} authority_queue_capacity={} authority_batches_dropped=0 backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_max_nonzero_pixel_bytes={} cpu_nonzero_frames={} cpu_checksum={} cpu_max_compose_msec={} injected_input={} input_events_expected={} input_events_flushed={} input_flush_latency_msec={} input_pixel_change={} input_text_match={} input_presented_latency_msec={} input_dispatch_max_gap_msec={} input_queue_max_depth={} input_queue_dwell_max_msec={} physical_events={} physical_keys_routed={} pointer_pixel_change={} physical_pointer_events={} physical_pointer_routed={} pointer_proof={} native_presentation={} native_submissions={} native_submit_deferred={} native_submit_failures={} native_retirements={} native_retire_failures={} native_max_in_flight_ticks={} native_max_submit_to_page_flip_msec={} native_max_upload_msec={} native_target_creations={} native_target_recreations={} native_pipeline_creations={} native_frame_uploads={} native_callback_accepted={} native_callback_rejected={} native_callback_queue_saturated={} native_nonzero_exports={} native_mixed_exports={} native_export_attempts={} native_in_flight={} native_cleanup_pending={} physical_input={} wm_policy={} wm_requests={} wm_committed={} wm_restarts={} wm_degraded={} namespace_profile={} output_update={} output_notifications={} surface_resize={} present_complete_flip={} present_complete_skip={} present_idle={} present_idle_fence_triggers={} present_disconnect_sources={} present_disconnect_fences={} present_disconnect_failures={} present_live_sources={} present_live_fences={} present_live_transactions={} present_acquire_waits={} present_controlled_rejections={}",
         config.display,
@@ -5258,6 +5350,7 @@ impl PersistentCpuScene {
 
     fn compose(
         &mut self,
+        cursor_position: Option<Point>,
     ) -> Result<&sophia_backend_live::LiveCpuCompositionReport, Box<dyn std::error::Error>> {
         let mut surface_order = self
             .surfaces
@@ -5289,8 +5382,12 @@ impl PersistentCpuScene {
             })
             .collect::<Vec<_>>();
         self.last_report = Some(
-            sophia_backend_live::compose_live_cpu_frame_ref(self.output_size, &layers)
-                .map_err(|error| format!("persistent CPU composition failed: {error:?}"))?,
+            sophia_backend_live::compose_live_cpu_frame_ref_with_cursor(
+                self.output_size,
+                &layers,
+                cursor_position,
+            )
+            .map_err(|error| format!("persistent CPU composition failed: {error:?}"))?,
         );
         let nonzero_pixel_bytes = self
             .last_report
@@ -5467,11 +5564,13 @@ struct PhysicalInputRouteReport {
     pointer_routed: usize,
     deliveries: Vec<XAuthorityInputDeliveryId>,
     emergency_exit: bool,
+    return_suppressed: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct SessionPointerPlacement {
     offset: Option<Point>,
+    position: Option<Point>,
 }
 
 fn pointer_offset_for_geometry(raw: Point, geometry: Rect) -> Point {
@@ -5499,10 +5598,12 @@ impl SessionPointerPlacement {
             };
             pointer_offset_for_geometry(raw, geometry)
         });
-        Point {
+        let position = Point {
             x: raw.x + offset.x,
             y: raw.y + offset.y,
-        }
+        };
+        self.position = Some(position);
+        position
     }
 }
 
@@ -5580,6 +5681,7 @@ fn route_input_events(
         pointer_buttons_routed: 0,
         deliveries: Vec::new(),
         emergency_exit: false,
+        return_suppressed: false,
     };
     for mut event in events {
         match event.kind {
@@ -5589,15 +5691,15 @@ fn route_input_events(
                     report.emergency_exit = true;
                     continue;
                 }
-                if pointer_proof_rejects_key(
+                if sophia_cli::input_proof::pointer_proof_suppresses_return(
                     pointer_proof_required,
                     keycode,
-                    pressed,
-                    physical_text_proof.as_deref(),
+                    physical_text_proof
+                        .as_deref()
+                        .is_some_and(PhysicalTextProof::is_complete),
                 ) {
-                    return Err(
-                        "Return is disabled during the required physical pointer selection".into(),
-                    );
+                    report.return_suppressed = true;
+                    continue;
                 }
                 let FocusedInputRoute::Routed(event) =
                     focus.route_keyboard_event(event, committed_surfaces)
@@ -5773,12 +5875,10 @@ mod tests {
         cpu_frame_matches_visible_output, cpu_frame_submission_ready,
         global_runtime_deadline_ends_session, layer_snapshots_from_committed,
         physical_input_may_route_after_primary_exit, physical_input_pixels_already_changed,
-        place_pointer_event_for_routing, pointer_offset_for_geometry, pointer_proof_rejects_key,
-        record_runtime_commits, required_wayland_presentation_submission,
-        retain_latest_wayland_presentation, seed_missing_committed_surfaces,
-        successful_primary_exit_ends_session,
+        place_pointer_event_for_routing, pointer_offset_for_geometry, record_runtime_commits,
+        required_wayland_presentation_submission, retain_latest_wayland_presentation,
+        seed_missing_committed_surfaces, successful_primary_exit_ends_session,
     };
-    use sophia_cli::input_proof::{PhysicalTextProof, PhysicalTextProofEvent};
     use sophia_protocol::{
         AuthorityKind, DeviceId, InputEventKind, InputEventPacket, NamespaceCapabilities,
         NamespaceProfile, Point, SeatId, SurfaceId, SurfaceTransaction,
@@ -5853,35 +5953,6 @@ mod tests {
     }
 
     #[test]
-    fn same_batch_text_tab_and_return_rejects_keyboard_activation() {
-        let incomplete_proof = PhysicalTextProof::new_without_submit("sophia").unwrap();
-        assert!(!pointer_proof_rejects_key(
-            true,
-            28,
-            true,
-            Some(&incomplete_proof)
-        ));
-
-        let mut proof = PhysicalTextProof::new_without_submit("sophia").unwrap();
-        for keycode in [39, 32, 33, 43, 31, 38] {
-            for pressed in [true, false] {
-                proof
-                    .observe(PhysicalTextProofEvent {
-                        keycode,
-                        pressed,
-                        state: 0,
-                    })
-                    .unwrap();
-            }
-        }
-
-        assert!(proof.is_complete());
-        assert!(!pointer_proof_rejects_key(true, 15, true, Some(&proof)));
-        assert!(pointer_proof_rejects_key(true, 28, true, Some(&proof)));
-        assert!(!pointer_proof_rejects_key(true, 28, false, Some(&proof)));
-        assert!(!pointer_proof_rejects_key(false, 28, true, Some(&proof)));
-    }
-    #[test]
     fn physical_pointer_starts_at_focused_surface_center() {
         let raw = Point { x: -4.0, y: 6.0 };
         let offset = pointer_offset_for_geometry(
@@ -5901,6 +5972,7 @@ mod tests {
     fn interactive_pointer_proof_routes_motion_after_placement() {
         let mut pointer = SessionPointerPlacement {
             offset: Some(Point { x: 10.0, y: 20.0 }),
+            position: None,
         };
         let mut motion = InputEventPacket {
             serial: 1,
@@ -6215,12 +6287,12 @@ mod tests {
             .insert(2, test_cpu_buffer(2, secondary_pixels));
 
         assert_eq!(
-            scene.compose().unwrap().frame.bytes,
+            scene.compose(None).unwrap().frame.bytes,
             secondary_pixels.to_vec()
         );
         scene.raise_surface(focused);
         assert_eq!(
-            scene.compose().unwrap().frame.bytes,
+            scene.compose(None).unwrap().frame.bytes,
             focused_pixels.to_vec()
         );
     }

@@ -104,7 +104,9 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
 
     #[cfg(feature = "atomic-scanout-live")]
     if args.iter().any(|arg| arg == "sophia-live-session") {
-        if args.iter().any(|arg| arg == "--proof") {
+        if args.iter().any(|arg| arg.starts_with("--client=")) {
+            super::live_session::run_persistent_xterm_session(args)?;
+        } else if args.iter().any(|arg| arg == "--proof") {
             run_sophia_live_session_bootstrap(args)?;
         } else if arg_value(args, "--client-backend").as_deref() == Some("wayland") {
             super::wayland::run_session(args)?;

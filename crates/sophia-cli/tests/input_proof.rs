@@ -1,5 +1,6 @@
 use sophia_cli::input_proof::{
     PhysicalTextProof, PhysicalTextProofEvent, PhysicalTextProofProgress,
+    pointer_proof_suppresses_return,
 };
 
 fn event(keycode: u8, pressed: bool) -> PhysicalTextProofEvent {
@@ -78,6 +79,14 @@ fn rejects_wrong_key_modifier_release_order_and_repeat() {
         .expect("first press should match");
     assert!(proof.observe(event(39, true)).is_err());
     assert_eq!(proof.matched_events(), 1);
+}
+
+#[test]
+fn completed_application_text_suppresses_return_press_and_release_only() {
+    assert!(!pointer_proof_suppresses_return(true, 28, false));
+    assert!(!pointer_proof_suppresses_return(true, 15, true));
+    assert!(pointer_proof_suppresses_return(true, 28, true));
+    assert!(!pointer_proof_suppresses_return(false, 28, true));
 }
 
 #[test]
