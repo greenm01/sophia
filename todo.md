@@ -77,8 +77,11 @@ polling and carries the originating cycle into feedback, so an unretired frame
 emits no protocol completion. The live native path now uses a backend-owned page-flip tracker for submission
 scheduling, monotonic callback validation, exact frame retirement, and reduced
 cycle-correlated feedback records; the CLI no longer owns those state tables.
+The backend feedback coordinator now retires presentation resources before it
+emits paired reduced Complete/Idle outcomes; missing presentations fail closed
+with no protocol event. The CLI only translates those outcomes to X wire events.
 The remaining migration is to make the production adapter own runtime/scanout
-invocation and Present Complete/Idle routing itself.
+invocation and prepared Engine commit application itself.
 
 - [ ] Establish `sophia-engine::runtime_driver` as the only production visual
   coordinator. Its ordered phases are bounded authority intake, Engine

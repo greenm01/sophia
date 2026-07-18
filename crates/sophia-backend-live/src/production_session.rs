@@ -3,6 +3,8 @@ use sophia_engine::{
     OutputPresentationRetire, OutputPresentationSchedule, ProductionPresentationAdapter,
     ProductionRetirement,
 };
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+use sophia_protocol::TransactionId;
 use sophia_protocol::{CommittedSurfaceState, OutputId};
 use std::collections::{BTreeMap, VecDeque};
 
@@ -176,6 +178,120 @@ impl LiveProductionPageFlipTracker {
                 .retirements
                 .retain(|retirement| retirement.retirement.output != output),
             None => self.retirements.clear(),
+        }
+    }
+}
+
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LivePresentCompletionMode {
+    Flip,
+    Skip,
+}
+
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LivePresentProtocolFeedback {
+    Complete {
+        transaction: TransactionId,
+        ust: u64,
+        msc: u64,
+        mode: LivePresentCompletionMode,
+    },
+    Idle {
+        transaction: TransactionId,
+    },
+}
+
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LivePresentFeedbackOutcome {
+    pub feedback: [LivePresentProtocolFeedback; 2],
+    pub idle_fence_triggered: bool,
+}
+
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LivePresentFeedbackError {
+    UnknownPresentation { transaction: TransactionId },
+}
+
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+#[derive(Debug, Default)]
+pub struct LiveProductionPresentFeedbackCoordinator {
+    resources: crate::LivePresentationResourceSession,
+}
+
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+impl LiveProductionPresentFeedbackCoordinator {
+    pub fn resources(&self) -> &crate::LivePresentationResourceSession {
+        &self.resources
+    }
+
+    pub fn resources_mut(&mut self) -> &mut crate::LivePresentationResourceSession {
+        &mut self.resources
+    }
+
+    pub fn complete_flip(
+        &mut self,
+        transaction: TransactionId,
+        ust: u64,
+        msc: u64,
+    ) -> Result<LivePresentFeedbackOutcome, LivePresentFeedbackError> {
+        let retirement = self
+            .resources
+            .retire_page_flip(transaction)
+            .ok_or(LivePresentFeedbackError::UnknownPresentation { transaction })?;
+        Ok(Self::outcome(
+            transaction,
+            ust,
+            msc,
+            LivePresentCompletionMode::Flip,
+            retirement.idle_fence == sophia_renderer_live::LiveIdleFenceStatus::Triggered,
+        ))
+    }
+
+    pub fn reject_skip(
+        &mut self,
+        transaction: TransactionId,
+        ust: u64,
+        msc: u64,
+    ) -> Result<LivePresentFeedbackOutcome, LivePresentFeedbackError> {
+        let retirement = self
+            .resources
+            .reject(transaction)
+            .ok_or(LivePresentFeedbackError::UnknownPresentation { transaction })?;
+        Ok(Self::outcome(
+            transaction,
+            ust,
+            msc,
+            LivePresentCompletionMode::Skip,
+            retirement.idle_fence == sophia_renderer_live::LiveIdleFenceStatus::Triggered,
+        ))
+    }
+
+    pub fn disconnect(&mut self) -> sophia_renderer_live::LivePresentationDisconnectReport {
+        self.resources.disconnect()
+    }
+
+    fn outcome(
+        transaction: TransactionId,
+        ust: u64,
+        msc: u64,
+        mode: LivePresentCompletionMode,
+        idle_fence_triggered: bool,
+    ) -> LivePresentFeedbackOutcome {
+        LivePresentFeedbackOutcome {
+            feedback: [
+                LivePresentProtocolFeedback::Complete {
+                    transaction,
+                    ust,
+                    msc,
+                    mode,
+                },
+                LivePresentProtocolFeedback::Idle { transaction },
+            ],
+            idle_fence_triggered,
         }
     }
 }

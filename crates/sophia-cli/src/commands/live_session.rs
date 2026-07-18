@@ -3460,14 +3460,19 @@ fn run_session_loop(
         runtime
             .as_ref()
             .map_or(0, |runtime| runtime.presentation_disconnect_failures),
-        runtime
-            .as_ref()
-            .map_or(0, |runtime| runtime.presentation_resources.source_count()),
-        runtime
-            .as_ref()
-            .map_or(0, |runtime| runtime.presentation_resources.fence_count()),
+        runtime.as_ref().map_or(0, |runtime| runtime
+            .presentation_feedback
+            .resources()
+            .source_count()),
+        runtime.as_ref().map_or(0, |runtime| runtime
+            .presentation_feedback
+            .resources()
+            .fence_count()),
         runtime.as_ref().map_or(0, |runtime| {
-            runtime.presentation_resources.presentation_count()
+            runtime
+                .presentation_feedback
+                .resources()
+                .presentation_count()
         }),
         runtime
             .as_ref()
@@ -3478,9 +3483,13 @@ fn run_session_loop(
     );
     if let Some(runtime) = runtime.as_ref()
         && (runtime.presentation_disconnect_failures != 0
-            || runtime.presentation_resources.source_count() != 0
-            || runtime.presentation_resources.fence_count() != 0
-            || runtime.presentation_resources.presentation_count() != 0
+            || runtime.presentation_feedback.resources().source_count() != 0
+            || runtime.presentation_feedback.resources().fence_count() != 0
+            || runtime
+                .presentation_feedback
+                .resources()
+                .presentation_count()
+                != 0
             || runtime.present_idle
                 != runtime
                     .present_complete_flip
@@ -3595,7 +3604,7 @@ struct PersistentBackendRuntime {
     outputs: BTreeMap<OutputId, PersistentOutputRuntime>,
     layers: BTreeMap<SurfaceId, SurfaceTransaction>,
     committed_snapshot_layers: Option<Vec<LayerSnapshot>>,
-    presentation_resources: sophia_backend_live::LivePresentationResourceSession,
+    presentation_feedback: sophia_backend_live::LiveProductionPresentFeedbackCoordinator,
     queued_gpu_presentations: VecDeque<QueuedGpuPresentation>,
     submitted_gpu_presentation: Option<SubmittedGpuPresentation>,
     protocol_router: Option<XServerFrontendProtocolRouter>,
@@ -3722,7 +3731,7 @@ impl PersistentBackendRuntime {
             outputs: output_runtimes,
             layers: BTreeMap::new(),
             committed_snapshot_layers: None,
-            presentation_resources: Default::default(),
+            presentation_feedback: Default::default(),
             queued_gpu_presentations: VecDeque::new(),
             submitted_gpu_presentation: None,
             protocol_router: None,
@@ -3801,7 +3810,9 @@ impl PersistentBackendRuntime {
                     acquire_fence: submission.acquire_fence,
                     idle_fence: submission.idle_fence,
                 };
-                self.presentation_resources.begin(live_submission)?;
+                self.presentation_feedback
+                    .resources_mut()
+                    .begin(live_submission)?;
                 // The hardware proof holds the first Present at the acquire
                 // gate even when Mesa omits the optional wait-fence handle.
                 // When a handle is present, normal fence polling still runs
@@ -3855,21 +3866,28 @@ impl PersistentBackendRuntime {
                 .iter()
                 .map(|fd| fd.as_ref().try_clone())
                 .collect::<Result<Vec<_>, _>>()?;
-            self.presentation_resources
+            self.presentation_feedback
+                .resources_mut()
                 .register_source(registration.descriptor, plane_fds)?;
         }
         for registration in &batch.fence_registrations {
-            self.presentation_resources.register_fence(
+            self.presentation_feedback.resources_mut().register_fence(
                 registration.handle,
                 registration.initially_triggered,
                 registration.fd.as_ref().try_clone()?,
             )?;
         }
         for handle in &batch.released_dma_bufs {
-            let _ = self.presentation_resources.release_source(*handle);
+            let _ = self
+                .presentation_feedback
+                .resources_mut()
+                .release_source(*handle);
         }
         for handle in &batch.released_fences {
-            let _ = self.presentation_resources.release_fence(*handle);
+            let _ = self
+                .presentation_feedback
+                .resources_mut()
+                .release_fence(*handle);
         }
         Ok(())
     }
@@ -3890,7 +3908,8 @@ impl PersistentBackendRuntime {
             return self.run_observation_tick();
         }
         if !self
-            .presentation_resources
+            .presentation_feedback
+            .resources_mut()
             .poll_acquire_fence(transaction)?
         {
             self.present_acquire_waits = self.present_acquire_waits.saturating_add(1);
@@ -3937,7 +3956,7 @@ impl PersistentBackendRuntime {
             }
             prepared.insert(*output_id, candidate);
         }
-        let mixed = self.presentation_resources.build_mixed_frame(
+        let mixed = self.presentation_feedback.resources().build_mixed_frame(
             transaction,
             queued.cpu_background.clone(),
             queued.target,
@@ -3960,16 +3979,19 @@ impl PersistentBackendRuntime {
                     });
             let (status, detail) = native_scanout.diagnose_mixed_frame(0, mixed);
             self.queued_gpu_presentations.pop_front();
-            let _ = self.presentation_resources.reject(transaction);
-            let _ = self.presentation_resources.disconnect();
+            let _ = self
+                .presentation_feedback
+                .resources_mut()
+                .reject(transaction);
+            let _ = self.presentation_feedback.disconnect();
             return Err(Box::new(NativeEglMixedSmokeComplete {
                 status,
                 detail,
                 cpu_layers,
                 dmabuf_layers,
-                live_sources: self.presentation_resources.source_count(),
-                live_fences: self.presentation_resources.fence_count(),
-                live_transactions: self.presentation_resources.presentation_count(),
+                live_sources: self.presentation_feedback.resources().source_count(),
+                live_fences: self.presentation_feedback.resources().fence_count(),
+                live_transactions: self.presentation_feedback.resources().presentation_count(),
             }));
         }
         native_scanout.queue_mixed_frame(0, mixed);
@@ -3995,7 +4017,9 @@ impl PersistentBackendRuntime {
                 // feedback already queued here therefore belongs to an older
                 // CPU frame and must not retire this Present transaction.
                 native_scanout.discard_presentation_feedback(self.outputs.keys().next().copied());
-                self.presentation_resources.mark_submitted(transaction)?;
+                self.presentation_feedback
+                    .resources_mut()
+                    .mark_submitted(transaction)?;
                 self.queued_gpu_presentations.pop_front();
                 self.submitted_gpu_presentation = Some(SubmittedGpuPresentation {
                     transaction,
@@ -4026,20 +4050,50 @@ impl PersistentBackendRuntime {
     }
 
     fn reject_gpu_presentation(&mut self, transaction: TransactionId, ust: u64, msc: u64) {
-        if let Some(router) = self.protocol_router.as_ref() {
-            let _ =
-                router.route_present_complete(transaction, ust, msc, XPresentCompletionMode::Skip);
-        }
-        self.present_complete_skip = self.present_complete_skip.saturating_add(1);
-        if let Some(retirement) = self.presentation_resources.reject(transaction)
-            && retirement.idle_fence == sophia_backend_live::LiveIdleFenceStatus::Triggered
+        if let Ok(outcome) = self
+            .presentation_feedback
+            .reject_skip(transaction, ust, msc)
         {
+            self.route_present_feedback(outcome);
+        }
+    }
+
+    fn route_present_feedback(&mut self, outcome: sophia_backend_live::LivePresentFeedbackOutcome) {
+        if outcome.idle_fence_triggered {
             self.idle_fence_triggers = self.idle_fence_triggers.saturating_add(1);
         }
-        if let Some(router) = self.protocol_router.as_ref() {
-            let _ = router.route_present_idle(transaction);
+        for feedback in outcome.feedback {
+            match feedback {
+                sophia_backend_live::LivePresentProtocolFeedback::Complete {
+                    transaction,
+                    ust,
+                    msc,
+                    mode,
+                } => {
+                    let mode = match mode {
+                        sophia_backend_live::LivePresentCompletionMode::Flip => {
+                            self.present_complete_flip =
+                                self.present_complete_flip.saturating_add(1);
+                            XPresentCompletionMode::Flip
+                        }
+                        sophia_backend_live::LivePresentCompletionMode::Skip => {
+                            self.present_complete_skip =
+                                self.present_complete_skip.saturating_add(1);
+                            XPresentCompletionMode::Skip
+                        }
+                    };
+                    if let Some(router) = self.protocol_router.as_ref() {
+                        let _ = router.route_present_complete(transaction, ust, msc, mode);
+                    }
+                }
+                sophia_backend_live::LivePresentProtocolFeedback::Idle { transaction } => {
+                    self.present_idle = self.present_idle.saturating_add(1);
+                    if let Some(router) = self.protocol_router.as_ref() {
+                        let _ = router.route_present_idle(transaction);
+                    }
+                }
+            }
         }
-        self.present_idle = self.present_idle.saturating_add(1);
     }
 
     fn shutdown_presentations(&mut self) {
@@ -4055,7 +4109,7 @@ impl PersistentBackendRuntime {
             self.reject_gpu_presentation(submitted.transaction, 0, 0);
         }
 
-        let report = self.presentation_resources.disconnect();
+        let report = self.presentation_feedback.disconnect();
         self.idle_fence_triggers = self
             .idle_fence_triggers
             .saturating_add(report.triggered_idle_fences);
@@ -4367,26 +4421,11 @@ impl PersistentBackendRuntime {
                 .assembly_mut()
                 .replace_committed_surfaces(committed);
         }
-        if let Some(router) = self.protocol_router.as_ref() {
-            let _ = router.route_present_complete(
-                submitted.transaction,
-                ust,
-                msc,
-                XPresentCompletionMode::Flip,
-            );
-        }
-        self.present_complete_flip = self.present_complete_flip.saturating_add(1);
-        if let Some(retirement) = self
-            .presentation_resources
-            .retire_page_flip(submitted.transaction)
-            && retirement.idle_fence == sophia_backend_live::LiveIdleFenceStatus::Triggered
-        {
-            self.idle_fence_triggers = self.idle_fence_triggers.saturating_add(1);
-        }
-        if let Some(router) = self.protocol_router.as_ref() {
-            let _ = router.route_present_idle(submitted.transaction);
-        }
-        self.present_idle = self.present_idle.saturating_add(1);
+        let outcome = self
+            .presentation_feedback
+            .complete_flip(submitted.transaction, ust, msc)
+            .map_err(|error| format!("page flip feedback retirement failed: {error:?}"))?;
+        self.route_present_feedback(outcome);
         Ok(())
     }
 
