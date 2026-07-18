@@ -5,8 +5,8 @@ use crate::{
     HeadlessEngine, HeadlessOutput, HeadlessSessionDriver, HeadlessSessionDriverReport,
     ImportCapableRenderer, LibinputEventSource, LibinputPhysicalInputAdapter, LibinputPollReport,
     LiveRuntimeDriverAdapter, LiveRuntimeDriverIntake, NonBlockingInputPoller, PerOutputFrameClock,
-    ProductionSessionCoordinator, QueuedInputPoller, RenderFrameReport, RuntimeDriverAdapter,
-    WmTransactionUpdate,
+    PreparedSurfaceCommit, ProductionSessionCoordinator, QueuedInputPoller, RenderFrameReport,
+    RuntimeDriverAdapter, WmTransactionUpdate,
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -273,6 +273,13 @@ where
         authority_batches: &[AuthorityTransactionIntake],
     ) -> Vec<TransactionCommit> {
         self.production.commit_authority_batches(authority_batches)
+    }
+
+    pub fn apply_prepared_surface_commit(
+        &mut self,
+        prepared: PreparedSurfaceCommit,
+    ) -> TransactionCommit {
+        self.production.apply_prepared_surface_commit(prepared)
     }
 
     pub fn run_tick(

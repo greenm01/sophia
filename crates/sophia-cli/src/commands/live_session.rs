@@ -4410,16 +4410,13 @@ impl PersistentBackendRuntime {
                 .outputs
                 .get_mut(&output_id)
                 .ok_or("prepared presentation referenced an unknown output")?;
-            let engine = output.runtime.assembly().engine().clone();
-            let mut committed = output.runtime.assembly().committed_surfaces().to_vec();
-            let commit = engine.apply_prepared_surface_commit(prepared, &mut committed);
+            let commit = output
+                .runtime
+                .assembly_mut()
+                .apply_prepared_surface_commit(prepared);
             if commit.outcome != TransactionOutcome::Committed {
                 return Err("page flip could not apply its prepared Engine commit".into());
             }
-            output
-                .runtime
-                .assembly_mut()
-                .replace_committed_surfaces(committed);
         }
         let outcome = self
             .presentation_feedback

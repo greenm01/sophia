@@ -1,4 +1,4 @@
-use crate::{AuthorityTransactionIntake, HeadlessEngine};
+use crate::{AuthorityTransactionIntake, HeadlessEngine, PreparedSurfaceCommit};
 use sophia_protocol::{CommittedSurfaceState, TransactionCommit};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -109,6 +109,14 @@ impl ProductionSessionCoordinator {
             .iter()
             .map(|batch| batch.commit(&self.engine, &mut self.committed_surfaces))
             .collect()
+    }
+
+    pub fn apply_prepared_surface_commit(
+        &mut self,
+        prepared: PreparedSurfaceCommit,
+    ) -> TransactionCommit {
+        self.engine
+            .apply_prepared_surface_commit(prepared, &mut self.committed_surfaces)
     }
 
     pub(crate) fn engine_and_committed_surfaces_mut(
