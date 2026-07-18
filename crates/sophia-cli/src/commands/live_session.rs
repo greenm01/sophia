@@ -3,8 +3,8 @@ use super::prelude::*;
 use sophia_backend_live::{
     LiveProductionAuthorityBatch, LiveProductionComposedFrame, LiveProductionCpuCycleAdapter,
     LiveProductionCpuCycleSubmission, LiveProductionCpuScene, LiveProductionDmaBufRegistration,
-    LiveProductionFenceRegistration, LiveProductionNativeScanout, LiveProductionPresentGate,
-    LiveProductionPresentScheduler, LiveProductionPresentSubmission,
+    LiveProductionFenceRegistration, LiveProductionNativeScanout, LiveProductionOutputRuntimeSet,
+    LiveProductionPresentGate, LiveProductionPresentScheduler, LiveProductionPresentSubmission,
     LiveProductionSubmittedPresent,
 };
 use sophia_cli::emergency_input::{EmergencyChordAction, EmergencyChordState};
@@ -15,8 +15,8 @@ use sophia_engine::{
     ProductionOutputRuntimeAdapter,
 };
 use sophia_protocol::{
-    ClientAdmissionContext, DeviceId, NamespaceCapabilities, NamespaceId, NamespaceProfile,
-    OutputId, Point, SeatId, WmManageSurface,
+    ClientAdmissionContext, DeviceId, NamespaceCapabilities, NamespaceId, NamespaceProfile, Point,
+    SeatId, WmManageSurface,
 };
 use sophia_runtime::NamespaceRegistry;
 use sophia_x_authority::{
@@ -3707,14 +3707,9 @@ fn production_authority_batch(
     }
 }
 
-struct PersistentOutputRuntime {
-    runtime: sophia_backend_live::LiveBackendRuntimeAssembly,
-    native_initialized: bool,
-}
-
 struct PersistentBackendRuntime {
     production: sophia_engine::ProductionSessionCoordinator,
-    outputs: BTreeMap<OutputId, PersistentOutputRuntime>,
+    outputs: LiveProductionOutputRuntimeSet,
     layers: BTreeMap<SurfaceId, SurfaceTransaction>,
     committed_snapshot_layers: Option<Vec<LayerSnapshot>>,
     presentation_feedback: sophia_backend_live::LiveProductionPresentFeedbackCoordinator,
@@ -3769,59 +3764,19 @@ impl PersistentBackendRuntime {
     fn new_with_committed_surfaces(
         outputs: &[sophia_engine::HeadlessOutput],
         committed_surfaces: Vec<CommittedSurfaceState>,
-        mut native_scanout: Option<&mut LiveProductionNativeScanout>,
+        native_scanout: Option<&mut LiveProductionNativeScanout>,
         initial_native_frames: Option<Vec<LiveProductionComposedFrame>>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        if outputs.is_empty() || outputs.len() > sophia_backend_live::LIVE_RENDERED_OUTPUT_CAPACITY
-        {
-            return Err("persistent backend runtime requires 1-16 outputs".into());
-        }
         let production = sophia_engine::ProductionSessionCoordinator::new(
             sophia_engine::HeadlessEngine::default(),
         )
         .with_committed_surfaces(committed_surfaces.clone());
-        let mut initial_native_frames = initial_native_frames.unwrap_or_default().into_iter();
-        let mut output_runtimes = BTreeMap::new();
-        for (index, output) in outputs.iter().copied().enumerate() {
-            let assembly = HeadlessCompositorBackendAssembly::new(output)
-                .with_committed_surfaces(committed_surfaces.clone());
-            let renderer = sophia_backend_live::LiveRendererRuntimeObservation::from_startup_status(
-                sophia_backend_live::LiveRendererImportStartupStatus::from_path_statuses(
-                    sophia_backend_live::LiveRendererImportPathStatus::Disabled,
-                    sophia_backend_live::LiveRendererImportPathStatus::Disabled,
-                ),
-                sophia_backend_live::LiveRendererSelectionObservation::CpuFallback,
-            );
-            let mut runtime =
-                sophia_backend_live::LiveBackendRuntimeAssembly::from_ready_headless_scanout(
-                    assembly, output, renderer,
-                )
-                .with_persistent_rendered_primary_plane_scanout();
-            let mut native_initialized = native_scanout.is_none();
-            if let Some(native_scanout) = native_scanout.as_deref_mut() {
-                runtime = runtime.with_page_flip_callback_queue(
-                    sophia_backend_live::LivePageFlipCallbackQueue::new(
-                        native_scanout.take_receiver(index),
-                        64,
-                    ),
-                );
-                let selection = native_scanout.selection(index);
-                if !runtime.configure_native_output_selection(output.id, selection) {
-                    return Err("persistent native output selection was not registered".into());
-                }
-                if let Some(initial_frame) = initial_native_frames.next() {
-                    native_scanout.initialize(index, &mut runtime, initial_frame)?;
-                    native_initialized = true;
-                }
-            }
-            output_runtimes.insert(
-                output.id,
-                PersistentOutputRuntime {
-                    runtime,
-                    native_initialized,
-                },
-            );
-        }
+        let output_runtimes = LiveProductionOutputRuntimeSet::new(
+            outputs,
+            &committed_surfaces,
+            native_scanout,
+            initial_native_frames,
+        )?;
         Ok(Self {
             production,
             outputs: output_runtimes,
@@ -3838,16 +3793,8 @@ impl PersistentBackendRuntime {
         native_scanout: &mut LiveProductionNativeScanout,
         frames: &[LiveProductionComposedFrame],
     ) -> Result<(), Box<dyn std::error::Error>> {
-        if frames.len() != self.outputs.len() {
-            return Err("persistent native initialization frame count mismatch".into());
-        }
-        for (index, output) in self.outputs.values_mut().enumerate() {
-            if !output.native_initialized {
-                native_scanout.initialize(index, &mut output.runtime, frames[index].clone())?;
-                output.native_initialized = true;
-            }
-        }
-        Ok(())
+        self.outputs
+            .initialize_native_scanout(native_scanout, frames)
     }
 
     fn with_present_feedback_sink(
@@ -3914,7 +3861,7 @@ impl PersistentBackendRuntime {
         let intake = AuthorityTransactionIntake::new(batch.transaction, batch.transactions.clone())
             .with_surface_removals(batch.removed_surfaces.clone());
         let (production, outputs) = (&mut self.production, &mut self.outputs);
-        let output_count = outputs.len();
+        let output_count = outputs.output_count();
         let event_count = authority_transaction_count(&batch.transactions);
         let mut native_scanout = native_scanout;
         let create_native_frames = native_scanout.is_some();
@@ -3932,14 +3879,7 @@ impl PersistentBackendRuntime {
                   native_frames: Option<Vec<LiveProductionComposedFrame>>| {
                 let native_frames = native_frames.unwrap_or_default();
                 if let Some(native_scanout) = native_scanout.as_deref_mut() {
-                    for (index, output) in outputs.values_mut().enumerate() {
-                        if !output.native_initialized
-                            && let Some(initial_frame) = native_frames.get(index).cloned()
-                        {
-                            native_scanout.initialize(index, &mut output.runtime, initial_frame)?;
-                            output.native_initialized = true;
-                        }
-                    }
+                    outputs.initialize_native_scanout(native_scanout, &native_frames)?;
                 }
                 let mut native_frames = native_frames.into_iter();
                 let mut output_adapter =
@@ -3948,36 +3888,26 @@ impl PersistentBackendRuntime {
                         |index,
                          snapshot: &[CommittedSurfaceState]|
                          -> Result<_, Box<dyn std::error::Error>> {
-                            let output = outputs
-                                .values_mut()
-                                .nth(index)
-                                .ok_or("production output index was not registered")?;
-                            output
-                                .runtime
-                                .assembly_mut()
-                                .replace_committed_surfaces(snapshot.to_vec());
-                            let input = compositor_tick_input(
-                                &active_transactions,
-                                event_count,
-                                authority_commits.to_vec(),
-                                wm_update.clone(),
-                            );
-                            Ok(match native_scanout.as_deref_mut() {
-                                Some(native_scanout) => {
-                                    if let Some(next_frame) = native_frames.next() {
-                                        native_scanout.queue_frame(index, next_frame);
+                            outputs.run_output(index, snapshot, |runtime| {
+                                let input = compositor_tick_input(
+                                    &active_transactions,
+                                    event_count,
+                                    authority_commits.to_vec(),
+                                    wm_update.clone(),
+                                );
+                                Ok(match native_scanout.as_deref_mut() {
+                                    Some(native_scanout) => {
+                                        if let Some(next_frame) = native_frames.next() {
+                                            native_scanout.queue_frame(index, next_frame);
+                                        }
+                                        if runtime.rendered_primary_plane_scanout_in_flight() {
+                                            runtime.run_tick(input)?
+                                        } else {
+                                            native_scanout.run_tick(index, runtime, input)?
+                                        }
                                     }
-                                    if output.runtime.rendered_primary_plane_scanout_in_flight() {
-                                        output.runtime.run_tick(input)?
-                                    } else {
-                                        native_scanout.run_tick(
-                                            index,
-                                            &mut output.runtime,
-                                            input,
-                                        )?
-                                    }
-                                }
-                                None => output.runtime.run_tick(input)?,
+                                    None => runtime.run_tick(input)?,
+                                })
                             })
                         },
                     );
@@ -4218,7 +4148,7 @@ impl PersistentBackendRuntime {
                 // run_tick polls callbacks before it submits this frame. Any
                 // feedback already queued here therefore belongs to an older
                 // CPU frame and must not retire this Present transaction.
-                native_scanout.discard_presentation_feedback(self.outputs.keys().next().copied());
+                native_scanout.discard_presentation_feedback(self.outputs.primary_output());
                 self.presentation_feedback
                     .resources_mut()
                     .mark_submitted(transaction)?;
@@ -4321,7 +4251,7 @@ impl PersistentBackendRuntime {
         native_frames: Option<Vec<LiveProductionComposedFrame>>,
         wm_update: Option<WmTransactionUpdate>,
     ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
-        let output_count = self.outputs.len();
+        let output_count = self.outputs.output_count();
         let production = &self.production;
         let outputs = &mut self.outputs;
         let mut native_frames = native_frames.unwrap_or_default().into_iter();
@@ -4395,7 +4325,7 @@ impl PersistentBackendRuntime {
             .replace_committed_surfaces(committed_surfaces.to_vec());
         let layers = layer_snapshots_from_committed(committed_surfaces);
         self.committed_snapshot_layers = Some(layers.clone());
-        let output_count = self.outputs.len();
+        let output_count = self.outputs.output_count();
         let production = &self.production;
         let outputs = &mut self.outputs;
         let mut native_frames = native_frames.unwrap_or_default().into_iter();
@@ -4471,7 +4401,7 @@ impl PersistentBackendRuntime {
         if self.native_scanout_in_flight() {
             return Err("persistent native scanout remained in flight during teardown".into());
         }
-        let output_count = self.outputs.len();
+        let output_count = self.outputs.output_count();
         let production = &self.production;
         let outputs = &mut self.outputs;
         let mut adapter = sophia_backend_live::LiveProductionOutputRuntimeAdapter::new(
@@ -4497,7 +4427,7 @@ impl PersistentBackendRuntime {
         native_scanout: &mut LiveProductionNativeScanout,
     ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
         let transactions = self.layers.values().cloned().collect::<Vec<_>>();
-        let output_count = self.outputs.len();
+        let output_count = self.outputs.output_count();
         let production = &self.production;
         let outputs = &mut self.outputs;
         let committed_snapshot_layers = &self.committed_snapshot_layers;
@@ -4537,7 +4467,7 @@ impl PersistentBackendRuntime {
         &mut self,
         native_scanout: &mut LiveProductionNativeScanout,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let output_count = self.outputs.len();
+        let output_count = self.outputs.output_count();
         let production = &self.production;
         let outputs = &mut self.outputs;
         let mut adapter = sophia_backend_live::LiveProductionOutputRuntimeAdapter::new(
@@ -4555,7 +4485,7 @@ impl PersistentBackendRuntime {
             },
         );
         let _ = production.run_outputs(&mut adapter)?;
-        if let Some(primary) = self.outputs.keys().next().copied()
+        if let Some(primary) = self.outputs.primary_output()
             && let Some((ust, msc)) = native_scanout.take_presentation_feedback(primary)
         {
             self.finalize_gpu_page_flip(ust, msc)?;
@@ -4581,49 +4511,22 @@ impl PersistentBackendRuntime {
                 presentation_feedback.complete_flip(submitted.transaction, ust, msc)
             })
             .map_err(|error| format!("page flip prepared retirement failed: {error:?}"))?;
-        for output in outputs.values_mut() {
-            output
-                .runtime
-                .assembly_mut()
-                .replace_committed_surfaces(completion.committed_surfaces.clone());
-        }
+        outputs.project_committed(&completion.committed_surfaces);
         let outcome = completion.evidence;
         self.route_present_feedback(outcome);
         Ok(())
     }
 
     fn native_scanout_in_flight(&self) -> bool {
-        self.outputs
-            .values()
-            .any(|output| output.runtime.rendered_primary_plane_scanout_in_flight())
+        self.outputs.native_scanout_in_flight()
     }
 
     fn native_cleanup_pending(&self) -> bool {
-        self.outputs.values().any(|output| {
-            output
-                .runtime
-                .rendered_primary_plane_scanout_cleanup_pending()
-        })
+        self.outputs.native_cleanup_pending()
     }
 
     fn native_diagnostic(&self) -> String {
-        self.outputs
-            .iter()
-            .map(|(output, state)| {
-                format!(
-                    "{}:in_flight={}:ticks={}:cleanup={}",
-                    output.raw(),
-                    state.runtime.rendered_primary_plane_scanout_in_flight(),
-                    state
-                        .runtime
-                        .rendered_primary_plane_scanout_in_flight_ticks(),
-                    state
-                        .runtime
-                        .rendered_primary_plane_scanout_cleanup_pending(),
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(",")
+        self.outputs.diagnostic()
     }
 }
 
@@ -6285,12 +6188,10 @@ mod tests {
             runtime.production.committed_surfaces()[0].committed_generation,
             6
         );
-        for output in runtime.outputs.values() {
-            assert_eq!(output.runtime.assembly().committed_surfaces().len(), 1);
-            assert_eq!(
-                output.runtime.assembly().committed_surfaces()[0].committed_generation,
-                6
-            );
+        for index in 0..runtime.outputs.output_count() {
+            let committed = runtime.outputs.output_committed(index).unwrap();
+            assert_eq!(committed.len(), 1);
+            assert_eq!(committed[0].committed_generation, 6);
         }
     }
 }
