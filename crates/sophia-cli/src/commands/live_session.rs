@@ -5406,9 +5406,41 @@ fn seed_missing_committed_surfaces(
     surfaces.into_values().collect()
 }
 
+fn renderer_cpu_buffer_update(
+    update: &sophia_x_authority::XAuthorityCpuBufferUpdate,
+) -> sophia_backend_live::LiveCpuBufferUpdate {
+    match update {
+        sophia_x_authority::XAuthorityCpuBufferUpdate::Replace(buffer) => {
+            sophia_backend_live::LiveCpuBufferUpdate::Replace(
+                sophia_backend_live::LiveCpuBufferSource {
+                    handle: buffer.handle,
+                    size: buffer.size,
+                    stride: buffer.stride,
+                    format: buffer.format,
+                    generation: buffer.generation,
+                    bytes: buffer.bytes.clone(),
+                },
+            )
+        }
+        sophia_x_authority::XAuthorityCpuBufferUpdate::Patch(patch) => {
+            sophia_backend_live::LiveCpuBufferUpdate::Patch(
+                sophia_backend_live::LiveCpuBufferPatch {
+                    handle: patch.handle,
+                    size: patch.size,
+                    stride: patch.stride,
+                    format: patch.format,
+                    generation: patch.generation,
+                    rect: patch.rect,
+                    bytes: patch.bytes.clone(),
+                },
+            )
+        }
+    }
+}
+
 struct PersistentCpuScene {
     output_size: Size,
-    buffers: BTreeMap<u64, XAuthorityCpuBufferSnapshot>,
+    buffers: sophia_backend_live::LiveCpuBufferRegistry,
     surfaces: BTreeMap<SurfaceId, (Rect, u64)>,
     raised_surface: Option<SurfaceId>,
     last_report: Option<sophia_backend_live::LiveCpuCompositionReport>,
@@ -5420,7 +5452,7 @@ impl PersistentCpuScene {
     fn new(output_size: Size) -> Self {
         Self {
             output_size,
-            buffers: BTreeMap::new(),
+            buffers: sophia_backend_live::LiveCpuBufferRegistry::new(),
             surfaces: BTreeMap::new(),
             raised_surface: None,
             last_report: None,
@@ -5439,19 +5471,17 @@ impl PersistentCpuScene {
                 self.raised_surface = None;
             }
         }
-        self.buffers.retain(|handle, _| {
-            self.surfaces
-                .values()
-                .any(|(_, surface_handle)| surface_handle == handle)
-        });
+        let retained_handles = self
+            .surfaces
+            .values()
+            .map(|(_, handle)| *handle)
+            .collect::<BTreeSet<_>>();
+        self.buffers
+            .retain_handles(|handle| retained_handles.contains(&handle));
         for update in &batch.cpu_buffer_updates {
-            let stale = self
-                .buffers
-                .get(&update.handle())
-                .is_some_and(|current| update.generation() < current.generation);
-            if !stale {
-                update.apply_to(&mut self.buffers)?;
-            }
+            self.buffers
+                .apply(renderer_cpu_buffer_update(update))
+                .map_err(|error| format!("renderer CPU buffer update failed: {error:?}"))?;
         }
         for transaction in &batch.transactions {
             if let BufferSource::CpuBuffer { handle } = transaction.target_buffer {
@@ -5487,7 +5517,7 @@ impl PersistentCpuScene {
             .iter()
             .filter_map(|surface| {
                 let (geometry, handle) = self.surfaces.get(surface)?;
-                let buffer = self.buffers.get(handle)?;
+                let buffer = self.buffers.get(*handle)?;
                 Some(sophia_backend_live::LiveCpuCompositionLayerRef {
                     geometry: *geometry,
                     buffer: sophia_backend_live::LiveCpuBufferSourceRef {
@@ -5522,18 +5552,12 @@ impl PersistentCpuScene {
     }
 
     fn buffer_checksum(&self) -> u64 {
-        self.buffers
-            .values()
-            .fold(0xcbf2_9ce4_8422_2325u64, |hash, buffer| {
-                buffer.bytes.iter().fold(hash, |hash, byte| {
-                    (hash ^ u64::from(*byte)).wrapping_mul(0x100_0000_01b3)
-                })
-            })
+        self.buffers.checksum()
     }
 
     fn surface_buffer_generation(&self, surface: SurfaceId) -> Option<u64> {
         let (_, handle) = self.surfaces.get(&surface)?;
-        let buffer = self.buffers.get(handle)?;
+        let buffer = self.buffers.get(*handle)?;
         Some(buffer.generation)
     }
 
@@ -5546,7 +5570,7 @@ impl PersistentCpuScene {
         let Some((_, handle)) = self.surfaces.get(&surface) else {
             return false;
         };
-        let Some(buffer) = self.buffers.get(handle) else {
+        let Some(buffer) = self.buffers.get(*handle) else {
             return false;
         };
         let Ok(width) = usize::try_from(buffer.size.width) else {
@@ -6037,9 +6061,7 @@ mod tests {
         NamespaceProfile, Point, SeatId, SurfaceId, SurfaceTransaction,
         SurfaceTransactionReadiness,
     };
-    use sophia_x_authority::{
-        X_AUTHORITY_CPU_BUFFER_FORMAT_XRGB8888, XAuthorityCpuBufferSnapshot, XResourceId,
-    };
+    use sophia_x_authority::X_AUTHORITY_CPU_BUFFER_FORMAT_XRGB8888;
     use std::collections::BTreeMap;
     use std::io::Write;
     use std::time::Instant;
@@ -6428,19 +6450,28 @@ mod tests {
                 2,
             ),
         );
-        scene.buffers.insert(1, test_cpu_buffer(1, [0xff; 8]));
-        scene.buffers.insert(
-            2,
-            test_cpu_buffer(2, [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0xff]),
-        );
+        scene
+            .buffers
+            .apply(sophia_backend_live::LiveCpuBufferUpdate::Replace(
+                test_cpu_buffer(1, [0xff; 8]),
+            ))
+            .unwrap();
+        scene
+            .buffers
+            .apply(sophia_backend_live::LiveCpuBufferUpdate::Replace(
+                test_cpu_buffer(2, [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0xff]),
+            ))
+            .unwrap();
 
         assert!(!scene.surface_has_visual_detail(focused));
         assert!(scene.surface_has_visual_detail(secondary));
 
-        scene.buffers.insert(
-            1,
-            test_cpu_buffer(1, [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0xff]),
-        );
+        scene
+            .buffers
+            .apply(sophia_backend_live::LiveCpuBufferUpdate::Replace(
+                test_cpu_buffer(1, [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0xff]),
+            ))
+            .unwrap();
         assert!(scene.surface_has_visual_detail(focused));
     }
 
@@ -6462,10 +6493,18 @@ mod tests {
         scene.surfaces.insert(secondary, (geometry, 2));
         let focused_pixels = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
         let secondary_pixels = [0, 0, 0, 0xff, 0, 0, 0, 0xff];
-        scene.buffers.insert(1, test_cpu_buffer(1, focused_pixels));
         scene
             .buffers
-            .insert(2, test_cpu_buffer(2, secondary_pixels));
+            .apply(sophia_backend_live::LiveCpuBufferUpdate::Replace(
+                test_cpu_buffer(1, focused_pixels),
+            ))
+            .unwrap();
+        scene
+            .buffers
+            .apply(sophia_backend_live::LiveCpuBufferUpdate::Replace(
+                test_cpu_buffer(2, secondary_pixels),
+            ))
+            .unwrap();
 
         assert_eq!(
             scene.compose(None).unwrap().frame.bytes,
@@ -6478,10 +6517,9 @@ mod tests {
         );
     }
 
-    fn test_cpu_buffer(handle: u64, bytes: [u8; 8]) -> XAuthorityCpuBufferSnapshot {
-        XAuthorityCpuBufferSnapshot {
+    fn test_cpu_buffer(handle: u64, bytes: [u8; 8]) -> sophia_backend_live::LiveCpuBufferSource {
+        sophia_backend_live::LiveCpuBufferSource {
             handle,
-            drawable: XResourceId::new(handle, 1),
             size: Size {
                 width: 2,
                 height: 1,

@@ -1319,3 +1319,25 @@ exit, exact stdout, `first_error=none`, clean two-output retirement, and zero
 native debt. This is an ownership migration, not the Milestone 6 exit: the
 legacy runtime adapter still sequences commits and the CLI still owns
 `PersistentCpuScene` and `PersistentNativeScanout`.
+
+
+## 2026-07-17: CPU Pixel Storage Leaves The CLI
+
+Renderer-live now owns a protocol-neutral `LiveCpuBufferRegistry`. It accepts
+immutable replacements and packed damage patches, rejects stale generations,
+missing bases, metadata changes, invalid bounds, and malformed byte lengths,
+and retires unreferenced handles. The X frontend remains responsible for
+read-only MIT-SHM admission and emits its existing immutable updates; the CLI
+only converts those packets at the renderer boundary. `PersistentCpuScene` no
+longer contains a CPU buffer map or applies pixel patches itself.
+
+Four focused registry regressions cover replacement/patch ordering, stale
+generation rejection, fail-closed malformed replacement and patch behavior,
+and resource retention. The live CLI suite passes. On the rebuilt X13-hosted
+image, strict two-xterm QEMU completed 300 ticks with two CPU layers, 7 ms input
+presentation, 40 submissions, 38 retirements, and zero cleanup debt. Confined
+GTK passed its high-volume SHM redraw path, exact text/pointer proof, normal
+exit, `first_error=none`, and clean two-output retirement. The remaining
+Milestone 6 scene gap is narrower but explicit: CLI still projects a
+`SurfaceId` to geometry/handle table because commit and composition have not yet
+been split into coordinator phases.

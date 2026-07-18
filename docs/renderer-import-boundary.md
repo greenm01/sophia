@@ -64,8 +64,11 @@ caches.
 MIT-SHM is now a bounded authority-owned upload path rather than a renderer
 import. The X frontend validates namespace and segment bounds, attaches the
 client SysV segment read-only, copies the admitted range into an immutable CPU
-buffer generation, and detaches immediately. Neither Engine nor the renderer
-retains the client mapping.
+buffer generation, and detaches immediately. Neither Engine nor the renderer retains the client mapping. Accepted immutable
+replacements and packed damage patches enter a renderer-owned CPU buffer
+registry. The registry rejects malformed size/stride/byte bounds, missing patch
+bases, metadata changes, and stale generations before composition; it retains
+only handles referenced by the transitional scene projection.
 
 Standard X11 DRI3 1.2 and Present are the admitted GPU handoff. Renderer-private
 registries retain imported multi-plane DMA-BUF sources and fences; mixed CPU and

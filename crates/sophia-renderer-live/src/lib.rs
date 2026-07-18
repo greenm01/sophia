@@ -9,6 +9,7 @@ pub use sophia_engine::BufferImportPath;
 pub use sophia_protocol::{BufferSource, Size};
 
 mod buffer_registry;
+mod cpu_buffer_registry;
 mod cpu_composition;
 mod frame_target;
 mod import;
@@ -23,6 +24,7 @@ mod gbm_probe;
 mod native_scanout;
 
 pub use buffer_registry::*;
+pub use cpu_buffer_registry::*;
 pub use cpu_composition::*;
 pub use frame_target::*;
 pub use import::*;
