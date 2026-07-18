@@ -150,3 +150,22 @@ fn page_flip_tracker_fails_closed_for_overlap_and_non_monotonic_feedback() {
     ));
     assert!(tracker.drain_retirements().is_empty());
 }
+
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+#[test]
+fn mixed_diagnostic_completion_has_stable_reduced_schema() {
+    let report = sophia_backend_live::LiveNativeMixedDiagnosticComplete {
+        status: sophia_backend_live::LiveRendererScanoutBufferExportStatus::Exported,
+        detail: sophia_backend_live::LiveRendererScanoutBufferExportDetail::Exported,
+        cpu_layers: 1,
+        dmabuf_layers: 1,
+        live_sources: 0,
+        live_fences: 0,
+        live_transactions: 0,
+    };
+
+    assert_eq!(
+        report.reduced_log_line("completed"),
+        "sophia_native_egl_mixed schema=1 case=mixed status=Exported stage=Exported cpu_layers=1 dmabuf_layers=1 child_outcome=completed live_sources=0 live_fences=0 live_transactions=0"
+    );
+}

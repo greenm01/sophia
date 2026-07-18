@@ -585,3 +585,38 @@ mod persistent_native_scanout {
 
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
 pub use persistent_native_scanout::{LiveProductionNativeHead, LiveProductionNativeScanout};
+
+#[derive(Debug)]
+pub struct LiveNativeMixedDiagnosticComplete {
+    pub status: crate::LiveRendererScanoutBufferExportStatus,
+    pub detail: crate::LiveRendererScanoutBufferExportDetail,
+    pub cpu_layers: usize,
+    pub dmabuf_layers: usize,
+    pub live_sources: usize,
+    pub live_fences: usize,
+    pub live_transactions: usize,
+}
+
+impl LiveNativeMixedDiagnosticComplete {
+    pub fn reduced_log_line(&self, child_outcome: &str) -> String {
+        format!(
+            "sophia_native_egl_mixed schema=1 case=mixed status={:?} stage={:?} cpu_layers={} dmabuf_layers={} child_outcome={} live_sources={} live_fences={} live_transactions={}",
+            self.status,
+            self.detail,
+            self.cpu_layers,
+            self.dmabuf_layers,
+            child_outcome,
+            self.live_sources,
+            self.live_fences,
+            self.live_transactions,
+        )
+    }
+}
+
+impl std::fmt::Display for LiveNativeMixedDiagnosticComplete {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.reduced_log_line("completed"))
+    }
+}
+
+impl std::error::Error for LiveNativeMixedDiagnosticComplete {}

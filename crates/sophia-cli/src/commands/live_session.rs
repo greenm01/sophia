@@ -801,41 +801,6 @@ struct PersistentXtermSessionConfig {
     m4_diagnose_first_mixed_export: bool,
 }
 
-#[derive(Debug)]
-pub(crate) struct NativeEglMixedSmokeComplete {
-    pub status: sophia_backend_live::LiveRendererScanoutBufferExportStatus,
-    pub detail: sophia_backend_live::LiveRendererScanoutBufferExportDetail,
-    pub cpu_layers: usize,
-    pub dmabuf_layers: usize,
-    pub live_sources: usize,
-    pub live_fences: usize,
-    pub live_transactions: usize,
-}
-
-impl NativeEglMixedSmokeComplete {
-    pub fn reduced_log_line(&self, child_outcome: &str) -> String {
-        format!(
-            "sophia_native_egl_mixed schema=1 case=mixed status={:?} stage={:?} cpu_layers={} dmabuf_layers={} child_outcome={} live_sources={} live_fences={} live_transactions={}",
-            self.status,
-            self.detail,
-            self.cpu_layers,
-            self.dmabuf_layers,
-            child_outcome,
-            self.live_sources,
-            self.live_fences,
-            self.live_transactions,
-        )
-    }
-}
-
-impl std::fmt::Display for NativeEglMixedSmokeComplete {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.reduced_log_line("completed"))
-    }
-}
-
-impl std::error::Error for NativeEglMixedSmokeComplete {}
-
 impl PersistentXtermSessionConfig {
     fn from_args(args: &[String]) -> Result<Self, Box<dyn std::error::Error>> {
         let display = arg_value(args, "--display").unwrap_or_else(|| ":77".to_owned());
@@ -4101,15 +4066,17 @@ impl PersistentBackendRuntime {
                 .resources_mut()
                 .reject(transaction);
             let _ = self.presentation_feedback.disconnect();
-            return Err(Box::new(NativeEglMixedSmokeComplete {
-                status,
-                detail,
-                cpu_layers,
-                dmabuf_layers,
-                live_sources: self.presentation_feedback.resources().source_count(),
-                live_fences: self.presentation_feedback.resources().fence_count(),
-                live_transactions: self.presentation_feedback.resources().presentation_count(),
-            }));
+            return Err(Box::new(
+                sophia_backend_live::LiveNativeMixedDiagnosticComplete {
+                    status,
+                    detail,
+                    cpu_layers,
+                    dmabuf_layers,
+                    live_sources: self.presentation_feedback.resources().source_count(),
+                    live_fences: self.presentation_feedback.resources().fence_count(),
+                    live_transactions: self.presentation_feedback.resources().presentation_count(),
+                },
+            ));
         }
         native_scanout.queue_mixed_frame(0, mixed);
 

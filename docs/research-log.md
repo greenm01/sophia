@@ -1731,3 +1731,15 @@ in 6,941 ms with 120 of 120 transactions, exact keyboard and pointer proofs, 42 
 text and pointer selection, committed 640x360 CPU\/SHM redraws, exited normally with
 `first_error=none`, and cleanly retired both outputs. The guarded native mixed diagnostic
 exported one CPU and one DMA-BUF layer with zero live sources, fences, or transactions.
+
+
+## 2026-07-18: Mixed Diagnostic Contract Moves Behind Backend Boundary
+
+The native mixed-export completion record and its reduced evidence schema now live in
+backend-live beside the native scanout diagnostic that produces them. The CLI only downcasts
+the backend error, prints the reduced record, and applies command-level pass criteria; it no
+longer defines a renderer\/scanout result type inside session supervision. A backend regression
+freezes the exact schema. The rebuilt guarded X13 diagnostic still exported one CPU and one
+DMA-BUF layer and retired all sources, fences, and transactions. This removes one CLI-specific
+dependency that pinned the remaining neutral visual-control implementation to
+`live_session.rs`.

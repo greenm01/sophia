@@ -77,7 +77,7 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
         match result {
             Err(error) => {
                 let Some(report) =
-                    error.downcast_ref::<super::live_session::NativeEglMixedSmokeComplete>()
+                    error.downcast_ref::<sophia_backend_live::LiveNativeMixedDiagnosticComplete>()
                 else {
                     return Err(error);
                 };
