@@ -69,10 +69,13 @@ single stable keyboard plus available mouse/touchpad paths and allows 30 seconds
 for each dialog. Set `SOPHIA_M5_GTK_INPUT_DEVICES` only when discovery is
 ambiguous.
 
-For each Zenity dialog, type `sophia` without Return, move the physical pointer,
-and click OK. The paired verifier requires classic shared-X and confined
-records with exact stdout, normal exit, zero protocol errors, committed resize,
-native presentation, and clean teardown. After retaining those logs, combine
+For each Zenity dialog, type `sophia` without Return. Wait for the cursor to be
+visible, then move the physical pointer and click OK; Return remains suppressed
+until a pointer button routes. The paired verifier requires classic shared-X and
+confined records with exact stdout, normal exit, zero protocol errors, committed
+resize, native presentation, and clean teardown. The isolated QEMU classic and
+confined scenarios retain this click-then-submit sequence, but they do not
+replace the target-hardware capture. After retaining those logs, combine
 them with the M3 and M4 evidence using
 `tools/verify_live_session_three_class_baseline.sh`.
 
@@ -98,7 +101,9 @@ Parse-error details include a bounded request head so extension decode failures
 show the concrete minor opcode that drove the next compatibility slice.
 
 For live composition changes that connect X Authority transaction intake to
-backend-live rendered scanout reporting, run:
+backend-live rendered scanout reporting, run the commands below. Until
+Milestone 6 completes, these validate the transitional CLI coordinator as well
+as the Engine, renderer, and backend boundaries:
 
 ```sh
 cargo test --offline -q -p sophia-backend-live --features libdrm-events live_session_composition

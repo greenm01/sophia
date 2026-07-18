@@ -61,27 +61,27 @@ fake paths in `sophia-renderer-live`, while the native scanout adapter owns the
 experimental GBM/EGL DMA-BUF implementation and its renderer-private resource
 caches.
 
-Real MIT-SHM mapping remains outside this boundary until Sophia has a bounded
-shared-memory upload path with size checks, namespace validation, lifetime
-tracking, and fail-closed errors.
+MIT-SHM is now a bounded authority-owned upload path rather than a renderer
+import. The X frontend validates namespace and segment bounds, attaches the
+client SysV segment read-only, copies the admitted range into an immutable CPU
+buffer generation, and detaches immediately. Neither Engine nor the renderer
+retains the client mapping.
 
-The initial native DMA-BUF route accepts only a bounded single-plane linear
-XRGB8888/ARGB8888 descriptor and stays behind `--experimental-dmabuf`. It is
-not a general renderer contract. Its repaired three-frame controlled hardware
-proof, core-mode 300-frame run, and three retained normal 300-frame runs pass
-after imported EGLImages moved to transient per-frame GL textures rather than
-the persistent CPU-upload texture. An earlier post-repair normal run aborted
-after frame 2, so the normal-stability wrapper remains a regression gate. The
-real-Kitty gate remains open. Its
-lifecycle is explicit:
+Standard X11 DRI3 1.2 and Present are the admitted GPU handoff. Renderer-private
+registries retain imported multi-plane DMA-BUF sources and fences; mixed CPU and
+GPU composition, controlled acquire delay and rejection recovery, KMS page-flip
+retirement, Complete-before-Idle feedback, idle-fence triggering, and exact
+cleanup pass the retained Milestone 4 X13 gate. The Wayland maintenance lane
+retains its separate controlled linear DMA-BUF proofs.
+
+The shared lifecycle is explicit:
 
 `admitted descriptor → renderer-private import/submission → observed page flip
-→ frame callback and wl_buffer.release → renderer resource retirement`.
+→ protocol completion/release → renderer resource retirement`.
 
-The controlled GBM producer and three-run real-Kitty gate exercise that exact
-ordering before any DMA-BUF opt-in may be promoted. `sophia-backend-live`
-remains the session assembly boundary that wires discovery, input, renderer
-admission, and startup health together.
+`sophia-backend-live` remains the owner of renderer/KMS adapters and native
+resources. The production session coordinator orders those adapters; it does not
+move their handles into Engine or runtime state.
 
 ## Native Dependency Admission
 

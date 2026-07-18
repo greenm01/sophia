@@ -123,59 +123,50 @@ or layout policy.
 - XLibre is absent from the production workspace and launcher. Its frozen
   prototype remains under `research/xlibre` as historical evidence.
 
-### Native X11 Presentation Integration Seam
+### Production Session Loop
 
-The live executable still contains transitional compositor assembly.
-`PersistentNativeScanout` owns persistent native output state, while
-`PersistentCpuScene` retains a second CPU-only `SurfaceId` projection and
-drives composition from `crates/sophia-cli/src/commands/live_session.rs`. This
-is current implementation location, not normative ownership: the CLI must not
-become the lasting scene, renderer-import, frame-scheduling, or scanout owner.
+The live X11 path has completed the Milestone 4 presentation work: standard
+DRI3/Present registrations, acquire-fence gating, mixed CPU/GPU composition,
+KMS submission, page-flip-driven Complete/Idle feedback, controlled rejection
+recovery, and exact resource retirement pass on target hardware. Milestone 5
+GTK input and protocol semantics pass in isolated QEMU; fresh paired classic and
+confined X13 evidence remains the application-promotion gate.
 
-Milestone 4 uses a narrow hybrid extraction. The Engine/backend-owned
-live-presentation seam contains DMA-BUF import, acquire-fence polling, mixed
-CPU/GPU composition, KMS submission correlation, and page-flip retirement.
-`sophia-renderer-live` retains imported sources and performs
-renderer-private composition; `sophia-backend-live` retains native KMS
-submission and retirement; Engine remains the sole committed scene truth. The
-CLI is limited to launch, supervision, and bounded coordination. Broader
-session-loop extraction remains follow-up architecture work after the proven
-GPU presentation exit.
+The remaining architecture debt is orchestration. The live executable still
+contains `PersistentCpuScene`, `PersistentBackendRuntime`, and
+`PersistentNativeScanout` beside the protocol-neutral Engine state. That CLI
+assembly is transitional. It must not remain a second scene projection, frame
+scheduler, renderer coordinator, or scanout lifecycle owner.
 
-The X13 gate exposed a Radeon context-lifetime hazard: reusing a GL context
-after an imported mixed frame caused the following CPU upload's asynchronous
-command stream to be rejected. The renderer now retires that context after the
-mixed export while the independently owned GBM scanout buffer remains alive
-through KMS retirement. Real CPU-plus-Vulkan pixels, controlled recovery, and
-exact teardown now pass; dropping the CPU layer remains diagnostic evidence
-only.
+The production target is one protocol-neutral session coordinator in
+`sophia-engine::runtime_driver`. It owns the ordered visual state machine while
+calling narrow adapters that retain their existing authority:
 
-The focused `native-egl-vkcube-mixed-smoke` retains the real X frontend DRI3
-source and renderer-private FD transfer, then invokes the mixed exporter without
-an Engine commit or KMS submit. Its watchdog and stage-specific export detail
-separate CPU upload, EGLImage creation/binding, draw, finish, swap, and buffer
-lock failures without moving native handles into Engine or protocol state.
+1. accept a bounded authority batch and transfer native registrations
+   immediately into renderer-private ownership;
+2. validate, commit, or prepare transactions against Engine committed state;
+3. compose one immutable frame from the resulting Engine snapshot;
+4. ask the live backend to submit and retire that frame through KMS; and
+5. route protocol feedback only after the matching retirement.
 
-An asynchronous GPU Present uses `PreparedSurfaceCommit`. Preparation validates
-and snapshots only protocol-neutral visual state without mutating the committed
-scene. A matching page flip revalidates every touched surface and merges the
-candidate while preserving unrelated newer commits. Timeout, rejection,
-disconnect, or a changed touched baseline discards the candidate and retains
-the last committed geometry-plus-pixels state.
+The coordinator owns sequencing, not foreign state. X resources remain in the
+protocol authority; imported images and fences remain in the renderer; GBM, DRM,
+and KMS objects remain in the backend; session runtime retains process and
+recovery policy. The CLI constructs these adapters, launches supervised
+processes, observes proof criteria, requests shutdown, and does no frame work.
 
-### Target
+`PreparedSurfaceCommit` remains the asynchronous Present gate. Preparation
+snapshots protocol-neutral state without changing the committed scene. Matching
+page-flip retirement revalidates and merges the candidate, then permits Present
+Complete before Idle and release. Rejection, timeout, disconnect, surface
+removal, changed baselines, or backpressure discard pending work, preserve the
+last committed geometry-plus-pixels state, and retire native resources exactly
+once. No failure path may infer presentation from client traffic or send
+feedback before backend retirement.
 
-- Standard X11 DMA-BUF registrations and Present submissions enter the
-  renderer-private live path without placing native objects in Engine scene
-  records or the X authority runtime.
-- Acquire fences quarantine unready frames while Engine preserves the last
-  committed geometry-plus-pixels state.
-- Real KMS page-flip feedback drives Present Complete before Idle, idle-fence
-  triggering, and exact-once imported-buffer retirement.
-- One software client and GPU-backed `vkcube` pass startup, resize, delayed
-  readiness, recovery, and teardown through the same Engine-owned KMS session.
-- Wayland remains a supported frontend through Smithay, but it is a maintenance
-  lane while X11 presentation semantics are completed.
+Wayland uses the same coordinator through its authority adapter and remains a
+maintenance lane. XLibre remains historical evidence and cannot become an
+alternate production loop.
 
 ## Load-Bearing Ownership Rules
 
@@ -365,16 +356,14 @@ credentials, titles, PIDs, paths, payloads, icons, or buffer contents.
 
 The active critical path is:
 
-1. completed: freeze the namespace, admission, capability, and portal
-   contracts;
-2. completed: make classic and confined X admission launchable;
-3. completed: complete the broker and X11 `CLIPBOARD`/`PRIMARY` reference flow;
-4. completed: complete XKB, input/grab, Engine-output, RandR, resize, and
-   session behavior;
-5. active: complete explicit SHM and DRI3/Present lifetime and native
-   presentation semantics through the hybrid Engine/backend seam; and
-6. next: expand application compatibility from the evidence matrix after the
-   Milestone 4 hardware exit.
+1. completed: namespace, admission, capability, portal, XKB, input, RandR,
+   resize, SHM, and DRI3/Present foundations;
+2. completed: paired xterm and mixed CPU-plus-Vulkan native sessions;
+3. active: finish paired classic/confined GTK3 target-hardware promotion;
+4. next: replace the transitional CLI orchestration with the single production
+   session loop defined above; and
+5. after consolidation: resume probe-driven X11 application and extension work
+   from the compatibility matrix.
 
 Wayland remains under maintenance gates during this work. XLibre remains
 documented and deferred.

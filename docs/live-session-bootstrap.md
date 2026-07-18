@@ -58,10 +58,14 @@ stable, pauses bounded tick accounting for at most five seconds, and succeeds
 only after routed physical keys change later terminal pixels.
 
 Add `--expect-physical-pointer` to extend that bounded proof. After keyboard
-pixels stabilize, the session emits a physical-pointer readiness marker and
-requires libinput pointer events to pass Engine surface-only hit-testing and
-produce another client pixel change. X Authority resolves the routed Sophia
-surface to its protocol-owned X window; Engine does not receive the XID.
+pixels stabilize, the session centers a compositor cursor on the focused
+surface, submits that cursor frame, and emits pointer readiness only after the
+matching presentation is observed. Return remains suppressed until a physical
+pointer button routes. Pointer events must pass Engine surface-only hit-testing
+and produce another client pixel change. If the application surface disappears
+before selection, the proof fails and restores the session instead of leaving
+an empty frame active. X Authority resolves the routed Sophia surface to its
+protocol-owned X window; Engine does not receive the XID.
 
 Passing evidence reports `status=bounded_complete`, matching authority batch,
 backend tick, and runtime commit counts, nonzero composed pixels, and
@@ -100,72 +104,21 @@ tools/stop_sophia_xmonad_session.sh
 The wrapper owns the session process group and restores `keyd` during either
 shutdown path.
 
-## Kitty Compatibility Session
+## Native Session Evidence And Wayland Maintenance
 
-Kitty needs XKB plus a real OpenGL window path that Sophia X Authority does not
-yet implement. The temporary compatibility launcher runs a private XLibre dummy
-server with software GL and imports Kitty through the existing XComposite
-authority boundary:
+The production launcher no longer uses XLibre. XLibre compatibility artifacts
+under `research/xlibre` are historical evidence only. Native X11 applications
+connect to the Sophia X Server Frontend; native Wayland Kitty uses the
+Smithay-backed Wayland Authority and remains under maintenance gates documented
+in `sophia-wayland-authority.md`.
 
-```sh
-tools/install_sophia_session.sh
-```
-
-After that one-time install, switch to a dedicated TTY and run `sophia`. The
-launcher builds Sophia in release mode, verifies KMS ownership, and stops and
-later restores `keyd`. Before changing the TTY mode it starts an independent libinput guard and
-requires one press-and-full-release of Ctrl-Alt-Backspace. That first chord
-proves the selected keyboard path and arms recovery. Once Kitty is visible,
-press Ctrl-Alt-Backspace again to end the session and restore the TTY, or close
-Kitty normally or run `sophia stop` from an outside control plane.
-
-The guard remains separate from the live session process and therefore still
-terminates a wedged input/focus loop. Shutdown gives Sophia a bounded graceful
-window, then kills stuck children before restoring the saved KD mode, termios,
-and `keyd` state. Ctrl-Alt-Fn live switching remains unsupported because Sophia
-does not yet implement the required VT/DRM suspend-and-reacquire lifecycle.
-Reduced logs persist across reboot under
-`${XDG_STATE_HOME:-$HOME/.local/state}/sophia/kitty-session`; each log retains
-the latest and one previous run without recording keycodes, text, or device
-paths.
-
-For the bounded Kitty latency gate, keep the outside control plane connected
-and launch:
-
-```sh
-sophia --max-runtime-ms=30000 --expect-physical-text=sophia --exit-after-input-proof
-```
-
-Arm the guard as prompted, then type `sophia` followed by Enter once Kitty is
-visible. After the TTY is restored, verify the persistent evidence with:
-
-```sh
-research/xlibre/tools/verify_xlibre_kitty_latency_evidence.sh \
-  "${XDG_STATE_HOME:-$HOME/.local/state}/sophia/kitty-session/session.log"
-```
-
-The launcher disables Kitty's remembered window size, requests a 1280x720 X11
-window, and centers the first compatibility surface without scaling it. The
-device-less XLibre server is explicitly loaded with the evdev XKB rules before
-Kitty starts; the launcher verifies Up, Left, Right, and Down at keycodes 111,
-113, 114, and 116 so physical navigation keys match Sophia's evdev input.
-The gate requires an unfallbacked MIT-SHM capture path, no readback larger than
-1280x720 XRGB, no libinput processing-lag warning, clean native-scanout drain,
-and input pixels presented within 100 milliseconds of the final proof key.
-Physical events are collected on a bounded worker and drained before capture;
-CPU composition uses borrowed buffers and row copies, while native scanout
-retains its EGL context, shaders, texture, and vertex buffer across frames.
-Schema 9 additionally rejects composition above 25 milliseconds, MIT-SHM
-capture above 30 milliseconds, upload above 50 milliseconds, page-flip above
-100 milliseconds, queue dwell above 25 milliseconds, or native target/pipeline
-recreation at the fixed proof size.
-Ordinary XGetImage remains available as a degraded diagnostic path, but its
-evidence is intentionally rejected by this interactive gate.
-
-XLibre receives no physical devices and does not own scanout. Engine routes
-physical keys to the focused opaque surface; the compatibility adapter delivers
-them through a private XTEST connection. This is a usability bridge, not the
-long-term X Authority GPU path and not an Engine dependency.
+The current X11 live command still contains transitional frame orchestration:
+`PersistentCpuScene`, `PersistentBackendRuntime`, and
+`PersistentNativeScanout` coordinate Engine commits, composition, and backend
+retirement from the CLI. The normative replacement is the single production
+session coordinator in `architecture.md`. Until that extraction is complete,
+treat this command as the proven operational path, not as the final ownership
+shape.
 
 On an exclusive TTY with no other DRM master, persistent native presentation is
 enabled by the gated `--native-scanout` flag. The bounded hardware wrapper

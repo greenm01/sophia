@@ -421,6 +421,35 @@ visual detail instead of treating its initial uniform background fill as
 application readiness. Another client drawing cannot satisfy this gate. This
 prevents synthetic proof keys from racing the proof shell's first prompt.
 
+## Remaining Production Gaps
+
+The frontend is sufficient for paired xterm sessions, mixed Vulkan presentation,
+and deterministic GTK3 Zenity behavior. Its remaining production gaps are
+explicit and evidence-driven:
+
+- GTK3 remains at `engine` evidence until fresh classic-shared and confined X13
+  sessions prove physical text, a presented cursor, pointer selection, resize
+  redraw, normal exit, and clean native teardown. Both QEMU profiles pass.
+- XFixes selection notifications and complete client-selected cursor-image
+  presentation are not yet general contracts. Existing selection-input, region,
+  and cursor request handling covers only retained probes.
+- Large selection transfers through `INCR` and full Xdnd execution remain
+  deferred behind the bounded clipboard reference flow.
+- Render, Sync, and selected GLX compatibility are not advertised. Add them only
+  when a captured application trace supplies a focused request and regression.
+- RandR provides Engine-derived observation and notifications, not general
+  client-controlled mode management. MIT-SHM intentionally copies admitted
+  image ranges and does not expose shared pixmaps.
+- A general local listener still needs independently credentialed confined
+  groups; the current classic and explicitly launched confined profiles remain
+  the supported admission shapes.
+
+Before expanding those surfaces, the production session path must consolidate
+its transitional CLI orchestration behind the protocol-neutral coordinator
+defined in `architecture.md`. The frontend contract does not change: it emits
+bounded observed batches and consumes routed input, control, topology, and
+presentation feedback without owning scene, renderer, or KMS state.
+
 ## Phoenix Strategic Direction
 
 Sophia adopts Phoenix’s strategic direction, not its code: build a modern X

@@ -1227,3 +1227,25 @@ the pre-selection phase. Suppression now ends when pointer selection becomes
 ready, and an application proof cannot complete before its primary child exits.
 The QEMU result closes the deterministic semantic gap; guarded target-hardware
 classic/confined captures with resize remain the promotion gate.
+
+
+## 2026-07-17: Presented Cursor Gate And Production-Loop Review
+
+The final GTK QEMU regression corrected the earlier pointer-proof conclusion.
+Pointer readiness now follows a centered cursor composition and matching native
+presentation. Return remains suppressed until a physical pointer button routes,
+not merely until pointer readiness. If the application proof surface disappears
+before selection, the session exits through bounded cleanup. Both classic and
+confined Zenity guests pass the click-then-submit sequence with normal exit and
+clean two-output retirement. Fresh paired X13 evidence remains required.
+
+A concurrent architecture review found that the authority boundaries are
+implemented, but production orchestration remains duplicated. The 6,500-line
+live-session command retains `PersistentCpuScene`, `PersistentBackendRuntime`,
+and `PersistentNativeScanout` while Engine, runtime, and backend crates each
+carry partial loop abstractions. The next architecture milestone after GTK
+promotion is one protocol-neutral coordinator in
+`sophia-engine::runtime_driver`: bounded authority intake, Engine
+commit/preparation, composition from committed state, backend-private KMS
+submission/retirement, then exact protocol feedback. CLI proof logic remains
+an observer and supervisor rather than a visual-state owner.

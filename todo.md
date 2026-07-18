@@ -19,9 +19,9 @@ scanout.
 
 The namespace, admission, portal lifecycle, bounded X11 `CLIPBOARD` plus
 `PRIMARY` reference flow, native X11 session correctness, and mixed Vulkan
-presentation baseline are established. The active track promotes GTK3 software
-applications through captured compatibility gaps without weakening those
-boundaries.
+presentation baseline are established. The active track finishes GTK3 software
+promotion, then consolidates the proven paths behind one production-grade
+Engine session loop before adding more X11 compatibility surface.
 
 The Smithay-backed Wayland Authority remains supported under a maintenance
 lane. XLibre is a retired prototype and documented possible future
@@ -59,15 +59,46 @@ compatibility provider; no XLibre integration work is active.
   and presents the cursor before readiness, suppresses Return until a physical
   button routes, and fails cleanly if the proof surface disappears; both GTK QEMU
   profiles pass the click-then-submit sequence. Fresh X13 evidence is still required.
-- [ ] Advance Render, XFixes, selections/INCR, Xdnd, GLX, or toolkit behavior
-  only when that captured Zenity session exposes a focused matrix gap; require
-  the smallest compatible change and a wire/authority regression.
 - [ ] Run the aggregate three-class verifier and promote GTK3 software from
   `engine` to `session` in `docs/x11-compatibility-matrix.md`.
 
 Exit: each promoted application class has reproducible `session` evidence and
 no undocumented dependency on XLibre, fixed output facts, injected input, or a
 Sophia-private presentation path.
+
+## Milestone 6: Production Session Loop
+
+- [ ] Establish `sophia-engine::runtime_driver` as the only production visual
+  coordinator. Its ordered phases are bounded authority intake, Engine
+  commit/preparation, composition from committed state, KMS submit/retire, and
+  protocol feedback after matching retirement.
+- [ ] Define protocol-neutral authority, renderer, scanout, and feedback
+  adapters. Keep X resources in the frontend, imported images/fences in the
+  renderer, native DRM/KMS objects in the backend, and process/recovery policy
+  in runtime.
+- [ ] Remove the duplicate CLI scene projection. Composition must consume one
+  immutable Engine committed snapshot; `PersistentCpuScene` must not remain a
+  second `SurfaceId` table.
+- [ ] Move `PersistentBackendRuntime` and `PersistentNativeScanout` sequencing
+  behind the production coordinator and live backend adapters. The CLI may
+  construct dependencies, supervise clients, observe proofs, and request
+  shutdown, but it must not commit, compose, submit, or retire frames.
+- [ ] Preserve fail-closed behavior for stale generations, acquire timeout,
+  rejected or missing page flips, authority backpressure/disconnect, surface
+  removal, and shutdown. Every path keeps the last committed frame, emits no
+  premature Complete/Idle, and drains native resources exactly once.
+- [ ] Migrate the retained xterm CPU, mixed Vulkan, GTK classic/confined QEMU,
+  and guarded X13 gates without weakening their evidence schemas or latency and
+  cleanup bounds; then delete the legacy CLI loop state.
+
+Exit: one production state machine owns the five visual phases;
+`crates/sophia-cli/src/commands/live_session.rs` owns no scene, Engine commit
+loop, native scanout lifecycle, or protocol-feedback timing; all retained
+session gates pass with zero cleanup debt.
+
+Only after this exit may Render, broader XFixes, selections/INCR, Xdnd, GLX,
+or new toolkit behavior advance from a captured compatibility gap with the
+smallest wire/authority regression.
 
 ## Wayland Maintenance Lane
 
