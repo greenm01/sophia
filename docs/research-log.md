@@ -1655,3 +1655,21 @@ module to reconcile skipped authority generations with the last visible Engine g
 The former CLI module is only a compatibility re-export for its retained tests. The full
 offline all-feature suite passes; this is a dependency-boundary change with no runtime
 behavior change.
+
+
+## 2026-07-18: Backend Owns The CPU Production Adapter
+
+Backend-live now owns `LiveProductionCpuCycleAdapter`. It applies renderer updates after the
+Engine commit, composes or coalesces from the immutable committed snapshot, creates native
+frames for every output, invokes one narrow output-runtime callback, and returns reduced
+composition timing and evidence. The CLI no longer implements `ProductionPresentationAdapter`
+or defines the CPU production frame record; its remaining callback projects the snapshot and
+invokes backend runtime/scanout objects pending their final owner extraction.
+
+The full offline all-feature suite passes. On the rebuilt X13 QEMU image, strict two-xterm
+completed in 6,971 ms with 117 of 117 authority transactions, 7 ms input presentation, 40
+submissions, 38 retirements, and zero cleanup debt. Classic and confined GTK accepted exact
+physical text and pointer selection, exited normally with `first_error=none`, and retired both
+outputs cleanly after 54-56 CPU compositions. The next extraction is GPU scheduling and the
+concrete per-output runtime owner; legacy committed-snapshot entry points remain only for the
+Wayland maintenance path and tests.
