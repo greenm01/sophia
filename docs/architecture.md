@@ -374,3 +374,10 @@ documented and deferred.
 - river: external policy-protocol and crash-isolation lessons.
 - macOS WindowServer/Core Animation: transaction-first presentation and
   fail-closed visual integrity.
+
+The WM policy boundary is versioned independently at Sophia WM API v2. Engine
+owns physical shortcut matching, workspace visibility, transaction validation,
+and named session actions. A WM registers bounded keycode/modifier chords to
+opaque action IDs during startup and receives only opaque layout nodes and
+action activations. Native Sophia WMs consume this contract directly; legacy
+X11 WMs require the metadata-blind compatibility bridge and a bounded profile.

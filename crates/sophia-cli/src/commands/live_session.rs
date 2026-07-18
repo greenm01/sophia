@@ -10,10 +10,12 @@ use sophia_cli::input_proof::{PhysicalTextProof, PhysicalTextProofEvent};
 use sophia_cli::resize_transaction::ResizeRollbackCoordinator;
 use sophia_engine::{
     FocusedInputRoute, InputFocusDecision, InputFocusState, NonBlockingInputPoller,
+    WmShortcutRegistry,
 };
 use sophia_protocol::{
     ClientAdmissionContext, DeviceId, NamespaceCapabilities, NamespaceId, NamespaceProfile, Point,
-    SeatId, WmManageSurface,
+    SeatId, WM_API_VERSION, WM_DEFAULT_WORKSPACES, WmManageSurface, WmOutputWorkspace,
+    WmSessionAction, WmSessionDescriptor,
 };
 use sophia_runtime::NamespaceRegistry;
 use sophia_x_authority::{
@@ -1265,6 +1267,7 @@ struct LiveWmSession {
     transport: Option<WmSocketTransport>,
     next_transaction: u64,
     requests: usize,
+    shortcuts: Option<WmShortcutRegistry>,
     committed: usize,
     last_committed_at: Option<Instant>,
     restarts: usize,
@@ -1302,6 +1305,7 @@ impl LiveWmSession {
                 SupervisedProcessKind::WindowManager,
             ),
             restart_policy: RestartPolicy::default(),
+            shortcuts: None,
             socket_path: config.wm_socket_path.clone(),
             transport: None,
             next_transaction: 1,
@@ -1332,12 +1336,33 @@ impl LiveWmSession {
         self.supervisor_state = state;
         super::x_authority::wait_for_socket_path(&self.socket_path)?;
         let stream = UnixStream::connect(&self.socket_path)?;
-        self.transport = Some(WmSocketTransport::new(
+        let mut transport = WmSocketTransport::new(
             stream,
             WmSocketTransportConfig {
                 response_timeout: Duration::from_millis(500),
             },
-        ));
+        );
+        let output = sophia_engine::HeadlessOutput::deterministic().id;
+        let workspaces = (1..=WM_DEFAULT_WORKSPACES)
+            .map(|index| WorkspaceId::from_raw(index as u64))
+            .collect();
+        let descriptor = WmSessionDescriptor {
+            api_version: WM_API_VERSION,
+            workspaces,
+            active_workspaces: vec![WmOutputWorkspace {
+                output,
+                workspace: WorkspaceId::from_raw(1),
+            }],
+            session_actions: vec![
+                WmSessionAction::LaunchTerminal,
+                WmSessionAction::LaunchApplicationMenu,
+                WmSessionAction::LaunchFirefox,
+                WmSessionAction::CloseFocused,
+                WmSessionAction::Logout,
+            ],
+        };
+        self.shortcuts = Some(transport.negotiate(&descriptor)?);
+        self.transport = Some(transport);
         let (state, _) = update_supervisor(
             self.supervisor_state.clone(),
             SupervisorEvent::ProcessHealthy,

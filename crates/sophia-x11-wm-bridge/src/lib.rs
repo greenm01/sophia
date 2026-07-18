@@ -151,6 +151,19 @@ impl X11WmBridgeState {
                     events.push(SyntheticXEvent::DestroyNotify { window });
                 }
             }
+            WmRequestKind::ActionActivated(activation) => {
+                for node in &activation.nodes {
+                    let (window, created) = self.upsert_node(node.clone())?;
+                    events.push(if created {
+                        SyntheticXEvent::MapRequest { window }
+                    } else {
+                        SyntheticXEvent::ConfigureNotify {
+                            window,
+                            geometry: node.geometry,
+                        }
+                    });
+                }
+            }
         }
         Ok(BridgeEngineUpdate {
             transaction: request.transaction,

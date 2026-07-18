@@ -64,6 +64,14 @@ It must not own:
 - portal policy or cross-namespace transfer decisions;
 - compositor chrome.
 
+Before request traffic, the WM sends a version-2 hello containing supported
+capabilities and a bounded action-binding table. Engine validates the complete
+table, rejects reserved or duplicate chords, then returns the configured
+workspace/output and named-session-action descriptor. The bridge translates
+opaque action activations for a selected compatibility profile; it never
+receives raw physical key events. Profiles are bounded adapters, not permission
+to expose arbitrary legacy WM configuration or executable commands.
+
 The bridge's only authority is translating policy math. Sophia Engine remains
 the compositor authority and validates every returned layout proposal.
 

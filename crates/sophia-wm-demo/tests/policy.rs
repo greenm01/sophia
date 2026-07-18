@@ -170,4 +170,76 @@ mod tests {
                 .contains(&WmCommand::FocusSurface(SurfaceId::new(4, 1)))
         );
     }
+    #[test]
+    fn action_requests_drive_native_focus_workspace_and_session_policy() {
+        let workspace = WorkspaceId::from_raw(1);
+        let nodes = vec![node(1, workspace), node(2, workspace)];
+
+        let focus = handle_wm_request(WmRequestPacket {
+            transaction: TransactionId::from_raw(20),
+            kind: WmRequestKind::ActionActivated(WmActionActivation {
+                action: WmActionId::from_raw(1),
+                output: OutputId::from_raw(1),
+                workspace,
+                focused_surface: Some(nodes[0].surface),
+                nodes: nodes.clone(),
+            }),
+        });
+        assert!(
+            focus
+                .commands
+                .contains(&WmCommand::FocusSurface(nodes[1].surface))
+        );
+
+        let activate = handle_wm_request(WmRequestPacket {
+            transaction: TransactionId::from_raw(21),
+            kind: WmRequestKind::ActionActivated(WmActionActivation {
+                action: WmActionId::from_raw(2),
+                output: OutputId::from_raw(1),
+                workspace,
+                focused_surface: None,
+                nodes: nodes.clone(),
+            }),
+        });
+        assert!(activate.commands.contains(&WmCommand::ActivateWorkspace {
+            output: OutputId::from_raw(1),
+            workspace: WorkspaceId::from_raw(2),
+        }));
+
+        let launch = handle_wm_request(WmRequestPacket {
+            transaction: TransactionId::from_raw(22),
+            kind: WmRequestKind::ActionActivated(WmActionActivation {
+                action: WmActionId::from_raw(3),
+                output: OutputId::from_raw(1),
+                workspace,
+                focused_surface: None,
+                nodes,
+            }),
+        });
+        assert!(launch.commands.contains(&WmCommand::RequestSessionAction {
+            action: WmSessionAction::LaunchTerminal,
+            target: None,
+        }));
+
+        let encoded = request_to_process_args(&WmRequestPacket {
+            transaction: TransactionId::from_raw(23),
+            kind: WmRequestKind::ActionActivated(WmActionActivation {
+                action: WmActionId::from_raw(3),
+                output: OutputId::from_raw(1),
+                workspace,
+                focused_surface: None,
+                nodes: Vec::new(),
+            }),
+        });
+        assert_eq!(
+            parse_process_request(&encoded).unwrap().kind,
+            WmRequestKind::ActionActivated(WmActionActivation {
+                action: WmActionId::from_raw(3),
+                output: OutputId::from_raw(1),
+                workspace,
+                focused_surface: None,
+                nodes: Vec::new(),
+            })
+        );
+    }
 }

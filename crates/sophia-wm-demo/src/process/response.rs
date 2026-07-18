@@ -1,6 +1,6 @@
 use sophia_protocol::{
-    SurfacePlacement, SurfaceSizeRequest, TransactionId, Transform, WmCommand, WmResponsePacket,
-    WorkspaceId,
+    OutputId, SurfacePlacement, SurfaceSizeRequest, TransactionId, Transform, WmCommand,
+    WmResponsePacket, WmSessionAction, WorkspaceId,
 };
 
 use super::{
@@ -16,6 +16,8 @@ pub fn encode_process_response(response: &WmResponsePacket) -> String {
     let mut configure = Vec::new();
     let mut focus = String::from("-");
     let mut render = Vec::new();
+    let mut activate = Vec::new();
+    let mut session = Vec::new();
 
     for command in &response.commands {
         match command {
@@ -43,17 +45,29 @@ pub fn encode_process_response(response: &WmResponsePacket) -> String {
                 placement.z_index,
                 placement.crop.map_or_else(|| "-".to_owned(), encode_rect)
             )),
+            WmCommand::ActivateWorkspace { output, workspace } => {
+                activate.push(format!("{}:{}", output.raw(), workspace.raw()));
+            }
+            WmCommand::RequestSessionAction { action, target } => {
+                let target = target.map_or_else(
+                    || "-".to_owned(),
+                    |surface| format!("{}:{}", surface.index(), surface.generation()),
+                );
+                session.push(format!("{}:{}", encode_session_action(*action), target));
+            }
         }
     }
 
     format!(
-        "ok tx={} timeout={} assign={} configure={} focus={} render={}",
+        "ok tx={} timeout={} assign={} configure={} focus={} render={} activate={} session={}",
         response.transaction.raw(),
         response.timeout_msec,
         encode_list(&assign),
         encode_list(&configure),
         focus,
-        encode_list(&render)
+        encode_list(&render),
+        encode_list(&activate),
+        encode_list(&session)
     )
 }
 
@@ -140,10 +154,72 @@ pub fn decode_process_response(line: &str) -> Result<WmResponsePacket, WmProcess
             transform: Transform::IDENTITY,
         }));
     }
+    for encoded in response_value(&parts, "activate")?.split(';') {
+        if encoded == "-" || encoded.is_empty() {
+            continue;
+        }
+        let fields = encoded.split(':').collect::<Vec<_>>();
+        if fields.len() != 2 {
+            return Err(WmProcessError::new(format!(
+                "invalid activate command: {encoded}"
+            )));
+        }
+        let output = OutputId::from_raw(parse_u64_field(fields[0], "output")?);
+        let workspace = WorkspaceId::from_raw(parse_u64_field(fields[1], "workspace")?);
+        commands.push(WmCommand::ActivateWorkspace { output, workspace });
+    }
+
+    for encoded in response_value(&parts, "session")?.split(';') {
+        if encoded == "-" || encoded.is_empty() {
+            continue;
+        }
+        let mut fields = encoded.splitn(2, ':');
+        let action = decode_session_action(
+            fields
+                .next()
+                .ok_or_else(|| WmProcessError::new("missing session action"))?,
+        )?;
+        let target = match fields
+            .next()
+            .ok_or_else(|| WmProcessError::new("missing session target"))?
+        {
+            "-" => None,
+            target => Some(parse_surface_token(target)?),
+        };
+        commands.push(WmCommand::RequestSessionAction { action, target });
+    }
 
     Ok(WmResponsePacket {
         transaction,
         commands,
         timeout_msec,
     })
+}
+fn encode_session_action(action: WmSessionAction) -> &'static str {
+    match action {
+        WmSessionAction::LaunchTerminal => "terminal",
+        WmSessionAction::LaunchApplicationMenu => "launcher",
+        WmSessionAction::LaunchFirefox => "firefox",
+        WmSessionAction::CloseFocused => "close",
+        WmSessionAction::Logout => "logout",
+    }
+}
+
+fn decode_session_action(value: &str) -> Result<WmSessionAction, WmProcessError> {
+    match value {
+        "terminal" => Ok(WmSessionAction::LaunchTerminal),
+        "launcher" => Ok(WmSessionAction::LaunchApplicationMenu),
+        "firefox" => Ok(WmSessionAction::LaunchFirefox),
+        "close" => Ok(WmSessionAction::CloseFocused),
+        "logout" => Ok(WmSessionAction::Logout),
+        _ => Err(WmProcessError::new(format!(
+            "invalid session action: {value}"
+        ))),
+    }
+}
+
+fn parse_u64_field(value: &str, field: &str) -> Result<u64, WmProcessError> {
+    value
+        .parse()
+        .map_err(|_| WmProcessError::new(format!("invalid {field}: {value}")))
 }

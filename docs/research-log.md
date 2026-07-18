@@ -1912,3 +1912,20 @@ plus confined GTK3 profiles without operator input. The first aggregate run
 exposed a stale schema-1 poller assertion in emergency recovery; updating the
 harness, verifier, and fixtures to the schema-2 tap-policy record closed it. The
 rerun passed all four scenarios. The strict three-class baseline then passed
+
+## 2026-07-18: WM API v2 Foundation
+
+Milestones 7 and 8 split interactive policy enablement from daily-driver
+promotion. The normative WM contract now fixes Engine ownership of physical
+input, nine workspace slots, named session actions, opaque metadata, and
+one-visible-workspace-per-output semantics.
+
+The protocol carries a versioned hello, bounded binding registrations, session
+descriptor, opaque action activation, workspace activation, and named session
+action requests. Engine rejects unsupported capabilities, duplicate bindings,
+invalid action/key values, and Ctrl-Alt-Backspace. Its shortcut registry
+consumes matching press/release pairs and suppresses repeats without leaking raw
+input. The native demo WM performs the startup handshake and exercises focus,
+workspace, and terminal actions. Focused protocol, Engine, demo-WM, and legacy
+bridge tests pass offline. Runtime physical-key routing, persistent workspace
+state, the bundled xmonad profile, and QEMU promotion remain Milestone 7 work.

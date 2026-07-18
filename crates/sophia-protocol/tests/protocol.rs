@@ -982,3 +982,97 @@ fn output_topology_rejects_duplicate_and_unbounded_facts() {
         Err(OutputTopologyError::RootSizeExceeded)
     );
 }
+#[test]
+fn wm_api_v2_negotiation_and_actions_round_trip() {
+    let hello = WmHello {
+        api_version: WM_API_VERSION,
+        capabilities: WmCapabilities::all_supported(),
+        bindings: vec![WmBindingRegistration {
+            action: WmActionId::from_raw(7),
+            keycode: 36,
+            modifiers: WmModifierMask {
+                bits: WmModifierMask::SUPER,
+            },
+        }],
+    };
+    assert_eq!(
+        decode_wm_hello_frame(&encode_wm_hello_frame(&hello).unwrap()).unwrap(),
+        hello
+    );
+
+    let descriptor = WmSessionDescriptor {
+        api_version: WM_API_VERSION,
+        workspaces: (1..=WM_DEFAULT_WORKSPACES)
+            .map(|raw| WorkspaceId::from_raw(raw as u64))
+            .collect(),
+        active_workspaces: vec![WmOutputWorkspace {
+            output: OutputId::from_raw(1),
+            workspace: WorkspaceId::from_raw(1),
+        }],
+        session_actions: vec![
+            WmSessionAction::LaunchTerminal,
+            WmSessionAction::CloseFocused,
+            WmSessionAction::Logout,
+        ],
+    };
+    assert_eq!(
+        decode_wm_session_descriptor_frame(
+            &encode_wm_session_descriptor_frame(&descriptor).unwrap()
+        )
+        .unwrap(),
+        descriptor
+    );
+
+    let workspace = WorkspaceId::from_raw(1);
+    let node = LayoutNodeSnapshot {
+        surface: SurfaceId::new(4, 1),
+        workspace,
+        kind: LayoutNodeKind::Toplevel,
+        capabilities: LayoutNodeCapabilities::STANDARD_TOPLEVEL,
+        state: LayoutNodeState::NORMAL,
+        constraints: SurfaceConstraints {
+            min_size: None,
+            max_size: None,
+        },
+        geometry: Rect {
+            x: 0,
+            y: 0,
+            width: 640,
+            height: 480,
+        },
+        generation: 1,
+    };
+    let request = WmRequestPacket {
+        transaction: TransactionId::from_raw(22),
+        kind: WmRequestKind::ActionActivated(WmActionActivation {
+            action: WmActionId::from_raw(7),
+            output: OutputId::from_raw(1),
+            workspace,
+            focused_surface: Some(node.surface),
+            nodes: vec![node],
+        }),
+    };
+    assert_eq!(
+        decode_wm_request_frame(&encode_wm_request_frame(&request).unwrap()).unwrap(),
+        request
+    );
+
+    let response = WmResponsePacket {
+        transaction: request.transaction,
+        commands: vec![
+            WmCommand::ActivateWorkspace {
+                output: OutputId::from_raw(1),
+                workspace: WorkspaceId::from_raw(2),
+            },
+            WmCommand::RequestSessionAction {
+                action: WmSessionAction::LaunchTerminal,
+                target: None,
+            },
+        ],
+        timeout_msec: 300,
+    };
+    assert_eq!(
+        decode_wm_response_frame(&encode_wm_response_frame(&response).unwrap()).unwrap(),
+        response
+    );
+}

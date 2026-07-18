@@ -1,7 +1,7 @@
 use sophia_protocol::{
     LayoutNodeSnapshot, LayoutTransaction, Rect, Size, SurfacePlacement, SurfaceSizeRequest,
     TransactionId, Transform, WmCommand, WmRequestKind, WmRequestPacket, WmResponsePacket,
-    WorkspaceId,
+    WmSessionAction, WorkspaceId,
 };
 
 pub fn empty_transaction(transaction: TransactionId) -> LayoutTransaction {
@@ -110,6 +110,41 @@ pub fn handle_wm_request(request: WmRequestPacket) -> WmResponsePacket {
             commands: Vec::new(),
             timeout_msec: 300,
         },
+        WmRequestKind::ActionActivated(activation) => {
+            let commands = match activation.action.raw() {
+                1 => {
+                    let focus = activation
+                        .focused_surface
+                        .and_then(|focused| {
+                            activation
+                                .nodes
+                                .iter()
+                                .position(|node| node.surface == focused)
+                        })
+                        .map_or(0, |index| (index + 1) % activation.nodes.len().max(1));
+                    activation
+                        .nodes
+                        .get(focus)
+                        .filter(|node| node.capabilities.focusable)
+                        .map(|node| vec![WmCommand::FocusSurface(node.surface)])
+                        .unwrap_or_default()
+                }
+                2 => vec![WmCommand::ActivateWorkspace {
+                    output: activation.output,
+                    workspace: WorkspaceId::from_raw(2),
+                }],
+                3 => vec![WmCommand::RequestSessionAction {
+                    action: WmSessionAction::LaunchTerminal,
+                    target: None,
+                }],
+                _ => Vec::new(),
+            };
+            WmResponsePacket {
+                transaction: request.transaction,
+                commands,
+                timeout_msec: 300,
+            }
+        }
     }
 }
 

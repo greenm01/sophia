@@ -17,6 +17,8 @@ wins when prose disagrees.
 
 Normative documents describe both current and target contracts. They must label
 unimplemented target behavior explicitly.
+- [Sophia WM API](sophia-wm-api.md) defines the versioned, metadata-blind native
+  policy contract shared by Sophia WMs and legacy compatibility profiles.
 
 ## Subsystem Contracts And Current Status
 

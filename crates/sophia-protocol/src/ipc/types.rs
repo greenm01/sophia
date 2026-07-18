@@ -15,6 +15,8 @@ pub enum IpcMessageKind {
     XAuthorityResponse = 5,
     PortalBrokerRequest = 6,
     PortalBrokerResponse = 7,
+    WmHello = 9,
+    WmSessionDescriptor = 10,
     PortalClipboardPayload = 8,
 }
 

@@ -1,12 +1,12 @@
 use sophia_protocol::{
-    OutputId, TransactionId, WmManageSurface, WmRelayoutWorkspace, WmRequestKind, WmRequestPacket,
-    WorkspaceId,
+    OutputId, TransactionId, WmActionActivation, WmActionId, WmManageSurface, WmRelayoutWorkspace,
+    WmRequestKind, WmRequestPacket, WorkspaceId,
 };
 
 use super::{
     codec::{
-        arg_values, encode_node, encode_rect, parse_node, process_usage, required_node,
-        required_rect, required_surface, required_u64,
+        arg_values, encode_node, encode_rect, parse_node, parse_surface_token, process_usage,
+        required_node, required_rect, required_surface, required_u64,
     },
     error::WmProcessError,
 };
@@ -47,6 +47,29 @@ pub fn request_to_process_args(request: &WmRequestPacket) -> Vec<String> {
             format!("--workspace={}", workspace.raw()),
             format!("--surface={}:{}", surface.index(), surface.generation()),
         ],
+        WmRequestKind::ActionActivated(activation) => {
+            let mut args = vec![
+                "action".to_owned(),
+                format!("--transaction={}", request.transaction.raw()),
+                format!("--action={}", activation.action.raw()),
+                format!("--output={}", activation.output.raw()),
+                format!("--workspace={}", activation.workspace.raw()),
+            ];
+            if let Some(surface) = activation.focused_surface {
+                args.push(format!(
+                    "--focus={}:{}",
+                    surface.index(),
+                    surface.generation()
+                ));
+            }
+            args.extend(
+                activation
+                    .nodes
+                    .iter()
+                    .map(|node| format!("--node={}", encode_node(node))),
+            );
+            args
+        }
     }
 }
 
@@ -94,6 +117,28 @@ pub fn parse_process_request(args: &[String]) -> Result<WmRequestPacket, WmProce
             Ok(WmRequestPacket {
                 transaction,
                 kind: WmRequestKind::SurfaceRemoved { surface, workspace },
+            })
+        }
+        "action" => {
+            let output = OutputId::from_raw(required_u64(args, "--output")?);
+            let action = WmActionId::from_raw(required_u64(args, "--action")?);
+            let focused_surface = arg_values(args, "--focus")
+                .first()
+                .map(|value| parse_surface_token(value))
+                .transpose()?;
+            let nodes = arg_values(args, "--node")
+                .into_iter()
+                .map(|value| parse_node(value, workspace))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(WmRequestPacket {
+                transaction,
+                kind: WmRequestKind::ActionActivated(WmActionActivation {
+                    action,
+                    output,
+                    workspace,
+                    focused_surface,
+                    nodes,
+                }),
             })
         }
         _ => Err(WmProcessError::new(process_usage())),

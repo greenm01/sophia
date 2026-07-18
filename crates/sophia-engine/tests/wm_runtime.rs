@@ -1,4 +1,8 @@
 mod support;
+use sophia_engine::{WmShortcutDecision, WmShortcutRegistry};
+use sophia_protocol::{
+    WM_API_VERSION, WmActionId, WmBindingRegistration, WmCapabilities, WmHello, WmModifierMask,
+};
 use support::*;
 
 #[test]
@@ -227,4 +231,86 @@ fn session_tick_restores_cached_layout_when_requested() {
     assert!(report.restored_last_committed);
     assert_eq!(report.frame.layers, cached);
     assert_eq!(report.replay.steps.len(), 1);
+}
+
+#[test]
+fn wm_shortcuts_validate_and_suppress_repeats_until_release() {
+    let action = WmActionId::from_raw(7);
+    let hello = WmHello {
+        api_version: WM_API_VERSION,
+        capabilities: WmCapabilities::all_supported(),
+        bindings: vec![WmBindingRegistration {
+            action,
+            keycode: 28,
+            modifiers: WmModifierMask {
+                bits: WmModifierMask::SUPER,
+            },
+        }],
+    };
+    let mut shortcuts = WmShortcutRegistry::from_hello(&hello).unwrap();
+
+    assert_eq!(shortcuts.binding_count(), 1);
+    assert_eq!(
+        shortcuts.handle_key(
+            28,
+            WmModifierMask {
+                bits: WmModifierMask::SUPER
+            },
+            true
+        ),
+        WmShortcutDecision {
+            action: Some(action),
+            consumed: true
+        }
+    );
+    assert_eq!(
+        shortcuts.handle_key(
+            28,
+            WmModifierMask {
+                bits: WmModifierMask::SUPER
+            },
+            true
+        ),
+        WmShortcutDecision {
+            action: None,
+            consumed: true
+        }
+    );
+    assert!(
+        shortcuts
+            .handle_key(28, WmModifierMask { bits: 0 }, false)
+            .consumed
+    );
+    assert_eq!(
+        shortcuts
+            .handle_key(
+                28,
+                WmModifierMask {
+                    bits: WmModifierMask::SUPER
+                },
+                true
+            )
+            .action,
+        Some(action)
+    );
+}
+
+#[test]
+fn wm_shortcuts_reject_the_emergency_chord() {
+    let hello = WmHello {
+        api_version: WM_API_VERSION,
+        capabilities: WmCapabilities::all_supported(),
+        bindings: vec![WmBindingRegistration {
+            action: WmActionId::from_raw(1),
+            keycode: 14,
+            modifiers: WmModifierMask {
+                bits: WmModifierMask::CONTROL | WmModifierMask::ALT,
+            },
+        }],
+    };
+
+    assert_eq!(
+        WmShortcutRegistry::from_hello(&hello),
+        Err(WmIpcError::Negotiation("reserved emergency chord"))
+    );
 }

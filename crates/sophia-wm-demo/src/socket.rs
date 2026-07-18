@@ -8,7 +8,9 @@ use std::{
 
 #[cfg(unix)]
 use sophia_protocol::{
-    SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAX_PAYLOAD_LEN, WmRequestPacket, decode_wm_request_frame,
+    SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAX_PAYLOAD_LEN, WM_API_VERSION, WmActionId,
+    WmBindingRegistration, WmCapabilities, WmHello, WmModifierMask, WmRequestPacket,
+    decode_wm_request_frame, decode_wm_session_descriptor_frame, encode_wm_hello_frame,
     encode_wm_response_frame,
 };
 
@@ -52,6 +54,44 @@ pub fn run_socket_server(path: impl AsRef<Path>) -> Result<(), WmProcessError> {
 
 #[cfg(unix)]
 fn serve_socket_client(stream: &mut UnixStream) -> Result<(), WmProcessError> {
+    let hello = WmHello {
+        api_version: WM_API_VERSION,
+        capabilities: WmCapabilities::all_supported(),
+        bindings: vec![
+            WmBindingRegistration {
+                action: WmActionId::from_raw(1),
+                keycode: 57,
+                modifiers: WmModifierMask {
+                    bits: WmModifierMask::SUPER,
+                },
+            },
+            WmBindingRegistration {
+                action: WmActionId::from_raw(2),
+                keycode: 3,
+                modifiers: WmModifierMask {
+                    bits: WmModifierMask::SUPER,
+                },
+            },
+            WmBindingRegistration {
+                action: WmActionId::from_raw(3),
+                keycode: 28,
+                modifiers: WmModifierMask {
+                    bits: WmModifierMask::SUPER,
+                },
+            },
+        ],
+    };
+    let frame = encode_wm_hello_frame(&hello)
+        .map_err(|error| WmProcessError::new(format!("failed to encode WM hello: {error:?}")))?;
+    stream
+        .write_all(&frame)
+        .and_then(|()| stream.flush())
+        .map_err(|error| WmProcessError::new(format!("failed to write WM hello: {error}")))?;
+    let descriptor = read_frame(stream)?;
+    decode_wm_session_descriptor_frame(&descriptor).map_err(|error| {
+        WmProcessError::new(format!("failed to decode WM session descriptor: {error:?}"))
+    })?;
+
     while let Some(request) = read_wm_request(stream)? {
         let response = handle_wm_request(request);
         let frame = encode_wm_response_frame(&response).map_err(|error| {
@@ -104,4 +144,28 @@ fn read_wm_request(stream: &mut UnixStream) -> Result<Option<WmRequestPacket>, W
     decode_wm_request_frame(&frame)
         .map(Some)
         .map_err(|error| WmProcessError::new(format!("failed to decode WM request: {error:?}")))
+}
+
+fn read_frame(stream: &mut UnixStream) -> Result<Vec<u8>, WmProcessError> {
+    let mut header = [0; SOPHIA_IPC_HEADER_LEN];
+    stream
+        .read_exact(&mut header)
+        .map_err(|error| WmProcessError::new(format!("failed to read IPC header: {error}")))?;
+    let payload_len = u32::from_le_bytes(
+        header[16..20]
+            .try_into()
+            .expect("fixed IPC header payload range should be present"),
+    ) as usize;
+    if payload_len > SOPHIA_IPC_MAX_PAYLOAD_LEN {
+        return Err(WmProcessError::new(format!(
+            "IPC payload too large: {payload_len}"
+        )));
+    }
+    let mut frame = Vec::with_capacity(SOPHIA_IPC_HEADER_LEN + payload_len);
+    frame.extend_from_slice(&header);
+    frame.resize(SOPHIA_IPC_HEADER_LEN + payload_len, 0);
+    stream
+        .read_exact(&mut frame[SOPHIA_IPC_HEADER_LEN..])
+        .map_err(|error| WmProcessError::new(format!("failed to read IPC payload: {error}")))?;
+    Ok(frame)
 }

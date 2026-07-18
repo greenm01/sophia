@@ -18,16 +18,64 @@ Engine remains the sole owner of physical input, scene state, rendering, and
 scanout.
 
 The namespace, admission, portal lifecycle, bounded X11 `CLIPBOARD` plus
-`PRIMARY` reference flow, native X11 session correctness, and mixed Vulkan
-presentation baseline are established. The active track finishes GTK3 software
-promotion, then consolidates the proven paths behind one production-grade
-Engine session loop before adding more X11 compatibility surface.
+`PRIMARY` reference flow, application compatibility, and the production Engine
+session loop are established. The active track now makes the blind Sophia WM API
+interactive, carries legacy X11 window managers through the compatibility bridge,
+and proves xmonad plus Firefox as an unattended daily-driver session.
 
 The Smithay-backed Wayland Authority remains supported under a maintenance
 lane. XLibre is a retired prototype and documented possible future
 compatibility provider; no XLibre integration work is active.
 
-## Milestone 5: Application Compatibility
+## Milestone 7: Interactive WM API And Legacy Bridge
+
+- [ ] Negotiate WM API version 2 over the existing bounded IPC frame without
+  changing unrelated broker protocols. A WM must register capabilities and
+  bindings before Engine sends layout or action requests; mismatch, duplicate
+  chords, oversized registration, and reserved emergency bindings fail closed.
+- [ ] Add Engine-owned shortcut routing. WMs register bounded evdev-keycode plus
+  modifier chords mapped to opaque action IDs; Engine consumes matched
+  press/release sequences and sends action activations without exposing raw input.
+- [ ] Add nine configured workspace slots with one active workspace per output.
+  Workspace activation, visible-workspace swaps, surface movement, focus, and
+  layout commit atomically and survive WM restart.
+- [ ] Add advertised named session actions for approved launch, close, Firefox,
+  launcher, and logout behavior. WMs may request tokens but never executable
+  paths, argument vectors, or arbitrary commands.
+- [ ] Update the native demo WM to exercise the version-2 API directly, including
+  bindings, focus, workspace switching, surface movement, and session actions.
+- [ ] Add a generic legacy-WM profile boundary and a bundled metadata-blind Sophia
+  xmonad profile. The bridge alone translates action activations into bounded
+  synthetic events and private action messages; xmonad sees no real XIDs, raw
+  metadata, namespaces, client sockets, pixels, or physical input.
+- [ ] Pass an unattended QEMU xmonad gate with three real windows, focus and
+  layout changes, workspace switch/move, approved terminal launch, polite close,
+  two-output workspace ownership, bridge restart, and preserved committed state.
+
+Exit: Sophia-native and profiled legacy WMs use the same versioned, blind WM API;
+Engine remains the only input, workspace, transaction, rendering, and scanout
+authority; the complete xmonad interaction gate passes without operator input.
+
+## Milestone 8: xmonad Daily Driver
+
+- [ ] Replace the proof-only xmonad wrapper with a normal supervised session
+  launcher supporting WM selection, approved startup applications, logout, clean
+  recovery, and a generic multi-application process model.
+- [ ] Capture native-X11 Firefox request traces and close compatibility gaps with
+  focused wire regressions. Retain an offline local-page proof for visible pixels,
+  keyboard and pointer input, resize, dialogs, clipboard, normal exit, and cleanup.
+- [ ] Pass a two-output application-mix gate containing xterm, GTK, Vulkan,
+  Firefox, `CLIPBOARD`/`PRIMARY`, dialogs, multiple workspaces, launch/close, and
+  a restarted WM bridge.
+- [ ] Pass a 30-minute unattended QEMU soak with repeated focus, layout, launch,
+  close, workspace movement, bridge restart, and application restart, with zero
+  protocol errors, stuck transactions, input leaks, or native cleanup debt.
+
+Exit: the normal xmonad-backed Sophia session boots, runs the retained application
+mix including Firefox, recovers its WM policy process, and completes the bounded
+soak. Machine-specific runs remain optional compatibility diagnostics.
+
+
 
 - [x] Add a bounded direct X client launcher, reduced protocol-error
   observations, and strict application-session evidence without bypassing the
