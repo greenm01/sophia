@@ -144,6 +144,50 @@ struct LiveInputProofResult {
     path: std::path::PathBuf,
 }
 
+struct LiveClientStdoutCapture {
+    directory: std::path::PathBuf,
+    path: std::path::PathBuf,
+}
+
+impl LiveClientStdoutCapture {
+    fn create(display_number: u32) -> Result<(Self, std::fs::File), Box<dyn std::error::Error>> {
+        let mut nonce = [0u8; 8];
+        fill_session_random(&mut nonce)?;
+        let suffix = nonce
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let directory = std::env::temp_dir().join(format!(
+            "sophia-client-stdout-{}-{display_number}-{suffix}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&directory)?;
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))?;
+        let path = directory.join("stdout");
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)?;
+        Ok((Self { directory, path }, file))
+    }
+
+    fn read_bounded(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let mut bytes = Vec::new();
+        std::fs::File::open(&self.path)?
+            .take(4_097)
+            .read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
+}
+
+impl Drop for LiveClientStdoutCapture {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+        let _ = std::fs::remove_dir(&self.directory);
+    }
+}
+
 impl LiveInputProofResult {
     fn create(display_number: u32) -> Result<Self, Box<dyn std::error::Error>> {
         let mut nonce = [0u8; 8];
@@ -446,13 +490,21 @@ pub(crate) fn run_persistent_xterm_session(
         .env_remove("BASH_ENV")
         .stdin(Stdio::null())
         .stderr(Stdio::inherit());
+    let (client_stdout_capture, client_stdout_file) = if config.client.is_some() {
+        let (capture, file) = LiveClientStdoutCapture::create(display_number)?;
+        (Some(capture), Some(file))
+    } else {
+        (None, None)
+    };
     if config.client.is_some() {
         terminal_command
             .env("GDK_BACKEND", "x11")
             .env("GTK_USE_PORTAL", "0")
             .env_remove("WAYLAND_DISPLAY")
             .args(&config.client_args)
-            .stdout(Stdio::piped());
+            .stdout(Stdio::from(
+                client_stdout_file.expect("application stdout file was created"),
+            ));
     } else {
         terminal_command
             .args([
@@ -631,6 +683,7 @@ pub(crate) fn run_persistent_xterm_session(
         &mut wm_session,
         protocol_router,
         input_proof_result.as_ref(),
+        client_stdout_capture.as_ref(),
         false,
         initial_authority_batch,
         output_notifications,
@@ -2019,6 +2072,7 @@ fn run_session_loop(
     wm_session: &mut Option<LiveWmSession>,
     protocol_router: XServerFrontendProtocolRouter,
     input_proof_result: Option<&LiveInputProofResult>,
+    client_stdout_capture: Option<&LiveClientStdoutCapture>,
     require_startup_focus: bool,
     mut initial_authority_batch: Option<XAuthorityObservedTransactionBatch>,
     output_notifications: usize,
@@ -2279,9 +2333,9 @@ fn run_session_loop(
                 );
             }
             if config.application_proof_requested() {
-                if let Some(stdout) = child.stdout.take() {
-                    stdout.take(4_097).read_to_end(&mut client_stdout)?;
-                }
+                client_stdout = client_stdout_capture
+                    .ok_or("application stdout capture is missing")?
+                    .read_bounded()?;
                 if client_stdout.len() > 4_096 {
                     return Err("application stdout exceeded the 4096-byte evidence bound".into());
                 }
@@ -5950,14 +6004,15 @@ impl Drop for SessionProcessGuard {
 #[cfg(test)]
 mod tests {
     use super::{
-        BufferSource, CommittedSurfaceState, LiveXAuthorityFile, PRIMARY_INPUT_PROOF_SCRIPT,
-        PersistentBackendRuntime, PersistentCpuScene, PersistentXtermSessionConfig, Rect, Region,
-        SECONDARY_POINTER_WITNESS_SCRIPT, SessionPointerPlacement, Size,
-        authority_transaction_count, center_geometry_without_scaling,
-        cpu_frame_matches_visible_output, cpu_frame_submission_ready,
-        global_runtime_deadline_ends_session, layer_snapshots_from_committed,
-        physical_input_may_route_after_primary_exit, physical_input_pixels_already_changed,
-        place_pointer_event_for_routing, pointer_offset_for_geometry, record_runtime_commits,
+        BufferSource, CommittedSurfaceState, LiveClientStdoutCapture, LiveXAuthorityFile,
+        PRIMARY_INPUT_PROOF_SCRIPT, PersistentBackendRuntime, PersistentCpuScene,
+        PersistentXtermSessionConfig, Rect, Region, SECONDARY_POINTER_WITNESS_SCRIPT,
+        SessionPointerPlacement, Size, authority_transaction_count,
+        center_geometry_without_scaling, cpu_frame_matches_visible_output,
+        cpu_frame_submission_ready, global_runtime_deadline_ends_session,
+        layer_snapshots_from_committed, physical_input_may_route_after_primary_exit,
+        physical_input_pixels_already_changed, place_pointer_event_for_routing,
+        pointer_offset_for_geometry, record_runtime_commits,
         required_wayland_presentation_submission, retain_latest_wayland_presentation,
         seed_missing_committed_surfaces, successful_primary_exit_ends_session,
     };
@@ -5970,6 +6025,18 @@ mod tests {
         X_AUTHORITY_CPU_BUFFER_FORMAT_XRGB8888, XAuthorityCpuBufferSnapshot, XResourceId,
     };
     use std::collections::BTreeMap;
+    use std::io::Write;
+
+    #[test]
+    fn client_stdout_capture_reads_without_waiting_for_inherited_writer_close() {
+        let (capture, mut writer) = LiveClientStdoutCapture::create(181).unwrap();
+        writer.write_all(b"sophia\n").unwrap();
+        writer.flush().unwrap();
+
+        assert_eq!(capture.read_bounded().unwrap(), b"sophia\n");
+
+        writer.write_all(b"still-open").unwrap();
+    }
 
     #[test]
     fn successful_primary_exit_keeps_requested_input_proof_alive() {

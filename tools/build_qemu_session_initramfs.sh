@@ -17,6 +17,7 @@ require_command() {
 require_command cargo
 require_command dracut
 require_command zenity
+require_command xterm
 require_command readlink
 
 if [[ ! -r "$KERNEL_IMAGE" ]]; then
@@ -49,7 +50,7 @@ runtime_files=(
     /usr/bin/zenity
 )
 install_files=()
-command -v xterm >/dev/null 2>&1 && runtime_files+=("$(command -v xterm)")
+runtime_files+=("$(command -v xterm)")
 for file in "${runtime_files[@]}"; do
     if [[ -e "$file" ]]; then
         install_files+=("$file")
