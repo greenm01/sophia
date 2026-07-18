@@ -1634,3 +1634,14 @@ in 7,008 ms with 117 of 117 authority transactions, 7 ms input presentation, 42 
 exported one CPU plus one DMA-BUF layer with zero live sources, fences, or transactions. The
 remaining Milestone 6 ownership work is moving the now-neutral visual control implementation
 out of the CLI module and retiring its legacy committed-snapshot APIs.
+
+
+## 2026-07-18: Backend Owns Production Intake Records
+
+Backend-live now defines and exports the neutral authority batch, DMA-BUF registration, fence
+registration, and Present submission records consumed by production visual control. The CLI
+retains only the X-to-production translation function; it no longer defines the records or
+their file-descriptor ownership shape. This makes the next runtime extraction a movement of
+behavior behind an already backend-owned input contract rather than another protocol rewrite.
+The full offline all-feature suite passes; runtime behavior is unchanged from the immediately
+preceding strict QEMU and guarded native mixed evidence.
