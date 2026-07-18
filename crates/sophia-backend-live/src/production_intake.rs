@@ -37,3 +37,17 @@ pub struct LiveProductionAuthorityBatch {
     pub released_dma_bufs: Vec<BufferHandle>,
     pub released_fences: Vec<FenceHandle>,
 }
+
+#[derive(Clone, Debug)]
+pub struct LiveProductionPreparedAuthorityBatch {
+    pub authority_commits: Vec<sophia_protocol::TransactionCommit>,
+    pub active_transactions: Vec<SurfaceTransaction>,
+}
+
+#[derive(Clone, Debug)]
+pub struct LiveProductionCpuSubmission {
+    pub tick: crate::LiveBackendRuntimeTickReport,
+    pub composition: crate::LiveCpuCompositionReport,
+    pub composed: bool,
+    pub compose_elapsed: std::time::Duration,
+}

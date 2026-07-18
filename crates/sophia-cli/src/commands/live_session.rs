@@ -2,8 +2,9 @@ use super::prelude::*;
 
 use sophia_backend_live::{
     LiveProductionAuthorityBatch, LiveProductionComposedFrame, LiveProductionCpuCycleAdapter,
-    LiveProductionCpuCycleSubmission, LiveProductionCpuScene, LiveProductionDmaBufRegistration,
-    LiveProductionFenceRegistration, LiveProductionNativeScanout, LiveProductionOutputRuntimeSet,
+    LiveProductionCpuCycleSubmission, LiveProductionCpuScene, LiveProductionCpuSubmission,
+    LiveProductionDmaBufRegistration, LiveProductionFenceRegistration, LiveProductionNativeScanout,
+    LiveProductionOutputRuntimeSet, LiveProductionPreparedAuthorityBatch,
     LiveProductionPresentGate, LiveProductionPresentScheduler, LiveProductionPresentSubmission,
     LiveProductionSubmittedPresent,
 };
@@ -3682,18 +3683,6 @@ struct PersistentBackendRuntime {
     present_feedback_sink: Box<dyn FnMut(sophia_backend_live::LivePresentFeedbackOutcome)>,
 }
 
-struct PreparedAuthorityBatch {
-    authority_commits: Vec<TransactionCommit>,
-    active_transactions: Vec<SurfaceTransaction>,
-}
-
-struct CpuProductionSubmission {
-    tick: sophia_backend_live::LiveBackendRuntimeTickReport,
-    composition: sophia_backend_live::LiveCpuCompositionReport,
-    composed: bool,
-    compose_elapsed: Duration,
-}
-
 impl PersistentBackendRuntime {
     fn new(
         outputs: &[sophia_engine::HeadlessOutput],
@@ -3906,7 +3895,7 @@ impl PersistentBackendRuntime {
         output_descriptors: &[sophia_engine::HeadlessOutput],
         mut native_scanout: Option<&mut LiveProductionNativeScanout>,
         wm_update: Option<WmTransactionUpdate>,
-    ) -> Result<(CpuProductionSubmission, Vec<CommittedSurfaceState>), Box<dyn std::error::Error>>
+    ) -> Result<(LiveProductionCpuSubmission, Vec<CommittedSurfaceState>), Box<dyn std::error::Error>>
     {
         let committed_surfaces = self.committed_surfaces().to_vec();
         scene.apply_updates(updates, &committed_surfaces)?;
@@ -3941,7 +3930,7 @@ impl PersistentBackendRuntime {
             wm_update,
         )?;
         Ok((
-            CpuProductionSubmission {
+            LiveProductionCpuSubmission {
                 tick,
                 composition,
                 composed: !defer_frame,
@@ -4142,7 +4131,7 @@ impl PersistentBackendRuntime {
         cursor_position: Option<Point>,
         output_descriptors: &[sophia_engine::HeadlessOutput],
         native_scanout: &mut LiveProductionNativeScanout,
-    ) -> Result<CpuProductionSubmission, Box<dyn std::error::Error>> {
+    ) -> Result<LiveProductionCpuSubmission, Box<dyn std::error::Error>> {
         let committed = self.production.committed_surfaces().to_vec();
         let compose_started = Instant::now();
         let composition = scene
@@ -4176,7 +4165,7 @@ impl PersistentBackendRuntime {
             .into_iter()
             .next()
             .ok_or("persistent backend runtime has no outputs")?;
-        Ok(CpuProductionSubmission {
+        Ok(LiveProductionCpuSubmission {
             tick,
             composition,
             composed: true,
@@ -4228,7 +4217,7 @@ impl PersistentBackendRuntime {
         transaction_id: TransactionId,
         transactions: &[SurfaceTransaction],
         removed_surfaces: &[SurfaceId],
-    ) -> Result<PreparedAuthorityBatch, Box<dyn std::error::Error>> {
+    ) -> Result<LiveProductionPreparedAuthorityBatch, Box<dyn std::error::Error>> {
         self.layers
             .retain(|surface, _| !removed_surfaces.contains(surface));
         for transaction in transactions {
@@ -4253,7 +4242,7 @@ impl PersistentBackendRuntime {
         let authority_commits = self
             .production
             .commit_authority_batches(std::slice::from_ref(&intake));
-        Ok(PreparedAuthorityBatch {
+        Ok(LiveProductionPreparedAuthorityBatch {
             authority_commits,
             active_transactions,
         })
@@ -4261,7 +4250,7 @@ impl PersistentBackendRuntime {
 
     fn run_prepared_authority_transactions(
         &mut self,
-        prepared: PreparedAuthorityBatch,
+        prepared: LiveProductionPreparedAuthorityBatch,
         event_count: usize,
         mut native_scanout: Option<&mut LiveProductionNativeScanout>,
         native_frames: Option<Vec<LiveProductionComposedFrame>>,

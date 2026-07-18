@@ -1743,3 +1743,13 @@ freezes the exact schema. The rebuilt guarded X13 diagnostic still exported one 
 DMA-BUF layer and retired all sources, fences, and transactions. This removes one CLI-specific
 dependency that pinned the remaining neutral visual-control implementation to
 `live_session.rs`.
+
+
+## 2026-07-18: Visual Runtime Intermediate Records Move To Backend
+
+Backend-live now owns the prepared-authority record and reduced CPU production submission
+record used between visual-control phases. The CLI no longer defines internal records carrying
+Engine commits, active transactions, backend ticks, renderer composition evidence, or compose
+timing. Together with the backend-owned mixed diagnostic contract, this leaves the visual
+control implementation dependent only on types already owned by engine, renderer-live, and
+backend-live, preparing the concrete wrapper movement without changing runtime behavior.
