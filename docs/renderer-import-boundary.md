@@ -501,3 +501,16 @@ Unsupported import paths fail closed as reduced decisions. They do not panic, do
 not partially start the compositor, and do not cause protocol authorities or the
 window manager to see renderer-private state. The session may still render via a
 safe fallback when one exists.
+
+
+## Committed Snapshot Composition
+
+CPU pixel bytes live in `LiveCpuBufferRegistry`, but visual identity does not.
+The production path must pass the immutable Engine `CommittedSurfaceState` slice
+to composition after authority commit. Geometry, buffer selection, generation,
+and stacking are resolved from that slice; the registry supplies bytes only for
+its referenced CPU handles and retires everything else. A CLI or renderer-local
+`SurfaceId` projection is not an admissible cache because it can diverge from a
+rejected or removed Engine transaction. Native KMS initialization waits for this
+first committed-state frame rather than requiring a speculative or blank visual
+bootstrap.

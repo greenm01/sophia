@@ -2456,7 +2456,11 @@ fn run_session_loop(
                     batches.saturating_sub(input_batch_baseline.unwrap_or(batches)),
                     cpu_buffer_updates.saturating_sub(input_cpu_update_baseline.unwrap_or(cpu_buffer_updates)),
                     scene.last_report.as_ref().map(|report| report.checksum),
-                    input_surface.and_then(|surface| scene.surface_buffer_generation(surface)),
+                    input_surface.and_then(|surface| {
+                        runtime.as_ref().and_then(|runtime| {
+                            scene.surface_buffer_generation(runtime.committed_surfaces(), surface)
+                        })
+                    }),
                     native_scanout.as_ref().map_or(0, |native| native.submissions),
                     native_scanout.as_ref().map_or(0, |native| native.callback_accepted),
                 )
@@ -2504,8 +2508,11 @@ fn run_session_loop(
             && let (Some(runtime), Some(native_scanout), Some(position)) =
                 (runtime.as_mut(), native_scanout.as_mut(), pointer.position)
         {
+            let committed = runtime.committed_surfaces().to_vec();
             let compose_started = Instant::now();
-            let report = scene.compose(Some(position))?.clone();
+            let report = scene
+                .compose(&committed, focus.focused_surface(seat), Some(position))?
+                .clone();
             max_compose = max_compose.max(compose_started.elapsed());
             cpu_compositions = cpu_compositions.saturating_add(1);
             if pointer_cursor_checksum.is_none() && pointer_checksum.is_none() {
@@ -2517,7 +2524,6 @@ fn run_session_loop(
                 pointer_pixel_change = true;
             }
             let frames = scene.frames_for_outputs(&outputs)?;
-            let committed = runtime.committed_surfaces().to_vec();
             let _ =
                 runtime.run_committed_snapshot(&committed, Some(native_scanout), Some(frames))?;
             backend_ticks = backend_ticks.saturating_add(1);
@@ -2745,7 +2751,41 @@ fn run_session_loop(
                     );
                 }
                 let batch = layout.projected_batch(&batch);
-                scene.observe(&batch)?;
+                if runtime.is_none() {
+                    runtime = Some(
+                        PersistentBackendRuntime::new(
+                            &outputs,
+                            &batch.transactions,
+                            native_scanout.as_mut(),
+                            None,
+                        )?
+                        .with_protocol_router(protocol_router.clone())
+                        .with_m4_proof_controls(
+                            config.m4_first_acquire_delay,
+                            config.m4_reject_first_present,
+                            config.m4_diagnose_first_mixed_export,
+                        ),
+                    );
+                }
+                let runtime = runtime
+                    .as_mut()
+                    .expect("persistent backend runtime was initialized above");
+                let prepared = if batch.present_submissions.is_empty() {
+                    runtime.observe_presentation_resources(&batch)?;
+                    Some(runtime.prepare_authority_transactions(
+                        batch.transaction,
+                        &batch.transactions,
+                        &batch.removed_surfaces,
+                    )?)
+                } else {
+                    None
+                };
+                let committed_surfaces = prepared.as_ref().map_or_else(
+                    || runtime.committed_surfaces().to_vec(),
+                    |prepared| prepared.committed_surfaces.clone(),
+                );
+                scene.observe(&batch, &committed_surfaces)?;
+                let raised_surface = focus.focused_surface(seat);
                 let report = if defer_cpu_frame {
                     coalesced_batches = coalesced_batches.saturating_add(1);
                     scene
@@ -2754,7 +2794,9 @@ fn run_session_loop(
                         .ok_or("software redraw coalescing has no prior composed frame")?
                 } else {
                     let compose_started = Instant::now();
-                    let report = scene.compose(pointer.position)?.clone();
+                    let report = scene
+                        .compose(&committed_surfaces, raised_surface, pointer.position)?
+                        .clone();
                     max_compose = max_compose.max(compose_started.elapsed());
                     cpu_compositions = cpu_compositions.saturating_add(1);
                     report
@@ -2762,7 +2804,7 @@ fn run_session_loop(
                 if let (Some(surface), Some(before_surface)) =
                     (input_surface, input_surface_generation)
                     && scene
-                        .surface_buffer_generation(surface)
+                        .surface_buffer_generation(&committed_surfaces, surface)
                         .is_some_and(|generation| generation != before_surface)
                 {
                     input_surface_pixel_change = true;
@@ -2789,35 +2831,35 @@ fn run_session_loop(
                     pointer_pixel_change = true;
                 }
 
-                if runtime.is_none() {
-                    runtime = Some(
-                        PersistentBackendRuntime::new(
-                            &outputs,
-                            &batch.transactions,
-                            native_scanout.as_mut(),
-                            native_frames.clone(),
-                        )?
-                        .with_protocol_router(protocol_router.clone())
-                        .with_m4_proof_controls(
-                            config.m4_first_acquire_delay,
-                            config.m4_reject_first_present,
-                            config.m4_diagnose_first_mixed_export,
-                        ),
-                    );
+                if let (Some(native_scanout), Some(frames)) =
+                    (native_scanout.as_mut(), native_frames.as_ref())
+                {
+                    runtime.initialize_native_scanout(native_scanout, frames)?;
                 }
-                let runtime = runtime
-                    .as_mut()
-                    .expect("persistent backend runtime was initialized above");
-                let tick = runtime.run_batch(
-                    &batch,
-                    if defer_cpu_frame {
-                        None
-                    } else {
-                        native_scanout.as_mut()
-                    },
-                    native_frames,
-                    wm_update,
-                )?;
+
+                let tick = match prepared {
+                    Some(prepared) => runtime.run_prepared_authority_transactions(
+                        prepared,
+                        authority_transaction_count(&batch.transactions),
+                        if defer_cpu_frame {
+                            None
+                        } else {
+                            native_scanout.as_mut()
+                        },
+                        native_frames,
+                        wm_update,
+                    )?,
+                    None => runtime.run_batch(
+                        &batch,
+                        if defer_cpu_frame {
+                            None
+                        } else {
+                            native_scanout.as_mut()
+                        },
+                        native_frames,
+                        wm_update,
+                    )?,
+                };
                 backend_ticks = backend_ticks.saturating_add(1);
                 runtime_committed = record_runtime_commits(
                     runtime_committed,
@@ -2871,14 +2913,12 @@ fn run_session_loop(
                                 }
                             })?;
                         focused_client_control = Some((transaction, surface.surface));
-                        scene.raise_surface(surface.surface);
                     }
                 }
                 if let Some((transaction, surface)) = layout.focus_to_apply.take()
                     && focus.focus_surface(seat, surface, runtime.committed_surfaces())
                         == InputFocusDecision::Focused
                 {
-                    scene.raise_surface(surface);
                     println!(
                         "sophia_live_wm schema=1 status=focus_committed transaction={} target=surface",
                         transaction.raw()
@@ -2892,7 +2932,7 @@ fn run_session_loop(
                 }
                 if !terminal_content_ready
                     && let Some(surface) = focus.focused_surface(seat)
-                    && scene.surface_has_visual_detail(surface)
+                    && scene.surface_has_visual_detail(runtime.committed_surfaces(), surface)
                 {
                     terminal_content_ready = true;
                     startup_ready_msec = Some(started.elapsed().as_millis());
@@ -3039,8 +3079,11 @@ fn run_session_loop(
                 .and_then(|native| native.heads.first())
                 .map(|head| head.presented_submissions);
             input_surface = focus.focused_surface(seat);
-            input_surface_generation =
-                input_surface.and_then(|surface| scene.surface_buffer_generation(surface));
+            input_surface_generation = input_surface.and_then(|surface| {
+                runtime.as_ref().and_then(|runtime| {
+                    scene.surface_buffer_generation(runtime.committed_surfaces(), surface)
+                })
+            });
             if let Some(text) = config.inject_text.as_deref() {
                 let events = synthetic_text_input_events(text)?;
                 let expected = events.len();
@@ -3538,6 +3581,7 @@ fn run_session_loop(
 
 struct PersistentOutputRuntime {
     runtime: sophia_backend_live::LiveBackendRuntimeAssembly,
+    native_initialized: bool,
 }
 
 #[derive(Clone)]
@@ -3582,6 +3626,12 @@ struct QueuedGpuPresentation {
 struct SubmittedGpuPresentation {
     transaction: TransactionId,
     prepared: BTreeMap<OutputId, sophia_engine::PreparedSurfaceCommit>,
+}
+
+struct PreparedAuthorityBatch {
+    authority_commits: Vec<TransactionCommit>,
+    committed_surfaces: Vec<CommittedSurfaceState>,
+    active_transactions: Vec<SurfaceTransaction>,
 }
 
 impl PersistentBackendRuntime {
@@ -3643,6 +3693,7 @@ impl PersistentBackendRuntime {
                     assembly, output, renderer,
                 )
                 .with_persistent_rendered_primary_plane_scanout();
+            let mut native_initialized = native_scanout.is_none();
             if let Some(native_scanout) = native_scanout.as_deref_mut() {
                 runtime = runtime.with_page_flip_callback_queue(
                     sophia_backend_live::LivePageFlipCallbackQueue::new(
@@ -3654,15 +3705,18 @@ impl PersistentBackendRuntime {
                 if !runtime.configure_native_output_selection(output.id, selection) {
                     return Err("persistent native output selection was not registered".into());
                 }
-                native_scanout.initialize(
-                    index,
-                    &mut runtime,
-                    initial_native_frames
-                        .next()
-                        .ok_or("persistent native scanout has no initial CPU frame")?,
-                )?;
+                if let Some(initial_frame) = initial_native_frames.next() {
+                    native_scanout.initialize(index, &mut runtime, initial_frame)?;
+                    native_initialized = true;
+                }
             }
-            output_runtimes.insert(output.id, PersistentOutputRuntime { runtime });
+            output_runtimes.insert(
+                output.id,
+                PersistentOutputRuntime {
+                    runtime,
+                    native_initialized,
+                },
+            );
         }
         Ok(Self {
             outputs: output_runtimes,
@@ -3686,6 +3740,23 @@ impl PersistentBackendRuntime {
             present_controlled_rejections: 0,
             diagnose_first_mixed_export: false,
         })
+    }
+
+    fn initialize_native_scanout(
+        &mut self,
+        native_scanout: &mut PersistentNativeScanout,
+        frames: &[ObservedComposedFrame],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if frames.len() != self.outputs.len() {
+            return Err("persistent native initialization frame count mismatch".into());
+        }
+        for (index, output) in self.outputs.values_mut().enumerate() {
+            if !output.native_initialized {
+                native_scanout.initialize(index, &mut output.runtime, frames[index].clone())?;
+                output.native_initialized = true;
+            }
+        }
+        Ok(())
     }
 
     fn with_protocol_router(mut self, router: XServerFrontendProtocolRouter) -> Self {
@@ -3999,16 +4070,12 @@ impl PersistentBackendRuntime {
             .saturating_add(report.failed_idle_fences);
     }
 
-    fn run_authority_transactions(
+    fn prepare_authority_transactions(
         &mut self,
         transaction_id: TransactionId,
         transactions: &[SurfaceTransaction],
         removed_surfaces: &[SurfaceId],
-        event_count: usize,
-        mut native_scanout: Option<&mut PersistentNativeScanout>,
-        native_frames: Option<Vec<ObservedComposedFrame>>,
-        wm_update: Option<WmTransactionUpdate>,
-    ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
+    ) -> Result<PreparedAuthorityBatch, Box<dyn std::error::Error>> {
         self.layers
             .retain(|surface, _| !removed_surfaces.contains(surface));
         for transaction in transactions {
@@ -4017,7 +4084,6 @@ impl PersistentBackendRuntime {
         let intake = AuthorityTransactionIntake::new(transaction_id, transactions.to_vec())
             .with_surface_removals(removed_surfaces.to_vec());
         let active_transactions = self.layers.values().cloned().collect::<Vec<_>>();
-
         let primary_output = self
             .outputs
             .keys()
@@ -4053,18 +4119,32 @@ impl PersistentBackendRuntime {
             let committed = primary.runtime.assembly().committed_surfaces().to_vec();
             (commits, committed)
         };
+        Ok(PreparedAuthorityBatch {
+            authority_commits,
+            committed_surfaces,
+            active_transactions,
+        })
+    }
 
+    fn run_prepared_authority_transactions(
+        &mut self,
+        prepared: PreparedAuthorityBatch,
+        event_count: usize,
+        mut native_scanout: Option<&mut PersistentNativeScanout>,
+        native_frames: Option<Vec<ObservedComposedFrame>>,
+        wm_update: Option<WmTransactionUpdate>,
+    ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
         let mut native_frames = native_frames.unwrap_or_default().into_iter();
         let mut first_report = None;
         for (index, output) in self.outputs.values_mut().enumerate() {
             output
                 .runtime
                 .assembly_mut()
-                .replace_committed_surfaces(committed_surfaces.clone());
+                .replace_committed_surfaces(prepared.committed_surfaces.clone());
             let input = compositor_tick_input(
-                &active_transactions,
+                &prepared.active_transactions,
                 event_count,
-                authority_commits.clone(),
+                prepared.authority_commits.clone(),
                 wm_update.clone(),
             );
             let report = match native_scanout.as_deref_mut() {
@@ -4085,6 +4165,27 @@ impl PersistentBackendRuntime {
             }
         }
         first_report.ok_or_else(|| "persistent backend runtime has no outputs".into())
+    }
+
+    fn run_authority_transactions(
+        &mut self,
+        transaction_id: TransactionId,
+        transactions: &[SurfaceTransaction],
+        removed_surfaces: &[SurfaceId],
+        event_count: usize,
+        native_scanout: Option<&mut PersistentNativeScanout>,
+        native_frames: Option<Vec<ObservedComposedFrame>>,
+        wm_update: Option<WmTransactionUpdate>,
+    ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
+        let prepared =
+            self.prepare_authority_transactions(transaction_id, transactions, removed_surfaces)?;
+        self.run_prepared_authority_transactions(
+            prepared,
+            event_count,
+            native_scanout,
+            native_frames,
+            wm_update,
+        )
     }
 
     fn run_committed_snapshot(
@@ -5438,8 +5539,6 @@ fn renderer_cpu_buffer_update(
 struct PersistentCpuScene {
     output_size: Size,
     buffers: sophia_backend_live::LiveCpuBufferRegistry,
-    surfaces: BTreeMap<SurfaceId, (Rect, u64)>,
-    raised_surface: Option<SurfaceId>,
     last_report: Option<sophia_backend_live::LiveCpuCompositionReport>,
     max_nonzero_pixel_bytes: usize,
     nonzero_frames: usize,
@@ -5450,8 +5549,6 @@ impl PersistentCpuScene {
         Self {
             output_size,
             buffers: sophia_backend_live::LiveCpuBufferRegistry::new(),
-            surfaces: BTreeMap::new(),
-            raised_surface: None,
             last_report: None,
             max_nonzero_pixel_bytes: 0,
             nonzero_frames: 0,
@@ -5461,62 +5558,51 @@ impl PersistentCpuScene {
     fn observe(
         &mut self,
         batch: &XAuthorityObservedTransactionBatch,
+        committed_surfaces: &[CommittedSurfaceState],
     ) -> Result<(), Box<dyn std::error::Error>> {
-        for surface in &batch.removed_surfaces {
-            self.surfaces.remove(surface);
-            if self.raised_surface == Some(*surface) {
-                self.raised_surface = None;
-            }
-        }
-        let retained_handles = self
-            .surfaces
-            .values()
-            .map(|(_, handle)| *handle)
-            .collect::<BTreeSet<_>>();
-        self.buffers
-            .retain_handles(|handle| retained_handles.contains(&handle));
         for update in &batch.cpu_buffer_updates {
             self.buffers
                 .apply(renderer_cpu_buffer_update(update))
                 .map_err(|error| format!("renderer CPU buffer update failed: {error:?}"))?;
         }
-        for transaction in &batch.transactions {
-            if let BufferSource::CpuBuffer { handle } = transaction.target_buffer {
-                self.surfaces
-                    .insert(transaction.surface, (transaction.target_geometry, handle));
-            }
-        }
+        let retained_handles = committed_surfaces
+            .iter()
+            .filter_map(|surface| match surface.buffer {
+                BufferSource::CpuBuffer { handle } => Some(handle),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        self.buffers
+            .retain_handles(|handle| retained_handles.contains(&handle));
         Ok(())
-    }
-
-    fn raise_surface(&mut self, surface: SurfaceId) {
-        if self.surfaces.contains_key(&surface) {
-            self.raised_surface = Some(surface);
-        }
     }
 
     fn compose(
         &mut self,
+        committed_surfaces: &[CommittedSurfaceState],
+        raised_surface: Option<SurfaceId>,
         cursor_position: Option<Point>,
     ) -> Result<&sophia_backend_live::LiveCpuCompositionReport, Box<dyn std::error::Error>> {
-        let mut surface_order = self
-            .surfaces
-            .keys()
-            .copied()
-            .filter(|surface| Some(*surface) != self.raised_surface)
+        let mut surface_order = committed_surfaces
+            .iter()
+            .filter(|surface| Some(surface.surface) != raised_surface)
             .collect::<Vec<_>>();
-        if let Some(surface) = self.raised_surface
-            && self.surfaces.contains_key(&surface)
+        if let Some(raised) = raised_surface
+            && let Some(surface) = committed_surfaces
+                .iter()
+                .find(|surface| surface.surface == raised)
         {
             surface_order.push(surface);
         }
         let layers = surface_order
             .iter()
             .filter_map(|surface| {
-                let (geometry, handle) = self.surfaces.get(surface)?;
-                let buffer = self.buffers.get(*handle)?;
+                let BufferSource::CpuBuffer { handle } = surface.buffer else {
+                    return None;
+                };
+                let buffer = self.buffers.get(handle)?;
                 Some(sophia_backend_live::LiveCpuCompositionLayerRef {
-                    geometry: *geometry,
+                    geometry: surface.geometry,
                     buffer: sophia_backend_live::LiveCpuBufferSourceRef {
                         handle: buffer.handle,
                         size: buffer.size,
@@ -5552,10 +5638,18 @@ impl PersistentCpuScene {
         self.buffers.checksum()
     }
 
-    fn surface_buffer_generation(&self, surface: SurfaceId) -> Option<u64> {
-        let (_, handle) = self.surfaces.get(&surface)?;
-        let buffer = self.buffers.get(*handle)?;
-        Some(buffer.generation)
+    fn surface_buffer_generation(
+        &self,
+        committed_surfaces: &[CommittedSurfaceState],
+        surface: SurfaceId,
+    ) -> Option<u64> {
+        let committed = committed_surfaces
+            .iter()
+            .find(|committed| committed.surface == surface)?;
+        let BufferSource::CpuBuffer { handle } = committed.buffer else {
+            return None;
+        };
+        Some(self.buffers.get(handle)?.generation)
     }
 
     /// Returns true only when the focused surface contains at least two
@@ -5563,11 +5657,21 @@ impl PersistentCpuScene {
     /// uniform background buffer; its prompt or cursor introduces visual
     /// detail once the terminal side is ready for input. Inspecting the
     /// focused surface avoids treating another client's draw as readiness.
-    fn surface_has_visual_detail(&self, surface: SurfaceId) -> bool {
-        let Some((_, handle)) = self.surfaces.get(&surface) else {
+    fn surface_has_visual_detail(
+        &self,
+        committed_surfaces: &[CommittedSurfaceState],
+        surface: SurfaceId,
+    ) -> bool {
+        let Some(committed) = committed_surfaces
+            .iter()
+            .find(|committed| committed.surface == surface)
+        else {
             return false;
         };
-        let Some(buffer) = self.buffers.get(*handle) else {
+        let BufferSource::CpuBuffer { handle } = committed.buffer else {
+            return false;
+        };
+        let Some(buffer) = self.buffers.get(handle) else {
             return false;
         };
         let Ok(width) = usize::try_from(buffer.size.width) else {
@@ -6423,9 +6527,9 @@ mod tests {
             width: 4,
             height: 1,
         });
-        scene.surfaces.insert(
-            focused,
-            (
+        let committed = vec![
+            test_committed_cpu_surface(
+                focused,
                 Rect {
                     x: 0,
                     y: 0,
@@ -6434,10 +6538,8 @@ mod tests {
                 },
                 1,
             ),
-        );
-        scene.surfaces.insert(
-            secondary,
-            (
+            test_committed_cpu_surface(
+                secondary,
                 Rect {
                     x: 2,
                     y: 0,
@@ -6446,7 +6548,7 @@ mod tests {
                 },
                 2,
             ),
-        );
+        ];
         scene
             .buffers
             .apply(sophia_backend_live::LiveCpuBufferUpdate::Replace(
@@ -6460,8 +6562,8 @@ mod tests {
             ))
             .unwrap();
 
-        assert!(!scene.surface_has_visual_detail(focused));
-        assert!(scene.surface_has_visual_detail(secondary));
+        assert!(!scene.surface_has_visual_detail(&committed, focused));
+        assert!(scene.surface_has_visual_detail(&committed, secondary));
 
         scene
             .buffers
@@ -6469,7 +6571,7 @@ mod tests {
                 test_cpu_buffer(1, [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0xff]),
             ))
             .unwrap();
-        assert!(scene.surface_has_visual_detail(focused));
+        assert!(scene.surface_has_visual_detail(&committed, focused));
     }
 
     #[test]
@@ -6486,8 +6588,10 @@ mod tests {
             width: 2,
             height: 1,
         });
-        scene.surfaces.insert(focused, (geometry, 1));
-        scene.surfaces.insert(secondary, (geometry, 2));
+        let committed = vec![
+            test_committed_cpu_surface(focused, geometry, 1),
+            test_committed_cpu_surface(secondary, geometry, 2),
+        ];
         let focused_pixels = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
         let secondary_pixels = [0, 0, 0, 0xff, 0, 0, 0, 0xff];
         scene
@@ -6504,14 +6608,31 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            scene.compose(None).unwrap().frame.bytes,
+            scene.compose(&committed, None, None).unwrap().frame.bytes,
             secondary_pixels.to_vec()
         );
-        scene.raise_surface(focused);
         assert_eq!(
-            scene.compose(None).unwrap().frame.bytes,
+            scene
+                .compose(&committed, Some(focused), None)
+                .unwrap()
+                .frame
+                .bytes,
             focused_pixels.to_vec()
         );
+    }
+
+    fn test_committed_cpu_surface(
+        surface: SurfaceId,
+        geometry: Rect,
+        handle: u64,
+    ) -> CommittedSurfaceState {
+        CommittedSurfaceState {
+            surface,
+            committed_generation: 1,
+            geometry,
+            buffer: BufferSource::CpuBuffer { handle },
+            damage: Region::single(geometry),
+        }
     }
 
     fn test_cpu_buffer(handle: u64, bytes: [u8; 8]) -> sophia_backend_live::LiveCpuBufferSource {
