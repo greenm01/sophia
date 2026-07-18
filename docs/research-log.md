@@ -1362,5 +1362,7 @@ run without the centralized late-discovery bridge correctly rejected the second
 xterm generations as stale; retaining that fail-closed evidence drove the fix.
 Confined GTK then passed 54 SHM transactions, exact text and pointer evidence,
 normal exit, `first_error=none`, 108 submissions, 106 retirements, and clean
-resource shutdown. Composition still uses the CLI scene table and runs before
+resource shutdown. Classic GTK passed the same application contract, and the
+emergency profile flushed all five routed chord deliveries before clean shutdown
+in 178 ms. Composition still uses the CLI scene table and runs before
 this commit phase; the next slice must compose from the coordinator snapshot.
