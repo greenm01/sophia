@@ -1,33 +1,37 @@
-use sophia_engine::ProductionPresentationAdapter;
+use sophia_engine::{ProductionPresentationAdapter, ProductionRetirement};
 use sophia_protocol::CommittedSurfaceState;
 
-pub struct LiveProductionPresentationAdapter<Compose, SubmitRetire, Feedback> {
+pub struct LiveProductionPresentationAdapter<Compose, Submit, Retire, Feedback> {
     compose: Compose,
-    submit_retire: SubmitRetire,
+    submit: Submit,
+    retire: Retire,
     feedback: Feedback,
 }
 
-impl<Compose, SubmitRetire, Feedback>
-    LiveProductionPresentationAdapter<Compose, SubmitRetire, Feedback>
+impl<Compose, Submit, Retire, Feedback>
+    LiveProductionPresentationAdapter<Compose, Submit, Retire, Feedback>
 {
-    pub const fn new(compose: Compose, submit_retire: SubmitRetire, feedback: Feedback) -> Self {
+    pub const fn new(compose: Compose, submit: Submit, retire: Retire, feedback: Feedback) -> Self {
         Self {
             compose,
-            submit_retire,
+            submit,
+            retire,
             feedback,
         }
     }
 }
 
-impl<Compose, SubmitRetire, Feedback, Frame, Retirement, Evidence, Error>
+impl<Compose, Submit, Retire, Feedback, Frame, Submission, Retirement, Evidence, Error>
     ProductionPresentationAdapter
-    for LiveProductionPresentationAdapter<Compose, SubmitRetire, Feedback>
+    for LiveProductionPresentationAdapter<Compose, Submit, Retire, Feedback>
 where
     Compose: FnMut(u64, &[CommittedSurfaceState]) -> Result<Frame, Error>,
-    SubmitRetire: FnMut(u64, Frame) -> Result<Retirement, Error>,
+    Submit: FnMut(u64, Frame) -> Result<Submission, Error>,
+    Retire: FnMut() -> Result<Vec<ProductionRetirement<Retirement>>, Error>,
     Feedback: FnMut(u64, Retirement) -> Result<Evidence, Error>,
 {
     type Frame = Frame;
+    type Submission = Submission;
     type Retirement = Retirement;
     type Evidence = Evidence;
     type Error = Error;
@@ -40,12 +44,18 @@ where
         (self.compose)(cycle, committed)
     }
 
-    fn submit_and_retire(
+    fn submit_frame(
         &mut self,
         cycle: u64,
         frame: Self::Frame,
-    ) -> Result<Self::Retirement, Self::Error> {
-        (self.submit_retire)(cycle, frame)
+    ) -> Result<Self::Submission, Self::Error> {
+        (self.submit)(cycle, frame)
+    }
+
+    fn poll_retirements(
+        &mut self,
+    ) -> Result<Vec<ProductionRetirement<Self::Retirement>>, Self::Error> {
+        (self.retire)()
     }
 
     fn route_protocol_feedback(

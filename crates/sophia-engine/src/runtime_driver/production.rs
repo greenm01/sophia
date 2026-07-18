@@ -6,12 +6,14 @@ pub enum ProductionSessionPhase {
     AuthorityIntake,
     EngineCommitPreparation,
     FrameComposition,
-    KmsSubmitRetire,
+    KmsSubmit,
+    KmsRetire,
     ProtocolFeedback,
 }
 
 pub trait ProductionPresentationAdapter {
     type Frame;
+    type Submission;
     type Retirement;
     type Evidence;
     type Error;
@@ -22,11 +24,15 @@ pub trait ProductionPresentationAdapter {
         committed: &[CommittedSurfaceState],
     ) -> Result<Self::Frame, Self::Error>;
 
-    fn submit_and_retire(
+    fn submit_frame(
         &mut self,
         cycle: u64,
         frame: Self::Frame,
-    ) -> Result<Self::Retirement, Self::Error>;
+    ) -> Result<Self::Submission, Self::Error>;
+
+    fn poll_retirements(
+        &mut self,
+    ) -> Result<Vec<ProductionRetirement<Self::Retirement>>, Self::Error>;
 
     fn route_protocol_feedback(
         &mut self,
@@ -35,12 +41,19 @@ pub trait ProductionPresentationAdapter {
     ) -> Result<Self::Evidence, Self::Error>;
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProductionRetirement<Retirement> {
+    pub cycle: u64,
+    pub retirement: Retirement,
+}
+
 #[derive(Clone, Debug, PartialEq)]
-pub struct ProductionSessionCycleReport<Evidence> {
+pub struct ProductionSessionCycleReport<Submission, Evidence> {
     pub cycle: u64,
     pub authority_commits: Vec<TransactionCommit>,
     pub committed_surfaces: Vec<CommittedSurfaceState>,
-    pub evidence: Evidence,
+    pub submission: Submission,
+    pub evidence: Vec<Evidence>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -108,7 +121,10 @@ impl ProductionSessionCoordinator {
         &mut self,
         authority_batches: &[AuthorityTransactionIntake],
         adapter: &mut A,
-    ) -> Result<ProductionSessionCycleReport<A::Evidence>, ProductionSessionCycleError<A::Error>>
+    ) -> Result<
+        ProductionSessionCycleReport<A::Submission, A::Evidence>,
+        ProductionSessionCycleError<A::Error>,
+    >
     where
         A: ProductionPresentationAdapter,
     {
@@ -124,25 +140,40 @@ impl ProductionSessionCoordinator {
                 phase: ProductionSessionPhase::FrameComposition,
                 source,
             })?;
-        let retirement = adapter.submit_and_retire(cycle, frame).map_err(|source| {
-            ProductionSessionCycleError {
-                cycle,
-                phase: ProductionSessionPhase::KmsSubmitRetire,
-                source,
-            }
-        })?;
-        let evidence = adapter
-            .route_protocol_feedback(cycle, retirement)
-            .map_err(|source| ProductionSessionCycleError {
-                cycle,
-                phase: ProductionSessionPhase::ProtocolFeedback,
-                source,
-            })?;
+        let submission =
+            adapter
+                .submit_frame(cycle, frame)
+                .map_err(|source| ProductionSessionCycleError {
+                    cycle,
+                    phase: ProductionSessionPhase::KmsSubmit,
+                    source,
+                })?;
+        let retirements =
+            adapter
+                .poll_retirements()
+                .map_err(|source| ProductionSessionCycleError {
+                    cycle,
+                    phase: ProductionSessionPhase::KmsRetire,
+                    source,
+                })?;
+        let mut evidence = Vec::with_capacity(retirements.len());
+        for retirement in retirements {
+            evidence.push(
+                adapter
+                    .route_protocol_feedback(retirement.cycle, retirement.retirement)
+                    .map_err(|source| ProductionSessionCycleError {
+                        cycle: retirement.cycle,
+                        phase: ProductionSessionPhase::ProtocolFeedback,
+                        source,
+                    })?,
+            );
+        }
 
         Ok(ProductionSessionCycleReport {
             cycle,
             authority_commits,
             committed_surfaces: self.committed_surfaces.clone(),
+            submission,
             evidence,
         })
     }

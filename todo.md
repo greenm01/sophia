@@ -72,8 +72,11 @@ Current state: authority batches commit exactly once through the production
 coordinator. CPU composition now runs after that commit and consumes its immutable
 committed snapshot; the CLI no longer owns a second surface, geometry, buffer, or
 stacking table. Per-output tick and native submission consume the prepared record.
-The remaining migration is ownership: move runtime/scanout sequencing and exact
-retirement feedback out of `live_session.rs` and behind production adapters.
+The production adapter now separates KMS submission from asynchronous retirement
+polling and carries the originating cycle into feedback, so an unretired frame
+emits no protocol completion. The remaining migration is ownership: wire the live
+runtime/scanout path through that adapter and move its sequencing out of
+`live_session.rs`.
 
 - [ ] Establish `sophia-engine::runtime_driver` as the only production visual
   coordinator. Its ordered phases are bounded authority intake, Engine

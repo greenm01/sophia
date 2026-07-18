@@ -867,10 +867,14 @@ fn wm_supervisor_adapter_restarts_wm_after_runtime_restart_action() {
 struct RecordingProductionAdapter {
     calls: Vec<&'static str>,
     fail_at: Option<&'static str>,
+    pending: Vec<(u64, usize)>,
+    withhold_retirement: bool,
+    feedback_cycles: Vec<u64>,
 }
 
 impl ProductionPresentationAdapter for RecordingProductionAdapter {
     type Frame = usize;
+    type Submission = usize;
     type Retirement = usize;
     type Evidence = usize;
     type Error = &'static str;
@@ -887,24 +891,43 @@ impl ProductionPresentationAdapter for RecordingProductionAdapter {
         Ok(committed.len())
     }
 
-    fn submit_and_retire(
+    fn submit_frame(
         &mut self,
-        _cycle: u64,
+        cycle: u64,
         frame: Self::Frame,
-    ) -> Result<Self::Retirement, Self::Error> {
-        self.calls.push("submit_retire");
-        if self.fail_at == Some("submit_retire") {
-            return Err("submit_retire");
+    ) -> Result<Self::Submission, Self::Error> {
+        self.calls.push("submit");
+        if self.fail_at == Some("submit") {
+            return Err("submit");
         }
+        self.pending.push((cycle, frame));
         Ok(frame)
+    }
+
+    fn poll_retirements(
+        &mut self,
+    ) -> Result<Vec<ProductionRetirement<Self::Retirement>>, Self::Error> {
+        self.calls.push("retire");
+        if self.withhold_retirement {
+            return Ok(Vec::new());
+        }
+        if self.fail_at == Some("retire") {
+            return Err("retire");
+        }
+        Ok(self
+            .pending
+            .drain(..)
+            .map(|(cycle, retirement)| ProductionRetirement { cycle, retirement })
+            .collect())
     }
 
     fn route_protocol_feedback(
         &mut self,
-        _cycle: u64,
+        cycle: u64,
         retirement: Self::Retirement,
     ) -> Result<Self::Evidence, Self::Error> {
         self.calls.push("feedback");
+        self.feedback_cycles.push(cycle);
         if self.fail_at == Some("feedback") {
             return Err("feedback");
         }
@@ -951,14 +974,37 @@ fn production_coordinator_orders_commit_composition_retirement_and_feedback() {
         .run_cycle(&[production_surface_batch(201)], &mut adapter)
         .expect("production cycle should complete");
 
-    assert_eq!(adapter.calls, ["compose", "submit_retire", "feedback"]);
+    assert_eq!(adapter.calls, ["compose", "submit", "retire", "feedback"]);
     assert_eq!(report.cycle, 1);
     assert_eq!(
         report.authority_commits[0].outcome,
         TransactionOutcome::Committed
     );
     assert_eq!(report.committed_surfaces.len(), 1);
-    assert_eq!(report.evidence, 1);
+    assert_eq!(report.submission, 1);
+    assert_eq!(report.evidence, [1]);
+}
+
+#[test]
+fn production_coordinator_routes_delayed_feedback_only_after_a_later_retirement_poll() {
+    let mut coordinator = ProductionSessionCoordinator::new(HeadlessEngine::default());
+    let mut adapter = RecordingProductionAdapter {
+        withhold_retirement: true,
+        ..RecordingProductionAdapter::default()
+    };
+
+    let first = coordinator
+        .run_cycle(&[production_surface_batch(204)], &mut adapter)
+        .expect("submission without a page flip remains in flight");
+    assert!(first.evidence.is_empty());
+    assert!(adapter.feedback_cycles.is_empty());
+
+    adapter.withhold_retirement = false;
+    let second = coordinator
+        .run_cycle(&[], &mut adapter)
+        .expect("later page flip poll should retire queued submissions");
+    assert_eq!(second.evidence, [1, 1]);
+    assert_eq!(adapter.feedback_cycles, [1, 2]);
 }
 
 #[test]
@@ -966,20 +1012,21 @@ fn production_coordinator_never_routes_feedback_before_retirement() {
     let mut coordinator = ProductionSessionCoordinator::new(HeadlessEngine::default());
     let mut adapter = RecordingProductionAdapter {
         calls: Vec::new(),
-        fail_at: Some("submit_retire"),
+        fail_at: Some("retire"),
+        ..RecordingProductionAdapter::default()
     };
 
     let error = coordinator
         .run_cycle(&[production_surface_batch(202)], &mut adapter)
-        .expect_err("retirement failure must fail the cycle");
+        .expect_err("missing retirement must fail the cycle");
 
-    assert_eq!(adapter.calls, ["compose", "submit_retire"]);
+    assert_eq!(adapter.calls, ["compose", "submit", "retire"]);
     assert_eq!(
         error,
         ProductionSessionCycleError {
             cycle: 1,
-            phase: ProductionSessionPhase::KmsSubmitRetire,
-            source: "submit_retire",
+            phase: ProductionSessionPhase::KmsRetire,
+            source: "retire",
         }
     );
     assert_eq!(coordinator.committed_surfaces().len(), 1);
@@ -991,13 +1038,14 @@ fn production_coordinator_reports_feedback_failure_after_retirement() {
     let mut adapter = RecordingProductionAdapter {
         calls: Vec::new(),
         fail_at: Some("feedback"),
+        ..RecordingProductionAdapter::default()
     };
 
     let error = coordinator
         .run_cycle(&[production_surface_batch(203)], &mut adapter)
         .expect_err("feedback failure must remain explicit");
 
-    assert_eq!(adapter.calls, ["compose", "submit_retire", "feedback"]);
+    assert_eq!(adapter.calls, ["compose", "submit", "retire", "feedback"]);
     assert_eq!(error.phase, ProductionSessionPhase::ProtocolFeedback);
     assert_eq!(coordinator.committed_surfaces().len(), 1);
 }
