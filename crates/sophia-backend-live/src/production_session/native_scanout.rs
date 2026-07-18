@@ -6,13 +6,6 @@ mod persistent_native_scanout {
     use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
     use std::time::{Duration, Instant};
 
-    #[derive(Clone)]
-    pub struct LiveProductionComposedFrame {
-        pub frame: LiveCpuComposedFrame,
-        pub checksum: u64,
-        pub nonzero_pixel_bytes: usize,
-    }
-
     pub struct LiveProductionNativeScanout {
         pub groups: Vec<LiveProductionNativeGroup>,
         pub heads: Vec<LiveProductionNativeHead>,
@@ -315,6 +308,41 @@ mod persistent_native_scanout {
             Ok(())
         }
 
+        pub fn retire_ready_and_retry_cleanup(
+            &mut self,
+            index: usize,
+            runtime: &mut crate::LiveBackendRuntimeAssembly,
+        ) -> Result<(), Box<dyn std::error::Error>> {
+            self.retire_ready(index, runtime)?;
+            if runtime.rendered_primary_plane_scanout_cleanup_pending() {
+                let cleanup =
+                    runtime.retry_tracked_rendered_primary_plane_scanout_cleanup(self.card(index));
+                if !cleanup.cleanup_pending {
+                    self.retire_failures = self.retire_failures.saturating_sub(1);
+                }
+            }
+            Ok(())
+        }
+
+        pub fn release_displayed_output(
+            &mut self,
+            index: usize,
+            runtime: &mut crate::LiveBackendRuntimeAssembly,
+        ) -> Result<(), Box<dyn std::error::Error>> {
+            trace_live_native_lifecycle("displayed_scanout_retire_started");
+            let retired = runtime.retire_displayed_rendered_primary_plane_scanout(self.card(index));
+            if retired.cleanup_pending {
+                trace_live_native_lifecycle("displayed_scanout_cleanup_retry_started");
+                let cleanup =
+                    runtime.retry_tracked_rendered_primary_plane_scanout_cleanup(self.card(index));
+                if cleanup.cleanup_pending {
+                    return Err("persistent displayed scanout cleanup remained pending".into());
+                }
+            }
+            trace_live_native_lifecycle("displayed_scanout_owner_released");
+            Ok(())
+        }
+
         pub fn observe_retire(
             &mut self,
             index: usize,
@@ -556,6 +584,4 @@ mod persistent_native_scanout {
 }
 
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
-pub use persistent_native_scanout::{
-    LiveProductionComposedFrame, LiveProductionNativeHead, LiveProductionNativeScanout,
-};
+pub use persistent_native_scanout::{LiveProductionNativeHead, LiveProductionNativeScanout};

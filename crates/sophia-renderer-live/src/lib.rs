@@ -14,6 +14,7 @@ mod cpu_composition;
 mod frame_target;
 mod import;
 mod presentation;
+mod production_cpu_scene;
 mod scanout_buffer;
 
 #[cfg(feature = "egl-probe")]
@@ -29,6 +30,7 @@ pub use cpu_composition::*;
 pub use frame_target::*;
 pub use import::*;
 pub use presentation::*;
+pub use production_cpu_scene::*;
 pub use scanout_buffer::*;
 
 #[cfg(feature = "egl-probe")]

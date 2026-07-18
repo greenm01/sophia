@@ -1,6 +1,8 @@
 use super::prelude::*;
 
-use sophia_backend_live::{LiveProductionComposedFrame, LiveProductionNativeScanout};
+use sophia_backend_live::{
+    LiveProductionComposedFrame, LiveProductionCpuScene, LiveProductionNativeScanout,
+};
 use sophia_cli::emergency_input::{EmergencyChordAction, EmergencyChordState};
 use sophia_cli::input_proof::{PhysicalTextProof, PhysicalTextProofEvent};
 use sophia_cli::resize_transaction::ResizeRollbackCoordinator;
@@ -2096,7 +2098,7 @@ fn run_session_loop(
         .map(LiveProductionNativeScanout::outputs)
         .unwrap_or_else(|| vec![sophia_engine::HeadlessOutput::deterministic()]);
     let output = outputs[0];
-    let mut scene = PersistentCpuScene::new(output.size);
+    let mut scene = LiveProductionCpuScene::new(output.size);
     let mut layout = PersistentLiveLayout::new(
         wm_session.is_some(),
         require_startup_focus.then_some(output.size),
@@ -2265,7 +2267,7 @@ fn run_session_loop(
                     // static terminal after exact text delivery succeeded.
                     if physical_input_pixels_already_changed(
                         injection_checksum,
-                        scene.last_report.as_ref().map(|report| report.checksum),
+                        scene.last_report().map(|report| report.checksum),
                         input_surface_pixel_change,
                     ) {
                         input_pixel_change = true;
@@ -2456,7 +2458,7 @@ fn run_session_loop(
                     "persistent live session timed out waiting for pixels after flushed X11 input: expected={input_events_expected} flushed={input_events_flushed} authority_batches_after_input={} cpu_updates_after_input={} baseline_checksum={injection_checksum:?} final_checksum={:?} baseline_generation={input_surface_generation:?} final_generation={:?} input_surface_pixel_change={input_surface_pixel_change} native_submission_baseline={input_change_submission_baseline:?} native_submissions={} native_callbacks={}",
                     batches.saturating_sub(input_batch_baseline.unwrap_or(batches)),
                     cpu_buffer_updates.saturating_sub(input_cpu_update_baseline.unwrap_or(cpu_buffer_updates)),
-                    scene.last_report.as_ref().map(|report| report.checksum),
+                    scene.last_report().map(|report| report.checksum),
                     input_surface.and_then(|surface| {
                         runtime.as_ref().and_then(|runtime| {
                             scene.surface_buffer_generation(runtime.committed_surfaces(), surface)
@@ -2548,15 +2550,14 @@ fn run_session_loop(
             std::io::stdout().flush()?;
         }
 
-        let input_baseline_presented_before_wait =
-            scene.last_report.as_ref().is_some_and(|report| {
-                report.nonzero_pixel_bytes > 0
-                    && native_scanout.as_ref().is_none_or(|native| {
-                        native.heads.first().is_some_and(|head| {
-                            head.presented_checksum == report.checksum && head.nonzero_exports > 0
-                        })
+        let input_baseline_presented_before_wait = scene.last_report().is_some_and(|report| {
+            report.nonzero_pixel_bytes > 0
+                && native_scanout.as_ref().is_none_or(|native| {
+                    native.heads.first().is_some_and(|head| {
+                        head.presented_checksum == report.checksum && head.nonzero_exports > 0
                     })
-            });
+                })
+        });
         if input_presented_latency.is_none()
             && input_pixel_change
             && let Some(started) = input_proof_started_at
@@ -2609,7 +2610,7 @@ fn run_session_loop(
             if started_at.elapsed() >= Duration::from_millis(SESSION_PHYSICAL_PIXEL_TIMEOUT_MSEC) {
                 return Err(format!(
                     "persistent live session timed out waiting for physical pointer pixels: pointer_observed={physical_pointer_events} pointer_routed={physical_pointer_routed} pointer_baseline={pointer_checksum:?} final_checksum={:?}",
-                    scene.last_report.as_ref().map(|report| report.checksum)
+                    scene.last_report().map(|report| report.checksum)
                 )
                 .into());
             }
@@ -2785,13 +2786,19 @@ fn run_session_loop(
                     || runtime.committed_surfaces().to_vec(),
                     |prepared| prepared.committed_surfaces.clone(),
                 );
-                scene.observe(&batch, &committed_surfaces)?;
+                scene.apply_updates(
+                    batch
+                        .cpu_buffer_updates
+                        .iter()
+                        .map(renderer_cpu_buffer_update),
+                    &committed_surfaces,
+                )?;
                 let raised_surface = focus.focused_surface(seat);
                 let report = if defer_cpu_frame {
                     coalesced_batches = coalesced_batches.saturating_add(1);
                     scene
-                        .last_report
-                        .clone()
+                        .last_report()
+                        .cloned()
                         .ok_or("software redraw coalescing has no prior composed frame")?
                 } else {
                     let compose_started = Instant::now();
@@ -3042,7 +3049,7 @@ fn run_session_loop(
         }
 
         let input_baseline_presented = input_baseline_presented_before_wait
-            || scene.last_report.as_ref().is_some_and(|report| {
+            || scene.last_report().is_some_and(|report| {
                 report.nonzero_pixel_bytes > 0
                     && native_scanout.as_ref().is_none_or(|native| {
                         native.heads.first().is_some_and(|head| {
@@ -3074,7 +3081,7 @@ fn run_session_loop(
             && focused_client_ready
             && terminal_content_ready
         {
-            injection_checksum = scene.last_report.as_ref().map(|report| report.checksum);
+            injection_checksum = scene.last_report().map(|report| report.checksum);
             input_change_submission_baseline = native_scanout
                 .as_ref()
                 .and_then(|native| native.heads.first())
@@ -3211,8 +3218,7 @@ fn run_session_loop(
     }
 
     let report = scene
-        .last_report
-        .as_ref()
+        .last_report()
         .ok_or("persistent live session received no composable X pixels")?;
     if config.input_proof_requested() && input_events_expected != input_events_flushed {
         return Err(format!(
@@ -3332,8 +3338,8 @@ fn run_session_loop(
         runtime_surfaces,
         report.layers_composed,
         report.nonzero_pixel_bytes,
-        scene.max_nonzero_pixel_bytes,
-        scene.nonzero_frames,
+        scene.max_nonzero_pixel_bytes(),
+        scene.nonzero_frames(),
         report.checksum,
         max_compose.as_millis(),
         config.inject_text.is_some(),
@@ -4343,23 +4349,7 @@ impl PersistentBackendRuntime {
                     .runtime
                     .assembly_mut()
                     .replace_committed_surfaces(committed.to_vec());
-                trace_live_native_lifecycle("displayed_scanout_retire_started");
-                let retired = output
-                    .runtime
-                    .retire_displayed_rendered_primary_plane_scanout(native_scanout.card(index));
-                if retired.cleanup_pending {
-                    trace_live_native_lifecycle("displayed_scanout_cleanup_retry_started");
-                    let cleanup = output
-                        .runtime
-                        .retry_tracked_rendered_primary_plane_scanout_cleanup(
-                            native_scanout.card(index),
-                        );
-                    if cleanup.cleanup_pending {
-                        return Err("persistent displayed scanout cleanup remained pending".into());
-                    }
-                }
-                trace_live_native_lifecycle("displayed_scanout_owner_released");
-                Ok(())
+                native_scanout.release_displayed_output(index, &mut output.runtime)
             },
         );
         let _ = production.run_outputs(&mut adapter)?;
@@ -4425,22 +4415,7 @@ impl PersistentBackendRuntime {
                     .runtime
                     .assembly_mut()
                     .replace_committed_surfaces(committed.to_vec());
-                native_scanout.retire_ready(index, &mut output.runtime)?;
-                if output
-                    .runtime
-                    .rendered_primary_plane_scanout_cleanup_pending()
-                {
-                    let cleanup = output
-                        .runtime
-                        .retry_tracked_rendered_primary_plane_scanout_cleanup(
-                            native_scanout.card(index),
-                        );
-                    if !cleanup.cleanup_pending {
-                        native_scanout.retire_failures =
-                            native_scanout.retire_failures.saturating_sub(1);
-                    }
-                }
-                Ok(())
+                native_scanout.retire_ready_and_retry_cleanup(index, &mut output.runtime)
             },
         );
         let _ = production.run_outputs(&mut adapter)?;
@@ -5069,236 +5044,6 @@ fn renderer_cpu_buffer_update(
     }
 }
 
-struct PersistentCpuScene {
-    output_size: Size,
-    buffers: sophia_backend_live::LiveCpuBufferRegistry,
-    last_report: Option<sophia_backend_live::LiveCpuCompositionReport>,
-    max_nonzero_pixel_bytes: usize,
-    nonzero_frames: usize,
-}
-
-impl PersistentCpuScene {
-    fn new(output_size: Size) -> Self {
-        Self {
-            output_size,
-            buffers: sophia_backend_live::LiveCpuBufferRegistry::new(),
-            last_report: None,
-            max_nonzero_pixel_bytes: 0,
-            nonzero_frames: 0,
-        }
-    }
-
-    fn observe(
-        &mut self,
-        batch: &XAuthorityObservedTransactionBatch,
-        committed_surfaces: &[CommittedSurfaceState],
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        for update in &batch.cpu_buffer_updates {
-            self.buffers
-                .apply(renderer_cpu_buffer_update(update))
-                .map_err(|error| format!("renderer CPU buffer update failed: {error:?}"))?;
-        }
-        let retained_handles = committed_surfaces
-            .iter()
-            .filter_map(|surface| match surface.buffer {
-                BufferSource::CpuBuffer { handle } => Some(handle),
-                _ => None,
-            })
-            .collect::<BTreeSet<_>>();
-        self.buffers
-            .retain_handles(|handle| retained_handles.contains(&handle));
-        Ok(())
-    }
-
-    fn compose(
-        &mut self,
-        committed_surfaces: &[CommittedSurfaceState],
-        raised_surface: Option<SurfaceId>,
-        cursor_position: Option<Point>,
-    ) -> Result<&sophia_backend_live::LiveCpuCompositionReport, Box<dyn std::error::Error>> {
-        let mut surface_order = committed_surfaces
-            .iter()
-            .filter(|surface| Some(surface.surface) != raised_surface)
-            .collect::<Vec<_>>();
-        if let Some(raised) = raised_surface
-            && let Some(surface) = committed_surfaces
-                .iter()
-                .find(|surface| surface.surface == raised)
-        {
-            surface_order.push(surface);
-        }
-        let layers = surface_order
-            .iter()
-            .filter_map(|surface| {
-                let BufferSource::CpuBuffer { handle } = surface.buffer else {
-                    return None;
-                };
-                let buffer = self.buffers.get(handle)?;
-                Some(sophia_backend_live::LiveCpuCompositionLayerRef {
-                    geometry: surface.geometry,
-                    buffer: sophia_backend_live::LiveCpuBufferSourceRef {
-                        handle: buffer.handle,
-                        size: buffer.size,
-                        stride: buffer.stride,
-                        format: buffer.format,
-                        generation: buffer.generation,
-                        bytes: &buffer.bytes,
-                    },
-                })
-            })
-            .collect::<Vec<_>>();
-        self.last_report = Some(
-            sophia_backend_live::compose_live_cpu_frame_ref_with_cursor(
-                self.output_size,
-                &layers,
-                cursor_position,
-            )
-            .map_err(|error| format!("persistent CPU composition failed: {error:?}"))?,
-        );
-        let nonzero_pixel_bytes = self
-            .last_report
-            .as_ref()
-            .expect("assigned above")
-            .nonzero_pixel_bytes;
-        self.max_nonzero_pixel_bytes = self.max_nonzero_pixel_bytes.max(nonzero_pixel_bytes);
-        self.nonzero_frames = self
-            .nonzero_frames
-            .saturating_add(usize::from(nonzero_pixel_bytes > 0));
-        Ok(self.last_report.as_ref().expect("assigned above"))
-    }
-
-    fn buffer_checksum(&self) -> u64 {
-        self.buffers.checksum()
-    }
-
-    fn surface_buffer_generation(
-        &self,
-        committed_surfaces: &[CommittedSurfaceState],
-        surface: SurfaceId,
-    ) -> Option<u64> {
-        let committed = committed_surfaces
-            .iter()
-            .find(|committed| committed.surface == surface)?;
-        let BufferSource::CpuBuffer { handle } = committed.buffer else {
-            return None;
-        };
-        Some(self.buffers.get(handle)?.generation)
-    }
-
-    /// Returns true only when the focused surface contains at least two
-    /// visible XRGB pixel values. A newly mapped xterm initially publishes a
-    /// uniform background buffer; its prompt or cursor introduces visual
-    /// detail once the terminal side is ready for input. Inspecting the
-    /// focused surface avoids treating another client's draw as readiness.
-    fn surface_has_visual_detail(
-        &self,
-        committed_surfaces: &[CommittedSurfaceState],
-        surface: SurfaceId,
-    ) -> bool {
-        let Some(committed) = committed_surfaces
-            .iter()
-            .find(|committed| committed.surface == surface)
-        else {
-            return false;
-        };
-        let BufferSource::CpuBuffer { handle } = committed.buffer else {
-            return false;
-        };
-        let Some(buffer) = self.buffers.get(handle) else {
-            return false;
-        };
-        let Ok(width) = usize::try_from(buffer.size.width) else {
-            return false;
-        };
-        let Ok(height) = usize::try_from(buffer.size.height) else {
-            return false;
-        };
-        let Ok(stride) = usize::try_from(buffer.stride) else {
-            return false;
-        };
-        let Some(row_bytes) = width.checked_mul(4) else {
-            return false;
-        };
-        if width == 0 || height == 0 || stride < row_bytes || buffer.bytes.len() < 4 {
-            return false;
-        }
-        let first = &buffer.bytes[..4];
-        (0..height).any(|row| {
-            let Some(start) = row.checked_mul(stride) else {
-                return false;
-            };
-            let Some(end) = start.checked_add(row_bytes) else {
-                return false;
-            };
-            buffer
-                .bytes
-                .get(start..end)
-                .is_some_and(|bytes| bytes.chunks_exact(4).any(|pixel| pixel != first))
-        })
-    }
-
-    fn frames_for_outputs(
-        &self,
-        outputs: &[sophia_engine::HeadlessOutput],
-    ) -> Result<Vec<LiveProductionComposedFrame>, Box<dyn std::error::Error>> {
-        let primary = self
-            .last_report
-            .as_ref()
-            .ok_or("persistent CPU scene has no composed primary frame")?;
-        let mut frames = Vec::with_capacity(outputs.len());
-        for (index, output) in outputs.iter().enumerate() {
-            if index == 0 && output.size == primary.frame.size {
-                frames.push(LiveProductionComposedFrame {
-                    frame: primary.frame.clone(),
-                    checksum: primary.checksum,
-                    nonzero_pixel_bytes: primary.nonzero_pixel_bytes,
-                });
-                continue;
-            }
-            let marker_size = Size {
-                width: output.size.width.min(64).max(1),
-                height: output.size.height.min(64).max(1),
-            };
-            let marker_width = usize::try_from(marker_size.width)?;
-            let marker_height = usize::try_from(marker_size.height)?;
-            let marker_stride = marker_width
-                .checked_mul(4)
-                .ok_or("marker stride overflow")?;
-            let marker_byte = u8::try_from((index + 1).min(255)).unwrap_or(255);
-            let marker = sophia_backend_live::LiveCpuCompositionLayer {
-                geometry: Rect {
-                    x: 0,
-                    y: 0,
-                    width: marker_size.width,
-                    height: marker_size.height,
-                },
-                buffer: sophia_backend_live::LiveCpuBufferSource {
-                    handle: 0x5350_4800u64.saturating_add(index as u64),
-                    size: marker_size,
-                    stride: u32::try_from(marker_stride)?,
-                    format: sophia_backend_live::LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
-                    generation: 1,
-                    bytes: vec![marker_byte; marker_stride.saturating_mul(marker_height)],
-                },
-            };
-            let report = sophia_backend_live::compose_live_cpu_frame(output.size, &[marker])
-                .map_err(|error| format!("secondary output composition failed: {error:?}"))?;
-            frames.push(LiveProductionComposedFrame {
-                frame: report.frame,
-                checksum: report.checksum,
-                nonzero_pixel_bytes: report.nonzero_pixel_bytes,
-            });
-        }
-        Ok(frames)
-    }
-}
-
-fn trace_live_native_lifecycle(stage: &str) {
-    if std::env::var_os("SOPHIA_LIVE_SESSION_DIAGNOSTIC").is_some() {
-        eprintln!("sophia_live_native_lifecycle schema=1 stage={stage}");
-    }
-}
-
 fn synthetic_text_input_events(
     text: &str,
 ) -> Result<Vec<sophia_protocol::InputEventPacket>, Box<dyn std::error::Error>> {
@@ -5677,8 +5422,8 @@ impl Drop for SessionProcessGuard {
 #[cfg(test)]
 mod tests {
     use super::{
-        BufferSource, CommittedSurfaceState, LiveClientStdoutCapture, LiveXAuthorityFile,
-        PRIMARY_INPUT_PROOF_SCRIPT, PersistentBackendRuntime, PersistentCpuScene,
+        BufferSource, CommittedSurfaceState, LiveClientStdoutCapture, LiveProductionCpuScene,
+        LiveXAuthorityFile, PRIMARY_INPUT_PROOF_SCRIPT, PersistentBackendRuntime,
         PersistentXtermSessionConfig, Rect, Region, SECONDARY_POINTER_WITNESS_SCRIPT,
         SessionPointerPlacement, Size, authority_transaction_count,
         center_geometry_without_scaling, cpu_frame_matches_visible_output,
@@ -6056,7 +5801,7 @@ mod tests {
     fn terminal_readiness_is_scoped_to_the_focused_surface() {
         let focused = SurfaceId::new(21, 1);
         let secondary = SurfaceId::new(22, 1);
-        let mut scene = PersistentCpuScene::new(Size {
+        let mut scene = LiveProductionCpuScene::new(Size {
             width: 4,
             height: 1,
         });
@@ -6083,26 +5828,30 @@ mod tests {
             ),
         ];
         scene
-            .buffers
-            .apply(sophia_backend_live::LiveCpuBufferUpdate::Replace(
-                test_cpu_buffer(1, [0xff; 8]),
-            ))
-            .unwrap();
-        scene
-            .buffers
-            .apply(sophia_backend_live::LiveCpuBufferUpdate::Replace(
-                test_cpu_buffer(2, [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0xff]),
-            ))
+            .apply_updates(
+                [
+                    sophia_backend_live::LiveCpuBufferUpdate::Replace(test_cpu_buffer(
+                        1, [0xff; 8],
+                    )),
+                    sophia_backend_live::LiveCpuBufferUpdate::Replace(test_cpu_buffer(
+                        2,
+                        [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0xff],
+                    )),
+                ],
+                &committed,
+            )
             .unwrap();
 
         assert!(!scene.surface_has_visual_detail(&committed, focused));
         assert!(scene.surface_has_visual_detail(&committed, secondary));
 
         scene
-            .buffers
-            .apply(sophia_backend_live::LiveCpuBufferUpdate::Replace(
-                test_cpu_buffer(1, [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0xff]),
-            ))
+            .apply_updates(
+                [sophia_backend_live::LiveCpuBufferUpdate::Replace(
+                    test_cpu_buffer(1, [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0xff]),
+                )],
+                &committed,
+            )
             .unwrap();
         assert!(scene.surface_has_visual_detail(&committed, focused));
     }
@@ -6117,7 +5866,7 @@ mod tests {
             width: 2,
             height: 1,
         };
-        let mut scene = PersistentCpuScene::new(Size {
+        let mut scene = LiveProductionCpuScene::new(Size {
             width: 2,
             height: 1,
         });
@@ -6128,16 +5877,19 @@ mod tests {
         let focused_pixels = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
         let secondary_pixels = [0, 0, 0, 0xff, 0, 0, 0, 0xff];
         scene
-            .buffers
-            .apply(sophia_backend_live::LiveCpuBufferUpdate::Replace(
-                test_cpu_buffer(1, focused_pixels),
-            ))
-            .unwrap();
-        scene
-            .buffers
-            .apply(sophia_backend_live::LiveCpuBufferUpdate::Replace(
-                test_cpu_buffer(2, secondary_pixels),
-            ))
+            .apply_updates(
+                [
+                    sophia_backend_live::LiveCpuBufferUpdate::Replace(test_cpu_buffer(
+                        1,
+                        focused_pixels,
+                    )),
+                    sophia_backend_live::LiveCpuBufferUpdate::Replace(test_cpu_buffer(
+                        2,
+                        secondary_pixels,
+                    )),
+                ],
+                &committed,
+            )
             .unwrap();
 
         assert_eq!(
