@@ -2517,12 +2517,15 @@ fn run_session_loop(
             && let (Some(runtime), Some(native_scanout), Some(position)) =
                 (runtime.as_mut(), native_scanout.as_mut(), pointer.position)
         {
-            let committed = runtime.committed_surfaces().to_vec();
-            let compose_started = Instant::now();
-            let report = scene
-                .compose(&committed, focus.focused_surface(seat), Some(position))?
-                .clone();
-            max_compose = max_compose.max(compose_started.elapsed());
+            let repaint = runtime.run_cpu_repaint(
+                &mut scene,
+                focus.focused_surface(seat),
+                Some(position),
+                &outputs,
+                native_scanout,
+            )?;
+            let report = &repaint.composition;
+            max_compose = max_compose.max(repaint.compose_elapsed);
             cpu_compositions = cpu_compositions.saturating_add(1);
             if pointer_cursor_checksum.is_none() && pointer_checksum.is_none() {
                 pointer_cursor_checksum = Some(report.checksum);
@@ -2532,9 +2535,6 @@ fn run_session_loop(
             {
                 pointer_pixel_change = true;
             }
-            let frames = scene.frames_for_outputs(&outputs)?;
-            let _ =
-                runtime.run_committed_snapshot(&committed, Some(native_scanout), Some(frames))?;
             backend_ticks = backend_ticks.saturating_add(1);
             cursor_dirty = false;
         }
@@ -4168,6 +4168,55 @@ impl PersistentBackendRuntime {
         Ok(report)
     }
 
+    fn run_cpu_repaint(
+        &mut self,
+        scene: &mut LiveProductionCpuScene,
+        raised_surface: Option<SurfaceId>,
+        cursor_position: Option<Point>,
+        output_descriptors: &[sophia_engine::HeadlessOutput],
+        native_scanout: &mut LiveProductionNativeScanout,
+    ) -> Result<CpuProductionSubmission, Box<dyn std::error::Error>> {
+        let committed = self.production.committed_surfaces().to_vec();
+        let compose_started = Instant::now();
+        let composition = scene
+            .compose(&committed, raised_surface, cursor_position)?
+            .clone();
+        let frames = scene.frames_for_outputs(output_descriptors)?;
+        self.initialize_native_scanout(native_scanout, &frames)?;
+        let transactions = self.layers.values().cloned().collect::<Vec<_>>();
+        let output_count = self.outputs.output_count();
+        let production = &self.production;
+        let outputs = &mut self.outputs;
+        let mut frames = frames.into_iter();
+        let mut adapter = sophia_backend_live::LiveProductionOutputRuntimeAdapter::new(
+            output_count,
+            |index, snapshot: &[CommittedSurfaceState]| -> Result<_, Box<dyn std::error::Error>> {
+                outputs.run_output(index, snapshot, |runtime| {
+                    if let Some(frame) = frames.next() {
+                        native_scanout.queue_frame(index, frame);
+                    }
+                    let input = compositor_tick_input(&transactions, 0, Vec::new(), None);
+                    Ok(if runtime.rendered_primary_plane_scanout_in_flight() {
+                        runtime.run_tick(input)?
+                    } else {
+                        native_scanout.run_tick(index, runtime, input)?
+                    })
+                })
+            },
+        );
+        let tick = production
+            .run_outputs(&mut adapter)?
+            .into_iter()
+            .next()
+            .ok_or("persistent backend runtime has no outputs")?;
+        Ok(CpuProductionSubmission {
+            tick,
+            composition,
+            composed: true,
+            compose_elapsed: compose_started.elapsed(),
+        })
+    }
+
     fn run_observation_tick(
         &mut self,
     ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
@@ -4315,7 +4364,7 @@ impl PersistentBackendRuntime {
         )
     }
 
-    fn run_committed_snapshot(
+    fn run_wayland_maintenance_snapshot(
         &mut self,
         committed_surfaces: &[CommittedSurfaceState],
         mut native_scanout: Option<&mut LiveProductionNativeScanout>,
@@ -4653,7 +4702,7 @@ impl WaylandNativeSession {
         }
         let runtime = self.runtime.as_mut().expect("checked above");
         let submissions_before = self.scanout.heads[0].submissions;
-        let _ = runtime.run_committed_snapshot(
+        let _ = runtime.run_wayland_maintenance_snapshot(
             committed_surfaces,
             Some(&mut self.scanout),
             Some(frames),
@@ -4712,8 +4761,11 @@ impl WaylandNativeSession {
         trace_native_dmabuf_lifecycle("client_frame_retained");
         let runtime = self.runtime.as_mut().expect("initialized above");
         let submissions_before = self.scanout.heads[0].submissions;
-        let _ =
-            runtime.run_committed_snapshot(committed_surfaces, Some(&mut self.scanout), None)?;
+        let _ = runtime.run_wayland_maintenance_snapshot(
+            committed_surfaces,
+            Some(&mut self.scanout),
+            None,
+        )?;
         let head = &self.scanout.heads[0];
         if head.submissions > submissions_before {
             trace_native_dmabuf_lifecycle("kms_submitted");
@@ -6082,7 +6134,7 @@ mod tests {
         .unwrap();
 
         let report = runtime
-            .run_committed_snapshot(&committed, None, None)
+            .run_wayland_maintenance_snapshot(&committed, None, None)
             .unwrap();
 
         assert_eq!(runtime.committed_surfaces(), committed);

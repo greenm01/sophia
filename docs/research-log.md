@@ -1714,3 +1714,20 @@ selection, exited normally with `first_error=none`, and retired both virtio-gpu 
 zero cleanup debt. Strict two-xterm also passed in 6,989 ms with 117 of 117 authority
 transactions, 40 submissions, 38 retirements, and zero phase or cleanup debt. The remaining
 Milestone 5 promotion gate is the deliberately operator-driven paired physical X13 capture.
+
+
+## 2026-07-18: Production X Cursor Repaint Stops Replacing Engine State
+
+The physical-pointer cursor repaint no longer composes frames in the outer X session loop or
+calls the legacy committed-snapshot replacement entry point. A visual-runtime repaint method
+reads the production coordinator snapshot, asks renderer-live to compose the cursor, creates
+per-output frames, and submits them through the backend-owned output runtime set. The remaining
+snapshot replacement API is named and called only by the Wayland maintenance adapter and its
+regression; production X has no caller.
+
+The full CLI all-feature suite passes. On the rebuilt X13 QEMU image, strict two-xterm completed
+in 6,941 ms with 120 of 120 transactions, exact keyboard and pointer proofs, 42 submissions,
+40 retirements, and zero cleanup debt. Resize-enabled classic and confined GTK accepted exact
+text and pointer selection, committed 640x360 CPU\/SHM redraws, exited normally with
+`first_error=none`, and cleanly retired both outputs. The guarded native mixed diagnostic
+exported one CPU and one DMA-BUF layer with zero live sources, fences, or transactions.
