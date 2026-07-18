@@ -3634,7 +3634,7 @@ struct QueuedGpuPresentation {
 
 struct SubmittedGpuPresentation {
     transaction: TransactionId,
-    prepared: BTreeMap<OutputId, sophia_engine::PreparedSurfaceCommit>,
+    prepared: sophia_engine::PreparedSurfaceCommit,
 }
 
 struct PreparedAuthorityBatch {
@@ -3936,25 +3936,26 @@ impl PersistentBackendRuntime {
             return self.run_observation_tick();
         }
 
-        let mut prepared = BTreeMap::new();
-        for (output_id, output) in &self.outputs {
-            let assembly = output.runtime.assembly();
-            let transactions =
-                sophia_cli::presentation_transaction::rebase_full_state_present_transactions(
-                    &queued.transactions,
-                    assembly.committed_surfaces(),
-                );
-            let candidate = assembly.engine().prepare_surface_transactions(
-                transaction,
-                &transactions,
+        let primary = self
+            .outputs
+            .values()
+            .next()
+            .ok_or("persistent backend runtime has no outputs")?;
+        let assembly = primary.runtime.assembly();
+        let transactions =
+            sophia_cli::presentation_transaction::rebase_full_state_present_transactions(
+                &queued.transactions,
                 assembly.committed_surfaces(),
             );
-            if !candidate.is_ready() {
-                self.queued_gpu_presentations.pop_front();
-                self.reject_gpu_presentation(transaction, 0, 0);
-                return self.run_observation_tick();
-            }
-            prepared.insert(*output_id, candidate);
+        let prepared = assembly.engine().prepare_surface_transactions(
+            transaction,
+            &transactions,
+            assembly.committed_surfaces(),
+        );
+        if !prepared.is_ready() {
+            self.queued_gpu_presentations.pop_front();
+            self.reject_gpu_presentation(transaction, 0, 0);
+            return self.run_observation_tick();
         }
         let mixed = self.presentation_feedback.resources().build_mixed_frame(
             transaction,
@@ -4405,18 +4406,24 @@ impl PersistentBackendRuntime {
         let Some(submitted) = self.submitted_gpu_presentation.take() else {
             return Ok(());
         };
-        for (output_id, prepared) in submitted.prepared {
-            let output = self
-                .outputs
-                .get_mut(&output_id)
-                .ok_or("prepared presentation referenced an unknown output")?;
-            let commit = output
+        let primary = self
+            .outputs
+            .values_mut()
+            .next()
+            .ok_or("persistent backend runtime has no outputs")?;
+        let commit = primary
+            .runtime
+            .assembly_mut()
+            .apply_prepared_surface_commit(submitted.prepared);
+        if commit.outcome != TransactionOutcome::Committed {
+            return Err("page flip could not apply its prepared Engine commit".into());
+        }
+        let committed = primary.runtime.assembly().committed_surfaces().to_vec();
+        for output in self.outputs.values_mut().skip(1) {
+            output
                 .runtime
                 .assembly_mut()
-                .apply_prepared_surface_commit(prepared);
-            if commit.outcome != TransactionOutcome::Committed {
-                return Err("page flip could not apply its prepared Engine commit".into());
-            }
+                .replace_committed_surfaces(committed.clone());
         }
         let outcome = self
             .presentation_feedback

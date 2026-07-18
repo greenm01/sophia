@@ -80,8 +80,11 @@ cycle-correlated feedback records; the CLI no longer owns those state tables.
 The backend feedback coordinator now retires presentation resources before it
 emits paired reduced Complete/Idle outcomes; missing presentations fail closed
 with no protocol event. The CLI only translates those outcomes to X wire events.
-The remaining migration is to make the production adapter own runtime/scanout
-invocation and prepared Engine commit application itself.
+A retired GPU Present is now prepared and committed once through the primary production
+coordinator, then its immutable snapshot is projected to the remaining outputs; it is no
+longer prepared and applied independently per output. The remaining migration is to make
+the production adapter own runtime/scanout invocation and trigger that prepared commit
+from its matching retirement rather than from CLI sequencing.
 
 - [ ] Establish `sophia-engine::runtime_driver` as the only production visual
   coordinator. Its ordered phases are bounded authority intake, Engine
