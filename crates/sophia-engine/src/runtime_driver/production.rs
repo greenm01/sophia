@@ -86,6 +86,18 @@ impl ProductionSessionCoordinator {
         self.committed_surfaces = committed_surfaces;
     }
 
+    /// Commits one bounded authority intake phase and retains the resulting
+    /// immutable visual snapshot for composition and per-output projection.
+    pub fn commit_authority_batches(
+        &mut self,
+        authority_batches: &[AuthorityTransactionIntake],
+    ) -> Vec<TransactionCommit> {
+        authority_batches
+            .iter()
+            .map(|batch| batch.commit(&self.engine, &mut self.committed_surfaces))
+            .collect()
+    }
+
     pub(crate) fn engine_and_committed_surfaces_mut(
         &mut self,
     ) -> (&HeadlessEngine, &mut Vec<CommittedSurfaceState>) {
@@ -103,10 +115,7 @@ impl ProductionSessionCoordinator {
         let cycle = self.next_cycle;
         self.next_cycle = self.next_cycle.saturating_add(1);
 
-        let authority_commits = authority_batches
-            .iter()
-            .map(|batch| batch.commit(&self.engine, &mut self.committed_surfaces))
-            .collect();
+        let authority_commits = self.commit_authority_batches(authority_batches);
 
         let frame = adapter
             .compose(cycle, &self.committed_surfaces)

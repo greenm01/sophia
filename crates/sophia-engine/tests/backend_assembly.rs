@@ -68,6 +68,7 @@ fn headless_backend_assembly_drains_input_commits_authority_and_renders_cpu_fram
     let report = assembly
         .run_tick(CompositorBackendTickInput {
             x_event_count: 1,
+            authority_commits: Vec::new(),
             authority_batches: vec![AuthorityTransactionIntake::new(
                 TransactionId::from_raw(90),
                 vec![transaction],

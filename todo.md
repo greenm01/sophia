@@ -68,6 +68,13 @@ Sophia-private presentation path.
 
 ## Milestone 6: Production Session Loop
 
+Current state: authority batches now commit exactly once through the production
+coordinator. The resulting immutable committed snapshot and commit observations
+fan out to every output runtime without per-output inbox replay. Late-discovered
+surfaces are generation-bridged once at that coordinator boundary. Composition
+still precedes this commit and consumes the remaining CLI `SurfaceId` projection;
+splitting commit from frame submission is the next required slice.
+
 - [ ] Establish `sophia-engine::runtime_driver` as the only production visual
   coordinator. Its ordered phases are bounded authority intake, Engine
   commit/preparation, composition from committed state, KMS submit/retire, and

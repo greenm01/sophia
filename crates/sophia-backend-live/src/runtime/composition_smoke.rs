@@ -107,6 +107,7 @@ pub fn run_live_session_composition_smoke(
     let tick = match runtime.run_tick_with_rendered_primary_plane_scanout_with(
         CompositorBackendTickInput {
             x_event_count: u32::try_from(transactions.len()).unwrap_or(u32::MAX),
+            authority_commits: Vec::new(),
             authority_batches: Vec::new(),
             wm_update: None,
             portal_commands: Vec::new(),

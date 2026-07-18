@@ -3538,7 +3538,6 @@ fn run_session_loop(
 
 struct PersistentOutputRuntime {
     runtime: sophia_backend_live::LiveBackendRuntimeAssembly,
-    authority_sender: SyncSender<AuthorityTransactionIntake>,
 }
 
 #[derive(Clone)]
@@ -3630,13 +3629,8 @@ impl PersistentBackendRuntime {
         let mut initial_native_frames = initial_native_frames.unwrap_or_default().into_iter();
         let mut output_runtimes = BTreeMap::new();
         for (index, output) in outputs.iter().copied().enumerate() {
-            let (authority_sender, authority_receiver) = sync_channel(SESSION_AUTHORITY_CAPACITY);
             let assembly = HeadlessCompositorBackendAssembly::new(output)
-                .with_committed_surfaces(committed_surfaces.clone())
-                .with_authority_inbox(AuthorityTransactionInbox::new(
-                    authority_receiver,
-                    SESSION_AUTHORITY_CAPACITY,
-                ));
+                .with_committed_surfaces(committed_surfaces.clone());
             let renderer = sophia_backend_live::LiveRendererRuntimeObservation::from_startup_status(
                 sophia_backend_live::LiveRendererImportStartupStatus::from_path_statuses(
                     sophia_backend_live::LiveRendererImportPathStatus::Disabled,
@@ -3668,13 +3662,7 @@ impl PersistentBackendRuntime {
                         .ok_or("persistent native scanout has no initial CPU frame")?,
                 )?;
             }
-            output_runtimes.insert(
-                output.id,
-                PersistentOutputRuntime {
-                    runtime,
-                    authority_sender,
-                },
-            );
+            output_runtimes.insert(output.id, PersistentOutputRuntime { runtime });
         }
         Ok(Self {
             outputs: output_runtimes,
@@ -3924,7 +3912,7 @@ impl PersistentBackendRuntime {
         let report = native_scanout.run_tick(
             0,
             &mut first_output.runtime,
-            compositor_tick_input(&transactions, 0, None),
+            compositor_tick_input(&transactions, 0, Vec::new(), None),
         )?;
         use sophia_backend_live::LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus as Status;
         match report
@@ -3963,7 +3951,7 @@ impl PersistentBackendRuntime {
             .ok_or("persistent backend runtime has no outputs")?;
         Ok(output
             .runtime
-            .run_tick(compositor_tick_input(&transactions, 0, None))?)
+            .run_tick(compositor_tick_input(&transactions, 0, Vec::new(), None))?)
     }
 
     fn reject_gpu_presentation(&mut self, transaction: TransactionId, ust: u64, msc: u64) {
@@ -4030,35 +4018,55 @@ impl PersistentBackendRuntime {
             .with_surface_removals(removed_surfaces.to_vec());
         let active_transactions = self.layers.values().cloned().collect::<Vec<_>>();
 
-        // The runtime is initialized from the first authority batch.  A later
-        // X client therefore needs a committed-state handoff before its first
-        // incremental transaction can be replayed.  Without this barrier the
-        // engine sees the new surface at generation zero and rejects every
-        // update that raced ahead of the next compositor tick as stale.
-        if transactions.iter().any(|transaction| {
-            !self
-                .committed_surfaces()
-                .iter()
-                .any(|committed| committed.surface == transaction.surface)
-        }) {
-            let committed_surfaces =
-                seed_missing_committed_surfaces(self.committed_surfaces(), &active_transactions);
-            self.prime_committed_surfaces(&committed_surfaces);
-        }
+        let primary_output = self
+            .outputs
+            .keys()
+            .next()
+            .copied()
+            .ok_or("persistent backend runtime has no outputs")?;
+        let (authority_commits, committed_surfaces) = {
+            let primary = self
+                .outputs
+                .get_mut(&primary_output)
+                .expect("primary output was selected from this table");
+            if transactions.iter().any(|transaction| {
+                !primary
+                    .runtime
+                    .assembly()
+                    .committed_surfaces()
+                    .iter()
+                    .any(|committed| committed.surface == transaction.surface)
+            }) {
+                let seeded = seed_missing_committed_surfaces(
+                    primary.runtime.assembly().committed_surfaces(),
+                    &active_transactions,
+                );
+                primary
+                    .runtime
+                    .assembly_mut()
+                    .replace_committed_surfaces(seeded);
+            }
+            let commits = primary
+                .runtime
+                .assembly_mut()
+                .commit_authority_batches(std::slice::from_ref(&intake));
+            let committed = primary.runtime.assembly().committed_surfaces().to_vec();
+            (commits, committed)
+        };
 
         let mut native_frames = native_frames.unwrap_or_default().into_iter();
         let mut first_report = None;
         for (index, output) in self.outputs.values_mut().enumerate() {
             output
-                .authority_sender
-                .try_send(intake.clone())
-                .map_err(|error| match error {
-                    TrySendError::Full(_) => "persistent live backend authority inbox is full",
-                    TrySendError::Disconnected(_) => {
-                        "persistent live backend authority inbox is disconnected"
-                    }
-                })?;
-            let input = compositor_tick_input(&active_transactions, event_count, wm_update.clone());
+                .runtime
+                .assembly_mut()
+                .replace_committed_surfaces(committed_surfaces.clone());
+            let input = compositor_tick_input(
+                &active_transactions,
+                event_count,
+                authority_commits.clone(),
+                wm_update.clone(),
+            );
             let report = match native_scanout.as_deref_mut() {
                 Some(native_scanout) => {
                     if let Some(frame) = native_frames.next() {
@@ -4077,20 +4085,6 @@ impl PersistentBackendRuntime {
             }
         }
         first_report.ok_or_else(|| "persistent backend runtime has no outputs".into())
-    }
-
-    /// Seeds a newly discovered authority surface at the generation immediately
-    /// before its first observed update. The caller must then replay that update
-    /// through the normal authority inbox so the authority generation chain
-    /// remains contiguous.
-    fn prime_committed_surfaces(&mut self, committed_surfaces: &[CommittedSurfaceState]) {
-        self.committed_snapshot_layers = None;
-        for output in self.outputs.values_mut() {
-            output
-                .runtime
-                .assembly_mut()
-                .replace_committed_surfaces(committed_surfaces.to_vec());
-        }
     }
 
     fn run_committed_snapshot(
@@ -4208,7 +4202,7 @@ impl PersistentBackendRuntime {
                 index,
                 &mut output.runtime,
                 self.committed_snapshot_layers.as_ref().map_or_else(
-                    || compositor_tick_input(&transactions, 0, None),
+                    || compositor_tick_input(&transactions, 0, Vec::new(), None),
                     |layers| compositor_tick_input_from_layers(layers.clone()),
                 ),
             )?;
@@ -4767,10 +4761,12 @@ fn native_frame_for_output(
 fn compositor_tick_input(
     transactions: &[SurfaceTransaction],
     x_event_count: usize,
+    authority_commits: Vec<TransactionCommit>,
     wm_update: Option<WmTransactionUpdate>,
 ) -> CompositorBackendTickInput {
     CompositorBackendTickInput {
         x_event_count: u32::try_from(x_event_count).unwrap_or(u32::MAX),
+        authority_commits,
         authority_batches: Vec::new(),
         wm_update,
         portal_commands: Vec::new(),
@@ -4788,6 +4784,7 @@ fn compositor_tick_input_from_layers(
 ) -> CompositorBackendTickInput {
     CompositorBackendTickInput {
         x_event_count: 0,
+        authority_commits: Vec::new(),
         authority_batches: Vec::new(),
         wm_update: None,
         portal_commands: Vec::new(),
@@ -6652,5 +6649,91 @@ mod tests {
                 .authority_transactions_committed,
             0
         );
+    }
+
+    #[test]
+    fn authority_batch_commits_once_and_fans_out_one_snapshot() {
+        let outputs = [17u64, 18]
+            .into_iter()
+            .map(|id| sophia_engine::HeadlessOutput {
+                id: sophia_protocol::OutputId::from_raw(id),
+                size: Size {
+                    width: 640,
+                    height: 480,
+                },
+                scale: 1,
+            })
+            .collect::<Vec<_>>();
+        let surface = sophia_protocol::SurfaceId::new(17, 1);
+        let committed = vec![CommittedSurfaceState {
+            surface,
+            committed_generation: 5,
+            geometry: Rect {
+                x: 0,
+                y: 0,
+                width: 640,
+                height: 480,
+            },
+            buffer: BufferSource::CpuBuffer { handle: 17 },
+            damage: Region::single(Rect {
+                x: 0,
+                y: 0,
+                width: 640,
+                height: 480,
+            }),
+        }];
+        let mut runtime =
+            PersistentBackendRuntime::new_from_committed_surfaces(&outputs, &committed, None, None)
+                .unwrap();
+        let transaction = SurfaceTransaction {
+            transaction: sophia_protocol::TransactionId::from_raw(90),
+            authority: AuthorityKind::SophiaX,
+            surface,
+            namespace: None,
+            target_geometry: Rect {
+                x: 4,
+                y: 8,
+                width: 632,
+                height: 464,
+            },
+            target_buffer: BufferSource::CpuBuffer { handle: 18 },
+            damage: Region::single(Rect {
+                x: 0,
+                y: 0,
+                width: 632,
+                height: 464,
+            }),
+            readiness: SurfaceTransactionReadiness::Ready,
+            timeout_msec: 250,
+            previous_committed_generation: 5,
+        };
+
+        let report = runtime
+            .run_authority_transactions(
+                sophia_protocol::TransactionId::from_raw(90),
+                std::slice::from_ref(&transaction),
+                &[],
+                1,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(
+            report
+                .engine
+                .runtime
+                .runtime_state
+                .authority_transactions_committed,
+            1
+        );
+        for output in runtime.outputs.values() {
+            assert_eq!(output.runtime.assembly().committed_surfaces().len(), 1);
+            assert_eq!(
+                output.runtime.assembly().committed_surfaces()[0].committed_generation,
+                6
+            );
+        }
     }
 }

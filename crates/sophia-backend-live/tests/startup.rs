@@ -500,6 +500,7 @@ fn live_runtime_assembly_runs_fake_compositor_loop_without_native_scanout() {
     let tick = assembly
         .run_tick(CompositorBackendTickInput {
             x_event_count: 1,
+            authority_commits: Vec::new(),
             authority_batches: vec![AuthorityTransactionIntake::new(
                 transaction_id,
                 vec![transaction],

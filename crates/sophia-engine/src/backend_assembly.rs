@@ -41,6 +41,9 @@ impl RendererSelection {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CompositorBackendTickInput {
     pub x_event_count: u32,
+    /// Commit observations produced by the production coordinator when the
+    /// authority phase completed before this per-output tick.
+    pub authority_commits: Vec<TransactionCommit>,
     pub authority_batches: Vec<AuthorityTransactionIntake>,
     pub wm_update: Option<WmTransactionUpdate>,
     pub portal_commands: Vec<PortalCommand>,
@@ -265,6 +268,13 @@ where
             .replace_committed_surfaces(committed_surfaces);
     }
 
+    pub fn commit_authority_batches(
+        &mut self,
+        authority_batches: &[AuthorityTransactionIntake],
+    ) -> Vec<TransactionCommit> {
+        self.production.commit_authority_batches(authority_batches)
+    }
+
     pub fn run_tick(
         &mut self,
         input: CompositorBackendTickInput,
@@ -305,7 +315,7 @@ where
             engine,
             LiveRuntimeDriverIntake {
                 x_event_count: input.x_event_count,
-                authority_commits: Vec::new(),
+                authority_commits: input.authority_commits,
                 authority_batches,
                 wm_update: input.wm_update,
                 portal_commands: input.portal_commands,
