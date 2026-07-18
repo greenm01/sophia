@@ -92,7 +92,7 @@ output adapter. `LiveProductionNativeScanout` now owns the real atomic sessions,
 exporters, callback routing, page-flip correlation, and scanout counters in backend-live;
 the CLI no longer defines native DRM/KMS lifecycle state. `LiveProductionCpuScene` now
 owns renderer buffers, committed-state layer resolution, focus stacking, cursor composition,
-readiness pixel inspection, and per-output frame creation in renderer-live. Reduced Present outcomes now leave the visual runtime through an injected protocol-neutral sink; `XPresentSessionObserver` alone owns X wire routing and completion, idle, fence, and disconnect proof counters. The remaining migration is to move X batch and resource translation outside `PersistentBackendRuntime`, extract its protocol-neutral visual control object from session supervision, and delete the legacy committed-snapshot entry points.
+readiness pixel inspection, and per-output frame creation in renderer-live. Reduced Present outcomes now leave the visual runtime through an injected protocol-neutral sink; `XPresentSessionObserver` alone owns X wire routing and completion, idle, fence, and disconnect proof counters. X authority batches are now translated once into protocol-neutral transaction, registration, release, and Present records before visual control; `PersistentBackendRuntime` no longer accepts the X observed-batch type. The remaining migration is to extract that visual control object from the CLI module and delete legacy committed-snapshot entry points.
 
 - [ ] Establish `sophia-engine::runtime_driver` as the only production visual
   coordinator. Its ordered phases are bounded authority intake, Engine

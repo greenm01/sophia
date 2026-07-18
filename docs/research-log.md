@@ -1617,3 +1617,20 @@ selection, exited normally with `first_error=none`, and retired both outputs cle
 remaining structural extraction is X authority-batch and resource translation plus session
 supervision around the protocol-neutral runtime, followed by deletion of legacy committed-
 snapshot entry points shared with the Wayland maintenance path.
+
+
+## 2026-07-18: X Authority Batches Stop At The Production Boundary
+
+The X session loop now translates each projected authority batch once into a protocol-neutral
+production record containing Engine transactions and surface removals, renderer DMA-BUF and
+fence registrations, Present submissions, and release handles. X resource IDs, client IDs,
+protocol errors, and authority-specific CPU update records do not cross that boundary.
+`PersistentBackendRuntime` no longer accepts `XAuthorityObservedTransactionBatch`; CPU and GPU
+production entry points consume only the reduced production batch plus renderer updates.
+
+The full offline all-feature suite passes. The rebuilt X13 QEMU image passed strict two-xterm
+in 7,008 ms with 117 of 117 authority transactions, 7 ms input presentation, 42 submissions,
+40 retirements, and zero cleanup debt. The guarded native mixed diagnostic translated and
+exported one CPU plus one DMA-BUF layer with zero live sources, fences, or transactions. The
+remaining Milestone 6 ownership work is moving the now-neutral visual control implementation
+out of the CLI module and retiring its legacy committed-snapshot APIs.

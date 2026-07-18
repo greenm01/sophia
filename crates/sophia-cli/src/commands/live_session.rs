@@ -2755,6 +2755,7 @@ fn run_session_loop(
                     );
                 }
                 let batch = layout.projected_batch(&batch);
+                let production_batch = production_authority_batch(&batch);
                 if runtime.is_none() {
                     runtime = Some(
                         PersistentBackendRuntime::new(
@@ -2791,7 +2792,7 @@ fn run_session_loop(
                 let (tick, report, committed_surfaces, composed, compose_elapsed) =
                     if batch.present_submissions.is_empty() {
                         let (submission, committed_surfaces) = runtime.run_cpu_production_cycle(
-                            &batch,
+                            &production_batch,
                             &mut scene,
                             updates,
                             raised_surface,
@@ -2814,7 +2815,7 @@ fn run_session_loop(
                         )
                     } else {
                         let (submission, committed_surfaces) = runtime.run_gpu_production_cycle(
-                            &batch,
+                            &production_batch,
                             &mut scene,
                             updates,
                             raised_surface,
@@ -3663,6 +3664,80 @@ impl XPresentSessionObserver {
     }
 }
 
+#[derive(Clone, Debug)]
+struct ProductionDmaBufRegistration {
+    descriptor: sophia_protocol::DmaBufDescriptor,
+    plane_fds: Vec<Arc<std::os::fd::OwnedFd>>,
+}
+
+#[derive(Clone, Debug)]
+struct ProductionFenceRegistration {
+    handle: sophia_protocol::FenceHandle,
+    initially_triggered: bool,
+    fd: Arc<std::os::fd::OwnedFd>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ProductionPresentSubmission {
+    transaction: TransactionId,
+    surface: SurfaceId,
+    buffer: sophia_protocol::BufferHandle,
+    acquire_fence: Option<sophia_protocol::FenceHandle>,
+    idle_fence: Option<sophia_protocol::FenceHandle>,
+}
+
+#[derive(Clone, Debug)]
+struct ProductionAuthorityBatch {
+    transaction: TransactionId,
+    transactions: Vec<SurfaceTransaction>,
+    removed_surfaces: Vec<SurfaceId>,
+    dma_buf_registrations: Vec<ProductionDmaBufRegistration>,
+    fence_registrations: Vec<ProductionFenceRegistration>,
+    present_submissions: Vec<ProductionPresentSubmission>,
+    released_dma_bufs: Vec<sophia_protocol::BufferHandle>,
+    released_fences: Vec<sophia_protocol::FenceHandle>,
+}
+
+fn production_authority_batch(
+    batch: &XAuthorityObservedTransactionBatch,
+) -> ProductionAuthorityBatch {
+    ProductionAuthorityBatch {
+        transaction: batch.transaction,
+        transactions: batch.transactions.clone(),
+        removed_surfaces: batch.removed_surfaces.clone(),
+        dma_buf_registrations: batch
+            .dma_buf_registrations
+            .iter()
+            .map(|registration| ProductionDmaBufRegistration {
+                descriptor: registration.descriptor,
+                plane_fds: registration.plane_fds.clone(),
+            })
+            .collect(),
+        fence_registrations: batch
+            .fence_registrations
+            .iter()
+            .map(|registration| ProductionFenceRegistration {
+                handle: registration.handle,
+                initially_triggered: registration.initially_triggered,
+                fd: Arc::clone(&registration.fd),
+            })
+            .collect(),
+        present_submissions: batch
+            .present_submissions
+            .iter()
+            .map(|submission| ProductionPresentSubmission {
+                transaction: submission.transaction,
+                surface: submission.surface,
+                buffer: submission.buffer,
+                acquire_fence: submission.acquire_fence,
+                idle_fence: submission.idle_fence,
+            })
+            .collect(),
+        released_dma_bufs: batch.released_dma_bufs.clone(),
+        released_fences: batch.released_fences.clone(),
+    }
+}
+
 struct PersistentOutputRuntime {
     runtime: sophia_backend_live::LiveBackendRuntimeAssembly,
     native_initialized: bool,
@@ -4005,7 +4080,7 @@ impl PersistentBackendRuntime {
 
     fn run_cpu_production_cycle(
         &mut self,
-        batch: &XAuthorityObservedTransactionBatch,
+        batch: &ProductionAuthorityBatch,
         scene: &mut LiveProductionCpuScene,
         updates: Vec<sophia_backend_live::LiveCpuBufferUpdate>,
         raised_surface: Option<SurfaceId>,
@@ -4065,7 +4140,7 @@ impl PersistentBackendRuntime {
 
     fn run_gpu_production_cycle(
         &mut self,
-        batch: &XAuthorityObservedTransactionBatch,
+        batch: &ProductionAuthorityBatch,
         scene: &mut LiveProductionCpuScene,
         updates: Vec<sophia_backend_live::LiveCpuBufferUpdate>,
         raised_surface: Option<SurfaceId>,
@@ -4125,7 +4200,7 @@ impl PersistentBackendRuntime {
 
     fn run_batch(
         &mut self,
-        batch: &XAuthorityObservedTransactionBatch,
+        batch: &ProductionAuthorityBatch,
         mut native_scanout: Option<&mut LiveProductionNativeScanout>,
         native_frames: Option<Vec<LiveProductionComposedFrame>>,
         wm_update: Option<WmTransactionUpdate>,
@@ -4196,7 +4271,7 @@ impl PersistentBackendRuntime {
 
     fn observe_presentation_resources(
         &mut self,
-        batch: &XAuthorityObservedTransactionBatch,
+        batch: &ProductionAuthorityBatch,
     ) -> Result<(), Box<dyn std::error::Error>> {
         for registration in &batch.dma_buf_registrations {
             let plane_fds = registration
