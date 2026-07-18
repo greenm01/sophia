@@ -1829,3 +1829,19 @@ redraw, normal exit, `first_error=none`, native presentation, and clean teardown
 native mixed path exported one CPU and one DMA-BUF layer with zero live resources. Milestone 6
 implementation is complete; its overall promotion remains coupled to the operator-driven paired
 physical X13 GTK evidence still required by Milestone 5.
+
+
+## 2026-07-18: Post-Milestone-6 Native Stability And Physical Evidence Audit
+
+The documented unattended X13 native stability gate passed 10 of 10 release runs against the
+runtime-driver-owned phase state machine. Every retained record passed exact terminal text,
+changed pixels, native presentation, callback validation, and zero in-flight or cleanup debt.
+
+The durable Milestone 5 physical GTK store was audited rather than assumed valid. Its classic
+record ends at pointer readiness with zero routed pointer events and has no application-session
+completion; its confined record is empty; recovery records `emergency=true`. Those artifacts
+cannot satisfy the current paired verifier. The remaining daily-driver promotion action is a
+fresh local-TTY run of `tools/live_session_milestone5_gtk_hardware_proof.sh`, followed by the
+three-class aggregate verifier. It requires a person to arm the independent guard, type exact
+text, and physically click each dialog, so it cannot be completed through unattended SSH or
+QEMU without weakening the stated acceptance criterion.
