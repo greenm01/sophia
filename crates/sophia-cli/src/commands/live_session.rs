@@ -4406,29 +4406,25 @@ impl PersistentBackendRuntime {
         let Some(submitted) = self.submitted_gpu_presentation.take() else {
             return Ok(());
         };
-        let primary = self
-            .outputs
+        let (outputs, presentation_feedback) = (&mut self.outputs, &mut self.presentation_feedback);
+        let primary = outputs
             .values_mut()
             .next()
             .ok_or("persistent backend runtime has no outputs")?;
-        let commit = primary
+        let completion = primary
             .runtime
             .assembly_mut()
-            .apply_prepared_surface_commit(submitted.prepared);
-        if commit.outcome != TransactionOutcome::Committed {
-            return Err("page flip could not apply its prepared Engine commit".into());
-        }
-        let committed = primary.runtime.assembly().committed_surfaces().to_vec();
-        for output in self.outputs.values_mut().skip(1) {
+            .complete_prepared_retirement(submitted.prepared, || {
+                presentation_feedback.complete_flip(submitted.transaction, ust, msc)
+            })
+            .map_err(|error| format!("page flip prepared retirement failed: {error:?}"))?;
+        for output in outputs.values_mut().skip(1) {
             output
                 .runtime
                 .assembly_mut()
-                .replace_committed_surfaces(committed.clone());
+                .replace_committed_surfaces(completion.committed_surfaces.clone());
         }
-        let outcome = self
-            .presentation_feedback
-            .complete_flip(submitted.transaction, ust, msc)
-            .map_err(|error| format!("page flip feedback retirement failed: {error:?}"))?;
+        let outcome = completion.evidence;
         self.route_present_feedback(outcome);
         Ok(())
     }

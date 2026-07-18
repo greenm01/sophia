@@ -988,14 +988,60 @@ fn production_coordinator_applies_prepared_present_to_its_owned_snapshot() {
         coordinator.committed_surfaces(),
     );
 
-    let commit = coordinator.apply_prepared_surface_commit(prepared);
+    let mut feedback_calls = 0;
+    let completion = coordinator
+        .complete_prepared_retirement(prepared, || {
+            feedback_calls += 1;
+            Ok::<_, &str>("flip-idle")
+        })
+        .expect("matching retirement should commit before feedback");
 
-    assert_eq!(commit.outcome, TransactionOutcome::Committed);
+    assert_eq!(completion.commit.outcome, TransactionOutcome::Committed);
+    assert_eq!(completion.evidence, "flip-idle");
+    assert_eq!(feedback_calls, 1);
     assert_eq!(coordinator.committed_surfaces()[0].geometry.width, 640);
     assert_eq!(
         coordinator.committed_surfaces()[0].buffer,
         BufferSource::DmaBuf { handle: 77 }
     );
+}
+
+#[test]
+fn production_coordinator_suppresses_feedback_when_prepared_baseline_is_stale() {
+    let engine = HeadlessEngine::default();
+    let old_layer = test_layer(0, 0, 0, Region::empty());
+    let committed = vec![engine.committed_state_from_layer(&old_layer)];
+    let mut coordinator =
+        ProductionSessionCoordinator::new(engine).with_committed_surfaces(committed);
+    let transaction = old_layer.to_surface_transaction(
+        TransactionId::from_raw(206),
+        AuthorityKind::SophiaX,
+        SurfaceTransactionReadiness::Ready,
+        250,
+        1,
+    );
+    let prepared = coordinator.engine().prepare_surface_transactions(
+        TransactionId::from_raw(206),
+        &[transaction],
+        coordinator.committed_surfaces(),
+    );
+    let mut changed = coordinator.committed_surfaces().to_vec();
+    changed[0].committed_generation = 9;
+    coordinator.replace_committed_surfaces(changed);
+    let mut feedback_calls = 0;
+
+    let result = coordinator.complete_prepared_retirement(prepared, || {
+        feedback_calls += 1;
+        Ok::<_, &str>(())
+    });
+
+    assert!(matches!(
+        result,
+        Err(ProductionPreparedRetirementError::EngineCommit(commit))
+            if commit.outcome == TransactionOutcome::RejectedStaleSurface
+    ));
+    assert_eq!(feedback_calls, 0);
+    assert_eq!(coordinator.committed_surfaces()[0].committed_generation, 9);
 }
 
 #[test]

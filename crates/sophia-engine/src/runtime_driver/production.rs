@@ -1,5 +1,5 @@
 use crate::{AuthorityTransactionIntake, HeadlessEngine, PreparedSurfaceCommit};
-use sophia_protocol::{CommittedSurfaceState, TransactionCommit};
+use sophia_protocol::{CommittedSurfaceState, TransactionCommit, TransactionOutcome};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProductionSessionPhase {
@@ -45,6 +45,19 @@ pub trait ProductionPresentationAdapter {
 pub struct ProductionRetirement<Retirement> {
     pub cycle: u64,
     pub retirement: Retirement,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProductionPreparedRetirementReport<Evidence> {
+    pub commit: TransactionCommit,
+    pub committed_surfaces: Vec<CommittedSurfaceState>,
+    pub evidence: Evidence,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ProductionPreparedRetirementError<Error> {
+    EngineCommit(TransactionCommit),
+    ProtocolFeedback(Error),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -117,6 +130,30 @@ impl ProductionSessionCoordinator {
     ) -> TransactionCommit {
         self.engine
             .apply_prepared_surface_commit(prepared, &mut self.committed_surfaces)
+    }
+
+    /// Applies the Engine state prepared for an already-matched KMS retirement,
+    /// then retires backend resources and produces reduced protocol feedback.
+    /// Feedback is never invoked when the prepared baseline is stale or invalid.
+    pub fn complete_prepared_retirement<Evidence, Error>(
+        &mut self,
+        prepared: PreparedSurfaceCommit,
+        complete_feedback: impl FnOnce() -> Result<Evidence, Error>,
+    ) -> Result<
+        ProductionPreparedRetirementReport<Evidence>,
+        ProductionPreparedRetirementError<Error>,
+    > {
+        let commit = self.apply_prepared_surface_commit(prepared);
+        if commit.outcome != TransactionOutcome::Committed {
+            return Err(ProductionPreparedRetirementError::EngineCommit(commit));
+        }
+        let evidence =
+            complete_feedback().map_err(ProductionPreparedRetirementError::ProtocolFeedback)?;
+        Ok(ProductionPreparedRetirementReport {
+            commit,
+            committed_surfaces: self.committed_surfaces.clone(),
+            evidence,
+        })
     }
 
     pub(crate) fn engine_and_committed_surfaces_mut(

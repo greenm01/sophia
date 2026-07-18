@@ -1476,3 +1476,20 @@ exit, `first_error=none`, and clean two-output retirement. Emergency recovery fl
 five routed chord deliveries and shut down cleanly in 187 ms. Runtime/scanout
 invocation and the retirement-to-commit trigger still reside in `live_session.rs`; moving
 that sequencing behind the production adapter remains the next Milestone 6 boundary.
+
+
+## 2026-07-18: Coordinator Completes Retired Present Atomically
+
+A matched GPU page flip now enters one `ProductionSessionCoordinator` operation that
+applies the prepared Engine commit, captures the resulting immutable snapshot, retires
+the backend Present resources, and produces the reduced Complete/Idle outcome. The CLI
+requests that operation and translates its outcome, but no longer orders Engine commit
+and backend feedback retirement itself. If the prepared baseline is stale, the coordinator
+preserves the current snapshot and never invokes the feedback retirement callback.
+
+Regressions prove commit-before-feedback on success and zero feedback calls for a stale
+baseline. The full offline all-feature suite passes, the X13 release build succeeds, and
+the guarded native EGL/vkcube diagnostic exports one CPU plus one DMA-BUF layer with zero
+live sources, fences, or transactions afterward. The retained two-xterm, GTK classic, GTK
+confined, and emergency QEMU gates already passed the immediately preceding snapshot; the
+remaining production-loop gap is ownership of live runtime/scanout invocation itself.

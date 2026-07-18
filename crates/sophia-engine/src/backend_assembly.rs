@@ -5,8 +5,9 @@ use crate::{
     HeadlessEngine, HeadlessOutput, HeadlessSessionDriver, HeadlessSessionDriverReport,
     ImportCapableRenderer, LibinputEventSource, LibinputPhysicalInputAdapter, LibinputPollReport,
     LiveRuntimeDriverAdapter, LiveRuntimeDriverIntake, NonBlockingInputPoller, PerOutputFrameClock,
-    PreparedSurfaceCommit, ProductionSessionCoordinator, QueuedInputPoller, RenderFrameReport,
-    RuntimeDriverAdapter, WmTransactionUpdate,
+    PreparedSurfaceCommit, ProductionPreparedRetirementError, ProductionPreparedRetirementReport,
+    ProductionSessionCoordinator, QueuedInputPoller, RenderFrameReport, RuntimeDriverAdapter,
+    WmTransactionUpdate,
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -280,6 +281,18 @@ where
         prepared: PreparedSurfaceCommit,
     ) -> TransactionCommit {
         self.production.apply_prepared_surface_commit(prepared)
+    }
+
+    pub fn complete_prepared_retirement<Evidence, Error>(
+        &mut self,
+        prepared: PreparedSurfaceCommit,
+        complete_feedback: impl FnOnce() -> Result<Evidence, Error>,
+    ) -> Result<
+        ProductionPreparedRetirementReport<Evidence>,
+        ProductionPreparedRetirementError<Error>,
+    > {
+        self.production
+            .complete_prepared_retirement(prepared, complete_feedback)
     }
 
     pub fn run_tick(
