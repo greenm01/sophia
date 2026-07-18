@@ -109,6 +109,18 @@ if "$ROOT_DIR/tools/verify_live_session_milestone3_evidence.sh" \
 fi
 
 expect_pass tools/verify_qemu_session_evidence.sh qemu_session_evidence_pass.log
+sed -e "s/native_target_creations=2/native_target_creations=0/" \
+    -e "s/native_pipeline_creations=2/native_pipeline_creations=0/" \
+    "$FIXTURE_DIR/qemu_session_evidence_pass.log" > "$TEMP_DIR/qemu-direct-write.log"
+"$ROOT_DIR/tools/verify_qemu_session_evidence.sh" \
+    "$TEMP_DIR/qemu-direct-write.log" > /dev/null
+sed "s/native_target_creations=0/native_target_creations=1/" \
+    "$TEMP_DIR/qemu-direct-write.log" > "$TEMP_DIR/qemu-inconsistent-resources.log"
+if "$ROOT_DIR/tools/verify_qemu_session_evidence.sh" \
+    "$TEMP_DIR/qemu-inconsistent-resources.log" > /dev/null 2>&1; then
+    echo "QEMU verifier accepted inconsistent direct-write resource evidence" >&2
+    exit 1
+fi
 expect_fail tools/verify_qemu_session_evidence.sh qemu_session_evidence_wrong_ticks.log
 expect_fail tools/verify_qemu_session_evidence.sh qemu_session_evidence_internal_input.log
 expect_fail tools/verify_qemu_session_evidence.sh qemu_session_evidence_no_pointer_pixels.log

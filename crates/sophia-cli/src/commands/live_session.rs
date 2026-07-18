@@ -2033,6 +2033,17 @@ fn authority_transaction_count(transactions: &[SurfaceTransaction]) -> usize {
     transactions.len()
 }
 
+fn take_settled_input_delivery_wait(
+    wait_started: &mut Option<Instant>,
+    pending_deliveries_empty: bool,
+) -> Option<Instant> {
+    if pending_deliveries_empty {
+        wait_started.take()
+    } else {
+        None
+    }
+}
+
 fn record_runtime_commits(committed: u64, accepted_transactions: usize) -> u64 {
     committed.saturating_add(u64::try_from(accepted_transactions).unwrap_or(u64::MAX))
 }
@@ -2208,6 +2219,9 @@ fn run_session_loop(
                 input_events_expected =
                     input_events_expected.saturating_add(report.deliveries.len());
                 pending_input_deliveries.extend(report.deliveries.iter().copied());
+                if !report.deliveries.is_empty() && input_proof_started_at.is_some() {
+                    input_delivery_wait_started_at.get_or_insert_with(Instant::now);
+                }
                 cursor_dirty |= report.pointer_routed > 0;
                 if report.return_suppressed && !return_suppressed_reported {
                     println!(
@@ -2299,13 +2313,14 @@ fn run_session_loop(
                 )
                 .into());
             }
-            if input_delivery_wait_started_at.is_some()
-                && pending_input_deliveries.is_empty()
-                && input_proof_started_at.is_none()
+            if let Some(wait_started) = take_settled_input_delivery_wait(
+                &mut input_delivery_wait_started_at,
+                pending_input_deliveries.is_empty(),
+            ) && input_proof_started_at.is_none()
             {
                 let flushed_at = Instant::now();
-                input_flush_latency = input_delivery_wait_started_at
-                    .map(|started| flushed_at.saturating_duration_since(started));
+                input_flush_latency =
+                    Some(flushed_at.saturating_duration_since(wait_started));
                 input_proof_started_at = Some(flushed_at);
                 post_input_deadline = Some(
                     flushed_at + Duration::from_millis(SESSION_PHYSICAL_PIXEL_TIMEOUT_MSEC),
@@ -6015,6 +6030,7 @@ mod tests {
         pointer_offset_for_geometry, record_runtime_commits,
         required_wayland_presentation_submission, retain_latest_wayland_presentation,
         seed_missing_committed_surfaces, successful_primary_exit_ends_session,
+        take_settled_input_delivery_wait,
     };
     use sophia_protocol::{
         AuthorityKind, DeviceId, InputEventKind, InputEventPacket, NamespaceCapabilities,
@@ -6026,6 +6042,7 @@ mod tests {
     };
     use std::collections::BTreeMap;
     use std::io::Write;
+    use std::time::Instant;
 
     #[test]
     fn client_stdout_capture_reads_without_waiting_for_inherited_writer_close() {
@@ -6036,6 +6053,20 @@ mod tests {
         assert_eq!(capture.read_bounded().unwrap(), b"sophia\n");
 
         writer.write_all(b"still-open").unwrap();
+    }
+
+    #[test]
+    fn settled_input_delivery_wait_is_consumed_once() {
+        let started = Instant::now();
+        let mut wait = Some(started);
+
+        assert_eq!(take_settled_input_delivery_wait(&mut wait, false), None);
+        assert_eq!(wait, Some(started));
+        assert_eq!(
+            take_settled_input_delivery_wait(&mut wait, true),
+            Some(started)
+        );
+        assert_eq!(wait, None);
     }
 
     #[test]

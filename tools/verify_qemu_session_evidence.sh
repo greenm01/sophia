@@ -77,7 +77,7 @@ if [[ "$(grep -c '^sophia_qemu_pointer schema=1 status=sent source=qmp device=vi
 fi
 
 completion_line="$(grep -E '^sophia_live_session .*status=bounded_complete ' "$EVIDENCE_FILE")"
-if [[ ! " $completion_line " =~ " schema=10 " ]] && [[ ! " $completion_line " =~ " schema=11 " ]]; then
+if [[ ! " $completion_line " =~ " schema=10 " ]] && [[ ! " $completion_line " =~ " schema=11 " ]] && [[ ! " $completion_line " =~ " schema=14 " ]]; then
     echo "QEMU evidence did not use the latency/resource schema" >&2
     exit 1
 fi
@@ -135,9 +135,13 @@ if (( input_presented_latency_msec > 100 || cpu_max_compose_msec > 25 \
     echo "QEMU evidence exceeded its input/rendering latency budget" >&2
     exit 1
 fi
-if (( native_target_creations != 2 || native_target_recreations != 0 \
-    || native_pipeline_creations != 2 || native_frame_uploads < 2 )); then
-    echo "QEMU evidence did not reuse one native target and GL pipeline per output" >&2
+if (( native_target_recreations != 0 || native_frame_uploads < 2 )); then
+    echo "QEMU evidence did not preserve bounded native upload resources" >&2
+    exit 1
+fi
+if ! (( (native_target_creations == 0 && native_pipeline_creations == 0) \
+    || (native_target_creations == 2 && native_pipeline_creations == 2) )); then
+    echo "QEMU evidence has inconsistent direct-write/persistent-GL resource counters" >&2
     exit 1
 fi
 
