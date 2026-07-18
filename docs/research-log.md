@@ -1775,3 +1775,21 @@ ms. The guarded native mixed diagnostic exported one CPU and one DMA-BUF layer w
 resources. Milestone 6 ownership, fail-closed, and retained-gate migration items are complete.
 The remaining exit item is moving asynchronous GPU-service and retirement trigger timing from
 the CLI event loop into `sophia-engine::runtime_driver`.
+
+
+## 2026-07-18: Production X Uses One Native Service Poll
+
+`LiveProductionVisualRuntime::service_native` now owns the asynchronous native service order:
+page-flip retirement and cleanup first, eligible queued Present work second, and pending native
+frames last. It returns one reduced report with the optional backend tick and phase observations.
+The production X event loop no longer inspects pending exporter frames or separately invokes
+retirement, GPU scheduling, and native idle submission. Wayland retains its specialized
+maintenance service because it correlates client buffer release to its own submission counters.
+
+The full offline all-feature suite passes. The rebuilt X13 QEMU image passed strict two-xterm in
+6,986 ms with 117 of 117 transactions, 40 submissions, 38 retirements, and zero cleanup debt.
+Resize-enabled classic and confined GTK passed exact input, pointer selection, committed resize
+redraw, normal exit, `first_error=none`, native presentation, and clean teardown. The remaining
+Milestone 6 exit gap is exact rather than structural: GPU Present prepare\/retire sequencing still
+lives in backend visual control and must enter `sophia-engine::runtime_driver` before that module
+is the only production visual coordinator.

@@ -2464,16 +2464,8 @@ fn run_session_loop(
         {
             break;
         }
-        if let (Some(runtime), Some(native_scanout)) = (runtime.as_mut(), native_scanout.as_mut())
-            && (runtime.native_scanout_in_flight() || runtime.native_cleanup_pending())
-        {
-            runtime.retire_native_scanout(native_scanout)?;
-        }
-        if let (Some(runtime), Some(native_scanout)) = (runtime.as_mut(), native_scanout.as_mut())
-            && runtime.diagnostics().present_queued
-            && !runtime.native_scanout_in_flight()
-        {
-            let _ = runtime.drive_gpu_presentation(Some(native_scanout))?;
+        if let (Some(runtime), Some(native_scanout)) = (runtime.as_mut(), native_scanout.as_mut()) {
+            let _ = runtime.service_native(native_scanout)?;
         }
         if cursor_dirty
             && let (Some(runtime), Some(native_scanout), Some(position)) =
@@ -2940,18 +2932,8 @@ fn run_session_loop(
                 if let (Some(runtime), Some(native_scanout)) =
                     (runtime.as_mut(), native_scanout.as_mut())
                 {
-                    if runtime.native_scanout_in_flight() || runtime.native_cleanup_pending() {
-                        runtime.retire_native_scanout(native_scanout)?;
-                    }
-                    if runtime.diagnostics().present_queued && !runtime.native_scanout_in_flight() {
-                        let _ = runtime.drive_gpu_presentation(Some(native_scanout))?;
-                    }
-                    if !runtime.native_scanout_in_flight()
-                        && native_scanout.heads.iter().any(|head| {
-                            head.exporter.pending_cpu_frame() || head.exporter.pending_mixed_frame()
-                        })
-                    {
-                        let tick = runtime.run_native_idle(native_scanout)?;
+                    let service = runtime.service_native(native_scanout)?;
+                    if let Some(tick) = service.tick {
                         backend_ticks = backend_ticks.saturating_add(1);
                         runtime_surfaces =
                             tick.engine.runtime.runtime_state.authority_surfaces_applied;
