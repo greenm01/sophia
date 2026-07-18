@@ -4317,11 +4317,10 @@ impl PersistentBackendRuntime {
             return self.run_observation_tick();
         }
 
-        let transactions =
-            sophia_cli::presentation_transaction::rebase_full_state_present_transactions(
-                &queued.transactions,
-                self.production.committed_surfaces(),
-            );
+        let transactions = sophia_engine::rebase_full_state_present_transactions(
+            &queued.transactions,
+            self.production.committed_surfaces(),
+        );
         let prepared = self.production.engine().prepare_surface_transactions(
             transaction,
             &transactions,

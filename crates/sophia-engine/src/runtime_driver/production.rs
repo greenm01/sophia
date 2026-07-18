@@ -1,5 +1,29 @@
 use crate::{AuthorityTransactionIntake, HeadlessEngine, PreparedSurfaceCommit};
-use sophia_protocol::{CommittedSurfaceState, TransactionCommit, TransactionOutcome};
+use sophia_protocol::{
+    CommittedSurfaceState, SurfaceTransaction, TransactionCommit, TransactionOutcome,
+};
+
+/// Rebase a complete presentation snapshot onto the Engine visual generation.
+///
+/// Skipped asynchronous presentations deliberately do not advance Engine state. A later
+/// full-state frame may therefore carry an authority-local generation ahead of the last
+/// visible generation; only its causal generation is rebased before normal validation.
+pub fn rebase_full_state_present_transactions(
+    transactions: &[SurfaceTransaction],
+    committed: &[CommittedSurfaceState],
+) -> Vec<SurfaceTransaction> {
+    transactions
+        .iter()
+        .cloned()
+        .map(|mut transaction| {
+            transaction.previous_committed_generation = committed
+                .iter()
+                .find(|state| state.surface == transaction.surface)
+                .map_or(0, |state| state.committed_generation);
+            transaction
+        })
+        .collect()
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProductionSessionPhase {
