@@ -11,6 +11,19 @@ pub enum ProductionSessionPhase {
     ProtocolFeedback,
 }
 
+pub trait ProductionOutputRuntimeAdapter {
+    type Report;
+    type Error;
+
+    fn output_count(&self) -> usize;
+
+    fn run_output(
+        &mut self,
+        output_index: usize,
+        committed: &[CommittedSurfaceState],
+    ) -> Result<Self::Report, Self::Error>;
+}
+
 pub trait ProductionPresentationAdapter {
     type Frame;
     type Submission;
@@ -154,6 +167,19 @@ impl ProductionSessionCoordinator {
             committed_surfaces: self.committed_surfaces.clone(),
             evidence,
         })
+    }
+
+    /// Projects the one committed snapshot to every output and delegates the
+    /// backend-private runtime/scanout decision to the production output adapter.
+    pub fn run_outputs<A>(&self, adapter: &mut A) -> Result<Vec<A::Report>, A::Error>
+    where
+        A: ProductionOutputRuntimeAdapter,
+    {
+        let mut reports = Vec::with_capacity(adapter.output_count());
+        for output_index in 0..adapter.output_count() {
+            reports.push(adapter.run_output(output_index, &self.committed_surfaces)?);
+        }
+        Ok(reports)
     }
 
     pub(crate) fn engine_and_committed_surfaces_mut(

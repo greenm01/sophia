@@ -1,12 +1,43 @@
 use sophia_engine::{
     DrmKmsOutputRegistry, OutputPresentationFeedback, OutputPresentationRegistry,
-    OutputPresentationRetire, OutputPresentationSchedule, ProductionPresentationAdapter,
-    ProductionRetirement,
+    OutputPresentationRetire, OutputPresentationSchedule, ProductionOutputRuntimeAdapter,
+    ProductionPresentationAdapter, ProductionRetirement,
 };
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
 use sophia_protocol::TransactionId;
 use sophia_protocol::{CommittedSurfaceState, OutputId};
 use std::collections::{BTreeMap, VecDeque};
+
+pub struct LiveProductionOutputRuntimeAdapter<Run> {
+    output_count: usize,
+    run: Run,
+}
+
+impl<Run> LiveProductionOutputRuntimeAdapter<Run> {
+    pub const fn new(output_count: usize, run: Run) -> Self {
+        Self { output_count, run }
+    }
+}
+
+impl<Run, Report, Error> ProductionOutputRuntimeAdapter for LiveProductionOutputRuntimeAdapter<Run>
+where
+    Run: FnMut(usize, &[CommittedSurfaceState]) -> Result<Report, Error>,
+{
+    type Report = Report;
+    type Error = Error;
+
+    fn output_count(&self) -> usize {
+        self.output_count
+    }
+
+    fn run_output(
+        &mut self,
+        output_index: usize,
+        committed: &[CommittedSurfaceState],
+    ) -> Result<Self::Report, Self::Error> {
+        (self.run)(output_index, committed)
+    }
+}
 
 pub struct LiveProductionPresentationAdapter<Compose, Submit, Retire, Feedback> {
     compose: Compose,

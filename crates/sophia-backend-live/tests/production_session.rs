@@ -1,14 +1,34 @@
 use sophia_backend_live::{
-    LiveProductionPageFlipRetirement, LiveProductionPageFlipTracker,
-    LiveProductionPageFlipTrackerError, LiveProductionPresentationAdapter,
+    LiveProductionOutputRuntimeAdapter, LiveProductionPageFlipRetirement,
+    LiveProductionPageFlipTracker, LiveProductionPageFlipTrackerError,
+    LiveProductionPresentationAdapter,
 };
 use sophia_engine::{
     DrmKmsMode, DrmKmsOutputDescriptor, DrmKmsOutputRegistry, OutputPresentationFeedback,
-    OutputPresentationSchedule, ProductionPresentationAdapter, ProductionRetirement,
+    OutputPresentationSchedule, ProductionOutputRuntimeAdapter, ProductionPresentationAdapter,
+    ProductionRetirement,
 };
 use sophia_protocol::{CommittedSurfaceState, OutputId, Size};
 use std::cell::RefCell;
 use std::rc::Rc;
+
+#[test]
+fn live_output_runtime_adapter_keeps_projection_and_invocation_in_one_callback() {
+    let calls = Rc::new(RefCell::new(Vec::new()));
+    let observed = Rc::clone(&calls);
+    let mut adapter = LiveProductionOutputRuntimeAdapter::new(
+        2,
+        move |index, committed: &[CommittedSurfaceState]| {
+            observed.borrow_mut().push((index, committed.len()));
+            Ok::<_, String>(index + committed.len())
+        },
+    );
+
+    assert_eq!(adapter.output_count(), 2);
+    assert_eq!(adapter.run_output(0, &[]).unwrap(), 0);
+    assert_eq!(adapter.run_output(1, &[]).unwrap(), 1);
+    assert_eq!(*calls.borrow(), [(0, 0), (1, 0)]);
+}
 
 #[test]
 fn live_adapter_keeps_frame_and_retirement_inside_ordered_callbacks() {

@@ -86,8 +86,11 @@ production coordinator, then its immutable snapshot is projected to the remainin
 outputs; it is no longer prepared and applied independently per output. After the
 matching page flip, the coordinator applies that prepared state before backend resource
 retirement and reduced feedback, and suppresses feedback when the baseline is stale.
-The remaining migration is to make the production live adapter own runtime/scanout
-invocation rather than leaving those calls in CLI sequencing.
+CPU and GPU submission, native idle work, page-flip retirement and cleanup, and
+displayed-buffer teardown now cross the coordinator fanout and a protocol-neutral live
+output adapter. The remaining migration is to move the concrete native adapter callbacks
+out of `live_session.rs`; the CLI still constructs those callbacks beside
+`PersistentNativeScanout`, so it is not yet only a supervisor/observer.
 
 - [ ] Establish `sophia-engine::runtime_driver` as the only production visual
   coordinator. Its ordered phases are bounded authority intake, Engine

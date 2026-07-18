@@ -3998,16 +3998,31 @@ impl PersistentBackendRuntime {
         native_scanout.queue_mixed_frame(0, mixed);
 
         let transactions = self.layers.values().cloned().collect::<Vec<_>>();
-        let first_output = self
-            .outputs
-            .values_mut()
+        let production = &self.production;
+        let outputs = &mut self.outputs;
+        let mut adapter = sophia_backend_live::LiveProductionOutputRuntimeAdapter::new(
+            1,
+            |index, committed: &[CommittedSurfaceState]| -> Result<_, Box<dyn std::error::Error>> {
+                let output = outputs
+                    .values_mut()
+                    .nth(index)
+                    .ok_or("production output index was not registered")?;
+                output
+                    .runtime
+                    .assembly_mut()
+                    .replace_committed_surfaces(committed.to_vec());
+                Ok(native_scanout.run_tick(
+                    index,
+                    &mut output.runtime,
+                    compositor_tick_input(&transactions, 0, Vec::new(), None),
+                )?)
+            },
+        );
+        let report = production
+            .run_outputs(&mut adapter)?
+            .into_iter()
             .next()
             .ok_or("persistent backend runtime has no outputs")?;
-        let report = native_scanout.run_tick(
-            0,
-            &mut first_output.runtime,
-            compositor_tick_input(&transactions, 0, Vec::new(), None),
-        )?;
         use sophia_backend_live::LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus as Status;
         match report
             .rendered_primary_plane_scanout_submit
@@ -4155,10 +4170,9 @@ impl PersistentBackendRuntime {
         let authority_commits = self
             .production
             .commit_authority_batches(std::slice::from_ref(&intake));
-        let committed_surfaces = self.production.committed_surfaces().to_vec();
         Ok(PreparedAuthorityBatch {
             authority_commits,
-            committed_surfaces,
+            committed_surfaces: self.production.committed_surfaces().to_vec(),
             active_transactions,
         })
     }
@@ -4171,37 +4185,47 @@ impl PersistentBackendRuntime {
         native_frames: Option<Vec<ObservedComposedFrame>>,
         wm_update: Option<WmTransactionUpdate>,
     ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
+        let output_count = self.outputs.len();
+        let production = &self.production;
+        let outputs = &mut self.outputs;
         let mut native_frames = native_frames.unwrap_or_default().into_iter();
-        let mut first_report = None;
-        for (index, output) in self.outputs.values_mut().enumerate() {
-            output
-                .runtime
-                .assembly_mut()
-                .replace_committed_surfaces(prepared.committed_surfaces.clone());
-            let input = compositor_tick_input(
-                &prepared.active_transactions,
-                event_count,
-                prepared.authority_commits.clone(),
-                wm_update.clone(),
-            );
-            let report = match native_scanout.as_deref_mut() {
-                Some(native_scanout) => {
-                    if let Some(frame) = native_frames.next() {
-                        native_scanout.queue_frame(index, frame);
+        let mut adapter = sophia_backend_live::LiveProductionOutputRuntimeAdapter::new(
+            output_count,
+            |index, committed: &[CommittedSurfaceState]| -> Result<_, Box<dyn std::error::Error>> {
+                let output = outputs
+                    .values_mut()
+                    .nth(index)
+                    .ok_or("production output index was not registered")?;
+                output
+                    .runtime
+                    .assembly_mut()
+                    .replace_committed_surfaces(committed.to_vec());
+                let input = compositor_tick_input(
+                    &prepared.active_transactions,
+                    event_count,
+                    prepared.authority_commits.clone(),
+                    wm_update.clone(),
+                );
+                Ok(match native_scanout.as_deref_mut() {
+                    Some(native_scanout) => {
+                        if let Some(frame) = native_frames.next() {
+                            native_scanout.queue_frame(index, frame);
+                        }
+                        if output.runtime.rendered_primary_plane_scanout_in_flight() {
+                            output.runtime.run_tick(input)?
+                        } else {
+                            native_scanout.run_tick(index, &mut output.runtime, input)?
+                        }
                     }
-                    if output.runtime.rendered_primary_plane_scanout_in_flight() {
-                        output.runtime.run_tick(input)?
-                    } else {
-                        native_scanout.run_tick(index, &mut output.runtime, input)?
-                    }
-                }
-                None => output.runtime.run_tick(input)?,
-            };
-            if first_report.is_none() {
-                first_report = Some(report);
-            }
-        }
-        first_report.ok_or_else(|| "persistent backend runtime has no outputs".into())
+                    None => output.runtime.run_tick(input)?,
+                })
+            },
+        );
+        production
+            .run_outputs(&mut adapter)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| "persistent backend runtime has no outputs".into())
     }
 
     fn run_authority_transactions(
@@ -4235,32 +4259,42 @@ impl PersistentBackendRuntime {
             .replace_committed_surfaces(committed_surfaces.to_vec());
         let layers = layer_snapshots_from_committed(committed_surfaces);
         self.committed_snapshot_layers = Some(layers.clone());
+        let output_count = self.outputs.len();
+        let production = &self.production;
+        let outputs = &mut self.outputs;
         let mut native_frames = native_frames.unwrap_or_default().into_iter();
-        let mut first_report = None;
-        for (index, output) in self.outputs.values_mut().enumerate() {
-            output
-                .runtime
-                .assembly_mut()
-                .replace_committed_surfaces(committed_surfaces.to_vec());
-            let input = compositor_tick_input_from_layers(layers.clone());
-            let report = match native_scanout.as_deref_mut() {
-                Some(native_scanout) => {
-                    if let Some(frame) = native_frames.next() {
-                        native_scanout.queue_frame(index, frame);
+        let mut adapter = sophia_backend_live::LiveProductionOutputRuntimeAdapter::new(
+            output_count,
+            |index, committed: &[CommittedSurfaceState]| -> Result<_, Box<dyn std::error::Error>> {
+                let output = outputs
+                    .values_mut()
+                    .nth(index)
+                    .ok_or("production output index was not registered")?;
+                output
+                    .runtime
+                    .assembly_mut()
+                    .replace_committed_surfaces(committed.to_vec());
+                let input = compositor_tick_input_from_layers(layers.clone());
+                Ok(match native_scanout.as_deref_mut() {
+                    Some(native_scanout) => {
+                        if let Some(frame) = native_frames.next() {
+                            native_scanout.queue_frame(index, frame);
+                        }
+                        if output.runtime.rendered_primary_plane_scanout_in_flight() {
+                            output.runtime.run_tick(input)?
+                        } else {
+                            native_scanout.run_tick(index, &mut output.runtime, input)?
+                        }
                     }
-                    if output.runtime.rendered_primary_plane_scanout_in_flight() {
-                        output.runtime.run_tick(input)?
-                    } else {
-                        native_scanout.run_tick(index, &mut output.runtime, input)?
-                    }
-                }
-                None => output.runtime.run_tick(input)?,
-            };
-            if first_report.is_none() {
-                first_report = Some(report);
-            }
-        }
-        first_report.ok_or_else(|| "persistent backend runtime has no outputs".into())
+                    None => output.runtime.run_tick(input)?,
+                })
+            },
+        );
+        production
+            .run_outputs(&mut adapter)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| "persistent backend runtime has no outputs".into())
     }
 
     fn committed_surfaces(&self) -> &[CommittedSurfaceState] {
@@ -4301,24 +4335,40 @@ impl PersistentBackendRuntime {
         if self.native_scanout_in_flight() {
             return Err("persistent native scanout remained in flight during teardown".into());
         }
-        for (index, output) in self.outputs.values_mut().enumerate() {
-            trace_live_native_lifecycle("displayed_scanout_retire_started");
-            let retired = output
-                .runtime
-                .retire_displayed_rendered_primary_plane_scanout(native_scanout.card(index));
-            if retired.cleanup_pending {
-                trace_live_native_lifecycle("displayed_scanout_cleanup_retry_started");
-                let cleanup = output
+        let output_count = self.outputs.len();
+        let production = &self.production;
+        let outputs = &mut self.outputs;
+        let mut adapter = sophia_backend_live::LiveProductionOutputRuntimeAdapter::new(
+            output_count,
+            |index, committed: &[CommittedSurfaceState]| -> Result<_, Box<dyn std::error::Error>> {
+                let output = outputs
+                    .values_mut()
+                    .nth(index)
+                    .ok_or("production output index was not registered")?;
+                output
                     .runtime
-                    .retry_tracked_rendered_primary_plane_scanout_cleanup(
-                        native_scanout.card(index),
-                    );
-                if cleanup.cleanup_pending {
-                    return Err("persistent displayed scanout cleanup remained pending".into());
+                    .assembly_mut()
+                    .replace_committed_surfaces(committed.to_vec());
+                trace_live_native_lifecycle("displayed_scanout_retire_started");
+                let retired = output
+                    .runtime
+                    .retire_displayed_rendered_primary_plane_scanout(native_scanout.card(index));
+                if retired.cleanup_pending {
+                    trace_live_native_lifecycle("displayed_scanout_cleanup_retry_started");
+                    let cleanup = output
+                        .runtime
+                        .retry_tracked_rendered_primary_plane_scanout_cleanup(
+                            native_scanout.card(index),
+                        );
+                    if cleanup.cleanup_pending {
+                        return Err("persistent displayed scanout cleanup remained pending".into());
+                    }
                 }
-            }
-            trace_live_native_lifecycle("displayed_scanout_owner_released");
-        }
+                trace_live_native_lifecycle("displayed_scanout_owner_released");
+                Ok(())
+            },
+        );
+        let _ = production.run_outputs(&mut adapter)?;
         Ok(())
     }
 
@@ -4327,47 +4377,79 @@ impl PersistentBackendRuntime {
         native_scanout: &mut PersistentNativeScanout,
     ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
         let transactions = self.layers.values().cloned().collect::<Vec<_>>();
-        let mut first_report = None;
-        for (index, output) in self.outputs.values_mut().enumerate() {
-            if !native_scanout.pending_frame(index) {
-                continue;
-            }
-            let report = native_scanout.run_tick(
-                index,
-                &mut output.runtime,
-                self.committed_snapshot_layers.as_ref().map_or_else(
-                    || compositor_tick_input(&transactions, 0, Vec::new(), None),
-                    |layers| compositor_tick_input_from_layers(layers.clone()),
-                ),
-            )?;
-            if first_report.is_none() {
-                first_report = Some(report);
-            }
-        }
-        first_report.ok_or_else(|| "persistent native idle tick had no pending output".into())
+        let output_count = self.outputs.len();
+        let production = &self.production;
+        let outputs = &mut self.outputs;
+        let committed_snapshot_layers = &self.committed_snapshot_layers;
+        let mut adapter = sophia_backend_live::LiveProductionOutputRuntimeAdapter::new(
+            output_count,
+            |index, committed: &[CommittedSurfaceState]| -> Result<_, Box<dyn std::error::Error>> {
+                let output = outputs
+                    .values_mut()
+                    .nth(index)
+                    .ok_or("production output index was not registered")?;
+                output
+                    .runtime
+                    .assembly_mut()
+                    .replace_committed_surfaces(committed.to_vec());
+                if !native_scanout.pending_frame(index) {
+                    return Ok(None);
+                }
+                Ok(Some(native_scanout.run_tick(
+                    index,
+                    &mut output.runtime,
+                    committed_snapshot_layers.as_ref().map_or_else(
+                        || compositor_tick_input(&transactions, 0, Vec::new(), None),
+                        |layers| compositor_tick_input_from_layers(layers.clone()),
+                    ),
+                )?))
+            },
+        );
+        production
+            .run_outputs(&mut adapter)?
+            .into_iter()
+            .flatten()
+            .next()
+            .ok_or_else(|| "persistent native idle tick had no pending output".into())
     }
 
     fn retire_native_scanout(
         &mut self,
         native_scanout: &mut PersistentNativeScanout,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        for (index, output) in self.outputs.values_mut().enumerate() {
-            native_scanout.retire_ready(index, &mut output.runtime)?;
-            if output
-                .runtime
-                .rendered_primary_plane_scanout_cleanup_pending()
-            {
-                let cleanup = output
+        let output_count = self.outputs.len();
+        let production = &self.production;
+        let outputs = &mut self.outputs;
+        let mut adapter = sophia_backend_live::LiveProductionOutputRuntimeAdapter::new(
+            output_count,
+            |index, committed: &[CommittedSurfaceState]| -> Result<_, Box<dyn std::error::Error>> {
+                let output = outputs
+                    .values_mut()
+                    .nth(index)
+                    .ok_or("production output index was not registered")?;
+                output
                     .runtime
-                    .retry_tracked_rendered_primary_plane_scanout_cleanup(
-                        native_scanout.card(index),
-                    );
-                if !cleanup.cleanup_pending {
-                    native_scanout.retire_failures =
-                        native_scanout.retire_failures.saturating_sub(1);
+                    .assembly_mut()
+                    .replace_committed_surfaces(committed.to_vec());
+                native_scanout.retire_ready(index, &mut output.runtime)?;
+                if output
+                    .runtime
+                    .rendered_primary_plane_scanout_cleanup_pending()
+                {
+                    let cleanup = output
+                        .runtime
+                        .retry_tracked_rendered_primary_plane_scanout_cleanup(
+                            native_scanout.card(index),
+                        );
+                    if !cleanup.cleanup_pending {
+                        native_scanout.retire_failures =
+                            native_scanout.retire_failures.saturating_sub(1);
+                    }
                 }
-            }
-        }
+                Ok(())
+            },
+        );
+        let _ = production.run_outputs(&mut adapter)?;
         if let Some(primary) = self.outputs.keys().next().copied()
             && let Some((ust, msc)) = native_scanout.take_presentation_feedback(primary)
         {
@@ -4384,19 +4466,17 @@ impl PersistentBackendRuntime {
         let Some(submitted) = self.submitted_gpu_presentation.take() else {
             return Ok(());
         };
-        let (outputs, presentation_feedback) = (&mut self.outputs, &mut self.presentation_feedback);
-        let primary = outputs
-            .values_mut()
-            .next()
-            .ok_or("persistent backend runtime has no outputs")?;
-        let completion = primary
-            .runtime
-            .assembly_mut()
+        let (production, outputs, presentation_feedback) = (
+            &mut self.production,
+            &mut self.outputs,
+            &mut self.presentation_feedback,
+        );
+        let completion = production
             .complete_prepared_retirement(submitted.prepared, || {
                 presentation_feedback.complete_flip(submitted.transaction, ust, msc)
             })
             .map_err(|error| format!("page flip prepared retirement failed: {error:?}"))?;
-        for output in outputs.values_mut().skip(1) {
+        for output in outputs.values_mut() {
             output
                 .runtime
                 .assembly_mut()

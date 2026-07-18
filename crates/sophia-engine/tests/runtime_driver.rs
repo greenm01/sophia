@@ -864,6 +864,47 @@ fn wm_supervisor_adapter_restarts_wm_after_runtime_restart_action() {
 }
 
 #[derive(Default)]
+struct RecordingOutputRuntimeAdapter {
+    output_count: usize,
+    generations: Vec<(usize, u64)>,
+}
+
+impl ProductionOutputRuntimeAdapter for RecordingOutputRuntimeAdapter {
+    type Report = usize;
+    type Error = String;
+
+    fn output_count(&self) -> usize {
+        self.output_count
+    }
+
+    fn run_output(
+        &mut self,
+        output_index: usize,
+        committed: &[CommittedSurfaceState],
+    ) -> Result<Self::Report, Self::Error> {
+        self.generations
+            .push((output_index, committed[0].committed_generation));
+        Ok(output_index)
+    }
+}
+
+#[test]
+fn production_coordinator_projects_one_snapshot_through_output_runtime_adapter() {
+    let engine = HeadlessEngine::default();
+    let committed = vec![engine.committed_state_from_layer(&test_layer(0, 0, 0, Region::empty()))];
+    let coordinator = ProductionSessionCoordinator::new(engine).with_committed_surfaces(committed);
+    let mut adapter = RecordingOutputRuntimeAdapter {
+        output_count: 2,
+        ..RecordingOutputRuntimeAdapter::default()
+    };
+
+    let reports = coordinator.run_outputs(&mut adapter).unwrap();
+
+    assert_eq!(reports, [0, 1]);
+    assert_eq!(adapter.generations, [(0, 1), (1, 1)]);
+}
+
+#[derive(Default)]
 struct RecordingProductionAdapter {
     calls: Vec<&'static str>,
     fail_at: Option<&'static str>,
