@@ -1493,3 +1493,22 @@ the guarded native EGL/vkcube diagnostic exports one CPU plus one DMA-BUF layer 
 live sources, fences, or transactions afterward. The retained two-xterm, GTK classic, GTK
 confined, and emergency QEMU gates already passed the immediately preceding snapshot; the
 remaining production-loop gap is ownership of live runtime/scanout invocation itself.
+
+
+## 2026-07-18: One Session Coordinator Owns Visual State
+
+`PersistentBackendRuntime` now owns one session-level `ProductionSessionCoordinator`.
+Authority commits, Present preparation, retired Present completion, and public committed
+state all use that owner. Per-output backend assemblies receive immutable snapshot
+projections for rendering and scanout; they are no longer selected as a primary authority.
+A regression deliberately changes the first output projection to generation 99, then
+proves the session coordinator independently commits generation 5 to 6 exactly once and
+overwrites both output projections with its result.
+
+The full offline all-feature suite passes. On the rebuilt X13 QEMU image, strict two-xterm
+completed 300 ticks in 7,013 ms with 117 of 117 authority transactions, 7 ms input
+presentation, 42 submissions, 40 retirements, and zero phase or cleanup debt. Confined GTK
+committed 58 SHM transactions, accepted exact physical text and pointer selection, exited
+normally with `first_error=none`, and retired both outputs cleanly. Live runtime and native
+scanout method invocation still need to move behind the production live adapter before the
+Milestone 6 coordinator item can close.

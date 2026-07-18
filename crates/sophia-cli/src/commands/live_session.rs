@@ -3601,6 +3601,7 @@ struct ObservedComposedFrame {
 }
 
 struct PersistentBackendRuntime {
+    production: sophia_engine::ProductionSessionCoordinator,
     outputs: BTreeMap<OutputId, PersistentOutputRuntime>,
     layers: BTreeMap<SurfaceId, SurfaceTransaction>,
     committed_snapshot_layers: Option<Vec<LayerSnapshot>>,
@@ -3685,6 +3686,10 @@ impl PersistentBackendRuntime {
         {
             return Err("persistent backend runtime requires 1-16 outputs".into());
         }
+        let production = sophia_engine::ProductionSessionCoordinator::new(
+            sophia_engine::HeadlessEngine::default(),
+        )
+        .with_committed_surfaces(committed_surfaces.clone());
         let mut initial_native_frames = initial_native_frames.unwrap_or_default().into_iter();
         let mut output_runtimes = BTreeMap::new();
         for (index, output) in outputs.iter().copied().enumerate() {
@@ -3728,6 +3733,7 @@ impl PersistentBackendRuntime {
             );
         }
         Ok(Self {
+            production,
             outputs: output_runtimes,
             layers: BTreeMap::new(),
             committed_snapshot_layers: None,
@@ -3936,21 +3942,15 @@ impl PersistentBackendRuntime {
             return self.run_observation_tick();
         }
 
-        let primary = self
-            .outputs
-            .values()
-            .next()
-            .ok_or("persistent backend runtime has no outputs")?;
-        let assembly = primary.runtime.assembly();
         let transactions =
             sophia_cli::presentation_transaction::rebase_full_state_present_transactions(
                 &queued.transactions,
-                assembly.committed_surfaces(),
+                self.production.committed_surfaces(),
             );
-        let prepared = assembly.engine().prepare_surface_transactions(
+        let prepared = self.production.engine().prepare_surface_transactions(
             transaction,
             &transactions,
-            assembly.committed_surfaces(),
+            self.production.committed_surfaces(),
         );
         if !prepared.is_ready() {
             self.queued_gpu_presentations.pop_front();
@@ -4139,41 +4139,23 @@ impl PersistentBackendRuntime {
         let intake = AuthorityTransactionIntake::new(transaction_id, transactions.to_vec())
             .with_surface_removals(removed_surfaces.to_vec());
         let active_transactions = self.layers.values().cloned().collect::<Vec<_>>();
-        let primary_output = self
-            .outputs
-            .keys()
-            .next()
-            .copied()
-            .ok_or("persistent backend runtime has no outputs")?;
-        let (authority_commits, committed_surfaces) = {
-            let primary = self
-                .outputs
-                .get_mut(&primary_output)
-                .expect("primary output was selected from this table");
-            if transactions.iter().any(|transaction| {
-                !primary
-                    .runtime
-                    .assembly()
-                    .committed_surfaces()
-                    .iter()
-                    .any(|committed| committed.surface == transaction.surface)
-            }) {
-                let seeded = seed_missing_committed_surfaces(
-                    primary.runtime.assembly().committed_surfaces(),
-                    &active_transactions,
-                );
-                primary
-                    .runtime
-                    .assembly_mut()
-                    .replace_committed_surfaces(seeded);
-            }
-            let commits = primary
-                .runtime
-                .assembly_mut()
-                .commit_authority_batches(std::slice::from_ref(&intake));
-            let committed = primary.runtime.assembly().committed_surfaces().to_vec();
-            (commits, committed)
-        };
+        if transactions.iter().any(|transaction| {
+            !self
+                .production
+                .committed_surfaces()
+                .iter()
+                .any(|committed| committed.surface == transaction.surface)
+        }) {
+            let seeded = seed_missing_committed_surfaces(
+                self.production.committed_surfaces(),
+                &active_transactions,
+            );
+            self.production.replace_committed_surfaces(seeded);
+        }
+        let authority_commits = self
+            .production
+            .commit_authority_batches(std::slice::from_ref(&intake));
+        let committed_surfaces = self.production.committed_surfaces().to_vec();
         Ok(PreparedAuthorityBatch {
             authority_commits,
             committed_surfaces,
@@ -4249,6 +4231,8 @@ impl PersistentBackendRuntime {
         mut native_scanout: Option<&mut PersistentNativeScanout>,
         native_frames: Option<Vec<ObservedComposedFrame>>,
     ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
+        self.production
+            .replace_committed_surfaces(committed_surfaces.to_vec());
         let layers = layer_snapshots_from_committed(committed_surfaces);
         self.committed_snapshot_layers = Some(layers.clone());
         let mut native_frames = native_frames.unwrap_or_default().into_iter();
@@ -4280,13 +4264,7 @@ impl PersistentBackendRuntime {
     }
 
     fn committed_surfaces(&self) -> &[CommittedSurfaceState] {
-        self.outputs
-            .values()
-            .next()
-            .expect("persistent backend runtime has at least one output")
-            .runtime
-            .assembly()
-            .committed_surfaces()
+        self.production.committed_surfaces()
     }
 
     fn input_layers(&self) -> Vec<LayerSnapshot> {
@@ -6816,6 +6794,16 @@ mod tests {
         let mut runtime =
             PersistentBackendRuntime::new_from_committed_surfaces(&outputs, &committed, None, None)
                 .unwrap();
+        let mut divergent_projection = committed.clone();
+        divergent_projection[0].committed_generation = 99;
+        runtime
+            .outputs
+            .values_mut()
+            .next()
+            .unwrap()
+            .runtime
+            .assembly_mut()
+            .replace_committed_surfaces(divergent_projection);
         let transaction = SurfaceTransaction {
             transaction: sophia_protocol::TransactionId::from_raw(90),
             authority: AuthorityKind::SophiaX,
@@ -6858,6 +6846,11 @@ mod tests {
                 .runtime_state
                 .authority_transactions_committed,
             1
+        );
+        assert_eq!(runtime.production.committed_surfaces().len(), 1);
+        assert_eq!(
+            runtime.production.committed_surfaces()[0].committed_generation,
+            6
         );
         for output in runtime.outputs.values() {
             assert_eq!(output.runtime.assembly().committed_surfaces().len(), 1);

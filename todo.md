@@ -68,8 +68,9 @@ Sophia-private presentation path.
 
 ## Milestone 6: Production Session Loop
 
-Current state: authority batches commit exactly once through the production
-coordinator. CPU composition now runs after that commit and consumes its immutable
+Current state: one session-level production coordinator owns the Engine and committed
+snapshot; per-output backend assemblies are projections and cannot become visual
+authority. Authority batches commit exactly once through that coordinator. CPU composition now runs after that commit and consumes its immutable
 committed snapshot; the CLI no longer owns a second surface, geometry, buffer, or
 stacking table. Per-output tick and native submission consume the prepared record.
 The production adapter now separates KMS submission from asynchronous retirement
