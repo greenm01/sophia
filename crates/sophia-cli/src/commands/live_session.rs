@@ -1,5 +1,6 @@
 use super::prelude::*;
 
+use sophia_backend_live::{LiveProductionComposedFrame, LiveProductionNativeScanout};
 use sophia_cli::emergency_input::{EmergencyChordAction, EmergencyChordState};
 use sophia_cli::input_proof::{PhysicalTextProof, PhysicalTextProofEvent};
 use sophia_cli::resize_transaction::ResizeRollbackCoordinator;
@@ -385,7 +386,7 @@ pub(crate) fn run_persistent_xterm_session(
     let (mut xauthority, xauthority_cookie) = LiveXAuthorityFile::create(display_number)?;
     let mut native_scanout = config
         .native_scanout
-        .then(PersistentNativeScanout::new)
+        .then(LiveProductionNativeScanout::new)
         .transpose()?;
     let mut physical_input = if config.input_devices.is_empty() {
         None
@@ -413,7 +414,7 @@ pub(crate) fn run_persistent_xterm_session(
     let mut wm_session = LiveWmSession::from_config(&config)?;
     let initial_outputs = native_scanout
         .as_ref()
-        .map(PersistentNativeScanout::outputs)
+        .map(LiveProductionNativeScanout::outputs)
         .unwrap_or_else(|| vec![sophia_engine::HeadlessOutput::deterministic()]);
     let output_topology = output_topology_from_engine_outputs(&initial_outputs)?;
 
@@ -2079,7 +2080,7 @@ fn run_session_loop(
     child: &mut Child,
     secondary_children: &mut [Child],
     physical_input: &mut Option<SessionPhysicalInput>,
-    native_scanout: &mut Option<PersistentNativeScanout>,
+    native_scanout: &mut Option<LiveProductionNativeScanout>,
     wm_session: &mut Option<LiveWmSession>,
     protocol_router: XServerFrontendProtocolRouter,
     input_proof_result: Option<&LiveInputProofResult>,
@@ -2092,7 +2093,7 @@ fn run_session_loop(
     let deadline = config.max_runtime.map(|duration| started + duration);
     let outputs = native_scanout
         .as_ref()
-        .map(PersistentNativeScanout::outputs)
+        .map(LiveProductionNativeScanout::outputs)
         .unwrap_or_else(|| vec![sophia_engine::HeadlessOutput::deterministic()]);
     let output = outputs[0];
     let mut scene = PersistentCpuScene::new(output.size);
@@ -3311,7 +3312,7 @@ fn run_session_loop(
         native_max_upload,
     ) = native_scanout.as_ref().map_or(
         (0, 0, 0, 0, Duration::ZERO),
-        PersistentNativeScanout::persistent_render_metrics,
+        LiveProductionNativeScanout::persistent_render_metrics,
     );
     println!(
         "sophia_live_session_scheduler schema=1 authority_batches={batches} cpu_compositions={cpu_compositions} coalesced_batches={coalesced_batches}"
@@ -3402,10 +3403,10 @@ fn run_session_loop(
             .map_or(0, |native| native.nonzero_exports),
         native_scanout
             .as_ref()
-            .map_or(0, PersistentNativeScanout::mixed_exports),
+            .map_or(0, LiveProductionNativeScanout::mixed_exports),
         native_scanout
             .as_ref()
-            .map_or(0, PersistentNativeScanout::export_attempts),
+            .map_or(0, LiveProductionNativeScanout::export_attempts),
         runtime
             .as_ref()
             .is_some_and(PersistentBackendRuntime::native_scanout_in_flight),
@@ -3593,13 +3594,6 @@ struct PersistentOutputRuntime {
     native_initialized: bool,
 }
 
-#[derive(Clone)]
-struct ObservedComposedFrame {
-    frame: sophia_backend_live::LiveCpuComposedFrame,
-    checksum: u64,
-    nonzero_pixel_bytes: usize,
-}
-
 struct PersistentBackendRuntime {
     production: sophia_engine::ProductionSessionCoordinator,
     outputs: BTreeMap<OutputId, PersistentOutputRuntime>,
@@ -3648,8 +3642,8 @@ impl PersistentBackendRuntime {
     fn new(
         outputs: &[sophia_engine::HeadlessOutput],
         first_transactions: &[SurfaceTransaction],
-        native_scanout: Option<&mut PersistentNativeScanout>,
-        initial_native_frames: Option<Vec<ObservedComposedFrame>>,
+        native_scanout: Option<&mut LiveProductionNativeScanout>,
+        initial_native_frames: Option<Vec<LiveProductionComposedFrame>>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         Self::new_with_committed_surfaces(
             outputs,
@@ -3662,8 +3656,8 @@ impl PersistentBackendRuntime {
     fn new_from_committed_surfaces(
         outputs: &[sophia_engine::HeadlessOutput],
         committed_surfaces: &[CommittedSurfaceState],
-        native_scanout: Option<&mut PersistentNativeScanout>,
-        initial_native_frames: Option<Vec<ObservedComposedFrame>>,
+        native_scanout: Option<&mut LiveProductionNativeScanout>,
+        initial_native_frames: Option<Vec<LiveProductionComposedFrame>>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let mut runtime = Self::new_with_committed_surfaces(
             outputs,
@@ -3679,8 +3673,8 @@ impl PersistentBackendRuntime {
     fn new_with_committed_surfaces(
         outputs: &[sophia_engine::HeadlessOutput],
         committed_surfaces: Vec<CommittedSurfaceState>,
-        mut native_scanout: Option<&mut PersistentNativeScanout>,
-        initial_native_frames: Option<Vec<ObservedComposedFrame>>,
+        mut native_scanout: Option<&mut LiveProductionNativeScanout>,
+        initial_native_frames: Option<Vec<LiveProductionComposedFrame>>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         if outputs.is_empty() || outputs.len() > sophia_backend_live::LIVE_RENDERED_OUTPUT_CAPACITY
         {
@@ -3759,8 +3753,8 @@ impl PersistentBackendRuntime {
 
     fn initialize_native_scanout(
         &mut self,
-        native_scanout: &mut PersistentNativeScanout,
-        frames: &[ObservedComposedFrame],
+        native_scanout: &mut LiveProductionNativeScanout,
+        frames: &[LiveProductionComposedFrame],
     ) -> Result<(), Box<dyn std::error::Error>> {
         if frames.len() != self.outputs.len() {
             return Err("persistent native initialization frame count mismatch".into());
@@ -3794,8 +3788,8 @@ impl PersistentBackendRuntime {
     fn run_batch(
         &mut self,
         batch: &XAuthorityObservedTransactionBatch,
-        mut native_scanout: Option<&mut PersistentNativeScanout>,
-        native_frames: Option<Vec<ObservedComposedFrame>>,
+        mut native_scanout: Option<&mut LiveProductionNativeScanout>,
+        native_frames: Option<Vec<LiveProductionComposedFrame>>,
         wm_update: Option<WmTransactionUpdate>,
     ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
         self.observe_presentation_resources(batch)?;
@@ -3900,7 +3894,7 @@ impl PersistentBackendRuntime {
 
     fn drive_gpu_presentation(
         &mut self,
-        mut native_scanout: Option<&mut PersistentNativeScanout>,
+        mut native_scanout: Option<&mut LiveProductionNativeScanout>,
     ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
         if self.submitted_gpu_presentation.is_some() {
             return self.run_observation_tick();
@@ -4181,8 +4175,8 @@ impl PersistentBackendRuntime {
         &mut self,
         prepared: PreparedAuthorityBatch,
         event_count: usize,
-        mut native_scanout: Option<&mut PersistentNativeScanout>,
-        native_frames: Option<Vec<ObservedComposedFrame>>,
+        mut native_scanout: Option<&mut LiveProductionNativeScanout>,
+        native_frames: Option<Vec<LiveProductionComposedFrame>>,
         wm_update: Option<WmTransactionUpdate>,
     ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
         let output_count = self.outputs.len();
@@ -4234,8 +4228,8 @@ impl PersistentBackendRuntime {
         transactions: &[SurfaceTransaction],
         removed_surfaces: &[SurfaceId],
         event_count: usize,
-        native_scanout: Option<&mut PersistentNativeScanout>,
-        native_frames: Option<Vec<ObservedComposedFrame>>,
+        native_scanout: Option<&mut LiveProductionNativeScanout>,
+        native_frames: Option<Vec<LiveProductionComposedFrame>>,
         wm_update: Option<WmTransactionUpdate>,
     ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
         let prepared =
@@ -4252,8 +4246,8 @@ impl PersistentBackendRuntime {
     fn run_committed_snapshot(
         &mut self,
         committed_surfaces: &[CommittedSurfaceState],
-        mut native_scanout: Option<&mut PersistentNativeScanout>,
-        native_frames: Option<Vec<ObservedComposedFrame>>,
+        mut native_scanout: Option<&mut LiveProductionNativeScanout>,
+        native_frames: Option<Vec<LiveProductionComposedFrame>>,
     ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
         self.production
             .replace_committed_surfaces(committed_surfaces.to_vec());
@@ -4324,7 +4318,7 @@ impl PersistentBackendRuntime {
 
     fn drain_native_scanout(
         &mut self,
-        native_scanout: &mut PersistentNativeScanout,
+        native_scanout: &mut LiveProductionNativeScanout,
         timeout: Duration,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let deadline = Instant::now() + timeout;
@@ -4374,7 +4368,7 @@ impl PersistentBackendRuntime {
 
     fn run_native_idle(
         &mut self,
-        native_scanout: &mut PersistentNativeScanout,
+        native_scanout: &mut LiveProductionNativeScanout,
     ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
         let transactions = self.layers.values().cloned().collect::<Vec<_>>();
         let output_count = self.outputs.len();
@@ -4415,7 +4409,7 @@ impl PersistentBackendRuntime {
 
     fn retire_native_scanout(
         &mut self,
-        native_scanout: &mut PersistentNativeScanout,
+        native_scanout: &mut LiveProductionNativeScanout,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let output_count = self.outputs.len();
         let production = &self.production;
@@ -4523,7 +4517,7 @@ impl PersistentBackendRuntime {
 }
 
 pub(super) struct WaylandNativeSession {
-    scanout: PersistentNativeScanout,
+    scanout: LiveProductionNativeScanout,
     runtime: Option<PersistentBackendRuntime>,
     outputs: Vec<sophia_engine::HeadlessOutput>,
     pending_cpu_presentations: BTreeMap<SurfaceId, u64>,
@@ -4542,7 +4536,7 @@ pub(super) struct WaylandCpuFrameSubmission {
 
 impl WaylandNativeSession {
     pub(super) fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let scanout = PersistentNativeScanout::new()?;
+        let scanout = LiveProductionNativeScanout::new()?;
         let outputs = scanout.outputs();
         Ok(Self {
             scanout,
@@ -4907,9 +4901,9 @@ fn trace_native_dmabuf_lifecycle(stage: &str) {
 fn native_frame_for_output(
     report: &sophia_backend_live::LiveCpuCompositionReport,
     output_size: Size,
-) -> ObservedComposedFrame {
+) -> LiveProductionComposedFrame {
     if report.frame.size == output_size {
-        return ObservedComposedFrame {
+        return LiveProductionComposedFrame {
             frame: report.frame.clone(),
             checksum: report.checksum,
             nonzero_pixel_bytes: report.nonzero_pixel_bytes,
@@ -4944,7 +4938,7 @@ fn native_frame_for_output(
             )
         },
     );
-    ObservedComposedFrame {
+    LiveProductionComposedFrame {
         frame: sophia_backend_live::LiveCpuComposedFrame {
             size: output_size,
             stride: u32::try_from(stride).unwrap_or(u32::MAX),
@@ -5014,535 +5008,6 @@ fn layer_snapshots_from_committed(
             resize_sync: ResizeSyncCapability::ImplicitOnly,
         })
         .collect()
-}
-
-struct PersistentNativeScanout {
-    groups: Vec<PersistentNativeGroup>,
-    heads: Vec<PersistentNativeHead>,
-    discovered_outputs: usize,
-    presentation_outputs: usize,
-    submissions: usize,
-    submit_deferred: usize,
-    submit_failures: usize,
-    retirements: usize,
-    retire_failures: usize,
-    max_in_flight_ticks: u64,
-    max_submit_to_page_flip: Duration,
-    callback_accepted: usize,
-    callback_rejected: usize,
-    callback_queue_saturated: usize,
-    nonzero_exports: usize,
-    production_page_flips: sophia_backend_live::LiveProductionPageFlipTracker,
-    presentation_started: Instant,
-    vsync_overlap_rejections: usize,
-    page_flip_phase_rejections: usize,
-}
-
-struct PersistentNativeGroup {
-    session: sophia_backend_live::RealAtomicScanoutPageFlipSession,
-    sender: SyncSender<sophia_backend_live::LivePageFlipCallback>,
-    receiver: Receiver<sophia_backend_live::LivePageFlipCallback>,
-}
-
-struct PersistentNativeHead {
-    group: usize,
-    selection: sophia_backend_live::LibdrmNativePrimaryPlaneSelection,
-    exporter: sophia_backend_live::NativeGbmRenderedScanoutBufferDiscoveryExporter<
-        sophia_backend_live::RealAtomicScanoutRenderDeviceDiscovery,
-    >,
-    sender: SyncSender<sophia_backend_live::LivePageFlipCallback>,
-    receiver: Option<Receiver<sophia_backend_live::LivePageFlipCallback>>,
-    output: sophia_engine::HeadlessOutput,
-    submitted_at: Option<Instant>,
-    pending_nonzero_pixel_bytes: usize,
-    last_checksum: u64,
-    submitted_checksum: Option<u64>,
-    submitted_sequence: Option<usize>,
-    presented_checksum: u64,
-    presented_submissions: usize,
-    submissions: usize,
-    retirements: usize,
-    callback_accepted: usize,
-    nonzero_exports: usize,
-}
-
-impl PersistentNativeScanout {
-    fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let authority = sophia_backend_live::RealAtomicScanoutSmokeConfig::default_primary_output()
-            .ok_or("persistent native scanout config is invalid")?
-            .authority;
-        let selection = sophia_backend_live::select_real_atomic_scanout_cards();
-        let mut sessions = selection.into_page_flip_sessions(authority);
-        if sessions.status != sophia_backend_live::RealAtomicScanoutPageFlipSessionSetStatus::Ready
-        {
-            return Err(format!(
-                "persistent native scanout could not open all KMS outputs: {:?}",
-                sessions.status
-            )
-            .into());
-        }
-        let outputs = sophia_engine::discover_drm_kms_outputs_from_sysfs("/sys/class/drm")?;
-        if sessions.output_count != outputs.len() {
-            return Err(format!(
-                "persistent native ownership is partial: discovered={} native={}",
-                outputs.len(),
-                sessions.output_count
-            )
-            .into());
-        }
-        let mut presentation_outputs = sophia_engine::DrmKmsOutputRegistry::new();
-        for session in &sessions.sessions {
-            for (selection, output_id) in session
-                .selections()
-                .iter()
-                .copied()
-                .zip(session.outputs().iter().copied())
-            {
-                let Some(descriptor) = outputs
-                    .outputs()
-                    .find(|descriptor| descriptor.connector_id == selection.connector_id())
-                    .copied()
-                else {
-                    return Err(format!(
-                        "persistent native output has no Engine connector match: connector={}",
-                        selection.connector_id(),
-                    )
-                    .into());
-                };
-                let descriptor = sophia_engine::DrmKmsOutputDescriptor {
-                    output: output_id,
-                    ..descriptor
-                };
-                if presentation_outputs.upsert(descriptor)
-                    == sophia_engine::DrmKmsOutputRegistryUpdate::CapacityExceeded
-                {
-                    return Err("persistent native presentation output capacity exceeded".into());
-                }
-            }
-        }
-        if presentation_outputs.len() != sessions.output_count {
-            return Err(format!(
-                "persistent native connector mapping is incomplete: mapped={} native={}",
-                presentation_outputs.len(),
-                sessions.output_count,
-            )
-            .into());
-        }
-        let presentation_output_count = presentation_outputs.len();
-        let production_page_flips =
-            sophia_backend_live::LiveProductionPageFlipTracker::from_outputs(&presentation_outputs);
-        let mut groups = Vec::new();
-        let mut heads = Vec::new();
-        for session in sessions.sessions.drain(..) {
-            let group = groups.len();
-            for (selection, output_id) in session
-                .selections()
-                .iter()
-                .copied()
-                .zip(session.outputs().iter().copied())
-            {
-                let size = selection.size();
-                let discovery = session.render_device_discovery()?;
-                let exporter =
-                    sophia_backend_live::NativeGbmRenderedScanoutBufferDiscoveryExporter::new(
-                        discovery,
-                    )
-                    .with_preferred_modifiers(
-                        session.preferred_xrgb8888_scanout_modifiers_for_selection(selection),
-                    );
-                let (sender, receiver) = sync_channel(64);
-                heads.push(PersistentNativeHead {
-                    group,
-                    selection,
-                    exporter,
-                    sender,
-                    receiver: Some(receiver),
-                    output: sophia_engine::HeadlessOutput {
-                        id: output_id,
-                        size,
-                        scale: 1,
-                    },
-                    submitted_at: None,
-                    pending_nonzero_pixel_bytes: 0,
-                    last_checksum: 0,
-                    submitted_checksum: None,
-                    submitted_sequence: None,
-                    presented_checksum: 0,
-                    presented_submissions: 0,
-                    submissions: 0,
-                    retirements: 0,
-                    callback_accepted: 0,
-                    nonzero_exports: 0,
-                });
-            }
-            let (sender, receiver) = sync_channel(64);
-            groups.push(PersistentNativeGroup {
-                session,
-                sender,
-                receiver,
-            });
-        }
-        heads.sort_by_key(|head| head.output.id);
-        Ok(Self {
-            groups,
-            heads,
-            discovered_outputs: outputs.len(),
-            presentation_outputs: presentation_output_count,
-            submissions: 0,
-            submit_deferred: 0,
-            submit_failures: 0,
-            retirements: 0,
-            retire_failures: 0,
-            max_in_flight_ticks: 0,
-            max_submit_to_page_flip: Duration::ZERO,
-            callback_accepted: 0,
-            callback_rejected: 0,
-            callback_queue_saturated: 0,
-            nonzero_exports: 0,
-            production_page_flips,
-            presentation_started: Instant::now(),
-            vsync_overlap_rejections: 0,
-            page_flip_phase_rejections: 0,
-        })
-    }
-
-    fn clone_render_device_file(&self) -> std::io::Result<std::fs::File> {
-        self.groups
-            .first()
-            .ok_or_else(|| std::io::Error::other("native scanout has no DRM device group"))?
-            .session
-            .card()
-            .try_clone_file()
-    }
-
-    fn outputs(&self) -> Vec<sophia_engine::HeadlessOutput> {
-        self.heads.iter().map(|head| head.output).collect()
-    }
-
-    fn selection(&self, index: usize) -> sophia_backend_live::LibdrmNativePrimaryPlaneSelection {
-        self.heads[index].selection
-    }
-
-    fn card(&self, index: usize) -> &sophia_backend_live::RealAtomicScanoutCard {
-        self.groups[self.heads[index].group].session.card()
-    }
-
-    fn take_receiver(
-        &mut self,
-        index: usize,
-    ) -> Receiver<sophia_backend_live::LivePageFlipCallback> {
-        self.heads[index]
-            .receiver
-            .take()
-            .expect("native page-flip receiver must attach once")
-    }
-
-    fn run_tick(
-        &mut self,
-        index: usize,
-        runtime: &mut sophia_backend_live::LiveBackendRuntimeAssembly,
-        input: CompositorBackendTickInput,
-    ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
-        let group = self.heads[index].group;
-        self.poll_group_callbacks(group)?;
-        let (report, exported_nonzero) = {
-            let groups = &mut self.groups;
-            let head = &mut self.heads[index];
-            let export_attempts_before = head.exporter.cpu_frame_export_attempts();
-            let report = runtime
-                .run_tick_with_native_gbm_rendered_primary_plane_scanout_exporter_with(
-                    input,
-                    groups[group].session.card(),
-                    &mut head.exporter,
-                )?;
-            let exported_nonzero = head.exporter.cpu_frame_export_attempts()
-                > export_attempts_before
-                && head.pending_nonzero_pixel_bytes > 0;
-            if !head.exporter.pending_cpu_frame() {
-                head.pending_nonzero_pixel_bytes = 0;
-            }
-            (report, exported_nonzero)
-        };
-        if exported_nonzero {
-            self.nonzero_exports = self.nonzero_exports.saturating_add(1);
-            self.heads[index].nonzero_exports = self.heads[index].nonzero_exports.saturating_add(1);
-        }
-        if let Some(retire) = report.rendered_primary_plane_scanout_retire {
-            self.observe_retire(index, retire);
-        }
-        self.observe_callbacks(index, report.page_flip_callbacks);
-        if let Some(submit) = report.rendered_primary_plane_scanout_submit {
-            use sophia_backend_live::LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus as Status;
-            match submit.status {
-                Status::SubmittedWaitingForPageFlip => {
-                    trace_live_native_lifecycle("kms_submit_accepted");
-                    self.submissions = self.submissions.saturating_add(1);
-                    self.heads[index].submissions = self.heads[index].submissions.saturating_add(1);
-                    self.heads[index].submitted_at = Some(Instant::now());
-                    self.heads[index].submitted_checksum = Some(self.heads[index].last_checksum);
-                    self.heads[index].submitted_sequence = Some(self.heads[index].submissions);
-                    let output = self.heads[index].output.id;
-                    let cycle = u64::try_from(self.heads[index].submissions).unwrap_or(u64::MAX);
-                    if self.production_page_flips.submit(output, cycle).is_err() {
-                        self.vsync_overlap_rejections =
-                            self.vsync_overlap_rejections.saturating_add(1);
-                    }
-                }
-                Status::AlreadyInFlight | Status::CleanupPending => {
-                    self.submit_deferred = self.submit_deferred.saturating_add(1);
-                }
-                _ => self.submit_failures = self.submit_failures.saturating_add(1),
-            }
-        }
-        self.max_in_flight_ticks = self
-            .max_in_flight_ticks
-            .max(report.rendered_primary_plane_scanout_in_flight_ticks);
-        Ok(report)
-    }
-
-    fn retire_ready(
-        &mut self,
-        index: usize,
-        runtime: &mut sophia_backend_live::LiveBackendRuntimeAssembly,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let group = self.heads[index].group;
-        self.poll_group_callbacks(group)?;
-        let report = runtime.drain_rendered_primary_plane_page_flip_callbacks_with(
-            self.groups[group].session.card(),
-        );
-        self.observe_callbacks(index, report.page_flip_callbacks);
-        if let Some(retire) = report.rendered_primary_plane_scanout_retire {
-            self.observe_retire(index, retire);
-        }
-        Ok(())
-    }
-
-    fn observe_retire(
-        &mut self,
-        index: usize,
-        retire: sophia_backend_live::LiveTrackedRenderedPrimaryPlaneScanoutRetireReport,
-    ) {
-        use sophia_backend_live::LiveTrackedRenderedPrimaryPlaneScanoutRetireStatus as Status;
-        match retire.status {
-            Status::RetiredAfterPageFlip => {
-                trace_live_native_lifecycle("kms_buffer_retired");
-                self.retirements = self.retirements.saturating_add(1);
-                self.heads[index].retirements = self.heads[index].retirements.saturating_add(1);
-                if let Some(submitted_at) = self.heads[index].submitted_at.take() {
-                    self.max_submit_to_page_flip =
-                        self.max_submit_to_page_flip.max(submitted_at.elapsed());
-                }
-            }
-            Status::NoSubmission | Status::WaitingForAcceptedPageFlip => {}
-            Status::ResourceRetireFailed => {
-                self.retire_failures = self.retire_failures.saturating_add(1);
-            }
-        }
-    }
-
-    fn observe_callbacks(
-        &mut self,
-        index: usize,
-        report: sophia_backend_live::LivePageFlipCallbackQueueReport,
-    ) {
-        self.callback_accepted = self.callback_accepted.saturating_add(report.accepted);
-        self.heads[index].callback_accepted = self.heads[index]
-            .callback_accepted
-            .saturating_add(report.accepted);
-        if report.accepted > 0 {
-            trace_live_native_lifecycle("page_flip_callback_accepted");
-            if let Some(checksum) = self.heads[index].submitted_checksum.take() {
-                self.heads[index].presented_checksum = checksum;
-            }
-            if let Some(submission) = self.heads[index].submitted_sequence.take() {
-                self.heads[index].presented_submissions = submission;
-            }
-            let output = self.heads[index].output.id;
-            if let Some(kernel_sequence) = report
-                .last_accepted
-                .and_then(|accepted| accepted.event.frame_serial)
-            {
-                let elapsed = self.presentation_started.elapsed();
-                let presentation_msec = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
-                let ust = u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX);
-                if self
-                    .production_page_flips
-                    .observe_page_flip(output, kernel_sequence, presentation_msec, ust)
-                    .is_err()
-                {
-                    self.page_flip_phase_rejections =
-                        self.page_flip_phase_rejections.saturating_add(1);
-                }
-            }
-        }
-        self.callback_rejected = self
-            .callback_rejected
-            .saturating_add(report.rejected_unexpected_output + report.rejected_stale_frame_serial);
-        self.callback_queue_saturated = self
-            .callback_queue_saturated
-            .saturating_add(usize::from(report.max_reached));
-    }
-
-    fn initialize(
-        &mut self,
-        index: usize,
-        runtime: &mut sophia_backend_live::LiveBackendRuntimeAssembly,
-        frame: ObservedComposedFrame,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        self.queue_frame(index, frame);
-        let group = self.heads[index].group;
-        let groups = &mut self.groups;
-        let head = &mut self.heads[index];
-        let export_attempts_before = head.exporter.cpu_frame_export_attempts();
-        groups[group]
-            .session
-            .initialize_persistent_native_gbm_scanout_for_selection(
-                runtime,
-                &mut head.exporter,
-                head.selection,
-            )
-            .map_err(|evidence| {
-                format!("persistent native initial modeset failed: {evidence:?}")
-            })?;
-        if head.exporter.cpu_frame_export_attempts() > export_attempts_before
-            && head.pending_nonzero_pixel_bytes > 0
-        {
-            self.nonzero_exports = self.nonzero_exports.saturating_add(1);
-            head.nonzero_exports = head.nonzero_exports.saturating_add(1);
-        }
-        if !head.exporter.pending_cpu_frame() {
-            head.pending_nonzero_pixel_bytes = 0;
-        }
-        self.submissions = self.submissions.saturating_add(1);
-        trace_live_native_lifecycle("initial_modeset_complete");
-        head.submissions = head.submissions.saturating_add(1);
-        head.presented_checksum = head.last_checksum;
-        head.presented_submissions = head.submissions;
-        Ok(())
-    }
-
-    fn queue_frame(&mut self, index: usize, frame: ObservedComposedFrame) {
-        let head = &mut self.heads[index];
-        head.pending_nonzero_pixel_bytes = frame.nonzero_pixel_bytes;
-        head.last_checksum = frame.checksum;
-        head.exporter
-            .set_pending_cpu_frame_with_checksum(frame.frame, frame.checksum);
-    }
-
-    fn queue_mixed_frame(
-        &mut self,
-        index: usize,
-        frame: sophia_backend_live::LiveOwnedMixedCompositionFrame,
-    ) {
-        self.heads[index].exporter.set_pending_mixed_frame(frame);
-    }
-
-    fn diagnose_mixed_frame(
-        &mut self,
-        index: usize,
-        frame: sophia_backend_live::LiveOwnedMixedCompositionFrame,
-    ) -> (
-        sophia_backend_live::LiveRendererScanoutBufferExportStatus,
-        sophia_backend_live::LiveRendererScanoutBufferExportDetail,
-    ) {
-        use sophia_backend_live::LiveRenderedScanoutBufferExporter as _;
-
-        let head = &mut self.heads[index];
-        head.exporter.set_pending_mixed_frame(frame);
-        let export = head.exporter.export_rendered_scanout_buffer(
-            sophia_backend_live::LiveGbmEglFrameTargetRecord::new(head.output.size),
-        );
-        let status = export.status;
-        let detail = export.detail;
-        drop(export);
-        (status, detail)
-    }
-
-    fn take_presentation_feedback(&mut self, output: OutputId) -> Option<(u64, u64)> {
-        let retirement = self.production_page_flips.take_retirement(output)?;
-        Some((retirement.retirement.ust, retirement.retirement.msc))
-    }
-
-    fn discard_presentation_feedback(&mut self, output: Option<OutputId>) {
-        self.production_page_flips.discard_retirements(output);
-    }
-
-    fn pending_frame(&self, index: usize) -> bool {
-        self.heads[index].exporter.pending_cpu_frame()
-            || self.heads[index].exporter.pending_dmabuf_frame()
-            || self.heads[index].exporter.pending_mixed_frame()
-    }
-
-    fn export_attempts(&self) -> usize {
-        self.heads
-            .iter()
-            .map(|head| head.exporter.cpu_frame_export_attempts())
-            .chain(
-                self.heads
-                    .iter()
-                    .map(|head| head.exporter.mixed_frame_export_attempts()),
-            )
-            .sum()
-    }
-
-    fn mixed_exports(&self) -> usize {
-        self.heads
-            .iter()
-            .map(|head| head.exporter.mixed_frame_exports())
-            .sum()
-    }
-
-    fn persistent_render_metrics(&self) -> (usize, usize, usize, usize, Duration) {
-        self.heads.iter().fold(
-            (0, 0, 0, 0, Duration::ZERO),
-            |(targets, recreations, pipelines, uploads, max_upload), head| {
-                let stats = head.exporter.persistent_render_stats();
-                (
-                    targets.saturating_add(stats.target_creations),
-                    recreations.saturating_add(stats.target_recreations),
-                    pipelines.saturating_add(stats.gl_pipeline_creations),
-                    uploads.saturating_add(stats.frame_uploads),
-                    max_upload.max(stats.max_upload),
-                )
-            },
-        )
-    }
-
-    fn poll_group_callbacks(&mut self, group: usize) -> Result<(), Box<dyn std::error::Error>> {
-        let callbacks = {
-            let group = &mut self.groups[group];
-            let _ = group
-                .session
-                .poll_native_page_flip_events(&group.sender, 64, 64);
-            let mut callbacks = Vec::new();
-            loop {
-                match group.receiver.try_recv() {
-                    Ok(callback) => callbacks.push(callback),
-                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        return Err("native card callback router disconnected".into());
-                    }
-                }
-            }
-            callbacks
-        };
-        for callback in callbacks {
-            let Some(head) = self
-                .heads
-                .iter()
-                .find(|head| head.output.id == callback.output)
-            else {
-                return Err("native callback referenced an unknown output".into());
-            };
-            head.sender
-                .try_send(callback)
-                .map_err(|error| match error {
-                    TrySendError::Full(_) => "native output callback queue is full",
-                    TrySendError::Disconnected(_) => "native output callback queue is disconnected",
-                })?;
-        }
-        Ok(())
-    }
 }
 
 fn seed_committed_surfaces(transactions: &[SurfaceTransaction]) -> Vec<CommittedSurfaceState> {
@@ -5775,7 +5240,7 @@ impl PersistentCpuScene {
     fn frames_for_outputs(
         &self,
         outputs: &[sophia_engine::HeadlessOutput],
-    ) -> Result<Vec<ObservedComposedFrame>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<LiveProductionComposedFrame>, Box<dyn std::error::Error>> {
         let primary = self
             .last_report
             .as_ref()
@@ -5783,7 +5248,7 @@ impl PersistentCpuScene {
         let mut frames = Vec::with_capacity(outputs.len());
         for (index, output) in outputs.iter().enumerate() {
             if index == 0 && output.size == primary.frame.size {
-                frames.push(ObservedComposedFrame {
+                frames.push(LiveProductionComposedFrame {
                     frame: primary.frame.clone(),
                     checksum: primary.checksum,
                     nonzero_pixel_bytes: primary.nonzero_pixel_bytes,
@@ -5818,7 +5283,7 @@ impl PersistentCpuScene {
             };
             let report = sophia_backend_live::compose_live_cpu_frame(output.size, &[marker])
                 .map_err(|error| format!("secondary output composition failed: {error:?}"))?;
-            frames.push(ObservedComposedFrame {
+            frames.push(LiveProductionComposedFrame {
                 frame: report.frame,
                 checksum: report.checksum,
                 nonzero_pixel_bytes: report.nonzero_pixel_bytes,

@@ -326,3 +326,8 @@ impl LiveProductionPresentFeedbackCoordinator {
         }
     }
 }
+
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+mod native_scanout;
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+pub use native_scanout::*;

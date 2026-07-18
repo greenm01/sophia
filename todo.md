@@ -81,16 +81,18 @@ cycle-correlated feedback records; the CLI no longer owns those state tables.
 The backend feedback coordinator now retires presentation resources before it
 emits paired reduced Complete/Idle outcomes; missing presentations fail closed
 with no protocol event. The CLI only translates those outcomes to X wire events.
-A retired GPU Present is now prepared and committed once through the primary
+A retired GPU Present is now prepared and committed once through the session
 production coordinator, then its immutable snapshot is projected to the remaining
 outputs; it is no longer prepared and applied independently per output. After the
 matching page flip, the coordinator applies that prepared state before backend resource
 retirement and reduced feedback, and suppresses feedback when the baseline is stale.
 CPU and GPU submission, native idle work, page-flip retirement and cleanup, and
 displayed-buffer teardown now cross the coordinator fanout and a protocol-neutral live
-output adapter. The remaining migration is to move the concrete native adapter callbacks
-out of `live_session.rs`; the CLI still constructs those callbacks beside
-`PersistentNativeScanout`, so it is not yet only a supervisor/observer.
+output adapter. `LiveProductionNativeScanout` now owns the real atomic sessions, GBM
+exporters, callback routing, page-flip correlation, and scanout counters in backend-live;
+the CLI no longer defines native DRM/KMS lifecycle state. The remaining migration is to
+move `PersistentBackendRuntime` and CPU composition callbacks out of `live_session.rs` so
+the CLI becomes only a dependency builder, supervisor, proof observer, and shutdown client.
 
 - [ ] Establish `sophia-engine::runtime_driver` as the only production visual
   coordinator. Its ordered phases are bounded authority intake, Engine
