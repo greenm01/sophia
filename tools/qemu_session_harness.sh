@@ -237,7 +237,7 @@ if [[ "$SCENARIO" == gtk-* ]]; then
         exit 1
     fi
     if ! grep -q "^sophia_qemu_guest schema=1 status=complete scenario=$SCENARIO$" "$EVIDENCE_FILE" \
-        || ! grep -q '^sophia_x_application_session schema=1 status=passed class=gtk3_software client=zenity ' "$EVIDENCE_FILE"; then
+        || ! grep -q '^sophia_x_application_session schema=1 status=passed class=gtk3_software client=zenity .*protocol_errors=0 first_error=none physical_text=true pointer_button=true surface_resize=committed buffer_path=cpu_shm native_presentation=enabled cleanup=clean$' "$EVIDENCE_FILE"; then
         echo "sophia_qemu_gtk schema=1 status=failed reason=semantic_evidence scenario=$SCENARIO" | tee -a "$EVIDENCE_FILE"
         exit 1
     fi

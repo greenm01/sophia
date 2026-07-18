@@ -132,7 +132,7 @@ elif [ "$scenario" = "gtk-classic" ] || [ "$scenario" = "gtk-confined" ]; then
         --client-arg='Type sophia, then click OK' \
         --expect-client-stdout="$expected_stdout" --require-client-normal-exit \
         --expect-physical-text=sophia --expect-physical-pointer \
-        --exit-after-input-proof
+        --inject-surface-resize=640x360 --exit-after-input-proof
     echo "sophia_qemu_gtk schema=1 status=running profile=$profile"
 else
     set -- sophia-live-session --display=:181 --native-scanout --max-ticks=300 \

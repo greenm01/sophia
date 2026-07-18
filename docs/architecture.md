@@ -132,10 +132,7 @@ recovery, and exact resource retirement pass on target hardware. Milestone 5
 GTK input and protocol semantics pass in isolated QEMU; fresh paired classic and
 confined X13 evidence remains the application-promotion gate.
 
-The remaining architecture debt is orchestration. The live executable still
-contains `PersistentCpuScene`, `PersistentBackendRuntime`, and
-`PersistentNativeScanout` beside the protocol-neutral Engine state. That CLI
-assembly is transitional. It must not remain a second scene projection, frame
+The remaining architecture debt is orchestration. Renderer-live owns the CPU scene, and backend-live owns native scanout plus the concrete per-output runtime set. The live executable still contains the `PersistentBackendRuntime` visual-control wrapper and legacy committed-snapshot entry points beside the protocol-neutral Engine state. That CLI assembly is transitional. It must not remain a second scene projection, frame
 scheduler, renderer coordinator, or scanout lifecycle owner.
 
 The production target is one protocol-neutral session coordinator in

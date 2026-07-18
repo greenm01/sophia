@@ -424,7 +424,7 @@ prevents synthetic proof keys from racing the proof shell's first prompt.
 ## Remaining Production Gaps
 
 The frontend is sufficient for paired xterm sessions, mixed Vulkan presentation,
-and deterministic GTK3 Zenity behavior. Its remaining production gaps are
+and deterministic GTK3 Zenity behavior. Retained classic and confined QEMU profiles now require a committed 640x360 resize with changed CPU/SHM pixels in addition to exact input, native presentation, normal exit, and clean teardown. Its remaining production gaps are
 explicit and evidence-driven:
 
 - GTK3 remains at `engine` evidence until fresh classic-shared and confined X13
