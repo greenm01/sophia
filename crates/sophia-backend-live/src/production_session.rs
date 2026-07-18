@@ -268,6 +268,35 @@ impl LiveProductionPresentFeedbackCoordinator {
         &mut self.resources
     }
 
+    pub fn observe_authority_resources(
+        &mut self,
+        batch: &crate::LiveProductionAuthorityBatch,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        for registration in &batch.dma_buf_registrations {
+            let plane_fds = registration
+                .plane_fds
+                .iter()
+                .map(|fd| fd.as_ref().try_clone())
+                .collect::<Result<Vec<_>, _>>()?;
+            self.resources
+                .register_source(registration.descriptor, plane_fds)?;
+        }
+        for registration in &batch.fence_registrations {
+            self.resources.register_fence(
+                registration.handle,
+                registration.initially_triggered,
+                registration.fd.as_ref().try_clone()?,
+            )?;
+        }
+        for handle in &batch.released_dma_bufs {
+            let _ = self.resources.release_source(*handle);
+        }
+        for handle in &batch.released_fences {
+            let _ = self.resources.release_fence(*handle);
+        }
+        Ok(())
+    }
+
     pub fn complete_flip(
         &mut self,
         transaction: TransactionId,

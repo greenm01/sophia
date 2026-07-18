@@ -3915,7 +3915,8 @@ impl PersistentBackendRuntime {
         ),
         Box<dyn std::error::Error>,
     > {
-        self.observe_presentation_resources(batch)?;
+        self.presentation_feedback
+            .observe_authority_resources(batch)?;
         self.layers
             .retain(|surface, _| !batch.removed_surfaces.contains(surface));
         for transaction in &batch.transactions {
@@ -4091,7 +4092,8 @@ impl PersistentBackendRuntime {
         native_frames: Option<Vec<LiveProductionComposedFrame>>,
         wm_update: Option<WmTransactionUpdate>,
     ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
-        self.observe_presentation_resources(batch)?;
+        self.presentation_feedback
+            .observe_authority_resources(batch)?;
         if !batch.present_submissions.is_empty() {
             let cpu_background = native_frames
                 .as_ref()
@@ -4153,42 +4155,6 @@ impl PersistentBackendRuntime {
             native_frames,
             wm_update,
         )
-    }
-
-    fn observe_presentation_resources(
-        &mut self,
-        batch: &LiveProductionAuthorityBatch,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        for registration in &batch.dma_buf_registrations {
-            let plane_fds = registration
-                .plane_fds
-                .iter()
-                .map(|fd| fd.as_ref().try_clone())
-                .collect::<Result<Vec<_>, _>>()?;
-            self.presentation_feedback
-                .resources_mut()
-                .register_source(registration.descriptor, plane_fds)?;
-        }
-        for registration in &batch.fence_registrations {
-            self.presentation_feedback.resources_mut().register_fence(
-                registration.handle,
-                registration.initially_triggered,
-                registration.fd.as_ref().try_clone()?,
-            )?;
-        }
-        for handle in &batch.released_dma_bufs {
-            let _ = self
-                .presentation_feedback
-                .resources_mut()
-                .release_source(*handle);
-        }
-        for handle in &batch.released_fences {
-            let _ = self
-                .presentation_feedback
-                .resources_mut()
-                .release_fence(*handle);
-        }
-        Ok(())
     }
 
     fn drive_gpu_presentation(

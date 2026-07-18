@@ -1673,3 +1673,12 @@ physical text and pointer selection, exited normally with `first_error=none`, an
 outputs cleanly after 54-56 CPU compositions. The next extraction is GPU scheduling and the
 concrete per-output runtime owner; legacy committed-snapshot entry points remain only for the
 Wayland maintenance path and tests.
+
+
+## 2026-07-18: Backend Owns Present Resource Admission
+
+`LiveProductionPresentFeedbackCoordinator` now consumes the backend-owned production batch
+directly to register DMA-BUF sources and fences and to process source/fence releases. The CLI
+visual wrapper no longer clones file descriptors or sequences presentation-resource lifetime
+admission. The full offline all-feature suite passes; behavior is covered by the immediately
+preceding guarded native mixed and strict QEMU evidence.
