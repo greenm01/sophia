@@ -4935,11 +4935,10 @@ struct PersistentNativeScanout {
     callback_rejected: usize,
     callback_queue_saturated: usize,
     nonzero_exports: usize,
-    presentation: sophia_engine::OutputPresentationRegistry,
+    production_page_flips: sophia_backend_live::LiveProductionPageFlipTracker,
     presentation_started: Instant,
     vsync_overlap_rejections: usize,
     page_flip_phase_rejections: usize,
-    presentation_feedback: VecDeque<(OutputId, u64, u64)>,
 }
 
 struct PersistentNativeGroup {
@@ -4968,7 +4967,6 @@ struct PersistentNativeHead {
     retirements: usize,
     callback_accepted: usize,
     nonzero_exports: usize,
-    scheduled_frame: Option<u64>,
 }
 
 impl PersistentNativeScanout {
@@ -5033,8 +5031,9 @@ impl PersistentNativeScanout {
             )
             .into());
         }
-        let presentation =
-            sophia_engine::OutputPresentationRegistry::from_outputs(&presentation_outputs);
+        let presentation_output_count = presentation_outputs.len();
+        let production_page_flips =
+            sophia_backend_live::LiveProductionPageFlipTracker::from_outputs(&presentation_outputs);
         let mut groups = Vec::new();
         let mut heads = Vec::new();
         for session in sessions.sessions.drain(..) {
@@ -5077,7 +5076,6 @@ impl PersistentNativeScanout {
                     retirements: 0,
                     callback_accepted: 0,
                     nonzero_exports: 0,
-                    scheduled_frame: None,
                 });
             }
             let (sender, receiver) = sync_channel(64);
@@ -5092,7 +5090,7 @@ impl PersistentNativeScanout {
             groups,
             heads,
             discovered_outputs: outputs.len(),
-            presentation_outputs: presentation.outputs().count(),
+            presentation_outputs: presentation_output_count,
             submissions: 0,
             submit_deferred: 0,
             submit_failures: 0,
@@ -5104,11 +5102,10 @@ impl PersistentNativeScanout {
             callback_rejected: 0,
             callback_queue_saturated: 0,
             nonzero_exports: 0,
-            presentation,
+            production_page_flips,
             presentation_started: Instant::now(),
             vsync_overlap_rejections: 0,
             page_flip_phase_rejections: 0,
-            presentation_feedback: VecDeque::new(),
         })
     }
 
@@ -5188,15 +5185,10 @@ impl PersistentNativeScanout {
                     self.heads[index].submitted_checksum = Some(self.heads[index].last_checksum);
                     self.heads[index].submitted_sequence = Some(self.heads[index].submissions);
                     let output = self.heads[index].output.id;
-                    let _ = self.presentation.mark_damage(output);
-                    match self.presentation.schedule(output) {
-                        sophia_engine::OutputPresentationSchedule::Scheduled(frame) => {
-                            self.heads[index].scheduled_frame = Some(frame.frame_serial);
-                        }
-                        _ => {
-                            self.vsync_overlap_rejections =
-                                self.vsync_overlap_rejections.saturating_add(1);
-                        }
+                    let cycle = u64::try_from(self.heads[index].submissions).unwrap_or(u64::MAX);
+                    if self.production_page_flips.submit(output, cycle).is_err() {
+                        self.vsync_overlap_rejections =
+                            self.vsync_overlap_rejections.saturating_add(1);
                     }
                 }
                 Status::AlreadyInFlight | Status::CleanupPending => {
@@ -5273,29 +5265,17 @@ impl PersistentNativeScanout {
                 .last_accepted
                 .and_then(|accepted| accepted.event.frame_serial)
             {
-                let presentation_msec =
-                    u64::try_from(self.presentation_started.elapsed().as_millis())
-                        .unwrap_or(u64::MAX);
-                if !matches!(
-                    self.presentation
-                        .observe_page_flip(output, kernel_sequence, presentation_msec),
-                    sophia_engine::OutputPresentationFeedback::Accepted { .. }
-                ) {
+                let elapsed = self.presentation_started.elapsed();
+                let presentation_msec = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+                let ust = u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX);
+                if self
+                    .production_page_flips
+                    .observe_page_flip(output, kernel_sequence, presentation_msec, ust)
+                    .is_err()
+                {
                     self.page_flip_phase_rejections =
                         self.page_flip_phase_rejections.saturating_add(1);
                 }
-                let ust = u64::try_from(self.presentation_started.elapsed().as_micros())
-                    .unwrap_or(u64::MAX);
-                self.presentation_feedback
-                    .push_back((output, ust, kernel_sequence));
-            }
-            if let Some(frame_serial) = self.heads[index].scheduled_frame.take()
-                && !matches!(
-                    self.presentation.retire(output, frame_serial),
-                    sophia_engine::OutputPresentationRetire::Retired { .. }
-                )
-            {
-                self.page_flip_phase_rejections = self.page_flip_phase_rejections.saturating_add(1);
             }
         }
         self.callback_rejected = self
@@ -5382,21 +5362,12 @@ impl PersistentNativeScanout {
     }
 
     fn take_presentation_feedback(&mut self, output: OutputId) -> Option<(u64, u64)> {
-        let index = self
-            .presentation_feedback
-            .iter()
-            .position(|(candidate, _, _)| *candidate == output)?;
-        let (_, ust, msc) = self.presentation_feedback.remove(index)?;
-        Some((ust, msc))
+        let retirement = self.production_page_flips.take_retirement(output)?;
+        Some((retirement.retirement.ust, retirement.retirement.msc))
     }
 
     fn discard_presentation_feedback(&mut self, output: Option<OutputId>) {
-        match output {
-            Some(output) => self
-                .presentation_feedback
-                .retain(|(candidate, _, _)| *candidate != output),
-            None => self.presentation_feedback.clear(),
-        }
+        self.production_page_flips.discard_retirements(output);
     }
 
     fn pending_frame(&self, index: usize) -> bool {

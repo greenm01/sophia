@@ -1,6 +1,12 @@
-use sophia_backend_live::LiveProductionPresentationAdapter;
-use sophia_engine::{ProductionPresentationAdapter, ProductionRetirement};
-use sophia_protocol::CommittedSurfaceState;
+use sophia_backend_live::{
+    LiveProductionPageFlipRetirement, LiveProductionPageFlipTracker,
+    LiveProductionPageFlipTrackerError, LiveProductionPresentationAdapter,
+};
+use sophia_engine::{
+    DrmKmsMode, DrmKmsOutputDescriptor, DrmKmsOutputRegistry, OutputPresentationFeedback,
+    OutputPresentationSchedule, ProductionPresentationAdapter, ProductionRetirement,
+};
+use sophia_protocol::{CommittedSurfaceState, OutputId, Size};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -55,4 +61,70 @@ fn live_adapter_keeps_frame_and_retirement_inside_ordered_callbacks() {
             ("feedback", 7),
         ]
     );
+}
+
+fn production_outputs() -> DrmKmsOutputRegistry {
+    let mut outputs = DrmKmsOutputRegistry::new();
+    let _ = outputs.upsert(DrmKmsOutputDescriptor {
+        output: OutputId::from_raw(7),
+        connector_id: 7,
+        crtc_id: 8,
+        mode: DrmKmsMode {
+            size: Size {
+                width: 1920,
+                height: 1080,
+            },
+            refresh_millihz: 60_000,
+        },
+        scale: 1,
+    });
+    outputs
+}
+
+#[test]
+fn page_flip_tracker_emits_only_matching_retirements_with_origin_cycle() {
+    let output = OutputId::from_raw(7);
+    let mut tracker = LiveProductionPageFlipTracker::from_outputs(&production_outputs());
+
+    let frame = tracker.submit(output, 41).unwrap();
+    assert_eq!(frame, 1);
+    assert!(tracker.drain_retirements().is_empty());
+
+    tracker.observe_page_flip(output, 99, 12, 12_345).unwrap();
+    assert_eq!(
+        tracker.drain_retirements(),
+        [ProductionRetirement {
+            cycle: 41,
+            retirement: LiveProductionPageFlipRetirement {
+                output,
+                ust: 12_345,
+                msc: 99,
+            },
+        }]
+    );
+}
+
+#[test]
+fn page_flip_tracker_fails_closed_for_overlap_and_non_monotonic_feedback() {
+    let output = OutputId::from_raw(7);
+    let mut tracker = LiveProductionPageFlipTracker::from_outputs(&production_outputs());
+
+    let _ = tracker.submit(output, 1).unwrap();
+    assert!(matches!(
+        tracker.submit(output, 2),
+        Err(LiveProductionPageFlipTrackerError::Schedule(
+            OutputPresentationSchedule::WaitingForRetirement { .. }
+        ))
+    ));
+    tracker.observe_page_flip(output, 10, 5, 50).unwrap();
+    let _ = tracker.drain_retirements();
+
+    let _ = tracker.submit(output, 3).unwrap();
+    assert!(matches!(
+        tracker.observe_page_flip(output, 10, 6, 60),
+        Err(LiveProductionPageFlipTrackerError::Feedback(
+            OutputPresentationFeedback::NonMonotonicSequence { .. }
+        ))
+    ));
+    assert!(tracker.drain_retirements().is_empty());
 }

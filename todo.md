@@ -74,9 +74,11 @@ committed snapshot; the CLI no longer owns a second surface, geometry, buffer, o
 stacking table. Per-output tick and native submission consume the prepared record.
 The production adapter now separates KMS submission from asynchronous retirement
 polling and carries the originating cycle into feedback, so an unretired frame
-emits no protocol completion. The remaining migration is ownership: wire the live
-runtime/scanout path through that adapter and move its sequencing out of
-`live_session.rs`.
+emits no protocol completion. The live native path now uses a backend-owned page-flip tracker for submission
+scheduling, monotonic callback validation, exact frame retirement, and reduced
+cycle-correlated feedback records; the CLI no longer owns those state tables.
+The remaining migration is to make the production adapter own runtime/scanout
+invocation and Present Complete/Idle routing itself.
 
 - [ ] Establish `sophia-engine::runtime_driver` as the only production visual
   coordinator. Its ordered phases are bounded authority intake, Engine
