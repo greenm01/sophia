@@ -862,3 +862,142 @@ fn wm_supervisor_adapter_restarts_wm_after_runtime_restart_action() {
         }
     );
 }
+
+#[derive(Default)]
+struct RecordingProductionAdapter {
+    calls: Vec<&'static str>,
+    fail_at: Option<&'static str>,
+}
+
+impl ProductionPresentationAdapter for RecordingProductionAdapter {
+    type Frame = usize;
+    type Retirement = usize;
+    type Evidence = usize;
+    type Error = &'static str;
+
+    fn compose(
+        &mut self,
+        _cycle: u64,
+        committed: &[CommittedSurfaceState],
+    ) -> Result<Self::Frame, Self::Error> {
+        self.calls.push("compose");
+        if self.fail_at == Some("compose") {
+            return Err("compose");
+        }
+        Ok(committed.len())
+    }
+
+    fn submit_and_retire(
+        &mut self,
+        _cycle: u64,
+        frame: Self::Frame,
+    ) -> Result<Self::Retirement, Self::Error> {
+        self.calls.push("submit_retire");
+        if self.fail_at == Some("submit_retire") {
+            return Err("submit_retire");
+        }
+        Ok(frame)
+    }
+
+    fn route_protocol_feedback(
+        &mut self,
+        _cycle: u64,
+        retirement: Self::Retirement,
+    ) -> Result<Self::Evidence, Self::Error> {
+        self.calls.push("feedback");
+        if self.fail_at == Some("feedback") {
+            return Err("feedback");
+        }
+        assert_eq!(retirement, 1);
+        Ok(retirement)
+    }
+}
+
+fn production_surface_batch(transaction: u64) -> AuthorityTransactionIntake {
+    let surface = SurfaceId::new(44, 1);
+    AuthorityTransactionIntake::new(
+        TransactionId::from_raw(transaction),
+        vec![SurfaceTransaction {
+            transaction: TransactionId::from_raw(transaction),
+            authority: AuthorityKind::SophiaX,
+            surface,
+            namespace: Some(NamespaceId::from_raw(2)),
+            target_geometry: Rect {
+                x: 10,
+                y: 20,
+                width: 320,
+                height: 200,
+            },
+            target_buffer: BufferSource::CpuBuffer { handle: 900 },
+            damage: Region::single(Rect {
+                x: 0,
+                y: 0,
+                width: 320,
+                height: 200,
+            }),
+            readiness: SurfaceTransactionReadiness::Ready,
+            timeout_msec: 250,
+            previous_committed_generation: 0,
+        }],
+    )
+}
+
+#[test]
+fn production_coordinator_orders_commit_composition_retirement_and_feedback() {
+    let mut coordinator = ProductionSessionCoordinator::new(HeadlessEngine::default());
+    let mut adapter = RecordingProductionAdapter::default();
+
+    let report = coordinator
+        .run_cycle(&[production_surface_batch(201)], &mut adapter)
+        .expect("production cycle should complete");
+
+    assert_eq!(adapter.calls, ["compose", "submit_retire", "feedback"]);
+    assert_eq!(report.cycle, 1);
+    assert_eq!(
+        report.authority_commits[0].outcome,
+        TransactionOutcome::Committed
+    );
+    assert_eq!(report.committed_surfaces.len(), 1);
+    assert_eq!(report.evidence, 1);
+}
+
+#[test]
+fn production_coordinator_never_routes_feedback_before_retirement() {
+    let mut coordinator = ProductionSessionCoordinator::new(HeadlessEngine::default());
+    let mut adapter = RecordingProductionAdapter {
+        calls: Vec::new(),
+        fail_at: Some("submit_retire"),
+    };
+
+    let error = coordinator
+        .run_cycle(&[production_surface_batch(202)], &mut adapter)
+        .expect_err("retirement failure must fail the cycle");
+
+    assert_eq!(adapter.calls, ["compose", "submit_retire"]);
+    assert_eq!(
+        error,
+        ProductionSessionCycleError {
+            cycle: 1,
+            phase: ProductionSessionPhase::KmsSubmitRetire,
+            source: "submit_retire",
+        }
+    );
+    assert_eq!(coordinator.committed_surfaces().len(), 1);
+}
+
+#[test]
+fn production_coordinator_reports_feedback_failure_after_retirement() {
+    let mut coordinator = ProductionSessionCoordinator::new(HeadlessEngine::default());
+    let mut adapter = RecordingProductionAdapter {
+        calls: Vec::new(),
+        fail_at: Some("feedback"),
+    };
+
+    let error = coordinator
+        .run_cycle(&[production_surface_batch(203)], &mut adapter)
+        .expect_err("feedback failure must remain explicit");
+
+    assert_eq!(adapter.calls, ["compose", "submit_retire", "feedback"]);
+    assert_eq!(error.phase, ProductionSessionPhase::ProtocolFeedback);
+    assert_eq!(coordinator.committed_surfaces().len(), 1);
+}
