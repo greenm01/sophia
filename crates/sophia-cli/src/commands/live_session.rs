@@ -2804,53 +2804,27 @@ fn run_session_loop(
                             submission.compose_elapsed,
                         )
                     } else {
-                        let committed_surfaces = runtime.committed_surfaces().to_vec();
-                        scene.apply_updates(updates, &committed_surfaces)?;
-                        let compose_started = Instant::now();
-                        let report = if defer_cpu_frame {
-                            scene
-                                .last_report()
-                                .cloned()
-                                .ok_or("software redraw coalescing has no prior composed frame")?
-                        } else {
-                            scene
-                                .compose(&committed_surfaces, raised_surface, pointer.position)?
-                                .clone()
-                        };
-                        let compose_elapsed = if defer_cpu_frame {
-                            Duration::ZERO
-                        } else {
-                            compose_started.elapsed()
-                        };
-                        let native_frames = if defer_cpu_frame {
-                            None
-                        } else {
-                            native_scanout
-                                .as_ref()
-                                .map(|_| scene.frames_for_outputs(&outputs))
-                                .transpose()?
-                        };
-                        if let (Some(native_scanout), Some(frames)) =
-                            (native_scanout.as_mut(), native_frames.as_ref())
-                        {
-                            runtime.initialize_native_scanout(native_scanout, frames)?;
-                        }
-                        let tick = runtime.run_batch(
+                        let (submission, committed_surfaces) = runtime.run_gpu_production_cycle(
                             &batch,
+                            &mut scene,
+                            updates,
+                            raised_surface,
+                            pointer.position,
+                            defer_cpu_frame,
+                            &outputs,
                             if defer_cpu_frame {
                                 None
                             } else {
                                 native_scanout.as_mut()
                             },
-                            native_frames,
                             wm_update,
                         )?;
                         (
-                            tick,
-                            report,
+                            submission.tick,
+                            submission.composition,
                             committed_surfaces,
-                            !defer_cpu_frame,
-                            compose_elapsed,
+                            submission.composed,
+                            submission.compose_elapsed,
                         )
                     };
                 if composed {
@@ -4016,6 +3990,66 @@ impl PersistentBackendRuntime {
                 )
             })?;
         Ok((report.submission, report.committed_surfaces))
+    }
+
+    fn run_gpu_production_cycle(
+        &mut self,
+        batch: &XAuthorityObservedTransactionBatch,
+        scene: &mut LiveProductionCpuScene,
+        updates: Vec<sophia_backend_live::LiveCpuBufferUpdate>,
+        raised_surface: Option<SurfaceId>,
+        cursor_position: Option<Point>,
+        defer_frame: bool,
+        output_descriptors: &[sophia_engine::HeadlessOutput],
+        mut native_scanout: Option<&mut LiveProductionNativeScanout>,
+        wm_update: Option<WmTransactionUpdate>,
+    ) -> Result<(CpuProductionSubmission, Vec<CommittedSurfaceState>), Box<dyn std::error::Error>>
+    {
+        let committed_surfaces = self.committed_surfaces().to_vec();
+        scene.apply_updates(updates, &committed_surfaces)?;
+        let compose_started = Instant::now();
+        let composition = if defer_frame {
+            scene
+                .last_report()
+                .cloned()
+                .ok_or("software redraw coalescing has no prior composed frame")?
+        } else {
+            scene
+                .compose(&committed_surfaces, raised_surface, cursor_position)?
+                .clone()
+        };
+        let native_frames = if defer_frame {
+            None
+        } else {
+            native_scanout
+                .as_ref()
+                .map(|_| scene.frames_for_outputs(output_descriptors))
+                .transpose()?
+        };
+        if let (Some(native_scanout), Some(frames)) =
+            (native_scanout.as_deref_mut(), native_frames.as_ref())
+        {
+            self.initialize_native_scanout(native_scanout, frames)?;
+        }
+        let tick = self.run_batch(
+            batch,
+            if defer_frame { None } else { native_scanout },
+            native_frames,
+            wm_update,
+        )?;
+        Ok((
+            CpuProductionSubmission {
+                tick,
+                composition,
+                composed: !defer_frame,
+                compose_elapsed: if defer_frame {
+                    Duration::ZERO
+                } else {
+                    compose_started.elapsed()
+                },
+            },
+            committed_surfaces,
+        ))
     }
 
     fn run_batch(

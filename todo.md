@@ -86,7 +86,7 @@ production coordinator, then its immutable snapshot is projected to the remainin
 outputs; it is no longer prepared and applied independently per output. After the
 matching page flip, the coordinator applies that prepared state before backend resource
 retirement and reduced feedback, and suppresses feedback when the baseline is stale.
-CPU and GPU submission, native idle work, page-flip retirement and cleanup, and
+CPU authority batches now enter one production cycle that commits, composes, submits, polls retirement, and routes feedback in coordinator order. GPU Present batches now enter one runtime-owned visual entry point; the outer X loop no longer composes their CPU background, builds output frames, initializes scanout, or invokes submission directly. CPU and GPU submission, native idle work, page-flip retirement and cleanup, and
 displayed-buffer teardown now cross the coordinator fanout and a protocol-neutral live
 output adapter. `LiveProductionNativeScanout` now owns the real atomic sessions, GBM
 exporters, callback routing, page-flip correlation, and scanout counters in backend-live;
