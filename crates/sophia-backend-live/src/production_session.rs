@@ -63,7 +63,11 @@ impl<Compose, Submit, Retire, Feedback, Frame, Submission, Retirement, Evidence,
     ProductionPresentationAdapter
     for LiveProductionPresentationAdapter<Compose, Submit, Retire, Feedback>
 where
-    Compose: FnMut(u64, &[CommittedSurfaceState]) -> Result<Frame, Error>,
+    Compose: FnMut(
+        u64,
+        &[CommittedSurfaceState],
+        &[sophia_protocol::TransactionCommit],
+    ) -> Result<Frame, Error>,
     Submit: FnMut(u64, Frame) -> Result<Submission, Error>,
     Retire: FnMut() -> Result<Vec<ProductionRetirement<Retirement>>, Error>,
     Feedback: FnMut(u64, Retirement) -> Result<Evidence, Error>,
@@ -78,8 +82,9 @@ where
         &mut self,
         cycle: u64,
         committed: &[CommittedSurfaceState],
+        authority_commits: &[sophia_protocol::TransactionCommit],
     ) -> Result<Self::Frame, Self::Error> {
-        (self.compose)(cycle, committed)
+        (self.compose)(cycle, committed, authority_commits)
     }
 
     fn submit_frame(

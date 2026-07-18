@@ -8,7 +8,7 @@ use sophia_engine::{
     OutputPresentationSchedule, ProductionOutputRuntimeAdapter, ProductionPresentationAdapter,
     ProductionRetirement,
 };
-use sophia_protocol::{CommittedSurfaceState, OutputId, Size};
+use sophia_protocol::{CommittedSurfaceState, OutputId, Size, TransactionCommit};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -41,7 +41,9 @@ fn live_adapter_keeps_frame_and_retirement_inside_ordered_callbacks() {
     let submitted = Rc::clone(&pending);
     let retired = Rc::clone(&pending);
     let mut adapter = LiveProductionPresentationAdapter::new(
-        move |cycle, committed: &[CommittedSurfaceState]| {
+        move |cycle,
+              committed: &[CommittedSurfaceState],
+              _authority_commits: &[TransactionCommit]| {
             compose_calls.borrow_mut().push(("compose", cycle));
             Ok::<_, &str>(committed.len())
         },
@@ -63,7 +65,7 @@ fn live_adapter_keeps_frame_and_retirement_inside_ordered_callbacks() {
         },
     );
 
-    let frame = adapter.compose(7, &[]).unwrap();
+    let frame = adapter.compose(7, &[], &[]).unwrap();
     let submission = adapter.submit_frame(7, frame).unwrap();
     let retirement = adapter.poll_retirements().unwrap().pop().unwrap();
     let evidence = adapter

@@ -35,6 +35,7 @@ pub trait ProductionPresentationAdapter {
         &mut self,
         cycle: u64,
         committed: &[CommittedSurfaceState],
+        authority_commits: &[TransactionCommit],
     ) -> Result<Self::Frame, Self::Error>;
 
     fn submit_frame(
@@ -205,7 +206,7 @@ impl ProductionSessionCoordinator {
         let authority_commits = self.commit_authority_batches(authority_batches);
 
         let frame = adapter
-            .compose(cycle, &self.committed_surfaces)
+            .compose(cycle, &self.committed_surfaces, &authority_commits)
             .map_err(|source| ProductionSessionCycleError {
                 cycle,
                 phase: ProductionSessionPhase::FrameComposition,

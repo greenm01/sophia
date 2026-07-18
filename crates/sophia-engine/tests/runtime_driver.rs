@@ -924,6 +924,7 @@ impl ProductionPresentationAdapter for RecordingProductionAdapter {
         &mut self,
         _cycle: u64,
         committed: &[CommittedSurfaceState],
+        _authority_commits: &[TransactionCommit],
     ) -> Result<Self::Frame, Self::Error> {
         self.calls.push("compose");
         if self.fail_at == Some("compose") {

@@ -8,6 +8,7 @@ use sophia_cli::input_proof::{PhysicalTextProof, PhysicalTextProofEvent};
 use sophia_cli::resize_transaction::ResizeRollbackCoordinator;
 use sophia_engine::{
     FocusedInputRoute, InputFocusDecision, InputFocusState, NonBlockingInputPoller,
+    ProductionOutputRuntimeAdapter,
 };
 use sophia_protocol::{
     ClientAdmissionContext, DeviceId, NamespaceCapabilities, NamespaceId, NamespaceProfile,
@@ -2772,43 +2773,92 @@ fn run_session_loop(
                 let runtime = runtime
                     .as_mut()
                     .expect("persistent backend runtime was initialized above");
-                let prepared = if batch.present_submissions.is_empty() {
-                    runtime.observe_presentation_resources(&batch)?;
-                    Some(runtime.prepare_authority_transactions(
-                        batch.transaction,
-                        &batch.transactions,
-                        &batch.removed_surfaces,
-                    )?)
-                } else {
-                    None
-                };
-                let committed_surfaces = prepared.as_ref().map_or_else(
-                    || runtime.committed_surfaces().to_vec(),
-                    |prepared| prepared.committed_surfaces.clone(),
-                );
-                scene.apply_updates(
-                    batch
-                        .cpu_buffer_updates
-                        .iter()
-                        .map(renderer_cpu_buffer_update),
-                    &committed_surfaces,
-                )?;
                 let raised_surface = focus.focused_surface(seat);
-                let report = if defer_cpu_frame {
-                    coalesced_batches = coalesced_batches.saturating_add(1);
-                    scene
-                        .last_report()
-                        .cloned()
-                        .ok_or("software redraw coalescing has no prior composed frame")?
-                } else {
-                    let compose_started = Instant::now();
-                    let report = scene
-                        .compose(&committed_surfaces, raised_surface, pointer.position)?
-                        .clone();
-                    max_compose = max_compose.max(compose_started.elapsed());
+                let updates = batch
+                    .cpu_buffer_updates
+                    .iter()
+                    .map(renderer_cpu_buffer_update)
+                    .collect::<Vec<_>>();
+                let (tick, report, committed_surfaces, composed, compose_elapsed) =
+                    if batch.present_submissions.is_empty() {
+                        let (submission, committed_surfaces) = runtime.run_cpu_production_cycle(
+                            &batch,
+                            &mut scene,
+                            updates,
+                            raised_surface,
+                            pointer.position,
+                            defer_cpu_frame,
+                            &outputs,
+                            if defer_cpu_frame {
+                                None
+                            } else {
+                                native_scanout.as_mut()
+                            },
+                            wm_update,
+                        )?;
+                        (
+                            submission.tick,
+                            submission.composition,
+                            committed_surfaces,
+                            submission.composed,
+                            submission.compose_elapsed,
+                        )
+                    } else {
+                        let committed_surfaces = runtime.committed_surfaces().to_vec();
+                        scene.apply_updates(updates, &committed_surfaces)?;
+                        let compose_started = Instant::now();
+                        let report = if defer_cpu_frame {
+                            scene
+                                .last_report()
+                                .cloned()
+                                .ok_or("software redraw coalescing has no prior composed frame")?
+                        } else {
+                            scene
+                                .compose(&committed_surfaces, raised_surface, pointer.position)?
+                                .clone()
+                        };
+                        let compose_elapsed = if defer_cpu_frame {
+                            Duration::ZERO
+                        } else {
+                            compose_started.elapsed()
+                        };
+                        let native_frames = if defer_cpu_frame {
+                            None
+                        } else {
+                            native_scanout
+                                .as_ref()
+                                .map(|_| scene.frames_for_outputs(&outputs))
+                                .transpose()?
+                        };
+                        if let (Some(native_scanout), Some(frames)) =
+                            (native_scanout.as_mut(), native_frames.as_ref())
+                        {
+                            runtime.initialize_native_scanout(native_scanout, frames)?;
+                        }
+                        let tick = runtime.run_batch(
+                            &batch,
+                            if defer_cpu_frame {
+                                None
+                            } else {
+                                native_scanout.as_mut()
+                            },
+                            native_frames,
+                            wm_update,
+                        )?;
+                        (
+                            tick,
+                            report,
+                            committed_surfaces,
+                            !defer_cpu_frame,
+                            compose_elapsed,
+                        )
+                    };
+                if composed {
+                    max_compose = max_compose.max(compose_elapsed);
                     cpu_compositions = cpu_compositions.saturating_add(1);
-                    report
-                };
+                } else {
+                    coalesced_batches = coalesced_batches.saturating_add(1);
+                }
                 if let (Some(surface), Some(before_surface)) =
                     (input_surface, input_surface_generation)
                     && scene
@@ -2817,14 +2867,6 @@ fn run_session_loop(
                 {
                     input_surface_pixel_change = true;
                 }
-                let native_frames = if defer_cpu_frame {
-                    None
-                } else {
-                    native_scanout
-                        .as_ref()
-                        .map(|_| scene.frames_for_outputs(&outputs))
-                        .transpose()?
-                };
                 if let Some(before_frame) = injection_checksum
                     && report.checksum != before_frame
                     && (config.expect_physical_text.is_none()
@@ -2838,36 +2880,6 @@ fn run_session_loop(
                 {
                     pointer_pixel_change = true;
                 }
-
-                if let (Some(native_scanout), Some(frames)) =
-                    (native_scanout.as_mut(), native_frames.as_ref())
-                {
-                    runtime.initialize_native_scanout(native_scanout, frames)?;
-                }
-
-                let tick = match prepared {
-                    Some(prepared) => runtime.run_prepared_authority_transactions(
-                        prepared,
-                        authority_transaction_count(&batch.transactions),
-                        if defer_cpu_frame {
-                            None
-                        } else {
-                            native_scanout.as_mut()
-                        },
-                        native_frames,
-                        wm_update,
-                    )?,
-                    None => runtime.run_batch(
-                        &batch,
-                        if defer_cpu_frame {
-                            None
-                        } else {
-                            native_scanout.as_mut()
-                        },
-                        native_frames,
-                        wm_update,
-                    )?,
-                };
                 backend_ticks = backend_ticks.saturating_add(1);
                 runtime_committed = record_runtime_commits(
                     runtime_committed,
@@ -3640,8 +3652,163 @@ struct SubmittedGpuPresentation {
 
 struct PreparedAuthorityBatch {
     authority_commits: Vec<TransactionCommit>,
-    committed_surfaces: Vec<CommittedSurfaceState>,
     active_transactions: Vec<SurfaceTransaction>,
+}
+
+struct CpuProductionFrame {
+    committed_surfaces: Vec<CommittedSurfaceState>,
+    authority_commits: Vec<TransactionCommit>,
+    composition: sophia_backend_live::LiveCpuCompositionReport,
+    native_frames: Option<Vec<LiveProductionComposedFrame>>,
+    composed: bool,
+    compose_elapsed: Duration,
+}
+
+struct CpuProductionSubmission {
+    tick: sophia_backend_live::LiveBackendRuntimeTickReport,
+    composition: sophia_backend_live::LiveCpuCompositionReport,
+    composed: bool,
+    compose_elapsed: Duration,
+}
+
+struct CpuProductionCycleAdapter<'a> {
+    scene: &'a mut LiveProductionCpuScene,
+    updates: Option<Vec<sophia_backend_live::LiveCpuBufferUpdate>>,
+    raised_surface: Option<SurfaceId>,
+    cursor_position: Option<Point>,
+    defer_frame: bool,
+    output_descriptors: &'a [sophia_engine::HeadlessOutput],
+    outputs: &'a mut BTreeMap<OutputId, PersistentOutputRuntime>,
+    native_scanout: Option<&'a mut LiveProductionNativeScanout>,
+    active_transactions: &'a [SurfaceTransaction],
+    event_count: usize,
+    wm_update: Option<WmTransactionUpdate>,
+}
+
+impl sophia_engine::ProductionPresentationAdapter for CpuProductionCycleAdapter<'_> {
+    type Frame = CpuProductionFrame;
+    type Submission = CpuProductionSubmission;
+    type Retirement = ();
+    type Evidence = ();
+    type Error = Box<dyn std::error::Error>;
+
+    fn compose(
+        &mut self,
+        _cycle: u64,
+        committed: &[CommittedSurfaceState],
+        authority_commits: &[TransactionCommit],
+    ) -> Result<Self::Frame, Self::Error> {
+        self.scene
+            .apply_updates(self.updates.take().unwrap_or_default(), committed)?;
+        let compose_started = Instant::now();
+        let composition = if self.defer_frame {
+            self.scene
+                .last_report()
+                .cloned()
+                .ok_or("software redraw coalescing has no prior composed frame")?
+        } else {
+            self.scene
+                .compose(committed, self.raised_surface, self.cursor_position)?
+                .clone()
+        };
+        let native_frames = if self.defer_frame || self.native_scanout.is_none() {
+            None
+        } else {
+            Some(self.scene.frames_for_outputs(self.output_descriptors)?)
+        };
+        Ok(CpuProductionFrame {
+            committed_surfaces: committed.to_vec(),
+            authority_commits: authority_commits.to_vec(),
+            composition,
+            native_frames,
+            composed: !self.defer_frame,
+            compose_elapsed: if self.defer_frame {
+                Duration::ZERO
+            } else {
+                compose_started.elapsed()
+            },
+        })
+    }
+
+    fn submit_frame(
+        &mut self,
+        _cycle: u64,
+        frame: Self::Frame,
+    ) -> Result<Self::Submission, Self::Error> {
+        let native_frames = frame.native_frames.unwrap_or_default();
+        if let Some(native_scanout) = self.native_scanout.as_deref_mut() {
+            for (index, output) in self.outputs.values_mut().enumerate() {
+                if !output.native_initialized
+                    && let Some(initial_frame) = native_frames.get(index).cloned()
+                {
+                    native_scanout.initialize(index, &mut output.runtime, initial_frame)?;
+                    output.native_initialized = true;
+                }
+            }
+        }
+        let output_count = self.outputs.len();
+        let outputs = &mut self.outputs;
+        let native_scanout = &mut self.native_scanout;
+        let mut native_frames = native_frames.into_iter();
+        let mut output_adapter = sophia_backend_live::LiveProductionOutputRuntimeAdapter::new(
+            output_count,
+            |index, committed: &[CommittedSurfaceState]| -> Result<_, Box<dyn std::error::Error>> {
+                let output = outputs
+                    .values_mut()
+                    .nth(index)
+                    .ok_or("production output index was not registered")?;
+                output
+                    .runtime
+                    .assembly_mut()
+                    .replace_committed_surfaces(committed.to_vec());
+                let input = compositor_tick_input(
+                    self.active_transactions,
+                    self.event_count,
+                    frame.authority_commits.clone(),
+                    self.wm_update.clone(),
+                );
+                Ok(match native_scanout.as_deref_mut() {
+                    Some(native_scanout) => {
+                        if let Some(next_frame) = native_frames.next() {
+                            native_scanout.queue_frame(index, next_frame);
+                        }
+                        if output.runtime.rendered_primary_plane_scanout_in_flight() {
+                            output.runtime.run_tick(input)?
+                        } else {
+                            native_scanout.run_tick(index, &mut output.runtime, input)?
+                        }
+                    }
+                    None => output.runtime.run_tick(input)?,
+                })
+            },
+        );
+        let tick = (0..output_count)
+            .map(|index| output_adapter.run_output(index, &frame.committed_surfaces))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .next()
+            .ok_or("persistent backend runtime has no outputs")?;
+        Ok(CpuProductionSubmission {
+            tick,
+            composition: frame.composition,
+            composed: frame.composed,
+            compose_elapsed: frame.compose_elapsed,
+        })
+    }
+
+    fn poll_retirements(
+        &mut self,
+    ) -> Result<Vec<sophia_engine::ProductionRetirement<Self::Retirement>>, Self::Error> {
+        Ok(Vec::new())
+    }
+
+    fn route_protocol_feedback(
+        &mut self,
+        _cycle: u64,
+        _retirement: Self::Retirement,
+    ) -> Result<Self::Evidence, Self::Error> {
+        Ok(())
+    }
 }
 
 impl PersistentBackendRuntime {
@@ -3789,6 +3956,66 @@ impl PersistentBackendRuntime {
         self.reject_first_present = reject_first_present;
         self.diagnose_first_mixed_export = diagnose_first_mixed_export;
         self
+    }
+
+    fn run_cpu_production_cycle(
+        &mut self,
+        batch: &XAuthorityObservedTransactionBatch,
+        scene: &mut LiveProductionCpuScene,
+        updates: Vec<sophia_backend_live::LiveCpuBufferUpdate>,
+        raised_surface: Option<SurfaceId>,
+        cursor_position: Option<Point>,
+        defer_frame: bool,
+        output_descriptors: &[sophia_engine::HeadlessOutput],
+        native_scanout: Option<&mut LiveProductionNativeScanout>,
+        wm_update: Option<WmTransactionUpdate>,
+    ) -> Result<(CpuProductionSubmission, Vec<CommittedSurfaceState>), Box<dyn std::error::Error>>
+    {
+        self.observe_presentation_resources(batch)?;
+        self.layers
+            .retain(|surface, _| !batch.removed_surfaces.contains(surface));
+        for transaction in &batch.transactions {
+            self.layers.insert(transaction.surface, transaction.clone());
+        }
+        let active_transactions = self.layers.values().cloned().collect::<Vec<_>>();
+        if batch.transactions.iter().any(|transaction| {
+            !self
+                .production
+                .committed_surfaces()
+                .iter()
+                .any(|committed| committed.surface == transaction.surface)
+        }) {
+            let seeded = seed_missing_committed_surfaces(
+                self.production.committed_surfaces(),
+                &active_transactions,
+            );
+            self.production.replace_committed_surfaces(seeded);
+        }
+        let intake = AuthorityTransactionIntake::new(batch.transaction, batch.transactions.clone())
+            .with_surface_removals(batch.removed_surfaces.clone());
+        let (production, outputs) = (&mut self.production, &mut self.outputs);
+        let mut adapter = CpuProductionCycleAdapter {
+            scene,
+            updates: Some(updates),
+            raised_surface,
+            cursor_position,
+            defer_frame,
+            output_descriptors,
+            outputs,
+            native_scanout,
+            active_transactions: &active_transactions,
+            event_count: authority_transaction_count(&batch.transactions),
+            wm_update,
+        };
+        let report = production
+            .run_cycle(std::slice::from_ref(&intake), &mut adapter)
+            .map_err(|error| {
+                format!(
+                    "production CPU cycle failed in phase {:?}: {}",
+                    error.phase, error.source
+                )
+            })?;
+        Ok((report.submission, report.committed_surfaces))
     }
 
     fn run_batch(
@@ -4172,7 +4399,6 @@ impl PersistentBackendRuntime {
             .commit_authority_batches(std::slice::from_ref(&intake));
         Ok(PreparedAuthorityBatch {
             authority_commits,
-            committed_surfaces: self.production.committed_surfaces().to_vec(),
             active_transactions,
         })
     }
