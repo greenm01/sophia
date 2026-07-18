@@ -163,7 +163,7 @@ if [[ -z "$devices" ]]; then
     )
     (( ${#keyboards[@]} == 1 )) || {
         echo "Expected exactly one stable keyboard path; found ${#keyboards[@]}." >&2
-        echo "Set SOPHIA_M5_GTK_INPUT_DEVICES explicitly if X13 exposes more than one." >&2
+        echo "Set SOPHIA_M5_GTK_INPUT_DEVICES explicitly if this machine exposes more than one." >&2
         exit 1
     }
     (( ${#pointers[@]} >= 1 )) || {
@@ -243,7 +243,7 @@ done
 }
 echo "Emergency input guard armed."
 
-echo "Sophia Milestone 5 GTK3 paired proof on X13"
+echo "Sophia optional GTK3 paired hardware compatibility proof"
 echo "Input devices: $devices"
 echo "Classic evidence: $classic"
 echo "Confined evidence: $confined"

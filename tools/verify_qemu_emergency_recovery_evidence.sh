@@ -40,7 +40,7 @@ require_exactly_one \
     'sophia_qemu_recovery schema=1 status=complete qemu_exit=0' \
     'clean host completion'
 
-if ! grep -q '^sophia_live_session_input_pipeline schema=1 status=poller_ready devices=[1-9][0-9]*$' "$EVIDENCE_FILE"; then
+if ! grep -Eq '^sophia_live_session_input_pipeline schema=2 status=poller_ready devices=[1-9][0-9]* tap_capable=[0-9]+ tap_enabled=[0-9]+$' "$EVIDENCE_FILE"; then
     echo "QEMU emergency recovery evidence is missing physical input readiness" >&2
     exit 1
 fi

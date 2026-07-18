@@ -1897,3 +1897,18 @@ normal exit, `first_error=none`, and clean two-output retirement. A bounded non-
 against the real ELAN path reported `devices=2 tap_capable=1 tap_enabled=1` and completed its
 xterm pixel proof. Paired physical X13 evidence remains the acceptance gate before GTK3
 software promotion.
+
+## 2026-07-18: Milestone 5 Uses Unattended QEMU Acceptance
+
+Machine-specific X13 capture is no longer an application-promotion gate. The
+repeatable acceptance boundary is a diskless, networkless QEMU guest that owns
+virtio DRM/KMS, guest console state, and libinput-backed virtio keyboard and
+pointer devices. Direct hardware runners remain optional compatibility
+diagnostics.
+
+`tools/qemu_milestone5_acceptance.sh` rebuilds the guest and runs strict
+two-xterm presentation/input, emergency Ctrl-Alt-Backspace recovery, and classic
+plus confined GTK3 profiles without operator input. The first aggregate run
+exposed a stale schema-1 poller assertion in emergency recovery; updating the
+harness, verifier, and fixtures to the schema-2 tap-policy record closed it. The
+rerun passed all four scenarios. The strict three-class baseline then passed

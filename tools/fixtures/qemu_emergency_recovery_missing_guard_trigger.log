@@ -3,7 +3,7 @@ sophia_qemu_guest_recovery schema=1 status=running chord=ctrl-alt-backspace
 sophia_session_input_guard schema=1 status=ready devices=6
 sophia_session_input_guard schema=1 status=armed
 sophia_qemu_recovery_input schema=1 status=sent phase=arm source=qmp device=virtio-keyboard chord=ctrl-alt-backspace events=6
-sophia_live_session_input_pipeline schema=1 status=poller_ready devices=6
+sophia_live_session_input_pipeline schema=2 status=poller_ready devices=6 tap_capable=0 tap_enabled=0
 sophia_live_session_input_pipeline schema=1 status=focus_ready
 sophia_qemu_recovery_input schema=1 status=sent phase=trigger source=qmp device=virtio-keyboard chord=ctrl-alt-backspace events=6
 sophia_live_session_input_pipeline schema=1 status=key_observed

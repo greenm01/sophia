@@ -138,7 +138,7 @@ if [[ "$SCENARIO" == "emergency-recovery" ]]; then
     recovery_ready=false
     for _ in $(seq 1 600); do
         if grep -q '^sophia_session_input_guard schema=1 status=armed$' "$EVIDENCE_FILE" \
-            && grep -q '^sophia_live_session_input_pipeline schema=1 status=poller_ready ' "$EVIDENCE_FILE" \
+            && grep -q '^sophia_live_session_input_pipeline schema=2 status=poller_ready ' "$EVIDENCE_FILE" \
             && grep -q '^sophia_live_session_input_pipeline schema=1 status=focus_ready$' "$EVIDENCE_FILE"; then
             recovery_ready=true
             break

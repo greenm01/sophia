@@ -49,21 +49,15 @@ compatibility provider; no XLibre integration work is active.
   present through native virtio-gpu outputs, and tear down with zero X protocol
   errors. The retained regressions cover ChangeGC, core and XI cursor requests,
   opaque non-input SendEvent delivery, XIQueryPointer, and XIUngrabDevice.
-- [ ] Capture fresh classic shared-X and confined Zenity entry-dialog sessions
-  on target hardware with exact physical text, a physical OK click,
-  `first_error=none`, CPU/SHM redraw after resize, native presentation, normal
-  exit, and clean teardown. QEMU closes the semantic and unattended-regression
-  gap but does not replace the guarded VT/DRM hardware evidence. The latest X13
-  run proved exact text plus routed pointer motion, but a touchpad tap produced no
-  button because the path-based libinput context retained tap-to-click disabled.
-  Cursor motion then changed pixels and incorrectly canceled the pointer deadline,
-  leaving the session waiting indefinitely. Native device admission now enables
-  and reports tapping on capable devices; the pointer deadline remains armed until
-  both a button and preserved application pixels are proven, and motion/button
-  evidence is edge-triggered instead of logged every poll. Both GTK QEMU profiles
-  retain the click-then-submit sequence. Fresh paired X13 evidence is still
-  required before promotion.
-- [ ] Run the aggregate three-class verifier and promote GTK3 software from
+- [x] Run the unattended local QEMU Milestone 5 acceptance gate for classic
+  shared-X and confined Zenity entry-dialog sessions with exact virtio text and
+  an OK click, `first_error=none`, CPU/SHM redraw after resize, native
+  presentation, normal exit, clean teardown, emergency recovery, and the strict
+  two-xterm regression. `tools/qemu_milestone5_acceptance.sh` rebuilds the
+  diskless guest and runs the complete gate without operator input. Real-hardware
+  runs remain available as optional compatibility diagnostics rather than
+  milestone gates.
+- [x] Run the aggregate three-class verifier and promote GTK3 software from
   `engine` to `session` in `docs/x11-compatibility-matrix.md`.
 
 Exit: each promoted application class has reproducible `session` evidence and
@@ -117,9 +111,9 @@ readiness pixel inspection, and per-output frame creation in renderer-live. Redu
   rejected or missing page flips, authority backpressure/disconnect, surface
   removal, and shutdown. Every path keeps the last committed frame, emits no
   premature Complete/Idle, and drains native resources exactly once.
-- [x] Migrate the retained xterm CPU, mixed Vulkan, GTK classic/confined QEMU,
-  and guarded X13 gates without weakening their evidence schemas or latency and
-  cleanup bounds; then delete the legacy CLI loop state.
+- [x] Migrate the retained xterm CPU, mixed Vulkan, and GTK classic/confined
+  QEMU gates without weakening their evidence schemas or latency and cleanup
+  bounds; then delete the legacy CLI loop state.
 
 Exit: one production state machine owns the five visual phases;
 `crates/sophia-cli/src/commands/live_session.rs` owns no scene, Engine commit

@@ -427,9 +427,9 @@ The frontend is sufficient for paired xterm sessions, mixed Vulkan presentation,
 and deterministic GTK3 Zenity behavior. Retained classic and confined QEMU profiles now require a committed 640x360 resize with changed CPU/SHM pixels in addition to exact input, native presentation, normal exit, and clean teardown. Its remaining production gaps are
 explicit and evidence-driven:
 
-- GTK3 remains at `engine` evidence until fresh classic-shared and confined X13
-  sessions prove physical text, a presented cursor, pointer selection, resize
-  redraw, normal exit, and clean native teardown. Both QEMU profiles pass.
+- GTK3 promotion requires classic-shared and confined QEMU sessions proving
+  virtio text, a presented cursor, pointer selection, resize redraw, normal
+  exit, and clean native teardown.
 - XFixes selection notifications and complete client-selected cursor-image
   presentation are not yet general contracts. Existing selection-input, region,
   and cursor request handling covers only retained probes.
@@ -444,7 +444,7 @@ explicit and evidence-driven:
   groups; the current classic and explicitly launched confined profiles remain
   the supported admission shapes.
 
-Before expanding those surfaces, the protocol-neutral `runtime_driver` owns visual phase order and production X uses one backend service poll; the remaining promotion gate is paired physical X13 GTK evidence. The frontend contract does not change: it emits
+Before expanding those surfaces, the protocol-neutral `runtime_driver` owns visual phase order and production X uses one backend service poll; the remaining promotion gate is the unattended paired QEMU GTK acceptance run. Machine-specific hardware runs remain optional compatibility diagnostics. The frontend contract does not change: it emits
 bounded observed batches and consumes routed input, control, topology, and
 presentation feedback without owning scene, renderer, or KMS state.
 

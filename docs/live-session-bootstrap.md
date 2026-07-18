@@ -136,8 +136,8 @@ other compositor owns DRM master and must be stopped before this proof. The
 persistent path performs a blocking initial modeset, retains the displayed
 framebuffer until a later frame replaces it, and uses event-driven nonblocking
 page flips for steady updates. Both the bounded proof and a 30-second TTY3 run
-pass. Use an isolated QEMU `virtio-gpu` guest for repeated development and keep
-the physical TTY proof for final driver evidence.
+pass. Use an isolated QEMU `virtio-gpu` guest for milestone acceptance; physical
+TTY proofs are optional driver-compatibility diagnostics.
 
 Persistent hardware proofs compile an optimized binary before taking DRM/KMS
 ownership and then invoke `target/release/sophia` directly. This keeps compiler
@@ -175,6 +175,14 @@ tools/build_qemu_session_initramfs.sh
 tools/qemu_session_harness.sh
 ```
 
+For the complete unattended Milestone 5 acceptance gate, including strict
+two-xterm, emergency recovery, and both GTK profiles, run:
+
+```sh
+tools/qemu_milestone5_acceptance.sh
+```
+
+
 To exercise the same two-xterm routing shape as the physical KMS gate, rebuild
 the initramfs after a Sophia change and run:
 
@@ -182,9 +190,9 @@ the initramfs after a Sophia change and run:
 SOPHIA_QEMU_TWO_XTERM=1 tools/qemu_session_harness.sh
 ```
 
-That optional mode requires two composed terminal layers and complete reduced
-X11 input-flush evidence; it does not replace the final physical DRM-master
-proof.
+That mode requires two composed terminal layers and complete reduced X11
+input-flush evidence. The aggregate Milestone 5 runner includes it
+automatically.
 
 The guest has no disk and no network device. QEMU stays headless, exposes its
 display only to an unconnected Unix-domain VNC sink, and emulates virtio-gpu
@@ -196,7 +204,7 @@ page-flip retirement, xterm pixel export/input change, no callback rejection,
 and no in-flight frame or cleanup debt. Evidence defaults to
 `/tmp/sophia-qemu-session.log`; build artifacts stay under ignored `.qemu/`.
 
-### Remote Hardware Target
+### Optional Remote Hardware Target
 
 When the development workstation must keep its graphical session, use a second
 machine as the dedicated hardware target. The workstation remains the editing

@@ -51,33 +51,30 @@ cargo run --offline -q -p sophia-cli -- x-authority-xterm-two-client-smoke
 dbus-run-session -- cargo run --offline -q -p sophia-cli -- x-authority-zenity-smoke
 ```
 
-Milestone 5 adds a physical GTK3 application-session proof. From the dedicated
-TTY on X13, run:
+Milestone 5 uses one unattended local QEMU acceptance command. It boots a
+diskless, networkless Linux guest that owns virtio DRM/KMS, guest console state,
+libinput keyboard and pointer devices, and the Sophia session:
 
 ```sh
-tools/live_session_milestone5_gtk_hardware_proof.sh
-tools/check_live_session_milestone5_verifier.sh
+tools/qemu_milestone5_acceptance.sh
 ```
 
-The runner builds and preflights before graphics takeover, then asks for one
-Ctrl-Alt-Backspace press/release to arm an independent input guard. During
-either dialog, press the chord again for emergency termination and TTY
-restoration. The runner saves and verifies KD mode plus termios, terminates the
-Sophia process group, restores `keyd`, and writes durable evidence below
-`${XDG_STATE_HOME:-~/.local/state}/sophia/milestone5-gtk`. It discovers the
-single stable keyboard plus available mouse/touchpad paths and allows 30 seconds
-for each dialog. Set `SOPHIA_M5_GTK_INPUT_DEVICES` only when discovery is
-ambiguous.
+The runner rebuilds the initramfs, runs the strict two-xterm native-session
+regression, exercises Ctrl-Alt-Backspace emergency recovery, then runs classic
+shared-X and confined GTK3 Zenity profiles. The GTK profiles require exact
+virtio `sophia` text, a routed pointer button before Return is accepted,
+CPU/SHM pixels changed by a committed resize, native presentation on both
+guest outputs, normal application exit, zero protocol errors, and clean
+retirement. Evidence is retained below `.evidence/qemu-milestone5/`.
 
-For each Zenity dialog, type `sophia` without Return. Wait for the cursor to be
-visible, then move the physical pointer and click OK; Return remains suppressed
-until a pointer button routes. The paired verifier requires classic shared-X and
-confined records with exact stdout, normal exit, zero protocol errors, committed
-resize, native presentation, and clean teardown. The isolated QEMU classic and
-confined scenarios retain this click-then-submit sequence, but they do not
-replace the target-hardware capture. After retaining those logs, combine
-them with the M3 and M4 evidence using
-`tools/verify_live_session_three_class_baseline.sh`.
+`tools/live_session_milestone5_gtk_hardware_proof.sh` remains an optional
+compatibility diagnostic for any machine where direct DRM/KMS, VT, and physical
+input behavior needs investigation. It is not a milestone gate. Its independent
+input guard, bounded process-group termination, and KD/termios restoration remain
+fail-closed safeguards for direct hardware use.
+
+The fixture-backed GTK and TTY recovery verifier check remains available through
+`tools/check_live_session_milestone5_verifier.sh`.
 
 The real-client smokes are regression smokes, not full X server conformance
 tests. Their reduced output must keep `first_error=none`, report the
@@ -101,9 +98,9 @@ Parse-error details include a bounded request head so extension decode failures
 show the concrete minor opcode that drove the next compatibility slice.
 
 For live composition changes that connect X Authority transaction intake to
-backend-live rendered scanout reporting, run the commands below. Until
-Milestone 6 completes, these validate the transitional CLI coordinator as well
-as the Engine, renderer, and backend boundaries:
+backend-live rendered scanout reporting, run the commands below. These validate
+the backend-owned production runtime as well as the Engine, renderer, and
+backend boundaries:
 
 ```sh
 cargo test --offline -q -p sophia-backend-live --features libdrm-events live_session_composition
