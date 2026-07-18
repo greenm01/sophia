@@ -2105,6 +2105,7 @@ fn run_session_loop(
         require_startup_focus.then_some(output.size),
     );
     let mut runtime: Option<PersistentBackendRuntime> = None;
+    let present_observer = Arc::new(Mutex::new(XPresentSessionObserver::new(protocol_router)));
     let mut last_authority_update = started;
     let mut injection_checksum = None;
     let mut physical_input_ready_at: Option<Instant> = None;
@@ -2762,7 +2763,15 @@ fn run_session_loop(
                             native_scanout.as_mut(),
                             None,
                         )?
-                        .with_protocol_router(protocol_router.clone())
+                        .with_present_feedback_sink({
+                            let observer = Arc::clone(&present_observer);
+                            move |outcome| {
+                                observer
+                                    .lock()
+                                    .expect("X Present observer mutex was poisoned")
+                                    .observe_feedback(outcome);
+                            }
+                        })
                         .with_m4_proof_controls(
                             config.m4_first_acquire_delay,
                             config.m4_reject_first_present,
@@ -3186,7 +3195,11 @@ fn run_session_loop(
         runtime.drain_native_scanout(native_scanout, Duration::from_secs(2))?;
     }
     if let Some(runtime) = runtime.as_mut() {
-        runtime.shutdown_presentations();
+        let report = runtime.shutdown_presentations();
+        present_observer
+            .lock()
+            .map_err(|_| "X Present observer mutex was poisoned")?
+            .observe_disconnect(report);
     }
     if input_presented_latency.is_none()
         && input_pixel_change
@@ -3310,6 +3323,9 @@ fn run_session_loop(
         "sophia_live_session_scheduler schema=1 authority_batches={batches} cpu_compositions={cpu_compositions} coalesced_batches={coalesced_batches}"
     );
 
+    let present_observation = present_observer
+        .lock()
+        .map_err(|_| "X Present observer mutex was poisoned")?;
     println!(
         "sophia_live_session schema=14 status=bounded_complete display={} elapsed_msec={} startup_ready_msec={} session_ticks={} authority_batches={} authority_transactions={} authority_queue_capacity={} authority_batches_dropped=0 backend_ticks={} runtime_committed={} runtime_surfaces={} cpu_layers={} cpu_nonzero_pixel_bytes={} cpu_max_nonzero_pixel_bytes={} cpu_nonzero_frames={} cpu_checksum={} cpu_max_compose_msec={} injected_input={} input_events_expected={} input_events_flushed={} input_flush_latency_msec={} input_pixel_change={} input_text_match={} input_presented_latency_msec={} input_dispatch_max_gap_msec={} input_queue_max_depth={} input_queue_dwell_max_msec={} physical_events={} physical_keys_routed={} pointer_pixel_change={} physical_pointer_events={} physical_pointer_routed={} pointer_proof={} native_presentation={} native_submissions={} native_submit_deferred={} native_submit_failures={} native_retirements={} native_retire_failures={} native_max_in_flight_ticks={} native_max_submit_to_page_flip_msec={} native_max_upload_msec={} native_target_creations={} native_target_recreations={} native_pipeline_creations={} native_frame_uploads={} native_callback_accepted={} native_callback_rejected={} native_callback_queue_saturated={} native_nonzero_exports={} native_mixed_exports={} native_export_attempts={} native_in_flight={} native_cleanup_pending={} physical_input={} wm_policy={} wm_requests={} wm_committed={} wm_restarts={} wm_degraded={} namespace_profile={} output_update={} output_notifications={} surface_resize={} present_complete_flip={} present_complete_skip={} present_idle={} present_idle_fence_triggers={} present_disconnect_sources={} present_disconnect_fences={} present_disconnect_failures={} present_live_sources={} present_live_fences={} present_live_transactions={} present_acquire_waits={} present_controlled_rejections={}",
         config.display,
@@ -3434,25 +3450,13 @@ fn run_session_loop(
         } else {
             "disabled"
         },
-        runtime
-            .as_ref()
-            .map_or(0, |runtime| runtime.present_complete_flip),
-        runtime
-            .as_ref()
-            .map_or(0, |runtime| runtime.present_complete_skip),
-        runtime.as_ref().map_or(0, |runtime| runtime.present_idle),
-        runtime
-            .as_ref()
-            .map_or(0, |runtime| runtime.idle_fence_triggers),
-        runtime
-            .as_ref()
-            .map_or(0, |runtime| runtime.presentation_disconnect_sources),
-        runtime
-            .as_ref()
-            .map_or(0, |runtime| runtime.presentation_disconnect_fences),
-        runtime
-            .as_ref()
-            .map_or(0, |runtime| runtime.presentation_disconnect_failures),
+        present_observation.complete_flip,
+        present_observation.complete_skip,
+        present_observation.idle,
+        present_observation.idle_fence_triggers,
+        present_observation.disconnect_sources,
+        present_observation.disconnect_fences,
+        present_observation.disconnect_failures,
         runtime.as_ref().map_or(0, |runtime| runtime
             .presentation_feedback
             .resources()
@@ -3475,7 +3479,7 @@ fn run_session_loop(
             .map_or(0, |runtime| runtime.present_controlled_rejections),
     );
     if let Some(runtime) = runtime.as_ref()
-        && (runtime.presentation_disconnect_failures != 0
+        && (present_observation.disconnect_failures != 0
             || runtime.presentation_feedback.resources().source_count() != 0
             || runtime.presentation_feedback.resources().fence_count() != 0
             || runtime
@@ -3483,10 +3487,10 @@ fn run_session_loop(
                 .resources()
                 .presentation_count()
                 != 0
-            || runtime.present_idle
-                != runtime
-                    .present_complete_flip
-                    .saturating_add(runtime.present_complete_skip))
+            || present_observation.idle
+                != present_observation
+                    .complete_flip
+                    .saturating_add(present_observation.complete_skip))
     {
         return Err("persistent Present resources did not retire exactly once".into());
     }
@@ -3581,6 +3585,84 @@ fn run_session_loop(
     Ok(())
 }
 
+struct XPresentSessionObserver {
+    router: XServerFrontendProtocolRouter,
+    complete_flip: usize,
+    complete_skip: usize,
+    idle: usize,
+    idle_fence_triggers: usize,
+    disconnect_sources: usize,
+    disconnect_fences: usize,
+    disconnect_failures: usize,
+}
+
+impl XPresentSessionObserver {
+    fn new(router: XServerFrontendProtocolRouter) -> Self {
+        Self {
+            router,
+            complete_flip: 0,
+            complete_skip: 0,
+            idle: 0,
+            idle_fence_triggers: 0,
+            disconnect_sources: 0,
+            disconnect_fences: 0,
+            disconnect_failures: 0,
+        }
+    }
+
+    fn observe_feedback(&mut self, outcome: sophia_backend_live::LivePresentFeedbackOutcome) {
+        if outcome.idle_fence_triggered {
+            self.idle_fence_triggers = self.idle_fence_triggers.saturating_add(1);
+        }
+        for feedback in outcome.feedback {
+            match feedback {
+                sophia_backend_live::LivePresentProtocolFeedback::Complete {
+                    transaction,
+                    ust,
+                    msc,
+                    mode,
+                } => {
+                    let mode = match mode {
+                        sophia_backend_live::LivePresentCompletionMode::Flip => {
+                            self.complete_flip = self.complete_flip.saturating_add(1);
+                            XPresentCompletionMode::Flip
+                        }
+                        sophia_backend_live::LivePresentCompletionMode::Skip => {
+                            self.complete_skip = self.complete_skip.saturating_add(1);
+                            XPresentCompletionMode::Skip
+                        }
+                    };
+                    let _ = self
+                        .router
+                        .route_present_complete(transaction, ust, msc, mode);
+                }
+                sophia_backend_live::LivePresentProtocolFeedback::Idle { transaction } => {
+                    self.idle = self.idle.saturating_add(1);
+                    let _ = self.router.route_present_idle(transaction);
+                }
+            }
+        }
+    }
+
+    fn observe_disconnect(
+        &mut self,
+        report: sophia_backend_live::LivePresentationDisconnectReport,
+    ) {
+        self.idle_fence_triggers = self
+            .idle_fence_triggers
+            .saturating_add(report.triggered_idle_fences);
+        self.disconnect_sources = self
+            .disconnect_sources
+            .saturating_add(report.released_sources.len());
+        self.disconnect_fences = self
+            .disconnect_fences
+            .saturating_add(report.released_fences.len());
+        self.disconnect_failures = self
+            .disconnect_failures
+            .saturating_add(report.failed_idle_fences);
+    }
+}
+
 struct PersistentOutputRuntime {
     runtime: sophia_backend_live::LiveBackendRuntimeAssembly,
     native_initialized: bool,
@@ -3594,14 +3676,7 @@ struct PersistentBackendRuntime {
     presentation_feedback: sophia_backend_live::LiveProductionPresentFeedbackCoordinator,
     queued_gpu_presentations: VecDeque<QueuedGpuPresentation>,
     submitted_gpu_presentation: Option<SubmittedGpuPresentation>,
-    protocol_router: Option<XServerFrontendProtocolRouter>,
-    present_complete_flip: usize,
-    present_complete_skip: usize,
-    present_idle: usize,
-    idle_fence_triggers: usize,
-    presentation_disconnect_sources: usize,
-    presentation_disconnect_fences: usize,
-    presentation_disconnect_failures: usize,
+    present_feedback_sink: Box<dyn FnMut(sophia_backend_live::LivePresentFeedbackOutcome)>,
     first_acquire_delay: Option<Duration>,
     first_acquire_delay_applied: bool,
     reject_first_present: bool,
@@ -3881,14 +3956,7 @@ impl PersistentBackendRuntime {
             presentation_feedback: Default::default(),
             queued_gpu_presentations: VecDeque::new(),
             submitted_gpu_presentation: None,
-            protocol_router: None,
-            present_complete_flip: 0,
-            present_complete_skip: 0,
-            present_idle: 0,
-            idle_fence_triggers: 0,
-            presentation_disconnect_sources: 0,
-            presentation_disconnect_fences: 0,
-            presentation_disconnect_failures: 0,
+            present_feedback_sink: Box::new(|_| {}),
             first_acquire_delay: None,
             first_acquire_delay_applied: false,
             reject_first_present: false,
@@ -3915,8 +3983,11 @@ impl PersistentBackendRuntime {
         Ok(())
     }
 
-    fn with_protocol_router(mut self, router: XServerFrontendProtocolRouter) -> Self {
-        self.protocol_router = Some(router);
+    fn with_present_feedback_sink(
+        mut self,
+        sink: impl FnMut(sophia_backend_live::LivePresentFeedbackOutcome) + 'static,
+    ) -> Self {
+        self.present_feedback_sink = Box::new(sink);
         self
     }
 
@@ -4336,44 +4407,10 @@ impl PersistentBackendRuntime {
     }
 
     fn route_present_feedback(&mut self, outcome: sophia_backend_live::LivePresentFeedbackOutcome) {
-        if outcome.idle_fence_triggered {
-            self.idle_fence_triggers = self.idle_fence_triggers.saturating_add(1);
-        }
-        for feedback in outcome.feedback {
-            match feedback {
-                sophia_backend_live::LivePresentProtocolFeedback::Complete {
-                    transaction,
-                    ust,
-                    msc,
-                    mode,
-                } => {
-                    let mode = match mode {
-                        sophia_backend_live::LivePresentCompletionMode::Flip => {
-                            self.present_complete_flip =
-                                self.present_complete_flip.saturating_add(1);
-                            XPresentCompletionMode::Flip
-                        }
-                        sophia_backend_live::LivePresentCompletionMode::Skip => {
-                            self.present_complete_skip =
-                                self.present_complete_skip.saturating_add(1);
-                            XPresentCompletionMode::Skip
-                        }
-                    };
-                    if let Some(router) = self.protocol_router.as_ref() {
-                        let _ = router.route_present_complete(transaction, ust, msc, mode);
-                    }
-                }
-                sophia_backend_live::LivePresentProtocolFeedback::Idle { transaction } => {
-                    self.present_idle = self.present_idle.saturating_add(1);
-                    if let Some(router) = self.protocol_router.as_ref() {
-                        let _ = router.route_present_idle(transaction);
-                    }
-                }
-            }
-        }
+        (self.present_feedback_sink)(outcome);
     }
 
-    fn shutdown_presentations(&mut self) {
+    fn shutdown_presentations(&mut self) -> sophia_backend_live::LivePresentationDisconnectReport {
         let queued = self
             .queued_gpu_presentations
             .drain(..)
@@ -4386,19 +4423,7 @@ impl PersistentBackendRuntime {
             self.reject_gpu_presentation(submitted.transaction, 0, 0);
         }
 
-        let report = self.presentation_feedback.disconnect();
-        self.idle_fence_triggers = self
-            .idle_fence_triggers
-            .saturating_add(report.triggered_idle_fences);
-        self.presentation_disconnect_sources = self
-            .presentation_disconnect_sources
-            .saturating_add(report.released_sources.len());
-        self.presentation_disconnect_fences = self
-            .presentation_disconnect_fences
-            .saturating_add(report.released_fences.len());
-        self.presentation_disconnect_failures = self
-            .presentation_disconnect_failures
-            .saturating_add(report.failed_idle_fences);
+        self.presentation_feedback.disconnect()
     }
 
     fn prepare_authority_transactions(

@@ -28,3 +28,4 @@ pub use api::*;
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
 pub use presentation::*;
 pub use production_session::*;
+pub use sophia_renderer_live::LivePresentationDisconnectReport;
