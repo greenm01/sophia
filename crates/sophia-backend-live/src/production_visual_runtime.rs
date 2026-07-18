@@ -1020,20 +1020,34 @@ impl LiveProductionVisualRuntime {
         &mut self,
         native_scanout: &mut LiveProductionNativeScanout,
     ) -> Result<LiveProductionNativeServiceReport, Box<dyn std::error::Error>> {
-        let retirement_polled = self.native_scanout_in_flight() || self.native_cleanup_pending();
-        if retirement_polled {
-            self.retire_native_scanout(native_scanout)?;
-        }
-        let present_polled = self.diagnostics().present_queued && !self.native_scanout_in_flight();
-        let mut tick = if present_polled {
-            Some(self.drive_gpu_presentation(Some(native_scanout))?)
-        } else {
-            None
-        };
-        let pending_frame_polled = !self.native_scanout_in_flight()
-            && (0..self.output_count()).any(|index| native_scanout.pending_frame(index));
-        if pending_frame_polled {
-            tick = Some(self.run_native_idle(native_scanout)?);
+        let mut coordinator = ProductionAsyncServiceCoordinator::new();
+        let mut tick = None;
+        let mut retirement_polled = false;
+        let mut present_polled = false;
+        let mut pending_frame_polled = false;
+        loop {
+            let phase = coordinator.next_phase(ProductionAsyncServiceObservation {
+                native_in_flight: self.native_scanout_in_flight(),
+                cleanup_pending: self.native_cleanup_pending(),
+                present_queued: self.diagnostics().present_queued,
+                pending_frame: (0..self.output_count())
+                    .any(|index| native_scanout.pending_frame(index)),
+            });
+            match phase {
+                Some(ProductionAsyncServicePhase::KmsRetire) => {
+                    retirement_polled = true;
+                    self.retire_native_scanout(native_scanout)?;
+                }
+                Some(ProductionAsyncServicePhase::SchedulePresent) => {
+                    present_polled = true;
+                    tick = Some(self.drive_gpu_presentation(Some(native_scanout))?);
+                }
+                Some(ProductionAsyncServicePhase::SubmitPendingFrame) => {
+                    pending_frame_polled = true;
+                    tick = Some(self.run_native_idle(native_scanout)?);
+                }
+                None => break,
+            }
         }
         Ok(LiveProductionNativeServiceReport {
             tick,

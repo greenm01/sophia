@@ -285,3 +285,67 @@ impl ProductionSessionCoordinator {
         })
     }
 }
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ProductionAsyncServiceObservation {
+    pub native_in_flight: bool,
+    pub cleanup_pending: bool,
+    pub present_queued: bool,
+    pub pending_frame: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProductionAsyncServicePhase {
+    KmsRetire,
+    SchedulePresent,
+    SubmitPendingFrame,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum ProductionAsyncServiceCursor {
+    #[default]
+    Retirement,
+    Present,
+    PendingFrame,
+    Complete,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ProductionAsyncServiceCoordinator {
+    cursor: ProductionAsyncServiceCursor,
+}
+
+impl ProductionAsyncServiceCoordinator {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn next_phase(
+        &mut self,
+        observation: ProductionAsyncServiceObservation,
+    ) -> Option<ProductionAsyncServicePhase> {
+        loop {
+            match self.cursor {
+                ProductionAsyncServiceCursor::Retirement => {
+                    self.cursor = ProductionAsyncServiceCursor::Present;
+                    if observation.native_in_flight || observation.cleanup_pending {
+                        return Some(ProductionAsyncServicePhase::KmsRetire);
+                    }
+                }
+                ProductionAsyncServiceCursor::Present => {
+                    self.cursor = ProductionAsyncServiceCursor::PendingFrame;
+                    if observation.present_queued && !observation.native_in_flight {
+                        return Some(ProductionAsyncServicePhase::SchedulePresent);
+                    }
+                }
+                ProductionAsyncServiceCursor::PendingFrame => {
+                    self.cursor = ProductionAsyncServiceCursor::Complete;
+                    if observation.pending_frame && !observation.native_in_flight {
+                        return Some(ProductionAsyncServicePhase::SubmitPendingFrame);
+                    }
+                }
+                ProductionAsyncServiceCursor::Complete => return None,
+            }
+        }
+    }
+}

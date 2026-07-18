@@ -1168,3 +1168,35 @@ fn production_coordinator_reports_feedback_failure_after_retirement() {
     assert_eq!(error.phase, ProductionSessionPhase::ProtocolFeedback);
     assert_eq!(coordinator.committed_surfaces().len(), 1);
 }
+
+#[test]
+fn production_async_service_coordinator_owns_dynamic_kms_phase_order() {
+    let mut coordinator = ProductionAsyncServiceCoordinator::new();
+    assert_eq!(
+        coordinator.next_phase(ProductionAsyncServiceObservation {
+            native_in_flight: true,
+            cleanup_pending: false,
+            present_queued: true,
+            pending_frame: true,
+        }),
+        Some(ProductionAsyncServicePhase::KmsRetire)
+    );
+    assert_eq!(
+        coordinator.next_phase(ProductionAsyncServiceObservation {
+            native_in_flight: false,
+            cleanup_pending: false,
+            present_queued: true,
+            pending_frame: true,
+        }),
+        Some(ProductionAsyncServicePhase::SchedulePresent)
+    );
+    assert_eq!(
+        coordinator.next_phase(ProductionAsyncServiceObservation {
+            native_in_flight: true,
+            cleanup_pending: false,
+            present_queued: false,
+            pending_frame: true,
+        }),
+        None
+    );
+}

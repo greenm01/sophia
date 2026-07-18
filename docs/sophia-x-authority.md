@@ -444,7 +444,7 @@ explicit and evidence-driven:
   groups; the current classic and explicitly launched confined profiles remain
   the supported admission shapes.
 
-Before expanding those surfaces, the remaining GPU Present preparation and retirement sequencing must move from backend visual control into the protocol-neutral `runtime_driver`; production X already uses one backend native-service poll. The frontend contract does not change: it emits
+Before expanding those surfaces, the protocol-neutral `runtime_driver` owns visual phase order and production X uses one backend service poll; the remaining promotion gate is paired physical X13 GTK evidence. The frontend contract does not change: it emits
 bounded observed batches and consumes routed input, control, topology, and
 presentation feedback without owning scene, renderer, or KMS state.
 
