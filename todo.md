@@ -53,12 +53,16 @@ compatibility provider; no XLibre integration work is active.
   on target hardware with exact physical text, a physical OK click,
   `first_error=none`, CPU/SHM redraw after resize, native presentation, normal
   exit, and clean teardown. QEMU closes the semantic and unattended-regression
-  gap but does not replace the guarded VT/DRM hardware evidence. The prior X13
-  attempts exposed a proof-state bug: readiness preceded a presented cursor and
-  Return could close Zenity before any pointer selection. The session now centers
-  and presents the cursor before readiness, suppresses Return until a physical
-  button routes, and fails cleanly if the proof surface disappears; both GTK QEMU
-  profiles pass the click-then-submit sequence. Fresh X13 evidence is still required.
+  gap but does not replace the guarded VT/DRM hardware evidence. The latest X13
+  run proved exact text plus routed pointer motion, but a touchpad tap produced no
+  button because the path-based libinput context retained tap-to-click disabled.
+  Cursor motion then changed pixels and incorrectly canceled the pointer deadline,
+  leaving the session waiting indefinitely. Native device admission now enables
+  and reports tapping on capable devices; the pointer deadline remains armed until
+  both a button and preserved application pixels are proven, and motion/button
+  evidence is edge-triggered instead of logged every poll. Both GTK QEMU profiles
+  retain the click-then-submit sequence. Fresh paired X13 evidence is still
+  required before promotion.
 - [ ] Run the aggregate three-class verifier and promote GTK3 software from
   `engine` to `session` in `docs/x11-compatibility-matrix.md`.
 

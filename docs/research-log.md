@@ -1845,3 +1845,55 @@ fresh local-TTY run of `tools/live_session_milestone5_gtk_hardware_proof.sh`, fo
 three-class aggregate verifier. It requires a person to arm the independent guard, type exact
 text, and physically click each dialog, so it cannot be completed through unattended SSH or
 QEMU without weakening the stated acceptance criterion.
+
+
+## 2026-07-18: GTK Client Exit Hang And Post-Proof Completion Watchdog
+
+The first X13 run with routed pointer buttons accepted exact physical `sophia` text, routed
+the OK click, and presented the surface-removal frame, then held a blank screen until the
+emergency chord restored the TTY. Reduction found a completion-phase deadline vacuum: once
+the text proof completes and a button routes, the keyboard-sequence and pointer-selection
+deadlines are disarmed and the global runtime budget intentionally stays out of input proofs,
+so any stall after the proof loops without a bound. The loop exit requires the primary
+client's reaped exit status; a toolkit that destroys its window but never exits leaves that
+term false forever. On a bare text TTY without a session bus address, GTK finalization is the
+prime suspect for the missing exit.
+
+The session now bounds the post-removal wait: when the application proof surface is gone and
+the client has not exited within five seconds, the loop fails closed with the exact exit-term
+states instead of presenting blank frames. Application-proof clients launch under
+`dbus-run-session --` when no bus address exists and the runner resolves on `PATH`, giving
+the toolkit a bounded per-client bus that exits with the client. The first watchdog draft
+armed on proof-complete-plus-button and falsely expired inside the QEMU click-then-submit
+sequence; the retained trigger is surface removal, which is the actual abnormal state.
+
+The full offline all-feature suite passes. The rebuilt X13 QEMU image passed strict two-xterm,
+and resize-enabled classic and confined GTK passed exact text, routed button selection,
+committed 640x360 redraw, normal exit, `first_error=none`, native presentation, and clean
+two-output retirement. Fresh paired physical X13 evidence remains the acceptance gate; if the
+watchdog fires there, its record names the missing exit term.
+
+
+## 2026-07-18: X13 GTK Blank Session Reduced To Tap Policy And Pointer Deadline
+
+A fresh classic hardware run accepted exact physical `sophia` input, committed the 640x360
+GTK resize, presented the software cursor, and routed sustained touchpad motion. It emitted no
+pointer-button record, no application-session record, and no bounded-completion record before
+the independent emergency chord restored the TTY cleanly. X13's libinput report confirmed that
+the ELAN touchpad supports tapping but defaults tap-to-click to disabled.
+
+The native path-based libinput owner now enables tap-to-click for every tap-capable admitted
+device, verifies the applied state, and exports only reduced device/tap counts. The proof loop
+now distinguishes motion observed/routed from button observed/routed. Its selection deadline
+remains armed after cursor pixels change and ends only after both a routed button and pointer
+pixel evidence; this closes the prior unbounded state where motion canceled the only pointer
+deadline. Cursor repaint also fails closed if an application proof produces no composed layer
+or only the bounded software-cursor footprint.
+
+The full offline all-feature suite passes. The rebuilt X13 QEMU image passed strict two-xterm
+in 6,880 ms with 19 of 19 input deliveries, 40 submissions, 38 retirements, and zero native
+debt. Resize-enabled classic and confined GTK passed exact text, routed button selection,
+normal exit, `first_error=none`, and clean two-output retirement. A bounded non-KMS smoke
+against the real ELAN path reported `devices=2 tap_capable=1 tap_enabled=1` and completed its
+xterm pixel proof. Paired physical X13 evidence remains the acceptance gate before GTK3
+software promotion.

@@ -44,6 +44,7 @@ const SESSION_CONTROL_CAPACITY: usize = 32;
 const SESSION_INPUT_QUIET_MSEC: u64 = 500;
 const SESSION_PHYSICAL_SEQUENCE_TIMEOUT_MSEC: u64 = 15_000;
 const SESSION_PHYSICAL_PIXEL_TIMEOUT_MSEC: u64 = 5_000;
+const SESSION_COMPLETION_TIMEOUT_MSEC: u64 = 5_000;
 const SESSION_INPUT_DELIVERY_TIMEOUT_MSEC: u64 = 1_000;
 const SESSION_SEAT_RAW: u64 = 1;
 const SESSION_KEYBOARD_DEVICE_RAW: u64 = 1;
@@ -371,6 +372,12 @@ impl SessionPhysicalInput {
             Self::Threaded(poller) => poller.stats(),
         }
     }
+
+    fn policy_report(&self) -> sophia_backend_live::NativeLibinputPolicyReport {
+        match self {
+            Self::Threaded(poller) => poller.policy_report(),
+        }
+    }
 }
 
 pub(crate) fn run_persistent_xterm_session(
@@ -409,9 +416,13 @@ pub(crate) fn run_persistent_xterm_session(
         ))
     };
     if !config.input_devices.is_empty() {
+        let policy = physical_input
+            .as_ref()
+            .expect("configured input devices create a poller")
+            .policy_report();
         println!(
-            "sophia_live_session_input_pipeline schema=1 status=poller_ready devices={}",
-            config.input_devices.len()
+            "sophia_live_session_input_pipeline schema=2 status=poller_ready devices={} tap_capable={} tap_enabled={}",
+            policy.devices_added, policy.tap_capable, policy.tap_enabled
         );
         std::io::stdout().flush()?;
     }
@@ -483,7 +494,7 @@ pub(crate) fn run_persistent_xterm_session(
         .then(|| LiveInputProofResult::create(display_number))
         .transpose()?;
     let mut terminal_command = match config.client.as_deref() {
-        Some(client) => std::process::Command::new(client),
+        Some(client) => application_client_command(client),
         None => {
             std::process::Command::new(terminal.as_deref().expect("xterm executable is resolved"))
         }
@@ -1179,6 +1190,37 @@ fn prepare_display_socket(path: &std::path::Path) -> Result<(), Box<dyn std::err
     }
     std::fs::remove_file(path)?;
     Ok(())
+}
+
+fn resolve_executable_on_path(name: &str) -> Option<std::path::PathBuf> {
+    let paths = std::env::var_os("PATH")?;
+    for directory in std::env::split_paths(&paths) {
+        let candidate = directory.join(name);
+        if candidate.is_file()
+            && candidate
+                .metadata()
+                .is_ok_and(|metadata| metadata.mode() & 0o111 != 0)
+        {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn application_client_command(client: &str) -> std::process::Command {
+    // GTK clients finalize through a session bus. On a bare text TTY no bus
+    // address exists; without one a toolkit can destroy its window but never
+    // exit, which previously stranded the post-proof completion path. Give
+    // application-proof clients a bounded per-client bus when the host
+    // provides dbus-run-session; the bus exits with the client.
+    if std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none()
+        && let Some(runner) = resolve_executable_on_path("dbus-run-session")
+    {
+        let mut command = std::process::Command::new(runner);
+        command.arg("--").arg(client);
+        return command;
+    }
+    std::process::Command::new(client)
 }
 
 fn wait_for_x_server_socket(
@@ -2130,6 +2172,10 @@ fn run_session_loop(
     let mut resize_proof_complete = false;
     let mut key_observed_reported = false;
     let mut key_routed_reported = false;
+    let mut pointer_motion_observed_reported = false;
+    let mut pointer_motion_routed_reported = false;
+    let mut pointer_button_observed_reported = false;
+    let mut pointer_button_routed_reported = false;
     let mut max_compose = Duration::ZERO;
     let mut next_input_delivery = 1u64;
     let mut pending_input_deliveries = BTreeSet::new();
@@ -2139,6 +2185,7 @@ fn run_session_loop(
     let mut input_delivery_source: Option<&'static str> = None;
     let mut input_flush_latency: Option<Duration> = None;
     let mut post_input_deadline: Option<Instant> = None;
+    let mut application_surface_gone_at: Option<Instant> = None;
     let mut terminal_content_ready = false;
     let mut startup_ready_msec = None;
     let mut terminal_content_ready_reported = false;
@@ -2241,11 +2288,36 @@ fn run_session_loop(
                         input_pixel_change = true;
                     }
                 }
-                if report.pointer_events > 0 {
+                if !pointer_motion_observed_reported
+                    && report.pointer_events > report.pointer_buttons_observed
+                {
+                    println!("sophia_live_session_pointer schema=2 status=motion_observed");
+                    pointer_motion_observed_reported = true;
+                }
+                if !pointer_motion_routed_reported
+                    && report.pointer_routed > report.pointer_buttons_routed
+                {
+                    println!("sophia_live_session_pointer schema=2 status=motion_routed");
+                    pointer_motion_routed_reported = true;
+                }
+                if !pointer_button_observed_reported && report.pointer_buttons_observed > 0 {
                     println!(
-                        "sophia_live_session_pointer schema=1 status=observed events={} routed={}",
-                        report.pointer_events, report.pointer_routed
+                        "sophia_live_session_pointer schema=2 status=button_observed count={}",
+                        report.pointer_buttons_observed
                     );
+                    pointer_button_observed_reported = true;
+                }
+                if !pointer_button_routed_reported && report.pointer_buttons_routed > 0 {
+                    println!(
+                        "sophia_live_session_pointer schema=2 status=button_routed count={}",
+                        physical_pointer_buttons_routed
+                    );
+                    pointer_button_routed_reported = true;
+                }
+                if pointer_motion_observed_reported
+                    || pointer_button_observed_reported
+                    || pointer_button_routed_reported
+                {
                     std::io::stdout().flush()?;
                 }
             }
@@ -2479,6 +2551,19 @@ fn run_session_loop(
                 native_scanout,
             )?;
             let report = &repaint.composition;
+            if pointer_checksum.is_some()
+                && config.application_proof_requested()
+                && !sophia_cli::input_proof::cursor_repaint_preserves_application(
+                    report.layers_composed,
+                    report.nonzero_pixel_bytes,
+                )
+            {
+                return Err(format!(
+                    "cursor repaint lost application content: layers={} nonzero_bytes={}",
+                    report.layers_composed, report.nonzero_pixel_bytes
+                )
+                .into());
+            }
             max_compose = max_compose.max(repaint.compose_elapsed);
             cpu_compositions = cpu_compositions.saturating_add(1);
             if pointer_cursor_checksum.is_none() && pointer_checksum.is_none() {
@@ -2501,6 +2586,7 @@ fn run_session_loop(
         {
             pointer_checksum = Some(candidate);
             pointer_cursor_checksum = None;
+            pointer_phase_started_at = Some(Instant::now());
             println!(
                 "sophia_live_session_pointer schema=1 status=visible source=physical position=center"
             );
@@ -2547,13 +2633,14 @@ fn run_session_loop(
             .is_none_or(PhysicalTextProof::is_complete);
         let waiting_for_keyboard_sequence =
             physical_input_ready_at.is_some() && !physical_sequence_complete;
-        let waiting_for_pointer_pixels = config.expect_physical_pointer
-            && physical_sequence_complete
-            && input_pixel_change
-            && !pointer_pixel_change;
-        if waiting_for_pointer_pixels && pointer_phase_started_at.is_none() {
-            pointer_phase_started_at = Some(Instant::now());
-        }
+        let waiting_for_pointer_selection = sophia_cli::input_proof::pointer_selection_waiting(
+            config.expect_physical_pointer,
+            physical_sequence_complete,
+            input_pixel_change,
+            pointer_checksum.is_some(),
+            physical_pointer_buttons_routed,
+            pointer_pixel_change,
+        );
         if waiting_for_keyboard_sequence {
             let ready_at = physical_input_ready_at.expect("checked above");
             if ready_at.elapsed() >= Duration::from_millis(SESSION_PHYSICAL_SEQUENCE_TIMEOUT_MSEC) {
@@ -2565,12 +2652,12 @@ fn run_session_loop(
                 )
                 .into());
             }
-        } else if waiting_for_pointer_pixels {
+        } else if waiting_for_pointer_selection {
             let started_at = pointer_phase_started_at.expect("set above");
-            if started_at.elapsed() >= Duration::from_millis(SESSION_PHYSICAL_PIXEL_TIMEOUT_MSEC) {
+            if started_at.elapsed() >= Duration::from_millis(SESSION_PHYSICAL_SEQUENCE_TIMEOUT_MSEC)
+            {
                 return Err(format!(
-                    "persistent live session timed out waiting for physical pointer pixels: pointer_observed={physical_pointer_events} pointer_routed={physical_pointer_routed} pointer_baseline={pointer_checksum:?} final_checksum={:?}",
-                    scene.last_report().map(|report| report.checksum)
+                    "persistent live session timed out waiting for a routed physical pointer button: pointer_observed={physical_pointer_events} pointer_routed={physical_pointer_routed} pointer_buttons={physical_pointer_buttons_routed} pointer_pixels={pointer_pixel_change}"
                 )
                 .into());
             }
@@ -2835,6 +2922,9 @@ fn run_session_loop(
                     {
                         application_surface_missing_since.get_or_insert_with(Instant::now);
                     }
+                    if config.application_proof_requested() && Some(surface) == input_surface {
+                        application_surface_gone_at.get_or_insert_with(Instant::now);
+                    }
                     focus.clear_surface(surface);
                 }
                 if let Some(surface) = input_surface
@@ -2844,6 +2934,7 @@ fn run_session_loop(
                         .any(|committed| committed.surface == surface)
                 {
                     application_surface_missing_since = None;
+                    application_surface_gone_at = None;
                 }
                 if focus.focused_surface(seat).is_none()
                     && let Some(surface) = runtime.committed_surfaces().first()
@@ -3112,6 +3203,29 @@ fn run_session_loop(
                 "application proof surface disappeared before the required physical pointer selection"
                     .into(),
             );
+        }
+        // Once the proof surface is gone, the session owns no narrower
+        // deadline and the global runtime budget intentionally stays out of
+        // input proofs. A toolkit that destroyed its window but never exits
+        // would otherwise leave the loop presenting blank frames forever;
+        // bound that wait and fail closed with the exact exit-term states.
+        if sophia_cli::input_proof::application_exit_overdue(
+            config.application_proof_requested(),
+            application_surface_gone_at.is_some(),
+            primary_child_exited,
+        ) && application_surface_gone_at.is_some_and(|gone_at| {
+            gone_at.elapsed() >= Duration::from_millis(SESSION_COMPLETION_TIMEOUT_MSEC)
+        }) {
+            return Err(format!(
+                "persistent live session application surface was removed but the client did not exit: presented_latency={} text_match={} completion_reported={} pointer_pixels={} buttons_routed={} child_exited={}",
+                input_presented_latency.is_some(),
+                input_text_match,
+                physical_input_completion_reported,
+                pointer_pixel_change,
+                physical_pointer_buttons_routed,
+                primary_child_exited,
+            )
+            .into());
         }
         if input_presented_latency.is_none()
             && input_pixel_change
@@ -4195,6 +4309,7 @@ fn synthetic_text_input_events(
 struct PhysicalInputRouteReport {
     events: usize,
     keys_observed: usize,
+    pointer_buttons_observed: usize,
     pointer_buttons_routed: usize,
     keys_routed: usize,
     pointer_events: usize,
@@ -4342,6 +4457,7 @@ fn route_input_events(
         keys_observed: 0,
         keys_routed: 0,
         pointer_events: 0,
+        pointer_buttons_observed: 0,
         pointer_routed: 0,
         pointer_buttons_routed: 0,
         deliveries: Vec::new(),
@@ -4426,6 +4542,10 @@ fn route_input_events(
                 }
                 let is_button =
                     matches!(kind, sophia_protocol::InputEventKind::PointerButton { .. });
+                if is_button {
+                    report.pointer_buttons_observed =
+                        report.pointer_buttons_observed.saturating_add(1);
+                }
                 report.pointer_events = report.pointer_events.saturating_add(1);
                 if !pointer_routing_enabled {
                     continue;

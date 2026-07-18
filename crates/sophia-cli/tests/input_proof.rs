@@ -1,6 +1,7 @@
 use sophia_cli::input_proof::{
-    PhysicalTextProof, PhysicalTextProofEvent, PhysicalTextProofProgress,
-    pointer_proof_suppresses_return, pointer_selection_pending,
+    PhysicalTextProof, PhysicalTextProofEvent, PhysicalTextProofProgress, application_exit_overdue,
+    cursor_repaint_preserves_application, pointer_proof_suppresses_return,
+    pointer_selection_pending, pointer_selection_waiting,
 };
 
 #[test]
@@ -8,6 +9,36 @@ fn pointer_selection_stays_pending_until_a_button_is_routed() {
     assert!(pointer_selection_pending(true, 0));
     assert!(!pointer_selection_pending(true, 1));
     assert!(!pointer_selection_pending(false, 0));
+}
+
+#[test]
+fn pointer_selection_wait_remains_bounded_after_motion_changes_pixels() {
+    assert!(pointer_selection_waiting(true, true, true, true, 0, true));
+    assert!(pointer_selection_waiting(true, true, true, true, 1, false));
+    assert!(!pointer_selection_waiting(true, true, true, true, 1, true));
+    assert!(!pointer_selection_waiting(true, true, true, false, 0, true));
+    assert!(!pointer_selection_waiting(false, true, true, true, 0, true));
+}
+
+#[test]
+fn cursor_only_frame_cannot_satisfy_application_preservation() {
+    assert!(!cursor_repaint_preserves_application(0, 10_000));
+    assert!(!cursor_repaint_preserves_application(1, 12 * 16 * 4));
+    assert!(cursor_repaint_preserves_application(1, 12 * 16 * 4 + 1));
+}
+
+#[test]
+fn application_exit_overdue_only_when_surface_gone_and_client_alive() {
+    // The overdue window opens only when the proof surface is gone but the
+    // client process has not exited.
+    assert!(application_exit_overdue(true, true, false));
+    // A present surface means the client may still be running legitimately.
+    assert!(!application_exit_overdue(true, false, false));
+    // A reaped client exits the session loop through the normal proof break.
+    assert!(!application_exit_overdue(true, true, true));
+    assert!(!application_exit_overdue(true, false, true));
+    // Non-application sessions never arm the application exit watchdog.
+    assert!(!application_exit_overdue(false, true, false));
 }
 
 fn event(keycode: u8, pressed: bool) -> PhysicalTextProofEvent {

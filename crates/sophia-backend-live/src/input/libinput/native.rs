@@ -18,15 +18,25 @@ use std::path::{Path, PathBuf};
 pub struct NativeLibinputEventReader {
     libinput: input::Libinput,
     devices: NativeLibinputDeviceMap,
+    policy: NativeLibinputPolicyReport,
     pointer_position: Point,
     next_serial: u64,
 }
 
 impl NativeLibinputEventReader {
     pub fn new(libinput: input::Libinput, devices: NativeLibinputDeviceMap) -> Self {
+        Self::new_with_policy(libinput, devices, NativeLibinputPolicyReport::default())
+    }
+
+    pub fn new_with_policy(
+        libinput: input::Libinput,
+        devices: NativeLibinputDeviceMap,
+        policy: NativeLibinputPolicyReport,
+    ) -> Self {
         Self {
             libinput,
             devices,
+            policy,
             pointer_position: Point { x: 0.0, y: 0.0 },
             next_serial: 1,
         }
@@ -38,6 +48,10 @@ impl NativeLibinputEventReader {
 
     pub const fn pointer_position(&self) -> Point {
         self.pointer_position
+    }
+
+    pub const fn policy_report(&self) -> NativeLibinputPolicyReport {
+        self.policy
     }
 
     pub fn libinput_mut(&mut self) -> &mut input::Libinput {
@@ -177,6 +191,14 @@ pub enum NativeLibinputOpenError {
     TooManyDevices,
     InvalidDevicePath,
     DeviceUnavailable,
+    DeviceConfigurationFailed,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct NativeLibinputPolicyReport {
+    pub devices_added: usize,
+    pub tap_capable: usize,
+    pub tap_enabled: usize,
 }
 
 impl core::fmt::Display for NativeLibinputOpenError {
@@ -199,17 +221,29 @@ pub fn open_native_libinput_path_poller(
         return Err(NativeLibinputOpenError::TooManyDevices);
     }
     let mut libinput = input::Libinput::new_from_path(DirectLibinputInterface);
+    let mut policy = NativeLibinputPolicyReport::default();
     for path in paths {
         let resolved = resolve_native_libinput_device_path(path)?;
         let path = resolved
             .to_str()
             .ok_or(NativeLibinputOpenError::InvalidDevicePath)?;
-        libinput
+        let mut device = libinput
             .path_add_device(path)
             .ok_or(NativeLibinputOpenError::DeviceUnavailable)?;
+        policy.devices_added = policy.devices_added.saturating_add(1);
+        if device.config_tap_finger_count() > 0 {
+            policy.tap_capable = policy.tap_capable.saturating_add(1);
+            device
+                .config_tap_set_enabled(true)
+                .map_err(|_| NativeLibinputOpenError::DeviceConfigurationFailed)?;
+            if !device.config_tap_enabled() {
+                return Err(NativeLibinputOpenError::DeviceConfigurationFailed);
+            }
+            policy.tap_enabled = policy.tap_enabled.saturating_add(1);
+        }
     }
     Ok(NativeLibinputEventPoller::new(
-        NativeLibinputEventReader::new(libinput, devices),
+        NativeLibinputEventReader::new_with_policy(libinput, devices, policy),
         max_read_per_poll.clamp(1, 256),
     ))
 }

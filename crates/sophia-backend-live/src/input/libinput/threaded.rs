@@ -8,7 +8,10 @@ use rustix::event::{PollFd, PollFlags, Timespec, poll};
 
 use crate::prelude::*;
 
-use super::{NativeLibinputDeviceMap, NativeLibinputOpenError, open_native_libinput_path_poller};
+use super::{
+    NativeLibinputDeviceMap, NativeLibinputOpenError, NativeLibinputPolicyReport,
+    open_native_libinput_path_poller,
+};
 
 const INPUT_THREAD_POLL_MSEC: i64 = 1;
 
@@ -27,6 +30,7 @@ pub struct ThreadedNativeInputStats {
 pub struct ThreadedNativeLibinputEventPoller {
     receiver: Receiver<QueuedInputEvent>,
     health: Receiver<Result<(), String>>,
+    policy: NativeLibinputPolicyReport,
     stop: Arc<AtomicBool>,
     queue_depth: Arc<AtomicUsize>,
     max_queue_depth: Arc<AtomicUsize>,
@@ -43,6 +47,10 @@ impl ThreadedNativeLibinputEventPoller {
             max_queue_depth: self.max_queue_depth.load(Ordering::Acquire),
             max_queue_dwell_msec: self.max_queue_dwell_msec,
         }
+    }
+
+    pub const fn policy_report(&self) -> NativeLibinputPolicyReport {
+        self.policy
     }
 
     fn worker_error(&self) -> io::Result<()> {
@@ -120,7 +128,8 @@ pub fn open_threaded_native_libinput_path_poller(
         let mut poller = match open_native_libinput_path_poller(&paths, devices, max_read_per_poll)
         {
             Ok(poller) => {
-                let _ = startup_sender.send(Ok(()));
+                let policy = poller.reader().policy_report();
+                let _ = startup_sender.send(Ok(policy));
                 poller
             }
             Err(error) => {
@@ -139,9 +148,10 @@ pub fn open_threaded_native_libinput_path_poller(
         let _ = health_sender.try_send(result);
     });
     match startup_receiver.recv_timeout(Duration::from_secs(5)) {
-        Ok(Ok(())) => Ok(ThreadedNativeLibinputEventPoller {
+        Ok(Ok(policy)) => Ok(ThreadedNativeLibinputEventPoller {
             receiver,
             health,
+            policy,
             stop,
             queue_depth,
             max_queue_depth,

@@ -22,6 +22,36 @@ pub const fn pointer_selection_pending(required: bool, routed_buttons: usize) ->
     required && routed_buttons == 0
 }
 
+pub const fn pointer_selection_waiting(
+    required: bool,
+    text_complete: bool,
+    input_pixels_presented: bool,
+    cursor_ready: bool,
+    routed_buttons: usize,
+    pointer_pixels_changed: bool,
+) -> bool {
+    required
+        && text_complete
+        && input_pixels_presented
+        && cursor_ready
+        && (routed_buttons == 0 || !pointer_pixels_changed)
+}
+
+pub const fn application_exit_overdue(
+    application_proof: bool,
+    surface_missing: bool,
+    primary_exited: bool,
+) -> bool {
+    application_proof && surface_missing && !primary_exited
+}
+
+pub const fn cursor_repaint_preserves_application(
+    layers_composed: usize,
+    nonzero_pixel_bytes: usize,
+) -> bool {
+    const CURSOR_ONLY_MAX_NONZERO_BYTES: usize = 12 * 16 * 4;
+    layers_composed > 0 && nonzero_pixel_bytes > CURSOR_ONLY_MAX_NONZERO_BYTES
+}
 pub fn pointer_proof_suppresses_return(required: bool, keycode: u32, text_complete: bool) -> bool {
     required && text_complete && keycode == 28
 }

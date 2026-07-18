@@ -13,10 +13,10 @@ use sophia_backend_live::{
     LiveHardwareValidationSmokeReport, LiveHardwareValidationSmokeStatus,
     LiveHardwareValidationTarget, LiveInputReadinessGateReport, LiveInputReadinessGateStatus,
     LiveInputReadinessGatedPoller, NativeLibinputDeviceMap, NativeLibinputEventPoller,
-    NativeLibinputEventReader, NativeLibinputOpenError, NonBlockingInputPoller, SeatId,
-    discover_live_backend, native_libinput_event_adapter_report, open_native_libinput_path_poller,
-    real_libinput_events_validation_gate, real_libinput_events_validation_smoke_report,
-    resolve_native_libinput_device_path,
+    NativeLibinputEventReader, NativeLibinputOpenError, NativeLibinputPolicyReport,
+    NonBlockingInputPoller, SeatId, discover_live_backend, native_libinput_event_adapter_report,
+    open_native_libinput_path_poller, real_libinput_events_validation_gate,
+    real_libinput_events_validation_smoke_report, resolve_native_libinput_device_path,
 };
 use sophia_protocol::{InputEventKind, Point};
 
@@ -267,11 +267,16 @@ fn input_readiness_gate_reports_reduced_read_failure() {
 
 #[test]
 fn native_libinput_event_reader_idles_without_exposing_native_identity() {
-    let reader = NativeLibinputEventReader::new(
+    let reader = NativeLibinputEventReader::new_with_policy(
         input::Libinput::new_from_path(RejectingLibinputInterface),
         NativeLibinputDeviceMap::new(SeatId::from_raw(1))
             .with_pointer_device(DeviceId::from_raw(2))
             .with_keyboard_device(DeviceId::from_raw(3)),
+        NativeLibinputPolicyReport {
+            devices_added: 3,
+            tap_capable: 1,
+            tap_enabled: 1,
+        },
     );
     let mut poller = NativeLibinputEventPoller::new(reader, 4);
 
@@ -289,6 +294,14 @@ fn native_libinput_event_reader_idles_without_exposing_native_identity() {
         NativeLibinputDeviceMap::new(SeatId::from_raw(1))
             .with_pointer_device(DeviceId::from_raw(2))
             .with_keyboard_device(DeviceId::from_raw(3))
+    );
+    assert_eq!(
+        poller.reader().policy_report(),
+        NativeLibinputPolicyReport {
+            devices_added: 3,
+            tap_capable: 1,
+            tap_enabled: 1,
+        }
     );
 }
 

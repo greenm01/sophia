@@ -22,6 +22,27 @@ guard_pid=""
 session_pid=""
 cleanup_done=false
 
+discover_stable_pointers() {
+    local path event ev prop
+    while IFS= read -r path; do
+        event="$(basename "$(readlink -f "$path")")"
+        [[ "$event" == event* ]] || continue
+        ev="$(tr -d '[:space:]' <"/sys/class/input/$event/device/capabilities/ev" 2>/dev/null || true)"
+        prop="$(tr -d '[:space:]' <"/sys/class/input/$event/device/properties" 2>/dev/null || echo 0)"
+        [[ "$ev" =~ ^[[:xdigit:]]+$ && "$prop" =~ ^[[:xdigit:]]+$ ]] || continue
+
+        # Stable by-path names are not standardized for touchpads; a
+        # pointer-capable node may use a generic `*-event` name instead of a
+        # mouse or touchpad suffix. Select relative devices, plus absolute
+        # pointer/button-pad devices, from kernel capabilities.
+        if (( (16#$ev & 4) != 0 || ((16#$ev & 8) != 0 && (16#$prop & 5) != 0) )); then
+            printf '%s\n' "$path"
+        fi
+    done < <(
+        find /dev/input/by-path -maxdepth 1 -type l -name '*-event*' -print 2>/dev/null | sort -u
+    )
+}
+
 terminate_bounded() {
     local target="$1" label="$2"
     if ! kill -0 -- "$target" 2>/dev/null; then
@@ -138,7 +159,7 @@ if [[ -z "$devices" ]]; then
         find /dev/input/by-path -maxdepth 1 -type l -name '*-event-kbd' -print 2>/dev/null | sort -u
     )
     mapfile -t pointers < <(
-        find /dev/input/by-path -maxdepth 1 -type l \( -name '*-event-mouse' -o -name '*-event-touchpad' \) -print 2>/dev/null | sort -u
+        discover_stable_pointers
     )
     (( ${#keyboards[@]} == 1 )) || {
         echo "Expected exactly one stable keyboard path; found ${#keyboards[@]}." >&2
