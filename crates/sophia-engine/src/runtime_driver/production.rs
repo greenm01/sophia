@@ -1,6 +1,6 @@
 use crate::{AuthorityTransactionIntake, HeadlessEngine, PreparedSurfaceCommit};
 use sophia_protocol::{
-    CommittedSurfaceState, SurfaceTransaction, TransactionCommit, TransactionOutcome,
+    CommittedSurfaceState, SurfaceTransaction, TransactionCommit, TransactionId, TransactionOutcome,
 };
 
 /// Rebase a complete presentation snapshot onto the Engine visual generation.
@@ -160,6 +160,17 @@ impl ProductionSessionCoordinator {
             .iter()
             .map(|batch| batch.commit(&self.engine, &mut self.committed_surfaces))
             .collect()
+    }
+
+    pub fn prepare_full_state_present(
+        &self,
+        transaction: TransactionId,
+        transactions: &[SurfaceTransaction],
+    ) -> PreparedSurfaceCommit {
+        let rebased =
+            rebase_full_state_present_transactions(transactions, &self.committed_surfaces);
+        self.engine
+            .prepare_surface_transactions(transaction, &rebased, &self.committed_surfaces)
     }
 
     pub fn apply_prepared_surface_commit(

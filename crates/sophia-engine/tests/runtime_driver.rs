@@ -1017,18 +1017,16 @@ fn production_coordinator_applies_prepared_present_to_its_owned_snapshot() {
     let mut next_layer = old_layer;
     next_layer.geometry.width = 640;
     next_layer.source = BufferSource::DmaBuf { handle: 77 };
-    let transaction = next_layer.to_surface_transaction(
+    let mut transaction = next_layer.to_surface_transaction(
         TransactionId::from_raw(205),
         AuthorityKind::SophiaX,
         SurfaceTransactionReadiness::Ready,
         250,
         1,
     );
-    let prepared = coordinator.engine().prepare_surface_transactions(
-        TransactionId::from_raw(205),
-        &[transaction],
-        coordinator.committed_surfaces(),
-    );
+    transaction.previous_committed_generation = 99;
+    let prepared =
+        coordinator.prepare_full_state_present(TransactionId::from_raw(205), &[transaction]);
 
     let mut feedback_calls = 0;
     let completion = coordinator

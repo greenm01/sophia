@@ -345,15 +345,9 @@ impl LiveProductionVisualRuntime {
             .front()
             .ok_or("ready Present gate has no queued presentation")?;
 
-        let transactions = sophia_engine::rebase_full_state_present_transactions(
-            &queued.transactions,
-            self.production.committed_surfaces(),
-        );
-        let prepared = self.production.engine().prepare_surface_transactions(
-            transaction,
-            &transactions,
-            self.production.committed_surfaces(),
-        );
+        let prepared = self
+            .production
+            .prepare_full_state_present(transaction, &queued.transactions);
         if !prepared.is_ready() {
             self.present_scheduler.pop_front();
             self.reject_gpu_presentation(transaction, 0, 0);

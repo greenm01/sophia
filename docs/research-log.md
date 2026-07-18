@@ -1793,3 +1793,19 @@ redraw, normal exit, `first_error=none`, native presentation, and clean teardown
 Milestone 6 exit gap is exact rather than structural: GPU Present prepare\/retire sequencing still
 lives in backend visual control and must enter `sophia-engine::runtime_driver` before that module
 is the only production visual coordinator.
+
+
+## 2026-07-18: Full-State Present Preparation Enters Runtime Driver
+
+`ProductionSessionCoordinator::prepare_full_state_present` now owns authority-generation rebasing
+and Engine preparation against its committed snapshot. Backend visual control no longer reaches
+through `coordinator.engine()` or independently selects the preparation baseline. The same
+coordinator already owns matching-retirement application and suppresses feedback when that
+baseline is stale, so both sides of the asynchronous prepared-commit gate now remain in
+`runtime_driver`. The external regression deliberately supplies generation 99 and proves the
+coordinator rebases and commits it against the visible generation.
+
+The full offline all-feature suite passes. The rebuilt guarded X13 mixed path crossed the new
+coordinator entry point, exported one CPU plus one DMA-BUF layer, and retired all sources, fences,
+and transactions. The remaining Milestone 6 coordinator gap is asynchronous KMS service adapter
+shape, not Engine Present preparation or retirement ownership.
