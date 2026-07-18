@@ -444,9 +444,7 @@ explicit and evidence-driven:
   groups; the current classic and explicitly launched confined profiles remain
   the supported admission shapes.
 
-Before expanding those surfaces, the production session path must consolidate
-its transitional CLI orchestration behind the protocol-neutral coordinator
-defined in `architecture.md`. The frontend contract does not change: it emits
+Before expanding those surfaces, the remaining asynchronous service triggers in the CLI event loop must move behind the protocol-neutral coordinator defined in `architecture.md`; the concrete visual-control implementation already lives in backend-live. The frontend contract does not change: it emits
 bounded observed batches and consumes routed input, control, topology, and
 presentation feedback without owning scene, renderer, or KMS state.
 

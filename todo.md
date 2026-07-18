@@ -92,7 +92,7 @@ output adapter. `LiveProductionNativeScanout` now owns the real atomic sessions,
 exporters, callback routing, page-flip correlation, and scanout counters in backend-live;
 the CLI no longer defines native DRM/KMS lifecycle state. `LiveProductionCpuScene` now
 owns renderer buffers, committed-state layer resolution, focus stacking, cursor composition,
-readiness pixel inspection, and per-output frame creation in renderer-live. Reduced Present outcomes now leave the visual runtime through an injected protocol-neutral sink; `XPresentSessionObserver` alone owns X wire routing and completion, idle, fence, and disconnect proof counters. X authority batches are now translated once into backend-owned protocol-neutral transaction, registration, release, and Present records before visual control; `PersistentBackendRuntime` no longer accepts the X observed-batch type. Backend-live now also owns the CPU production adapter that applies renderer updates, composes from the coordinator snapshot, creates per-output frames, and returns reduced composition evidence; the CLI supplies only the output-runtime callback. Backend-live now also owns the Present queue, acquire-delay and fence gates, timeout and controlled rejection policy, submitted frame state, diagnostic trigger, and scheduling counters. Backend-live now owns the concrete per-output runtime set, including construction, projection, native initialization, lookup, and diagnostics. The production X cursor repaint now composes from the coordinator snapshot and submits through the backend-owned output set; it no longer replaces committed state through the legacy snapshot API. Backend-live also owns the prepared-authority and CPU-submission records used internally by that control path. The remaining migration is extraction of the neutral visual-control wrapper; snapshot replacement is isolated to the Wayland maintenance adapter.
+readiness pixel inspection, and per-output frame creation in renderer-live. Reduced Present outcomes now leave the visual runtime through an injected protocol-neutral sink; `XPresentSessionObserver` alone owns X wire routing and completion, idle, fence, and disconnect proof counters. X authority batches are now translated once into backend-owned protocol-neutral transaction, registration, release, and Present records before visual control; `PersistentBackendRuntime` no longer accepts the X observed-batch type. Backend-live now also owns the CPU production adapter that applies renderer updates, composes from the coordinator snapshot, creates per-output frames, and returns reduced composition evidence; the CLI supplies only the output-runtime callback. Backend-live now also owns the Present queue, acquire-delay and fence gates, timeout and controlled rejection policy, submitted frame state, diagnostic trigger, and scheduling counters. Backend-live now owns the concrete per-output runtime set, including construction, projection, native initialization, lookup, and diagnostics. The production X cursor repaint now composes from the coordinator snapshot and submits through the backend-owned output set; it no longer replaces committed state through the legacy snapshot API. Backend-live also owns the prepared-authority and CPU-submission records used internally by that control path. `LiveProductionVisualRuntime` now owns the neutral visual-control implementation in backend-live; `PersistentBackendRuntime` and its CLI implementation are gone. Snapshot replacement is isolated to the Wayland maintenance adapter. The remaining production-loop work is to move asynchronous service timing out of the CLI event loop so `runtime_driver` alone requests GPU scheduling and retirement.
 
 - [ ] Establish `sophia-engine::runtime_driver` as the only production visual
   coordinator. Its ordered phases are bounded authority intake, Engine
@@ -105,15 +105,15 @@ readiness pixel inspection, and per-output frame creation in renderer-live. Redu
 - [x] Remove the duplicate CLI scene projection. Composition must consume one
   immutable Engine committed snapshot; `PersistentCpuScene` must not remain a
   second `SurfaceId` table.
-- [ ] Move `PersistentBackendRuntime` and `PersistentNativeScanout` sequencing
+- [x] Move `PersistentBackendRuntime` and `PersistentNativeScanout` sequencing
   behind the production coordinator and live backend adapters. The CLI may
   construct dependencies, supervise clients, observe proofs, and request
   shutdown, but it must not commit, compose, submit, or retire frames.
-- [ ] Preserve fail-closed behavior for stale generations, acquire timeout,
+- [x] Preserve fail-closed behavior for stale generations, acquire timeout,
   rejected or missing page flips, authority backpressure/disconnect, surface
   removal, and shutdown. Every path keeps the last committed frame, emits no
   premature Complete/Idle, and drains native resources exactly once.
-- [ ] Migrate the retained xterm CPU, mixed Vulkan, GTK classic/confined QEMU,
+- [x] Migrate the retained xterm CPU, mixed Vulkan, GTK classic/confined QEMU,
   and guarded X13 gates without weakening their evidence schemas or latency and
   cleanup bounds; then delete the legacy CLI loop state.
 

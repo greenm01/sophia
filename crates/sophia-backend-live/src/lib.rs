@@ -25,6 +25,8 @@ mod production_output_runtime;
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
 mod production_present_scheduler;
 mod production_session;
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+mod production_visual_runtime;
 mod runtime;
 mod scanout;
 mod session_loop;
@@ -40,4 +42,6 @@ pub use production_output_runtime::*;
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
 pub use production_present_scheduler::*;
 pub use production_session::*;
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+pub use production_visual_runtime::*;
 pub use sophia_renderer_live::LivePresentationDisconnectReport;

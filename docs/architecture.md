@@ -132,8 +132,7 @@ recovery, and exact resource retirement pass on target hardware. Milestone 5
 GTK input and protocol semantics pass in isolated QEMU; fresh paired classic and
 confined X13 evidence remains the application-promotion gate.
 
-The remaining architecture debt is orchestration. Renderer-live owns the CPU scene, and backend-live owns native scanout plus the concrete per-output runtime set. The live executable still contains the `PersistentBackendRuntime` visual-control wrapper beside the protocol-neutral Engine state. Production X no longer calls a committed-snapshot replacement entry point; that compatibility operation is isolated to the Wayland maintenance adapter. That CLI assembly is transitional. It must not remain a second scene projection, frame
-scheduler, renderer coordinator, or scanout lifecycle owner.
+Renderer-live owns the CPU scene. Backend-live now owns native scanout, the concrete per-output runtime set, and `LiveProductionVisualRuntime`, which contains Engine commit/preparation, composition, Present scheduling, KMS submission/retirement, cleanup, and reduced feedback sequencing. `PersistentBackendRuntime` and its CLI implementation are gone. Production X no longer calls a committed-snapshot replacement entry point; that compatibility operation is isolated to the Wayland maintenance adapter. The remaining orchestration debt is narrower: the CLI event loop still decides when to request asynchronous GPU service and retirement. Those service triggers must move behind `runtime_driver` before it is the only production visual coordinator.
 
 The production target is one protocol-neutral session coordinator in
 `sophia-engine::runtime_driver`. It owns the ordered visual state machine while
