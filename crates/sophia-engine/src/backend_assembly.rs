@@ -5,7 +5,8 @@ use crate::{
     HeadlessEngine, HeadlessOutput, HeadlessSessionDriver, HeadlessSessionDriverReport,
     ImportCapableRenderer, LibinputEventSource, LibinputPhysicalInputAdapter, LibinputPollReport,
     LiveRuntimeDriverAdapter, LiveRuntimeDriverIntake, NonBlockingInputPoller, PerOutputFrameClock,
-    QueuedInputPoller, RenderFrameReport, RuntimeDriverAdapter, WmTransactionUpdate,
+    ProductionSessionCoordinator, QueuedInputPoller, RenderFrameReport, RuntimeDriverAdapter,
+    WmTransactionUpdate,
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -161,14 +162,13 @@ pub type QueuedHeadlessCompositorBackendAssembly =
     HeadlessCompositorBackendAssembly<QueuedInputPoller>;
 
 pub struct HeadlessCompositorBackendAssembly<P = QueuedInputPoller> {
-    engine: HeadlessEngine,
+    production: ProductionSessionCoordinator,
     driver: HeadlessSessionDriver,
     clock: PerOutputFrameClock,
     outputs: DrmKmsOutputRegistry,
     input: LibinputPhysicalInputAdapter<P>,
     authority_inbox: Option<AuthorityTransactionInbox>,
     renderer: RendererSelection,
-    committed_surfaces: Vec<CommittedSurfaceState>,
 }
 
 impl HeadlessCompositorBackendAssembly<QueuedInputPoller> {
@@ -202,16 +202,16 @@ where
     ) -> Self {
         let engine = HeadlessEngine::new(output);
         let driver = HeadlessSessionDriver::new(engine.clone());
+        let production = ProductionSessionCoordinator::new(engine);
 
         Self {
-            engine,
+            production,
             driver,
             clock: PerOutputFrameClock::from_outputs(&outputs, clock),
             outputs,
             input,
             authority_inbox: None,
             renderer,
-            committed_surfaces: Vec::new(),
         }
     }
 
@@ -224,12 +224,13 @@ where
         mut self,
         committed_surfaces: Vec<CommittedSurfaceState>,
     ) -> Self {
-        self.committed_surfaces = committed_surfaces;
+        self.production
+            .replace_committed_surfaces(committed_surfaces);
         self
     }
 
     pub fn engine(&self) -> &HeadlessEngine {
-        &self.engine
+        self.production.engine()
     }
 
     pub fn driver(&self) -> &HeadlessSessionDriver {
@@ -253,14 +254,15 @@ where
     }
 
     pub fn committed_surfaces(&self) -> &[CommittedSurfaceState] {
-        &self.committed_surfaces
+        self.production.committed_surfaces()
     }
 
     /// Replaces the committed snapshot when an external authority has already
     /// accepted the transaction. This lets a presentation backend consume the
     /// single authoritative state without replaying the authority transaction.
     pub fn replace_committed_surfaces(&mut self, committed_surfaces: Vec<CommittedSurfaceState>) {
-        self.committed_surfaces = committed_surfaces;
+        self.production
+            .replace_committed_surfaces(committed_surfaces);
     }
 
     pub fn run_tick(
@@ -278,7 +280,7 @@ where
         &mut self,
         input: CompositorBackendTickInput,
         build_adapter: impl FnOnce(&HeadlessEngine, LiveRuntimeDriverIntake) -> A,
-        committed_surfaces: impl Fn(&A) -> Vec<CommittedSurfaceState>,
+        extract_committed_surfaces: impl Fn(&A) -> Vec<CommittedSurfaceState>,
     ) -> Result<CompositorBackendTickReport, CompositorBackendAssemblyError>
     where
         A: RuntimeDriverAdapter,
@@ -291,15 +293,16 @@ where
             input_poll.clone(),
             self.input.source().pending_len(),
         );
-        let tick = self.clock.next_frame(self.engine.output().id);
+        let tick = self.clock.next_frame(self.production.engine().output().id);
         let mut authority_batches = input.authority_batches;
         let authority_inbox = self
             .authority_inbox
             .as_ref()
             .map(|inbox| inbox.drain_ready(&mut authority_batches))
             .unwrap_or_default();
+        let (engine, committed_surfaces) = self.production.engine_and_committed_surfaces_mut();
         let mut adapter = build_adapter(
-            &self.engine,
+            engine,
             LiveRuntimeDriverIntake {
                 x_event_count: input.x_event_count,
                 authority_commits: Vec::new(),
@@ -308,24 +311,21 @@ where
                 portal_commands: input.portal_commands,
                 chrome_command_count: input.chrome_command_count,
                 layers: input.layer_templates,
-                committed_surfaces: self.committed_surfaces.clone(),
+                committed_surfaces: committed_surfaces.clone(),
                 scanout_submit_state: input.scanout_submit_state,
                 scanout_lifecycle_states: input.scanout_lifecycle_states,
             },
         );
 
-        self.committed_surfaces = committed_surfaces(&adapter);
+        *committed_surfaces = extract_committed_surfaces(&adapter);
         let runtime = self
             .driver
             .run_with_adapter(tick.output, tick.frame_serial, &mut adapter)?;
-        self.committed_surfaces = committed_surfaces(&adapter);
+        *committed_surfaces = extract_committed_surfaces(&adapter);
         let render = runtime
             .session_tick
             .as_ref()
-            .map(|session_tick| {
-                self.renderer
-                    .render_frame(&self.engine, &session_tick.frame)
-            })
+            .map(|session_tick| self.renderer.render_frame(engine, &session_tick.frame))
             .transpose()?;
 
         debug!(
@@ -336,7 +336,7 @@ where
             input_rejected = input_poll.rejected.len(),
             authority_batches_drained = authority_inbox.drained,
             authority_inbox_disconnected = authority_inbox.disconnected,
-            committed_surfaces = self.committed_surfaces.len(),
+            committed_surfaces = committed_surfaces.len(),
             rendered = render.is_some(),
             "ran deterministic compositor backend tick"
         );

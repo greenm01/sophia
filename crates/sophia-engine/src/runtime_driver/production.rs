@@ -82,6 +82,16 @@ impl ProductionSessionCoordinator {
         &self.committed_surfaces
     }
 
+    pub fn replace_committed_surfaces(&mut self, committed_surfaces: Vec<CommittedSurfaceState>) {
+        self.committed_surfaces = committed_surfaces;
+    }
+
+    pub(crate) fn engine_and_committed_surfaces_mut(
+        &mut self,
+    ) -> (&HeadlessEngine, &mut Vec<CommittedSurfaceState>) {
+        (&self.engine, &mut self.committed_surfaces)
+    }
+
     pub fn run_cycle<A>(
         &mut self,
         authority_batches: &[AuthorityTransactionIntake],
