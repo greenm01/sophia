@@ -3,7 +3,9 @@ use super::prelude::*;
 use sophia_backend_live::{
     LiveProductionAuthorityBatch, LiveProductionComposedFrame, LiveProductionCpuCycleAdapter,
     LiveProductionCpuCycleSubmission, LiveProductionCpuScene, LiveProductionDmaBufRegistration,
-    LiveProductionFenceRegistration, LiveProductionNativeScanout, LiveProductionPresentSubmission,
+    LiveProductionFenceRegistration, LiveProductionNativeScanout, LiveProductionPresentGate,
+    LiveProductionPresentScheduler, LiveProductionPresentSubmission,
+    LiveProductionSubmittedPresent,
 };
 use sophia_cli::emergency_input::{EmergencyChordAction, EmergencyChordState};
 use sophia_cli::input_proof::{PhysicalTextProof, PhysicalTextProofEvent};
@@ -2506,7 +2508,7 @@ fn run_session_loop(
             runtime.retire_native_scanout(native_scanout)?;
         }
         if let (Some(runtime), Some(native_scanout)) = (runtime.as_mut(), native_scanout.as_mut())
-            && !runtime.queued_gpu_presentations.is_empty()
+            && runtime.present_scheduler.has_queued()
             && !runtime.native_scanout_in_flight()
         {
             let _ = runtime.drive_gpu_presentation(Some(native_scanout))?;
@@ -2979,8 +2981,7 @@ fn run_session_loop(
                     if runtime.native_scanout_in_flight() || runtime.native_cleanup_pending() {
                         runtime.retire_native_scanout(native_scanout)?;
                     }
-                    if !runtime.queued_gpu_presentations.is_empty()
-                        && !runtime.native_scanout_in_flight()
+                    if runtime.present_scheduler.has_queued() && !runtime.native_scanout_in_flight()
                     {
                         let _ = runtime.drive_gpu_presentation(Some(native_scanout))?;
                     }
@@ -3476,10 +3477,10 @@ fn run_session_loop(
         }),
         runtime
             .as_ref()
-            .map_or(0, |runtime| runtime.present_acquire_waits),
-        runtime
-            .as_ref()
-            .map_or(0, |runtime| runtime.present_controlled_rejections),
+            .map_or(0, |runtime| runtime.present_scheduler.acquire_waits()),
+        runtime.as_ref().map_or(0, |runtime| runtime
+            .present_scheduler
+            .controlled_rejections()),
     );
     if let Some(runtime) = runtime.as_ref()
         && (present_observation.disconnect_failures != 0
@@ -3717,29 +3718,8 @@ struct PersistentBackendRuntime {
     layers: BTreeMap<SurfaceId, SurfaceTransaction>,
     committed_snapshot_layers: Option<Vec<LayerSnapshot>>,
     presentation_feedback: sophia_backend_live::LiveProductionPresentFeedbackCoordinator,
-    queued_gpu_presentations: VecDeque<QueuedGpuPresentation>,
-    submitted_gpu_presentation: Option<SubmittedGpuPresentation>,
+    present_scheduler: LiveProductionPresentScheduler,
     present_feedback_sink: Box<dyn FnMut(sophia_backend_live::LivePresentFeedbackOutcome)>,
-    first_acquire_delay: Option<Duration>,
-    first_acquire_delay_applied: bool,
-    reject_first_present: bool,
-    present_acquire_waits: usize,
-    present_controlled_rejections: usize,
-    diagnose_first_mixed_export: bool,
-}
-
-struct QueuedGpuPresentation {
-    submission: sophia_backend_live::LivePresentationSubmission,
-    transactions: Vec<SurfaceTransaction>,
-    cpu_background: Option<sophia_backend_live::LiveCpuComposedFrame>,
-    target: Rect,
-    deadline: Instant,
-    not_before: Instant,
-}
-
-struct SubmittedGpuPresentation {
-    transaction: TransactionId,
-    prepared: sophia_engine::PreparedSurfaceCommit,
 }
 
 struct PreparedAuthorityBatch {
@@ -3848,15 +3828,8 @@ impl PersistentBackendRuntime {
             layers: BTreeMap::new(),
             committed_snapshot_layers: None,
             presentation_feedback: Default::default(),
-            queued_gpu_presentations: VecDeque::new(),
-            submitted_gpu_presentation: None,
+            present_scheduler: LiveProductionPresentScheduler::default(),
             present_feedback_sink: Box::new(|_| {}),
-            first_acquire_delay: None,
-            first_acquire_delay_applied: false,
-            reject_first_present: false,
-            present_acquire_waits: 0,
-            present_controlled_rejections: 0,
-            diagnose_first_mixed_export: false,
         })
     }
 
@@ -3891,9 +3864,11 @@ impl PersistentBackendRuntime {
         reject_first_present: bool,
         diagnose_first_mixed_export: bool,
     ) -> Self {
-        self.first_acquire_delay = first_acquire_delay;
-        self.reject_first_present = reject_first_present;
-        self.diagnose_first_mixed_export = diagnose_first_mixed_export;
+        self.present_scheduler = self.present_scheduler.with_controls(
+            first_acquire_delay,
+            reject_first_present,
+            diagnose_first_mixed_export,
+        );
         self
     }
 
@@ -4099,46 +4074,12 @@ impl PersistentBackendRuntime {
                 .as_ref()
                 .and_then(|frames| frames.first())
                 .map(|frame| frame.frame.clone());
-            for submission in &batch.present_submissions {
-                let transaction = batch
-                    .transactions
-                    .iter()
-                    .find(|transaction| transaction.surface == submission.surface)
-                    .ok_or("Present submission has no matching Engine transaction")?;
-                let live_submission = sophia_backend_live::LivePresentationSubmission {
-                    transaction: submission.transaction,
-                    buffer: submission.buffer,
-                    acquire_fence: submission.acquire_fence,
-                    idle_fence: submission.idle_fence,
-                };
-                self.presentation_feedback
-                    .resources_mut()
-                    .begin(live_submission)?;
-                // The hardware proof holds the first Present at the acquire
-                // gate even when Mesa omits the optional wait-fence handle.
-                // When a handle is present, normal fence polling still runs
-                // after this bounded scheduling delay.
-                let acquire_delay =
-                    if !self.first_acquire_delay_applied && self.first_acquire_delay.is_some() {
-                        self.first_acquire_delay_applied = true;
-                        self.first_acquire_delay.unwrap_or(Duration::ZERO)
-                    } else {
-                        Duration::ZERO
-                    };
-                let not_before = Instant::now() + acquire_delay;
-                self.queued_gpu_presentations
-                    .push_back(QueuedGpuPresentation {
-                        submission: live_submission,
-                        transactions: batch.transactions.clone(),
-                        cpu_background: cpu_background.clone(),
-                        target: transaction.target_geometry,
-                        deadline: not_before
-                            + Duration::from_millis(u64::from(
-                                transaction.timeout_msec.clamp(100, 2_000),
-                            )),
-                        not_before,
-                    });
-            }
+            self.present_scheduler.enqueue_batch(
+                batch,
+                cpu_background,
+                self.presentation_feedback.resources_mut(),
+                Instant::now(),
+            )?;
             self.layers
                 .retain(|surface, _| !batch.removed_surfaces.contains(surface));
             for transaction in &batch.transactions {
@@ -4161,45 +4102,33 @@ impl PersistentBackendRuntime {
         &mut self,
         mut native_scanout: Option<&mut LiveProductionNativeScanout>,
     ) -> Result<sophia_backend_live::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
-        if self.submitted_gpu_presentation.is_some() {
-            return self.run_observation_tick();
-        }
-        let Some(queued) = self.queued_gpu_presentations.front() else {
-            return self.run_observation_tick();
-        };
-        let transaction = queued.submission.transaction;
-        if Instant::now() < queued.not_before {
-            self.present_acquire_waits = self.present_acquire_waits.saturating_add(1);
-            return self.run_observation_tick();
-        }
-        if !self
-            .presentation_feedback
-            .resources_mut()
-            .poll_acquire_fence(transaction)?
+        let transaction = match self
+            .present_scheduler
+            .poll_gate(self.presentation_feedback.resources_mut(), Instant::now())?
         {
-            self.present_acquire_waits = self.present_acquire_waits.saturating_add(1);
-            if Instant::now() >= queued.deadline {
-                self.queued_gpu_presentations.pop_front();
-                self.reject_gpu_presentation(transaction, 0, 0);
+            LiveProductionPresentGate::Idle
+            | LiveProductionPresentGate::SubmittedInFlight
+            | LiveProductionPresentGate::WaitingAcquire => {
+                return self.run_observation_tick();
             }
-            return self.run_observation_tick();
-        }
-        if self.reject_first_present {
-            self.reject_first_present = false;
-            self.present_controlled_rejections =
-                self.present_controlled_rejections.saturating_add(1);
-            self.queued_gpu_presentations.pop_front();
-            self.reject_gpu_presentation(transaction, 0, 0);
-            return self.run_observation_tick();
-        }
+            LiveProductionPresentGate::Reject(transaction) => {
+                self.reject_gpu_presentation(transaction, 0, 0);
+                return self.run_observation_tick();
+            }
+            LiveProductionPresentGate::Ready(transaction) => transaction,
+        };
         let Some(native_scanout) = native_scanout.as_deref_mut() else {
-            self.queued_gpu_presentations.pop_front();
+            self.present_scheduler.pop_front();
             self.reject_gpu_presentation(transaction, 0, 0);
             return self.run_observation_tick();
         };
         if self.native_scanout_in_flight() {
             return self.run_observation_tick();
         }
+        let queued = self
+            .present_scheduler
+            .front()
+            .ok_or("ready Present gate has no queued presentation")?;
 
         let transactions = sophia_engine::rebase_full_state_present_transactions(
             &queued.transactions,
@@ -4211,7 +4140,7 @@ impl PersistentBackendRuntime {
             self.production.committed_surfaces(),
         );
         if !prepared.is_ready() {
-            self.queued_gpu_presentations.pop_front();
+            self.present_scheduler.pop_front();
             self.reject_gpu_presentation(transaction, 0, 0);
             return self.run_observation_tick();
         }
@@ -4222,8 +4151,7 @@ impl PersistentBackendRuntime {
             None,
             1.0,
         )?;
-        if self.diagnose_first_mixed_export {
-            self.diagnose_first_mixed_export = false;
+        if self.present_scheduler.take_diagnose_first_mixed_export() {
             let (cpu_layers, dmabuf_layers) =
                 mixed
                     .layers
@@ -4237,7 +4165,7 @@ impl PersistentBackendRuntime {
                         }
                     });
             let (status, detail) = native_scanout.diagnose_mixed_frame(0, mixed);
-            self.queued_gpu_presentations.pop_front();
+            self.present_scheduler.pop_front();
             let _ = self
                 .presentation_feedback
                 .resources_mut()
@@ -4294,15 +4222,16 @@ impl PersistentBackendRuntime {
                 self.presentation_feedback
                     .resources_mut()
                     .mark_submitted(transaction)?;
-                self.queued_gpu_presentations.pop_front();
-                self.submitted_gpu_presentation = Some(SubmittedGpuPresentation {
-                    transaction,
-                    prepared,
-                });
+                self.present_scheduler.pop_front();
+                self.present_scheduler
+                    .mark_submitted(LiveProductionSubmittedPresent {
+                        transaction,
+                        prepared,
+                    });
             }
             Some(Status::AlreadyInFlight | Status::CleanupPending) | None => {}
             Some(_) => {
-                self.queued_gpu_presentations.pop_front();
+                self.present_scheduler.pop_front();
                 self.reject_gpu_presentation(transaction, 0, 0);
             }
         }
@@ -4337,15 +4266,11 @@ impl PersistentBackendRuntime {
     }
 
     fn shutdown_presentations(&mut self) -> sophia_backend_live::LivePresentationDisconnectReport {
-        let queued = self
-            .queued_gpu_presentations
-            .drain(..)
-            .map(|queued| queued.submission.transaction)
-            .collect::<Vec<_>>();
+        let queued = self.present_scheduler.drain_transactions();
         for transaction in queued {
             self.reject_gpu_presentation(transaction, 0, 0);
         }
-        if let Some(submitted) = self.submitted_gpu_presentation.take() {
+        if let Some(submitted) = self.present_scheduler.take_submitted() {
             self.reject_gpu_presentation(submitted.transaction, 0, 0);
         }
 
@@ -4643,7 +4568,7 @@ impl PersistentBackendRuntime {
         ust: u64,
         msc: u64,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let Some(submitted) = self.submitted_gpu_presentation.take() else {
+        let Some(submitted) = self.present_scheduler.take_submitted() else {
             return Ok(());
         };
         let (production, outputs, presentation_feedback) = (

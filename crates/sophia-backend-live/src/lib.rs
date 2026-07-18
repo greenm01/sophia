@@ -20,6 +20,8 @@ mod prelude;
 mod presentation;
 mod production_cpu_cycle;
 mod production_intake;
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+mod production_present_scheduler;
 mod production_session;
 mod runtime;
 mod scanout;
@@ -31,5 +33,7 @@ pub use api::*;
 pub use presentation::*;
 pub use production_cpu_cycle::*;
 pub use production_intake::*;
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+pub use production_present_scheduler::*;
 pub use production_session::*;
 pub use sophia_renderer_live::LivePresentationDisconnectReport;

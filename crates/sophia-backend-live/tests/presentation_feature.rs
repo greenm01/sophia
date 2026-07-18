@@ -2,16 +2,19 @@
 
 use std::fs::File;
 use std::os::fd::OwnedFd;
+use std::time::{Duration, Instant};
 
 use sophia_backend_live::{
     LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888, LiveCpuComposedFrame, LivePresentCompletionMode,
     LivePresentFeedbackError, LivePresentProtocolFeedback, LivePresentationResourceSession,
-    LivePresentationSubmission, LiveProductionPresentFeedbackCoordinator,
-    LiveResourceReleaseStatus,
+    LivePresentationSubmission, LiveProductionAuthorityBatch,
+    LiveProductionPresentFeedbackCoordinator, LiveProductionPresentGate,
+    LiveProductionPresentScheduler, LiveProductionPresentSubmission, LiveResourceReleaseStatus,
 };
 use sophia_protocol::{
-    BufferHandle, BufferSource, DRM_FORMAT_MOD_INVALID, DmaBufDescriptor, DmaBufPlaneDescriptor,
-    Rect, Size, TransactionId,
+    AuthorityKind, BufferHandle, BufferSource, DRM_FORMAT_MOD_INVALID, DmaBufDescriptor,
+    DmaBufPlaneDescriptor, Rect, Region, Size, SurfaceId, SurfaceTransaction,
+    SurfaceTransactionReadiness, TransactionId,
 };
 
 fn fd() -> OwnedFd {
@@ -152,4 +155,89 @@ fn production_feedback_emits_nothing_when_skip_has_no_live_presentation() {
         coordinator.reject_skip(transaction, 0, 0),
         Err(LivePresentFeedbackError::UnknownPresentation { transaction })
     );
+}
+
+fn scheduler_batch(
+    transaction: TransactionId,
+    surface: SurfaceId,
+    handle: BufferHandle,
+) -> LiveProductionAuthorityBatch {
+    LiveProductionAuthorityBatch {
+        transaction,
+        transactions: vec![SurfaceTransaction {
+            transaction,
+            authority: AuthorityKind::SophiaX,
+            surface,
+            namespace: None,
+            target_geometry: Rect {
+                x: 0,
+                y: 0,
+                width: 64,
+                height: 48,
+            },
+            target_buffer: BufferSource::DmaBuf {
+                handle: handle.raw(),
+            },
+            damage: Region::single(Rect {
+                x: 0,
+                y: 0,
+                width: 64,
+                height: 48,
+            }),
+            readiness: SurfaceTransactionReadiness::Ready,
+            timeout_msec: 250,
+            previous_committed_generation: 0,
+        }],
+        removed_surfaces: Vec::new(),
+        dma_buf_registrations: Vec::new(),
+        fence_registrations: Vec::new(),
+        present_submissions: vec![LiveProductionPresentSubmission {
+            transaction,
+            surface,
+            buffer: handle,
+            acquire_fence: None,
+            idle_fence: None,
+        }],
+        released_dma_bufs: Vec::new(),
+        released_fences: Vec::new(),
+    }
+}
+
+#[test]
+fn production_present_scheduler_owns_delay_and_controlled_rejection_gates() {
+    let handle = BufferHandle::from_raw(37);
+    let transaction = TransactionId::from_raw(38);
+    let surface = SurfaceId::new(39, 1);
+    let mut resources = LivePresentationResourceSession::default();
+    resources
+        .register_source(descriptor(handle), vec![fd()])
+        .unwrap();
+    let mut scheduler = LiveProductionPresentScheduler::default().with_controls(
+        Some(Duration::from_millis(50)),
+        true,
+        false,
+    );
+    let now = Instant::now();
+    scheduler
+        .enqueue_batch(
+            &scheduler_batch(transaction, surface, handle),
+            None,
+            &mut resources,
+            now,
+        )
+        .unwrap();
+
+    assert_eq!(
+        scheduler.poll_gate(&mut resources, now).unwrap(),
+        LiveProductionPresentGate::WaitingAcquire
+    );
+    assert_eq!(scheduler.acquire_waits(), 1);
+    assert_eq!(
+        scheduler
+            .poll_gate(&mut resources, now + Duration::from_millis(50))
+            .unwrap(),
+        LiveProductionPresentGate::Reject(transaction)
+    );
+    assert_eq!(scheduler.controlled_rejections(), 1);
+    assert!(!scheduler.has_queued());
 }

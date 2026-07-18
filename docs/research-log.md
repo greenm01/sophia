@@ -1682,3 +1682,18 @@ directly to register DMA-BUF sources and fences and to process source/fence rele
 visual wrapper no longer clones file descriptors or sequences presentation-resource lifetime
 admission. The full offline all-feature suite passes; behavior is covered by the immediately
 preceding guarded native mixed and strict QEMU evidence.
+
+
+## 2026-07-18: Backend Owns Present Scheduling State
+
+Backend-live now owns `LiveProductionPresentScheduler`: queued and submitted Present state,
+first-frame acquire delay, fence polling, bounded timeout rejection, controlled-rejection
+proof policy, diagnostic triggering, and acquire/rejection counters. The CLI visual wrapper
+asks for a reduced gate decision and supplies native scanout availability; it no longer owns
+the scheduling tables or timing state. A backend regression proves delayed acquire admission
+and one-shot controlled rejection with a registered DMA-BUF presentation.
+
+The full offline all-feature suite passes. The rebuilt X13 guarded native mixed diagnostic
+crossed the new scheduler, exported one CPU plus one DMA-BUF layer, and ended with zero live
+sources, fences, or transactions. The remaining central Milestone 6 extraction is the
+concrete per-output runtime owner and the legacy committed-snapshot APIs shared with Wayland.
