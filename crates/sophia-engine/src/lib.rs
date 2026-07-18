@@ -49,6 +49,7 @@ mod session;
 mod visual_state;
 mod wm;
 
+mod wm_policy;
 pub use backend_assembly::*;
 pub use chrome::*;
 pub use drm::*;
@@ -65,3 +66,4 @@ pub use visual_state::*;
 pub use wm::*;
 
 pub use sophia_runtime::{RuntimeScanoutState, SessionRuntimeObservation};
+pub use wm_policy::*;

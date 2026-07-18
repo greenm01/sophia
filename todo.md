@@ -29,6 +29,13 @@ compatibility provider; no XLibre integration work is active.
 
 ## Milestone 7: Interactive WM API And Legacy Bridge
 
+Current implementation: API-v2 negotiation, fail-closed binding validation,
+per-seat physical shortcut consumption, nine-slot Engine workspace policy, live
+`ActionActivated` dispatch, and bounded xmonad-profile workspace/session-token
+translation are implemented and covered by the offline all-feature suite. Named
+action execution, atomic persistence through delayed resize commits, synthetic
+xmonad focus/layout events, and the unattended QEMU acceptance gate remain open.
+
 - [ ] Negotiate WM API version 2 over the existing bounded IPC frame without
   changing unrelated broker protocols. A WM must register capabilities and
   bindings before Engine sends layout or action requests; mismatch, duplicate

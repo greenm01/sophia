@@ -117,6 +117,113 @@ impl WmShortcutRegistry {
     }
 }
 
+pub const WM_MAX_SHORTCUT_SEATS: usize = 16;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WmShortcutRouter {
+    registry: WmShortcutRegistry,
+    seats: BTreeMap<SeatId, WmSeatShortcutState>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct WmSeatShortcutState {
+    shortcuts: WmShortcutRegistry,
+    modifiers: WmPhysicalModifierState,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct WmPhysicalModifierState {
+    left_shift: bool,
+    right_shift: bool,
+    left_control: bool,
+    right_control: bool,
+    left_alt: bool,
+    right_alt: bool,
+    left_super: bool,
+    right_super: bool,
+}
+
+impl WmShortcutRouter {
+    pub fn new(registry: WmShortcutRegistry) -> Self {
+        Self {
+            registry,
+            seats: BTreeMap::new(),
+        }
+    }
+
+    pub fn replace_registry(&mut self, registry: WmShortcutRegistry) {
+        self.registry = registry;
+        self.seats.clear();
+    }
+
+    pub fn route_key(&mut self, seat: SeatId, keycode: u32, pressed: bool) -> WmShortcutDecision {
+        if !seat.is_valid() {
+            return WmShortcutDecision {
+                action: None,
+                consumed: false,
+            };
+        }
+        if !self.seats.contains_key(&seat) {
+            if self.seats.len() >= WM_MAX_SHORTCUT_SEATS {
+                return WmShortcutDecision {
+                    action: None,
+                    consumed: false,
+                };
+            }
+            self.seats.insert(
+                seat,
+                WmSeatShortcutState {
+                    shortcuts: self.registry.clone(),
+                    modifiers: WmPhysicalModifierState::default(),
+                },
+            );
+        }
+        let state = self.seats.get_mut(&seat).expect("seat was inserted");
+        let decision = state
+            .shortcuts
+            .handle_key(keycode, state.modifiers.mask(), pressed);
+        state.modifiers.update(keycode, pressed);
+        decision
+    }
+
+    pub fn clear_seat(&mut self, seat: SeatId) -> bool {
+        self.seats.remove(&seat).is_some()
+    }
+}
+
+impl WmPhysicalModifierState {
+    fn mask(self) -> WmModifierMask {
+        let mut bits = 0;
+        if self.left_shift || self.right_shift {
+            bits |= WmModifierMask::SHIFT;
+        }
+        if self.left_control || self.right_control {
+            bits |= WmModifierMask::CONTROL;
+        }
+        if self.left_alt || self.right_alt {
+            bits |= WmModifierMask::ALT;
+        }
+        if self.left_super || self.right_super {
+            bits |= WmModifierMask::SUPER;
+        }
+        WmModifierMask { bits }
+    }
+
+    fn update(&mut self, keycode: u32, pressed: bool) {
+        match keycode {
+            42 => self.left_shift = pressed,
+            54 => self.right_shift = pressed,
+            29 => self.left_control = pressed,
+            97 => self.right_control = pressed,
+            56 => self.left_alt = pressed,
+            100 => self.right_alt = pressed,
+            125 => self.left_super = pressed,
+            126 => self.right_super = pressed,
+            _ => {}
+        }
+    }
+}
+
 impl std::error::Error for WmIpcError {}
 
 #[derive(Clone, Debug, Eq, PartialEq)]

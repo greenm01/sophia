@@ -13,14 +13,15 @@ use std::{
 };
 
 use sophia_protocol::{
-    Rect, SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAX_PAYLOAD_LEN, WmRequestPacket, WmResponsePacket,
-    decode_wm_request_frame, encode_wm_response_frame,
+    Rect, SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAX_PAYLOAD_LEN, WM_API_VERSION, WmRequestPacket,
+    WmResponsePacket, WmSessionDescriptor, decode_wm_request_frame,
+    decode_wm_session_descriptor_frame, encode_wm_hello_frame, encode_wm_response_frame,
 };
 use sophia_x_authority::{XByteOrder, serve_x11_setup_socket_client};
 
 use crate::{
-    BridgeEngineUpdate, LegacyWmRequest, SYNTHETIC_ROOT_XID, SyntheticXEvent, SyntheticXWindowId,
-    X11WmBridgeError, X11WmBridgeState,
+    BridgeEngineUpdate, LegacyWmProfile, LegacyWmRequest, SYNTHETIC_ROOT_XID, SyntheticXEvent,
+    SyntheticXWindowId, X11WmBridgeError, X11WmBridgeState, translate_xmonad_profile_action,
 };
 
 const FIRST_DYNAMIC_ATOM: u32 = 256;
@@ -65,6 +66,7 @@ pub struct LegacyWmLaunchSpec {
     executable: PathBuf,
     arguments: Vec<OsString>,
     private_executable_alias: Option<PathBuf>,
+    profile: LegacyWmProfile,
 }
 
 impl LegacyWmLaunchSpec {
@@ -73,11 +75,17 @@ impl LegacyWmLaunchSpec {
             executable: executable.into(),
             arguments: Vec::new(),
             private_executable_alias: None,
+            profile: LegacyWmProfile::LayoutOnly,
         }
     }
 
     pub fn arg(mut self, argument: impl Into<OsString>) -> Self {
         self.arguments.push(argument.into());
+        self
+    }
+
+    pub fn with_profile(mut self, profile: LegacyWmProfile) -> Self {
+        self.profile = profile;
         self
     }
 
@@ -98,11 +106,14 @@ pub struct LegacyX11WmBridgeRuntime {
     child: Child,
     socket_path: PathBuf,
     config_dir: PathBuf,
+    profile: LegacyWmProfile,
+    session: Option<WmSessionDescriptor>,
 }
 
 impl LegacyX11WmBridgeRuntime {
     pub fn start(spec: LegacyWmLaunchSpec) -> Result<Self, BridgeRuntimeError> {
         let executable = resolve_executable(&spec.executable)?;
+        let profile = spec.profile;
         if let Some(relative_alias) = spec.private_executable_alias.as_deref() {
             validate_private_executable_alias(relative_alias)?;
         }
@@ -183,6 +194,8 @@ impl LegacyX11WmBridgeRuntime {
             legacy: legacy_rx,
             worker: Some(worker),
             child,
+            profile,
+            session: None,
             socket_path,
             config_dir,
         })
@@ -192,6 +205,16 @@ impl LegacyX11WmBridgeRuntime {
         &mut self,
         request: &WmRequestPacket,
     ) -> Result<WmResponsePacket, BridgeRuntimeError> {
+        if self.profile == LegacyWmProfile::Xmonad {
+            let session = self
+                .session
+                .as_ref()
+                .ok_or_else(|| BridgeRuntimeError::new("WM session was not negotiated"))?;
+            if let Some(response) = translate_xmonad_profile_action(request, session)? {
+                return Ok(response);
+            }
+        }
+
         while self.legacy.try_recv().is_ok() {}
         let update = self.bridge.apply_engine_request(request)?;
         let expected = send_engine_update(
@@ -255,6 +278,21 @@ impl LegacyX11WmBridgeRuntime {
         self.bridge
             .translate_legacy_requests(request.transaction, &requests, 300)
             .map_err(Into::into)
+    }
+
+    pub fn profile(&self) -> LegacyWmProfile {
+        self.profile
+    }
+
+    pub fn configure_session(
+        &mut self,
+        descriptor: WmSessionDescriptor,
+    ) -> Result<(), BridgeRuntimeError> {
+        if descriptor.api_version != WM_API_VERSION {
+            return Err(BridgeRuntimeError::new("unsupported Sophia WM API version"));
+        }
+        self.session = Some(descriptor);
+        Ok(())
     }
 
     pub fn bridge(&self) -> &X11WmBridgeState {
@@ -371,6 +409,18 @@ pub fn run_wm_socket_server(
         let mut stream = stream.map_err(|error| {
             BridgeRuntimeError::new(format!("failed to accept WM socket client: {error}"))
         })?;
+        let hello = encode_wm_hello_frame(&runtime.profile().hello()).map_err(|error| {
+            BridgeRuntimeError::new(format!("failed to encode WM hello: {error:?}"))
+        })?;
+        stream
+            .write_all(&hello)
+            .and_then(|()| stream.flush())
+            .map_err(|error| {
+                BridgeRuntimeError::new(format!("failed to write WM hello: {error}"))
+            })?;
+        let descriptor = read_wm_session_descriptor(&mut stream)?;
+        runtime.configure_session(descriptor)?;
+
         while let Some(request) = read_wm_request(&mut stream)? {
             let response = runtime.handle_request(&request)?;
             let frame = encode_wm_response_frame(&response).map_err(|error| {
@@ -1136,4 +1186,34 @@ mod tests {
         assert!(validate_private_executable_alias(Path::new("/tmp/wm")).is_err());
         assert!(validate_private_executable_alias(Path::new("")).is_err());
     }
+}
+
+fn read_wm_session_descriptor(
+    stream: &mut UnixStream,
+) -> Result<WmSessionDescriptor, BridgeRuntimeError> {
+    let mut header = [0; SOPHIA_IPC_HEADER_LEN];
+    stream.read_exact(&mut header).map_err(|error| {
+        BridgeRuntimeError::new(format!(
+            "failed to read WM session descriptor header: {error}"
+        ))
+    })?;
+    let payload_len = u32::from_le_bytes(header[16..20].try_into().expect("fixed header")) as usize;
+    if payload_len > SOPHIA_IPC_MAX_PAYLOAD_LEN {
+        return Err(BridgeRuntimeError::new(format!(
+            "WM session descriptor payload too large: {payload_len}"
+        )));
+    }
+    let mut frame = Vec::with_capacity(SOPHIA_IPC_HEADER_LEN + payload_len);
+    frame.extend_from_slice(&header);
+    frame.resize(SOPHIA_IPC_HEADER_LEN + payload_len, 0);
+    stream
+        .read_exact(&mut frame[SOPHIA_IPC_HEADER_LEN..])
+        .map_err(|error| {
+            BridgeRuntimeError::new(format!(
+                "failed to read WM session descriptor payload: {error}"
+            ))
+        })?;
+    decode_wm_session_descriptor_frame(&frame).map_err(|error| {
+        BridgeRuntimeError::new(format!("failed to decode WM session descriptor: {error:?}"))
+    })
 }

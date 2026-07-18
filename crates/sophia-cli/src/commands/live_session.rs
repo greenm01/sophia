@@ -10,12 +10,12 @@ use sophia_cli::input_proof::{PhysicalTextProof, PhysicalTextProofEvent};
 use sophia_cli::resize_transaction::ResizeRollbackCoordinator;
 use sophia_engine::{
     FocusedInputRoute, InputFocusDecision, InputFocusState, NonBlockingInputPoller,
-    WmShortcutRegistry,
+    WmShortcutRouter, WmWorkspaceState,
 };
 use sophia_protocol::{
     ClientAdmissionContext, DeviceId, NamespaceCapabilities, NamespaceId, NamespaceProfile, Point,
-    SeatId, WM_API_VERSION, WM_DEFAULT_WORKSPACES, WmManageSurface, WmOutputWorkspace,
-    WmSessionAction, WmSessionDescriptor,
+    SeatId, WM_DEFAULT_WORKSPACES, WmActionActivation, WmActionId, WmManageSurface,
+    WmSessionAction,
 };
 use sophia_runtime::NamespaceRegistry;
 use sophia_x_authority::{
@@ -428,11 +428,11 @@ pub(crate) fn run_persistent_xterm_session(
         );
         std::io::stdout().flush()?;
     }
-    let mut wm_session = LiveWmSession::from_config(&config)?;
     let initial_outputs = native_scanout
         .as_ref()
         .map(LiveProductionNativeScanout::outputs)
         .unwrap_or_else(|| vec![sophia_engine::HeadlessOutput::deterministic()]);
+    let mut wm_session = LiveWmSession::from_config(&config, &initial_outputs)?;
     let output_topology = output_topology_from_engine_outputs(&initial_outputs)?;
 
     let server_path = config.socket_path.clone();
@@ -776,9 +776,30 @@ fn output_topology_from_engine_outputs(
     Ok(snapshot)
 }
 
+fn wm_output_bounds(
+    outputs: &[sophia_engine::HeadlessOutput],
+) -> Vec<(sophia_protocol::OutputId, Rect)> {
+    let mut x = 0;
+    outputs
+        .iter()
+        .map(|output| {
+            let scale = i32::try_from(output.scale.max(1)).unwrap_or(i32::MAX);
+            let bounds = Rect {
+                x,
+                y: 0,
+                width: output.size.width.saturating_div(scale).max(1),
+                height: output.size.height.saturating_div(scale).max(1),
+            };
+            x = x.saturating_add(bounds.width);
+            (output.id, bounds)
+        })
+        .collect()
+}
+
 #[derive(Clone, Debug)]
 struct PersistentXtermSessionConfig {
     display: String,
+
     socket_path: std::path::PathBuf,
     terminal: String,
     terminal_exec: Option<String>,
@@ -1267,7 +1288,9 @@ struct LiveWmSession {
     transport: Option<WmSocketTransport>,
     next_transaction: u64,
     requests: usize,
-    shortcuts: Option<WmShortcutRegistry>,
+    shortcuts: Option<WmShortcutRouter>,
+    workspace_state: WmWorkspaceState,
+    session_actions: Vec<WmSessionAction>,
     committed: usize,
     last_committed_at: Option<Instant>,
     restarts: usize,
@@ -1287,6 +1310,7 @@ struct LiveWmProposal {
 impl LiveWmSession {
     fn from_config(
         config: &PersistentXtermSessionConfig,
+        outputs: &[sophia_engine::HeadlessOutput],
     ) -> Result<Option<Self>, Box<dyn std::error::Error>> {
         let Some(process) = config.wm_process.as_deref() else {
             return Ok(None);
@@ -1299,6 +1323,13 @@ impl LiveWmSession {
                 .arg(socket_arg),
             |spec, argument| spec.arg(argument),
         );
+        let workspace_state =
+            WmWorkspaceState::new(wm_output_bounds(outputs), WM_DEFAULT_WORKSPACES)?;
+        let session_actions = vec![
+            WmSessionAction::LaunchTerminal,
+            WmSessionAction::CloseFocused,
+            WmSessionAction::Logout,
+        ];
         let mut session = Self {
             supervisor: ProcessSupervisor::new(SupervisedProcessKind::WindowManager, spec),
             supervisor_state: sophia_runtime::SupervisorState::new(
@@ -1306,6 +1337,8 @@ impl LiveWmSession {
             ),
             restart_policy: RestartPolicy::default(),
             shortcuts: None,
+            workspace_state,
+            session_actions,
             socket_path: config.wm_socket_path.clone(),
             transport: None,
             next_transaction: 1,
@@ -1342,26 +1375,14 @@ impl LiveWmSession {
                 response_timeout: Duration::from_millis(500),
             },
         );
-        let output = sophia_engine::HeadlessOutput::deterministic().id;
-        let workspaces = (1..=WM_DEFAULT_WORKSPACES)
-            .map(|index| WorkspaceId::from_raw(index as u64))
-            .collect();
-        let descriptor = WmSessionDescriptor {
-            api_version: WM_API_VERSION,
-            workspaces,
-            active_workspaces: vec![WmOutputWorkspace {
-                output,
-                workspace: WorkspaceId::from_raw(1),
-            }],
-            session_actions: vec![
-                WmSessionAction::LaunchTerminal,
-                WmSessionAction::LaunchApplicationMenu,
-                WmSessionAction::LaunchFirefox,
-                WmSessionAction::CloseFocused,
-                WmSessionAction::Logout,
-            ],
-        };
-        self.shortcuts = Some(transport.negotiate(&descriptor)?);
+        let descriptor = self
+            .workspace_state
+            .descriptor(self.session_actions.clone());
+        let registry = transport.negotiate(&descriptor)?;
+        match self.shortcuts.as_mut() {
+            Some(shortcuts) => shortcuts.replace_registry(registry),
+            None => self.shortcuts = Some(WmShortcutRouter::new(registry)),
+        }
         self.transport = Some(transport);
         let (state, _) = update_supervisor(
             self.supervisor_state.clone(),
@@ -1413,7 +1434,12 @@ impl LiveWmSession {
             .layers
             .get(&surface)
             .ok_or("new WM surface is missing from live layout")?;
-        let workspace = WorkspaceId::from_raw(1);
+        let workspace = self
+            .workspace_state
+            .output(output.id)
+            .ok_or("WM output is not configured")?
+            .workspace;
+        self.workspace_state.register_surface(surface, workspace)?;
         let request = WmRequestPacket {
             transaction: self.mint_transaction()?,
             kind: WmRequestKind::ManageSurface(WmManageSurface {
@@ -1431,7 +1457,11 @@ impl LiveWmSession {
         layout: &PersistentLiveLayout,
         output: sophia_engine::HeadlessOutput,
     ) -> Result<LiveWmProposal, Box<dyn std::error::Error>> {
-        let workspace = WorkspaceId::from_raw(1);
+        let workspace = self
+            .workspace_state
+            .output(output.id)
+            .ok_or("WM output is not configured")?
+            .workspace;
         let request = WmRequestPacket {
             transaction: self.mint_transaction()?,
             kind: WmRequestKind::RelayoutWorkspace(WmRelayoutWorkspace {
@@ -1443,6 +1473,38 @@ impl LiveWmSession {
                     .values()
                     .map(|layer| live_layout_node(layer, workspace))
                     .collect(),
+            }),
+        };
+        self.request(request, layout, output)
+    }
+
+    fn request_action(
+        &mut self,
+        action: WmActionId,
+        focused_surface: Option<SurfaceId>,
+        layout: &PersistentLiveLayout,
+        output: sophia_engine::HeadlessOutput,
+    ) -> Result<LiveWmProposal, Box<dyn std::error::Error>> {
+        let output_state = self
+            .workspace_state
+            .output(output.id)
+            .ok_or("WM output is not configured")?;
+        let nodes = layout
+            .layers
+            .values()
+            .filter_map(|layer| {
+                let workspace = self.workspace_state.surface_workspace(layer.surface)?;
+                (workspace == output_state.workspace).then(|| live_layout_node(layer, workspace))
+            })
+            .collect();
+        let request = WmRequestPacket {
+            transaction: self.mint_transaction()?,
+            kind: WmRequestKind::ActionActivated(WmActionActivation {
+                action,
+                output: output.id,
+                workspace: output_state.workspace,
+                focused_surface,
+                nodes,
             }),
         };
         self.request(request, layout, output)
@@ -1463,7 +1525,11 @@ impl LiveWmSession {
         if response.commands.len() > 8_192 {
             return Err("WM response exceeds the live command limit".into());
         }
-        let transaction = response.into_layout_transaction();
+        let plan = self
+            .workspace_state
+            .plan_response(&response, &self.session_actions)?;
+        self.workspace_state = plan.candidate;
+        let transaction = plan.layout;
         validate_live_wm_transaction(&transaction, layout, output_bounds(output))?;
         let mut proposed = layout.layers.values().cloned().collect::<Vec<_>>();
         let engine = HeadlessEngine::new(output);
@@ -2238,6 +2304,9 @@ fn run_session_loop(
                     runtime.committed_surfaces(),
                     &runtime.input_layers(),
                     &layout.client_routes,
+                    wm_session
+                        .as_mut()
+                        .and_then(|wm_session| wm_session.shortcuts.as_mut()),
                     input_sender,
                     &mut modifiers,
                     &mut emergency_chord,
@@ -2266,6 +2335,20 @@ fn run_session_loop(
                     input_delivery_wait_started_at.get_or_insert_with(Instant::now);
                 }
                 cursor_dirty |= report.pointer_routed > 0;
+                for action in report.wm_actions.iter().copied() {
+                    let wm = wm_session
+                        .as_mut()
+                        .ok_or("WM shortcut activated without a live WM session")?;
+                    let proposal =
+                        wm.request_action(action, focus.focused_surface(seat), &layout, output)?;
+                    if layout
+                        .stage(proposal, control_sender, control_ack_receiver)?
+                        .is_some()
+                    {
+                        wm.mark_committed();
+                    }
+                }
+
                 if report.return_suppressed && !return_suppressed_reported {
                     println!(
                         "sophia_live_session_input_pipeline schema=1 status=return_suppressed"
@@ -3165,6 +3248,7 @@ fn run_session_loop(
                     input_sender,
                     &mut modifiers,
                     &mut emergency_chord,
+                    None,
                     &mut pointer,
                     false,
                     false,
@@ -4333,6 +4417,7 @@ fn synthetic_text_input_events(
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct PhysicalInputRouteReport {
     events: usize,
+    wm_actions: Vec<WmActionId>,
     keys_observed: usize,
     pointer_buttons_observed: usize,
     pointer_buttons_routed: usize,
@@ -4431,6 +4516,7 @@ fn route_physical_input<P: NonBlockingInputPoller>(
     committed_surfaces: &[CommittedSurfaceState],
     input_layers: &[LayerSnapshot],
     client_routes: &XAuthorityClientSurfaceRoutes,
+    shortcuts: Option<&mut WmShortcutRouter>,
     input_sender: &SyncSender<XAuthorityRoutedInput>,
     modifiers: &mut XCoreKeyboardMapper,
     emergency_chord: &mut EmergencyChordState,
@@ -4451,6 +4537,7 @@ fn route_physical_input<P: NonBlockingInputPoller>(
         input_sender,
         modifiers,
         emergency_chord,
+        shortcuts,
         pointer,
         pointer_routing_enabled,
         pointer_proof_required,
@@ -4470,6 +4557,7 @@ fn route_input_events(
     input_sender: &SyncSender<XAuthorityRoutedInput>,
     modifiers: &mut XCoreKeyboardMapper,
     emergency_chord: &mut EmergencyChordState,
+    mut shortcuts: Option<&mut WmShortcutRouter>,
     pointer: &mut SessionPointerPlacement,
     pointer_routing_enabled: bool,
     pointer_proof_required: bool,
@@ -4479,6 +4567,7 @@ fn route_input_events(
 ) -> Result<PhysicalInputRouteReport, Box<dyn std::error::Error>> {
     let mut report = PhysicalInputRouteReport {
         events: events.len(),
+        wm_actions: Vec::new(),
         keys_observed: 0,
         keys_routed: 0,
         pointer_events: 0,
@@ -4496,6 +4585,13 @@ fn route_input_events(
                 if emergency_chord.observe(keycode, pressed) == EmergencyChordAction::Triggered {
                     report.emergency_exit = true;
                     continue;
+                }
+                if let Some(shortcuts) = shortcuts.as_deref_mut() {
+                    let decision = shortcuts.route_key(event.seat, keycode, pressed);
+                    if decision.consumed {
+                        report.wm_actions.extend(decision.action);
+                        continue;
+                    }
                 }
                 if sophia_cli::input_proof::pointer_proof_suppresses_return(
                     pointer_proof_required,

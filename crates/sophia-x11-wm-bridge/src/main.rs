@@ -5,7 +5,9 @@ use sophia_protocol::{
     SurfaceConstraints, SurfaceId, TransactionId, WmCommand, WmRelayoutWorkspace, WmRequestKind,
     WmRequestPacket, WorkspaceId,
 };
-use sophia_x11_wm_bridge::{LegacyWmLaunchSpec, LegacyX11WmBridgeRuntime, run_wm_socket_server};
+use sophia_x11_wm_bridge::{
+    LegacyWmLaunchSpec, LegacyWmProfile, LegacyX11WmBridgeRuntime, run_wm_socket_server,
+};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
@@ -34,6 +36,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Some(alias) => launch.with_private_executable_alias(alias),
                 None => launch,
             };
+            let profile = match args.iter().find_map(|arg| arg.strip_prefix("--profile=")) {
+                None | Some("layout-only") => LegacyWmProfile::LayoutOnly,
+                Some("xmonad") => LegacyWmProfile::Xmonad,
+                Some(profile) => {
+                    return Err(format!("unsupported legacy WM profile {profile:?}").into());
+                }
+            };
+            let launch = launch.with_profile(profile);
             run_wm_socket_server(socket, launch)?;
         }
         Some("xmonad-smoke" | "smoke") => {
@@ -47,7 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         _ => {
             return Err(
-                "usage: sophia-x11-wm-bridge serve-socket --socket=PATH --wm=PATH [--wm-arg=ARG ...] [--wm-private-alias=RELATIVE]\n       sophia-x11-wm-bridge xmonad-smoke [--xmonad=PATH]"
+                "usage: sophia-x11-wm-bridge serve-socket --socket=PATH --wm=PATH [--profile=layout-only|xmonad] [--wm-arg=ARG ...] [--wm-private-alias=RELATIVE]\n       sophia-x11-wm-bridge xmonad-smoke [--xmonad=PATH]"
                     .into(),
             );
         }

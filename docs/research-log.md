@@ -1926,6 +1926,11 @@ action requests. Engine rejects unsupported capabilities, duplicate bindings,
 invalid action/key values, and Ctrl-Alt-Backspace. Its shortcut registry
 consumes matching press/release pairs and suppresses repeats without leaking raw
 input. The native demo WM performs the startup handshake and exercises focus,
-workspace, and terminal actions. Focused protocol, Engine, demo-WM, and legacy
-bridge tests pass offline. Runtime physical-key routing, persistent workspace
-state, the bundled xmonad profile, and QEMU promotion remain Milestone 7 work.
+workspace, and terminal actions. Engine now owns per-seat physical modifier
+state, consumes registered chords after the emergency chord check, and sends
+opaque action activations through the live WM transport. A nine-slot workspace
+policy validates workspace swaps, surface moves, visible focus, layout commands,
+and advertised session tokens. The profiled legacy bridge registers the bundled
+xmonad chord set and translates bounded workspace and named-action requests.
+The full offline all-feature suite passes. Atomic delayed-commit persistence,
+named-action execution, xmonad focus/layout synthesis, and QEMU remain open.
