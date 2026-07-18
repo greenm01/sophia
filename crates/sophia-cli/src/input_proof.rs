@@ -18,6 +18,10 @@ pub struct PhysicalTextProofMismatch {
     pub observed: PhysicalTextProofEvent,
 }
 
+pub const fn pointer_selection_pending(required: bool, routed_buttons: usize) -> bool {
+    required && routed_buttons == 0
+}
+
 pub fn pointer_proof_suppresses_return(required: bool, keycode: u32, text_complete: bool) -> bool {
     required && text_complete && keycode == 28
 }

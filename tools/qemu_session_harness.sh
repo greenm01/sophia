@@ -217,8 +217,10 @@ if [[ "$SCENARIO" == gtk-* ]]; then
         exit 1
     fi
 
-    "$ROOT_DIR/tools/qemu_qmp_pointer.py" "$QMP_SOCKET" 171 183 1
-    echo "sophia_qemu_gtk_pointer schema=1 status=sent phase=ok_select source=qmp clicks=1" | tee -a "$EVIDENCE_FILE"
+    "$ROOT_DIR/tools/qemu_qmp_pointer.py" "$QMP_SOCKET" 0 0 1
+    echo "sophia_qemu_gtk_pointer schema=1 status=sent phase=focused_select source=qmp clicks=1" | tee -a "$EVIDENCE_FILE"
+    "$ROOT_DIR/tools/qemu_qmp_type.py" "$QMP_SOCKET"
+    echo "sophia_qemu_gtk_input schema=1 status=sent source=qmp action=submit events=2" | tee -a "$EVIDENCE_FILE"
 
     set +e
     wait "$QEMU_PID"

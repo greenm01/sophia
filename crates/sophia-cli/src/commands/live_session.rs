@@ -2060,6 +2060,7 @@ fn run_session_loop(
     let mut input_change_submission_baseline = None;
     let mut input_presented_latency = None;
     let mut pointer_checksum = None;
+    let mut pointer_cursor_checksum = None;
     let mut pointer_phase_started_at = None;
     let mut pointer_pixel_change = false;
     let mut batches = 0usize;
@@ -2108,6 +2109,7 @@ fn run_session_loop(
     let mut input_text_match = false;
     let mut primary_child_exited = false;
     let mut primary_exit_status = None;
+    let mut application_surface_missing_since: Option<Instant> = None;
     let mut client_stdout = Vec::new();
     let mut protocol_error_count = 0usize;
     let mut first_protocol_error = None;
@@ -2133,7 +2135,10 @@ fn run_session_loop(
                     &mut emergency_chord,
                     &mut pointer,
                     !config.expect_physical_pointer || pointer_checksum.is_some(),
-                    config.expect_physical_pointer && pointer_checksum.is_none(),
+                    sophia_cli::input_proof::pointer_selection_pending(
+                        config.expect_physical_pointer,
+                        physical_pointer_buttons_routed,
+                    ),
                     false,
                     &mut next_input_delivery,
                     physical_text_proof.as_mut(),
@@ -2433,6 +2438,10 @@ fn run_session_loop(
             let compose_started = Instant::now();
             let report = scene.compose(Some(position))?.clone();
             max_compose = max_compose.max(compose_started.elapsed());
+            cpu_compositions = cpu_compositions.saturating_add(1);
+            if pointer_cursor_checksum.is_none() && pointer_checksum.is_none() {
+                pointer_cursor_checksum = Some(report.checksum);
+            }
             if pointer_checksum.is_some_and(|baseline| baseline != report.checksum)
                 && physical_pointer_routed > 0
             {
@@ -2444,6 +2453,23 @@ fn run_session_loop(
                 runtime.run_committed_snapshot(&committed, Some(native_scanout), Some(frames))?;
             backend_ticks = backend_ticks.saturating_add(1);
             cursor_dirty = false;
+        }
+        if let Some(candidate) = pointer_cursor_checksum
+            && native_scanout.as_ref().is_none_or(|native| {
+                native.heads.first().is_some_and(|head| {
+                    head.presented_checksum == candidate && head.nonzero_exports > 0
+                })
+            })
+        {
+            pointer_checksum = Some(candidate);
+            pointer_cursor_checksum = None;
+            println!(
+                "sophia_live_session_pointer schema=1 status=visible source=physical position=center"
+            );
+            println!(
+                "sophia_live_session_pointer schema=1 status=ready source=physical action=select"
+            );
+            std::io::stdout().flush()?;
         }
 
         let input_baseline_presented_before_wait =
@@ -2730,7 +2756,21 @@ fn run_session_loop(
                 );
                 runtime_surfaces = tick.engine.runtime.runtime_state.authority_surfaces_applied;
                 for surface in removed_surfaces {
+                    if config.application_proof_requested()
+                        && physical_pointer_buttons_routed == 0
+                        && Some(surface) == input_surface
+                    {
+                        application_surface_missing_since.get_or_insert_with(Instant::now);
+                    }
                     focus.clear_surface(surface);
+                }
+                if let Some(surface) = input_surface
+                    && runtime
+                        .committed_surfaces()
+                        .iter()
+                        .any(|committed| committed.surface == surface)
+                {
+                    application_surface_missing_since = None;
                 }
                 if focus.focused_surface(seat).is_none()
                     && let Some(surface) = runtime.committed_surfaces().first()
@@ -2993,13 +3033,23 @@ fn run_session_loop(
             && physical_input_completion_reported
             && input_pixel_change
             && pointer_checksum.is_none()
-            && scene.last_report.is_some()
+            && pointer_cursor_checksum.is_none()
         {
-            pointer_checksum = scene.last_report.as_ref().map(|report| report.checksum);
-            println!(
-                "sophia_live_session_pointer schema=1 status=ready source=physical action=select"
+            let runtime = runtime
+                .as_ref()
+                .ok_or("pointer proof became ready before the backend runtime")?;
+            pointer
+                .arm_at_focused_surface_center(focus.focused_surface(seat), &runtime.input_layers())
+                .ok_or("pointer proof has no focused application surface to place the cursor")?;
+            cursor_dirty = true;
+        }
+        if application_surface_missing_since
+            .is_some_and(|started| started.elapsed() >= Duration::from_millis(500))
+        {
+            return Err(
+                "application proof surface disappeared before the required physical pointer selection"
+                    .into(),
             );
-            std::io::stdout().flush()?;
         }
         if input_presented_latency.is_none()
             && input_pixel_change
@@ -5570,6 +5620,7 @@ struct PhysicalInputRouteReport {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct SessionPointerPlacement {
+    raw_position: Option<Point>,
     offset: Option<Point>,
     position: Option<Point>,
 }
@@ -5582,12 +5633,39 @@ fn pointer_offset_for_geometry(raw: Point, geometry: Rect) -> Point {
 }
 
 impl SessionPointerPlacement {
+    fn observe_raw(&mut self, raw: Point) {
+        self.raw_position = Some(raw);
+    }
+
+    fn arm_at_focused_surface_center(
+        &mut self,
+        focused_surface: Option<SurfaceId>,
+        input_layers: &[LayerSnapshot],
+    ) -> Option<Point> {
+        let geometry = focused_surface.and_then(|surface| {
+            input_layers
+                .iter()
+                .find(|layer| layer.surface == surface)
+                .map(|layer| layer.geometry)
+        })?;
+        let raw = self.raw_position.unwrap_or_default();
+        let offset = pointer_offset_for_geometry(raw, geometry);
+        let position = Point {
+            x: raw.x + offset.x,
+            y: raw.y + offset.y,
+        };
+        self.offset = Some(offset);
+        self.position = Some(position);
+        Some(position)
+    }
+
     fn place(
         &mut self,
         raw: Point,
         focused_surface: Option<SurfaceId>,
         input_layers: &[LayerSnapshot],
     ) -> Point {
+        self.observe_raw(raw);
         let offset = *self.offset.get_or_insert_with(|| {
             let Some(geometry) = focused_surface.and_then(|surface| {
                 input_layers
@@ -5757,6 +5835,9 @@ fn route_input_events(
             }
             kind @ (sophia_protocol::InputEventKind::PointerMotion
             | sophia_protocol::InputEventKind::PointerButton { .. }) => {
+                if let Some(raw) = event.global_position {
+                    pointer.observe_raw(raw);
+                }
                 let is_button =
                     matches!(kind, sophia_protocol::InputEventKind::PointerButton { .. });
                 report.pointer_events = report.pointer_events.saturating_add(1);
@@ -5972,6 +6053,7 @@ mod tests {
     #[test]
     fn interactive_pointer_proof_routes_motion_after_placement() {
         let mut pointer = SessionPointerPlacement {
+            raw_position: None,
             offset: Some(Point { x: 10.0, y: 20.0 }),
             position: None,
         };

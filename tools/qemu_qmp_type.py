@@ -64,10 +64,11 @@ def key_event(qcode: str, down: bool):
 
 
 def main():
-    if len(sys.argv) != 3:
-        fail("usage: qemu_qmp_type.py QMP_SOCKET LOWERCASE_TEXT")
-    socket_path, text = sys.argv[1:]
-    if not 1 <= len(text) <= 24 or not text.isascii() or not text.islower() or not text.isalpha():
+    if len(sys.argv) not in (2, 3):
+        fail("usage: qemu_qmp_type.py QMP_SOCKET [LOWERCASE_TEXT]")
+    socket_path = sys.argv[1]
+    text = sys.argv[2] if len(sys.argv) == 3 else ""
+    if text and (not 1 <= len(text) <= 24 or not text.isascii() or not text.islower() or not text.isalpha()):
         fail("text must contain 1-24 lowercase ASCII letters")
 
     with QmpClient(socket_path) as qmp:

@@ -53,7 +53,12 @@ compatibility provider; no XLibre integration work is active.
   on target hardware with exact physical text, a physical OK click,
   `first_error=none`, CPU/SHM redraw after resize, native presentation, normal
   exit, and clean teardown. QEMU closes the semantic and unattended-regression
-  gap but does not replace the guarded VT/DRM hardware evidence.
+  gap but does not replace the guarded VT/DRM hardware evidence. The prior X13
+  attempts exposed a proof-state bug: readiness preceded a presented cursor and
+  Return could close Zenity before any pointer selection. The session now centers
+  and presents the cursor before readiness, suppresses Return until a physical
+  button routes, and fails cleanly if the proof surface disappears; both GTK QEMU
+  profiles pass the click-then-submit sequence. Fresh X13 evidence is still required.
 - [ ] Advance Render, XFixes, selections/INCR, Xdnd, GLX, or toolkit behavior
   only when that captured Zenity session exposes a focused matrix gap; require
   the smallest compatible change and a wire/authority regression.

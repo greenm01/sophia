@@ -1,7 +1,14 @@
 use sophia_cli::input_proof::{
     PhysicalTextProof, PhysicalTextProofEvent, PhysicalTextProofProgress,
-    pointer_proof_suppresses_return,
+    pointer_proof_suppresses_return, pointer_selection_pending,
 };
+
+#[test]
+fn pointer_selection_stays_pending_until_a_button_is_routed() {
+    assert!(pointer_selection_pending(true, 0));
+    assert!(!pointer_selection_pending(true, 1));
+    assert!(!pointer_selection_pending(false, 0));
+}
 
 fn event(keycode: u8, pressed: bool) -> PhysicalTextProofEvent {
     PhysicalTextProofEvent {
