@@ -1752,6 +1752,26 @@ fn x11_core_decoder_captures_mit_shm_requests() {
     .unwrap();
     assert_eq!(query, XWireRequest::ShmQueryVersion);
 
+    for byte_order in [XByteOrder::LittleEndian, XByteOrder::BigEndian] {
+        let create = decode_x11_core_request(
+            context(namespace, 530, byte_order),
+            &mit_shm_create_pixmap_request(byte_order, 0x440010, 0x220701, 0x440001, 256),
+        )
+        .unwrap();
+        assert_eq!(
+            create,
+            XWireRequest::ShmCreatePixmap {
+                pixmap: XResourceId::new(0x440010, 1),
+                drawable: XResourceId::new(0x220701, 1),
+                width: 64,
+                height: 48,
+                depth: 24,
+                segment: XResourceId::new(0x440001, 1),
+                offset: 256,
+            }
+        );
+    }
+
     let attach = decode_x11_core_request(
         context(namespace, 531, XByteOrder::LittleEndian),
         &mit_shm_attach_request(XByteOrder::LittleEndian, 0x440001, 77, true),
@@ -1791,6 +1811,58 @@ fn x11_core_decoder_captures_mit_shm_requests() {
             offset: 128,
         }
     );
+}
+
+#[test]
+fn x11_core_decoder_captures_firefox_compatibility_requests_in_both_orders() {
+    let namespace = NamespaceId::from_raw(45);
+    for byte_order in [XByteOrder::LittleEndian, XByteOrder::BigEndian] {
+        let mut get_image = vec![73, 2];
+        push_u16(&mut get_image, byte_order, 5);
+        push_u32(&mut get_image, byte_order, 0x220009);
+        push_i16(&mut get_image, byte_order, 3);
+        push_i16(&mut get_image, byte_order, 4);
+        push_u16(&mut get_image, byte_order, 1);
+        push_u16(&mut get_image, byte_order, 1);
+        push_u32(&mut get_image, byte_order, u32::MAX);
+        assert_eq!(
+            decode_x11_core_request(context(namespace, 540, byte_order), &get_image).unwrap(),
+            XWireRequest::GetImage {
+                format: 2,
+                drawable: XResourceId::new(0x220009, 1),
+                x: 3,
+                y: 4,
+                width: 1,
+                height: 1,
+                plane_mask: u32::MAX,
+            }
+        );
+
+        let mut reparent = vec![7, 0];
+        push_u16(&mut reparent, byte_order, 4);
+        push_u32(&mut reparent, byte_order, 0x22000c);
+        push_u32(&mut reparent, byte_order, 0x22000d);
+        push_i16(&mut reparent, byte_order, 5);
+        push_i16(&mut reparent, byte_order, 6);
+        assert_eq!(
+            decode_x11_core_request(context(namespace, 541, byte_order), &reparent).unwrap(),
+            XWireRequest::ReparentWindow {
+                window: XResourceId::new(0x22000c, 1),
+                parent: XResourceId::new(0x22000d, 1),
+                x: 5,
+                y: 6,
+            }
+        );
+
+        let mut controls = vec![X_KEYBOARD_MAJOR_OPCODE, 6];
+        push_u16(&mut controls, byte_order, 2);
+        push_u16(&mut controls, byte_order, 3);
+        push_u16(&mut controls, byte_order, 0);
+        assert_eq!(
+            decode_x11_core_request(context(namespace, 542, byte_order), &controls).unwrap(),
+            XWireRequest::XkbGetControls
+        );
+    }
 }
 
 #[test]
@@ -3159,7 +3231,10 @@ fn x11_dispatch_advertises_big_requests_and_replies_to_enable() {
     );
     let encoded = enable.encoded_outputs(XByteOrder::LittleEndian);
     assert_eq!(encoded[0][0], 1);
-    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][8..12]), 4096);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &encoded[0][8..12]),
+        u32::from(X_SETUP_DEFAULT_MAX_REQUEST_UNITS)
+    );
 }
 
 #[test]
@@ -4709,6 +4784,7 @@ fn x11_dispatch_accepts_destroy_window_for_known_namespace_window() {
             released_dma_bufs: Vec::new(),
             released_fences: Vec::new(),
             protocol_errors: Vec::new(),
+            expected_protocol_errors: Vec::new(),
         })
     );
 }
@@ -7571,6 +7647,7 @@ fn x11_core_socket_channel_sees_sophia_present_transaction_batch() {
         released_dma_bufs: Vec::new(),
         released_fences: Vec::new(),
         protocol_errors: Vec::new(),
+        expected_protocol_errors: Vec::new(),
     });
     assert!(routes.is_empty());
 }
@@ -9020,6 +9097,26 @@ fn mit_shm_put_image_request(
     out.push(2);
     out.push(0);
     out.push(0);
+    push_u32(&mut out, byte_order, segment);
+    push_u32(&mut out, byte_order, offset);
+    out
+}
+
+fn mit_shm_create_pixmap_request(
+    byte_order: XByteOrder,
+    pixmap: u32,
+    drawable: u32,
+    segment: u32,
+    offset: u32,
+) -> Vec<u8> {
+    let mut out = vec![X_MIT_SHM_MAJOR_OPCODE, X_MIT_SHM_CREATE_PIXMAP_MINOR_OPCODE];
+    push_u16(&mut out, byte_order, 7);
+    push_u32(&mut out, byte_order, pixmap);
+    push_u32(&mut out, byte_order, drawable);
+    push_u16(&mut out, byte_order, 64);
+    push_u16(&mut out, byte_order, 48);
+    out.push(24);
+    out.extend_from_slice(&[0, 0, 0]);
     push_u32(&mut out, byte_order, segment);
     push_u32(&mut out, byte_order, offset);
     out

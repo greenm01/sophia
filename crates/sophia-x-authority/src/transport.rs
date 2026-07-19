@@ -20,16 +20,28 @@ pub struct XAuthorityProtocolErrorObservation {
     pub major_code: u8,
 }
 
-fn reduce_protocol_errors(outputs: &[XClientOutput]) -> Vec<XAuthorityProtocolErrorObservation> {
+fn is_expected_client_probe_error(error: &crate::XClientError) -> bool {
+    error.code == crate::XErrorCode::BadWindow
+        && error.resource_id == 0
+        && error.minor_code == 0
+        && matches!(error.major_code, 3 | 14)
+}
+
+fn reduce_protocol_errors(
+    outputs: &[XClientOutput],
+    expected: bool,
+) -> Vec<XAuthorityProtocolErrorObservation> {
     outputs
         .iter()
         .filter_map(|output| match output {
-            XClientOutput::Error(error) => Some(XAuthorityProtocolErrorObservation {
-                code: error.code.wire_code(),
-                sequence: error.sequence,
-                minor_code: error.minor_code,
-                major_code: error.major_code,
-            }),
+            XClientOutput::Error(error) if is_expected_client_probe_error(error) == expected => {
+                Some(XAuthorityProtocolErrorObservation {
+                    code: error.code.wire_code(),
+                    sequence: error.sequence,
+                    minor_code: error.minor_code,
+                    major_code: error.major_code,
+                })
+            }
             _ => None,
         })
         .take(16)
@@ -90,6 +102,7 @@ pub struct XAuthorityObservedTransactionBatch {
     /// Reduced protocol errors. Resource IDs and request payloads deliberately
     /// remain inside the X frontend boundary.
     pub protocol_errors: Vec<XAuthorityProtocolErrorObservation>,
+    pub expected_protocol_errors: Vec<XAuthorityProtocolErrorObservation>,
 }
 
 impl XAuthorityObservedTransactionBatch {
@@ -111,6 +124,7 @@ impl XAuthorityObservedTransactionBatch {
             released_dma_bufs: Vec::new(),
             released_fences: Vec::new(),
             protocol_errors: Vec::new(),
+            expected_protocol_errors: Vec::new(),
         })
     }
 
@@ -145,7 +159,8 @@ impl XAuthorityObservedTransactionBatch {
             .into_iter()
             .collect::<Vec<_>>();
         let response = trace.result.response.as_ref();
-        let protocol_errors = reduce_protocol_errors(&trace.result.outputs);
+        let protocol_errors = reduce_protocol_errors(&trace.result.outputs, false);
+        let expected_protocol_errors = reduce_protocol_errors(&trace.result.outputs, true);
         if response.is_none()
             && dma_buf_registrations.is_empty()
             && fence_registrations.is_empty()
@@ -153,6 +168,7 @@ impl XAuthorityObservedTransactionBatch {
             && trace.released_dma_bufs.is_empty()
             && trace.released_fences.is_empty()
             && protocol_errors.is_empty()
+            && expected_protocol_errors.is_empty()
         {
             return None;
         }
@@ -170,6 +186,7 @@ impl XAuthorityObservedTransactionBatch {
             && trace.released_dma_bufs.is_empty()
             && trace.released_fences.is_empty()
             && protocol_errors.is_empty()
+            && expected_protocol_errors.is_empty()
         {
             return None;
         }
@@ -188,6 +205,7 @@ impl XAuthorityObservedTransactionBatch {
             released_dma_bufs: trace.released_dma_bufs.to_vec(),
             released_fences: trace.released_fences.to_vec(),
             protocol_errors,
+            expected_protocol_errors,
         })
     }
 }
@@ -210,12 +228,28 @@ mod tests {
                 })
             })
             .collect::<Vec<_>>();
-        let observed = reduce_protocol_errors(&outputs);
+        let observed = reduce_protocol_errors(&outputs, false);
         assert_eq!(observed.len(), 16);
         assert_eq!(observed[0].code, XErrorCode::BadWindow.wire_code());
         assert_eq!(observed[0].sequence, 0);
         assert_eq!(observed[0].minor_code, 7);
         assert_eq!(observed[0].major_code, 42);
+    }
+
+    #[test]
+    fn only_exact_window_zero_geometry_probes_are_expected() {
+        let output = |major_code, resource_id| {
+            XClientOutput::Error(XClientError {
+                code: XErrorCode::BadWindow,
+                sequence: 7,
+                resource_id,
+                minor_code: 0,
+                major_code,
+            })
+        };
+        let outputs = vec![output(3, 0), output(14, 0), output(3, 1), output(7, 0)];
+        assert_eq!(reduce_protocol_errors(&outputs, true).len(), 2);
+        assert_eq!(reduce_protocol_errors(&outputs, false).len(), 2);
     }
 }
 

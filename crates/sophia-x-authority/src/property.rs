@@ -4,7 +4,8 @@ use sophia_protocol::NamespaceId;
 
 use crate::{XAtom, XAtomTable, XResourceId, is_metadata_candidate_name};
 
-pub const X_PROPERTY_MAX_VALUE_BYTES: usize = 64 * 1024;
+pub const X_PROPERTY_MAX_VALUE_BYTES: usize = 256 * 1024;
+pub const X_PROPERTY_MAX_TABLE_BYTES: usize = 4 * 1024 * 1024;
 pub const X_PROPERTY_ANY_TYPE: XAtom = 0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -73,6 +74,7 @@ pub enum XPropertyError {
     InvalidWindow,
     InvalidFormat(u8),
     ValueTooLarge { len: usize, max: usize },
+    TableTooLarge { len: usize, max: usize },
     TypeMismatch,
     InvalidOffset,
     ReadTooLarge { len: usize, max: usize },
@@ -140,6 +142,7 @@ impl XPropertyTable {
 
         let key = (namespace, change.window, change.property);
         let previous = self.records.get(&key);
+        let previous_len = previous.map_or(0, |record| record.bytes.len());
         let generation = previous
             .map(|record| record.generation.saturating_add(1))
             .unwrap_or(1);
@@ -154,6 +157,24 @@ impl XPropertyTable {
                 joined_bytes(&change.bytes, &record.bytes)?
             }
         };
+        let table_len = self
+            .records
+            .values()
+            .try_fold(0usize, |total, record| {
+                total.checked_add(record.bytes.len())
+            })
+            .and_then(|total| total.checked_sub(previous_len))
+            .and_then(|total| total.checked_add(bytes.len()))
+            .ok_or(XPropertyError::TableTooLarge {
+                len: usize::MAX,
+                max: X_PROPERTY_MAX_TABLE_BYTES,
+            })?;
+        if table_len > X_PROPERTY_MAX_TABLE_BYTES {
+            return Err(XPropertyError::TableTooLarge {
+                len: table_len,
+                max: X_PROPERTY_MAX_TABLE_BYTES,
+            });
+        }
 
         let record = XPropertyRecord {
             namespace,

@@ -15,6 +15,11 @@ cargo test --offline -p sophia-backend-live --features "libdrm-events libinput-e
 bash -n tools/qemu_xmonad_m7_acceptance.sh
 bash -n tools/check_qemu_xmonad_m7_verifier.sh
 tools/check_qemu_xmonad_m7_verifier.sh
+bash -n tools/qemu_xmonad_m8_mix_acceptance.sh
+bash -n tools/qemu_xmonad_m8_soak_acceptance.sh
+bash -n tools/verify_qemu_xmonad_m8_mix_evidence.sh
+bash -n tools/verify_qemu_xmonad_m8_soak_evidence.sh
+tools/check_qemu_xmonad_m8_verifiers.sh
 tools/check_atomic_scanout_verifiers.sh
 bash -n tools/atomic_scanout_preflight.sh
 bash -n tools/atomic_scanout_smoke.sh

@@ -250,6 +250,12 @@ pub enum XClientReply {
         geometry: Rect,
         border_width: u16,
     },
+    GetImage {
+        sequence: u16,
+        depth: u8,
+        visual: u32,
+        data: Vec<u8>,
+    },
     QueryTree {
         sequence: u16,
         root: XResourceId,
@@ -390,6 +396,9 @@ pub enum XClientReply {
     XkbGetState {
         sequence: u16,
         modifiers: u8,
+    },
+    XkbGetControls {
+        sequence: u16,
     },
     XkbGetNames {
         sequence: u16,
@@ -644,6 +653,26 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
                 u16::try_from(geometry.height).unwrap_or(0),
             );
             put_u16(byte_order, &mut out[20..22], border_width);
+            out
+        }
+        XClientReply::GetImage {
+            sequence,
+            depth,
+            visual,
+            data,
+        } => {
+            let padded_len = (data.len() + 3) & !3;
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN + padded_len];
+            write_reply_header(
+                byte_order,
+                &mut out[..X_CLIENT_OUTPUT_RECORD_LEN],
+                sequence,
+                u32::try_from(padded_len / 4).unwrap_or(u32::MAX),
+            );
+            out[1] = depth;
+            put_u32(byte_order, &mut out[8..12], visual);
+            out[X_CLIENT_OUTPUT_RECORD_LEN..X_CLIENT_OUTPUT_RECORD_LEN + data.len()]
+                .copy_from_slice(&data);
             out
         }
         XClientReply::QueryTree {
@@ -1206,6 +1235,15 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             out[9] = modifiers;
             out[18] = modifiers;
             out[20] = modifiers;
+            out
+        }
+        XClientReply::XkbGetControls { sequence } => {
+            let mut out = vec![0; 92];
+            write_reply_header(byte_order, &mut out[..32], sequence, 15);
+            out[1] = 3;
+            out[9] = 1;
+            put_u16(byte_order, &mut out[20..22], 660);
+            put_u16(byte_order, &mut out[22..24], 40);
             out
         }
         XClientReply::XkbGetNames {

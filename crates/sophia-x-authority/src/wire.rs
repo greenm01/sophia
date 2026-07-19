@@ -12,6 +12,7 @@ const X_CREATE_WINDOW: u8 = 1;
 const X_CHANGE_WINDOW_ATTRIBUTES: u8 = 2;
 const X_GET_WINDOW_ATTRIBUTES: u8 = 3;
 const X_DESTROY_WINDOW: u8 = 4;
+const X_REPARENT_WINDOW: u8 = 7;
 const X_MAP_WINDOW: u8 = 8;
 const X_MAP_SUBWINDOWS: u8 = 9;
 const X_UNMAP_WINDOW: u8 = 10;
@@ -62,6 +63,7 @@ const X_FILL_POLY: u8 = 69;
 const X_POLY_FILL_RECTANGLE: u8 = 70;
 const X_POLY_FILL_ARC: u8 = 71;
 const X_PUT_IMAGE: u8 = 72;
+const X_GET_IMAGE: u8 = 73;
 const X_POLY_TEXT8: u8 = 74;
 const X_IMAGE_TEXT8: u8 = 76;
 const X_CREATE_COLORMAP: u8 = 78;
@@ -88,6 +90,7 @@ pub const X_MIT_SHM_QUERY_VERSION_MINOR_OPCODE: u8 = 0;
 pub const X_MIT_SHM_ATTACH_MINOR_OPCODE: u8 = 1;
 pub const X_MIT_SHM_DETACH_MINOR_OPCODE: u8 = 2;
 pub const X_MIT_SHM_PUT_IMAGE_MINOR_OPCODE: u8 = 3;
+pub const X_MIT_SHM_CREATE_PIXMAP_MINOR_OPCODE: u8 = 5;
 pub const X_RANDR_EXTENSION_NAME: &str = "RANDR";
 pub const X_RANDR_MAJOR_OPCODE: u8 = 132;
 pub const X_RANDR_FIRST_EVENT: u8 = 64;
@@ -107,6 +110,7 @@ pub const X_KEYBOARD_FIRST_EVENT: u8 = 80;
 pub const X_KEYBOARD_USE_EXTENSION_MINOR_OPCODE: u8 = 0;
 pub const X_KEYBOARD_SELECT_EVENTS_MINOR_OPCODE: u8 = 1;
 pub const X_KEYBOARD_GET_STATE_MINOR_OPCODE: u8 = 4;
+pub const X_KEYBOARD_GET_CONTROLS_MINOR_OPCODE: u8 = 6;
 pub const X_KEYBOARD_GET_MAP_MINOR_OPCODE: u8 = 8;
 pub const X_KEYBOARD_GET_NAMES_MINOR_OPCODE: u8 = 17;
 pub const X_KEYBOARD_PER_CLIENT_FLAGS_MINOR_OPCODE: u8 = 21;
@@ -160,6 +164,7 @@ const X_CREATE_WINDOW_REQ_LEN: usize = 32;
 const X_CHANGE_WINDOW_ATTRIBUTES_REQ_LEN: usize = 12;
 const X_GET_WINDOW_ATTRIBUTES_REQ_LEN: usize = 8;
 const X_DESTROY_WINDOW_REQ_LEN: usize = 8;
+const X_REPARENT_WINDOW_REQ_LEN: usize = 16;
 const X_MAP_WINDOW_REQ_LEN: usize = 8;
 const X_MAP_SUBWINDOWS_REQ_LEN: usize = 8;
 const X_UNMAP_WINDOW_REQ_LEN: usize = 8;
@@ -191,6 +196,7 @@ const X_UNGRAB_SERVER_REQ_LEN: usize = 4;
 const X_TRANSLATE_COORDINATES_REQ_LEN: usize = 16;
 const X_SET_INPUT_FOCUS_REQ_LEN: usize = 12;
 const X_GET_INPUT_FOCUS_REQ_LEN: usize = 4;
+const X_GET_IMAGE_REQ_LEN: usize = 20;
 const X_OPEN_FONT_REQ_LEN: usize = 12;
 const X_CLOSE_FONT_REQ_LEN: usize = 8;
 const X_QUERY_FONT_REQ_LEN: usize = 8;
@@ -230,6 +236,7 @@ const X_MIT_SHM_QUERY_VERSION_REQ_LEN: usize = 4;
 const X_MIT_SHM_ATTACH_REQ_LEN: usize = 16;
 const X_MIT_SHM_DETACH_REQ_LEN: usize = 8;
 const X_MIT_SHM_PUT_IMAGE_REQ_LEN: usize = 40;
+const X_MIT_SHM_CREATE_PIXMAP_REQ_LEN: usize = 28;
 const X_RANDR_QUERY_VERSION_REQ_LEN: usize = 12;
 const X_RANDR_SELECT_INPUT_REQ_LEN: usize = 12;
 const X_RANDR_GET_SCREEN_SIZE_RANGE_REQ_LEN: usize = 8;
@@ -242,6 +249,7 @@ const X_RANDR_GET_MONITORS_REQ_LEN: usize = 12;
 const X_KEYBOARD_USE_EXTENSION_REQ_LEN: usize = 8;
 const X_KEYBOARD_SELECT_EVENTS_REQ_LEN: usize = 16;
 const X_KEYBOARD_GET_MAP_REQ_LEN: usize = 28;
+const X_KEYBOARD_GET_CONTROLS_REQ_LEN: usize = 8;
 const X_KEYBOARD_PER_CLIENT_FLAGS_REQ_LEN: usize = 28;
 const X_BIG_REQUESTS_ENABLE_REQ_LEN: usize = 4;
 const X_INPUT_QUERY_VERSION_REQ_LEN: usize = 8;
@@ -252,10 +260,10 @@ const X_INPUT_GET_FOCUS_REQ_LEN: usize = 8;
 const X_INPUT_GET_PROPERTY_REQ_LEN: usize = 24;
 const X_GENERIC_EVENT_QUERY_VERSION_REQ_LEN: usize = 8;
 
-pub const X_PUT_IMAGE_MAX_DATA_BYTES: usize = crate::X_PROPERTY_MAX_VALUE_BYTES;
+pub const X_PUT_IMAGE_MAX_DATA_BYTES: usize = 256 * 1024;
 pub const X_QUERY_COLORS_MAX_PIXELS: usize = 256;
-pub const X_POLY_TEXT8_MAX_BYTES: usize = crate::X_PROPERTY_MAX_VALUE_BYTES;
-pub const X_IMAGE_TEXT8_MAX_BYTES: usize = crate::X_PROPERTY_MAX_VALUE_BYTES;
+pub const X_POLY_TEXT8_MAX_BYTES: usize = 64 * 1024;
+pub const X_IMAGE_TEXT8_MAX_BYTES: usize = 64 * 1024;
 pub const X_ALLOC_NAMED_COLOR_MAX_NAME_BYTES: usize = 256;
 
 /// The XID range granted to one X11 client during connection setup.
@@ -317,6 +325,12 @@ pub enum XWireRequest {
     },
     DestroyWindow {
         window: XResourceId,
+    },
+    ReparentWindow {
+        window: XResourceId,
+        parent: XResourceId,
+        x: i16,
+        y: i16,
     },
     MapSubwindows {
         window: XResourceId,
@@ -455,6 +469,15 @@ pub enum XWireRequest {
         left_pad: u8,
         depth: u8,
         data: Vec<u8>,
+    },
+    GetImage {
+        format: u8,
+        drawable: XResourceId,
+        x: i16,
+        y: i16,
+        width: u16,
+        height: u16,
+        plane_mask: u32,
     },
     PolyText8 {
         drawable: XResourceId,
@@ -682,6 +705,15 @@ pub enum XWireRequest {
         segment: XResourceId,
         offset: u32,
     },
+    ShmCreatePixmap {
+        pixmap: XResourceId,
+        drawable: XResourceId,
+        width: u16,
+        height: u16,
+        depth: u8,
+        segment: XResourceId,
+        offset: u32,
+    },
     RandrQueryVersion {
         major_version: u32,
         minor_version: u32,
@@ -730,6 +762,7 @@ pub enum XWireRequest {
         partial: u16,
     },
     XkbGetState,
+    XkbGetControls,
     XkbGetNames {
         which: u32,
     },
@@ -879,6 +912,7 @@ pub fn decode_x11_core_request(
         X_CHANGE_WINDOW_ATTRIBUTES => decode_change_window_attributes(context, bytes),
         X_GET_WINDOW_ATTRIBUTES => decode_get_window_attributes(context, bytes),
         X_DESTROY_WINDOW => decode_destroy_window(context, bytes),
+        X_REPARENT_WINDOW => decode_reparent_window(context, bytes),
         X_MAP_WINDOW => decode_map_window(context, bytes),
         X_MAP_SUBWINDOWS => decode_map_subwindows(context, bytes),
         X_UNMAP_WINDOW => decode_unmap_window(context, bytes),
@@ -940,6 +974,7 @@ pub fn decode_x11_core_request(
         X_POLY_FILL_RECTANGLE => decode_poly_fill_rectangle(context, bytes),
         X_POLY_FILL_ARC => decode_poly_fill_arc(context, bytes),
         X_PUT_IMAGE => decode_put_image(context, bytes),
+        X_GET_IMAGE => decode_get_image(context, bytes),
         X_POLY_TEXT8 => decode_poly_text8(context, bytes),
         X_IMAGE_TEXT8 => decode_image_text8(context, bytes),
         X_CREATE_COLORMAP => decode_create_colormap(context, bytes),
@@ -1439,6 +1474,14 @@ fn decode_x_keyboard(
             require_exact_len(X_KEYBOARD_MAJOR_OPCODE, 8, bytes.len())?;
             Ok(XWireRequest::XkbGetState)
         }
+        X_KEYBOARD_GET_CONTROLS_MINOR_OPCODE => {
+            require_exact_len(
+                X_KEYBOARD_MAJOR_OPCODE,
+                X_KEYBOARD_GET_CONTROLS_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::XkbGetControls)
+        }
         X_KEYBOARD_GET_NAMES_MINOR_OPCODE => {
             require_exact_len(X_KEYBOARD_MAJOR_OPCODE, 12, bytes.len())?;
             Ok(XWireRequest::XkbGetNames {
@@ -1659,6 +1702,24 @@ fn decode_mit_shm(
                 offset: context.byte_order.u32(&bytes[36..40]),
             })
         }
+        X_MIT_SHM_CREATE_PIXMAP_MINOR_OPCODE => {
+            require_exact_len(
+                X_MIT_SHM_MAJOR_OPCODE,
+                X_MIT_SHM_CREATE_PIXMAP_REQ_LEN,
+                bytes.len(),
+            )?;
+            let pixmap = context.byte_order.u32(&bytes[4..8]);
+            context.validate_new_resource_id(pixmap)?;
+            Ok(XWireRequest::ShmCreatePixmap {
+                pixmap: XResourceId::new(u64::from(pixmap), 1),
+                drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
+                width: context.byte_order.u16(&bytes[12..14]),
+                height: context.byte_order.u16(&bytes[14..16]),
+                depth: bytes[16],
+                segment: XResourceId::new(u64::from(context.byte_order.u32(&bytes[20..24])), 1),
+                offset: context.byte_order.u32(&bytes[24..28]),
+            })
+        }
         _ => Err(XWireParseError::UnknownOpcode(bytes[0])),
     }
 }
@@ -1720,6 +1781,38 @@ fn decode_put_image(
         left_pad: bytes[20],
         depth: bytes[21],
         data: bytes[X_PUT_IMAGE_REQ_LEN..].to_vec(),
+    })
+}
+
+fn decode_get_image(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_GET_IMAGE, X_GET_IMAGE_REQ_LEN, bytes.len())?;
+    validate_wire_image_format(bytes[1])?;
+    let width = context.byte_order.u16(&bytes[12..14]);
+    let height = context.byte_order.u16(&bytes[14..16]);
+    let byte_len = usize::from(width)
+        .checked_mul(usize::from(height))
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or(XWireParseError::PropertyValueTooLarge {
+            len: usize::MAX,
+            max: X_PUT_IMAGE_MAX_DATA_BYTES,
+        })?;
+    if byte_len > X_PUT_IMAGE_MAX_DATA_BYTES {
+        return Err(XWireParseError::PropertyValueTooLarge {
+            len: byte_len,
+            max: X_PUT_IMAGE_MAX_DATA_BYTES,
+        });
+    }
+    Ok(XWireRequest::GetImage {
+        format: bytes[1],
+        drawable: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        x: context.byte_order.i16(&bytes[8..10]),
+        y: context.byte_order.i16(&bytes[10..12]),
+        width,
+        height,
+        plane_mask: context.byte_order.u32(&bytes[16..20]),
     })
 }
 
@@ -2848,6 +2941,19 @@ fn decode_map_window(
             generation: 2,
         },
     }))
+}
+
+fn decode_reparent_window(
+    context: XWireClientContext,
+    bytes: &[u8],
+) -> Result<XWireRequest, XWireParseError> {
+    require_exact_len(X_REPARENT_WINDOW, X_REPARENT_WINDOW_REQ_LEN, bytes.len())?;
+    Ok(XWireRequest::ReparentWindow {
+        window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+        parent: XResourceId::new(u64::from(context.byte_order.u32(&bytes[8..12])), 1),
+        x: context.byte_order.i16(&bytes[12..14]),
+        y: context.byte_order.i16(&bytes[14..16]),
+    })
 }
 
 fn decode_map_subwindows(

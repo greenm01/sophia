@@ -168,6 +168,34 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
+        XWireRequest::ReparentWindow { window, parent, .. } => {
+            let result = runtime
+                .validate_window_access(context.namespace, window)
+                .and_then(|()| {
+                    if parent.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
+                        Ok(())
+                    } else {
+                        runtime.validate_window_access(context.namespace, parent)
+                    }
+                });
+            let outputs = result
+                .err()
+                .map(|error| {
+                    XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(window.local.raw()).unwrap_or(0),
+                    ))
+                })
+                .into_iter()
+                .collect();
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::MapSubwindows { window } => {
             let outputs = if let Err(error) =
                 runtime.validate_drawable_access(context.namespace, window)
@@ -331,6 +359,32 @@ pub fn dispatch_x11_wire_request(
             XDispatchResult {
                 response: None,
                 outputs: vec![output],
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::GetImage {
+            drawable,
+            width,
+            height,
+            ..
+        } => {
+            let outputs = match runtime.validate_drawable_access(context.namespace, drawable) {
+                Ok(()) => vec![XClientOutput::Reply(XClientReply::GetImage {
+                    sequence: context.sequence,
+                    depth: 24,
+                    visual: crate::X_SETUP_DEFAULT_VISUAL,
+                    data: vec![0; usize::from(width) * usize::from(height) * 4],
+                })],
+                Err(error) => vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(drawable.local.raw()).unwrap_or(0),
+                ))],
+            };
+            XDispatchResult {
+                response: None,
+                outputs,
                 metadata_candidates: Vec::new(),
             }
         }
@@ -2273,6 +2327,13 @@ pub fn dispatch_x11_wire_request(
             })],
             metadata_candidates: Vec::new(),
         },
+        XWireRequest::XkbGetControls => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::XkbGetControls {
+                sequence: context.sequence,
+            })],
+            metadata_candidates: Vec::new(),
+        },
         XWireRequest::XkbGetNames { which } => {
             let config = runtime.xkb_keymap().config();
             let layout = if config.variant.is_empty() {
@@ -2532,7 +2593,7 @@ pub fn dispatch_x11_wire_request(
             response: None,
             outputs: vec![XClientOutput::Reply(XClientReply::BigRequestsEnable {
                 sequence: context.sequence,
-                maximum_request_length: 4096,
+                maximum_request_length: u32::from(crate::X_SETUP_DEFAULT_MAX_REQUEST_UNITS),
             })],
             metadata_candidates: Vec::new(),
         },
@@ -2576,6 +2637,52 @@ pub fn dispatch_x11_wire_request(
                     u32::try_from(segment.local.raw()).unwrap_or(0),
                 ))],
             };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::ShmCreatePixmap {
+            pixmap,
+            drawable,
+            width,
+            height,
+            depth,
+            segment,
+            offset,
+        } => {
+            let valid_shape = width != 0
+                && height != 0
+                && matches!(depth, 24 | 32)
+                && usize::from(width)
+                    .checked_mul(usize::from(height))
+                    .and_then(|pixels| pixels.checked_mul(4))
+                    .and_then(|bytes| usize::try_from(offset).ok()?.checked_add(bytes))
+                    .is_some_and(|end| end <= 64 * 1024 * 1024);
+            let result = runtime
+                .validate_drawable_access(context.namespace, drawable)
+                .and_then(|()| runtime.validate_shm_segment_access(context.namespace, segment))
+                .and_then(|()| {
+                    valid_shape
+                        .then_some(())
+                        .ok_or(crate::XAuthorityRuntimeError::InvalidResource)
+                })
+                .and_then(|()| {
+                    runtime.create_pixmap(context.namespace, pixmap, u64::from(context.sequence))
+                });
+            let outputs = result
+                .err()
+                .map(|error| {
+                    XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(pixmap.local.raw()).unwrap_or(0),
+                    ))
+                })
+                .into_iter()
+                .collect();
             XDispatchResult {
                 response: None,
                 outputs,
@@ -3477,6 +3584,7 @@ fn x_error_from_property_read(error: XPropertyError) -> XErrorCode {
         XPropertyError::InvalidNamespace | XPropertyError::InvalidWindow => XErrorCode::BadWindow,
         XPropertyError::InvalidFormat(_)
         | XPropertyError::ValueTooLarge { .. }
+        | XPropertyError::TableTooLarge { .. }
         | XPropertyError::TypeMismatch
         | XPropertyError::InvalidOffset
         | XPropertyError::ReadTooLarge { .. } => XErrorCode::BadValue,

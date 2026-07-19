@@ -4,6 +4,23 @@ This file archives completed and prototype roadmap items that previously lived
 in `todo.md`. Keep active work in `todo.md`; keep detailed rationale and
 validation evidence in `docs/research-log.md`.
 
+## 2026-07-18 Application Compatibility And Production Session Loop
+
+- [x] Promoted paired xterm, GTK3 software, and mixed Vulkan application
+  classes with strict protocol-error, presentation, input, and cleanup evidence.
+- [x] Passed the unattended classic/confined GTK QEMU gate and retained guarded
+  machine-specific Vulkan and recovery diagnostics.
+- [x] Established `sophia-engine::runtime_driver` as the only production visual
+  coordinator and removed CLI-owned scene, commit, scanout, and feedback timing.
+- [x] Preserved fail-closed stale-generation, backpressure, acquire, page-flip,
+  disconnect, surface-removal, and shutdown behavior with exact native cleanup.
+
+The retained Milestone 5 and 6 gates remain regression contracts. New toolkit
+or extension behavior must begin with a captured native-X compatibility gap and
+the smallest focused wire regression.
+
+---
+
 ## 2026-07-18 Interactive WM API And Legacy Bridge
 
 - [x] Negotiated WM API version 2 with fail-closed capability and binding

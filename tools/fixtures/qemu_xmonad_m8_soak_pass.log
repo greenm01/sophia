@@ -1,0 +1,26 @@
+sophia_live_wm schema=1 status=restarted restarts=1 preserved_layout=true
+sophia_live_wm schema=1 status=restarted restarts=2 preserved_layout=true
+sophia_qemu_m8_soak schema=1 status=cycle_complete cycle=1
+sophia_qemu_m8_soak schema=1 status=cycle_complete cycle=2
+sophia_qemu_m8_soak schema=1 status=cycle_complete cycle=3
+sophia_qemu_m8_soak schema=1 status=cycle_complete cycle=4
+sophia_qemu_m8_soak schema=1 status=cycle_complete cycle=5
+sophia_qemu_m8_soak schema=1 status=cycle_complete cycle=6
+sophia_qemu_m8_soak schema=1 status=cycle_complete cycle=7
+sophia_qemu_m8_soak schema=1 status=cycle_complete cycle=8
+sophia_qemu_m8_soak schema=1 status=cycle_complete cycle=9
+sophia_qemu_m8_soak schema=1 status=cycle_complete cycle=10
+sophia_qemu_m8_soak schema=1 status=cycle_complete cycle=11
+sophia_qemu_m8_soak schema=1 status=cycle_complete cycle=12
+sophia_qemu_m8_soak schema=1 status=cycle_complete cycle=13
+sophia_qemu_m8_soak schema=1 status=cycle_complete cycle=14
+sophia_qemu_m8_soak schema=1 status=cycle_complete cycle=15
+sophia_qemu_m8_soak schema=1 status=cycle_complete cycle=16
+sophia_qemu_m8_soak schema=1 status=cycle_complete cycle=17
+sophia_qemu_m8_soak schema=1 status=cycle_complete cycle=18
+sophia_qemu_m8_soak schema=1 status=cycle_complete cycle=19
+sophia_qemu_m8_soak schema=1 status=cycle_complete cycle=20
+sophia_live_session schema=14 status=bounded_complete elapsed_msec=1800000
+sophia_live_session_health schema=1 status=clean protocol_errors=0 pending_wm=0 pending_actions=0 pending_input=0 wm_degraded=false
+sophia_live_session_cleanup schema=1 status=clean app_groups=0 frontend_workers=0 namespace=revoked xauthority=removed
+sophia_qemu_guest schema=1 status=complete scenario=xmonad-m8-soak

@@ -585,6 +585,12 @@ pub(crate) fn run_persistent_xterm_session(
         }
     }
     let child = terminal_command.spawn()?;
+    if let Some(app) = normal_primary {
+        println!(
+            "sophia_session_app schema=1 status=started id={} source=startup",
+            app.id
+        );
+    }
     let mut process = SessionProcessGuard::new(
         child,
         Vec::new(),
@@ -607,17 +613,20 @@ pub(crate) fn run_persistent_xterm_session(
             None
         };
     if config.secondary_terminal {
-        process.add_secondary_child(spawn_secondary_xterm(
-            terminal
-                .as_deref()
-                .expect("secondary terminal requires xterm"),
-            &config.display,
-            xauthority.path(),
-            config
-                .inject_text
-                .as_deref()
-                .or(config.expect_physical_text.as_deref()),
-        )?);
+        process.add_secondary_child(
+            None,
+            spawn_secondary_xterm(
+                terminal
+                    .as_deref()
+                    .expect("secondary terminal requires xterm"),
+                &config.display,
+                xauthority.path(),
+                config
+                    .inject_text
+                    .as_deref()
+                    .or(config.expect_physical_text.as_deref()),
+            )?,
+        );
     }
     for id in config.applications.startup.iter().skip(1) {
         let app = config
@@ -625,11 +634,14 @@ pub(crate) fn run_persistent_xterm_session(
             .applications
             .get(id)
             .expect("normal session startup application was validated");
-        process.add_secondary_child(PersistentXtermSessionConfig::spawn_session_application(
-            app,
-            &config.display,
-            xauthority.path(),
-        )?);
+        process.add_secondary_child(
+            Some(app.id.clone()),
+            PersistentXtermSessionConfig::spawn_session_application(
+                app,
+                &config.display,
+                xauthority.path(),
+            )?,
+        );
         println!(
             "sophia_session_app schema=1 status=started id={} source=startup",
             app.id
@@ -781,6 +793,9 @@ pub(crate) fn run_persistent_xterm_session(
     let xauthority_cleanup = xauthority.remove();
     result?;
     xauthority_cleanup?;
+    println!(
+        "sophia_live_session_cleanup schema=1 status=clean app_groups=0 frontend_workers=0 namespace=revoked xauthority=removed"
+    );
     Ok(())
 }
 
@@ -2053,7 +2068,11 @@ impl PersistentLiveLayout {
         control_ack_receiver: &Receiver<XAuthorityClientControlAck>,
     ) -> Result<Option<LiveWmCommitResult>, Box<dyn std::error::Error>> {
         if self.pending.is_some() {
-            return Err("live WM attempted to overlap resize transactions".into());
+            println!(
+                "sophia_live_wm schema=1 status=proposal_busy transaction={} preserved_layout=true",
+                proposal.transaction.raw()
+            );
+            return Ok(None);
         }
         proposal
             .requested_sizes
@@ -2426,6 +2445,14 @@ fn global_runtime_deadline_ends_session(input_proof_requested: bool) -> bool {
     !input_proof_requested
 }
 
+fn session_protocol_errors_are_fatal(
+    normal_session: bool,
+    application_proof: bool,
+    protocol_error_count: usize,
+) -> bool {
+    protocol_error_count != 0 && (normal_session || application_proof)
+}
+
 fn physical_input_may_route_after_primary_exit(
     primary_child_exited: bool,
     focused_surface: Option<SurfaceId>,
@@ -2477,7 +2504,7 @@ fn software_batch_may_coalesce(batch: &XAuthorityObservedTransactionBatch) -> bo
 fn execute_committed_session_actions(
     config: &PersistentXtermSessionConfig,
     xauthority: &std::path::Path,
-    children: &mut Vec<Child>,
+    children: &mut Vec<ManagedSessionChild>,
     layout: &PersistentLiveLayout,
     focus: &InputFocusState,
     seat: SeatId,
@@ -2487,8 +2514,11 @@ fn execute_committed_session_actions(
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let mut retained = Vec::with_capacity(children.len());
     for mut child in children.drain(..) {
-        if child.try_wait()?.is_none() {
+        if child.child.try_wait()?.is_none() {
             retained.push(child);
+        } else if let Some(id) = child.id.as_deref() {
+            terminate_session_child(&mut child.child, true)?;
+            println!("sophia_session_app schema=1 status=exited id={id} source=managed");
         }
     }
     *children = retained;
@@ -2503,18 +2533,28 @@ fn execute_committed_session_actions(
                     let app = config
                         .application_for_action(action)
                         .ok_or("WM requested an unadvertised session application")?;
-                    children.push(PersistentXtermSessionConfig::spawn_session_application(
-                        app,
-                        &config.display,
-                        xauthority,
-                    )?);
+                    children.push(ManagedSessionChild::new(
+                        Some(app.id.clone()),
+                        PersistentXtermSessionConfig::spawn_session_application(
+                            app,
+                            &config.display,
+                            xauthority,
+                        )?,
+                    ));
+                    println!(
+                        "sophia_session_app schema=1 status=started id={} source=action",
+                        app.id
+                    );
                 } else {
-                    children.push(spawn_secondary_xterm(
-                        std::path::Path::new(&config.terminal),
-                        &config.display,
-                        xauthority,
+                    children.push(ManagedSessionChild::new(
                         None,
-                    )?);
+                        spawn_secondary_xterm(
+                            std::path::Path::new(&config.terminal),
+                            &config.display,
+                            xauthority,
+                            None,
+                        )?,
+                    ));
                 }
             }
             WmSessionAction::LaunchApplicationMenu | WmSessionAction::LaunchFirefox => {
@@ -2525,11 +2565,18 @@ fn execute_committed_session_actions(
                     let app = config
                         .application_for_action(action)
                         .ok_or("WM requested an unadvertised session application")?;
-                    children.push(PersistentXtermSessionConfig::spawn_session_application(
-                        app,
-                        &config.display,
-                        xauthority,
-                    )?);
+                    children.push(ManagedSessionChild::new(
+                        Some(app.id.clone()),
+                        PersistentXtermSessionConfig::spawn_session_application(
+                            app,
+                            &config.display,
+                            xauthority,
+                        )?,
+                    ));
+                    println!(
+                        "sophia_session_app schema=1 status=started id={} source=action",
+                        app.id
+                    );
                 } else {
                     let program = match action {
                         WmSessionAction::LaunchApplicationMenu => {
@@ -2539,11 +2586,10 @@ fn execute_committed_session_actions(
                         _ => unreachable!(),
                     }
                     .ok_or("WM requested an unadvertised session executable")?;
-                    children.push(spawn_approved_application(
-                        program,
-                        &config.display,
-                        xauthority,
-                    )?);
+                    children.push(ManagedSessionChild::new(
+                        None,
+                        spawn_approved_application(program, &config.display, xauthority)?,
+                    ));
                 }
             }
             WmSessionAction::CloseFocused => {
@@ -2593,7 +2639,7 @@ fn run_session_loop(
     control_ack_receiver: &Receiver<XAuthorityClientControlAck>,
     input_delivery_receiver: &Receiver<XAuthorityClientInputDelivery>,
     child: &mut Child,
-    secondary_children: &mut Vec<Child>,
+    secondary_children: &mut Vec<ManagedSessionChild>,
     xauthority: &std::path::Path,
     physical_input: &mut Option<SessionPhysicalInput>,
     native_scanout: &mut Option<LiveProductionNativeScanout>,
@@ -2701,6 +2747,7 @@ fn run_session_loop(
     let mut application_surface_missing_since: Option<Instant> = None;
     let mut client_stdout = Vec::new();
     let mut protocol_error_count = 0usize;
+    let mut expected_protocol_error_count = 0usize;
     let mut first_protocol_error = None;
     let mut emergency_exit_requested = false;
     let mut return_suppressed_reported = false;
@@ -2981,11 +3028,15 @@ fn run_session_loop(
         }
         let mut secondary_index = 0;
         while secondary_index < secondary_children.len() {
-            if let Some(status) = secondary_children[secondary_index].try_wait()? {
+            if let Some(status) = secondary_children[secondary_index].child.try_wait()? {
                 if config.normal_session {
+                    terminate_session_child(&mut secondary_children[secondary_index].child, true)?;
+                    let id = secondary_children[secondary_index]
+                        .id
+                        .as_deref()
+                        .unwrap_or("untracked");
                     println!(
-                        "sophia_session_app schema=1 status=exited id=auxiliary-{} source=managed exit_status={status}",
-                        secondary_index + 1,
+                        "sophia_session_app schema=1 status=exited id={id} source=managed exit_status={status}",
                     );
                     secondary_children.remove(secondary_index);
                 } else {
@@ -3258,6 +3309,8 @@ fn run_session_loop(
                     protocol_error_count = protocol_error_count.saturating_add(1);
                     first_protocol_error.get_or_insert(*error);
                 }
+                expected_protocol_error_count = expected_protocol_error_count
+                    .saturating_add(batch.expected_protocol_errors.len());
                 let has_engine_work = !batch.transactions.is_empty()
                     || !batch.removed_surfaces.is_empty()
                     || !batch.cpu_buffer_updates.is_empty()
@@ -3295,7 +3348,9 @@ fn run_session_loop(
                 if wm_update.is_none() {
                     wm_update = layout.expire_pending(control_sender, control_ack_receiver)?;
                 }
-                if let Some(wm_session) = wm_session.as_mut() {
+                if layout.pending.is_none()
+                    && let Some(wm_session) = wm_session.as_mut()
+                {
                     if let Some(proposal) = wm_session.poll_restart(&layout, output)? {
                         wm_update = layout.stage(proposal, control_sender, control_ack_receiver)?;
                     }
@@ -3564,7 +3619,8 @@ fn run_session_loop(
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 let _ = layout.expire_pending(control_sender, control_ack_receiver)?;
-                if let Some(wm_session) = wm_session.as_mut()
+                if layout.pending.is_none()
+                    && let Some(wm_session) = wm_session.as_mut()
                     && let Some(proposal) = wm_session.poll_restart(&layout, output)?
                 {
                     let _ = layout.stage(proposal, control_sender, control_ack_receiver)?;
@@ -3931,9 +3987,19 @@ fn run_session_loop(
             )
             .into());
         }
-        if protocol_error_count != 0 {
+        if session_protocol_errors_are_fatal(false, true, protocol_error_count) {
             return Err(format!("application emitted {protocol_error_count} X protocol errors; first={first_protocol_error:?}").into());
         }
+    }
+    if session_protocol_errors_are_fatal(
+        config.normal_session,
+        config.application_proof_requested(),
+        protocol_error_count,
+    ) {
+        return Err(format!(
+            "normal session emitted {protocol_error_count} X protocol errors; first={first_protocol_error:?}"
+        )
+        .into());
     }
     if config.inject_surface_resize.is_some() && !resize_proof_complete {
         return Err(
@@ -3944,6 +4010,21 @@ fn run_session_loop(
         && wm_session.committed == 0
     {
         return Err("live session ended without a committed external WM layout".into());
+    }
+    if config.normal_session
+        && (layout.pending.is_some()
+            || !committed_session_actions.is_empty()
+            || !pending_input_deliveries.is_empty()
+            || wm_session.as_ref().is_some_and(|wm| wm.degraded))
+    {
+        return Err(format!(
+            "normal session ended with pending work: wm={} actions={} input={} degraded={}",
+            usize::from(layout.pending.is_some()),
+            committed_session_actions.len(),
+            pending_input_deliveries.len(),
+            wm_session.as_ref().is_some_and(|wm| wm.degraded),
+        )
+        .into());
     }
     let input_stats = physical_input
         .as_ref()
@@ -3960,6 +4041,18 @@ fn run_session_loop(
     );
     println!(
         "sophia_live_session_scheduler schema=1 authority_batches={batches} cpu_compositions={cpu_compositions} coalesced_batches={coalesced_batches}"
+    );
+    println!(
+        "sophia_live_session_health schema=1 status=clean protocol_errors={} pending_wm={} pending_actions={} pending_input={} wm_degraded={}",
+        protocol_error_count,
+        usize::from(layout.pending.is_some()),
+        committed_session_actions.len(),
+        pending_input_deliveries.len(),
+        wm_session.as_ref().is_some_and(|wm| wm.degraded),
+    );
+    println!(
+        "sophia_live_session_protocol_errors schema=1 expected={} unexpected={}",
+        expected_protocol_error_count, protocol_error_count,
     );
 
     let present_observation = present_observer
@@ -5188,21 +5281,38 @@ fn route_input_events(
 
 struct SessionProcessGuard {
     child: Option<Child>,
-    secondary_children: Vec<Child>,
+    secondary_children: Vec<ManagedSessionChild>,
     socket_path: Option<std::path::PathBuf>,
     grouped: bool,
+}
+
+struct ManagedSessionChild {
+    id: Option<String>,
+    child: Child,
+}
+
+impl ManagedSessionChild {
+    fn new(id: Option<String>, child: Child) -> Self {
+        Self { id, child }
+    }
 }
 fn terminate_session_child(
     child: &mut Child,
     grouped: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if child.try_wait()?.is_some() {
-        return Ok(());
-    }
+    let leader_exited = child.try_wait()?.is_some();
     if grouped {
         let pid = rustix::process::Pid::from_raw(child.id() as i32)
             .ok_or("session child PID is invalid")?;
         let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::TERM);
+        if leader_exited {
+            // A launcher can exit before helpers in its process group. The
+            // group remains addressable by its original PGID even after the
+            // leader is reaped, so explicitly drain those helpers as well.
+            std::thread::sleep(Duration::from_millis(25));
+            let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+            return Ok(());
+        }
         let deadline = Instant::now() + Duration::from_secs(2);
         while Instant::now() < deadline {
             if child.try_wait()?.is_some() {
@@ -5212,6 +5322,9 @@ fn terminate_session_child(
         }
         let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
     } else {
+        if leader_exited {
+            return Ok(());
+        }
         child.kill()?;
     }
     child.wait()?;
@@ -5221,7 +5334,7 @@ fn terminate_session_child(
 impl SessionProcessGuard {
     fn new(
         child: Child,
-        secondary_children: Vec<Child>,
+        secondary_children: Vec<ManagedSessionChild>,
         socket_path: std::path::PathBuf,
         grouped: bool,
     ) -> Self {
@@ -5235,7 +5348,7 @@ impl SessionProcessGuard {
 
     fn children_mut(
         &mut self,
-    ) -> Result<(&mut Child, &mut Vec<Child>), Box<dyn std::error::Error>> {
+    ) -> Result<(&mut Child, &mut Vec<ManagedSessionChild>), Box<dyn std::error::Error>> {
         let child = self
             .child
             .as_mut()
@@ -5243,8 +5356,9 @@ impl SessionProcessGuard {
         Ok((child, &mut self.secondary_children))
     }
 
-    fn add_secondary_child(&mut self, child: Child) {
-        self.secondary_children.push(child);
+    fn add_secondary_child(&mut self, id: Option<String>, child: Child) {
+        self.secondary_children
+            .push(ManagedSessionChild::new(id, child));
     }
 
     fn terminate(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -5252,7 +5366,7 @@ impl SessionProcessGuard {
             terminate_session_child(&mut child, self.grouped)?;
         }
         for mut child in self.secondary_children.drain(..) {
-            terminate_session_child(&mut child, self.grouped)?;
+            terminate_session_child(&mut child.child, self.grouped)?;
         }
         if let Some(socket_path) = self.socket_path.as_ref() {
             match std::fs::remove_file(socket_path) {
@@ -5284,8 +5398,8 @@ mod tests {
         physical_input_pixels_already_changed, place_pointer_event_for_routing,
         pointer_offset_for_geometry, record_runtime_commits,
         required_wayland_presentation_submission, retain_latest_wayland_presentation,
-        seed_missing_committed_surfaces, successful_primary_exit_ends_session,
-        take_settled_input_delivery_wait,
+        seed_missing_committed_surfaces, session_protocol_errors_are_fatal,
+        successful_primary_exit_ends_session, take_settled_input_delivery_wait,
     };
     use sophia_protocol::{
         AuthorityKind, DeviceId, InputEventKind, InputEventPacket, NamespaceCapabilities,
@@ -5332,6 +5446,14 @@ mod tests {
     fn global_runtime_deadline_does_not_strand_an_active_input_proof() {
         assert!(global_runtime_deadline_ends_session(false));
         assert!(!global_runtime_deadline_ends_session(true));
+    }
+
+    #[test]
+    fn normal_sessions_fail_on_any_protocol_error() {
+        assert!(session_protocol_errors_are_fatal(true, false, 1));
+        assert!(session_protocol_errors_are_fatal(false, true, 1));
+        assert!(!session_protocol_errors_are_fatal(false, false, 1));
+        assert!(!session_protocol_errors_are_fatal(true, true, 0));
     }
 
     #[test]

@@ -27,13 +27,13 @@ use std::{
 #[cfg(unix)]
 use crate::{
     X_ATOM_NAME_WM_DELETE_WINDOW, X_ATOM_NAME_WM_PROTOCOLS, X_SETUP_CLIENT_PREFIX_LEN,
-    X_SETUP_DEFAULT_RESOURCE_ID_MASK, X_SETUP_DEFAULT_ROOT, X_SETUP_MAX_AUTH_FIELD_LEN, XAtomTable,
-    XAuthorityCpuBufferUpdate, XAuthorityObservedTransactionBatch, XAuthorityResponsePacket,
-    XAuthorityRuntime, XByteOrder, XClientEvent, XDispatchContext, XDispatchResult, XPropertyTable,
-    XResourceId, XSetupFailure, XSetupRequest, XSetupSuccess, XWireClientContext,
-    decode_x11_core_request, dispatch_x11_parse_error, dispatch_x11_wire_request,
-    encode_x_client_event, encode_x11_setup_failure, encode_x11_setup_success,
-    parse_x11_setup_request, try_emit_x_authority_trace, x11_setup_request_total_len,
+    X_SETUP_DEFAULT_RESOURCE_ID_MASK, X_SETUP_DEFAULT_ROOT, XAtomTable, XAuthorityCpuBufferUpdate,
+    XAuthorityObservedTransactionBatch, XAuthorityResponsePacket, XAuthorityRuntime, XByteOrder,
+    XClientEvent, XDispatchContext, XDispatchResult, XPropertyTable, XResourceId, XSetupFailure,
+    XSetupRequest, XSetupSuccess, XWireClientContext, decode_x11_core_request,
+    dispatch_x11_parse_error, dispatch_x11_wire_request, encode_x_client_event,
+    encode_x11_setup_failure, encode_x11_setup_success, parse_x11_setup_request,
+    try_emit_x_authority_trace, x11_setup_request_total_len,
 };
 #[cfg(unix)]
 use sophia_protocol::{
@@ -6406,6 +6406,18 @@ fn x11_core_request_trace_detail(request: &crate::XWireRequest) -> Option<String
             "UngrabButton:window={:#x}:button={button}:modifiers={modifiers:#x}",
             window.local.raw()
         )),
+        crate::XWireRequest::ReparentWindow {
+            window,
+            parent,
+            x,
+            y,
+        } => Some(format!(
+            "ReparentWindow:window={:#x}:parent={:#x}:x={}:y={}",
+            window.local.raw(),
+            parent.local.raw(),
+            x,
+            y
+        )),
         crate::XWireRequest::CreateColormap {
             colormap,
             window,
@@ -6426,6 +6438,17 @@ fn x11_core_request_trace_detail(request: &crate::XWireRequest) -> Option<String
             colormap.local.raw()
         )),
         crate::XWireRequest::ShmQueryVersion => Some("MIT-SHM:QueryVersion".to_string()),
+        crate::XWireRequest::GetImage {
+            drawable,
+            width,
+            height,
+            ..
+        } => Some(format!(
+            "GetImage:drawable={:#x}:{}x{}",
+            drawable.local.raw(),
+            width,
+            height
+        )),
         crate::XWireRequest::ShmAttach { segment, .. } => {
             Some(format!("MIT-SHM:Attach:{:#x}", segment.local.raw()))
         }
@@ -6438,6 +6461,21 @@ fn x11_core_request_trace_detail(request: &crate::XWireRequest) -> Option<String
             "MIT-SHM:PutImage:drawable={:#x}:segment={:#x}",
             drawable.local.raw(),
             segment.local.raw()
+        )),
+        crate::XWireRequest::ShmCreatePixmap {
+            pixmap,
+            drawable,
+            segment,
+            width,
+            height,
+            ..
+        } => Some(format!(
+            "MIT-SHM:CreatePixmap:pixmap={:#x}:drawable={:#x}:segment={:#x}:{}x{}",
+            pixmap.local.raw(),
+            drawable.local.raw(),
+            segment.local.raw(),
+            width,
+            height
         )),
         crate::XWireRequest::Dri3Open { drawable, provider } => Some(format!(
             "DRI3:Open:drawable={:#x}:provider={provider:#x}",
@@ -6471,6 +6509,7 @@ fn x11_core_request_trace_detail(request: &crate::XWireRequest) -> Option<String
             Some(format!("RANDR:GetMonitors:{:#x}", window.local.raw()))
         }
         crate::XWireRequest::XkbUseExtension { .. } => Some("XKEYBOARD:UseExtension".to_string()),
+        crate::XWireRequest::XkbGetControls => Some("XKEYBOARD:GetControls".to_string()),
         crate::XWireRequest::XkbGetMap { full, partial } => Some(format!(
             "XKEYBOARD:GetMap:full={full:#x}:partial={partial:#x}"
         )),
@@ -6646,7 +6685,12 @@ pub fn read_x11_core_request(
             fds,
         }));
     }
-    let max_len = X_SETUP_MAX_AUTH_FIELD_LEN * 64;
+    // The setup reply advertises the full core u16 request-length range. Keep
+    // the socket reader consistent with that wire contract: Firefox emits
+    // large, but still ordinary, requests just below the 65,535-unit limit.
+    // BIG-REQUESTS extended (zero u16 plus u32 length) frames remain outside
+    // this bounded reader until a captured client requires them.
+    let max_len = usize::from(crate::X_SETUP_DEFAULT_MAX_REQUEST_UNITS) * 4;
     if length > max_len {
         return Err(X11SetupSocketError::new(format!(
             "X11 request payload too large: {length}"

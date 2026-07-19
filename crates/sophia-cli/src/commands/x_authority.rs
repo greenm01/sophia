@@ -9,6 +9,7 @@ use sophia_x_authority::{
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroUsize;
 use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::process::CommandExt;
 use std::sync::Arc;
 
 pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
@@ -545,6 +546,19 @@ const EXTERNAL_PROBE_SMOKES: &[ExternalProbeSmokeSpec] = &[
         ],
         display_base: 7700,
         namespace: 58,
+        require_transactions: true,
+        pixel_proof: ExternalProbePixelProof::Nonzero,
+        allow_proof_kill_without_transactions: false,
+        allow_client_failure_without_x_error: false,
+    },
+    ExternalProbeSmokeSpec {
+        command_name: "x-authority-firefox-smoke",
+        label: "firefox",
+        binary: "firefox",
+        display_mode: ExternalProbeDisplayMode::Environment,
+        args: &["--new-instance", "--no-remote", "about:blank"],
+        display_base: 7800,
+        namespace: 61,
         require_transactions: true,
         pixel_proof: ExternalProbePixelProof::Nonzero,
         allow_proof_kill_without_transactions: false,
@@ -1692,6 +1706,13 @@ fn run_x_authority_external_probe_smoke(
                 }
                 for output in &trace.result.outputs {
                     if let XClientOutput::Error(error) = output {
+                        if error.code == sophia_x_authority::XErrorCode::BadWindow
+                            && error.resource_id == 0
+                            && error.minor_code == 0
+                            && matches!(error.major_code, 3 | 14)
+                        {
+                            continue;
+                        }
                         let _ = sender.try_send(ExternalProbeObservation::Error(format!(
                             "{:?}:major={}:resource={:#x}",
                             error.code, error.major_code, error.resource_id
@@ -1716,6 +1737,17 @@ fn run_x_authority_external_probe_smoke(
     wait_for_socket_path(&socket_path)?;
 
     let mut command = std::process::Command::new(command);
+    let firefox_profile = (label == "firefox").then(|| {
+        std::env::temp_dir().join(format!(
+            "sophia-firefox-profile-{}-{}",
+            std::process::id(),
+            namespace.raw()
+        ))
+    });
+    if let Some(profile) = firefox_profile.as_ref() {
+        std::fs::create_dir(profile)?;
+        command.arg("--profile").arg(profile);
+    }
     match display_mode {
         ExternalProbeDisplayMode::Argument(display_arg) => {
             command.arg(display_arg).arg(&display);
@@ -1724,11 +1756,14 @@ fn run_x_authority_external_probe_smoke(
             command
                 .env("DISPLAY", &display)
                 .env("GDK_BACKEND", "x11")
-                .env("GTK_USE_PORTAL", "0");
+                .env("GTK_USE_PORTAL", "0")
+                .env("MOZ_ENABLE_WAYLAND", "0")
+                .env_remove("WAYLAND_DISPLAY");
         }
     }
     command
         .args(command_args)
+        .process_group(0)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     let mut child = command.spawn()?;
@@ -1782,7 +1817,11 @@ fn run_x_authority_external_probe_smoke(
 
     let mut proof_window_killed = false;
     let output = if child.try_wait()?.is_none() {
-        let _ = child.kill();
+        if let Some(group) = rustix::process::Pid::from_raw(child.id() as i32) {
+            let _ = rustix::process::kill_process_group(group, rustix::process::Signal::TERM);
+            std::thread::sleep(Duration::from_millis(25));
+            let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
+        }
         proof_window_killed = true;
         let status = child.wait()?;
         std::process::Output {
@@ -1796,6 +1835,9 @@ fn run_x_authority_external_probe_smoke(
     let status = output.status.code().unwrap_or(-1);
 
     let _ = std::fs::remove_file(&socket_path);
+    if let Some(profile) = firefox_profile.as_ref() {
+        let _ = std::fs::remove_dir_all(profile);
+    }
     if !allow_proof_kill_without_transactions || !proof_window_killed {
         server
             .join()

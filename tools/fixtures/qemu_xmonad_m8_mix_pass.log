@@ -1,0 +1,18 @@
+sophia_session_app schema=1 status=started id=terminal source=startup
+sophia_session_app schema=1 status=started id=vulkan source=startup
+sophia_session_app schema=1 status=started id=firefox source=action
+sophia_session_app schema=1 status=started id=launcher source=action
+sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+j
+sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+k
+sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+spc
+sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+2
+sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+shift+1
+sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+f
+sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+p
+sophia_live_outputs schema=2 status=ready discovered=2 presentation=2 native_owned=2 multi_output_scanout=enabled layout=extended_horizontal
+sophia_live_wm schema=1 status=restarted restarts=1 preserved_layout=true
+sophia_live_session_health schema=1 status=clean protocol_errors=0 pending_wm=0 pending_actions=0 pending_input=0 wm_degraded=false
+sophia_live_output schema=1 status=complete output=1 checksum=10 submissions=2 retirements=2 callbacks=2 nonzero_exports=2
+sophia_live_output schema=1 status=complete output=2 checksum=20 submissions=2 retirements=2 callbacks=2 nonzero_exports=2
+sophia_live_session_cleanup schema=1 status=clean app_groups=0 frontend_workers=0 namespace=revoked xauthority=removed
+sophia_qemu_guest schema=1 status=complete scenario=xmonad-m8-mix

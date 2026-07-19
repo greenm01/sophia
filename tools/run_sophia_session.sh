@@ -66,6 +66,13 @@ session_args=(
     --session-start=terminal
     --session-action-app=terminal=terminal
 )
+firefox_bin="$(resolve_program "${SOPHIA_FIREFOX_BIN:-}" firefox)"
+if [[ -n "$firefox_bin" ]]; then
+    session_args+=(
+        "--session-app=firefox=$firefox_bin"
+        --session-action-app=firefox=firefox
+    )
+fi
 session_args+=("${wm_args[@]}")
 session_args+=("$@")
 exec "$sophia_bin" "${session_args[@]}"

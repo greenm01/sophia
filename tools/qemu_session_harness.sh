@@ -8,7 +8,7 @@ KERNEL_IMAGE="${SOPHIA_QEMU_KERNEL:-/boot/vmlinuz-$KERNEL_VERSION}"
 INITRAMFS="${SOPHIA_QEMU_INITRAMFS:-$OUT_DIR/sophia-$KERNEL_VERSION.img}"
 SCENARIO="${SOPHIA_QEMU_SCENARIO:-session}"
 TWO_XTERM="${SOPHIA_QEMU_TWO_XTERM:-0}"
-if [[ "$SCENARIO" != "session" && "$SCENARIO" != "emergency-recovery" && "$SCENARIO" != "gtk-classic" && "$SCENARIO" != "gtk-confined" && "$SCENARIO" != "xmonad-m7" && "$SCENARIO" != "xmonad-m8-launcher" ]]; then
+if [[ "$SCENARIO" != "session" && "$SCENARIO" != "emergency-recovery" && "$SCENARIO" != "gtk-classic" && "$SCENARIO" != "gtk-confined" && "$SCENARIO" != "xmonad-m7" && "$SCENARIO" != "xmonad-m8-launcher" && "$SCENARIO" != "xmonad-m8-mix" && "$SCENARIO" != "xmonad-m8-soak" ]]; then
     echo "SOPHIA_QEMU_SCENARIO must include a supported session or xmonad scenario" >&2
     exit 1
 fi
@@ -37,6 +37,55 @@ QMP_SOCKET="${SOPHIA_QEMU_QMP_SOCKET:-$OUT_DIR/qmp.sock}"
 SERIAL_FIFO="${SOPHIA_QEMU_SERIAL_FIFO:-$OUT_DIR/serial.fifo}"
 QEMU_PID=""
 LOGGER_PID=""
+
+evidence_count() {
+    grep -c "$1" "$EVIDENCE_FILE" 2>/dev/null || true
+}
+
+wait_for_new_evidence() {
+    local pattern=$1
+    local baseline=$2
+    local attempts=${3:-400}
+    local current
+    for _ in $(seq 1 "$attempts"); do
+        current="$(evidence_count "$pattern")"
+        if (( current > baseline )); then
+            return 0
+        fi
+        if ! kill -0 "$QEMU_PID" 2>/dev/null; then
+            return 1
+        fi
+        sleep 0.05
+    done
+    return 1
+}
+
+send_chord_and_wait() {
+    local chord=$1
+    local pattern=$2
+    local label=$3
+    local baseline
+    baseline="$(evidence_count "$pattern")"
+    "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" "$chord"
+    echo "sophia_qemu_xmonad_input schema=1 status=sent chord=$chord" | tee -a "$EVIDENCE_FILE"
+    if ! wait_for_new_evidence "$pattern" "$baseline"; then
+        echo "sophia_qemu_xmonad schema=1 status=failed reason=action_evidence_timeout action=$label chord=$chord" | tee -a "$EVIDENCE_FILE"
+        return 1
+    fi
+}
+
+send_launch_and_wait() {
+    local chord=$1
+    local pattern=$2
+    local label=$3
+    local layout_baseline
+    layout_baseline="$(evidence_count '^sophia_live_wm schema=1 status=layout_committed ')"
+    send_chord_and_wait "$chord" "$pattern" "$label"
+    if ! wait_for_new_evidence '^sophia_live_wm schema=1 status=layout_committed ' "$layout_baseline"; then
+        echo "sophia_qemu_xmonad schema=1 status=failed reason=action_layout_timeout action=$label chord=$chord" | tee -a "$EVIDENCE_FILE"
+        return 1
+    fi
+}
 
 cleanup() {
     if [[ -n "$QEMU_PID" ]] && kill -0 "$QEMU_PID" 2>/dev/null; then
@@ -233,11 +282,39 @@ if [[ "$SCENARIO" == xmonad-* ]]; then
         if ! kill -0 "$QEMU_PID" 2>/dev/null; then break; fi
         sleep 0.05
     done
-    if [[ "$recovery_layout" != true ]]; then
+    if [[ "$recovery_layout" != true ]] && ! grep -q '^sophia_live_wm schema=1 status=layout_timeout .*preserved_layout=true' "$EVIDENCE_FILE"; then
         echo "sophia_qemu_xmonad schema=1 status=failed reason=restart_layout_timeout" | tee -a "$EVIDENCE_FILE"
         exit 1
     fi
-    chords=("meta_l+shift+ret" "meta_l+shift+c" "meta_l+shift+q")
+    if [[ "$SCENARIO" == "xmonad-m8-soak" ]]; then
+        soak_started=$SECONDS
+        cycles=0
+        while (( SECONDS - soak_started < 1800 )); do
+            for chord in meta_l+j meta_l+k meta_l+spc meta_l+2 meta_l+shift+1 meta_l+shift+ret meta_l+shift+c meta_l+f meta_l+shift+c meta_l+p meta_l+shift+c; do
+                "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" "$chord"
+                echo "sophia_qemu_xmonad_input schema=1 status=sent chord=$chord" | tee -a "$EVIDENCE_FILE"
+                sleep 1
+            done
+            cycles=$((cycles + 1))
+            echo "sophia_qemu_m8_soak schema=1 status=cycle_complete cycle=$cycles" | tee -a "$EVIDENCE_FILE"
+            sleep 75
+        done
+        if (( cycles < 20 )); then
+            echo "sophia_qemu_m8_soak schema=1 status=failed reason=insufficient_cycles cycles=$cycles" | tee -a "$EVIDENCE_FILE"
+            exit 1
+        fi
+        chords=("meta_l+shift+q")
+    elif [[ "$SCENARIO" == "xmonad-m8-mix" ]]; then
+        send_launch_and_wait meta_l+shift+ret '^sophia_session_app schema=1 status=started id=terminal source=action' terminal-launch
+        send_chord_and_wait meta_l+shift+c '^sophia_session_app schema=1 status=exited id=terminal ' terminal-close
+        send_launch_and_wait meta_l+f '^sophia_session_app schema=1 status=started id=firefox source=action' firefox-launch
+        send_chord_and_wait meta_l+shift+c '^sophia_session_app schema=1 status=exited id=firefox ' firefox-close
+        send_launch_and_wait meta_l+p '^sophia_session_app schema=1 status=started id=launcher source=action' launcher-launch
+        send_chord_and_wait meta_l+shift+c '^sophia_session_app schema=1 status=exited id=launcher ' launcher-close
+        chords=("meta_l+shift+q")
+    else
+        chords=("meta_l+shift+ret" "meta_l+shift+c" "meta_l+shift+q")
+    fi
     for chord in "${chords[@]}"; do
         "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" "$chord"
         echo "sophia_qemu_xmonad_input schema=1 status=sent chord=$chord" | tee -a "$EVIDENCE_FILE"
@@ -258,11 +335,12 @@ if [[ "$SCENARIO" == xmonad-* ]]; then
         echo "sophia_qemu_xmonad schema=1 status=failed reason=guest_exit qemu_exit=$qemu_status logger_exit=$logger_status" | tee -a "$EVIDENCE_FILE"
         exit 1
     fi
-    if [[ "$SCENARIO" == "xmonad-m7" ]]; then
-        "$ROOT_DIR/tools/verify_qemu_xmonad_m7_evidence.sh" "$EVIDENCE_FILE"
-    else
-        "$ROOT_DIR/tools/verify_qemu_xmonad_m8_launcher_evidence.sh" "$EVIDENCE_FILE"
-    fi
+    case "$SCENARIO" in
+        xmonad-m7) "$ROOT_DIR/tools/verify_qemu_xmonad_m7_evidence.sh" "$EVIDENCE_FILE" ;;
+        xmonad-m8-launcher) "$ROOT_DIR/tools/verify_qemu_xmonad_m8_launcher_evidence.sh" "$EVIDENCE_FILE" ;;
+        xmonad-m8-mix) "$ROOT_DIR/tools/verify_qemu_xmonad_m8_mix_evidence.sh" "$EVIDENCE_FILE" ;;
+        xmonad-m8-soak) "$ROOT_DIR/tools/verify_qemu_xmonad_m8_soak_evidence.sh" "$EVIDENCE_FILE" ;;
+    esac
     echo "sophia_qemu_xmonad schema=1 status=complete qemu_exit=0" | tee -a "$EVIDENCE_FILE"
     exit 0
 fi

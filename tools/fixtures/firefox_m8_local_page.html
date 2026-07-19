@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>0000000000000000</title>
+<style>
+  html, body { height: 100%; margin: 0; background: #102038; color: #fff; font: 28px sans-serif; }
+  main { box-sizing: border-box; height: 100%; padding: 8vh 10vw; }
+  input, button { box-sizing: border-box; display: block; width: 100%; margin: 3vh 0; padding: 2vh; font: inherit; }
+  #status { min-height: 2em; padding: 2vh; background: #284a78; }
+</style>
+<main>
+  <h1>Sophia Firefox offline proof</h1>
+  <input id="source" autofocus aria-label="source" placeholder="type sophia">
+  <input id="clipboard" aria-label="clipboard target" placeholder="clipboard target">
+  <input id="primary" aria-label="primary target" placeholder="primary target">
+  <button id="dialog">Open proof dialog</button>
+  <div id="status">waiting</div>
+</main>
+<script>
+  const stages = [16, 32, 48, 64, 80, 96];
+  let stage = 0;
+  const status = document.querySelector('#status');
+  function advance(label) {
+    stage += 1;
+    document.title = '0'.repeat(stages[stage]);
+    status.textContent = label;
+    document.body.style.background = `hsl(${stage * 47} 55% 24%)`;
+  }
+  document.querySelector('#source').addEventListener('input', event => {
+    if (stage === 0 && event.target.value === 'sophia') advance('keyboard complete');
+  });
+  document.querySelector('#clipboard').addEventListener('input', event => {
+    if (stage === 1 && event.target.value === 'sophia') advance('clipboard complete');
+  });
+  document.querySelector('#primary').addEventListener('input', event => {
+    if (stage === 2 && event.target.value === 'sophia') advance('primary complete');
+  });
+  addEventListener('resize', () => {
+    if (stage === 3) advance('resize complete');
+  }, { once: true });
+  document.querySelector('#dialog').addEventListener('click', () => {
+    if (stage === 4) {
+      alert('Sophia dialog proof');
+      advance('dialog complete');
+    }
+  });
+</script>
+</html>

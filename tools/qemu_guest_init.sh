@@ -26,6 +26,8 @@ case " $cmdline " in
     *" sophia.scenario=gtk-confined "*) scenario="gtk-confined" ;;
     *" sophia.scenario=xmonad-m7 "*) scenario="xmonad-m7" ;;
     *" sophia.scenario=xmonad-m8-launcher "*) scenario="xmonad-m8-launcher" ;;
+    *" sophia.scenario=xmonad-m8-mix "*) scenario="xmonad-m8-mix" ;;
+    *" sophia.scenario=xmonad-m8-soak "*) scenario="xmonad-m8-soak" ;;
 esac
 case " $cmdline " in
     *" sophia.two_xterm=1 "*) two_xterm=true ;;
@@ -35,7 +37,7 @@ if [ "$scenario" = "emergency-recovery" ]; then
     echo "sophia_qemu_guest schema=1 status=booting gpu=virtio-gpu scenario=emergency-recovery"
 elif [ "$scenario" = "gtk-classic" ] || [ "$scenario" = "gtk-confined" ]; then
     echo "sophia_qemu_guest schema=1 status=booting gpu=virtio-gpu scenario=$scenario"
-elif [ "$scenario" = "xmonad-m7" ] || [ "$scenario" = "xmonad-m8-launcher" ]; then
+elif [ "$scenario" = "xmonad-m7" ] || [ "$scenario" = "xmonad-m8-launcher" ] || [ "$scenario" = "xmonad-m8-mix" ] || [ "$scenario" = "xmonad-m8-soak" ]; then
     echo "sophia_qemu_guest schema=1 status=booting gpu=virtio-gpu scenario=$scenario"
 else
     echo "sophia_qemu_guest schema=1 status=booting gpu=virtio-gpu ticks=300"
@@ -138,19 +140,45 @@ elif [ "$scenario" = "gtk-classic" ] || [ "$scenario" = "gtk-confined" ]; then
         --expect-physical-text=sophia --expect-physical-pointer \
         --inject-surface-resize=640x360 --exit-after-input-proof
     echo "sophia_qemu_gtk schema=1 status=running profile=$profile"
-elif [ "$scenario" = "xmonad-m7" ] || [ "$scenario" = "xmonad-m8-launcher" ]; then
+elif [ "$scenario" = "xmonad-m7" ] || [ "$scenario" = "xmonad-m8-launcher" ] || [ "$scenario" = "xmonad-m8-mix" ] || [ "$scenario" = "xmonad-m8-soak" ]; then
     if [ ! -x /usr/bin/xmonad ]; then
         echo "sophia_qemu_xmonad schema=1 status=failed reason=xmonad_missing"
         sync
         poweroff -f
     fi
-    set -- sophia-live-session --display=:181 --native-scanout --max-runtime-ms=60000
+    runtime_ms=60000
+    [ "$scenario" != "xmonad-m8-soak" ] || runtime_ms=1860000
+    set -- sophia-live-session --display=:181 --native-scanout --max-runtime-ms="$runtime_ms"
     if [ "$scenario" = "xmonad-m8-launcher" ]; then
         set -- "$@" --session-mode=normal
         set -- "$@" --session-app=terminal=/usr/bin/xterm
         set -- "$@" --session-app-arg=terminal=-cm --session-app-arg=terminal=-dc
         set -- "$@" --session-start=terminal --session-action-app=terminal=terminal
         echo "sophia_qemu_xmonad schema=1 status=running windows=1 profile=xmonad mode=normal"
+    elif [ "$scenario" = "xmonad-m8-mix" ] || [ "$scenario" = "xmonad-m8-soak" ]; then
+        for program in /usr/bin/firefox /usr/bin/vkcube /usr/bin/zenity; do
+            if [ ! -x "$program" ]; then
+                echo "sophia_qemu_xmonad schema=1 status=failed reason=m8_application_missing program=$program"
+                sync
+                poweroff -f
+            fi
+        done
+        export MOZ_ENABLE_WAYLAND=0
+        export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+        mkdir -p /tmp/firefox-profile
+        set -- "$@" --session-mode=normal
+        set -- "$@" --session-app=terminal=/usr/bin/xterm
+        set -- "$@" --session-app-arg=terminal=-cm --session-app-arg=terminal=-dc
+        set -- "$@" --session-app=vulkan=/usr/bin/vkcube --session-app-arg=vulkan=--wsi --session-app-arg=vulkan=xcb
+        set -- "$@" --session-app-arg=vulkan=--width --session-app-arg=vulkan=640
+        set -- "$@" --session-app-arg=vulkan=--height --session-app-arg=vulkan=720
+        set -- "$@" --session-app=launcher=/usr/bin/zenity --session-app-arg=launcher=--info --session-app-arg=launcher=--text=Sophia-application-launcher
+        set -- "$@" --session-app=firefox=/usr/bin/firefox --session-app-arg=firefox=--new-instance --session-app-arg=firefox=--no-remote
+        set -- "$@" --session-app-arg=firefox=--profile --session-app-arg=firefox=/tmp/firefox-profile
+        set -- "$@" --session-app-arg=firefox=file:///usr/share/sophia/firefox_m8_local_page.html
+        set -- "$@" --session-start=terminal --session-start=vulkan
+        set -- "$@" --session-action-app=terminal=terminal --session-action-app=launcher=launcher --session-action-app=firefox=firefox
+        echo "sophia_qemu_xmonad schema=1 status=running windows=2 profile=xmonad mode=m8-app-mix"
     else
         set -- "$@" --secondary-terminal
         echo "sophia_qemu_xmonad schema=1 status=running windows=2 profile=xmonad"
@@ -169,15 +197,19 @@ fi
 
 if [ -n "$input_devices" ]; then
     set -- "$@" "--input-devices=$input_devices"
-if [ "$scenario" = "xmonad-m7" ] || [ "$scenario" = "xmonad-m8-launcher" ]; then
+if [ "$scenario" = "xmonad-m7" ] || [ "$scenario" = "xmonad-m8-launcher" ] || [ "$scenario" = "xmonad-m8-mix" ] || [ "$scenario" = "xmonad-m8-soak" ]; then
     (
         while ! pidof sophia-x11-wm-bridge >/dev/null 2>&1; do sleep 0.05; done
         sleep 9
-        wm_pid="$(pidof xmonad 2>/dev/null || true)"
-        bridge_pid="$(pidof sophia-x11-wm-bridge 2>/dev/null || true)"
-        [ -z "$wm_pid" ] || kill -TERM $wm_pid 2>/dev/null || true
-        [ -z "$bridge_pid" ] || kill -TERM $bridge_pid 2>/dev/null || true
-        echo "sophia_qemu_xmonad schema=1 status=restart_injected target=compatibility_bridge"
+        while :; do
+            wm_pid="$(pidof xmonad 2>/dev/null || true)"
+            bridge_pid="$(pidof sophia-x11-wm-bridge 2>/dev/null || true)"
+            [ -z "$wm_pid" ] || kill -TERM $wm_pid 2>/dev/null || true
+            [ -z "$bridge_pid" ] || kill -TERM $bridge_pid 2>/dev/null || true
+            echo "sophia_qemu_xmonad schema=1 status=restart_injected target=compatibility_bridge"
+            [ "$scenario" = "xmonad-m8-soak" ] || break
+            sleep 180
+        done
     ) &
 fi
 
@@ -227,7 +259,7 @@ elif [ "$scenario" = "gtk-classic" ] || [ "$scenario" = "gtk-confined" ]; then
     else
         echo "sophia_qemu_guest schema=1 status=failed reason=gtk_session_exit scenario=$scenario exit_status=$status"
     fi
-elif [ "$scenario" = "xmonad-m7" ] || [ "$scenario" = "xmonad-m8-launcher" ]; then
+elif [ "$scenario" = "xmonad-m7" ] || [ "$scenario" = "xmonad-m8-launcher" ] || [ "$scenario" = "xmonad-m8-mix" ] || [ "$scenario" = "xmonad-m8-soak" ]; then
     if [ "$status" -eq 0 ]; then
         echo "sophia_qemu_guest schema=1 status=complete scenario=$scenario"
     else

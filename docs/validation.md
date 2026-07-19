@@ -392,6 +392,25 @@ terminal launch and close, logout, bridge restart recovery, and clean two-output
 shutdown. The frozen Milestone 7 regression remains
 `tools/qemu_xmonad_m7_acceptance.sh`.
 
+Milestone 8 adds two explicit application scenarios:
+
+```sh
+cargo run --offline -q -p sophia-cli -- x-authority-firefox-smoke
+tools/qemu_xmonad_m8_mix_acceptance.sh
+tools/qemu_xmonad_m8_soak_acceptance.sh
+```
+
+The M8 image profile is isolated, offline, and storage-free. It requires
+Firefox, `vkcube`, and Mesa Lavapipe; set `SOPHIA_FIREFOX_BIN`,
+`SOPHIA_VKCUBE_BIN`, or `SOPHIA_LVP_ICD` when they are not installed in the
+standard Void paths. The mix verifier requires four managed application IDs,
+two independently retired outputs, workspace and bridge-recovery evidence,
+zero normal-session protocol errors, and final frontend/application cleanup.
+The soak reuses that scenario for at least 1,800,000 ms and twenty complete
+interaction cycles. Application launch and close steps are evidence-driven:
+the harness waits for the matching managed-process start or exit record before
+advancing, so a slow Firefox startup cannot be hidden by fixed sleeps.
+
 The older bounded proof wrapper can pass `--max-runtime-ms=10000`,
 `--inject-text=sophia`, and `--exit-after-input-proof`; passing evidence requires one
 WM request, one acknowledged resize, one committed layout with a moved surface,
