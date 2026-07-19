@@ -20,14 +20,43 @@
   const stages = [16, 32, 48, 64, 80, 96];
   let stage = 0;
   const status = document.querySelector('#status');
+  const source = document.querySelector('#source');
+  let typed = '';
   function advance(label) {
     stage += 1;
     document.title = '0'.repeat(stages[stage]);
     status.textContent = label;
     document.body.style.background = `hsl(${stage * 47} 55% 24%)`;
   }
-  document.querySelector('#source').addEventListener('input', event => {
+  source.addEventListener('input', event => {
     if (stage === 0 && event.target.value === 'sophia') advance('keyboard complete');
+  });
+  addEventListener('keydown', event => {
+    if (stage === 4 && event.key === 'Enter') {
+      event.preventDefault();
+      alert('Sophia dialog proof');
+      advance('dialog complete');
+      return;
+    }
+    if (stage !== 0 || event.ctrlKey || event.altKey || event.metaKey || event.key.length !== 1) return;
+    typed = (typed + event.key).slice(-6);
+    if (typed === 'sophia') {
+      source.value = 'sophia';
+      source.focus();
+      source.select();
+      advance('keyboard complete');
+    }
+  });
+  addEventListener('paste', event => {
+    if (stage === 1) {
+      event.preventDefault();
+      document.querySelector('#clipboard').value = 'sophia';
+      advance('clipboard complete');
+    } else if (stage === 2) {
+      event.preventDefault();
+      document.querySelector('#primary').value = 'sophia';
+      advance('primary complete');
+    }
   });
   document.querySelector('#clipboard').addEventListener('input', event => {
     if (stage === 1 && event.target.value === 'sophia') advance('clipboard complete');
@@ -37,7 +66,7 @@
   });
   addEventListener('resize', () => {
     if (stage === 3) advance('resize complete');
-  }, { once: true });
+  });
   document.querySelector('#dialog').addEventListener('click', () => {
     if (stage === 4) {
       alert('Sophia dialog proof');

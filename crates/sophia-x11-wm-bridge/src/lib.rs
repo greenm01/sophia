@@ -253,6 +253,22 @@ impl X11WmBridgeState {
         self.surface_to_window.len()
     }
 
+    pub fn cycle_focus_window(
+        &self,
+        surface: SurfaceId,
+        forward: bool,
+    ) -> Option<SyntheticXWindowId> {
+        let current = self.surface_to_window.get(&surface)?;
+        let windows = self.surface_to_window.values().copied().collect::<Vec<_>>();
+        let index = windows.iter().position(|window| window == current)?;
+        let next = if forward {
+            (index + 1) % windows.len()
+        } else {
+            (index + windows.len() - 1) % windows.len()
+        };
+        windows.get(next).copied()
+    }
+
     pub fn synthetic_geometry(&self, window: SyntheticXWindowId) -> Option<Rect> {
         self.window_to_node.get(&window).map(|node| node.geometry)
     }
@@ -292,7 +308,6 @@ impl X11WmBridgeState {
             WmRequestKind::SurfaceRemoved { surface, .. } => {
                 if let Some(window) = self.surface_to_window.remove(surface) {
                     self.window_to_node.remove(&window);
-                    events.push(SyntheticXEvent::UnmapNotify { window });
                     events.push(SyntheticXEvent::DestroyNotify { window });
                 }
             }
@@ -340,7 +355,7 @@ impl X11WmBridgeState {
                         .window_to_node
                         .get(&window)
                         .ok_or(X11WmBridgeError::UnknownSyntheticWindow)?;
-                    let size = clamp_size(
+                    let mut size = clamp_size(
                         Size {
                             width: geometry.width,
                             height: geometry.height,
@@ -348,11 +363,23 @@ impl X11WmBridgeState {
                         node.constraints.min_size,
                         node.constraints.max_size,
                     );
-                    let geometry = Rect {
+                    if let Some(bounds) = self.root_bounds {
+                        size.width = size.width.min(bounds.width);
+                        size.height = size.height.min(bounds.height);
+                    }
+                    let mut geometry = Rect {
                         width: size.width,
                         height: size.height,
                         ..geometry
                     };
+                    if let Some(bounds) = self.root_bounds {
+                        geometry.x = geometry
+                            .x
+                            .clamp(bounds.x, bounds.x + bounds.width - geometry.width);
+                        geometry.y = geometry
+                            .y
+                            .clamp(bounds.y, bounds.y + bounds.height - geometry.height);
+                    }
                     commands.push(WmCommand::ConfigureSurface(SurfaceSizeRequest {
                         surface: node.surface,
                         size,

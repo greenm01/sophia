@@ -62,6 +62,7 @@ enum ServerCommand {
     Unmap(SyntheticXWindowId),
     Destroy(SyntheticXWindowId),
     Key { keycode: u8, pressed: bool },
+    Wake,
     QueryFocus(SyncSender<Option<SyntheticXWindowId>>),
 }
 
@@ -232,6 +233,18 @@ impl LegacyX11WmBridgeRuntime {
             }
             _ => None,
         };
+        let profiled_focus = match &request.kind {
+            WmRequestKind::ActionActivated(activation) => match activation.action.raw() {
+                XMONAD_ACTION_FOCUS_NEXT => activation
+                    .focused_surface
+                    .and_then(|surface| self.bridge.cycle_focus_window(surface, true)),
+                XMONAD_ACTION_FOCUS_PREVIOUS => activation
+                    .focused_surface
+                    .and_then(|surface| self.bridge.cycle_focus_window(surface, false)),
+                _ => None,
+            },
+            _ => None,
+        };
 
         while self.legacy.try_recv().is_ok() {}
         let update = self.bridge.apply_engine_request(request)?;
@@ -252,6 +265,9 @@ impl LegacyX11WmBridgeRuntime {
                     .send(ServerCommand::Key { keycode, pressed })
                     .map_err(|_| BridgeRuntimeError::new("legacy WM server stopped"))?;
             }
+            commands
+                .send(ServerCommand::Wake)
+                .map_err(|_| BridgeRuntimeError::new("legacy WM server stopped"))?;
         }
 
         let started = Instant::now();
@@ -310,7 +326,17 @@ impl LegacyX11WmBridgeRuntime {
             )));
         }
         let mut requests = configured.into_values().collect::<Vec<_>>();
-        if let Some(focus) = focus {
+        let managed_focus = match &request.kind {
+            WmRequestKind::ManageSurface(manage) => {
+                self.bridge.synthetic_window(manage.node.surface)
+            }
+            _ => None,
+        };
+        if let Some(window) = profiled_focus {
+            requests.push(LegacyWmRequest::FocusWindow { window });
+        } else if let Some(window) = managed_focus {
+            requests.push(LegacyWmRequest::FocusWindow { window });
+        } else if let Some(focus) = focus {
             requests.push(focus);
         } else {
             let (focus_sender, focus_receiver) = mpsc::sync_channel(1);
@@ -319,10 +345,10 @@ impl LegacyX11WmBridgeRuntime {
                 .ok_or_else(|| BridgeRuntimeError::new("legacy WM server stopped"))?
                 .send(ServerCommand::QueryFocus(focus_sender))
                 .map_err(|_| BridgeRuntimeError::new("legacy WM server stopped"))?;
-            if let Some(window) = focus_receiver
+            let queried_focus = focus_receiver
                 .recv_timeout(Duration::from_millis(500))
-                .map_err(|_| BridgeRuntimeError::new("legacy WM focus query timed out"))?
-            {
+                .map_err(|_| BridgeRuntimeError::new("legacy WM focus query timed out"))?;
+            if let Some(window) = queried_focus {
                 requests.push(LegacyWmRequest::FocusWindow { window });
             }
         }
@@ -629,9 +655,15 @@ fn serve_legacy_wm(
         BridgeRuntimeError::new(format!("failed to configure X11 socket timeout: {error}"))
     })?;
     let mut state = XServerState::new();
+    let mut pending_focus_queries = Vec::new();
+    let mut last_socket_activity = Instant::now();
     loop {
         loop {
             match commands.try_recv() {
+                Ok(ServerCommand::QueryFocus(reply)) => {
+                    pending_focus_queries.push(reply);
+                    last_socket_activity = Instant::now();
+                }
                 Ok(command) => apply_server_command(stream, &mut state, command)?,
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => return Ok(()),
@@ -641,6 +673,11 @@ fn serve_legacy_wm(
         match stream.read_exact(&mut header) {
             Ok(()) => {}
             Err(error) if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
+                if last_socket_activity.elapsed() >= QUIET_PERIOD {
+                    for reply in pending_focus_queries.drain(..) {
+                        let _ = reply.send(synthetic_id(&state, state.input_focus));
+                    }
+                }
                 continue;
             }
             Err(error) if error.kind() == ErrorKind::UnexpectedEof => return Ok(()),
@@ -660,6 +697,7 @@ fn serve_legacy_wm(
         stream.read_exact(&mut body).map_err(|error| {
             BridgeRuntimeError::new(format!("failed to read legacy WM request body: {error}"))
         })?;
+        last_socket_activity = Instant::now();
         state.sequence = state.sequence.wrapping_add(1);
         if std::env::var_os("SOPHIA_X11_WM_TRACE").is_some() {
             eprintln!(
@@ -703,11 +741,11 @@ fn apply_server_command(
         }
         ServerCommand::Unmap(window) => {
             state.windows.remove(&window.raw());
-            write_window_event(stream, 18, window.raw())?;
+            write_window_event(stream, state.sequence, 18, window.raw())?;
         }
         ServerCommand::Destroy(window) => {
             state.windows.remove(&window.raw());
-            write_window_event(stream, 17, window.raw())?;
+            write_window_event(stream, state.sequence, 17, window.raw())?;
         }
         ServerCommand::Key { keycode, pressed } => {
             let modifiers = 1 << 3;
@@ -726,9 +764,10 @@ fn apply_server_command(
             event.push(0);
             write_packet(stream, &event)?;
         }
-        ServerCommand::QueryFocus(reply) => {
-            let _ = reply.send(synthetic_id(state, state.input_focus));
+        ServerCommand::Wake => {
+            write_configure_notify(stream, state.sequence, SYNTHETIC_ROOT_XID, state.root)?;
         }
+        ServerCommand::QueryFocus(_) => unreachable!("focus queries are socket-order barriers"),
     }
     Ok(())
 }
@@ -1211,10 +1250,12 @@ fn write_configure_notify(
 
 fn write_window_event(
     stream: &mut UnixStream,
+    sequence: u16,
     event_type: u8,
     window: u32,
 ) -> Result<(), BridgeRuntimeError> {
-    let mut event = vec![event_type, 0, 0, 0];
+    let mut event = vec![event_type, 0];
+    push_u16(&mut event, sequence);
     push_u32(&mut event, window);
     push_u32(&mut event, window);
     event.resize(32, 0);

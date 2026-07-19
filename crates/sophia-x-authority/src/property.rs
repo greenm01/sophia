@@ -207,6 +207,19 @@ impl XPropertyTable {
             .collect()
     }
 
+    pub fn windows_with_property(
+        &self,
+        namespace: NamespaceId,
+        property: XAtom,
+    ) -> Vec<XResourceId> {
+        self.records
+            .keys()
+            .filter_map(|(record_namespace, window, record_property)| {
+                (*record_namespace == namespace && *record_property == property).then_some(*window)
+            })
+            .collect()
+    }
+
     pub fn remove_window(&mut self, namespace: NamespaceId, window: XResourceId) -> usize {
         let before = self.records.len();
         self.records

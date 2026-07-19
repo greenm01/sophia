@@ -1345,10 +1345,20 @@ impl PersistentXtermSessionConfig {
     }
 }
 
-#[derive(Default)]
 struct FirefoxM8StageProof {
-    baseline_title_bytes: Option<usize>,
+    baseline_title_bytes: [Option<usize>; 16],
+    active_residue: Option<usize>,
     completed_stage: usize,
+}
+
+impl Default for FirefoxM8StageProof {
+    fn default() -> Self {
+        Self {
+            baseline_title_bytes: [None; 16],
+            active_residue: None,
+            completed_stage: 0,
+        }
+    }
 }
 
 impl FirefoxM8StageProof {
@@ -1369,12 +1379,14 @@ impl FirefoxM8StageProof {
         if property_name != "_NET_WM_NAME" || byte_len == 0 || byte_len > 256 {
             return Vec::new();
         }
-        let Some(baseline) = self.baseline_title_bytes else {
-            self.baseline_title_bytes = Some(byte_len);
-            return Vec::new();
-        };
+        let residue = byte_len % 16;
         if self.completed_stage == 0 {
+            let Some(baseline) = self.baseline_title_bytes[residue] else {
+                self.baseline_title_bytes[residue] = Some(byte_len);
+                return Vec::new();
+            };
             if byte_len == baseline.saturating_add(16) {
+                self.active_residue = Some(residue);
                 self.completed_stage = 2;
                 return vec![
                     (Self::STAGES[0], 0, baseline),
@@ -1382,13 +1394,21 @@ impl FirefoxM8StageProof {
                 ];
             }
             if byte_len != baseline {
-                self.baseline_title_bytes = Some(byte_len);
+                self.baseline_title_bytes[residue] = Some(byte_len);
             }
             return Vec::new();
         }
         if self.completed_stage >= Self::STAGES.len() {
             return Vec::new();
         }
+        let active_residue = self
+            .active_residue
+            .expect("stage activation records a residue");
+        if residue != active_residue {
+            return Vec::new();
+        }
+        let baseline = self.baseline_title_bytes[active_residue]
+            .expect("stage activation retains its baseline");
         let expected = baseline.saturating_add(self.completed_stage.saturating_mul(16));
         if byte_len != expected {
             return Vec::new();
@@ -1849,6 +1869,30 @@ impl LiveWmSession {
         self.request(request, layout, output)
     }
 
+    fn notify_surface_removed(
+        &mut self,
+        surface: SurfaceId,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let Some(workspace) = self.workspace_state.surface_workspace(surface) else {
+            return Ok(());
+        };
+        let request = WmRequestPacket {
+            transaction: self.mint_transaction()?,
+            kind: WmRequestKind::SurfaceRemoved { surface, workspace },
+        };
+        let response = self
+            .transport
+            .as_mut()
+            .ok_or("WM transport is unavailable")?
+            .request(&request)?;
+        self.requests = self.requests.saturating_add(1);
+        if response.commands.len() > 8_192 {
+            return Err("WM removal response exceeds the live command limit".into());
+        }
+        self.workspace_state.remove_surface(surface);
+        Ok(())
+    }
+
     fn request_action(
         &mut self,
         action: WmActionId,
@@ -2286,6 +2330,9 @@ impl PersistentLiveLayout {
             pending.requested_sizes.len(),
             resize_state,
         );
+        if let Some(surface) = pending.focus {
+            self.focus_to_apply = Some((pending.transaction, surface));
+        }
         Ok(Some(LiveWmCommitResult {
             update: WmTransactionUpdate {
                 commit: TransactionCommit {
@@ -2459,11 +2506,15 @@ fn validate_live_wm_transaction(
     bounds: Rect,
 ) -> Result<(), Box<dyn std::error::Error>> {
     for placement in &transaction.render_positions {
-        if !layout.layers.contains_key(&placement.surface)
-            || placement.geometry.is_empty()
-            || !rect_is_within(bounds, placement.geometry)
-        {
-            return Err("live WM returned an unknown, empty, or out-of-bounds placement".into());
+        let known = layout.layers.contains_key(&placement.surface);
+        let empty = placement.geometry.is_empty();
+        let within = rect_is_within(bounds, placement.geometry);
+        if !known || empty || !within {
+            return Err(format!(
+                "live WM returned invalid placement: known={known} empty={empty} within={within} geometry={:?} bounds={bounds:?}",
+                placement.geometry
+            )
+            .into());
         }
     }
     for request in &transaction.requested_sizes {
@@ -2677,6 +2728,10 @@ fn execute_committed_session_actions(
                     .client_routes
                     .client_for_surface(surface)
                     .ok_or("WM close action has no X11 client route")?;
+                println!(
+                    "sophia_live_wm schema=1 status=close_routed transaction={} target=surface surface={surface:?} client={client:?}",
+                    transaction.raw()
+                );
                 control_sender.try_send(XAuthorityClientControlCommand {
                     client,
                     command: XAuthorityControlCommand::CloseSurface {
@@ -2826,6 +2881,7 @@ fn run_session_loop(
     let mut protocol_error_count = 0usize;
     let mut expected_protocol_error_count = 0usize;
     let mut firefox_m8_proof = FirefoxM8StageProof::default();
+    let mut firefox_m8_page_ready_reported = false;
     let mut firefox_m8_selection_owner_changes = 0usize;
     let mut firefox_m8_selection_conversions = 0usize;
     let mut first_protocol_error = None;
@@ -3397,6 +3453,15 @@ fn run_session_loop(
                     firefox_m8_selection_conversions = firefox_m8_selection_conversions
                         .saturating_add(usize::from(batch.selection_conversion));
                     for metadata in &batch.metadata {
+                        if !firefox_m8_page_ready_reported
+                            && metadata.property_name == "_NET_WM_NAME"
+                            && metadata.byte_len == 36
+                        {
+                            firefox_m8_page_ready_reported = true;
+                            println!(
+                                "sophia_firefox_m8 schema=1 status=page_ready title_bytes=36 content=redacted"
+                            );
+                        }
                         for (stage, index, title_bytes) in
                             firefox_m8_proof.observe(&metadata.property_name, metadata.byte_len)
                         {
@@ -3425,6 +3490,11 @@ fn run_session_loop(
                 cpu_buffer_updates =
                     cpu_buffer_updates.saturating_add(batch.cpu_buffer_updates.len());
                 let removed_surfaces = batch.removed_surfaces.clone();
+                if let Some(wm_session) = wm_session.as_mut() {
+                    for surface in &removed_surfaces {
+                        wm_session.notify_surface_removed(*surface)?;
+                    }
+                }
                 let _ = layout.observe_authority_batch(&batch);
                 let mut wm_update = layout.resolve_pending();
                 if !resize_proof_complete
@@ -3683,14 +3753,41 @@ fn run_session_loop(
                         focused_client_control = Some((transaction, surface.surface));
                     }
                 }
-                if let Some((transaction, surface)) = layout.focus_to_apply.take()
-                    && focus.focus_surface(seat, surface, runtime.committed_surfaces())
-                        == InputFocusDecision::Focused
-                {
+                if let Some((transaction, surface)) = layout.focus_to_apply.take() {
+                    let decision = focus.focus_surface(seat, surface, runtime.committed_surfaces());
+                    if decision == InputFocusDecision::Focused && wm_session.is_some() {
+                        let client = layout
+                            .client_routes
+                            .client_for_surface(surface)
+                            .ok_or("WM focus has no X11 client route")?;
+                        control_sender.try_send(XAuthorityClientControlCommand {
+                            client,
+                            command: XAuthorityControlCommand::FocusSurface {
+                                transaction,
+                                surface,
+                            },
+                        })?;
+                        let acknowledgement =
+                            control_ack_receiver.recv_timeout(Duration::from_millis(500))?;
+                        if acknowledgement.client != client
+                            || acknowledgement.acknowledgement.transaction != transaction
+                            || acknowledgement.acknowledgement.surface != surface
+                            || acknowledgement.acknowledgement.outcome
+                                != XAuthorityControlOutcome::Delivered
+                        {
+                            return Err("X Authority rejected WM focus reconciliation".into());
+                        }
+                    }
                     println!(
-                        "sophia_live_wm schema=1 status=focus_committed transaction={} target=surface",
+                        "sophia_live_wm schema=1 status=focus_reconciled transaction={} target=surface surface={surface:?} outcome={decision:?}",
                         transaction.raw()
                     );
+                    if decision == InputFocusDecision::Focused {
+                        println!(
+                            "sophia_live_wm schema=1 status=focus_committed transaction={} target=surface",
+                            transaction.raw()
+                        );
+                    }
                 }
                 if !focus_ready_reported && focus.focused_surface(seat).is_some() {
                     println!("sophia_live_session_input_pipeline schema=1 status=focus_ready");

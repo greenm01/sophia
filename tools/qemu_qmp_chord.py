@@ -7,8 +7,8 @@ import sys
 import time
 
 ALLOWED = {
-    "shift", "ctrl", "alt", "meta_l", "a", "c", "f", "j", "k", "p", "q", "v",
-    "spc", "tab", "insert", "1", "2", "ret",
+    "shift", "ctrl", "alt", "meta_l", "a", "c", "f", "j", "k", "l", "p", "q", "v", "w",
+    "spc", "tab", "insert", "1", "2", "ret", "f6",
 }
 
 

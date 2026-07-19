@@ -147,6 +147,7 @@ elif [ "$scenario" = "xmonad-m7" ] || [ "$scenario" = "xmonad-m8-launcher" ] || 
         poweroff -f
     fi
     runtime_ms=60000
+    [ "$scenario" != "xmonad-m8-mix" ] || runtime_ms=180000
     [ "$scenario" != "xmonad-m8-soak" ] || runtime_ms=1860000
     set -- sophia-live-session --display=:181 --native-scanout --max-runtime-ms="$runtime_ms"
     if [ "$scenario" = "xmonad-m8-launcher" ]; then
@@ -164,8 +165,14 @@ elif [ "$scenario" = "xmonad-m7" ] || [ "$scenario" = "xmonad-m8-launcher" ] || 
             fi
         done
         export MOZ_ENABLE_WAYLAND=0
+        export MOZ_FORCE_DISABLE_E10S=1
         export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
         mkdir -p /tmp/firefox-profile
+        printf '%s\n' \
+            'user_pref("browser.tabs.remote.autostart", false);' \
+            'user_pref("browser.tabs.remote.autostart.2", false);' \
+            'user_pref("fission.autostart", false);' \
+            > /tmp/firefox-profile/user.js
         set -- "$@" --session-mode=normal
         set -- "$@" --session-app=terminal=/usr/bin/xterm
         set -- "$@" --session-app-arg=terminal=-cm --session-app-arg=terminal=-dc

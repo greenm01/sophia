@@ -103,12 +103,21 @@ impl TryFrom<Vec<u8>> for X11SocketOutputRecord {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct X11SetupSocketError {
     message: String,
+    client_disconnect: bool,
 }
 
 impl X11SetupSocketError {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            client_disconnect: false,
+        }
+    }
+
+    fn client_disconnect(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            client_disconnect: true,
         }
     }
 }
@@ -1725,8 +1734,15 @@ impl XServerFrontendRouteBroker {
             let mut progressed = false;
             match self.routed_input_receiver.try_recv() {
                 Ok(route) => {
-                    self.registry.route_engine_input(route)?;
-                    routed = routed.saturating_add(1);
+                    match self.registry.route_engine_input(route) {
+                        Ok(()) => routed = routed.saturating_add(1),
+                        Err(
+                            XServerFrontendRouteError::UnknownSurface { .. }
+                            | XServerFrontendRouteError::ClientQueueDisconnected { .. }
+                            | XServerFrontendRouteError::UnknownClient { .. },
+                        ) => {}
+                        Err(error) => return Err(error),
+                    }
                     progressed = true;
                 }
                 Err(TryRecvError::Empty | TryRecvError::Disconnected) => {}
@@ -2630,7 +2646,10 @@ impl XServerFrontendRouteRegistry {
         event: XClientEvent,
     ) -> Result<(), XServerFrontendRouteError> {
         let sender = self.client_senders(client)?.protocol;
-        self.route_to_client(client, sender, event)
+        match self.route_to_client(client, sender, event) {
+            Err(XServerFrontendRouteError::ClientQueueDisconnected { .. }) => Ok(()),
+            result => result,
+        }
     }
 
     fn client_senders(
@@ -4139,6 +4158,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 state.atoms.clone(),
                 state.properties.clone(),
                 state.runtime.clone(),
+                resource_id_range,
                 namespace,
                 client,
                 channels,
@@ -5112,6 +5132,7 @@ fn spawn_x11_control_writer(
     atoms: Arc<Mutex<XAtomTable>>,
     properties: Arc<Mutex<XPropertyTable>>,
     runtime: Arc<Mutex<XAuthorityRuntime>>,
+    resource_id_range: crate::XWireClientResourceRange,
     namespace: NamespaceId,
     client: XServerFrontendClientId,
     channels: X11ControlChannels,
@@ -5247,22 +5268,38 @@ fn spawn_x11_control_writer(
                         terminate_client!(transaction, surface);
                     };
                     drop(atoms);
-                    let supported = properties
-                        .lock()
-                        .map_err(|_| X11SetupSocketError::new("X11 property table lock poisoned"))?
-                        .get(namespace, window, protocols)
-                        .is_some_and(|record| {
-                            record.format == 32
-                                && record
-                                    .bytes
-                                    .chunks_exact(4)
-                                    .any(|bytes| byte_order.u32(bytes) == delete)
-                        });
-                    if !supported {
-                        terminate_client!(transaction, surface);
-                    }
+                    let properties = properties.lock().map_err(|_| {
+                        X11SetupSocketError::new("X11 property table lock poisoned")
+                    })?;
+                    let protocol_windows = properties.windows_with_property(namespace, protocols);
+                    let advertises_delete = |candidate: &XResourceId| {
+                        u32::try_from(candidate.local.raw())
+                            .is_ok_and(|raw| resource_id_range.owns_new_resource(raw))
+                            && properties
+                                .get(namespace, *candidate, protocols)
+                                .is_some_and(|record| {
+                                    record.format == 32
+                                        && record
+                                            .bytes
+                                            .chunks_exact(4)
+                                            .any(|bytes| byte_order.u32(bytes) == delete)
+                                })
+                    };
+                    let window = protocol_windows
+                        .iter()
+                        .find(|candidate| **candidate == window && advertises_delete(candidate))
+                        .copied()
+                        .or_else(|| {
+                            protocol_windows
+                                .iter()
+                                .find(|candidate| advertises_delete(candidate))
+                                .copied()
+                        })
+                        .unwrap_or(window);
                     let mut bytes = [0_u8; 32];
-                    bytes[0] = 33;
+                    // ICCCM WM_DELETE_WINDOW is delivered via SendEvent, so
+                    // the synthetic-event bit must be set on ClientMessage.
+                    bytes[0] = 33 | 0x80;
                     bytes[1] = 32;
                     write_control_u32(byte_order, &mut bytes[4..8], window.local.raw() as u32);
                     write_control_u32(byte_order, &mut bytes[8..12], protocols);
@@ -5580,7 +5617,15 @@ fn spawn_x11_input_event_writer(
                     focus_sent_to = Some(delivered_focus);
                 }
                 stream.write_all(&record).map_err(|error| {
-                    X11SetupSocketError::new(format!("failed to write X11 input event: {error}"))
+                    if is_x11_client_disconnect(&error) {
+                        X11SetupSocketError::client_disconnect(format!(
+                            "X11 client disconnected while writing input: {error}"
+                        ))
+                    } else {
+                        X11SetupSocketError::new(format!(
+                            "failed to write X11 input event: {error}"
+                        ))
+                    }
                 })?;
                 if let XAuthorityInputEvent::Key(key) = event {
                     let previous = xkb_modifiers.swap(key.state, Ordering::AcqRel);
@@ -5630,6 +5675,9 @@ fn spawn_x11_input_event_writer(
                     XAuthorityInputDeliveryOutcome::Flushed,
                 )?,
                 Err(error) => {
+                    if error.client_disconnect {
+                        return Ok(());
+                    }
                     let _ = receiver.send_delivery(
                         client,
                         delivery,
