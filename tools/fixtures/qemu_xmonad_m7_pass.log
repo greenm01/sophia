@@ -1,0 +1,17 @@
+sophia_live_wm schema=1 status=ready adapter=external socket=private restarts=0
+sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+j
+sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+k
+sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+spc
+sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+2
+sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+shift+1
+sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+shift+ret
+sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+shift+c
+sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+shift+q
+sophia_live_wm schema=1 status=session_action_committed transaction=10 action=LaunchTerminal
+sophia_live_wm schema=1 status=layout_committed transaction=10 surfaces=3 moved_surfaces=1 configure_acks=1 outcome=Committed
+sophia_live_wm schema=1 status=session_action_committed transaction=11 action=CloseFocused
+sophia_live_wm schema=1 status=session_action_committed transaction=12 action=Logout
+sophia_qemu_xmonad schema=1 status=restart_injected target=compatibility_bridge
+sophia_live_wm schema=1 status=restarted restarts=1 preserved_layout=true
+sophia_live_session schema=14 status=bounded_complete cpu_layers=2 wm_policy=external wm_requests=12 wm_committed=12 wm_degraded=false cleanup=clean
+sophia_qemu_guest schema=1 status=complete scenario=xmonad-m7

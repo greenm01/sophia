@@ -367,10 +367,8 @@ released DRM master, run:
 tools/finish_milestones_1_2.sh
 ```
 
-The combined helper auto-selects the keyboard when exactly one stable keyboard
-path exists, reruns the synthetic-window real-xmonad compatibility gate, and
-executes both physical proofs. These remain separate processes; this helper does
-not claim that xmonad is wired into the live xterm session. It
+The historical combined helper auto-selects the keyboard when exactly one stable
+keyboard path exists and executes the retained physical diagnostics. It
 refuses to proceed while River, Niri, Sway, Hyprland, KWin, or Xorg is active,
 so invoking it accidentally from the live graphical session cannot take DRM
 master. Set `SOPHIA_OPERATOR_KEYBOARD` only when more than one keyboard path is
@@ -379,16 +377,22 @@ before opening the physical keyboard and an EXIT trap restores it with
 `sudo sv up keyd` after success, failure, or interruption. There is no separate
 confirmation prompt whose Return could enter the exact input proof.
 
-The integrated operator path is separate:
+The normal supervised operator path is:
 
 ```sh
-tools/run_sophia_xmonad_session.sh
+tools/run_sophia_session.sh --wm=xmonad
 ```
 
 It starts the generic bridge as `sophia-live-session`'s supervised WM process,
-uses xmonad only as the selected bridge client, and launches one ordinary real
-xterm with a clean interactive `/bin/sh`. Stop it from another TTY with
-`tools/stop_sophia_xmonad_session.sh`. A bounded automated form can pass `--max-runtime-ms=10000`,
+uses xmonad only as the selected bridge client, and launches approved applications
+from the bounded normal-session registry. `--wm=native` selects the Sophia WM API
+demo and `--wm=none` runs without an external policy process. The unattended
+`tools/qemu_xmonad_m8_launcher_acceptance.sh` gate proves startup, xmonad-driven
+terminal launch and close, logout, bridge restart recovery, and clean two-output
+shutdown. The frozen Milestone 7 regression remains
+`tools/qemu_xmonad_m7_acceptance.sh`.
+
+The older bounded proof wrapper can pass `--max-runtime-ms=10000`,
 `--inject-text=sophia`, and `--exit-after-input-proof`; passing evidence requires one
 WM request, one acknowledged resize, one committed layout with a moved surface,
 the proof shell to receive exactly `sophia`, and a later terminal pixel change.

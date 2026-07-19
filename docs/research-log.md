@@ -2,29 +2,6 @@
 
 This file records decisions and unresolved questions for the active milestone.
 Completed evidence is archived in `research-log-archive.md`.
-
-## 2026-07-18: Real xmonad QEMU Acceptance
-
-The Milestone 7 diskless QEMU gate now boots the production Sophia session with
-the locally built upstream xmonad binary, two virtio-gpu outputs, two initial
-xterms, and physical virtio keyboard input injected only through QMP. The gate
-exercises focus next/previous, layout rotation, workspace view and move,
-approved terminal launch, close, logout, and a forced compatibility-bridge
-restart. The strict verifier requires every chord, all three committed session
-actions, a three-surface post-launch layout, preserved committed state after
-restart, non-degraded external WM policy, and clean guest completion.
-
-Two transaction-lifecycle gaps surfaced during the proof. Startup management
-could overlap resize transactions when multiple new surfaces arrived together,
-and post-restart input could race the recovery relayout. Engine now admits one
-unmanaged surface per transaction, while the harness waits for the recovery
-layout commit before resuming input. Immediate action proposals also now install
-their accepted workspace and session-action effects instead of discarding them.
-
-The close proof exposed the ICCCM fallback case: clients that do not advertise
-`WM_DELETE_WINDOW` must have their X connection terminated rather than aborting
-the desktop session. Cooperative clients still receive the polite client
-message; the authority frontend now performs the bounded connection fallback.
 ## 2026-07-14: Explicit Final Scanout Retirement
 
 The post-completion X11 allocator failure exposed a teardown ownership gap.
@@ -1956,3 +1933,22 @@ and advertised session tokens. The profiled legacy bridge registers the bundled
 xmonad chord set and translates bounded workspace and named-action requests.
 The full offline all-feature suite passes. Atomic delayed-commit persistence,
 named-action execution, xmonad focus/layout synthesis, and QEMU remain open.
+
+## 2026-07-18: Normal xmonad Session Launcher
+
+Milestone 7 is archived with its unattended QEMU gate retained as a frozen
+regression. Its verifier now has a positive fixture plus negative mutations and
+fails explicitly when any guest failure marker is present.
+
+`sophia-live-session --session-mode=normal` now owns a bounded application
+registry with explicit startup and named-action mappings. Applications are
+spawned without a shell in dedicated process groups; normal exit is nonfatal,
+and shutdown sends TERM to the group before a bounded KILL fallback. The
+operator launcher selects xmonad compatibility policy, native Sophia WM policy,
+or no external WM without placing a WM identity in Engine.
+
+The first Milestone 8 QEMU gate starts one registered xterm, survives an
+intentional bridge/xmonad restart with layout preserved, launches a second
+registered xterm through xmonad's terminal action, closes it, logs out, and
+retires two-output native presentation without cleanup debt. The frozen
+Milestone 7 two-xterm gate also passes against the same build.

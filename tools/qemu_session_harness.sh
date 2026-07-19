@@ -8,8 +8,8 @@ KERNEL_IMAGE="${SOPHIA_QEMU_KERNEL:-/boot/vmlinuz-$KERNEL_VERSION}"
 INITRAMFS="${SOPHIA_QEMU_INITRAMFS:-$OUT_DIR/sophia-$KERNEL_VERSION.img}"
 SCENARIO="${SOPHIA_QEMU_SCENARIO:-session}"
 TWO_XTERM="${SOPHIA_QEMU_TWO_XTERM:-0}"
-if [[ "$SCENARIO" != "session" && "$SCENARIO" != "emergency-recovery" && "$SCENARIO" != "gtk-classic" && "$SCENARIO" != "gtk-confined" && "$SCENARIO" != "xmonad-m7" ]]; then
-    echo "SOPHIA_QEMU_SCENARIO must be session, emergency-recovery, gtk-classic, gtk-confined, or xmonad-m7" >&2
+if [[ "$SCENARIO" != "session" && "$SCENARIO" != "emergency-recovery" && "$SCENARIO" != "gtk-classic" && "$SCENARIO" != "gtk-confined" && "$SCENARIO" != "xmonad-m7" && "$SCENARIO" != "xmonad-m8-launcher" ]]; then
+    echo "SOPHIA_QEMU_SCENARIO must include a supported session or xmonad scenario" >&2
     exit 1
 fi
 if [[ "$TWO_XTERM" != "0" && "$TWO_XTERM" != "1" ]]; then
@@ -24,8 +24,8 @@ if [[ "$SCENARIO" == "emergency-recovery" ]]; then
     DEFAULT_EVIDENCE_FILE="/tmp/sophia-qemu-emergency-recovery.log"
 elif [[ "$SCENARIO" == gtk-* ]]; then
     DEFAULT_EVIDENCE_FILE="/tmp/sophia-qemu-$SCENARIO.log"
-elif [[ "$SCENARIO" == "xmonad-m7" ]]; then
-    DEFAULT_EVIDENCE_FILE="/tmp/sophia-qemu-xmonad-m7.log"
+elif [[ "$SCENARIO" == xmonad-* ]]; then
+    DEFAULT_EVIDENCE_FILE="/tmp/sophia-qemu-$SCENARIO.log"
 else
     DEFAULT_EVIDENCE_FILE="/tmp/sophia-qemu-session.log"
 fi
@@ -84,7 +84,7 @@ if [[ "$SCENARIO" == "emergency-recovery" ]]; then
     echo "sophia_qemu_recovery schema=1 status=starting isolation=headless control=qmp-unix host_drm=none host_vt=none keyboard=virtio chord=ctrl-alt-backspace" | tee -a "$EVIDENCE_FILE"
 elif [[ "$SCENARIO" == gtk-* ]]; then
     echo "sophia_qemu_gtk schema=1 status=starting isolation=headless control=qmp-unix host_drm=none host_vt=none keyboard=virtio mouse=virtio scenario=$SCENARIO" | tee -a "$EVIDENCE_FILE"
-elif [[ "$SCENARIO" == "xmonad-m7" ]]; then
+elif [[ "$SCENARIO" == xmonad-* ]]; then
     echo "sophia_qemu_xmonad schema=1 status=starting isolation=headless control=qmp-unix profile=xmonad windows=2" | tee -a "$EVIDENCE_FILE"
 else
     echo "sophia_qemu_session schema=3 status=starting isolation=headless display_sink=vnc-unix control=qmp-unix host_drm=none host_vt=none guest_network=none storage=none gpu=virtio-gpu gpu_devices=2 gpu_heads=2 keyboard=virtio mouse=virtio ticks=300" | tee -a "$EVIDENCE_FILE"
@@ -187,7 +187,7 @@ if [[ "$SCENARIO" == "emergency-recovery" ]]; then
     exit 0
 fi
 
-if [[ "$SCENARIO" == "xmonad-m7" ]]; then
+if [[ "$SCENARIO" == xmonad-* ]]; then
     ready=false
     for _ in $(seq 1 800); do
         if grep -q '^sophia_live_wm schema=1 status=ready ' "$EVIDENCE_FILE" \
@@ -258,7 +258,11 @@ if [[ "$SCENARIO" == "xmonad-m7" ]]; then
         echo "sophia_qemu_xmonad schema=1 status=failed reason=guest_exit qemu_exit=$qemu_status logger_exit=$logger_status" | tee -a "$EVIDENCE_FILE"
         exit 1
     fi
-    "$ROOT_DIR/tools/verify_qemu_xmonad_m7_evidence.sh" "$EVIDENCE_FILE"
+    if [[ "$SCENARIO" == "xmonad-m7" ]]; then
+        "$ROOT_DIR/tools/verify_qemu_xmonad_m7_evidence.sh" "$EVIDENCE_FILE"
+    else
+        "$ROOT_DIR/tools/verify_qemu_xmonad_m8_launcher_evidence.sh" "$EVIDENCE_FILE"
+    fi
     echo "sophia_qemu_xmonad schema=1 status=complete qemu_exit=0" | tee -a "$EVIDENCE_FILE"
     exit 0
 fi

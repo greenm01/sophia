@@ -4,6 +4,25 @@ This file archives completed and prototype roadmap items that previously lived
 in `todo.md`. Keep active work in `todo.md`; keep detailed rationale and
 validation evidence in `docs/research-log.md`.
 
+## 2026-07-18 Interactive WM API And Legacy Bridge
+
+- [x] Negotiated WM API version 2 with fail-closed capability and binding
+  validation before any layout or action traffic.
+- [x] Added Engine-owned physical shortcut routing, nine Engine-owned
+  workspaces, atomic focus/workspace/layout effects, and approved named session
+  actions.
+- [x] Exercised the same blind API through the native demo WM and the generic
+  legacy-WM bridge's metadata-free xmonad profile.
+- [x] Passed the unattended two-output QEMU gate with real xmonad, three real
+  xterm surfaces, physical virtio input, focus/layout/workspace operations,
+  terminal launch, close, logout, bridge restart, and preserved committed state.
+
+Commit `d6ee120` satisfies the milestone exit. The retained `xmonad-m7`
+scenario and strict evidence verifier remain the regression contract.
+Machine-specific DRM and input runs are optional compatibility diagnostics.
+
+---
+
 ---
 
 ## 2026-07-14 X11 Session Correctness

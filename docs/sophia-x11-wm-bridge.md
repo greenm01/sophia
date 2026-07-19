@@ -1,8 +1,8 @@
 # Sophia X11 WM Bridge
 
-Status: generic legacy-WM supervisor boundary implemented; real xmonad
-two-window compatibility proof and one-real-xterm live wiring implemented;
-dedicated-TTY operator evidence remains open.
+Status: generic legacy-WM supervisor boundary and interactive xmonad profile
+implemented; the unattended two-output QEMU gate passes with physical virtio
+input and restart recovery. Dedicated-TTY runs are optional diagnostics.
 
 The Sophia X11 WM Bridge is a legacy window-manager translation daemon. It sits
 in the Sophia WM policy slot and lets existing X11 window managers such as i3,

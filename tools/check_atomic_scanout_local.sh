@@ -12,6 +12,9 @@ cargo test --offline -p sophia-cli --features atomic-scanout-smoke-live --test i
 cargo test --offline -p sophia-renderer-native-egl --features gbm-platform --quiet
 cargo test --offline -p sophia-renderer-live --features "gbm-probe egl-probe" --quiet
 cargo test --offline -p sophia-backend-live --features "libdrm-events libinput-events gbm-probe egl-probe" --quiet
+bash -n tools/qemu_xmonad_m7_acceptance.sh
+bash -n tools/check_qemu_xmonad_m7_verifier.sh
+tools/check_qemu_xmonad_m7_verifier.sh
 tools/check_atomic_scanout_verifiers.sh
 bash -n tools/atomic_scanout_preflight.sh
 bash -n tools/atomic_scanout_smoke.sh

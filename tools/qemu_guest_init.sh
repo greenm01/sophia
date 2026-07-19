@@ -25,6 +25,7 @@ case " $cmdline " in
     *" sophia.scenario=gtk-classic "*) scenario="gtk-classic" ;;
     *" sophia.scenario=gtk-confined "*) scenario="gtk-confined" ;;
     *" sophia.scenario=xmonad-m7 "*) scenario="xmonad-m7" ;;
+    *" sophia.scenario=xmonad-m8-launcher "*) scenario="xmonad-m8-launcher" ;;
 esac
 case " $cmdline " in
     *" sophia.two_xterm=1 "*) two_xterm=true ;;
@@ -34,8 +35,8 @@ if [ "$scenario" = "emergency-recovery" ]; then
     echo "sophia_qemu_guest schema=1 status=booting gpu=virtio-gpu scenario=emergency-recovery"
 elif [ "$scenario" = "gtk-classic" ] || [ "$scenario" = "gtk-confined" ]; then
     echo "sophia_qemu_guest schema=1 status=booting gpu=virtio-gpu scenario=$scenario"
-elif [ "$scenario" = "xmonad-m7" ]; then
-    echo "sophia_qemu_guest schema=1 status=booting gpu=virtio-gpu scenario=xmonad-m7"
+elif [ "$scenario" = "xmonad-m7" ] || [ "$scenario" = "xmonad-m8-launcher" ]; then
+    echo "sophia_qemu_guest schema=1 status=booting gpu=virtio-gpu scenario=$scenario"
 else
     echo "sophia_qemu_guest schema=1 status=booting gpu=virtio-gpu ticks=300"
 fi
@@ -137,17 +138,27 @@ elif [ "$scenario" = "gtk-classic" ] || [ "$scenario" = "gtk-confined" ]; then
         --expect-physical-text=sophia --expect-physical-pointer \
         --inject-surface-resize=640x360 --exit-after-input-proof
     echo "sophia_qemu_gtk schema=1 status=running profile=$profile"
-elif [ "$scenario" = "xmonad-m7" ]; then
+elif [ "$scenario" = "xmonad-m7" ] || [ "$scenario" = "xmonad-m8-launcher" ]; then
     if [ ! -x /usr/bin/xmonad ]; then
         echo "sophia_qemu_xmonad schema=1 status=failed reason=xmonad_missing"
         sync
         poweroff -f
     fi
-    set -- sophia-live-session --display=:181 --native-scanout --max-runtime-ms=60000 \
-        --secondary-terminal --wm-process=/usr/bin/sophia-x11-wm-bridge \
-        --wm-process-arg=--profile=xmonad --wm-process-arg=--wm=/usr/bin/xmonad \
-        --wm-process-arg=--wm-private-alias=xmonad/xmonad-x86_64-linux
-    echo "sophia_qemu_xmonad schema=1 status=running windows=2 profile=xmonad"
+    set -- sophia-live-session --display=:181 --native-scanout --max-runtime-ms=60000
+    if [ "$scenario" = "xmonad-m8-launcher" ]; then
+        set -- "$@" --session-mode=normal
+        set -- "$@" --session-app=terminal=/usr/bin/xterm
+        set -- "$@" --session-app-arg=terminal=-cm --session-app-arg=terminal=-dc
+        set -- "$@" --session-start=terminal --session-action-app=terminal=terminal
+        echo "sophia_qemu_xmonad schema=1 status=running windows=1 profile=xmonad mode=normal"
+    else
+        set -- "$@" --secondary-terminal
+        echo "sophia_qemu_xmonad schema=1 status=running windows=2 profile=xmonad"
+    fi
+    set -- "$@" --wm-process=/usr/bin/sophia-x11-wm-bridge
+    set -- "$@" --wm-process-arg=--profile=xmonad
+    set -- "$@" --wm-process-arg=--wm=/usr/bin/xmonad
+    set -- "$@" --wm-process-arg=--wm-private-alias=xmonad/xmonad-x86_64-linux
 else
     set -- sophia-live-session --display=:181 --native-scanout --max-ticks=300 \
         --expect-physical-text=sophia --expect-physical-pointer
@@ -158,7 +169,7 @@ fi
 
 if [ -n "$input_devices" ]; then
     set -- "$@" "--input-devices=$input_devices"
-if [ "$scenario" = "xmonad-m7" ]; then
+if [ "$scenario" = "xmonad-m7" ] || [ "$scenario" = "xmonad-m8-launcher" ]; then
     (
         while ! pidof sophia-x11-wm-bridge >/dev/null 2>&1; do sleep 0.05; done
         sleep 9
@@ -216,9 +227,9 @@ elif [ "$scenario" = "gtk-classic" ] || [ "$scenario" = "gtk-confined" ]; then
     else
         echo "sophia_qemu_guest schema=1 status=failed reason=gtk_session_exit scenario=$scenario exit_status=$status"
     fi
-elif [ "$scenario" = "xmonad-m7" ]; then
+elif [ "$scenario" = "xmonad-m7" ] || [ "$scenario" = "xmonad-m8-launcher" ]; then
     if [ "$status" -eq 0 ]; then
-        echo "sophia_qemu_guest schema=1 status=complete scenario=xmonad-m7"
+        echo "sophia_qemu_guest schema=1 status=complete scenario=$scenario"
     else
         echo "sophia_qemu_guest schema=1 status=failed reason=xmonad_session_exit exit_status=$status"
     fi

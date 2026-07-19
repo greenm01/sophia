@@ -32,6 +32,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io::{Read, Write};
 use std::num::NonZeroUsize;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::process::CommandExt;
 use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
@@ -495,9 +496,17 @@ pub(crate) fn run_persistent_xterm_session(
     let input_proof_result = (config.input_proof_requested() && config.client.is_none())
         .then(|| LiveInputProofResult::create(display_number))
         .transpose()?;
-    let mut terminal_command = match config.client.as_deref() {
-        Some(client) => application_client_command(client),
-        None => {
+    let normal_primary = config.normal_session.then(|| {
+        config
+            .applications
+            .applications
+            .get(&config.applications.startup[0])
+            .expect("normal session startup application was validated")
+    });
+    let mut terminal_command = match (normal_primary, config.client.as_deref()) {
+        (Some(app), _) => std::process::Command::new(&app.executable),
+        (None, Some(client)) => application_client_command(client),
+        (None, None) => {
             std::process::Command::new(terminal.as_deref().expect("xterm executable is resolved"))
         }
     };
@@ -514,7 +523,12 @@ pub(crate) fn run_persistent_xterm_session(
     } else {
         (None, None)
     };
-    if config.client.is_some() {
+    if let Some(app) = normal_primary {
+        terminal_command
+            .args(&app.arguments)
+            .process_group(0)
+            .stdout(Stdio::inherit());
+    } else if config.client.is_some() {
         terminal_command
             .env("GDK_BACKEND", "x11")
             .env("GTK_USE_PORTAL", "0")
@@ -563,23 +577,35 @@ pub(crate) fn run_persistent_xterm_session(
             .arg("-e")
             .arg(program)
             .args(&config.terminal_exec_args);
+        if let Some(app) = normal_primary {
+            println!(
+                "sophia_session_app schema=1 status=started id={} source=startup",
+                app.id
+            );
+        }
     }
     let child = terminal_command.spawn()?;
-    let mut process = SessionProcessGuard::new(child, Vec::new(), config.socket_path.clone());
+    let mut process = SessionProcessGuard::new(
+        child,
+        Vec::new(),
+        config.socket_path.clone(),
+        config.normal_session,
+    );
     // Admit one primary-client transaction before launching the secondary
     // proof client. Otherwise optimized startup lets both xterms race for the
     // first committed surface, making initial focus nondeterministic.
-    let initial_authority_batch = if config.secondary_terminal {
-        Some(
-            authority_receiver
-                .recv_timeout(Duration::from_secs(5))
-                .map_err(|error| {
-                    format!("primary xterm did not publish a startup frame: {error}")
-                })?,
-        )
-    } else {
-        None
-    };
+    let initial_authority_batch =
+        if config.secondary_terminal || config.applications.startup.len() > 1 {
+            Some(
+                authority_receiver
+                    .recv_timeout(Duration::from_secs(5))
+                    .map_err(|error| {
+                        format!("primary xterm did not publish a startup frame: {error}")
+                    })?,
+            )
+        } else {
+            None
+        };
     if config.secondary_terminal {
         process.add_secondary_child(spawn_secondary_xterm(
             terminal
@@ -592,6 +618,22 @@ pub(crate) fn run_persistent_xterm_session(
                 .as_deref()
                 .or(config.expect_physical_text.as_deref()),
         )?);
+    }
+    for id in config.applications.startup.iter().skip(1) {
+        let app = config
+            .applications
+            .applications
+            .get(id)
+            .expect("normal session startup application was validated");
+        process.add_secondary_child(PersistentXtermSessionConfig::spawn_session_application(
+            app,
+            &config.display,
+            xauthority.path(),
+        )?);
+        println!(
+            "sophia_session_app schema=1 status=started id={} source=startup",
+            app.id
+        );
     }
 
     let mut randr_witness = config
@@ -638,6 +680,17 @@ pub(crate) fn run_persistent_xterm_session(
             size.width, size.height, notifications
         );
     }
+
+    println!(
+        "sophia_live_session_mode schema=1 mode={} configured_apps={} startup_apps={}",
+        if config.normal_session {
+            "normal"
+        } else {
+            "proof"
+        },
+        config.applications.applications.len(),
+        config.applications.startup.len(),
+    );
 
     println!(
         "sophia_live_session schema=7 status=running display={} terminal=xterm runtime=persistent authority_capacity={} input_capacity={} control_capacity={} native_presentation={} physical_input={} pointer_proof={} secondary_terminal={} wm_policy={} namespace_profile={} namespace_request_capabilities={} namespace_publish_capabilities={}",
@@ -797,6 +850,22 @@ fn wm_output_bounds(
         .collect()
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SessionApplicationSpec {
+    id: String,
+    executable: std::path::PathBuf,
+    arguments: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct SessionApplicationConfig {
+    applications: BTreeMap<String, SessionApplicationSpec>,
+    startup: Vec<String>,
+    terminal: Option<String>,
+    launcher: Option<String>,
+    firefox: Option<String>,
+}
+
 #[derive(Clone, Debug)]
 struct PersistentXtermSessionConfig {
     display: String,
@@ -811,6 +880,8 @@ struct PersistentXtermSessionConfig {
     client_args: Vec<String>,
     expect_client_stdout: Option<String>,
     require_client_normal_exit: bool,
+    normal_session: bool,
+    applications: SessionApplicationConfig,
     secondary_terminal: bool,
     max_runtime: Option<Duration>,
     max_ticks: Option<usize>,
@@ -839,6 +910,121 @@ impl PersistentXtermSessionConfig {
     fn from_args(args: &[String]) -> Result<Self, Box<dyn std::error::Error>> {
         let display = arg_value(args, "--display").unwrap_or_else(|| ":77".to_owned());
         let display_number = parse_display_number(&display)?;
+        let normal_session = args.iter().any(|arg| arg == "--session-mode=normal");
+        let mut applications = SessionApplicationConfig::default();
+        for value in args
+            .iter()
+            .filter_map(|arg| arg.strip_prefix("--session-app="))
+        {
+            let (id, executable) = value
+                .split_once('=')
+                .ok_or("--session-app expects ID=/absolute/executable")?;
+            Self::validate_session_app_id(id)?;
+            let executable = std::path::PathBuf::from(executable);
+            if !executable.is_absolute() || executable.as_os_str().is_empty() {
+                return Err("--session-app executable must be an absolute path".into());
+            }
+            if applications.applications.len() >= 32 {
+                return Err("--session-app accepts at most 32 applications".into());
+            }
+            if applications
+                .applications
+                .insert(
+                    id.to_owned(),
+                    SessionApplicationSpec {
+                        id: id.to_owned(),
+                        executable,
+                        arguments: Vec::new(),
+                    },
+                )
+                .is_some()
+            {
+                return Err(format!("duplicate --session-app ID {id:?}").into());
+            }
+        }
+        for value in args
+            .iter()
+            .filter_map(|arg| arg.strip_prefix("--session-app-arg="))
+        {
+            let (id, argument) = value
+                .split_once('=')
+                .ok_or("--session-app-arg expects ID=ARG")?;
+            if argument.len() > 4_096 {
+                return Err("--session-app-arg accepts at most 4096 bytes".into());
+            }
+            let app = applications
+                .applications
+                .get_mut(id)
+                .ok_or_else(|| format!("--session-app-arg references unknown app {id:?}"))?;
+            if app.arguments.len() >= 32 {
+                return Err(format!("session app {id:?} accepts at most 32 arguments").into());
+            }
+            app.arguments.push(argument.to_owned());
+        }
+        for id in args
+            .iter()
+            .filter_map(|arg| arg.strip_prefix("--session-start="))
+        {
+            Self::validate_session_app_id(id)?;
+            if !applications.applications.contains_key(id) {
+                return Err(format!("--session-start references unknown app {id:?}").into());
+            }
+            if applications.startup.iter().any(|entry| entry == id) {
+                return Err(format!("duplicate --session-start ID {id:?}").into());
+            }
+            applications.startup.push(id.to_owned());
+        }
+        for value in args
+            .iter()
+            .filter_map(|arg| arg.strip_prefix("--session-action-app="))
+        {
+            let (action, id) = value
+                .split_once('=')
+                .ok_or("--session-action-app expects terminal|launcher|firefox=ID")?;
+            if !applications.applications.contains_key(id) {
+                return Err(format!("--session-action-app references unknown app {id:?}").into());
+            }
+            let slot = match action {
+                "terminal" => &mut applications.terminal,
+                "launcher" => &mut applications.launcher,
+                "firefox" => &mut applications.firefox,
+                _ => {
+                    return Err(
+                        "--session-action-app expects terminal, launcher, or firefox".into(),
+                    );
+                }
+            };
+            if slot.replace(id.to_owned()).is_some() {
+                return Err(format!("duplicate session action mapping {action:?}").into());
+            }
+        }
+        if normal_session {
+            if applications.startup.is_empty() {
+                return Err("--session-mode=normal requires at least one --session-start".into());
+            }
+            let proof_only = args.iter().any(|arg| {
+                arg == "--secondary-terminal"
+                    || arg == "--proof"
+                    || arg.starts_with("--client=")
+                    || arg.starts_with("--terminal=")
+                    || arg.starts_with("--terminal-exec=")
+                    || arg.starts_with("--inject-text=")
+                    || arg.starts_with("--expect-physical-text=")
+            });
+            if proof_only {
+                return Err(
+                    "--session-mode=normal cannot be combined with proof or terminal-specific options"
+                        .into(),
+                );
+            }
+        } else if !applications.applications.is_empty()
+            || !applications.startup.is_empty()
+            || applications.terminal.is_some()
+            || applications.launcher.is_some()
+            || applications.firefox.is_some()
+        {
+            return Err("session application options require --session-mode=normal".into());
+        }
         let max_runtime = arg_value(args, "--max-runtime-ms")
             .as_deref()
             .map(parse_u64)
@@ -1054,6 +1240,8 @@ impl PersistentXtermSessionConfig {
             require_client_normal_exit,
             secondary_terminal,
             max_runtime,
+            normal_session,
+            applications,
             max_ticks,
             inject_text,
             expect_physical_text,
@@ -1070,6 +1258,7 @@ impl PersistentXtermSessionConfig {
             )),
             input_quiet_msec: SESSION_INPUT_QUIET_MSEC,
             namespace_profile,
+
             namespace_capabilities: NamespaceCapabilities::NONE,
             xkb_config,
             inject_output_size,
@@ -1080,12 +1269,55 @@ impl PersistentXtermSessionConfig {
         })
     }
 
+    fn validate_session_app_id(id: &str) -> Result<(), Box<dyn std::error::Error>> {
+        if id.is_empty()
+            || id.len() > 32
+            || !id.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-' || byte == b'_'
+            })
+        {
+            return Err(
+                "session application IDs accept 1-32 lowercase ASCII letters, digits, '-' or '_'"
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+
     fn input_proof_requested(&self) -> bool {
         self.inject_text.is_some() || self.expect_physical_text.is_some()
     }
 
     fn application_proof_requested(&self) -> bool {
         self.client.is_some()
+    }
+
+    fn application_for_action(&self, action: WmSessionAction) -> Option<&SessionApplicationSpec> {
+        let id = match action {
+            WmSessionAction::LaunchTerminal => self.applications.terminal.as_ref(),
+            WmSessionAction::LaunchApplicationMenu => self.applications.launcher.as_ref(),
+            WmSessionAction::LaunchFirefox => self.applications.firefox.as_ref(),
+            WmSessionAction::CloseFocused | WmSessionAction::Logout => None,
+        }?;
+        self.applications.applications.get(id)
+    }
+    fn spawn_session_application(
+        app: &SessionApplicationSpec,
+        display: &str,
+        xauthority: &std::path::Path,
+    ) -> Result<Child, Box<dyn std::error::Error>> {
+        let mut command = std::process::Command::new(&app.executable);
+        command
+            .args(&app.arguments)
+            .env("DISPLAY", display)
+            .env("XAUTHORITY", xauthority)
+            .env_remove("ENV")
+            .env_remove("BASH_ENV")
+            .process_group(0)
+            .stdin(Stdio::null())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit());
+        Ok(command.spawn()?)
     }
 }
 
@@ -1367,11 +1599,16 @@ impl LiveWmSession {
         );
         let workspace_state =
             WmWorkspaceState::new(wm_output_bounds(outputs), WM_DEFAULT_WORKSPACES)?;
-        let mut session_actions = vec![
-            WmSessionAction::LaunchTerminal,
-            WmSessionAction::CloseFocused,
-            WmSessionAction::Logout,
-        ];
+        let mut session_actions = vec![WmSessionAction::CloseFocused, WmSessionAction::Logout];
+        if !config.normal_session || config.applications.terminal.is_some() {
+            session_actions.push(WmSessionAction::LaunchTerminal);
+        }
+        if config.normal_session && config.applications.launcher.is_some() {
+            session_actions.push(WmSessionAction::LaunchApplicationMenu);
+        }
+        if config.normal_session && config.applications.firefox.is_some() {
+            session_actions.push(WmSessionAction::LaunchFirefox);
+        }
         if config.session_launcher.is_some() {
             session_actions.push(WmSessionAction::LaunchApplicationMenu);
         }
@@ -2262,28 +2499,52 @@ fn execute_committed_session_actions(
                 if children.len() >= 16 {
                     return Err("approved session child limit reached".into());
                 }
-                children.push(spawn_secondary_xterm(
-                    std::path::Path::new(&config.terminal),
-                    &config.display,
-                    xauthority,
-                    None,
-                )?);
+                if config.normal_session {
+                    let app = config
+                        .application_for_action(action)
+                        .ok_or("WM requested an unadvertised session application")?;
+                    children.push(PersistentXtermSessionConfig::spawn_session_application(
+                        app,
+                        &config.display,
+                        xauthority,
+                    )?);
+                } else {
+                    children.push(spawn_secondary_xterm(
+                        std::path::Path::new(&config.terminal),
+                        &config.display,
+                        xauthority,
+                        None,
+                    )?);
+                }
             }
             WmSessionAction::LaunchApplicationMenu | WmSessionAction::LaunchFirefox => {
                 if children.len() >= 16 {
                     return Err("approved session child limit reached".into());
                 }
-                let program = match action {
-                    WmSessionAction::LaunchApplicationMenu => config.session_launcher.as_deref(),
-                    WmSessionAction::LaunchFirefox => config.session_firefox.as_deref(),
-                    _ => unreachable!(),
+                if config.normal_session {
+                    let app = config
+                        .application_for_action(action)
+                        .ok_or("WM requested an unadvertised session application")?;
+                    children.push(PersistentXtermSessionConfig::spawn_session_application(
+                        app,
+                        &config.display,
+                        xauthority,
+                    )?);
+                } else {
+                    let program = match action {
+                        WmSessionAction::LaunchApplicationMenu => {
+                            config.session_launcher.as_deref()
+                        }
+                        WmSessionAction::LaunchFirefox => config.session_firefox.as_deref(),
+                        _ => unreachable!(),
+                    }
+                    .ok_or("WM requested an unadvertised session executable")?;
+                    children.push(spawn_approved_application(
+                        program,
+                        &config.display,
+                        xauthority,
+                    )?);
                 }
-                .ok_or("WM requested an unadvertised session executable")?;
-                children.push(spawn_approved_application(
-                    program,
-                    &config.display,
-                    xauthority,
-                )?);
             }
             WmSessionAction::CloseFocused => {
                 let surface = target
@@ -2682,21 +2943,29 @@ fn run_session_loop(
                     );
                 }
             }
-            if status.success()
-                && successful_primary_exit_ends_session(config.input_proof_requested())
-            {
-                break;
+            if config.normal_session {
+                println!(
+                    "sophia_session_app schema=1 status=exited id={} source=startup exit_status={status}",
+                    config.applications.startup[0],
+                );
+                primary_child_exited = true;
+            } else {
+                if status.success()
+                    && successful_primary_exit_ends_session(config.input_proof_requested())
+                {
+                    break;
+                }
+                if !status.success() {
+                    return Err(format!(
+                        "session client exited during live session with status {status}"
+                    )
+                    .into());
+                }
+                // The proof helper intentionally exits after displaying its
+                // received text. Keep the session and secondary terminal alive so
+                // the final native frame can retire and pointer evidence can run.
+                primary_child_exited = true;
             }
-            if !status.success() {
-                return Err(format!(
-                    "session client exited during live session with status {status}"
-                )
-                .into());
-            }
-            // The proof helper intentionally exits after displaying its
-            // received text. Keep the session and secondary terminal alive so
-            // the final native frame can retire and pointer evidence can run.
-            primary_child_exited = true;
         }
         if config.application_proof_requested()
             && !input_text_match
@@ -2710,13 +2979,24 @@ fn run_session_loop(
                 config.expect_physical_text.as_ref().map_or(0, String::len)
             );
         }
-        for (index, secondary) in secondary_children.iter_mut().enumerate() {
-            if let Some(status) = secondary.try_wait()? {
-                return Err(format!(
-                    "secondary xterm {} exited during live session with status {status}",
-                    index + 1
-                )
-                .into());
+        let mut secondary_index = 0;
+        while secondary_index < secondary_children.len() {
+            if let Some(status) = secondary_children[secondary_index].try_wait()? {
+                if config.normal_session {
+                    println!(
+                        "sophia_session_app schema=1 status=exited id=auxiliary-{} source=managed exit_status={status}",
+                        secondary_index + 1,
+                    );
+                    secondary_children.remove(secondary_index);
+                } else {
+                    return Err(format!(
+                        "secondary xterm {} exited during live session with status {status}",
+                        secondary_index + 1
+                    )
+                    .into());
+                }
+            } else {
+                secondary_index += 1;
             }
         }
         drain_input_deliveries!();
@@ -4910,14 +5190,46 @@ struct SessionProcessGuard {
     child: Option<Child>,
     secondary_children: Vec<Child>,
     socket_path: Option<std::path::PathBuf>,
+    grouped: bool,
+}
+fn terminate_session_child(
+    child: &mut Child,
+    grouped: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if child.try_wait()?.is_some() {
+        return Ok(());
+    }
+    if grouped {
+        let pid = rustix::process::Pid::from_raw(child.id() as i32)
+            .ok_or("session child PID is invalid")?;
+        let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::TERM);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if child.try_wait()?.is_some() {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+    } else {
+        child.kill()?;
+    }
+    child.wait()?;
+    Ok(())
 }
 
 impl SessionProcessGuard {
-    fn new(child: Child, secondary_children: Vec<Child>, socket_path: std::path::PathBuf) -> Self {
+    fn new(
+        child: Child,
+        secondary_children: Vec<Child>,
+        socket_path: std::path::PathBuf,
+        grouped: bool,
+    ) -> Self {
         Self {
             child: Some(child),
             secondary_children,
             socket_path: Some(socket_path),
+            grouped,
         }
     }
 
@@ -4937,16 +5249,10 @@ impl SessionProcessGuard {
 
     fn terminate(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(mut child) = self.child.take() {
-            if child.try_wait()?.is_none() {
-                child.kill()?;
-            }
-            child.wait()?;
+            terminate_session_child(&mut child, self.grouped)?;
         }
         for mut child in self.secondary_children.drain(..) {
-            if child.try_wait()?.is_none() {
-                child.kill()?;
-            }
-            child.wait()?;
+            terminate_session_child(&mut child, self.grouped)?;
         }
         if let Some(socket_path) = self.socket_path.as_ref() {
             match std::fs::remove_file(socket_path) {
@@ -4984,7 +5290,7 @@ mod tests {
     use sophia_protocol::{
         AuthorityKind, DeviceId, InputEventKind, InputEventPacket, NamespaceCapabilities,
         NamespaceProfile, Point, SeatId, SurfaceId, SurfaceTransaction,
-        SurfaceTransactionReadiness,
+        SurfaceTransactionReadiness, WmSessionAction,
     };
     use sophia_x_authority::X_AUTHORITY_CPU_BUFFER_FORMAT_XRGB8888;
     use std::collections::BTreeMap;
@@ -5156,6 +5462,63 @@ mod tests {
                 .to_string()
                 .contains("expected classic or confined")
         );
+    }
+
+    #[test]
+    fn normal_session_application_registry_is_bounded_and_explicit() {
+        let config = PersistentXtermSessionConfig::from_args(&[
+            "--session-mode=normal".to_owned(),
+            "--session-app=terminal=/usr/bin/xterm".to_owned(),
+            "--session-app-arg=terminal=-cm".to_owned(),
+            "--session-start=terminal".to_owned(),
+            "--session-action-app=terminal=terminal".to_owned(),
+        ])
+        .unwrap();
+        assert!(config.normal_session);
+        assert_eq!(config.applications.startup, ["terminal"]);
+        assert_eq!(
+            config
+                .application_for_action(WmSessionAction::LaunchTerminal)
+                .unwrap()
+                .arguments,
+            ["-cm"]
+        );
+
+        for args in [
+            vec![
+                "--session-mode=normal".to_owned(),
+                "--session-app=terminal=xterm".to_owned(),
+                "--session-start=terminal".to_owned(),
+            ],
+            vec![
+                "--session-mode=normal".to_owned(),
+                "--session-app=terminal=/usr/bin/xterm".to_owned(),
+                "--session-start=missing".to_owned(),
+            ],
+            vec![
+                "--session-app=terminal=/usr/bin/xterm".to_owned(),
+                "--session-start=terminal".to_owned(),
+            ],
+            vec![
+                "--session-mode=normal".to_owned(),
+                "--session-app=terminal=/usr/bin/xterm".to_owned(),
+                "--session-app=terminal=/usr/bin/xterm".to_owned(),
+                "--session-start=terminal".to_owned(),
+            ],
+        ] {
+            assert!(PersistentXtermSessionConfig::from_args(&args).is_err());
+        }
+    }
+
+    #[test]
+    fn normal_session_rejects_proof_only_options() {
+        let result = PersistentXtermSessionConfig::from_args(&[
+            "--session-mode=normal".to_owned(),
+            "--session-app=terminal=/usr/bin/xterm".to_owned(),
+            "--session-start=terminal".to_owned(),
+            "--proof".to_owned(),
+        ]);
+        assert!(result.is_err());
     }
 
     #[test]

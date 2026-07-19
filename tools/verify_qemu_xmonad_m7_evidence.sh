@@ -28,6 +28,9 @@ grep -Eq '^sophia_live_session schema=14 status=bounded_complete .*cpu_layers=[2
 grep -q '^sophia_qemu_guest schema=1 status=complete scenario=xmonad-m7$' "$evidence"
 grep -q '^sophia_qemu_xmonad schema=1 status=restart_injected target=compatibility_bridge$' "$evidence"
 grep -q '^sophia_live_wm schema=1 status=restarted .*preserved_layout=true' "$evidence"
-! grep -q ' status=failed ' "$evidence"
+if grep -q ' status=failed ' "$evidence"; then
+    echo "xmonad evidence contains a failure marker" >&2
+    exit 1
+fi
 
 echo "Milestone 7 xmonad QEMU evidence passed: $evidence"
