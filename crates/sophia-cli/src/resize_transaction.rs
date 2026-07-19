@@ -56,6 +56,7 @@ impl ResizeRollbackCoordinator {
             return false;
         }
         self.rollback_sizes.remove(&surface);
+        self.rejected_sizes.remove(&surface);
         true
     }
 

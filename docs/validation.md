@@ -415,6 +415,11 @@ sleeps. The Firefox stage record contains only redacted title byte lengths and
 bounded selection-operation counts; title content and X object identities stay
 inside the frontend. The soak verifier additionally requires twenty terminal,
 Firefox, and launcher restarts plus sixty committed close actions.
+The installed GTK4 Zenity probe runs through the retained Cairo-renderer
+wrapper so it maps without an EGL-capable guest display and reports explicit
+child-reaped and wrapper-complete evidence. Close/launch actions use bounded
+retries around busy WM layout proposals and require the matching managed
+process to exit successfully.
 
 The older bounded proof wrapper can pass `--max-runtime-ms=10000`,
 `--inject-text=sophia`, and `--exit-after-input-proof`; passing evidence requires one

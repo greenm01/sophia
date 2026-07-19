@@ -1376,6 +1376,18 @@ pub fn dispatch_x11_wire_request(
             })],
             metadata_candidates: Vec::new(),
         },
+        XWireRequest::GetKeyboardControl => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::GetKeyboardControl {
+                sequence: context.sequence,
+            })],
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::Bell => XDispatchResult {
+            response: None,
+            outputs: Vec::new(),
+            metadata_candidates: Vec::new(),
+        },
         XWireRequest::TranslateCoordinates {
             source,
             destination,
@@ -2263,13 +2275,34 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
-        // Output policy is Engine-owned; accept the advisory RandR request
-        // without allowing an X11 client to mutate the native output layout.
-        XWireRequest::RandrSetOutputPrimary => XDispatchResult {
-            response: None,
-            outputs: Vec::new(),
-            metadata_candidates: Vec::new(),
-        },
+        XWireRequest::RandrGetProviders { window } => {
+            let timestamp = u32::try_from(runtime.output_topology().generation)
+                .unwrap_or(u32::MAX)
+                .max(1);
+            let output = if window.local.raw() == u64::from(X_SETUP_DEFAULT_ROOT) {
+                XClientOutput::Reply(XClientReply::RandrGetProviders {
+                    sequence: context.sequence,
+                    timestamp,
+                })
+            } else if let Err(error) = runtime.validate_window_access(context.namespace, window) {
+                XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(window.local.raw()).unwrap_or(0),
+                ))
+            } else {
+                XClientOutput::Reply(XClientReply::RandrGetProviders {
+                    sequence: context.sequence,
+                    timestamp,
+                })
+            };
+            XDispatchResult {
+                response: None,
+                outputs: vec![output],
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::RandrGetMonitors { window, .. } => {
             let timestamp = u32::try_from(runtime.output_topology().generation)
                 .unwrap_or(u32::MAX)

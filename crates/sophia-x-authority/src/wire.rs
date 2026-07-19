@@ -77,6 +77,8 @@ const X_RECOLOR_CURSOR: u8 = 96;
 const X_QUERY_EXTENSION: u8 = 98;
 const X_LIST_EXTENSIONS: u8 = 99;
 const X_GET_KEYBOARD_MAPPING: u8 = 101;
+const X_GET_KEYBOARD_CONTROL: u8 = 103;
+const X_BELL: u8 = 104;
 const X_QUERY_BEST_SIZE: u8 = 97;
 const X_GET_MODIFIER_MAPPING: u8 = 119;
 
@@ -103,7 +105,7 @@ pub const X_RANDR_GET_OUTPUT_PROPERTY_MINOR_OPCODE: u8 = 15;
 pub const X_RANDR_GET_CRTC_INFO_MINOR_OPCODE: u8 = 20;
 pub const X_RANDR_GET_SCREEN_RESOURCES_CURRENT_MINOR_OPCODE: u8 = 25;
 pub const X_RANDR_GET_OUTPUT_PRIMARY_MINOR_OPCODE: u8 = 31;
-pub const X_RANDR_SET_OUTPUT_PRIMARY_MINOR_OPCODE: u8 = 32;
+pub const X_RANDR_GET_PROVIDERS_MINOR_OPCODE: u8 = 32;
 pub const X_RANDR_GET_MONITORS_MINOR_OPCODE: u8 = 42;
 pub const X_KEYBOARD_EXTENSION_NAME: &str = "XKEYBOARD";
 pub const X_KEYBOARD_MAJOR_OPCODE: u8 = 133;
@@ -751,7 +753,9 @@ pub enum XWireRequest {
     RandrGetOutputPrimary {
         window: XResourceId,
     },
-    RandrSetOutputPrimary,
+    RandrGetProviders {
+        window: XResourceId,
+    },
     RandrGetMonitors {
         window: XResourceId,
         get_active: bool,
@@ -839,6 +843,8 @@ pub enum XWireRequest {
         first_keycode: u8,
         count: u8,
     },
+    GetKeyboardControl,
+    Bell,
     TranslateCoordinates {
         source: XResourceId,
         destination: XResourceId,
@@ -959,6 +965,14 @@ pub fn decode_x11_core_request(
         }
         X_SET_INPUT_FOCUS => decode_set_input_focus(context, bytes),
         X_GET_INPUT_FOCUS => decode_get_input_focus(bytes),
+        X_GET_KEYBOARD_CONTROL => {
+            require_exact_len(X_GET_KEYBOARD_CONTROL, 4, bytes.len())?;
+            Ok(XWireRequest::GetKeyboardControl)
+        }
+        X_BELL => {
+            require_exact_len(X_BELL, 4, bytes.len())?;
+            Ok(XWireRequest::Bell)
+        }
         X_OPEN_FONT => decode_open_font(context, bytes),
         X_CLOSE_FONT => decode_close_font(context, bytes),
         X_QUERY_FONT => decode_query_font(context, bytes),
@@ -1026,10 +1040,6 @@ fn decode_xfixes(
     bytes: &[u8],
 ) -> Result<XWireRequest, XWireParseError> {
     match bytes[1] {
-        X_INPUT_DEVICE_BELL_MINOR_OPCODE => {
-            require_exact_len(X_INPUT_MAJOR_OPCODE, 8, bytes.len())?;
-            Ok(XWireRequest::XiDeviceBell)
-        }
         X_XFIXES_QUERY_VERSION_MINOR_OPCODE => decode_extension_query_version(
             context,
             bytes,
@@ -1302,6 +1312,10 @@ fn decode_x_input(
     bytes: &[u8],
 ) -> Result<XWireRequest, XWireParseError> {
     match bytes[1] {
+        X_INPUT_DEVICE_BELL_MINOR_OPCODE => {
+            require_exact_len(X_INPUT_MAJOR_OPCODE, 8, bytes.len())?;
+            Ok(XWireRequest::XiDeviceBell)
+        }
         X_INPUT_QUERY_POINTER_MINOR_OPCODE => {
             require_exact_len(
                 X_INPUT_MAJOR_OPCODE,
@@ -1633,9 +1647,11 @@ fn decode_randr(
                 window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
             })
         }
-        X_RANDR_SET_OUTPUT_PRIMARY_MINOR_OPCODE => {
-            require_exact_len(X_RANDR_MAJOR_OPCODE, 12, bytes.len())?;
-            Ok(XWireRequest::RandrSetOutputPrimary)
+        X_RANDR_GET_PROVIDERS_MINOR_OPCODE => {
+            require_exact_len(X_RANDR_MAJOR_OPCODE, 8, bytes.len())?;
+            Ok(XWireRequest::RandrGetProviders {
+                window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+            })
         }
         X_RANDR_GET_MONITORS_MINOR_OPCODE => {
             require_exact_len(

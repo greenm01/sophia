@@ -31,8 +31,8 @@ def main():
             dx, dy, clicks = map(int, sys.argv[2:5])
         except ValueError:
             fail("DX, DY, and CLICKS must be integers")
-        if not -4096 <= dx <= 4096 or not -4096 <= dy <= 4096 or not 1 <= clicks <= 4:
-            fail("pointer movement must be within +/-4096 and clicks within 1-4")
+        if not -4096 <= dx <= 4096 or not -4096 <= dy <= 4096 or not 0 <= clicks <= 4:
+            fail("pointer movement must be within +/-4096 and clicks within 0-4")
     if len(sys.argv) == 6:
         button_name = sys.argv[5]
         if button_name not in ("left", "middle", "right"):

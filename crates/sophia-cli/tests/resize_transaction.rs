@@ -53,8 +53,10 @@ fn late_abandoned_pixels_are_fenced_until_rollback_confirmation() {
         .begin_rollback([(surface, size(1024, 768))])
         .unwrap();
     assert!(!coordinator.accept_observation(surface, size(1024, 768)));
+    assert!(!coordinator.request_allowed(surface, size(1024, 768)));
     assert!(coordinator.accept_observation(surface, size(800, 600)));
     assert!(!coordinator.rollback_pending(surface));
+    assert!(coordinator.request_allowed(surface, size(1024, 768)));
 }
 
 #[test]

@@ -3,6 +3,27 @@
 This file records decisions and unresolved questions for the active milestone.
 Completed evidence is archived in `research-log-archive.md`.
 
+## 2026-07-19: Milestone 8 Close, Sequence, And Soak Results
+
+Firefox's intermittent XCB abort was an output-order race: asynchronous writers
+could snapshot sequence N, wait behind a reply for N+1, then emit an event
+carrying N. Request-sequence publication and every protocol, control, and input
+event snapshot are now serialized by the output socket lock.
+
+Close routing selects an exact `WM_DELETE_WINDOW` target, its nearest
+protocol-advertising ancestor, or the only unambiguous protocol window. A
+client with no cooperative target follows the bounded terminate path. The soak
+also established bounded launch/focus settlement, close retries during busy
+layout proposals, stale-surface WM resynchronization, and explicit discard of
+the terminal logout chord's undeliverable release batch.
+
+The final unattended QEMU run lasted 1,891,936 ms and completed 22 terminal,
+Firefox, and GTK launcher cycles with 66 closes, 11 recovered bridge restarts,
+all six Firefox semantic stages, zero unexpected protocol errors, no pending
+WM/action/input state, and clean application, frontend, namespace, Xauthority,
+and native presentation teardown. Three consecutive mixed-application runs
+also passed before the soak.
+
 ## 2026-07-18: Semantic Firefox Gate And Xmonad Focus Reconciliation
 
 The M8 page proof no longer treats changing pixels or fixed host sleeps as

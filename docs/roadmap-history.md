@@ -4,6 +4,25 @@ This file archives completed and prototype roadmap items that previously lived
 in `todo.md`. Keep active work in `todo.md`; keep detailed rationale and
 validation evidence in `docs/research-log.md`.
 
+## 2026-07-19 xmonad Daily Driver
+
+- [x] Added the normal supervised xmonad session with approved startup/action
+  applications, logout, bridge recovery, and generic process-group ownership.
+- [x] Closed Firefox compatibility gaps with focused wire regressions and an
+  offline six-stage proof covering keyboard, pointer, resize, dialog,
+  `CLIPBOARD`, `PRIMARY`, normal exit, and cleanup.
+- [x] Passed three consecutive two-output mixed-application QEMU gates with
+  xterm, GTK, Vulkan, Firefox, workspace movement, and bridge restart.
+- [x] Passed the unattended 30-minute QEMU soak with 22 terminal, Firefox, and
+  launcher cycles, 66 closes, zero unexpected protocol errors, no pending WM,
+  action, or input work, and clean native/frontend/application teardown.
+
+The retained `xmonad-m8-mix` and `xmonad-m8-soak` scenarios are the Milestone
+8 regression contract. The accepted soak ran for 1,891,936 ms and completed
+with 9,551 authority transactions and no native cleanup debt.
+
+---
+
 ## 2026-07-18 Application Compatibility And Production Session Loop
 
 - [x] Promoted paired xterm, GTK3 software, and mixed Vulkan application

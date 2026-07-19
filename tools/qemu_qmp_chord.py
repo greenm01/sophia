@@ -8,7 +8,7 @@ import time
 
 ALLOWED = {
     "shift", "ctrl", "alt", "meta_l", "a", "c", "f", "j", "k", "l", "p", "q", "v", "w",
-    "spc", "tab", "insert", "1", "2", "ret", "f6",
+    "spc", "tab", "insert", "esc", "1", "2", "ret", "f6",
 }
 
 

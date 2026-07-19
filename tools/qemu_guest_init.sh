@@ -147,8 +147,8 @@ elif [ "$scenario" = "xmonad-m7" ] || [ "$scenario" = "xmonad-m8-launcher" ] || 
         poweroff -f
     fi
     runtime_ms=60000
-    [ "$scenario" != "xmonad-m8-mix" ] || runtime_ms=180000
-    [ "$scenario" != "xmonad-m8-soak" ] || runtime_ms=1860000
+    [ "$scenario" != "xmonad-m8-mix" ] || runtime_ms=360000
+    [ "$scenario" != "xmonad-m8-soak" ] || runtime_ms=2100000
     set -- sophia-live-session --display=:181 --native-scanout --max-runtime-ms="$runtime_ms"
     if [ "$scenario" = "xmonad-m8-launcher" ]; then
         set -- "$@" --session-mode=normal
@@ -172,6 +172,8 @@ elif [ "$scenario" = "xmonad-m7" ] || [ "$scenario" = "xmonad-m8-launcher" ] || 
             'user_pref("browser.tabs.remote.autostart", false);' \
             'user_pref("browser.tabs.remote.autostart.2", false);' \
             'user_pref("fission.autostart", false);' \
+            'user_pref("middlemouse.paste", true);' \
+            'user_pref("middlemouse.contentLoadURL", false);' \
             > /tmp/firefox-profile/user.js
         set -- "$@" --session-mode=normal
         set -- "$@" --session-app=terminal=/usr/bin/xterm
@@ -179,7 +181,7 @@ elif [ "$scenario" = "xmonad-m7" ] || [ "$scenario" = "xmonad-m8-launcher" ] || 
         set -- "$@" --session-app=vulkan=/usr/bin/vkcube --session-app-arg=vulkan=--wsi --session-app-arg=vulkan=xcb
         set -- "$@" --session-app-arg=vulkan=--width --session-app-arg=vulkan=640
         set -- "$@" --session-app-arg=vulkan=--height --session-app-arg=vulkan=720
-        set -- "$@" --session-app=launcher=/usr/bin/zenity --session-app-arg=launcher=--info --session-app-arg=launcher=--text=Sophia-application-launcher
+        set -- "$@" --session-app=launcher=/usr/bin/sophia-zenity-launcher
         set -- "$@" --session-app=firefox=/usr/bin/firefox --session-app-arg=firefox=--new-instance --session-app-arg=firefox=--no-remote
         set -- "$@" --session-app-arg=firefox=--profile --session-app-arg=firefox=/tmp/firefox-profile
         set -- "$@" --session-app-arg=firefox=file:///usr/share/sophia/firefox_m8_local_page.html

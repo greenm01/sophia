@@ -29,7 +29,17 @@
     document.title = '0'.repeat(stages[stage]);
     status.textContent = label;
     document.body.style.background = `hsl(${stage * 47} 55% 24%)`;
+    if (stage === 1 || stage === 2) {
+      source.focus();
+      source.select();
+    }
   }
+  addEventListener('focus', () => {
+    if (stage === 1 || stage === 2) {
+      source.focus();
+      source.select();
+    }
+  });
   source.addEventListener('input', event => {
     if (stage === 0 && event.target.value === 'sophia') advance('keyboard complete');
   });
@@ -44,8 +54,6 @@
     typed = (typed + event.key).slice(-6);
     if (typed === 'sophia') {
       source.value = 'sophia';
-      source.focus();
-      source.select();
       advance('keyboard complete');
     }
   });

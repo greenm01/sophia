@@ -17,35 +17,18 @@ protocol-neutral Engine remains the sole owner of physical input, scene state,
 rendering, and scanout.
 
 Namespace admission, portals, the bounded X11 `CLIPBOARD` plus `PRIMARY`
-reference flow, application compatibility, the production Engine loop, and the
-interactive blind WM API are established. The active track now proves xmonad
-plus Firefox as an unattended daily-driver session.
+reference flow, application compatibility, the production Engine loop, the
+interactive blind WM API, and the unattended xmonad/Firefox daily-driver gate
+are established. The next major milestone has not yet been selected.
 
 The Smithay-backed Wayland Authority remains supported under a maintenance
 lane. XLibre is a retired prototype and documented possible future
 compatibility provider; no XLibre integration work is active.
 
-## Milestone 8: xmonad Daily Driver
+## Next Milestone Selection
 
-- [x] Replace the proof-only xmonad wrapper with a normal supervised session
-  launcher supporting WM selection, approved startup applications, logout,
-  clean recovery, and a generic multi-application process model.
-- [ ] Capture native-X11 Firefox request traces and close compatibility gaps
-  with focused wire regressions. Retain an offline local-page proof for visible
-  pixels, keyboard and pointer input, resize, dialogs, clipboard, normal exit,
-  and cleanup.
-- [ ] Pass a two-output application-mix gate containing xterm, GTK, Vulkan,
-  Firefox, `CLIPBOARD`/`PRIMARY`, dialogs, multiple workspaces, launch/close,
-  and a restarted WM bridge.
-- [ ] Pass a 30-minute unattended QEMU soak with repeated focus, layout,
-  launch, close, workspace movement, bridge restart, and application restart,
-  with zero protocol errors, stuck transactions, input leaks, or native cleanup
-  debt.
-
-Exit: the normal xmonad-backed Sophia session boots, runs the retained
-application mix including Firefox, recovers its WM policy process, and
-completes the bounded soak. Machine-specific runs remain optional compatibility
-diagnostics.
+- [ ] Select the next measurable milestone from observed daily-driver gaps;
+  do not broaden X11 or Wayland support without retained client evidence.
 
 ## Wayland Maintenance Lane
 

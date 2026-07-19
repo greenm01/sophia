@@ -376,6 +376,10 @@ pub enum XClientReply {
         sequence: u16,
         output: u32,
     },
+    RandrGetProviders {
+        sequence: u16,
+        timestamp: u32,
+    },
     RandrGetMonitors {
         sequence: u16,
         timestamp: u32,
@@ -475,6 +479,9 @@ pub enum XClientReply {
         sequence: u16,
         keysyms_per_keycode: u8,
         keysyms: Vec<u32>,
+    },
+    GetKeyboardControl {
+        sequence: u16,
     },
     TranslateCoordinates {
         sequence: u16,
@@ -1080,6 +1087,16 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             put_u32(byte_order, &mut out[8..12], output);
             out
         }
+        XClientReply::RandrGetProviders {
+            sequence,
+            timestamp,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            put_u32(byte_order, &mut out[8..12], timestamp);
+            put_u16(byte_order, &mut out[12..14], 0);
+            out
+        }
         XClientReply::RandrGetMonitors {
             sequence,
             timestamp,
@@ -1513,6 +1530,16 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
                 put_u32(byte_order, &mut out[offset..offset + 4], keysym);
                 offset += 4;
             }
+            out
+        }
+        XClientReply::GetKeyboardControl { sequence } => {
+            let mut out = vec![0; 52];
+            write_reply_header(byte_order, &mut out, sequence, 5);
+            out[1] = 1;
+            out[13] = 50;
+            put_u16(byte_order, &mut out[14..16], 400);
+            put_u16(byte_order, &mut out[16..18], 100);
+            out[20..52].fill(0xff);
             out
         }
         XClientReply::TranslateCoordinates {

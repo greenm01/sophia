@@ -4155,6 +4155,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 event_sequence.clone(),
                 focused_surface_window.clone(),
                 surface_windows.clone(),
+                core_event_selections.clone(),
                 state.atoms.clone(),
                 state.properties.clone(),
                 state.runtime.clone(),
@@ -4215,7 +4216,6 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 std::thread::sleep(Duration::from_millis(1));
             }
             sequence = sequence.wrapping_add(1);
-            event_sequence.store(sequence, Ordering::Release);
             let dispatch_context = XDispatchContext {
                 byte_order: setup.byte_order,
                 namespace,
@@ -4296,6 +4296,9 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                                 }
                                 _ => None,
                             }
+                        }
+                        crate::XWireRequest::ReparentWindow { window, parent, .. } => {
+                            Some((*window, *parent))
                         }
                         _ => None,
                     };
@@ -4777,40 +4780,49 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 server_reply_fd_count: server_reply_fds.len(),
             })?;
             let encoded_outputs = output.encoded_outputs(setup.byte_order);
-            if !encoded_outputs.is_empty() || !server_reply_fds.is_empty() {
+            {
                 let mut output_stream = output_stream
                     .lock()
                     .map_err(|_| X11SetupSocketError::new("X11 output socket lock poisoned"))?;
-                for (index, bytes) in encoded_outputs.into_iter().enumerate() {
-                    let fds = if index == 0 {
-                        core::mem::take(&mut server_reply_fds)
-                    } else {
-                        Vec::new()
-                    };
-                    let record = X11SocketOutputRecord::new(bytes, fds)?;
-                    if let Err(error) = write_x11_socket_output_record(&mut output_stream, record) {
-                        if is_x11_client_disconnect(&error) {
+                if !encoded_outputs.is_empty() || !server_reply_fds.is_empty() {
+                    for (index, bytes) in encoded_outputs.into_iter().enumerate() {
+                        let fds = if index == 0 {
+                            core::mem::take(&mut server_reply_fds)
+                        } else {
+                            Vec::new()
+                        };
+                        let record = X11SocketOutputRecord::new(bytes, fds)?;
+                        if let Err(error) =
+                            write_x11_socket_output_record(&mut output_stream, record)
+                        {
+                            if is_x11_client_disconnect(&error) {
+                                return Ok(());
+                            }
+                            return Err(X11SetupSocketError::new(format!(
+                                "failed to write X11 output: {error}"
+                            )));
+                        }
+                    }
+                    debug_assert!(server_reply_fds.is_empty());
+                    if let Err(error) = output_stream.flush() {
+                        if matches!(
+                            error.kind(),
+                            ErrorKind::BrokenPipe
+                                | ErrorKind::ConnectionReset
+                                | ErrorKind::UnexpectedEof
+                        ) {
                             return Ok(());
                         }
                         return Err(X11SetupSocketError::new(format!(
-                            "failed to write X11 output: {error}"
+                            "failed to flush X11 output: {error}"
                         )));
                     }
                 }
-                debug_assert!(server_reply_fds.is_empty());
-                if let Err(error) = output_stream.flush() {
-                    if matches!(
-                        error.kind(),
-                        ErrorKind::BrokenPipe
-                            | ErrorKind::ConnectionReset
-                            | ErrorKind::UnexpectedEof
-                    ) {
-                        return Ok(());
-                    }
-                    return Err(X11SetupSocketError::new(format!(
-                        "failed to flush X11 output: {error}"
-                    )));
-                }
+                // Publish the request sequence while holding the same lock
+                // used by every asynchronous event writer. Otherwise a
+                // writer can snapshot the old value, wait behind this reply,
+                // and emit a backwards sequence after it.
+                event_sequence.store(sequence, Ordering::Release);
             }
         }
         Ok(())
@@ -5047,6 +5059,19 @@ impl XCoreEventSelectionState {
         }
         fallback
     }
+
+    fn ancestors(&self, window: XResourceId) -> Vec<XResourceId> {
+        let mut ancestors = Vec::new();
+        let mut candidate = window;
+        for _ in 0..64 {
+            let Some(parent) = self.parents.get(&candidate).copied() else {
+                break;
+            };
+            ancestors.push(parent);
+            candidate = parent;
+        }
+        ancestors
+    }
 }
 
 #[cfg(unix)]
@@ -5083,11 +5108,11 @@ fn spawn_x11_protocol_event_writer(
                 Err(RecvTimeoutError::Timeout) => continue,
                 Err(RecvTimeoutError::Disconnected) => return Ok(()),
             };
-            set_x11_protocol_event_sequence(&mut event, sequence.load(Ordering::Acquire));
-            let record = encode_x_client_event(byte_order, event);
             let mut stream = stream
                 .lock()
                 .map_err(|_| X11SetupSocketError::new("X11 output socket lock poisoned"))?;
+            set_x11_protocol_event_sequence(&mut event, sequence.load(Ordering::Acquire));
+            let record = encode_x_client_event(byte_order, event);
             if let Err(error) = stream.write_all(&record) {
                 if is_x11_client_disconnect(&error) {
                     return Ok(());
@@ -5129,6 +5154,7 @@ fn spawn_x11_control_writer(
     sequence: Arc<AtomicU16>,
     focused_surface_window: Arc<AtomicU64>,
     surface_windows: Arc<Mutex<BTreeMap<SurfaceId, XResourceId>>>,
+    core_event_selections: Arc<Mutex<XCoreEventSelectionState>>,
     atoms: Arc<Mutex<XAtomTable>>,
     properties: Arc<Mutex<XPropertyTable>>,
     runtime: Arc<Mutex<XAuthorityRuntime>>,
@@ -5285,17 +5311,28 @@ fn spawn_x11_control_writer(
                                             .any(|bytes| byte_order.u32(bytes) == delete)
                                 })
                     };
-                    let window = protocol_windows
+                    let candidates: Vec<_> = protocol_windows
                         .iter()
-                        .find(|candidate| **candidate == window && advertises_delete(candidate))
-                        .copied()
-                        .or_else(|| {
-                            protocol_windows
-                                .iter()
-                                .find(|candidate| advertises_delete(candidate))
-                                .copied()
-                        })
-                        .unwrap_or(window);
+                        .map(|candidate| (*candidate, advertises_delete(candidate)))
+                        .collect();
+                    let ancestors = core_event_selections
+                        .lock()
+                        .map_err(|_| {
+                            X11SetupSocketError::new("X11 core event selection lock poisoned")
+                        })?
+                        .ancestors(window);
+                    let decision = crate::select_x_close_target(window, &ancestors, &candidates);
+                    if decision.protocol_window_count == 0 {
+                        drop(properties);
+                        terminate_client!(transaction, surface);
+                    }
+                    eprintln!(
+                        "sophia_x11_close_target schema=1 surface_map_hit=true exact_delete={} fallback_used={} protocol_windows={}",
+                        decision.exact_advertises_delete,
+                        decision.fallback_used,
+                        decision.protocol_window_count,
+                    );
+                    let window = decision.window;
                     let mut bytes = [0_u8; 32];
                     // ICCCM WM_DELETE_WINDOW is delivered via SendEvent, so
                     // the synthetic-event bit must be set on ClientMessage.
@@ -5366,7 +5403,9 @@ fn spawn_x11_control_writer(
             let mut stream = stream
                 .lock()
                 .map_err(|_| X11SetupSocketError::new("X11 output socket lock poisoned"))?;
-            for record in records {
+            let event_sequence = sequence.load(Ordering::Acquire);
+            for mut record in records {
+                write_xi_u16(byte_order, &mut record[2..4], event_sequence);
                 if let Err(error) = stream.write_all(&record) {
                     if is_x11_client_disconnect(&error) {
                         return Ok(());
@@ -5443,12 +5482,11 @@ fn spawn_x11_input_event_writer(
             let routed_keyboard_window =
                 target_window.map(|window| selections.keyboard_target(window));
             drop(selections);
-            if std::env::var_os("SOPHIA_LIVE_SESSION_DIAGNOSTIC").is_some()
-                && let XAuthorityInputEvent::Key(key) = event
+            if let XAuthorityInputEvent::Key(_) = event
+                && routed_keyboard_window.is_some_and(|window| window != focused_window)
             {
                 eprintln!(
-                    "sophia_x11_key_delivery schema=1 keycode={} pressed={} state={} target=authority_selection",
-                    key.keycode, key.pressed, key.state,
+                    "sophia_x11_key_delivery schema=1 target_matches_focus=false explicit_target=true",
                 );
             }
             let root = XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1);
@@ -5467,12 +5505,11 @@ fn spawn_x11_input_event_writer(
                 ),
             };
             let delivered_focus = delivered_window;
-            let sequence = sequence.load(Ordering::Acquire);
-            let record = encode_x_client_event(
+            let mut record = encode_x_client_event(
                 byte_order,
                 match event {
                     XAuthorityInputEvent::Key(event) => XClientEvent::Key {
-                        sequence,
+                        sequence: 0,
                         pressed: event.pressed,
                         keycode: event.keycode,
                         time: event.time_msec,
@@ -5490,7 +5527,7 @@ fn spawn_x11_input_event_writer(
                         state,
                         time_msec,
                     }) => XClientEvent::PointerMotion {
-                        sequence,
+                        sequence: 0,
                         time: time_msec,
                         root,
                         event: target_window.unwrap_or(
@@ -5522,7 +5559,7 @@ fn spawn_x11_input_event_writer(
                         state,
                         time_msec,
                     }) => XClientEvent::PointerButton {
-                        sequence,
+                        sequence: 0,
                         pressed,
                         button,
                         time: time_msec,
@@ -5552,6 +5589,8 @@ fn spawn_x11_input_event_writer(
                 let mut stream = stream
                     .lock()
                     .map_err(|_| X11SetupSocketError::new("X11 output socket lock poisoned"))?;
+                let sequence = sequence.load(Ordering::Acquire);
+                write_xi_u16(byte_order, &mut record[2..4], sequence);
                 let transition = match event {
                     XAuthorityInputEvent::Key(_) if focus_sent_to != Some(delivered_window) => {
                         Some((focus_sent_to, 10, 9))

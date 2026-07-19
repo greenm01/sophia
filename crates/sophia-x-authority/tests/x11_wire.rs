@@ -329,6 +329,76 @@ fn xi2_decoder_accepts_query_pointer_and_ungrab_device() {
 }
 
 #[test]
+fn legacy_xinput_device_bell_is_a_bounded_noop() {
+    let namespace = NamespaceId::from_raw(45);
+    let request = vec![
+        X_INPUT_MAJOR_OPCODE,
+        X_INPUT_DEVICE_BELL_MINOR_OPCODE,
+        2,
+        0,
+        2,
+        0,
+        0,
+        0,
+    ];
+    let decoded =
+        decode_x11_core_request(context(namespace, 1, XByteOrder::LittleEndian), &request).unwrap();
+    assert_eq!(decoded, XWireRequest::XiDeviceBell);
+
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let dispatched = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, X_INPUT_MAJOR_OPCODE),
+        decoded,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    assert!(dispatched.outputs.is_empty());
+
+    assert!(
+        decode_x11_core_request(
+            context(namespace, 2, XByteOrder::LittleEndian),
+            &request[..4],
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn core_keyboard_control_and_bell_requests_are_bounded() {
+    let namespace = NamespaceId::from_raw(46);
+    let keyboard_control = decode_x11_core_request(
+        context(namespace, 1, XByteOrder::LittleEndian),
+        &[103, 0, 1, 0],
+    )
+    .unwrap();
+    assert_eq!(keyboard_control, XWireRequest::GetKeyboardControl);
+
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let reply = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 103),
+        keyboard_control,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = reply.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0].len(), 52);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[0][4..8]), 5);
+
+    let bell = decode_x11_core_request(
+        context(namespace, 2, XByteOrder::LittleEndian),
+        &[104, 0, 1, 0],
+    )
+    .unwrap();
+    assert_eq!(bell, XWireRequest::Bell);
+}
+
+#[test]
 fn x11_setup_parser_accepts_little_endian_auth_fields() {
     let bytes = setup_request(
         XByteOrder::LittleEndian,
@@ -2647,6 +2717,35 @@ fn x11_dispatch_advertises_randr_and_replies_to_query_version() {
         read_u32(XByteOrder::LittleEndian, &encoded[0][8..12]),
         0x2000_0001
     );
+
+    let mut get_providers_request = vec![
+        X_RANDR_MAJOR_OPCODE,
+        X_RANDR_GET_PROVIDERS_MINOR_OPCODE,
+        2,
+        0,
+    ];
+    get_providers_request.extend_from_slice(&X_SETUP_DEFAULT_ROOT.to_le_bytes());
+    let get_providers = decode_x11_core_request(
+        context(namespace, 542, XByteOrder::LittleEndian),
+        &get_providers_request,
+    )
+    .unwrap();
+    assert_eq!(
+        get_providers,
+        XWireRequest::RandrGetProviders {
+            window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+        }
+    );
+    let get_providers = dispatch_x11_wire_request(
+        dispatch_context(namespace, 5, XByteOrder::LittleEndian, X_RANDR_MAJOR_OPCODE),
+        get_providers,
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    );
+    let encoded = get_providers.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][0], 1);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &encoded[0][12..14]), 0);
 
     let monitors = decode_x11_core_request(
         context(namespace, 542, XByteOrder::LittleEndian),

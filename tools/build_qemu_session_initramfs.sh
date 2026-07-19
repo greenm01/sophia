@@ -72,6 +72,7 @@ runtime_files=(
 extra_includes=()
 required_guest_paths=()
 if [[ "$IMAGE_PROFILE" == m8 ]]; then
+    extra_includes+=(--include "$ROOT_DIR/tools/fixtures/qemu_zenity_launcher.sh" /usr/bin/sophia-zenity-launcher)
     FIREFOX_BIN="${SOPHIA_FIREFOX_BIN:-$(command -v firefox || true)}"
     VKCUBE_BIN="${SOPHIA_VKCUBE_BIN:-$(command -v vkcube || true)}"
     LVP_ICD="${SOPHIA_LVP_ICD:-/usr/share/vulkan/icd.d/lvp_icd.x86_64.json}"

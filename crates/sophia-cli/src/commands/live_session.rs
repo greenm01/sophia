@@ -11,7 +11,7 @@ use sophia_cli::resize_transaction::{
     ResizeRollbackCoordinator, project_authority_batch_onto_layout,
 };
 use sophia_engine::{
-    FocusedInputRoute, InputFocusDecision, InputFocusState, NonBlockingInputPoller,
+    FocusedInputRoute, InputFocusDecision, InputFocusState, NonBlockingInputPoller, WmPolicyError,
     WmShortcutRouter, WmWorkspaceState,
 };
 use sophia_protocol::{
@@ -1842,7 +1842,18 @@ impl LiveWmSession {
         };
         let result = self.request(request, layout, output);
         self.workspace_state = committed_state;
-        result
+        match result {
+            Err(error)
+                if error.downcast_ref::<WmPolicyError>()
+                    == Some(&WmPolicyError::UnknownSurface) =>
+            {
+                println!(
+                    "sophia_live_wm schema=1 status=manage_resync reason=stale_surface preserved_layout=true"
+                );
+                self.request_relayout(layout, output)
+            }
+            result => result,
+        }
     }
 
     fn request_relayout(
@@ -2800,6 +2811,7 @@ fn run_session_loop(
     let mut max_compose = Duration::ZERO;
     let mut next_input_delivery = 1u64;
     let mut pending_input_deliveries = BTreeSet::new();
+    let mut logout_requested = false;
     let mut input_events_expected = 0usize;
     let mut input_events_flushed = 0usize;
     let mut input_delivery_wait_started_at: Option<Instant> = None;
@@ -3999,6 +4011,19 @@ fn run_session_loop(
             control_ack_receiver,
             &mut committed_session_actions,
         )? {
+            logout_requested = true;
+            let discarded = pending_input_deliveries.len();
+            input_events_expected = input_events_expected.saturating_sub(discarded);
+            pending_input_deliveries.clear();
+            input_delivery_wait_started_at = None;
+            if discarded != 0 {
+                println!(
+                    "sophia_live_session_input_pipeline schema=2 status=logout_discarded pending={discarded}"
+                );
+                std::io::stdout().flush()?;
+            }
+        }
+        if logout_requested && pending_input_deliveries.is_empty() {
             break;
         }
         if input_presented_latency.is_none()
