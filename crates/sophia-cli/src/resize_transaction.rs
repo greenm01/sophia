@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
-use sophia_protocol::{Size, SurfaceId, TransactionId};
+use sophia_protocol::{LayerSnapshot, Size, SurfaceId, TransactionId};
+use sophia_x_authority::XAuthorityObservedTransactionBatch;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ResizeRollbackRequest {
@@ -16,6 +17,7 @@ pub struct ResizeRollbackRequest {
 pub struct ResizeRollbackCoordinator {
     committed_sizes: BTreeMap<SurfaceId, Size>,
     rollback_sizes: BTreeMap<SurfaceId, Size>,
+    rejected_sizes: BTreeMap<SurfaceId, Size>,
     next_transaction: u64,
 }
 
@@ -24,6 +26,7 @@ impl Default for ResizeRollbackCoordinator {
         Self {
             committed_sizes: BTreeMap::new(),
             rollback_sizes: BTreeMap::new(),
+            rejected_sizes: BTreeMap::new(),
             next_transaction: 1 << 63,
         }
     }
@@ -36,6 +39,13 @@ impl ResizeRollbackCoordinator {
 
     pub fn record_committed(&mut self, surface: SurfaceId, size: Size) {
         self.committed_sizes.insert(surface, size);
+        if self.rejected_sizes.get(&surface) == Some(&size) {
+            self.rejected_sizes.remove(&surface);
+        }
+    }
+
+    pub fn request_allowed(&self, surface: SurfaceId, size: Size) -> bool {
+        self.rejected_sizes.get(&surface) != Some(&size)
     }
 
     pub fn accept_observation(&mut self, surface: SurfaceId, size: Size) -> bool {
@@ -51,11 +61,12 @@ impl ResizeRollbackCoordinator {
 
     pub fn begin_rollback(
         &mut self,
-        surfaces: impl IntoIterator<Item = SurfaceId>,
+        requests: impl IntoIterator<Item = (SurfaceId, Size)>,
     ) -> Result<Vec<ResizeRollbackRequest>, &'static str> {
-        let sizes = surfaces
+        let sizes = requests
             .into_iter()
-            .map(|surface| {
+            .map(|(surface, rejected)| {
+                self.rejected_sizes.insert(surface, rejected);
                 self.committed_size(surface)
                     .map(|size| (surface, size))
                     .ok_or("live WM rollback surface has no committed authority size")
@@ -82,6 +93,7 @@ impl ResizeRollbackCoordinator {
     pub fn remove(&mut self, surface: SurfaceId) {
         self.committed_sizes.remove(&surface);
         self.rollback_sizes.remove(&surface);
+        self.rejected_sizes.remove(&surface);
     }
 
     pub fn rollback_pending(&self, surface: SurfaceId) -> bool {
@@ -91,4 +103,18 @@ impl ResizeRollbackCoordinator {
     pub fn rollback_surfaces(&self) -> impl Iterator<Item = SurfaceId> + '_ {
         self.rollback_sizes.keys().copied()
     }
+}
+
+/// Projects authority pixels onto the current layout without dropping any
+/// generation-bearing transaction or associated buffer update.
+pub fn project_authority_batch_onto_layout(
+    mut batch: XAuthorityObservedTransactionBatch,
+    layers: &BTreeMap<SurfaceId, LayerSnapshot>,
+) -> XAuthorityObservedTransactionBatch {
+    for transaction in &mut batch.transactions {
+        if let Some(layer) = layers.get(&transaction.surface) {
+            transaction.target_geometry = layer.geometry;
+        }
+    }
+    batch
 }

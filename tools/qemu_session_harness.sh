@@ -119,11 +119,11 @@ send_firefox_close_and_wait() {
 
     # Firefox can expose more than one managed top-level window. Closing the
     # focused one may leave the browser process alive, so use its native quit
-    # chord while cycling the remaining managed surfaces. Ctrl+Shift+W is
-    # harmless to the terminal and Vulkan fixtures between Firefox windows.
+    # chord while cycling the remaining managed surfaces. Ctrl+Q exits
+    # the browser process instead of closing only one of its top-levels.
     for _ in $(seq 1 8); do
-        "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" ctrl+shift+w
-        echo "sophia_qemu_xmonad_input schema=1 status=sent chord=ctrl+shift+w app=firefox" | tee -a "$EVIDENCE_FILE"
+        "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" ctrl+q
+        echo "sophia_qemu_xmonad_input schema=1 status=sent chord=ctrl+q app=firefox" | tee -a "$EVIDENCE_FILE"
         if wait_for_new_evidence '^sophia_session_app schema=1 status=exited id=firefox ' "$exit_baseline" 80; then
             return 0
         fi
@@ -147,6 +147,8 @@ wait_for_firefox_stage() {
 run_firefox_m8_interactions() {
     local page_focus_baseline
     local clipboard_complete=false
+    local primary_complete=false
+    local dialog_complete=false
     wait_for_new_evidence '^sophia_firefox_m8 schema=1 status=page_ready ' 0 800
     for _ in $(seq 1 10); do
         "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" ctrl+l
@@ -164,22 +166,59 @@ run_firefox_m8_interactions() {
         page_focus_baseline="$(evidence_count '^sophia_live_wm schema=1 status=focus_reconciled ')"
         "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" meta_l+j
         echo "sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+j phase=firefox-input-refocus" | tee -a "$EVIDENCE_FILE"
-        wait_for_new_evidence '^sophia_live_wm schema=1 status=focus_reconciled ' "$page_focus_baseline" || true
+        wait_for_new_evidence '^sophia_live_wm schema=1 status=focus_reconciled ' "$page_focus_baseline" 400 || true
     done
     if [[ "$clipboard_complete" != true ]]; then
         echo "sophia_qemu_xmonad schema=1 status=failed reason=firefox_stage_timeout stage=clipboard" | tee -a "$EVIDENCE_FILE"
         return 1
     fi
     wait_for_firefox_stage clipboard
-    "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" tab
-    "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" shift+insert
+    for _ in $(seq 1 10); do
+        # Firefox's native PRIMARY paste gesture is a middle click. The fixture
+        # expands the target over its content area for this stage; sweep a
+        # bounded grid because the browser shares two outputs with other apps.
+        "$ROOT_DIR/tools/qemu_qmp_pointer.py" "$QMP_SOCKET" -4096 -4096 1 middle
+        "$ROOT_DIR/tools/qemu_qmp_pointer.py" "$QMP_SOCKET" 320 400 1 middle
+        "$ROOT_DIR/tools/qemu_qmp_pointer.py" "$QMP_SOCKET" 640 0 1 middle
+        "$ROOT_DIR/tools/qemu_qmp_pointer.py" "$QMP_SOCKET" 640 0 1 middle
+        "$ROOT_DIR/tools/qemu_qmp_pointer.py" "$QMP_SOCKET" 640 0 1 middle
+        "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" ctrl+v
+        if wait_for_new_evidence '^sophia_firefox_m8 schema=1 status=stage_complete stage=primary ' 0 20; then
+            primary_complete=true
+            break
+        fi
+        page_focus_baseline="$(evidence_count '^sophia_live_wm schema=1 status=focus_reconciled ')"
+        "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" meta_l+j
+        echo "sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+j phase=firefox-primary-refocus" | tee -a "$EVIDENCE_FILE"
+        wait_for_new_evidence '^sophia_live_wm schema=1 status=focus_reconciled ' "$page_focus_baseline" 400 || true
+    done
+    if [[ "$primary_complete" != true ]]; then
+        echo "sophia_qemu_xmonad schema=1 status=failed reason=firefox_stage_timeout stage=primary" | tee -a "$EVIDENCE_FILE"
+        return 1
+    fi
     wait_for_firefox_stage primary
     "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" meta_l+spc
     echo "sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+spc phase=firefox-resize" | tee -a "$EVIDENCE_FILE"
     wait_for_firefox_stage resize
-    "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" tab
-    "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" ret
-    "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" ret
+    for _ in $(seq 1 10); do
+        "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" ctrl+l
+        "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" f6
+        "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" tab
+        "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" ret
+        "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" ret
+        if wait_for_new_evidence '^sophia_firefox_m8 schema=1 status=stage_complete stage=dialog ' 0 20; then
+            dialog_complete=true
+            break
+        fi
+        page_focus_baseline="$(evidence_count '^sophia_live_wm schema=1 status=focus_reconciled ')"
+        "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" meta_l+j
+        echo "sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+j phase=firefox-dialog-refocus" | tee -a "$EVIDENCE_FILE"
+        wait_for_new_evidence '^sophia_live_wm schema=1 status=focus_reconciled ' "$page_focus_baseline" 400 || true
+    done
+    if [[ "$dialog_complete" != true ]]; then
+        echo "sophia_qemu_xmonad schema=1 status=failed reason=firefox_stage_timeout stage=dialog" | tee -a "$EVIDENCE_FILE"
+        return 1
+    fi
     wait_for_firefox_stage dialog
     echo "sophia_qemu_firefox_m8 schema=1 status=interactions_complete keyboard=true clipboard=true primary=true resize=true dialog=true" | tee -a "$EVIDENCE_FILE"
 }

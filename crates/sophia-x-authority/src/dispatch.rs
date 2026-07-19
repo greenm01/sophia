@@ -2263,6 +2263,13 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
+        // Output policy is Engine-owned; accept the advisory RandR request
+        // without allowing an X11 client to mutate the native output layout.
+        XWireRequest::RandrSetOutputPrimary => XDispatchResult {
+            response: None,
+            outputs: Vec::new(),
+            metadata_candidates: Vec::new(),
+        },
         XWireRequest::RandrGetMonitors { window, .. } => {
             let timestamp = u32::try_from(runtime.output_topology().generation)
                 .unwrap_or(u32::MAX)
@@ -2438,6 +2445,13 @@ pub fn dispatch_x11_wire_request(
                 sequence: context.sequence,
                 device_id: 2,
             })],
+            metadata_candidates: Vec::new(),
+        },
+        // DeviceBell has no server-side state in Sophia. Accepting the bounded
+        // legacy XInput request matches an X server with its bell disabled.
+        XWireRequest::XiDeviceBell => XDispatchResult {
+            response: None,
+            outputs: Vec::new(),
             metadata_candidates: Vec::new(),
         },
         XWireRequest::XiChangeCursor { window, cursor } => {

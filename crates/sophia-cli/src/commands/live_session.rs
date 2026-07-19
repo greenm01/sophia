@@ -7,7 +7,9 @@ use sophia_backend_live::{
 };
 use sophia_cli::emergency_input::{EmergencyChordAction, EmergencyChordState};
 use sophia_cli::input_proof::{PhysicalTextProof, PhysicalTextProofEvent};
-use sophia_cli::resize_transaction::ResizeRollbackCoordinator;
+use sophia_cli::resize_transaction::{
+    ResizeRollbackCoordinator, project_authority_batch_onto_layout,
+};
 use sophia_engine::{
     FocusedInputRoute, InputFocusDecision, InputFocusState, NonBlockingInputPoller,
     WmShortcutRouter, WmWorkspaceState,
@@ -2017,7 +2019,6 @@ struct PendingLiveWmLayout {
     moved_surfaces: usize,
     staged_transactions: BTreeMap<SurfaceId, SurfaceTransaction>,
     effects: Option<LiveWmCommitEffects>,
-    staged_cpu_buffer_updates: Vec<XAuthorityCpuBufferUpdate>,
 }
 
 #[derive(Default)]
@@ -2030,7 +2031,6 @@ struct PersistentLiveLayout {
     focus_to_apply: Option<(TransactionId, SurfaceId)>,
     stage_new_surfaces_offset: bool,
     center_first_surface_in: Option<Size>,
-    committed_resize_replay: Option<(Vec<SurfaceTransaction>, Vec<XAuthorityCpuBufferUpdate>)>,
 }
 
 impl PersistentLiveLayout {
@@ -2113,23 +2113,6 @@ impl PersistentLiveLayout {
                 }
             }
         }
-        if let Some(pending) = self.pending.as_mut() {
-            let staged_handles = pending
-                .staged_transactions
-                .values()
-                .filter_map(|transaction| match transaction.target_buffer {
-                    BufferSource::CpuBuffer { handle } => Some(handle),
-                    _ => None,
-                })
-                .collect::<BTreeSet<_>>();
-            pending.staged_cpu_buffer_updates.extend(
-                batch
-                    .cpu_buffer_updates
-                    .iter()
-                    .filter(|update| staged_handles.contains(&update.handle()))
-                    .cloned(),
-            );
-        }
         new_surfaces
     }
 
@@ -2185,9 +2168,22 @@ impl PersistentLiveLayout {
             );
             return Ok(None);
         }
-        proposal
-            .requested_sizes
-            .retain(|surface, size| self.resize.committed_size(*surface) != Some(*size));
+        for (surface, size) in &proposal.requested_sizes {
+            if !self.resize.request_allowed(*surface, *size)
+                && let Some(committed) = self.resize.committed_size(*surface)
+                && let Some(layer) = proposal
+                    .layers
+                    .iter_mut()
+                    .find(|layer| layer.surface == *surface)
+            {
+                layer.geometry.width = committed.width;
+                layer.geometry.height = committed.height;
+            }
+        }
+        proposal.requested_sizes.retain(|surface, size| {
+            self.resize.committed_size(*surface) != Some(*size)
+                && self.resize.request_allowed(*surface, *size)
+        });
         for (surface, size) in &proposal.requested_sizes {
             let client = self
                 .client_routes
@@ -2237,7 +2233,6 @@ impl PersistentLiveLayout {
             moved_surfaces: proposal.moved_surfaces,
             staged_transactions: BTreeMap::new(),
             effects: proposal.effects,
-            staged_cpu_buffer_updates: Vec::new(),
         });
         Ok(None)
     }
@@ -2273,9 +2268,12 @@ impl PersistentLiveLayout {
             return Ok(None);
         }
         let pending = self.pending.take().expect("checked above");
-        let rollback = self
-            .resize
-            .begin_rollback(pending.requested_sizes.keys().copied())?;
+        let rollback = self.resize.begin_rollback(
+            pending
+                .requested_sizes
+                .iter()
+                .map(|(surface, size)| (*surface, *size)),
+        )?;
         let rollback_transaction = rollback
             .first()
             .map(|request| request.transaction)
@@ -2356,7 +2354,6 @@ impl PersistentLiveLayout {
             update: proposal.update,
             moved_surfaces: proposal.moved_surfaces,
             staged_transactions: BTreeMap::new(),
-            staged_cpu_buffer_updates: Vec::new(),
             effects: proposal.effects,
         };
         self.commit_pending(pending)
@@ -2373,10 +2370,6 @@ impl PersistentLiveLayout {
                     },
                 );
             }
-            self.committed_resize_replay = Some((
-                pending.staged_transactions.values().cloned().collect(),
-                pending.staged_cpu_buffer_updates.clone(),
-            ));
         }
         self.layers = pending
             .layers
@@ -2404,68 +2397,12 @@ impl PersistentLiveLayout {
         &mut self,
         batch: &XAuthorityObservedTransactionBatch,
     ) -> XAuthorityObservedTransactionBatch {
-        let mut projected = batch.clone();
-        if let Some(pending) = self.pending.as_ref() {
-            let staged_surfaces = pending
-                .staged_transactions
-                .keys()
-                .copied()
-                .collect::<BTreeSet<_>>();
-            let staged_handles = pending
-                .staged_transactions
-                .values()
-                .filter_map(|transaction| match transaction.target_buffer {
-                    BufferSource::CpuBuffer { handle } => Some(handle),
-                    _ => None,
-                })
-                .collect::<BTreeSet<_>>();
-            projected
-                .transactions
-                .retain(|transaction| !staged_surfaces.contains(&transaction.surface));
-            projected
-                .cpu_buffer_updates
-                .retain(|update| !staged_handles.contains(&update.handle()));
-        }
-        let rollback_surfaces = self.resize.rollback_surfaces().collect::<BTreeSet<_>>();
-        let rollback_handles = projected
-            .transactions
-            .iter()
-            .filter(|transaction| rollback_surfaces.contains(&transaction.surface))
-            .filter_map(|transaction| match transaction.target_buffer {
-                BufferSource::CpuBuffer { handle } => Some(handle),
-                _ => None,
-            })
-            .collect::<BTreeSet<_>>();
-        projected
-            .transactions
-            .retain(|transaction| !rollback_surfaces.contains(&transaction.surface));
-        projected
-            .cpu_buffer_updates
-            .retain(|update| !rollback_handles.contains(&update.handle()));
-        if let Some((transactions, updates)) = self.committed_resize_replay.take() {
-            let surfaces = transactions
-                .iter()
-                .map(|transaction| transaction.surface)
-                .collect::<BTreeSet<_>>();
-            let handles = updates
-                .iter()
-                .map(XAuthorityCpuBufferUpdate::handle)
-                .collect::<BTreeSet<_>>();
-            projected
-                .transactions
-                .retain(|transaction| !surfaces.contains(&transaction.surface));
-            projected
-                .cpu_buffer_updates
-                .retain(|update| !handles.contains(&update.handle()));
-            projected.transactions.extend(transactions);
-            projected.cpu_buffer_updates.extend(updates);
-        }
-        for transaction in &mut projected.transactions {
-            if let Some(layer) = self.layers.get(&transaction.surface) {
-                transaction.target_geometry = layer.geometry;
-            }
-        }
-        projected
+        // Resize quarantine controls geometry and presentation, not authority
+        // intake. Dropping a drawing transaction here would break the X
+        // authority's per-surface generation chain permanently. Preserve each
+        // transaction and buffer update in order, but pin its geometry to the
+        // last layout decision until a coherent proposal commits.
+        project_authority_batch_onto_layout(batch.clone(), &self.layers)
     }
 }
 
@@ -3448,10 +3385,20 @@ fn run_session_loop(
                 expected_protocol_error_count = expected_protocol_error_count
                     .saturating_add(batch.expected_protocol_errors.len());
                 if config.firefox_m8_proof {
-                    firefox_m8_selection_owner_changes = firefox_m8_selection_owner_changes
-                        .saturating_add(usize::from(batch.selection_owner_change));
-                    firefox_m8_selection_conversions = firefox_m8_selection_conversions
-                        .saturating_add(usize::from(batch.selection_conversion));
+                    if batch.selection_owner_change {
+                        firefox_m8_selection_owner_changes =
+                            firefox_m8_selection_owner_changes.saturating_add(1);
+                        println!(
+                            "sophia_firefox_m8 schema=1 status=selection_observed kind=owner_change count={firefox_m8_selection_owner_changes} content=redacted"
+                        );
+                    }
+                    if batch.selection_conversion {
+                        firefox_m8_selection_conversions =
+                            firefox_m8_selection_conversions.saturating_add(1);
+                        println!(
+                            "sophia_firefox_m8 schema=1 status=selection_observed kind=conversion count={firefox_m8_selection_conversions} content=redacted"
+                        );
+                    }
                     for metadata in &batch.metadata {
                         if !firefox_m8_page_ready_reported
                             && metadata.property_name == "_NET_WM_NAME"

@@ -103,6 +103,7 @@ pub const X_RANDR_GET_OUTPUT_PROPERTY_MINOR_OPCODE: u8 = 15;
 pub const X_RANDR_GET_CRTC_INFO_MINOR_OPCODE: u8 = 20;
 pub const X_RANDR_GET_SCREEN_RESOURCES_CURRENT_MINOR_OPCODE: u8 = 25;
 pub const X_RANDR_GET_OUTPUT_PRIMARY_MINOR_OPCODE: u8 = 31;
+pub const X_RANDR_SET_OUTPUT_PRIMARY_MINOR_OPCODE: u8 = 32;
 pub const X_RANDR_GET_MONITORS_MINOR_OPCODE: u8 = 42;
 pub const X_KEYBOARD_EXTENSION_NAME: &str = "XKEYBOARD";
 pub const X_KEYBOARD_MAJOR_OPCODE: u8 = 133;
@@ -122,6 +123,7 @@ pub const X_INPUT_MAJOR_OPCODE: u8 = 135;
 pub const X_INPUT_FIRST_EVENT: u8 = 96;
 pub const X_INPUT_FIRST_ERROR: u8 = 160;
 pub const X_INPUT_GET_EXTENSION_VERSION_MINOR_OPCODE: u8 = 1;
+pub const X_INPUT_DEVICE_BELL_MINOR_OPCODE: u8 = 32;
 pub const X_INPUT_QUERY_POINTER_MINOR_OPCODE: u8 = 40;
 pub const X_INPUT_CHANGE_CURSOR_MINOR_OPCODE: u8 = 42;
 const X_INPUT_QUERY_POINTER_REQ_LEN: usize = 12;
@@ -749,6 +751,7 @@ pub enum XWireRequest {
     RandrGetOutputPrimary {
         window: XResourceId,
     },
+    RandrSetOutputPrimary,
     RandrGetMonitors {
         window: XResourceId,
         get_active: bool,
@@ -785,6 +788,7 @@ pub enum XWireRequest {
         device_id: u16,
     },
     XiGetClientPointer,
+    XiDeviceBell,
     XiUngrabDevice {
         device_id: u16,
         time: u32,
@@ -1022,6 +1026,10 @@ fn decode_xfixes(
     bytes: &[u8],
 ) -> Result<XWireRequest, XWireParseError> {
     match bytes[1] {
+        X_INPUT_DEVICE_BELL_MINOR_OPCODE => {
+            require_exact_len(X_INPUT_MAJOR_OPCODE, 8, bytes.len())?;
+            Ok(XWireRequest::XiDeviceBell)
+        }
         X_XFIXES_QUERY_VERSION_MINOR_OPCODE => decode_extension_query_version(
             context,
             bytes,
@@ -1624,6 +1632,10 @@ fn decode_randr(
             Ok(XWireRequest::RandrGetOutputPrimary {
                 window: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
             })
+        }
+        X_RANDR_SET_OUTPUT_PRIMARY_MINOR_OPCODE => {
+            require_exact_len(X_RANDR_MAJOR_OPCODE, 12, bytes.len())?;
+            Ok(XWireRequest::RandrSetOutputPrimary)
         }
         X_RANDR_GET_MONITORS_MINOR_OPCODE => {
             require_exact_len(
