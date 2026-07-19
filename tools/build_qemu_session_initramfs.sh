@@ -31,9 +31,20 @@ fi
 
 mkdir -p "$OUT_DIR" "$OUT_DIR/dracut-tmp"
 
+BRIDGE_BIN="$ROOT_DIR/target/release/sophia-x11-wm-bridge"
+XMONAD_BIN="${SOPHIA_XMONAD_BIN:-}"
+if [[ -z "$XMONAD_BIN" ]] && command -v xmonad >/dev/null 2>&1; then
+    XMONAD_BIN="$(command -v xmonad)"
+fi
+if [[ -n "$XMONAD_BIN" && ! -x "$XMONAD_BIN" ]]; then
+    echo "configured xmonad binary is not executable: $XMONAD_BIN" >&2
+    exit 1
+fi
+XMONAD_INCLUDE=()
+[[ -z "$XMONAD_BIN" ]] || XMONAD_INCLUDE=(--include "$XMONAD_BIN" /usr/bin/xmonad)
 (
     cd "$ROOT_DIR"
-    cargo build --release --offline -p sophia-cli --features atomic-scanout-live
+    cargo build --release --offline -p sophia-cli -p sophia-x11-wm-bridge --features atomic-scanout-live
 )
 
 SOPHIA_BIN="$ROOT_DIR/target/release/sophia"
@@ -66,9 +77,11 @@ dracut --force --no-hostonly --no-hostonly-cmdline --no-early-microcode \
     --kver "$KERNEL_VERSION" \
     --tmpdir "$OUT_DIR/dracut-tmp" \
     --force-drivers "virtio_pci virtio_gpu virtio_input evdev" \
-    --install "/bin/sh /usr/bin/chmod /usr/bin/mount /usr/bin/modprobe /usr/bin/poweroff /usr/bin/sleep /usr/bin/sync ${install_files[*]}" \
+    --install "/bin/sh /usr/bin/chmod /usr/bin/mount /usr/bin/modprobe /usr/bin/pidof /usr/bin/poweroff /usr/bin/sleep /usr/bin/sync ${install_files[*]}" \
     --include "$ROOT_DIR/tools/qemu_guest_init.sh" /sbin/sophia-qemu-init \
     --include "$SOPHIA_BIN" /usr/bin/sophia \
+    --include "$BRIDGE_BIN" /usr/bin/sophia-x11-wm-bridge \
+    "${XMONAD_INCLUDE[@]}" \
     --include /usr/lib/dri /usr/lib/dri \
     --include /usr/lib/gbm /usr/lib/gbm \
     --include /etc/fonts /etc/fonts \

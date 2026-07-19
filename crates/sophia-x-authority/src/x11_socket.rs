@@ -26,14 +26,14 @@ use std::{
 
 #[cfg(unix)]
 use crate::{
-    X_SETUP_CLIENT_PREFIX_LEN, X_SETUP_DEFAULT_RESOURCE_ID_MASK, X_SETUP_DEFAULT_ROOT,
-    X_SETUP_MAX_AUTH_FIELD_LEN, XAtomTable, XAuthorityCpuBufferUpdate,
-    XAuthorityObservedTransactionBatch, XAuthorityResponsePacket, XAuthorityRuntime, XByteOrder,
-    XClientEvent, XDispatchContext, XDispatchResult, XPropertyTable, XResourceId, XSetupFailure,
-    XSetupRequest, XSetupSuccess, XWireClientContext, decode_x11_core_request,
-    dispatch_x11_parse_error, dispatch_x11_wire_request, encode_x_client_event,
-    encode_x11_setup_failure, encode_x11_setup_success, parse_x11_setup_request,
-    try_emit_x_authority_trace, x11_setup_request_total_len,
+    X_ATOM_NAME_WM_DELETE_WINDOW, X_ATOM_NAME_WM_PROTOCOLS, X_SETUP_CLIENT_PREFIX_LEN,
+    X_SETUP_DEFAULT_RESOURCE_ID_MASK, X_SETUP_DEFAULT_ROOT, X_SETUP_MAX_AUTH_FIELD_LEN, XAtomTable,
+    XAuthorityCpuBufferUpdate, XAuthorityObservedTransactionBatch, XAuthorityResponsePacket,
+    XAuthorityRuntime, XByteOrder, XClientEvent, XDispatchContext, XDispatchResult, XPropertyTable,
+    XResourceId, XSetupFailure, XSetupRequest, XSetupSuccess, XWireClientContext,
+    decode_x11_core_request, dispatch_x11_parse_error, dispatch_x11_wire_request,
+    encode_x_client_event, encode_x11_setup_failure, encode_x11_setup_success,
+    parse_x11_setup_request, try_emit_x_authority_trace, x11_setup_request_total_len,
 };
 #[cfg(unix)]
 use sophia_protocol::{
@@ -1405,6 +1405,10 @@ pub enum XAuthorityControlCommand {
         transaction: TransactionId,
         surface: SurfaceId,
     },
+    CloseSurface {
+        transaction: TransactionId,
+        surface: SurfaceId,
+    },
 }
 
 /// An Engine control request addressed to the frontend connection that owns
@@ -1420,15 +1424,17 @@ pub struct XAuthorityClientControlCommand {
 impl XAuthorityControlCommand {
     pub const fn transaction(self) -> TransactionId {
         match self {
-            Self::ConfigureSurface { transaction, .. } | Self::FocusSurface { transaction, .. } => {
-                transaction
-            }
+            Self::ConfigureSurface { transaction, .. }
+            | Self::FocusSurface { transaction, .. }
+            | Self::CloseSurface { transaction, .. } => transaction,
         }
     }
 
     pub const fn surface(self) -> SurfaceId {
         match self {
-            Self::ConfigureSurface { surface, .. } | Self::FocusSurface { surface, .. } => surface,
+            Self::ConfigureSurface { surface, .. }
+            | Self::FocusSurface { surface, .. }
+            | Self::CloseSurface { surface, .. } => surface,
         }
     }
 }
@@ -1440,6 +1446,7 @@ pub enum XAuthorityControlOutcome {
     UnknownSurface,
     InvalidSize,
     AuthorityRejected,
+    UnsupportedProtocol,
 }
 
 #[cfg(unix)]
@@ -4129,6 +4136,8 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 event_sequence.clone(),
                 focused_surface_window.clone(),
                 surface_windows.clone(),
+                state.atoms.clone(),
+                state.properties.clone(),
                 state.runtime.clone(),
                 namespace,
                 client,
@@ -5100,6 +5109,8 @@ fn spawn_x11_control_writer(
     sequence: Arc<AtomicU16>,
     focused_surface_window: Arc<AtomicU64>,
     surface_windows: Arc<Mutex<BTreeMap<SurfaceId, XResourceId>>>,
+    atoms: Arc<Mutex<XAtomTable>>,
+    properties: Arc<Mutex<XPropertyTable>>,
     runtime: Arc<Mutex<XAuthorityRuntime>>,
     namespace: NamespaceId,
     client: XServerFrontendClientId,
@@ -5107,6 +5118,28 @@ fn spawn_x11_control_writer(
 ) -> Result<X11ControlWriter, X11SetupSocketError> {
     let stop = Arc::new(AtomicBool::new(false));
     let writer_stop = stop.clone();
+    macro_rules! terminate_client {
+        ($transaction:expr, $surface:expr) => {{
+            let stream = stream
+                .lock()
+                .map_err(|_| X11SetupSocketError::new("X11 output socket lock poisoned"))?;
+            stream.shutdown(Shutdown::Both).map_err(|error| {
+                X11SetupSocketError::new(format!(
+                    "failed to terminate non-cooperating X11 client: {error}"
+                ))
+            })?;
+            drop(stream);
+            channels.send_ack(
+                client,
+                XAuthorityControlAck {
+                    transaction: $transaction,
+                    surface: $surface,
+                    outcome: XAuthorityControlOutcome::Delivered,
+                },
+            )?;
+            return Ok(());
+        }};
+    }
     let thread = std::thread::spawn(move || {
         while !writer_stop.load(Ordering::Acquire) {
             let command = match channels.recv_timeout(client) {
@@ -5203,6 +5236,45 @@ fn spawn_x11_control_writer(
                         ),
                     ]
                 }
+                XAuthorityControlCommand::CloseSurface { .. } => {
+                    let atoms = atoms
+                        .lock()
+                        .map_err(|_| X11SetupSocketError::new("X11 atom table lock poisoned"))?;
+                    let Some(protocols) = atoms.atom(X_ATOM_NAME_WM_PROTOCOLS) else {
+                        terminate_client!(transaction, surface);
+                    };
+                    let Some(delete) = atoms.atom(X_ATOM_NAME_WM_DELETE_WINDOW) else {
+                        terminate_client!(transaction, surface);
+                    };
+                    drop(atoms);
+                    let supported = properties
+                        .lock()
+                        .map_err(|_| X11SetupSocketError::new("X11 property table lock poisoned"))?
+                        .get(namespace, window, protocols)
+                        .is_some_and(|record| {
+                            record.format == 32
+                                && record
+                                    .bytes
+                                    .chunks_exact(4)
+                                    .any(|bytes| byte_order.u32(bytes) == delete)
+                        });
+                    if !supported {
+                        terminate_client!(transaction, surface);
+                    }
+                    let mut bytes = [0_u8; 32];
+                    bytes[0] = 33;
+                    bytes[1] = 32;
+                    write_control_u32(byte_order, &mut bytes[4..8], window.local.raw() as u32);
+                    write_control_u32(byte_order, &mut bytes[8..12], protocols);
+                    write_control_u32(byte_order, &mut bytes[12..16], delete);
+                    vec![encode_x_client_event(
+                        byte_order,
+                        XClientEvent::ClientMessage {
+                            sequence: event_sequence,
+                            bytes,
+                        },
+                    )]
+                }
                 XAuthorityControlCommand::FocusSurface { .. } => {
                     if runtime
                         .lock()
@@ -5283,6 +5355,15 @@ fn spawn_x11_control_writer(
         Ok(())
     });
     Ok(X11ControlWriter { stop, thread })
+}
+
+#[cfg(unix)]
+fn write_control_u32(byte_order: XByteOrder, out: &mut [u8], value: u32) {
+    let bytes = match byte_order {
+        XByteOrder::LittleEndian => value.to_le_bytes(),
+        XByteOrder::BigEndian => value.to_be_bytes(),
+    };
+    out.copy_from_slice(&bytes);
 }
 
 #[cfg(unix)]

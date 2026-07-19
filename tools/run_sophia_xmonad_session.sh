@@ -134,6 +134,7 @@ setsid env SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 \
     --input-devices="$keyboard" \
     --wm-process="$ROOT_DIR/target/debug/sophia-x11-wm-bridge" \
     --wm-process-arg="--wm=$xmonad_bin" \
+    --wm-process-arg=--profile=xmonad \
     --wm-process-arg=--wm-private-alias=xmonad/xmonad-x86_64-linux \
     --terminal-exec=/bin/sh \
     --terminal-exec-arg=-i \

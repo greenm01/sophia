@@ -24,6 +24,7 @@ case " $cmdline " in
     *" sophia.scenario=emergency-recovery "*) scenario="emergency-recovery" ;;
     *" sophia.scenario=gtk-classic "*) scenario="gtk-classic" ;;
     *" sophia.scenario=gtk-confined "*) scenario="gtk-confined" ;;
+    *" sophia.scenario=xmonad-m7 "*) scenario="xmonad-m7" ;;
 esac
 case " $cmdline " in
     *" sophia.two_xterm=1 "*) two_xterm=true ;;
@@ -33,6 +34,8 @@ if [ "$scenario" = "emergency-recovery" ]; then
     echo "sophia_qemu_guest schema=1 status=booting gpu=virtio-gpu scenario=emergency-recovery"
 elif [ "$scenario" = "gtk-classic" ] || [ "$scenario" = "gtk-confined" ]; then
     echo "sophia_qemu_guest schema=1 status=booting gpu=virtio-gpu scenario=$scenario"
+elif [ "$scenario" = "xmonad-m7" ]; then
+    echo "sophia_qemu_guest schema=1 status=booting gpu=virtio-gpu scenario=xmonad-m7"
 else
     echo "sophia_qemu_guest schema=1 status=booting gpu=virtio-gpu ticks=300"
 fi
@@ -134,6 +137,17 @@ elif [ "$scenario" = "gtk-classic" ] || [ "$scenario" = "gtk-confined" ]; then
         --expect-physical-text=sophia --expect-physical-pointer \
         --inject-surface-resize=640x360 --exit-after-input-proof
     echo "sophia_qemu_gtk schema=1 status=running profile=$profile"
+elif [ "$scenario" = "xmonad-m7" ]; then
+    if [ ! -x /usr/bin/xmonad ]; then
+        echo "sophia_qemu_xmonad schema=1 status=failed reason=xmonad_missing"
+        sync
+        poweroff -f
+    fi
+    set -- sophia-live-session --display=:181 --native-scanout --max-runtime-ms=60000 \
+        --secondary-terminal --wm-process=/usr/bin/sophia-x11-wm-bridge \
+        --wm-process-arg=--profile=xmonad --wm-process-arg=--wm=/usr/bin/xmonad \
+        --wm-process-arg=--wm-private-alias=xmonad/xmonad-x86_64-linux
+    echo "sophia_qemu_xmonad schema=1 status=running windows=2 profile=xmonad"
 else
     set -- sophia-live-session --display=:181 --native-scanout --max-ticks=300 \
         --expect-physical-text=sophia --expect-physical-pointer
@@ -144,6 +158,18 @@ fi
 
 if [ -n "$input_devices" ]; then
     set -- "$@" "--input-devices=$input_devices"
+if [ "$scenario" = "xmonad-m7" ]; then
+    (
+        while ! pidof sophia-x11-wm-bridge >/dev/null 2>&1; do sleep 0.05; done
+        sleep 9
+        wm_pid="$(pidof xmonad 2>/dev/null || true)"
+        bridge_pid="$(pidof sophia-x11-wm-bridge 2>/dev/null || true)"
+        [ -z "$wm_pid" ] || kill -TERM $wm_pid 2>/dev/null || true
+        [ -z "$bridge_pid" ] || kill -TERM $bridge_pid 2>/dev/null || true
+        echo "sophia_qemu_xmonad schema=1 status=restart_injected target=compatibility_bridge"
+    ) &
+fi
+
 fi
 
 set +e
@@ -189,6 +215,12 @@ elif [ "$scenario" = "gtk-classic" ] || [ "$scenario" = "gtk-confined" ]; then
         echo "sophia_qemu_guest schema=1 status=complete scenario=$scenario"
     else
         echo "sophia_qemu_guest schema=1 status=failed reason=gtk_session_exit scenario=$scenario exit_status=$status"
+    fi
+elif [ "$scenario" = "xmonad-m7" ]; then
+    if [ "$status" -eq 0 ]; then
+        echo "sophia_qemu_guest schema=1 status=complete scenario=xmonad-m7"
+    else
+        echo "sophia_qemu_guest schema=1 status=failed reason=xmonad_session_exit exit_status=$status"
     fi
 elif [ "$status" -eq 0 ]; then
     echo "sophia_qemu_guest schema=1 status=complete ticks=300"

@@ -8,8 +8,8 @@ KERNEL_IMAGE="${SOPHIA_QEMU_KERNEL:-/boot/vmlinuz-$KERNEL_VERSION}"
 INITRAMFS="${SOPHIA_QEMU_INITRAMFS:-$OUT_DIR/sophia-$KERNEL_VERSION.img}"
 SCENARIO="${SOPHIA_QEMU_SCENARIO:-session}"
 TWO_XTERM="${SOPHIA_QEMU_TWO_XTERM:-0}"
-if [[ "$SCENARIO" != "session" && "$SCENARIO" != "emergency-recovery" && "$SCENARIO" != "gtk-classic" && "$SCENARIO" != "gtk-confined" ]]; then
-    echo "SOPHIA_QEMU_SCENARIO must be session, emergency-recovery, gtk-classic, or gtk-confined" >&2
+if [[ "$SCENARIO" != "session" && "$SCENARIO" != "emergency-recovery" && "$SCENARIO" != "gtk-classic" && "$SCENARIO" != "gtk-confined" && "$SCENARIO" != "xmonad-m7" ]]; then
+    echo "SOPHIA_QEMU_SCENARIO must be session, emergency-recovery, gtk-classic, gtk-confined, or xmonad-m7" >&2
     exit 1
 fi
 if [[ "$TWO_XTERM" != "0" && "$TWO_XTERM" != "1" ]]; then
@@ -24,6 +24,8 @@ if [[ "$SCENARIO" == "emergency-recovery" ]]; then
     DEFAULT_EVIDENCE_FILE="/tmp/sophia-qemu-emergency-recovery.log"
 elif [[ "$SCENARIO" == gtk-* ]]; then
     DEFAULT_EVIDENCE_FILE="/tmp/sophia-qemu-$SCENARIO.log"
+elif [[ "$SCENARIO" == "xmonad-m7" ]]; then
+    DEFAULT_EVIDENCE_FILE="/tmp/sophia-qemu-xmonad-m7.log"
 else
     DEFAULT_EVIDENCE_FILE="/tmp/sophia-qemu-session.log"
 fi
@@ -82,6 +84,8 @@ if [[ "$SCENARIO" == "emergency-recovery" ]]; then
     echo "sophia_qemu_recovery schema=1 status=starting isolation=headless control=qmp-unix host_drm=none host_vt=none keyboard=virtio chord=ctrl-alt-backspace" | tee -a "$EVIDENCE_FILE"
 elif [[ "$SCENARIO" == gtk-* ]]; then
     echo "sophia_qemu_gtk schema=1 status=starting isolation=headless control=qmp-unix host_drm=none host_vt=none keyboard=virtio mouse=virtio scenario=$SCENARIO" | tee -a "$EVIDENCE_FILE"
+elif [[ "$SCENARIO" == "xmonad-m7" ]]; then
+    echo "sophia_qemu_xmonad schema=1 status=starting isolation=headless control=qmp-unix profile=xmonad windows=2" | tee -a "$EVIDENCE_FILE"
 else
     echo "sophia_qemu_session schema=3 status=starting isolation=headless display_sink=vnc-unix control=qmp-unix host_drm=none host_vt=none guest_network=none storage=none gpu=virtio-gpu gpu_devices=2 gpu_heads=2 keyboard=virtio mouse=virtio ticks=300" | tee -a "$EVIDENCE_FILE"
 fi
@@ -183,6 +187,81 @@ if [[ "$SCENARIO" == "emergency-recovery" ]]; then
     exit 0
 fi
 
+if [[ "$SCENARIO" == "xmonad-m7" ]]; then
+    ready=false
+    for _ in $(seq 1 800); do
+        if grep -q '^sophia_live_wm schema=1 status=ready ' "$EVIDENCE_FILE" \
+            && grep -q '^sophia_live_session_input_pipeline schema=1 status=focus_ready$' "$EVIDENCE_FILE" \
+            && grep -q '^sophia_live_wm schema=1 status=layout_committed ' "$EVIDENCE_FILE"; then
+            ready=true
+            break
+        fi
+        if ! kill -0 "$QEMU_PID" 2>/dev/null; then break; fi
+        sleep 0.05
+    done
+    if [[ "$ready" != true ]]; then
+        echo "sophia_qemu_xmonad schema=1 status=failed reason=readiness_timeout" | tee -a "$EVIDENCE_FILE"
+        exit 1
+    fi
+    chords=("meta_l+j" "meta_l+k" "meta_l+spc" "meta_l+2" "meta_l+shift+1")
+    for chord in "${chords[@]}"; do
+        "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" "$chord"
+        echo "sophia_qemu_xmonad_input schema=1 status=sent chord=$chord" | tee -a "$EVIDENCE_FILE"
+        sleep 1
+    done
+    restart_layout_baseline="$(grep -c '^sophia_live_wm schema=1 status=layout_committed ' "$EVIDENCE_FILE" || true)"
+    restarted=false
+    for _ in $(seq 1 400); do
+        if grep -q '^sophia_live_wm schema=1 status=restarted .*preserved_layout=true' "$EVIDENCE_FILE"; then
+            restarted=true
+            break
+        fi
+        if ! kill -0 "$QEMU_PID" 2>/dev/null; then break; fi
+        sleep 0.05
+    done
+    if [[ "$restarted" != true ]]; then
+        echo "sophia_qemu_xmonad schema=1 status=failed reason=restart_recovery_timeout" | tee -a "$EVIDENCE_FILE"
+        exit 1
+    fi
+    recovery_layout=false
+    for _ in $(seq 1 400); do
+        current_layout_count="$(grep -c '^sophia_live_wm schema=1 status=layout_committed ' "$EVIDENCE_FILE" || true)"
+        if (( current_layout_count > restart_layout_baseline )); then
+            recovery_layout=true
+            break
+        fi
+        if ! kill -0 "$QEMU_PID" 2>/dev/null; then break; fi
+        sleep 0.05
+    done
+    if [[ "$recovery_layout" != true ]]; then
+        echo "sophia_qemu_xmonad schema=1 status=failed reason=restart_layout_timeout" | tee -a "$EVIDENCE_FILE"
+        exit 1
+    fi
+    chords=("meta_l+shift+ret" "meta_l+shift+c" "meta_l+shift+q")
+    for chord in "${chords[@]}"; do
+        "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" "$chord"
+        echo "sophia_qemu_xmonad_input schema=1 status=sent chord=$chord" | tee -a "$EVIDENCE_FILE"
+        sleep 1
+    done
+
+
+    set +e
+    wait "$QEMU_PID"
+    qemu_status=$?
+    QEMU_PID=""
+    wait "$LOGGER_PID"
+    logger_status=$?
+    LOGGER_PID=""
+    set -e
+    cleanup
+    if [[ "$qemu_status" -ne 0 || "$logger_status" -ne 0 ]]; then
+        echo "sophia_qemu_xmonad schema=1 status=failed reason=guest_exit qemu_exit=$qemu_status logger_exit=$logger_status" | tee -a "$EVIDENCE_FILE"
+        exit 1
+    fi
+    "$ROOT_DIR/tools/verify_qemu_xmonad_m7_evidence.sh" "$EVIDENCE_FILE"
+    echo "sophia_qemu_xmonad schema=1 status=complete qemu_exit=0" | tee -a "$EVIDENCE_FILE"
+    exit 0
+fi
 if [[ "$SCENARIO" == gtk-* ]]; then
     input_ready=false
     for _ in $(seq 1 600); do

@@ -3,6 +3,28 @@
 This file records decisions and unresolved questions for the active milestone.
 Completed evidence is archived in `research-log-archive.md`.
 
+## 2026-07-18: Real xmonad QEMU Acceptance
+
+The Milestone 7 diskless QEMU gate now boots the production Sophia session with
+the locally built upstream xmonad binary, two virtio-gpu outputs, two initial
+xterms, and physical virtio keyboard input injected only through QMP. The gate
+exercises focus next/previous, layout rotation, workspace view and move,
+approved terminal launch, close, logout, and a forced compatibility-bridge
+restart. The strict verifier requires every chord, all three committed session
+actions, a three-surface post-launch layout, preserved committed state after
+restart, non-degraded external WM policy, and clean guest completion.
+
+Two transaction-lifecycle gaps surfaced during the proof. Startup management
+could overlap resize transactions when multiple new surfaces arrived together,
+and post-restart input could race the recovery relayout. Engine now admits one
+unmanaged surface per transaction, while the harness waits for the recovery
+layout commit before resuming input. Immediate action proposals also now install
+their accepted workspace and session-action effects instead of discarding them.
+
+The close proof exposed the ICCCM fallback case: clients that do not advertise
+`WM_DELETE_WINDOW` must have their X connection terminated rather than aborting
+the desktop session. Cooperative clients still receive the polite client
+message; the authority frontend now performs the bounded connection fallback.
 ## 2026-07-14: Explicit Final Scanout Retirement
 
 The post-completion X11 allocator failure exposed a teardown ownership gap.

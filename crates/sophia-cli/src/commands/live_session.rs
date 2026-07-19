@@ -696,6 +696,7 @@ pub(crate) fn run_persistent_xterm_session(
         &input_delivery_receiver,
         primary_child,
         secondary_children,
+        xauthority.path(),
         &mut physical_input,
         &mut native_scanout,
         &mut wm_session,
@@ -804,6 +805,8 @@ struct PersistentXtermSessionConfig {
     terminal: String,
     terminal_exec: Option<String>,
     terminal_exec_args: Vec<String>,
+    session_launcher: Option<String>,
+    session_firefox: Option<String>,
     client: Option<String>,
     client_args: Vec<String>,
     expect_client_stdout: Option<String>,
@@ -856,6 +859,15 @@ impl PersistentXtermSessionConfig {
             .filter_map(|arg| arg.strip_prefix("--terminal-exec-arg="))
             .map(ToOwned::to_owned)
             .collect::<Vec<_>>();
+        let session_launcher = arg_value(args, "--session-launcher");
+        let session_firefox = arg_value(args, "--session-firefox");
+        if session_launcher
+            .iter()
+            .chain(session_firefox.iter())
+            .any(|path| path.is_empty() || path.len() > 4_096)
+        {
+            return Err("approved session executable paths accept 1-4096 bytes".into());
+        }
         let client = arg_value(args, "--client");
         let software_client_rendering = args.iter().any(|arg| arg == "--software-client-rendering");
         let client_args = args
@@ -1034,6 +1046,8 @@ impl PersistentXtermSessionConfig {
             terminal: arg_value(args, "--terminal").unwrap_or_else(|| "xterm".to_owned()),
             terminal_exec,
             terminal_exec_args,
+            session_launcher,
+            session_firefox,
             client,
             client_args,
             expect_client_stdout,
@@ -1191,6 +1205,22 @@ fn spawn_secondary_xterm(
     Ok(command.spawn()?)
 }
 
+fn spawn_approved_application(
+    program: &str,
+    display: &str,
+    xauthority: &std::path::Path,
+) -> Result<Child, Box<dyn std::error::Error>> {
+    Ok(std::process::Command::new(program)
+        .env("DISPLAY", display)
+        .env("XAUTHORITY", xauthority)
+        .env_remove("ENV")
+        .env_remove("BASH_ENV")
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()?)
+}
+
 fn parse_display_number(display: &str) -> Result<u32, Box<dyn std::error::Error>> {
     let raw = display
         .strip_prefix(':')
@@ -1305,6 +1335,18 @@ struct LiveWmProposal {
     timeout: Duration,
     update: WmTransactionUpdate,
     moved_surfaces: usize,
+    effects: Option<LiveWmCommitEffects>,
+}
+
+struct LiveWmCommitEffects {
+    workspace_state: WmWorkspaceState,
+    transaction: TransactionId,
+    session_action: Option<(WmSessionAction, Option<SurfaceId>)>,
+}
+
+struct LiveWmCommitResult {
+    update: WmTransactionUpdate,
+    effects: Option<LiveWmCommitEffects>,
 }
 
 impl LiveWmSession {
@@ -1325,11 +1367,17 @@ impl LiveWmSession {
         );
         let workspace_state =
             WmWorkspaceState::new(wm_output_bounds(outputs), WM_DEFAULT_WORKSPACES)?;
-        let session_actions = vec![
+        let mut session_actions = vec![
             WmSessionAction::LaunchTerminal,
             WmSessionAction::CloseFocused,
             WmSessionAction::Logout,
         ];
+        if config.session_launcher.is_some() {
+            session_actions.push(WmSessionAction::LaunchApplicationMenu);
+        }
+        if config.session_firefox.is_some() {
+            session_actions.push(WmSessionAction::LaunchFirefox);
+        }
         let mut session = Self {
             supervisor: ProcessSupervisor::new(SupervisedProcessKind::WindowManager, spec),
             supervisor_state: sophia_runtime::SupervisorState::new(
@@ -1354,6 +1402,7 @@ impl LiveWmSession {
     }
 
     fn start(&mut self, event: SupervisorEvent) -> Result<(), Box<dyn std::error::Error>> {
+        let _ = std::fs::remove_file(&self.socket_path);
         let (state, command) =
             update_supervisor(self.supervisor_state.clone(), event, self.restart_policy);
         self.supervisor_state = state;
@@ -1409,7 +1458,7 @@ impl LiveWmSession {
             }
             self.degraded = true;
             println!(
-                "sophia_live_wm schema=1 status=degraded reason=restart_failed preserved_layout=true"
+                "sophia_live_wm schema=1 status=degraded reason=restart_failed preserved_layout=true error={error:?}"
             );
             return Ok(None);
         }
@@ -1440,6 +1489,7 @@ impl LiveWmSession {
             .ok_or("WM output is not configured")?
             .workspace;
         self.workspace_state.register_surface(surface, workspace)?;
+        let committed_state = self.workspace_state.clone();
         let request = WmRequestPacket {
             transaction: self.mint_transaction()?,
             kind: WmRequestKind::ManageSurface(WmManageSurface {
@@ -1449,7 +1499,9 @@ impl LiveWmSession {
                 bounds: output_bounds(output),
             }),
         };
-        self.request(request, layout, output)
+        let result = self.request(request, layout, output);
+        self.workspace_state = committed_state;
+        result
     }
 
     fn request_relayout(
@@ -1528,7 +1580,6 @@ impl LiveWmSession {
         let plan = self
             .workspace_state
             .plan_response(&response, &self.session_actions)?;
-        self.workspace_state = plan.candidate;
         let transaction = plan.layout;
         validate_live_wm_transaction(&transaction, layout, output_bounds(output))?;
         let mut proposed = layout.layers.values().cloned().collect::<Vec<_>>();
@@ -1563,6 +1614,11 @@ impl LiveWmSession {
                 ipc_error: None,
             },
             moved_surfaces,
+            effects: Some(LiveWmCommitEffects {
+                workspace_state: plan.candidate,
+                transaction: transaction.transaction,
+                session_action: plan.session_action,
+            }),
         })
     }
 
@@ -1597,6 +1653,7 @@ struct PendingLiveWmLayout {
     update: WmTransactionUpdate,
     moved_surfaces: usize,
     staged_transactions: BTreeMap<SurfaceId, SurfaceTransaction>,
+    effects: Option<LiveWmCommitEffects>,
     staged_cpu_buffer_updates: Vec<XAuthorityCpuBufferUpdate>,
 }
 
@@ -1746,10 +1803,10 @@ impl PersistentLiveLayout {
         }
     }
 
-    fn take_unmanaged_surfaces(&mut self) -> Vec<SurfaceId> {
-        std::mem::take(&mut self.unmanaged_surfaces)
-            .into_iter()
-            .collect()
+    fn take_next_unmanaged_surface(&mut self) -> Option<SurfaceId> {
+        let surface = self.unmanaged_surfaces.iter().next().copied()?;
+        self.unmanaged_surfaces.remove(&surface);
+        Some(surface)
     }
 
     fn stage(
@@ -1757,7 +1814,7 @@ impl PersistentLiveLayout {
         mut proposal: LiveWmProposal,
         control_sender: &SyncSender<XAuthorityClientControlCommand>,
         control_ack_receiver: &Receiver<XAuthorityClientControlAck>,
-    ) -> Result<Option<WmTransactionUpdate>, Box<dyn std::error::Error>> {
+    ) -> Result<Option<LiveWmCommitResult>, Box<dyn std::error::Error>> {
         if self.pending.is_some() {
             return Err("live WM attempted to overlap resize transactions".into());
         }
@@ -1812,12 +1869,13 @@ impl PersistentLiveLayout {
             update: proposal.update,
             moved_surfaces: proposal.moved_surfaces,
             staged_transactions: BTreeMap::new(),
+            effects: proposal.effects,
             staged_cpu_buffer_updates: Vec::new(),
         });
         Ok(None)
     }
 
-    fn resolve_pending(&mut self) -> Option<WmTransactionUpdate> {
+    fn resolve_pending(&mut self) -> Option<LiveWmCommitResult> {
         let pending = self.pending.as_ref()?;
         let ready = pending.requested_sizes.iter().all(|(surface, size)| {
             pending
@@ -1839,7 +1897,7 @@ impl PersistentLiveLayout {
         &mut self,
         control_sender: &SyncSender<XAuthorityClientControlCommand>,
         control_ack_receiver: &Receiver<XAuthorityClientControlAck>,
-    ) -> Result<Option<WmTransactionUpdate>, Box<dyn std::error::Error>> {
+    ) -> Result<Option<LiveWmCommitResult>, Box<dyn std::error::Error>> {
         if !self
             .pending
             .as_ref()
@@ -1905,17 +1963,20 @@ impl PersistentLiveLayout {
             pending.requested_sizes.len(),
             resize_state,
         );
-        Ok(Some(WmTransactionUpdate {
-            commit: TransactionCommit {
-                transaction: pending.transaction,
-                outcome: TransactionOutcome::TimedOut,
-                applied_surfaces: Vec::new(),
+        Ok(Some(LiveWmCommitResult {
+            update: WmTransactionUpdate {
+                commit: TransactionCommit {
+                    transaction: pending.transaction,
+                    outcome: TransactionOutcome::TimedOut,
+                    applied_surfaces: Vec::new(),
+                },
+                ipc_error: None,
             },
-            ipc_error: None,
+            effects: None,
         }))
     }
 
-    fn commit_proposal(&mut self, proposal: LiveWmProposal) -> WmTransactionUpdate {
+    fn commit_proposal(&mut self, proposal: LiveWmProposal) -> LiveWmCommitResult {
         let pending = PendingLiveWmLayout {
             transaction: proposal.transaction,
             layers: proposal.layers,
@@ -1926,11 +1987,12 @@ impl PersistentLiveLayout {
             moved_surfaces: proposal.moved_surfaces,
             staged_transactions: BTreeMap::new(),
             staged_cpu_buffer_updates: Vec::new(),
+            effects: proposal.effects,
         };
         self.commit_pending(pending)
     }
 
-    fn commit_pending(&mut self, pending: PendingLiveWmLayout) -> WmTransactionUpdate {
+    fn commit_pending(&mut self, pending: PendingLiveWmLayout) -> LiveWmCommitResult {
         if !pending.staged_transactions.is_empty() {
             for transaction in pending.staged_transactions.values() {
                 self.resize.record_committed(
@@ -1962,7 +2024,10 @@ impl PersistentLiveLayout {
             pending.requested_sizes.len(),
             pending.update.commit.outcome
         );
-        pending.update
+        LiveWmCommitResult {
+            update: pending.update,
+            effects: pending.effects,
+        }
     }
 
     fn projected_batch(
@@ -2172,6 +2237,93 @@ fn software_batch_may_coalesce(batch: &XAuthorityObservedTransactionBatch) -> bo
         && (!batch.transactions.is_empty() || !batch.cpu_buffer_updates.is_empty())
 }
 
+fn execute_committed_session_actions(
+    config: &PersistentXtermSessionConfig,
+    xauthority: &std::path::Path,
+    children: &mut Vec<Child>,
+    layout: &PersistentLiveLayout,
+    focus: &InputFocusState,
+    seat: SeatId,
+    control_sender: &SyncSender<XAuthorityClientControlCommand>,
+    control_ack_receiver: &Receiver<XAuthorityClientControlAck>,
+    actions: &mut VecDeque<(TransactionId, WmSessionAction, Option<SurfaceId>)>,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let mut retained = Vec::with_capacity(children.len());
+    for mut child in children.drain(..) {
+        if child.try_wait()?.is_none() {
+            retained.push(child);
+        }
+    }
+    *children = retained;
+    let mut logout = false;
+    while let Some((transaction, action, target)) = actions.pop_front() {
+        match action {
+            WmSessionAction::LaunchTerminal => {
+                if children.len() >= 16 {
+                    return Err("approved session child limit reached".into());
+                }
+                children.push(spawn_secondary_xterm(
+                    std::path::Path::new(&config.terminal),
+                    &config.display,
+                    xauthority,
+                    None,
+                )?);
+            }
+            WmSessionAction::LaunchApplicationMenu | WmSessionAction::LaunchFirefox => {
+                if children.len() >= 16 {
+                    return Err("approved session child limit reached".into());
+                }
+                let program = match action {
+                    WmSessionAction::LaunchApplicationMenu => config.session_launcher.as_deref(),
+                    WmSessionAction::LaunchFirefox => config.session_firefox.as_deref(),
+                    _ => unreachable!(),
+                }
+                .ok_or("WM requested an unadvertised session executable")?;
+                children.push(spawn_approved_application(
+                    program,
+                    &config.display,
+                    xauthority,
+                )?);
+            }
+            WmSessionAction::CloseFocused => {
+                let surface = target
+                    .or_else(|| focus.focused_surface(seat))
+                    .ok_or("WM close action has no focused surface")?;
+                let client = layout
+                    .client_routes
+                    .client_for_surface(surface)
+                    .ok_or("WM close action has no X11 client route")?;
+                control_sender.try_send(XAuthorityClientControlCommand {
+                    client,
+                    command: XAuthorityControlCommand::CloseSurface {
+                        transaction,
+                        surface,
+                    },
+                })?;
+                let acknowledgement =
+                    control_ack_receiver.recv_timeout(Duration::from_millis(500))?;
+                if acknowledgement.client != client
+                    || acknowledgement.acknowledgement.transaction != transaction
+                    || acknowledgement.acknowledgement.surface != surface
+                    || acknowledgement.acknowledgement.outcome
+                        != XAuthorityControlOutcome::Delivered
+                {
+                    return Err(format!(
+                        "X Authority rejected polite close: {:?}",
+                        acknowledgement.acknowledgement.outcome
+                    )
+                    .into());
+                }
+            }
+            WmSessionAction::Logout => logout = true,
+        }
+        println!(
+            "sophia_live_wm schema=1 status=session_action_committed transaction={} action={action:?}",
+            transaction.raw()
+        );
+    }
+    Ok(logout)
+}
 fn run_session_loop(
     config: &PersistentXtermSessionConfig,
     authority_receiver: &Receiver<XAuthorityObservedTransactionBatch>,
@@ -2180,7 +2332,8 @@ fn run_session_loop(
     control_ack_receiver: &Receiver<XAuthorityClientControlAck>,
     input_delivery_receiver: &Receiver<XAuthorityClientInputDelivery>,
     child: &mut Child,
-    secondary_children: &mut [Child],
+    secondary_children: &mut Vec<Child>,
+    xauthority: &std::path::Path,
     physical_input: &mut Option<SessionPhysicalInput>,
     native_scanout: &mut Option<LiveProductionNativeScanout>,
     wm_session: &mut Option<LiveWmSession>,
@@ -2203,6 +2356,7 @@ fn run_session_loop(
         wm_session.is_some(),
         require_startup_focus.then_some(output.size),
     );
+    let mut committed_session_actions = VecDeque::new();
     let mut runtime: Option<LiveProductionVisualRuntime> = None;
     let present_observer = Arc::new(Mutex::new(XPresentSessionObserver::new(protocol_router)));
     let mut last_authority_update = started;
@@ -2341,10 +2495,21 @@ fn run_session_loop(
                         .ok_or("WM shortcut activated without a live WM session")?;
                     let proposal =
                         wm.request_action(action, focus.focused_surface(seat), &layout, output)?;
-                    if layout
-                        .stage(proposal, control_sender, control_ack_receiver)?
-                        .is_some()
+                    if let Some(mut result) =
+                        layout.stage(proposal, control_sender, control_ack_receiver)?
                     {
+                        if result.update.commit.outcome == TransactionOutcome::Committed
+                            && let Some(effects) = result.effects.take()
+                        {
+                            wm.workspace_state = effects.workspace_state;
+                            if let Some(action) = effects.session_action {
+                                committed_session_actions.push_back((
+                                    effects.transaction,
+                                    action.0,
+                                    action.1,
+                                ));
+                            }
+                        }
                         wm.mark_committed();
                     }
                 }
@@ -2850,13 +3015,6 @@ fn run_session_loop(
                 if wm_update.is_none() {
                     wm_update = layout.expire_pending(control_sender, control_ack_receiver)?;
                 }
-                if wm_update
-                    .as_ref()
-                    .is_some_and(|update| update.commit.outcome == TransactionOutcome::Committed)
-                    && let Some(wm_session) = wm_session.as_mut()
-                {
-                    wm_session.mark_committed();
-                }
                 if let Some(wm_session) = wm_session.as_mut() {
                     if let Some(proposal) = wm_session.poll_restart(&layout, output)? {
                         wm_update = layout.stage(proposal, control_sender, control_ack_receiver)?;
@@ -2896,6 +3054,7 @@ fn run_session_loop(
                             ipc_error: None,
                         },
                         moved_surfaces: 0,
+                        effects: None,
                     };
                     wm_update = layout.stage(proposal, control_sender, control_ack_receiver)?;
                     resize_proof = Some((transaction, surface, size));
@@ -2907,6 +3066,23 @@ fn run_session_loop(
                         size.height,
                     );
                 }
+                let wm_update = wm_update.map(|mut result| {
+                    if result.update.commit.outcome == TransactionOutcome::Committed
+                        && let Some(effects) = result.effects.take()
+                        && let Some(wm_session) = wm_session.as_mut()
+                    {
+                        wm_session.workspace_state = effects.workspace_state;
+                        wm_session.mark_committed();
+                        if let Some(action) = effects.session_action {
+                            committed_session_actions.push_back((
+                                effects.transaction,
+                                action.0,
+                                action.1,
+                            ));
+                        }
+                    }
+                    result.update
+                });
                 let batch = layout.projected_batch(&batch);
                 let production_batch = production_authority_batch(&batch);
                 if runtime.is_none() {
@@ -3118,7 +3294,7 @@ fn run_session_loop(
                         >= Duration::from_millis(config.input_quiet_msec)
                     && let Some(wm_session) = wm_session.as_mut()
                 {
-                    for surface in layout.take_unmanaged_surfaces() {
+                    if let Some(surface) = layout.take_next_unmanaged_surface() {
                         let proposal = wm_session.request_manage(surface, &layout, output)?;
                         if layout
                             .stage(proposal, control_sender, control_ack_receiver)?
@@ -3335,6 +3511,19 @@ fn run_session_loop(
                 primary_child_exited,
             )
             .into());
+        }
+        if execute_committed_session_actions(
+            config,
+            xauthority,
+            secondary_children,
+            &layout,
+            &focus,
+            seat,
+            control_sender,
+            control_ack_receiver,
+            &mut committed_session_actions,
+        )? {
+            break;
         }
         if input_presented_latency.is_none()
             && input_pixel_change
@@ -4732,12 +4921,14 @@ impl SessionProcessGuard {
         }
     }
 
-    fn children_mut(&mut self) -> Result<(&mut Child, &mut [Child]), Box<dyn std::error::Error>> {
+    fn children_mut(
+        &mut self,
+    ) -> Result<(&mut Child, &mut Vec<Child>), Box<dyn std::error::Error>> {
         let child = self
             .child
             .as_mut()
             .ok_or_else(|| -> Box<dyn std::error::Error> { "xterm child missing".into() })?;
-        Ok((child, self.secondary_children.as_mut_slice()))
+        Ok((child, &mut self.secondary_children))
     }
 
     fn add_secondary_child(&mut self, child: Child) {

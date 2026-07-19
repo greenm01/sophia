@@ -30,6 +30,7 @@ target/debug/sophia sophia-live-session \
     --exit-after-input-proof \
     --wm-process="$ROOT_DIR/target/debug/sophia-x11-wm-bridge" \
     --wm-process-arg="--wm=$xmonad_bin" \
+    --wm-process-arg=--profile=xmonad \
     --wm-process-arg=--wm-private-alias=xmonad/xmonad-x86_64-linux \
     >"$EVIDENCE_FILE" 2>&1
 status=$?

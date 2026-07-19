@@ -21,6 +21,7 @@ pub const X_ATOM_NAME_WM_CLASS: &str = "WM_CLASS";
 pub const X_ATOM_NAME_NET_WM_NAME: &str = "_NET_WM_NAME";
 pub const X_ATOM_NAME_WM_PROTOCOLS: &str = "WM_PROTOCOLS";
 pub const X_ATOM_NAME_UTF8_STRING: &str = "UTF8_STRING";
+pub const X_ATOM_NAME_WM_DELETE_WINDOW: &str = "WM_DELETE_WINDOW";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum XAtomError {

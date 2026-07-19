@@ -13,15 +13,16 @@ use std::{
 };
 
 use sophia_protocol::{
-    Rect, SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAX_PAYLOAD_LEN, WM_API_VERSION, WmRequestPacket,
-    WmResponsePacket, WmSessionDescriptor, decode_wm_request_frame,
+    Rect, SOPHIA_IPC_HEADER_LEN, SOPHIA_IPC_MAX_PAYLOAD_LEN, WM_API_VERSION, WmRequestKind,
+    WmRequestPacket, WmResponsePacket, WmSessionDescriptor, decode_wm_request_frame,
     decode_wm_session_descriptor_frame, encode_wm_hello_frame, encode_wm_response_frame,
 };
 use sophia_x_authority::{XByteOrder, serve_x11_setup_socket_client};
 
 use crate::{
     BridgeEngineUpdate, LegacyWmProfile, LegacyWmRequest, SYNTHETIC_ROOT_XID, SyntheticXEvent,
-    SyntheticXWindowId, X11WmBridgeError, X11WmBridgeState, translate_xmonad_profile_action,
+    SyntheticXWindowId, X11WmBridgeError, X11WmBridgeState, XMONAD_ACTION_FOCUS_NEXT,
+    XMONAD_ACTION_FOCUS_PREVIOUS, XMONAD_ACTION_NEXT_LAYOUT, translate_xmonad_profile_action,
 };
 
 const FIRST_DYNAMIC_ATOM: u32 = 256;
@@ -31,6 +32,7 @@ const IO_POLL: Duration = Duration::from_millis(20);
 
 #[derive(Debug)]
 pub struct BridgeRuntimeError(String);
+const MAX_PRIVATE_KEY_GRABS: usize = 256;
 
 impl BridgeRuntimeError {
     fn new(message: impl Into<String>) -> Self {
@@ -59,6 +61,7 @@ enum ServerCommand {
     Configure(SyntheticXWindowId, Rect),
     Unmap(SyntheticXWindowId),
     Destroy(SyntheticXWindowId),
+    Key { keycode: u8, pressed: bool },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -215,6 +218,20 @@ impl LegacyX11WmBridgeRuntime {
             }
         }
 
+        let profiled_key = match &request.kind {
+            WmRequestKind::ActionActivated(activation)
+                if self.profile == LegacyWmProfile::Xmonad =>
+            {
+                match activation.action.raw() {
+                    XMONAD_ACTION_FOCUS_NEXT => Some(106),
+                    XMONAD_ACTION_FOCUS_PREVIOUS => Some(107),
+                    XMONAD_ACTION_NEXT_LAYOUT => Some(32),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+
         while self.legacy.try_recv().is_ok() {}
         let update = self.bridge.apply_engine_request(request)?;
         let expected = send_engine_update(
@@ -224,6 +241,17 @@ impl LegacyX11WmBridgeRuntime {
                 .as_ref()
                 .ok_or_else(|| BridgeRuntimeError::new("legacy WM server stopped"))?,
         )?;
+        if let Some(keycode) = profiled_key {
+            let commands = self
+                .commands
+                .as_ref()
+                .ok_or_else(|| BridgeRuntimeError::new("legacy WM server stopped"))?;
+            for pressed in [true, false] {
+                commands
+                    .send(ServerCommand::Key { keycode, pressed })
+                    .map_err(|_| BridgeRuntimeError::new("legacy WM server stopped"))?;
+            }
+        }
 
         let started = Instant::now();
         let mut last_activity = started;
@@ -255,7 +283,16 @@ impl LegacyX11WmBridgeRuntime {
                     }
                 }
                 Err(RecvTimeoutError::Disconnected) => {
-                    return Err(BridgeRuntimeError::new("legacy WM server disconnected"));
+                    let detail = self
+                        .worker
+                        .take()
+                        .and_then(|worker| worker.join().ok())
+                        .and_then(Result::err)
+                        .map_or_else(
+                            || "legacy WM server disconnected".to_owned(),
+                            |error| format!("legacy WM server disconnected: {error}"),
+                        );
+                    return Err(BridgeRuntimeError::new(detail));
                 }
             }
         }
@@ -539,6 +576,7 @@ struct XServerState {
     atom_names: BTreeMap<u32, Vec<u8>>,
     next_atom: u32,
     input_focus: u32,
+    key_grabs: BTreeSet<(u8, u16)>,
 }
 
 impl XServerState {
@@ -556,6 +594,7 @@ impl XServerState {
             atom_names: BTreeMap::new(),
             next_atom: FIRST_DYNAMIC_ATOM,
             input_focus: SYNTHETIC_ROOT_XID,
+            key_grabs: BTreeSet::new(),
         }
     }
 }
@@ -656,6 +695,23 @@ fn apply_server_command(
             state.windows.remove(&window.raw());
             write_window_event(stream, 17, window.raw())?;
         }
+        ServerCommand::Key { keycode, pressed } => {
+            let modifiers = 1 << 3;
+            let mut event = vec![if pressed { 2 } else { 3 }, keycode];
+            push_u16(&mut event, state.sequence);
+            push_u32(&mut event, 0);
+            push_u32(&mut event, SYNTHETIC_ROOT_XID);
+            push_u32(&mut event, SYNTHETIC_ROOT_XID);
+            push_u32(&mut event, 0);
+            push_i16(&mut event, 0);
+            push_i16(&mut event, 0);
+            push_i16(&mut event, 0);
+            push_i16(&mut event, 0);
+            push_u16(&mut event, modifiers);
+            event.push(1);
+            event.push(0);
+            write_packet(stream, &event)?;
+        }
     }
     Ok(())
 }
@@ -693,7 +749,29 @@ fn dispatch_request(
         21 => reply_list_properties(stream, state.sequence)?,
         22 => {}
         23 => reply_u32(stream, state.sequence, 0, 0)?,
-        25 | 28 | 29 | 30 | 32 | 33 | 34 | 35 | 36 | 37 | 39 | 41 => {}
+        25 | 28 | 29 | 30 | 32 | 35 | 36 | 37 | 39 | 41 => {}
+        33 => {
+            if read_u32(body, 0) != SYNTHETIC_ROOT_XID {
+                return Err(BridgeRuntimeError::new(
+                    "private GrabKey targeted a non-root window",
+                ));
+            }
+            let grab = (body[6], read_u16(body, 4));
+            if !state.key_grabs.contains(&grab) && state.key_grabs.len() >= MAX_PRIVATE_KEY_GRABS {
+                return Err(BridgeRuntimeError::new("private key grab limit reached"));
+            }
+            state.key_grabs.insert(grab);
+        }
+        34 => {
+            let modifiers = read_u16(body, 4);
+            if detail == 0 {
+                state
+                    .key_grabs
+                    .retain(|(_, registered)| *registered != modifiers);
+            } else {
+                state.key_grabs.remove(&(detail, modifiers));
+            }
+        }
         26 => reply_simple(stream, state.sequence, 0)?,
         31 => reply_simple(stream, state.sequence, 0)?,
         38 => reply_query_pointer(stream, state)?,

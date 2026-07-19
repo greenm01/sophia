@@ -32,30 +32,32 @@ compatibility provider; no XLibre integration work is active.
 Current implementation: API-v2 negotiation, fail-closed binding validation,
 per-seat physical shortcut consumption, nine-slot Engine workspace policy, live
 `ActionActivated` dispatch, and bounded xmonad-profile workspace/session-token
-translation are implemented and covered by the offline all-feature suite. Named
-action execution, atomic persistence through delayed resize commits, synthetic
-xmonad focus/layout events, and the unattended QEMU acceptance gate remain open.
+translation are implemented. Engine now installs workspace and session-action
+effects only with the accepted layout transaction; approved named actions,
+polite `WM_DELETE_WINDOW`, and bounded synthetic xmonad focus/layout keys are
+wired. The diskless QEMU gate now passes with a real bundled xmonad binary,
+physical virtio input, bridge recovery, and approved session actions.
 
-- [ ] Negotiate WM API version 2 over the existing bounded IPC frame without
+- [x] Negotiate WM API version 2 over the existing bounded IPC frame without
   changing unrelated broker protocols. A WM must register capabilities and
   bindings before Engine sends layout or action requests; mismatch, duplicate
   chords, oversized registration, and reserved emergency bindings fail closed.
-- [ ] Add Engine-owned shortcut routing. WMs register bounded evdev-keycode plus
+- [x] Add Engine-owned shortcut routing. WMs register bounded evdev-keycode plus
   modifier chords mapped to opaque action IDs; Engine consumes matched
   press/release sequences and sends action activations without exposing raw input.
-- [ ] Add nine configured workspace slots with one active workspace per output.
+- [x] Add nine configured workspace slots with one active workspace per output.
   Workspace activation, visible-workspace swaps, surface movement, focus, and
   layout commit atomically and survive WM restart.
-- [ ] Add advertised named session actions for approved launch, close, Firefox,
+- [x] Add advertised named session actions for approved launch, close, Firefox,
   launcher, and logout behavior. WMs may request tokens but never executable
   paths, argument vectors, or arbitrary commands.
-- [ ] Update the native demo WM to exercise the version-2 API directly, including
+- [x] Update the native demo WM to exercise the version-2 API directly, including
   bindings, focus, workspace switching, surface movement, and session actions.
-- [ ] Add a generic legacy-WM profile boundary and a bundled metadata-blind Sophia
+- [x] Add a generic legacy-WM profile boundary and a bundled metadata-blind Sophia
   xmonad profile. The bridge alone translates action activations into bounded
   synthetic events and private action messages; xmonad sees no real XIDs, raw
   metadata, namespaces, client sockets, pixels, or physical input.
-- [ ] Pass an unattended QEMU xmonad gate with three real windows, focus and
+- [x] Pass an unattended QEMU xmonad gate with three real windows, focus and
   layout changes, workspace switch/move, approved terminal launch, polite close,
   two-output workspace ownership, bridge restart, and preserved committed state.
 
