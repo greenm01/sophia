@@ -6,7 +6,10 @@ import socket
 import sys
 import time
 
-ALLOWED = {"shift", "ctrl", "alt", "meta_l", "j", "k", "spc", "1", "2", "c", "p", "f", "q", "ret"}
+ALLOWED = {
+    "shift", "ctrl", "alt", "meta_l", "a", "c", "f", "j", "k", "p", "q", "v",
+    "spc", "tab", "insert", "1", "2", "ret",
+}
 
 
 def fail(message):

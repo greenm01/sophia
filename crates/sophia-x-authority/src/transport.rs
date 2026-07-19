@@ -20,6 +20,15 @@ pub struct XAuthorityProtocolErrorObservation {
     pub major_code: u8,
 }
 
+/// Privacy-preserving metadata change evidence. Protocol object IDs and value
+/// bytes remain inside the X frontend; the session sees only the established
+/// property name and bounded byte length.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct XAuthorityMetadataObservation {
+    pub property_name: String,
+    pub byte_len: usize,
+}
+
 fn is_expected_client_probe_error(error: &crate::XClientError) -> bool {
     error.code == crate::XErrorCode::BadWindow
         && error.resource_id == 0
@@ -103,6 +112,10 @@ pub struct XAuthorityObservedTransactionBatch {
     /// remain inside the X frontend boundary.
     pub protocol_errors: Vec<XAuthorityProtocolErrorObservation>,
     pub expected_protocol_errors: Vec<XAuthorityProtocolErrorObservation>,
+    pub metadata: Vec<XAuthorityMetadataObservation>,
+    /// Privacy-preserving core selection operation witnesses.
+    pub selection_owner_change: bool,
+    pub selection_conversion: bool,
 }
 
 impl XAuthorityObservedTransactionBatch {
@@ -125,6 +138,9 @@ impl XAuthorityObservedTransactionBatch {
             released_fences: Vec::new(),
             protocol_errors: Vec::new(),
             expected_protocol_errors: Vec::new(),
+            metadata: Vec::new(),
+            selection_owner_change: false,
+            selection_conversion: false,
         })
     }
 
@@ -161,6 +177,18 @@ impl XAuthorityObservedTransactionBatch {
         let response = trace.result.response.as_ref();
         let protocol_errors = reduce_protocol_errors(&trace.result.outputs, false);
         let expected_protocol_errors = reduce_protocol_errors(&trace.result.outputs, true);
+        let metadata = trace
+            .result
+            .metadata_candidates
+            .iter()
+            .take(16)
+            .map(|candidate| XAuthorityMetadataObservation {
+                property_name: candidate.property_name.clone(),
+                byte_len: candidate.byte_len,
+            })
+            .collect::<Vec<_>>();
+        let selection_owner_change = trace.major_opcode == 22;
+        let selection_conversion = trace.major_opcode == 24;
         if response.is_none()
             && dma_buf_registrations.is_empty()
             && fence_registrations.is_empty()
@@ -169,6 +197,9 @@ impl XAuthorityObservedTransactionBatch {
             && trace.released_fences.is_empty()
             && protocol_errors.is_empty()
             && expected_protocol_errors.is_empty()
+            && metadata.is_empty()
+            && !selection_owner_change
+            && !selection_conversion
         {
             return None;
         }
@@ -187,6 +218,9 @@ impl XAuthorityObservedTransactionBatch {
             && trace.released_fences.is_empty()
             && protocol_errors.is_empty()
             && expected_protocol_errors.is_empty()
+            && metadata.is_empty()
+            && !selection_owner_change
+            && !selection_conversion
         {
             return None;
         }
@@ -206,6 +240,9 @@ impl XAuthorityObservedTransactionBatch {
             released_fences: trace.released_fences.to_vec(),
             protocol_errors,
             expected_protocol_errors,
+            metadata,
+            selection_owner_change,
+            selection_conversion,
         })
     }
 }

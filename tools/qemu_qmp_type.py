@@ -64,15 +64,25 @@ def key_event(qcode: str, down: bool):
 
 
 def main():
-    if len(sys.argv) not in (2, 3):
-        fail("usage: qemu_qmp_type.py QMP_SOCKET [LOWERCASE_TEXT]")
+    if len(sys.argv) not in (2, 3, 4):
+        fail("usage: qemu_qmp_type.py QMP_SOCKET [--no-return] [LOWERCASE_TEXT]")
     socket_path = sys.argv[1]
-    text = sys.argv[2] if len(sys.argv) == 3 else ""
+    arguments = sys.argv[2:]
+    append_return = True
+    if arguments[:1] == ["--no-return"]:
+        append_return = False
+        arguments = arguments[1:]
+    if len(arguments) > 1:
+        fail("usage: qemu_qmp_type.py QMP_SOCKET [--no-return] [LOWERCASE_TEXT]")
+    text = arguments[0] if arguments else ""
     if text and (not 1 <= len(text) <= 24 or not text.isascii() or not text.islower() or not text.isalpha()):
         fail("text must contain 1-24 lowercase ASCII letters")
 
     with QmpClient(socket_path) as qmp:
-        for qcode in [*text, "ret"]:
+        qcodes = [*text]
+        if append_return:
+            qcodes.append("ret")
+        for qcode in qcodes:
             qmp.execute(
                 "input-send-event",
                 {"events": [key_event(qcode, True), key_event(qcode, False)]},

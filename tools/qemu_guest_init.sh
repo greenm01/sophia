@@ -178,6 +178,7 @@ elif [ "$scenario" = "xmonad-m7" ] || [ "$scenario" = "xmonad-m8-launcher" ] || 
         set -- "$@" --session-app-arg=firefox=file:///usr/share/sophia/firefox_m8_local_page.html
         set -- "$@" --session-start=terminal --session-start=vulkan
         set -- "$@" --session-action-app=terminal=terminal --session-action-app=launcher=launcher --session-action-app=firefox=firefox
+        set -- "$@" --firefox-m8-proof
         echo "sophia_qemu_xmonad schema=1 status=running windows=2 profile=xmonad mode=m8-app-mix"
     else
         set -- "$@" --secondary-terminal

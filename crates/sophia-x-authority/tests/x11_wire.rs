@@ -4785,6 +4785,9 @@ fn x11_dispatch_accepts_destroy_window_for_known_namespace_window() {
             released_fences: Vec::new(),
             protocol_errors: Vec::new(),
             expected_protocol_errors: Vec::new(),
+            metadata: Vec::new(),
+            selection_owner_change: false,
+            selection_conversion: false,
         })
     );
 }
@@ -7648,6 +7651,9 @@ fn x11_core_socket_channel_sees_sophia_present_transaction_batch() {
         released_fences: Vec::new(),
         protocol_errors: Vec::new(),
         expected_protocol_errors: Vec::new(),
+        metadata: Vec::new(),
+        selection_owner_change: false,
+        selection_conversion: false,
     });
     assert!(routes.is_empty());
 }

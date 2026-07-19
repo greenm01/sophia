@@ -87,6 +87,50 @@ send_launch_and_wait() {
     fi
 }
 
+send_close_and_wait() {
+    local app=$1
+    local action_baseline
+    local exit_baseline
+    action_baseline="$(evidence_count '^sophia_live_wm schema=1 status=session_action_committed .* action=CloseFocused$')"
+    exit_baseline="$(evidence_count "^sophia_session_app schema=1 status=exited id=$app ")"
+    "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" meta_l+shift+c
+    echo "sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+shift+c app=$app" | tee -a "$EVIDENCE_FILE"
+    if ! wait_for_new_evidence '^sophia_live_wm schema=1 status=session_action_committed .* action=CloseFocused$' "$action_baseline" \
+        || ! wait_for_new_evidence "^sophia_session_app schema=1 status=exited id=$app " "$exit_baseline" 800; then
+        echo "sophia_qemu_xmonad schema=1 status=failed reason=application_close_timeout app=$app" | tee -a "$EVIDENCE_FILE"
+        return 1
+    fi
+}
+
+wait_for_firefox_stage() {
+    local stage=$1
+    if ! wait_for_new_evidence "^sophia_firefox_m8 schema=1 status=stage_complete stage=$stage " 0 800; then
+        echo "sophia_qemu_xmonad schema=1 status=failed reason=firefox_stage_timeout stage=$stage" | tee -a "$EVIDENCE_FILE"
+        return 1
+    fi
+}
+
+run_firefox_m8_interactions() {
+    "$ROOT_DIR/tools/qemu_qmp_type.py" "$QMP_SOCKET" --no-return sophia
+    wait_for_firefox_stage keyboard
+    "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" ctrl+a
+    "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" ctrl+c
+    "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" tab
+    "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" ctrl+v
+    wait_for_firefox_stage clipboard
+    "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" tab
+    "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" shift+insert
+    wait_for_firefox_stage primary
+    "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" meta_l+spc
+    echo "sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+spc phase=firefox-resize" | tee -a "$EVIDENCE_FILE"
+    wait_for_firefox_stage resize
+    "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" tab
+    "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" ret
+    "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" ret
+    wait_for_firefox_stage dialog
+    echo "sophia_qemu_firefox_m8 schema=1 status=interactions_complete keyboard=true clipboard=true primary=true resize=true dialog=true" | tee -a "$EVIDENCE_FILE"
+}
+
 cleanup() {
     if [[ -n "$QEMU_PID" ]] && kill -0 "$QEMU_PID" 2>/dev/null; then
         kill "$QEMU_PID" 2>/dev/null || true
@@ -290,13 +334,21 @@ if [[ "$SCENARIO" == xmonad-* ]]; then
         soak_started=$SECONDS
         cycles=0
         while (( SECONDS - soak_started < 1800 )); do
-            for chord in meta_l+j meta_l+k meta_l+spc meta_l+2 meta_l+shift+1 meta_l+shift+ret meta_l+shift+c meta_l+f meta_l+shift+c meta_l+p meta_l+shift+c; do
+            for chord in meta_l+j meta_l+k meta_l+spc meta_l+2 meta_l+shift+1; do
                 "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" "$chord"
                 echo "sophia_qemu_xmonad_input schema=1 status=sent chord=$chord" | tee -a "$EVIDENCE_FILE"
-                sleep 1
             done
+            send_launch_and_wait meta_l+shift+ret '^sophia_session_app schema=1 status=started id=terminal source=action' terminal-launch
+            send_close_and_wait terminal
+            send_launch_and_wait meta_l+f '^sophia_session_app schema=1 status=started id=firefox source=action' firefox-launch
+            if (( cycles == 0 )); then
+                run_firefox_m8_interactions
+            fi
+            send_close_and_wait firefox
+            send_launch_and_wait meta_l+p '^sophia_session_app schema=1 status=started id=launcher source=action' launcher-launch
+            send_close_and_wait launcher
             cycles=$((cycles + 1))
-            echo "sophia_qemu_m8_soak schema=1 status=cycle_complete cycle=$cycles" | tee -a "$EVIDENCE_FILE"
+            echo "sophia_qemu_m8_soak schema=1 status=cycle_complete cycle=$cycles terminal_restarts=$cycles firefox_restarts=$cycles launcher_restarts=$cycles close_actions=$((cycles * 3))" | tee -a "$EVIDENCE_FILE"
             sleep 75
         done
         if (( cycles < 20 )); then
@@ -306,11 +358,12 @@ if [[ "$SCENARIO" == xmonad-* ]]; then
         chords=("meta_l+shift+q")
     elif [[ "$SCENARIO" == "xmonad-m8-mix" ]]; then
         send_launch_and_wait meta_l+shift+ret '^sophia_session_app schema=1 status=started id=terminal source=action' terminal-launch
-        send_chord_and_wait meta_l+shift+c '^sophia_session_app schema=1 status=exited id=terminal ' terminal-close
+        send_close_and_wait terminal
         send_launch_and_wait meta_l+f '^sophia_session_app schema=1 status=started id=firefox source=action' firefox-launch
-        send_chord_and_wait meta_l+shift+c '^sophia_session_app schema=1 status=exited id=firefox ' firefox-close
+        run_firefox_m8_interactions
+        send_close_and_wait firefox
         send_launch_and_wait meta_l+p '^sophia_session_app schema=1 status=started id=launcher source=action' launcher-launch
-        send_chord_and_wait meta_l+shift+c '^sophia_session_app schema=1 status=exited id=launcher ' launcher-close
+        send_close_and_wait launcher
         chords=("meta_l+shift+q")
     else
         chords=("meta_l+shift+ret" "meta_l+shift+c" "meta_l+shift+q")

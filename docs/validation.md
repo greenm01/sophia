@@ -408,8 +408,13 @@ two independently retired outputs, workspace and bridge-recovery evidence,
 zero normal-session protocol errors, and final frontend/application cleanup.
 The soak reuses that scenario for at least 1,800,000 ms and twenty complete
 interaction cycles. Application launch and close steps are evidence-driven:
-the harness waits for the matching managed-process start or exit record before
-advancing, so a slow Firefox startup cannot be hidden by fixed sleeps.
+the harness waits for the matching managed-process start, committed layout,
+close acknowledgement, and zero-status managed-process exit before advancing,
+so a slow Firefox startup or stale xmonad focus cannot be hidden by fixed
+sleeps. The Firefox stage record contains only redacted title byte lengths and
+bounded selection-operation counts; title content and X object identities stay
+inside the frontend. The soak verifier additionally requires twenty terminal,
+Firefox, and launcher restarts plus sixty committed close actions.
 
 The older bounded proof wrapper can pass `--max-runtime-ms=10000`,
 `--inject-text=sophia`, and `--exit-after-input-proof`; passing evidence requires one

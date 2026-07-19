@@ -54,7 +54,7 @@ impl From<X11WmBridgeError> for BridgeRuntimeError {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 enum ServerCommand {
     Root(Rect),
     Map(SyntheticXWindowId, Rect),
@@ -62,6 +62,7 @@ enum ServerCommand {
     Unmap(SyntheticXWindowId),
     Destroy(SyntheticXWindowId),
     Key { keycode: u8, pressed: bool },
+    QueryFocus(SyncSender<Option<SyntheticXWindowId>>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -311,6 +312,19 @@ impl LegacyX11WmBridgeRuntime {
         let mut requests = configured.into_values().collect::<Vec<_>>();
         if let Some(focus) = focus {
             requests.push(focus);
+        } else {
+            let (focus_sender, focus_receiver) = mpsc::sync_channel(1);
+            self.commands
+                .as_ref()
+                .ok_or_else(|| BridgeRuntimeError::new("legacy WM server stopped"))?
+                .send(ServerCommand::QueryFocus(focus_sender))
+                .map_err(|_| BridgeRuntimeError::new("legacy WM server stopped"))?;
+            if let Some(window) = focus_receiver
+                .recv_timeout(Duration::from_millis(500))
+                .map_err(|_| BridgeRuntimeError::new("legacy WM focus query timed out"))?
+            {
+                requests.push(LegacyWmRequest::FocusWindow { window });
+            }
         }
         self.bridge
             .translate_legacy_requests(request.transaction, &requests, 300)
@@ -711,6 +725,9 @@ fn apply_server_command(
             event.push(1);
             event.push(0);
             write_packet(stream, &event)?;
+        }
+        ServerCommand::QueryFocus(reply) => {
+            let _ = reply.send(synthetic_id(state, state.input_focus));
         }
     }
     Ok(())

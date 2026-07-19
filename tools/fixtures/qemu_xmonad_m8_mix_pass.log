@@ -1,7 +1,22 @@
 sophia_session_app schema=1 status=started id=terminal source=startup
+sophia_session_app schema=1 status=started id=terminal source=action
 sophia_session_app schema=1 status=started id=vulkan source=startup
 sophia_session_app schema=1 status=started id=firefox source=action
 sophia_session_app schema=1 status=started id=launcher source=action
+sophia_session_app schema=1 status=exited id=terminal source=managed exit_status=exit status: 0
+sophia_session_app schema=1 status=exited id=firefox source=managed exit_status=exit status: 0
+sophia_session_app schema=1 status=exited id=launcher source=managed exit_status=exit status: 0
+sophia_firefox_m8 schema=1 status=stage_complete stage=loaded index=0 title_bytes=24 content=redacted
+sophia_firefox_m8 schema=1 status=stage_complete stage=keyboard index=1 title_bytes=40 content=redacted
+sophia_firefox_m8 schema=1 status=stage_complete stage=clipboard index=2 title_bytes=56 content=redacted
+sophia_firefox_m8 schema=1 status=stage_complete stage=primary index=3 title_bytes=72 content=redacted
+sophia_firefox_m8 schema=1 status=stage_complete stage=resize index=4 title_bytes=88 content=redacted
+sophia_firefox_m8 schema=1 status=stage_complete stage=dialog index=5 title_bytes=104 content=redacted
+sophia_qemu_firefox_m8 schema=1 status=interactions_complete keyboard=true clipboard=true primary=true resize=true dialog=true
+sophia_firefox_m8 schema=1 status=complete stages=6 selection_owner_changes=2 selection_conversions=2 content=redacted
+sophia_live_wm schema=1 status=session_action_committed transaction=10 action=CloseFocused
+sophia_live_wm schema=1 status=session_action_committed transaction=12 action=CloseFocused
+sophia_live_wm schema=1 status=session_action_committed transaction=14 action=CloseFocused
 sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+j
 sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+k
 sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+spc
@@ -12,6 +27,7 @@ sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+p
 sophia_live_outputs schema=2 status=ready discovered=2 presentation=2 native_owned=2 multi_output_scanout=enabled layout=extended_horizontal
 sophia_live_wm schema=1 status=restarted restarts=1 preserved_layout=true
 sophia_live_session_health schema=1 status=clean protocol_errors=0 pending_wm=0 pending_actions=0 pending_input=0 wm_degraded=false
+sophia_live_session_protocol_errors schema=1 expected=2 unexpected=0
 sophia_live_output schema=1 status=complete output=1 checksum=10 submissions=2 retirements=2 callbacks=2 nonzero_exports=2
 sophia_live_output schema=1 status=complete output=2 checksum=20 submissions=2 retirements=2 callbacks=2 nonzero_exports=2
 sophia_live_session_cleanup schema=1 status=clean app_groups=0 frontend_workers=0 namespace=revoked xauthority=removed

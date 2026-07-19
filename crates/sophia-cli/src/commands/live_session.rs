@@ -919,6 +919,7 @@ struct PersistentXtermSessionConfig {
     m4_first_acquire_delay: Option<Duration>,
     m4_reject_first_present: bool,
     m4_diagnose_first_mixed_export: bool,
+    firefox_m8_proof: bool,
 }
 
 impl PersistentXtermSessionConfig {
@@ -1153,6 +1154,13 @@ impl PersistentXtermSessionConfig {
         let m4_diagnose_first_mixed_export = args
             .iter()
             .any(|arg| arg == "--m4-diagnose-first-mixed-export");
+        let firefox_m8_proof = args.iter().any(|arg| arg == "--firefox-m8-proof");
+        if firefox_m8_proof && (!normal_session || applications.firefox.is_none()) {
+            return Err(
+                "--firefox-m8-proof requires normal session mode and a Firefox action mapping"
+                    .into(),
+            );
+        }
         let wm_process = arg_value(args, "--wm-process");
         let wm_process_args = args
             .iter()
@@ -1281,6 +1289,7 @@ impl PersistentXtermSessionConfig {
             m4_first_acquire_delay,
             m4_reject_first_present,
             m4_diagnose_first_mixed_export,
+            firefox_m8_proof,
         })
     }
 
@@ -1333,6 +1342,64 @@ impl PersistentXtermSessionConfig {
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
         Ok(command.spawn()?)
+    }
+}
+
+#[derive(Default)]
+struct FirefoxM8StageProof {
+    baseline_title_bytes: Option<usize>,
+    completed_stage: usize,
+}
+
+impl FirefoxM8StageProof {
+    const STAGES: [&'static str; 6] = [
+        "loaded",
+        "keyboard",
+        "clipboard",
+        "primary",
+        "resize",
+        "dialog",
+    ];
+
+    fn observe(
+        &mut self,
+        property_name: &str,
+        byte_len: usize,
+    ) -> Vec<(&'static str, usize, usize)> {
+        if property_name != "_NET_WM_NAME" || byte_len == 0 || byte_len > 256 {
+            return Vec::new();
+        }
+        let Some(baseline) = self.baseline_title_bytes else {
+            self.baseline_title_bytes = Some(byte_len);
+            return Vec::new();
+        };
+        if self.completed_stage == 0 {
+            if byte_len == baseline.saturating_add(16) {
+                self.completed_stage = 2;
+                return vec![
+                    (Self::STAGES[0], 0, baseline),
+                    (Self::STAGES[1], 1, byte_len),
+                ];
+            }
+            if byte_len != baseline {
+                self.baseline_title_bytes = Some(byte_len);
+            }
+            return Vec::new();
+        }
+        if self.completed_stage >= Self::STAGES.len() {
+            return Vec::new();
+        }
+        let expected = baseline.saturating_add(self.completed_stage.saturating_mul(16));
+        if byte_len != expected {
+            return Vec::new();
+        }
+        let stage_index = self.completed_stage;
+        self.completed_stage += 1;
+        vec![(Self::STAGES[stage_index], stage_index, byte_len)]
+    }
+
+    fn complete(&self) -> bool {
+        self.completed_stage == Self::STAGES.len()
     }
 }
 
@@ -2514,11 +2581,21 @@ fn execute_committed_session_actions(
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let mut retained = Vec::with_capacity(children.len());
     for mut child in children.drain(..) {
-        if child.child.try_wait()?.is_none() {
+        let status = child.child.try_wait()?;
+        if status.is_none() {
             retained.push(child);
         } else if let Some(id) = child.id.as_deref() {
             terminate_session_child(&mut child.child, true)?;
-            println!("sophia_session_app schema=1 status=exited id={id} source=managed");
+            let status = status.expect("checked above");
+            if !status.success() {
+                return Err(format!(
+                    "managed session application {id:?} exited abnormally: {status}"
+                )
+                .into());
+            }
+            println!(
+                "sophia_session_app schema=1 status=exited id={id} source=managed exit_status={status}"
+            );
         }
     }
     *children = retained;
@@ -2748,6 +2825,9 @@ fn run_session_loop(
     let mut client_stdout = Vec::new();
     let mut protocol_error_count = 0usize;
     let mut expected_protocol_error_count = 0usize;
+    let mut firefox_m8_proof = FirefoxM8StageProof::default();
+    let mut firefox_m8_selection_owner_changes = 0usize;
+    let mut firefox_m8_selection_conversions = 0usize;
     let mut first_protocol_error = None;
     let mut emergency_exit_requested = false;
     let mut return_suppressed_reported = false;
@@ -3311,6 +3391,22 @@ fn run_session_loop(
                 }
                 expected_protocol_error_count = expected_protocol_error_count
                     .saturating_add(batch.expected_protocol_errors.len());
+                if config.firefox_m8_proof {
+                    firefox_m8_selection_owner_changes = firefox_m8_selection_owner_changes
+                        .saturating_add(usize::from(batch.selection_owner_change));
+                    firefox_m8_selection_conversions = firefox_m8_selection_conversions
+                        .saturating_add(usize::from(batch.selection_conversion));
+                    for metadata in &batch.metadata {
+                        for (stage, index, title_bytes) in
+                            firefox_m8_proof.observe(&metadata.property_name, metadata.byte_len)
+                        {
+                            println!(
+                                "sophia_firefox_m8 schema=1 status=stage_complete stage={stage} index={index} title_bytes={} content=redacted",
+                                title_bytes,
+                            );
+                        }
+                    }
+                }
                 let has_engine_work = !batch.transactions.is_empty()
                     || !batch.removed_surfaces.is_empty()
                     || !batch.cpu_buffer_updates.is_empty()
@@ -4000,6 +4096,27 @@ fn run_session_loop(
             "normal session emitted {protocol_error_count} X protocol errors; first={first_protocol_error:?}"
         )
         .into());
+    }
+    if config.firefox_m8_proof {
+        if !firefox_m8_proof.complete()
+            || firefox_m8_selection_owner_changes < 2
+            || firefox_m8_selection_conversions < 2
+        {
+            return Err(format!(
+                "Firefox M8 proof incomplete: stages={}/{} selection_owner_changes={} selection_conversions={}",
+                firefox_m8_proof.completed_stage,
+                FirefoxM8StageProof::STAGES.len(),
+                firefox_m8_selection_owner_changes,
+                firefox_m8_selection_conversions,
+            )
+            .into());
+        }
+        println!(
+            "sophia_firefox_m8 schema=1 status=complete stages={} selection_owner_changes={} selection_conversions={} content=redacted",
+            firefox_m8_proof.completed_stage,
+            firefox_m8_selection_owner_changes,
+            firefox_m8_selection_conversions,
+        );
     }
     if config.inject_surface_resize.is_some() && !resize_proof_complete {
         return Err(
