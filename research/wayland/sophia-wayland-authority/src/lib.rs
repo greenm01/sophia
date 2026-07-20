@@ -1,4 +1,4 @@
-//! Sophia-owned Wayland protocol authority.
+//! Retired Sophia-owned Wayland protocol authority.
 //!
 //! Smithay is used only for Wayland frontend object machinery. This crate owns
 //! protocol resources and reduces them into protocol-neutral Sophia packets;

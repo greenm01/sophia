@@ -2,9 +2,9 @@
 
 **Role:** reproducible validation catalog.
 
-The active priority is native X11, namespace admission, and portals. Wayland,
-DMA-BUF, XLibre, and legacy-WM commands below remain regression or historical
-evidence unless `todo.md` names them as an active exit gate.
+The active product is native X11 with namespace admission, portals, external
+WM policy, and Engine-owned CPU/DMA-BUF presentation. Retired compatibility
+frontends are preserved under `research/` and are not validation gates.
 
 Sophia's default validation path must not require native renderer libraries,
 kernel devices, a display server, or network access. The default suite protects
@@ -120,10 +120,8 @@ tools/qemu_session_harness.sh
 SOPHIA_QEMU_SCENARIO=emergency-recovery tools/qemu_session_harness.sh
 SOPHIA_QEMU_SCENARIO=gtk-classic tools/qemu_session_harness.sh
 SOPHIA_QEMU_SCENARIO=gtk-confined tools/qemu_session_harness.sh
-tools/wayland_kitty_smoke.sh
 tools/audit_no_xlibre_runtime.sh
-# Dedicated text TTY with SOPHIA_INPUT_DEVICES set:
-tools/wayland_kitty_hardware_proof.sh
+tools/audit_xcentric_runtime.sh
 ```
 
 The Milestone 4 proof must pass both the software verifier and the strict
@@ -150,142 +148,6 @@ two-layer, and clean-teardown gates. Its current retained result is 1,487 ms,
 `hardware`, not `session`, evidence until the compatibility-matrix promotion
 gate passes.
 
-## Wayland And DMA-BUF Maintenance Evidence
-
-The native Wayland Kitty smoke is non-destructive: it uses a private Wayland
-socket, software rendering, and the headless CPU composition path. It also
-requests a 1024x640 resize from the initial 1280x720 configure and requires
-Kitty to keep the old frame live until ack before committing changing nonzero
-pixels at the new size. The runtime
-audit proves the production CLI dependency graph and installed launcher do not
-select or start XLibre/Xorg. Historical XLibre latency and fallback artifacts
-are frozen under `research/xlibre` and are not release gates.
-
-The native session defaults to its proven SHM path even with `--native-scanout`.
-The bounded DMA-BUF path requires the explicit experimental
-`--experimental-dmabuf` flag. Controlled output-sized direct scanout has passing
-hardware evidence; arbitrary window-sized client GPU composition does not. Run
-the controlled external producer from a dedicated text TTY with an outside
-recovery path:
-
-```bash
-# First-frame admission and retirement:
-SOPHIA_DMABUF_PRODUCER_FRAMES=3 tools/wayland_dmabuf_first_frame_hardware_proof.sh
-
-# Reuse/lifetime stress after the first frame passes:
-SOPHIA_DMABUF_PRODUCER_FRAMES=300 tools/wayland_dmabuf_first_frame_hardware_proof.sh
-```
-
-The proof requires explicit experimental enablement, at least one DMA-BUF
-import, multiple KMS submissions, accepted callbacks and retirement, no import
-loss, submit/retire/callback failures, in-flight ownership, or cleanup debt,
-and a maximum submit-to-page-flip interval no greater than 100 ms.
-
-Current hardware status: after explicitly detaching the EGLImage from its GL
-texture before destruction, the GDB-backed controlled three-frame run passes.
-It imports, submits, page-flips, retires, and releases three full-size 1920x1200
-DMA-BUF frames with no allocator diagnostic and a 14 ms maximum
-submit-to-page-flip interval. The GDB-backed 300-frame lifetime diagnostic also
-passes: 300 imports, submissions, page flips, and retirements, with no cleanup
-debt and the same 14 ms maximum submit-to-page-flip interval. The release-timing
-trace and four later normal release runs also passed. These samples do not clear
-the gate: a later normal 300-frame run aborted after frame 2 with `free():
-invalid pointer`. Each imported EGLImage now uses a transient GL texture,
-released before its EGLImage is destroyed. The repaired three-frame proof then
-passed at 16 ms, and a core-mode run plus three separate normal 300-frame runs
-passed at 14–16 ms with zero cleanup debt. The controlled gate is satisfied,
-but those normal runs remain the required regression check before any future
-promotion retry.
-
-On Void Linux, use the release-timing trace after a future controlled failure:
-
-```bash
-tools/run_void_dmabuf_lifetime_proof.sh --trace
-```
-
-It retains release scheduling and records ordered renderer, KMS, page-flip,
-retirement, and client-release stages in
-`~/.local/state/sophia/dmabuf-promotion/controlled-lifecycle-trace.log`. Use
-`tools/run_void_dmabuf_lifetime_proof.sh --diagnostic` for the GDB comparison.
-
-If an uninstrumented run aborts with allocator output, preserve its normal-run
-core (limited to 128 MiB) without starting under GDB:
-
-```bash
-tools/run_void_dmabuf_lifetime_proof.sh --core
-```
-
-On failure it keeps the log and core at
-`~/.local/state/sophia/dmabuf-promotion/controlled-lifecycle-core.log` and its
-`.core` sibling for offline stack inspection.
-
-After a future normal 300-frame failure, require three independent
-uninstrumented passes before clearing the lifecycle gate. This preserves each
-evidence file instead of overwriting it:
-
-```bash
-tools/run_void_dmabuf_lifetime_proof.sh --runs 3
-```
-
-To capture the native allocator stack from a dedicated text TTY, install `gdb`
-if needed and rerun the controlled three-frame proof in diagnostic mode:
-
-```bash
-tools/diagnose_void_dmabuf_heap.sh
-```
-
-The normal evidence file and a sibling `.gdb.log` retain the process stack and
-ordered DMA-BUF stages. Diagnostic mode is only for the controlled proof; do
-not use it for the interactive Kitty gate. To diagnose a lifetime failure, set
-`SOPHIA_DMABUF_DIAGNOSTIC_FRAMES=300` before running the same helper.
-
-For the real-Kitty gate, set `SOPHIA_INPUT_DEVICES` to comma-separated keyboard
-and pointer event paths. The guarded launcher asks for its recovery chord before
-DRM takeover. In Kitty, type `sophia` plus Enter, press all four arrow keys,
-move/click the pointer, then type `exit` plus Enter. With the controlled
-300-frame proof passed, run:
-
-```bash
-tools/wayland_kitty_dmabuf_promotion_gate.sh
-```
-
-It first proves the direct, output-sized DMA-BUF producer, then requires exactly
-three independent Kitty logs. Every Kitty log must show all eleven evdev
-keycodes, routed pointer input, presented-input latency no greater than 100 ms,
-normal client completion, restored KD mode, termios state and `keyd`, and no
-surviving session or input-guard process. Kitty intentionally remains on SHM:
-the current DMA-BUF route is direct scanout and cannot present its arbitrary
-window-sized buffers. Re-enable DMA-BUF for Kitty only after GPU composition
-can import, scale, and blend into Sophia's output-sized scanout target.
-`tools/finish_wayland_kitty_milestones.sh` is the operator entry point: it
-discovers the stable keyboard and pointer aliases, runs the three-frame and
-300-frame controlled proofs, and then runs those three guarded Kitty proofs.
-Use `--dry-run` from any shell to inspect discovery without opening input or DRM
-devices.
-
-On Void Linux, `tools/setup_void_dmabuf_promotion.sh` installs the required
-development packages and then starts that operator entry point. Use
-`--dry-run` to install dependencies and inspect device discovery only, or
-`--skip-install` when the packages are already present. Its installer transcript
-is retained at `~/.local/state/sophia/void-dmabuf-install.log`.
-
-The archived XLibre latency smoke used a dummy XLibre display,
-routes synthetic text over the compatibility XTEST connection, and requires a
-damage patch plus presented pixel latency of at most 100 milliseconds. The
-Kitty variant uses software GL, reusable MIT-SHM readback, and a fixed 1280x720
-window; it requires each readback to remain within the 1280x720 XRGB budget.
-The fallback smoke disables MIT-SHM and proves that degraded XGetImage capture
-keeps the session operational while the interactive verifier rejects it. The
-guarded physical Kitty proof must meet the same latency limit without a
-libinput processing-lag warning and must drain native scanout cleanly. Its
-schema 9 component gates require CPU composition at or below 25 milliseconds,
-MIT-SHM capture at or below 30 milliseconds, native upload at or below 50
-milliseconds, and submit-to-page-flip at or below 100 milliseconds. One native
-target and one GL pipeline must be created per output, with no size-triggered
-recreation during a fixed-size proof. The QEMU gate uses a 100-millisecond
-upload ceiling because its renderer is software-emulated, while retaining the
-same 100-millisecond presented-input and page-flip limits.
-
 The emergency-recovery QEMU scenario starts the independent input guard, sends
 one complete Ctrl-Alt-Backspace chord to arm it, waits for the live virtual
 libinput path and committed focus, then sends a second chord. It requires both
@@ -293,15 +155,6 @@ the guard trigger and an `emergency_exit`, followed by bounded live-session and
 native-scanout cleanup. It is the non-destructive prerequisite for the
 installed-session recovery test. QEMU does not exercise the host VT or DRM
 device, so it cannot replace the final guarded hardware restoration gate.
-
-The installed Kitty session has an additional destructive TTY gate. Run it
-only with SSH or another outside control plane available. The first
-Ctrl-Alt-Backspace must arm the independent input guard before graphics
-takeover; normal typing must then change Kitty pixels. For the recovery half,
-stop the Sophia session process from the outside control plane, press
-Ctrl-Alt-Backspace again, and require return to the text TTY within five
-seconds with `keyd` restored and no surviving Sophia/Kitty process or DRM
-ownership. Inspect the persistent latest logs for every input-pipeline stage.
 
 `live-session-composition-smoke` is non-destructive. Its reduced output must
 report `status=Passed`, one or more drained authority batches, committed runtime
@@ -473,7 +326,7 @@ The `egl-probe` feature admits `khronos-egl` through the internal
 unsafe dynamic EGL calls. Public renderer-live and backend-live tests assert
 only reduced EGL startup and draw-smoke status.
 
-The `libdrm-events` feature admits Smithay's `drm` crate as an optional
+The `libdrm-events` feature admits the Rust `drm` crate as an optional
 backend-live dependency. It checks only the reduced dependency-admission report,
 private native adapter skeleton, page-flip event polling adapter shape, and
 deterministic fake poller that feeds the runtime-owned bounded callback queue.

@@ -1,13 +1,13 @@
 [package]
 name = "sophia-wayland-authority"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-authors.workspace = true
-rust-version.workspace = true
+version = "0.1.0"
+edition = "2024"
+license = "BSD-3-Clause"
+authors = ["Mason Austin Green"]
+rust-version = "1.96"
 
 [dependencies]
-sophia-protocol = { path = "../sophia-protocol" }
+sophia-protocol = { path = "../../../crates/sophia-protocol" }
 smithay = { version = "0.7", default-features = false, features = ["wayland_frontend"] }
 
 [dev-dependencies]
@@ -18,3 +18,5 @@ unsafe_code = "allow"
 
 [lints.clippy]
 new_without_default = "allow"
+
+[workspace]

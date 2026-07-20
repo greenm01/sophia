@@ -13,7 +13,7 @@ Recommended operator layout:
 
 - TTY1 or SSH/tmux: Codex and recovery control plane.
 - TTY3: Sophia live session experiments.
-- Optional host X/Wayland session: reference clients and documentation lookup.
+- Optional host graphical session: reference clients and documentation lookup.
 
 This keeps the development agent available if scanout, input, or session
 supervision fails.
@@ -104,21 +104,15 @@ tools/stop_sophia_xmonad_session.sh
 The wrapper owns the session process group and restores `keyd` during either
 shutdown path.
 
-## Native Session Evidence And Wayland Maintenance
+## Native Session Evidence
 
-The production launcher no longer uses XLibre. XLibre compatibility artifacts
-under `research/xlibre` are historical evidence only. Native X11 applications
-connect to the Sophia X Server Frontend; native Wayland Kitty uses the
-Smithay-backed Wayland Authority and remains under maintenance gates documented
-in `sophia-wayland-authority.md`.
+Native X11 applications connect directly to the Sophia X Server Frontend. The
+production launcher uses neither XLibre nor Wayland; both former compatibility
+frontends are historical evidence under `research/`.
 
-The current X11 live command still contains transitional frame orchestration:
-`PersistentCpuScene`, `PersistentBackendRuntime`, and
-`PersistentNativeScanout` coordinate Engine commits, composition, and backend
-retirement from the CLI. The normative replacement is the single production
-session coordinator in `architecture.md`. Until that extraction is complete,
-treat this command as the proven operational path, not as the final ownership
-shape.
+The live command drives the production Engine/session coordinator, persistent
+CPU and DMA-BUF renderer, backend retirement, external WM policy, and native
+KMS path documented in `architecture.md`.
 
 On an exclusive TTY with no other DRM master, persistent native presentation is
 enabled by the gated `--native-scanout` flag. The bounded hardware wrapper

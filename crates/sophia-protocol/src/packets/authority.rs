@@ -4,7 +4,6 @@ use crate::{BufferSource, SurfaceId, TransactionCommit};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AuthorityKind {
     SophiaX,
-    SophiaWayland,
     SophiaNative,
 }
 

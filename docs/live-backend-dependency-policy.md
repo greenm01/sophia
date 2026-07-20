@@ -8,7 +8,7 @@ mapping, or blocking file-descriptor polling.
 Real backend dependencies belong in `sophia-backend-live` or in a later live
 backend crate with the same authority boundary. That crate may translate kernel
 and graphics APIs into engine records. It may not leak raw file descriptors,
-device paths, client metadata, XIDs, Wayland object IDs, or namespace labels into
+device paths, client metadata, XIDs, protocol object IDs, or namespace labels into
 the window manager, portal reducers, or protocol-neutral runtime state.
 
 ## Admission Phases

@@ -16,7 +16,7 @@ launch, logout, and protocol-specific polite close execution. A WM proposes
 bounded policy changes and never receives:
 
 - physical input streams, grabs, or client sockets;
-- real XIDs, Wayland object IDs, namespaces, titles, classes, PIDs, or paths;
+- real XIDs, protocol object IDs, namespaces, titles, classes, PIDs, or paths;
 - client pixels, renderer handles, DRM objects, or portal payloads.
 
 The Engine validates every proposal and preserves the last committed layout when
@@ -111,4 +111,3 @@ internal injection cannot satisfy it.
 Milestone 8 adds the normal session launcher, Firefox, the retained X11
 application mix, multi-output workspace behavior, and the unattended soak.
 Machine-specific DRM/input runs are optional compatibility diagnostics.
-

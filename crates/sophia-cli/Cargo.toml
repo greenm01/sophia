@@ -17,7 +17,6 @@ sophia-portal = { path = "../sophia-portal" }
 sophia-protocol = { path = "../sophia-protocol" }
 sophia-runtime = { path = "../sophia-runtime" }
 sophia-wm-demo = { path = "../sophia-wm-demo" }
-sophia-wayland-authority = { path = "../sophia-wayland-authority" }
 sophia-x-authority = { path = "../sophia-x-authority" }
 tracing.workspace = true
 rustix = { version = "1.1", default-features = false, features = ["process", "rand", "system"] }

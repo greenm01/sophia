@@ -4,8 +4,6 @@ mod help;
 #[cfg(feature = "atomic-scanout-live")]
 mod live_session;
 mod runtime;
-#[cfg(feature = "atomic-scanout-live")]
-mod wayland;
 mod x_authority;
 
 #[allow(unused_imports)]
@@ -62,11 +60,6 @@ pub(crate) fn run(args: &[String], verbose: bool) -> Result<(), Box<dyn std::err
     if x_authority::try_run(args)? {
         return Ok(());
     }
-    #[cfg(feature = "atomic-scanout-live")]
-    if wayland::try_run(args)? {
-        return Ok(());
-    }
-
     help::print(verbose);
     Ok(())
 }

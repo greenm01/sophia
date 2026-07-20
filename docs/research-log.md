@@ -3,6 +3,27 @@
 This file records decisions and unresolved questions for the active milestone.
 Completed evidence is archived in `research-log-archive.md`.
 
+## 2026-07-19: X-Centric Product Direction And Wayland Retirement
+
+Sophia is an X-centric product built on a protocol-neutral architecture. X11
+is the sole supported application protocol and the native X Server Frontend is
+the product vehicle. Engine transactions, routed input, namespaces, portals,
+rendering, and presentation remain independent of X11 object identity so a
+future translator can be evaluated without moving authority.
+
+The Smithay-backed Wayland frontend is retired from the workspace, CLI,
+launcher, dependencies, documentation contracts, and validation gates. Its
+source, tools, fixtures, last Kitty SHM evidence, and controlled linear
+DMA-BUF evidence are frozen under `research/wayland`. Those results proved that
+the Engine boundary was not X-shaped; they do not create an ongoing Wayland
+compatibility promise.
+
+Future application protocols are not deferred backlog. A translator or native
+Sophia interface requires named product evidence, an explicit specification
+amendment, existing authority boundaries, and bounded maintenance cost. Sophia
+will not import another protocol ecosystem's shell, workspace, input,
+presentation, or compositor-extension architecture.
+
 ## 2026-07-19: Milestone 8 Close, Sequence, And Soak Results
 
 Firefox's intermittent XCB abort was an output-order race: asynchronous writers
@@ -281,9 +302,10 @@ Classic shared-X intentionally retains same-namespace resource visibility.
 Confined sessions use distinct namespaces and explicit capabilities; XID ranges
 remain creation/cleanup ledgers rather than access-control lists.
 
-Wayland/Smithay stays supported under maintenance gates. XLibre remains frozen
-historical evidence and a possible future provider only if measured native-X
-gaps later justify its authority and maintenance cost.
+At this stage Wayland/Smithay stayed supported under maintenance gates. The
+2026-07-19 retirement decision above supersedes that status. XLibre remained
+frozen historical evidence and a possible future provider only if measured
+native-X gaps later justified its authority and maintenance cost.
 
 ## 2026-07-13: Kitty DMA-BUF Direct-Scanout Boundary
 
@@ -549,8 +571,8 @@ keycodes and modifiers to core events. The TTY keyboard node opens in a bounded
 run, but the noninteractive validation process observed zero physical events;
 an operator typing run is still the evidence gate.
 
-Wayland is gated behind the operator-grade X session. Before Wayland, Sophia
-will connect the live session to the documented generic X11 WM bridge. The
+Wayland was gated behind the operator-grade X session. Before considering it,
+Sophia would connect the live session to the documented generic X11 WM bridge. The
 bridge is an embedded minimal X server with synthetic windows; a configured
 legacy WM is layout policy only and receives no physical input, raw metadata,
 namespaces, or real client XIDs. Sophia Engine speaks only its generic WM IPC
@@ -1696,7 +1718,7 @@ in 6,988 ms with 117 of 117 authority transactions, 8 ms input presentation, 40 
 selection, exited normally with `first_error=none`, and retired both outputs cleanly. The
 remaining structural extraction is X authority-batch and resource translation plus session
 supervision around the protocol-neutral runtime, followed by deletion of legacy committed-
-snapshot entry points shared with the Wayland maintenance path.
+snapshot entry points then shared with the Wayland maintenance path.
 
 
 ## 2026-07-18: X Authority Batches Stop At The Production Boundary
@@ -1752,7 +1774,7 @@ submissions, 38 retirements, and zero cleanup debt. Classic and confined GTK acc
 physical text and pointer selection, exited normally with `first_error=none`, and retired both
 outputs cleanly after 54-56 CPU compositions. The next extraction is GPU scheduling and the
 concrete per-output runtime owner; legacy committed-snapshot entry points remain only for the
-Wayland maintenance path and tests.
+then-active Wayland maintenance path and tests.
 
 
 ## 2026-07-18: Backend Owns Present Resource Admission
@@ -1802,8 +1824,8 @@ The physical-pointer cursor repaint no longer composes frames in the outer X ses
 calls the legacy committed-snapshot replacement entry point. A visual-runtime repaint method
 reads the production coordinator snapshot, asks renderer-live to compose the cursor, creates
 per-output frames, and submits them through the backend-owned output runtime set. The remaining
-snapshot replacement API is named and called only by the Wayland maintenance adapter and its
-regression; production X has no caller.
+snapshot replacement API was named and called only by the Wayland maintenance adapter and its
+regression; production X had no caller. The 2026-07-19 retirement removed that adapter.
 
 The full CLI all-feature suite passes. On the rebuilt X13 QEMU image, strict two-xterm completed
 in 6,941 ms with 120 of 120 transactions, exact keyboard and pointer proofs, 42 submissions,

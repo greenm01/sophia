@@ -1,4 +1,4 @@
-# Sophia Wayland Authority
+# Retired Sophia Wayland Authority
 
 **Role:** subsystem contract and maintenance status.
 

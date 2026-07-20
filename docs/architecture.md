@@ -8,10 +8,13 @@ those boundaries. [Namespaces and Portals](namespaces-and-portals.md) defines
 the trust and transfer model. Subsystem documents record implementation detail
 and current coverage.
 
-Sophia is Engine-centered. Sophia Engine owns physical input, the scene graph,
-atomic visual commits, rendering, and scanout. Protocol authorities terminate
-client protocols and translate them into namespace-checked Sophia facts. The WM
-proposes blind layout policy. Portals mediate deliberate namespace crossings.
+Sophia is an X-centric product with an Engine-centered architecture. Sophia
+Engine owns physical input, the scene graph, atomic visual commits, rendering,
+and scanout. The active X Server Frontend terminates X11 and translates it into
+namespace-checked Sophia facts. The WM proposes blind layout policy. Portals
+mediate deliberate namespace crossings. Engine boundaries remain
+protocol-neutral so future translators can be evaluated without redesigning
+visual authority.
 
 ## System Shape
 
@@ -40,11 +43,10 @@ proposes blind layout policy. Portals mediate deliberate namespace crossings.
                 ▼                     ▼
 
 ================================================================================
-                         PROTOCOL AUTHORITIES
+                         PROTOCOL FRONTEND
 ================================================================================
  ┌────────────────────────────────────────────────────────────────────────────┐
- │ Sophia X Server Frontend              | Sophia Wayland Authority           │
- │ X11 resources, selections, grabs      | Wayland objects and protocol state │
+ │ Sophia X Server Frontend: X11 resources, selections, grabs, protocol state │
  └───────────────────────────────┬────────────────────────────────────────────┘
                                  │ namespace-checked transactions,
                                  │ lifecycle, routed input, configure
@@ -117,11 +119,12 @@ or layout policy.
   retirement path. The paired software and CPU-plus-Vulkan hardware gate now
   passes through Engine-owned KMS with controlled rejection recovery and exact
   resource retirement.
-- The Smithay-backed Wayland Authority runs real Kitty with SHM, routed input,
-  frame callbacks, buffer release, and native KMS. Controlled DMA-BUF
-  direct-scanout evidence exists, but arbitrary client GPU composition does not.
 - XLibre is absent from the production workspace and launcher. Its frozen
   prototype remains under `research/xlibre` as historical evidence.
+- The former Wayland frontend is absent from the production workspace,
+  dependency graph, launcher, and validation gates. Its frozen prototype and
+  last Kitty/SHM and controlled DMA-BUF evidence remain under
+  `research/wayland` as proof that Engine transactions were not X-shaped.
 
 ### Production Session Loop
 
@@ -132,7 +135,18 @@ recovery, and exact resource retirement pass on retained hardware evidence.
 Milestone 5 application promotion uses the repeatable, unattended classic and
 confined QEMU session gate; machine-specific runs are compatibility diagnostics.
 
-Renderer-live owns the CPU scene. Backend-live now owns native scanout, the concrete per-output runtime set, and `LiveProductionVisualRuntime`, which contains Engine commit/preparation, composition, Present scheduling, KMS submission/retirement, cleanup, and reduced feedback sequencing. `PersistentBackendRuntime` and its CLI implementation are gone. Production X no longer calls a committed-snapshot replacement entry point; that compatibility operation is isolated to the Wayland maintenance adapter. Production X now polls one backend service entry point; backend-live decides retirement, queued Present scheduling, and pending native submission order and returns a reduced tick. `runtime_driver` now owns CPU cycle order, full-state Present rebasing and preparation, the prepared retirement commit-before-feedback gate, and dynamic asynchronous KMS phase order from reduced observations. Backend-live executes requested retire, Present-schedule, and pending-submit phases and returns updated observations; it is not a second phase coordinator. The production session-loop architecture target is complete; the unattended QEMU gate is the shared Milestone 5/6 regression gate.
+Renderer-live owns the CPU scene. Backend-live owns native scanout, the concrete
+per-output runtime set, and `LiveProductionVisualRuntime`, which contains
+Engine commit/preparation, composition, Present scheduling, KMS
+submission/retirement, cleanup, and reduced feedback sequencing. Production X
+polls one backend service entry point; backend-live decides retirement, queued
+Present scheduling, and pending native submission order and returns a reduced
+tick. `runtime_driver` owns CPU cycle order, full-state Present rebasing and
+preparation, the prepared retirement commit-before-feedback gate, and dynamic
+asynchronous KMS phase order from reduced observations. Backend-live executes
+requested retire, Present-schedule, and pending-submit phases; it is not a
+second phase coordinator. The production session-loop architecture target and
+unattended xmonad daily-driver gate are complete.
 
 The production target is one protocol-neutral session coordinator in
 `sophia-engine::runtime_driver`. It owns the ordered visual state machine while
@@ -160,17 +174,16 @@ last committed geometry-plus-pixels state, and retire native resources exactly
 once. No failure path may infer presentation from client traffic or send
 feedback before backend retirement.
 
-Wayland uses the same coordinator through its authority adapter and remains a
-maintenance lane. XLibre remains historical evidence and cannot become an
-alternate production loop.
+There is no compatibility-only committed-snapshot production adapter. Every
+active client path enters through authority transactions. XLibre and Wayland
+remain historical evidence and cannot become alternate production loops.
 
 ## Load-Bearing Ownership Rules
 
 | Component | Owns | Must not own |
 | --- | --- | --- |
-| Sophia Engine | physical input, scene graph, hit-testing, committed visual state, damage, frame scheduling, rendering, DRM/KMS presentation | client protocol parsing, X/Wayland resources, portal decisions, WM policy |
+| Sophia Engine | physical input, scene graph, hit-testing, committed visual state, damage, frame scheduling, rendering, DRM/KMS presentation | client protocol parsing, protocol-local resources, portal decisions, WM policy |
 | X Server Frontend | X11 sockets, authentication adapter, XIDs, atoms, properties, selections, focus, grabs, events, drawing readiness | physical devices, workspaces, final layout, portal policy, renderer imports, scanout |
-| Wayland Authority | Wayland sockets and objects, configure/ack, attach/damage/commit, protocol delivery | a second scene graph, physical input, final layout, scanout, portal policy |
 | Session runtime | process supervision, namespace registry, admission, authorization publication, bounded I/O coordination, recovery | protocol meaning, visual policy, portal allow/deny decisions |
 | Sophia WM | layout, workspace, focus and launch policy through opaque handles | XIDs, protocol objects, namespaces, titles, PIDs, payloads, rendering |
 | Portal broker | bounded transfer policy, decision and grant lifecycle | protocol object tables, payload rendering, DRM/KMS, client-global visibility |
@@ -181,14 +194,14 @@ No component may acquire another row's authority merely because it currently
 runs in the same process. Crate and process boundaries may evolve; ownership
 does not.
 
-## Protocol Authorities
+## Protocol Frontends
 
-A protocol authority parses one client protocol, owns its object/resource
+A protocol frontend parses one client protocol, owns its object/resource
 tables, enforces the admitted namespace context, and reduces client-visible
 state into Sophia records. It may own protocol focus, grabs, selections,
 configure/ack state, buffer readiness, and lifecycle behavior.
 
-An authority emits:
+A frontend emits:
 
 - `AuthoritySurface` and `SurfaceTransaction` values;
 - surface removal and lifecycle facts;
@@ -196,7 +209,7 @@ An authority emits:
 - bounded portal request facts;
 - accept/reject acknowledgements for Engine-routed input and control.
 
-An authority must not duplicate Engine's scene graph or infer presentation from
+No frontend may duplicate Engine's scene graph or infer presentation from
 client traffic. Engine output snapshots and presentation retirement flow back to
 the authority so it can produce native protocol replies and events.
 
@@ -208,8 +221,10 @@ the protocol role and current crate name.
 
 The frontend follows the Phoenix strategy, not Phoenix code: implement a modern
 X server cleanly, retain the established X11 API, and expand only from real
-application evidence. Sophia is not designing an “X12” or a separate native
-application protocol.
+application evidence. Sophia is not designing an “X12” or a speculative native
+application protocol. If repeated product evidence eventually exceeds X11,
+Sophia may extract a native interface from proven Engine mechanisms through an
+explicit specification decision.
 
 Modernization happens beneath X11 through Sophia-owned atomic commits,
 Engine-owned presentation, explicit buffer readiness, session-selected
@@ -220,17 +235,15 @@ The detailed contract is in
 [sophia-x-authority.md](sophia-x-authority.md). Real-client admission is tracked
 in [x11-compatibility-matrix.md](x11-compatibility-matrix.md).
 
-### Sophia Wayland Authority
+### Future Compatibility Frontends
 
-The Wayland Authority uses Smithay as protocol infrastructure. Smithay's
-dependency does not make it the compositor authority: the frontend terminates
-Wayland objects and emits Sophia transactions; Engine owns composition and
-scanout.
-
-No new Wayland protocol work is currently prioritized beyond correctness,
-security, recovery, and regression maintenance. The implemented and deferred
-surface is recorded in
-[sophia-wayland-authority.md](sophia-wayland-authority.md).
+No non-X application frontend is currently supported or planned. A future
+compatibility translator may be admitted only from named product evidence. It
+must reduce to existing Sophia transactions, routed input, namespaces, and
+portals; remain subordinate to Engine and session policy; and must not import
+another protocol's shell, workspace, physical-input, presentation, or
+compositor-extension architecture. Architectural openness is permission to
+evaluate a translator later, not a compatibility promise.
 
 ### XLibre Boundary
 
@@ -258,8 +271,8 @@ The default slow-client behavior is:
 - degrade only through explicit bounded timeout policy.
 
 X core drawing, SHM, Render, and Present/DRI3 must reduce to the same readiness
-model. Wayland attach/damage/commit maps into that model through its authority.
-Prototype `LayoutEpochState` and XComposite readiness inference are historical
+model. Any future frontend must do the same. Prototype `LayoutEpochState`,
+XComposite readiness inference, and the retired Wayland adapter are historical
 compatibility mechanisms, not the permanent native-X seam.
 
 Renderer imports and KMS handles remain backend-private. An authority may pass
@@ -272,10 +285,9 @@ Sophia Engine reads physical devices, applies global shortcuts and chrome
 hit-testing, walks the actual transformed scene, and selects a `SurfaceId` plus
 target-local coordinates. It sends that route to the owning authority.
 
-The authority then applies protocol delivery rules:
-
-- X11 focus, grabs, event masks, XKB/XI state, and namespace checks;
-- Wayland focus, serials, implicit grabs, and namespace checks.
+The X frontend then applies X11 focus, grabs, event masks, XKB/XI state, and
+namespace checks. A future frontend would remain responsible for its own
+protocol-local delivery rules after the same Engine route.
 
 The authority returns a reduced delivery acknowledgement. Engine never writes
 arbitrary client events or receives a client connection handle. Route failure
@@ -288,7 +300,7 @@ protocol identity.
 ## Window Manager And Chrome
 
 The WM consumes immutable snapshots keyed by opaque `SurfaceId` values and
-emits `LayoutTransaction` proposals. It never sees XIDs, Wayland object IDs,
+emits `LayoutTransaction` proposals. It never sees XIDs, protocol object IDs,
 namespace IDs, titles, classes, PIDs, paths, icons, credentials, or portal
 payloads.
 
@@ -350,26 +362,19 @@ credentials, titles, PIDs, paths, payloads, icons, or buffer contents.
 
 ## Development Order
 
-The active critical path is:
-
-1. completed: namespace, admission, capability, portal, XKB, input, RandR,
-   resize, SHM, and DRI3/Present foundations;
-2. completed: paired xterm and mixed CPU-plus-Vulkan native sessions;
-3. active: finish paired classic/confined GTK3 target-hardware promotion;
-4. next: replace the transitional CLI orchestration with the single production
-   session loop defined above; and
-5. after consolidation: resume probe-driven X11 application and extension work
-   from the compatibility matrix.
-
-Wayland remains under maintenance gates during this work. XLibre remains
-documented and deferred.
+The native-X foundations, production session loop, paired software/GPU gates,
+namespace and portal reference flows, xmonad policy bridge, and Firefox
+daily-driver soak are complete. The next milestone is selected from measured
+native-X daily-driver gaps. New X11 compatibility remains probe-driven; future
+application protocols are outside the active roadmap. XLibre and Wayland stay
+archived unless a later specification decision admits a bounded provider.
 
 ## Reference Boundaries
 
 - Phoenix: clean-room modern X server strategy and evidence-driven coverage.
 - XLibre: historical X11 delivery, namespace, and compatibility lessons.
-- Smithay/niri: Wayland protocol, backend, renderer, and test patterns without
-  adopting their compositor-policy architecture.
+- niri and the retired Smithay frontend: historical backend, renderer, and test
+  lessons without adopting their compositor-policy architecture.
 - picom: historical XComposite/Damage and buffer-lifetime lessons.
 - river: external policy-protocol and crash-isolation lessons.
 - macOS WindowServer/Core Animation: transaction-first presentation and

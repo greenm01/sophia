@@ -214,8 +214,8 @@ emit snapshots instead of owning render policy.
 ### LayerSnapshot
 
 A layer snapshot is the reduced frame value that Sophia Engine render planning
-consumes. It may come from Sophia X Authority, Sophia Wayland Authority, or a
-future protocol authority.
+consumes. It currently comes from the Sophia X Server Frontend; a future
+frontend must produce the same protocol-neutral value.
 
 Fields should describe:
 
@@ -233,7 +233,7 @@ The snapshot is flat and immutable for the frame that consumes it.
 ### AuthoritySurface
 
 An authority surface is a protocol-facing record owned by a protocol authority.
-It maps protocol-local objects, such as X windows or Wayland surfaces, to a
+It maps protocol-local objects, such as X windows or future frontend surfaces, to a
 Sophia `SurfaceId`.
 
 Fields should describe:
@@ -486,7 +486,7 @@ Fields should describe:
 
 The packet is not delivered directly to a client. Engine resolves the visible
 `SurfaceId` and sends a reduced route to the owning protocol authority, which
-still applies X11 or Wayland delivery semantics.
+still applies its protocol delivery semantics.
 
 ### LibinputDeviceDescriptor
 
@@ -530,7 +530,7 @@ Fields should describe:
 - route confidence or rejection reason
 
 This packet is Sophia Engine authority, but final delivery remains protocol
-authority. Authority-local XIDs or Wayland objects are resolved inside that
+authority. Authority-local XIDs or future protocol objects are resolved inside that
 authority and never become Engine routing keys.
 
 Transformed scene hit-testing must produce target-local coordinates by applying
@@ -675,8 +675,8 @@ Descriptor removal follows the same generation rule.
 Chrome actions are not WM commands. A compositor close button produces a
 `ChromeActionRequest` owned by Engine/session policy, validated against surface
 generation and capabilities, then translated by the owning protocol authority
-into normal X11 or Wayland close semantics. The WM receives only later layout
-consequences.
+into normal X11 close semantics. A future frontend would supply its own native
+close translation. The WM receives only later layout consequences.
 
 Session events are compositor/session inputs that may produce privileged
 commands. For chrome close, `SessionEvent::ChromeAction` can produce
@@ -797,8 +797,9 @@ The hot paths are:
 - surface ordering and transform evaluation
 
 Keep them allocation-light and branch-obvious. Slow policy work belongs in the
-WM or portal processes. X11 and Wayland protocol complexity belongs in their
-authorities, not inside the compositor's inner frame path.
+WM or portal processes. X11—and any future frontend's protocol
+complexity—belongs in its frontend, not inside the compositor's inner frame
+path.
 
 Policy can be TEA-style. Compositor hot paths should be table/system style.
 

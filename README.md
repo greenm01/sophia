@@ -8,31 +8,38 @@ Wayland stepped in to fix the visual rot. It enforces atomic buffer swaps and se
 
 Sophia rejects this false binary.
 
-Sophia is a secure, atomic session stack for the Linux desktop. It shatters the monolithic display server and divides the labor.
+Sophia is a modern atomic X11 desktop system built on a protocol-neutral,
+authority-separated visual engine. It keeps X11's mechanism-oriented
+application model while replacing the monolithic display server's implicit
+presentation and ambient trust.
 
 # The Engine Dictates the Pixels
 
 Sophia Engine is the absolute visual authority. It hit-tests the scene, schedules the frames, and owns the scanout. It enforces a simple, unbreakable rule: no new geometry appears on the screen without matching, committed pixels. If an application hangs during a resize, Sophia fails closed. The old, perfectly rendered layout remains on the screen. 
 
-## The Authorities Translate the Past
+## X11 Is The Foundation
 
-Sophia does not force the world to rewrite its software. It hosts protocol
-frontends. The **Sophia X Server Frontend** presents the real X11 API to
-applications, while the Sophia Wayland Authority presents Wayland. Both reduce
-client requests into atomic surface transactions. They do not own workspaces or
-dictate layout; they translate client protocol into Sophia Engine facts.
+The **Sophia X Server Frontend** is a clean, modern X server implementation. It
+presents the established X11 API to applications and reduces client requests
+into atomic Sophia surface transactions. It does not own workspaces, dictate
+layout, read physical input, or control scanout.
 
 X11 is not a deprecated migration path in Sophia. The long-term X Server
 Frontend is a Sophia-owned, modern X server implementation: X11 remains the
 application API while Sophia modernizes its rendering, presentation, and output
 architecture underneath. A classic shared-X profile preserves the inspectable,
 scriptable model people value; confined namespaces are an explicit session
-choice, not a reason to erase that model. Sophia does not currently plan a
-separate application-facing “Sophia native” display protocol.
+choice, not a reason to erase that model.
+
+X11 is Sophia's sole current application protocol, but it is not allowed to
+shape Engine internals. The transaction boundary remains protocol-neutral so a
+future compatibility translator or evidence-driven native interface can be
+added without importing another protocol's desktop architecture. Sophia does
+not design a speculative replacement protocol today.
 
 ## The Window Manager Remains Blind
 
-Layout policy belongs in an external process. The Sophia Window Manager receives opaque layout nodes. It never sees an XID, a window title, or a Wayland object ID. It crunches the geometry and returns command packets. Because the window manager is blind, it cannot leak secure metadata. Because it sits outside the rendering hot path, it can crash, restart, or be rewritten in any language without taking down the session.
+Layout policy belongs in an external process. The Sophia Window Manager receives opaque layout nodes. It never sees an XID, a window title, a namespace, or a protocol-local object ID. It crunches the geometry and returns command packets. Because the window manager is blind, it cannot leak secure metadata. Because it sits outside the rendering hot path, it can crash, restart, or be rewritten in any language without taking down the session.
 
 Sophia gives you the flawless visual integrity of a modern macOS environment and the hackable freedom of a tiling setup. 
 
@@ -40,7 +47,8 @@ No tearing. No shared mutable state. NOT designed by committee.
 
 # The Sophia Session Stack
 
-Sophia is a secure, frame-perfect session stack for X11 and Wayland.
+Sophia is an X-centric, frame-perfect session stack with a reusable
+protocol-neutral Engine.
 
 The project starts from a plain frustration: Linux graphics stacks make you
 choose too often. X11 is open and hackable, but it lets clients share too much
@@ -48,12 +56,12 @@ state and makes tear-free resizing a negotiation. Wayland fixes the visual
 model, then pushes every desktop feature through a compositor and a protocol
 process that can move slowly.
 
-Sophia takes a different route. The compositor is the visual authority. Protocol
-servers for X11, Wayland, and future clients sit behind it as translation
-layers. The window manager stays outside the hot path and sees only opaque
-layout nodes. Portals handle deliberate namespace crossing. The goal is a
-desktop that keeps the sharp edges people like about X11 without making every
-client part of one shared trust domain.
+Sophia takes a different route. Engine is the visual authority; the Sophia X
+Server Frontend translates X11 into bounded transactions; the window manager
+stays outside the hot path and sees only opaque layout nodes. Portals handle
+deliberate namespace crossing. The goal is a desktop that keeps the sharp edges
+people like about X11 without making every client part of one shared trust
+domain.
 
 One rule drives the design:
 
@@ -99,8 +107,7 @@ half-finished resize.
                          PROTOCOL AUTHORITY LAYER
 ================================================================================
  ┌────────────────────────────────────────────────────────────────────────────┐
- │ Sophia X Server Frontend | Sophia Wayland Authority                         │
- │ X11 resources/grabs      | Wayland objects | protocol-specific checks      │
+ │ Sophia X Server Frontend: X11 resources, selections, grabs, protocol checks │
  └────────────────────────────────┬───────────────────────────────────────────┘
                                   │
                                   │ namespace-checked surface transactions
@@ -112,7 +119,7 @@ half-finished resize.
 ================================================================================
  ┌────────────────────────────────────┐     ┌─────────────────────────────────┐
  │ Namespace A: trusted               │     │ Namespace B: untrusted          │
- │ X terminal | Wayland file manager  │  X  │ X browser | Wayland chat app    │
+ │ X terminal | trusted local tools   │  X  │ X browser | untrusted X app     │
  └────────────────────────────────────┘     └─────────────────────────────────┘
 ```
 
@@ -120,23 +127,21 @@ half-finished resize.
 
 Input reaches Sophia Engine first. The engine owns the scene graph, transforms,
 outputs, and frame loop, so it maps physical input to the surface the user can
-see. A protocol authority then performs the protocol-specific delivery rules:
-focus, grabs, event masks, serials, and namespace checks.
+see. The X frontend then performs X11 delivery rules: focus, grabs, event
+masks, modifier state, and namespace checks.
 
-Each frontend terminates one client protocol. The Sophia X Server Frontend
-implements a modern, compatibility-driven X11 subset; the Wayland Authority
-serves Wayland clients through Smithay. Sophia adds X11 extensions only where a
-real need cannot be served by the established protocol. There is no planned
-third application protocol for “Sophia-first” clients. Frontends own protocol
-resources and client semantics; they do not own layout, scanout, compositor
-chrome, or portal policy.
+The Sophia X Server Frontend implements a modern, compatibility-driven X11
+subset. Sophia adds compatibility only from named real-client evidence and
+adds X11 extensions only where an established mechanism cannot serve a real
+need. The frontend owns X resources and client semantics; it does not own
+layout, scanout, compositor chrome, or portal policy.
 
 The WM is a policy process. It manages workspaces, focus policy, layouts,
 keybindings, and launch decisions, but it does that through opaque handles. It
 does not need XIDs, namespace IDs, window titles, app classes, or clipboard
 payloads.
 
-Rendering is transaction-based. The WM proposes layout. Authorities provide
+Rendering is transaction-based. The WM proposes layout. The X frontend provides
 pending buffers, damage, constraints, and readiness. Sophia Engine commits
 geometry and pixels together on a frame boundary. If a surface is not ready, the
 engine keeps the last committed state until policy says otherwise.
@@ -149,7 +154,7 @@ feature added after the desktop works. It is the shape of the system.
 
 ### Namespaces At The Edge
 
-Protocol frontends sit at the edge of the session. A **classic shared-X**
+The X frontend sits at the edge of the session. A **classic shared-X**
 profile puts trusted applications in one namespace and deliberately preserves
 the inspectable, scriptable X11 object model. A confined profile assigns clients
 to separate namespaces before they can create useful state: an untrusted browser
@@ -164,7 +169,7 @@ trusted local users the shared-X workflow they selected.
 
 The WM manages layout, focus, and workspaces, but it does not receive client
 identity. It sees opaque layout nodes and `SurfaceId` handles. It does not see
-XIDs, Wayland object IDs, namespaces, titles, classes, PIDs, paths, or clipboard
+XIDs, protocol-local object IDs, namespaces, titles, classes, PIDs, paths, or clipboard
 payloads.
 
 That blindness is deliberate. If the WM is compromised, the attacker gets a
@@ -215,7 +220,7 @@ Sophia is split by authority, not by convenience.
 
 - **Sophia Engine** owns physical input, visual state, frame scheduling,
   transaction commits, rendering, and display output.
-- **Protocol Authorities** own client compatibility and translate protocol
+- **Sophia X Server Frontend** owns X11 compatibility and translates protocol
   state into Sophia surface transactions.
 - **Sophia WM** owns layout, focus policy, keybindings, workspaces, and launch
   decisions.
@@ -229,6 +234,10 @@ Sophia is split by authority, not by convenience.
 
 - `docs/README.md` maps normative contracts, subsystem status, evidence, and
   historical material.
+- `docs/specification.md` is the proposed project constitution: a discussion
+  draft for invariants, hard non-goals, compatibility admission, and the
+  compatibility admission, and amendment rules. Existing normative contracts
+  retain precedence until it is explicitly ratified.
 - `docs/architecture.md` maps processes and load-bearing boundaries.
 - `docs/namespaces-and-portals.md` defines admission, isolation profiles,
   capabilities, grants, and cross-namespace failure behavior.
@@ -243,18 +252,17 @@ Sophia is split by authority, not by convenience.
   evidence.
 - `research/xlibre/docs/xlibre-prototype-regression-map.md` maps retired XLibre
   checks to active Sophia-owned regressions.
+- `research/wayland/README.md` preserves the retired Wayland frontend and maps
+  its architectural lessons to active native-X and Engine regressions.
 - `todo.md` tracks only active milestones and measurable exits.
 
 ## Status
 
-Sophia is a research prototype. The primary development track is now the native
-Sophia X Server Frontend. The bounded portal reference flow is complete; X11
-buffer and presentation semantics are the active milestone. The completed
-session-correctness milestone retains paired classic-shared and fresh confined
-two-xterm evidence through Engine-owned composition and KMS. Both profiles use
-physical keyboard and pointer input, Engine-derived output facts, authenticated
-RandR delivery, configure-plus-pixels resize, and clean teardown; retained X13
-runs reported 94/90 ms startup readiness and 13 ms maximum composition.
+Sophia is a research prototype. The native Sophia X Server Frontend is the
+product path; no other application protocol is currently supported. The
+completed milestones retain paired classic/confined namespace evidence,
+Engine-owned CPU and DMA-BUF composition, physical input, multi-output KMS,
+portal-mediated selections, and an unattended xmonad daily-driver session.
 
 Standard DRI3 1.2 now carries FD-bearing `Open`, modifier-bearing multi-plane
 pixmaps, xshmfences, and Present transactions through the native frontend. The
@@ -275,11 +283,11 @@ targeted admission cleanup, and authority-private native `CLIPBOARD`/`PRIMARY`
 source-proxy flow are proven for `TARGETS`, `UTF8_STRING`, and bounded UTF-8
 `text/plain`.
 
-The Smithay-backed Wayland Authority remains functional and supported. Real
-Kitty uses native Wayland SHM, Engine-routed input, and KMS; controlled DMA-BUF
-direct-scanout lifecycle evidence is retained as a renderer regression. New
-Wayland protocols and arbitrary client GPU composition are deferred while the
-X11, namespace, and portal architecture matures.
+The former Smithay-backed Wayland frontend is retired under
+`research/wayland`. It proved that the Engine boundary was not inherently
+X-shaped, but it is not a production dependency, supported runtime, validation
+gate, or promise of future compatibility. A future translator must justify
+itself from product evidence and reduce to Sophia's existing authority model.
 
 XLibre is not a production dependency, feature, workspace member, or launcher
 path. Its frozen source and prototype evidence live under `research/xlibre`.

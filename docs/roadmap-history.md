@@ -4,6 +4,23 @@ This file archives completed and prototype roadmap items that previously lived
 in `todo.md`. Keep active work in `todo.md`; keep detailed rationale and
 validation evidence in `docs/research-log.md`.
 
+## 2026-07-19 Wayland Frontend Retirement
+
+- [x] Recorded Sophia as an X-centric product with a protocol-neutral Engine
+  rather than a dual-protocol compositor.
+- [x] Removed the Wayland frontend, commands, launchers, dependencies, and
+  maintenance gates from the production workspace.
+- [x] Preserved the former frontend, subsystem contract, tools, fixtures, and
+  last evidence under `research/wayland` as design provenance.
+- [x] Kept future compatibility translators architecturally possible but
+  outside the roadmap unless a specification amendment admits one from named
+  product evidence.
+
+This retirement is post-M8 architecture cleanup. It does not change the
+completed xmonad daily-driver criteria or its retained mix and soak evidence.
+
+---
+
 ## 2026-07-19 xmonad Daily Driver
 
 - [x] Added the normal supervised xmonad session with approved startup/action

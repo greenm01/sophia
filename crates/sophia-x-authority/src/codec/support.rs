@@ -217,7 +217,6 @@ pub(super) fn encode_authority_kind(kind: AuthorityKind, out: &mut Vec<u8>) {
         out,
         match kind {
             AuthorityKind::SophiaX => 1,
-            AuthorityKind::SophiaWayland => 2,
             AuthorityKind::SophiaNative => 3,
         },
     );
@@ -226,7 +225,6 @@ pub(super) fn encode_authority_kind(kind: AuthorityKind, out: &mut Vec<u8>) {
 pub(super) fn decode_authority_kind(value: u16) -> Result<AuthorityKind, IpcCodecError> {
     match value {
         1 => Ok(AuthorityKind::SophiaX),
-        2 => Ok(AuthorityKind::SophiaWayland),
         3 => Ok(AuthorityKind::SophiaNative),
         other => Err(IpcCodecError::InvalidEnum {
             field: "authority_kind",

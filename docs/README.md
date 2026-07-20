@@ -3,6 +3,12 @@
 Sophia documentation is divided by purpose. A document's role determines what
 wins when prose disagrees.
 
+## Proposed Constitution
+
+- [Specification](specification.md) is the **unratified discussion draft** for
+  project invariants, hard non-goals, compatibility admission, and amendment
+  rules. It does not override the normative architecture documents yet.
+
 ## Normative Architecture
 
 - [Architecture](architecture.md) defines process ownership and the boundaries
@@ -24,8 +30,6 @@ unimplemented target behavior explicitly.
 
 - [Sophia X Server Frontend](sophia-x-authority.md) records the native X11
   frontend boundary, implemented surface, and remaining production gaps.
-- [Sophia Wayland Authority](sophia-wayland-authority.md) records the
-  Smithay-backed frontend boundary and its maintenance status.
 - [Sophia X11 WM Bridge](sophia-x11-wm-bridge.md) records the optional legacy-WM
   policy adapter. It is not an application authority.
 - [Renderer Import Boundary](renderer-import-boundary.md), [Live Backend
@@ -52,6 +56,8 @@ override the ownership and trust rules in the normative architecture.
   superseded experiments.
 - `research/xlibre/` preserves the retired XLibre prototype and its regression
   lessons outside the production workspace.
+- `research/wayland/` preserves the retired Wayland frontend, tools, fixtures,
+  and final subsystem contract outside the production workspace.
 
 Historical documents are evidence, not current architecture. XLibre bridge
 types, XComposite mirror paths, and prototype routed-input extensions must not

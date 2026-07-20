@@ -9,7 +9,6 @@ pub struct LiveProductionVisualRuntime {
     production: sophia_engine::ProductionSessionCoordinator,
     outputs: LiveProductionOutputRuntimeSet,
     layers: BTreeMap<SurfaceId, SurfaceTransaction>,
-    committed_snapshot_layers: Option<Vec<LayerSnapshot>>,
     presentation_feedback: crate::LiveProductionPresentFeedbackCoordinator,
     present_scheduler: LiveProductionPresentScheduler,
     present_feedback_sink: Box<dyn FnMut(crate::LivePresentFeedbackOutcome)>,
@@ -28,23 +27,6 @@ impl LiveProductionVisualRuntime {
             native_scanout,
             initial_native_frames,
         )
-    }
-
-    pub fn new_from_committed_surfaces(
-        outputs: &[sophia_engine::HeadlessOutput],
-        committed_surfaces: &[CommittedSurfaceState],
-        native_scanout: Option<&mut LiveProductionNativeScanout>,
-        initial_native_frames: Option<Vec<LiveProductionComposedFrame>>,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut runtime = Self::new_with_committed_surfaces(
-            outputs,
-            committed_surfaces.to_vec(),
-            native_scanout,
-            initial_native_frames,
-        )?;
-        runtime.committed_snapshot_layers =
-            Some(layer_snapshots_from_committed(committed_surfaces));
-        Ok(runtime)
     }
 
     pub fn new_with_committed_surfaces(
@@ -67,7 +49,6 @@ impl LiveProductionVisualRuntime {
             production,
             outputs: output_runtimes,
             layers: BTreeMap::new(),
-            committed_snapshot_layers: None,
             presentation_feedback: Default::default(),
             present_scheduler: LiveProductionPresentScheduler::default(),
             present_feedback_sink: Box::new(|_| {}),
@@ -643,54 +624,6 @@ impl LiveProductionVisualRuntime {
         )
     }
 
-    pub fn run_wayland_maintenance_snapshot(
-        &mut self,
-        committed_surfaces: &[CommittedSurfaceState],
-        mut native_scanout: Option<&mut LiveProductionNativeScanout>,
-        native_frames: Option<Vec<LiveProductionComposedFrame>>,
-    ) -> Result<crate::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
-        self.production
-            .replace_committed_surfaces(committed_surfaces.to_vec());
-        let layers = layer_snapshots_from_committed(committed_surfaces);
-        self.committed_snapshot_layers = Some(layers.clone());
-        let output_count = self.outputs.output_count();
-        let production = &self.production;
-        let outputs = &mut self.outputs;
-        let mut native_frames = native_frames.unwrap_or_default().into_iter();
-        let mut adapter = crate::LiveProductionOutputRuntimeAdapter::new(
-            output_count,
-            |index, committed: &[CommittedSurfaceState]| -> Result<_, Box<dyn std::error::Error>> {
-                let output = outputs
-                    .values_mut()
-                    .nth(index)
-                    .ok_or("production output index was not registered")?;
-                output
-                    .runtime
-                    .assembly_mut()
-                    .replace_committed_surfaces(committed.to_vec());
-                let input = compositor_tick_input_from_layers(layers.clone());
-                Ok(match native_scanout.as_deref_mut() {
-                    Some(native_scanout) => {
-                        if let Some(frame) = native_frames.next() {
-                            native_scanout.queue_frame(index, frame);
-                        }
-                        if output.runtime.rendered_primary_plane_scanout_in_flight() {
-                            output.runtime.run_tick(input)?
-                        } else {
-                            native_scanout.run_tick(index, &mut output.runtime, input)?
-                        }
-                    }
-                    None => output.runtime.run_tick(input)?,
-                })
-            },
-        );
-        production
-            .run_outputs(&mut adapter)?
-            .into_iter()
-            .next()
-            .ok_or_else(|| "persistent backend runtime has no outputs".into())
-    }
-
     pub fn committed_surfaces(&self) -> &[CommittedSurfaceState] {
         self.production.committed_surfaces()
     }
@@ -758,7 +691,6 @@ impl LiveProductionVisualRuntime {
         let output_count = self.outputs.output_count();
         let production = &self.production;
         let outputs = &mut self.outputs;
-        let committed_snapshot_layers = &self.committed_snapshot_layers;
         let mut adapter = crate::LiveProductionOutputRuntimeAdapter::new(
             output_count,
             |index, committed: &[CommittedSurfaceState]| -> Result<_, Box<dyn std::error::Error>> {
@@ -776,10 +708,7 @@ impl LiveProductionVisualRuntime {
                 Ok(Some(native_scanout.run_tick(
                     index,
                     &mut output.runtime,
-                    committed_snapshot_layers.as_ref().map_or_else(
-                        || compositor_tick_input(&transactions, 0, Vec::new(), None),
-                        |layers| compositor_tick_input_from_layers(layers.clone()),
-                    ),
+                    compositor_tick_input(&transactions, 0, Vec::new(), None),
                 )?))
             },
         );
@@ -874,45 +803,6 @@ fn compositor_tick_input(
         scanout_submit_state: None,
         scanout_lifecycle_states: Vec::new(),
     }
-}
-
-fn compositor_tick_input_from_layers(
-    layer_templates: Vec<LayerSnapshot>,
-) -> CompositorBackendTickInput {
-    CompositorBackendTickInput {
-        x_event_count: 0,
-        authority_commits: Vec::new(),
-        authority_batches: Vec::new(),
-        wm_update: None,
-        portal_commands: Vec::new(),
-        chrome_command_count: 0,
-        layer_templates,
-        scanout_submit_state: None,
-        scanout_lifecycle_states: Vec::new(),
-    }
-}
-
-fn layer_snapshots_from_committed(
-    committed_surfaces: &[CommittedSurfaceState],
-) -> Vec<LayerSnapshot> {
-    committed_surfaces
-        .iter()
-        .enumerate()
-        .map(|(stack_rank, surface)| LayerSnapshot {
-            surface: surface.surface,
-            authority_local_id: None,
-            namespace: None,
-            stack_rank: u32::try_from(stack_rank).unwrap_or(u32::MAX),
-            geometry: surface.geometry,
-            source: surface.buffer,
-            damage: surface.damage.clone(),
-            opacity: 1.0,
-            crop: None,
-            transform: Transform::IDENTITY,
-            generation: surface.committed_generation,
-            resize_sync: ResizeSyncCapability::ImplicitOnly,
-        })
-        .collect()
 }
 
 fn seed_committed_surfaces(transactions: &[SurfaceTransaction]) -> Vec<CommittedSurfaceState> {

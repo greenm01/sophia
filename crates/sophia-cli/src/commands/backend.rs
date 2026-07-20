@@ -108,13 +108,11 @@ pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error
             super::live_session::run_persistent_xterm_session(args)?;
         } else if args.iter().any(|arg| arg == "--proof") {
             run_sophia_live_session_bootstrap(args)?;
-        } else if arg_value(args, "--client-backend").as_deref() == Some("wayland") {
-            super::wayland::run_session(args)?;
         } else if arg_value(args, "--client-backend")
             .as_deref()
             .is_some_and(|backend| backend != "sophia-x")
         {
-            return Err("unsupported client backend; expected wayland or sophia-x".into());
+            return Err("unsupported client backend; expected sophia-x".into());
         } else {
             super::live_session::run_persistent_xterm_session(args)?;
         }

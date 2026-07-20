@@ -59,7 +59,7 @@ It must not own:
 - rendering, pixmap allocation, buffers, frame scheduling, or scanout;
 - physical input devices or real input routing;
 - Sophia X Authority client resources;
-- Wayland Authority resources;
+- resources owned by any future compatibility frontend;
 - real client metadata, titles, classes, icons, PIDs, paths, or namespace IDs;
 - portal policy or cross-namespace transfer decisions;
 - compositor chrome.

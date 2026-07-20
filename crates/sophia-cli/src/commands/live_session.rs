@@ -1,9 +1,9 @@
 use super::prelude::*;
 
 use sophia_backend_live::{
-    LiveProductionAuthorityBatch, LiveProductionComposedFrame, LiveProductionCpuScene,
-    LiveProductionDmaBufRegistration, LiveProductionFenceRegistration, LiveProductionNativeScanout,
-    LiveProductionPresentSubmission, LiveProductionVisualRuntime,
+    LiveProductionAuthorityBatch, LiveProductionCpuScene, LiveProductionDmaBufRegistration,
+    LiveProductionFenceRegistration, LiveProductionNativeScanout, LiveProductionPresentSubmission,
+    LiveProductionVisualRuntime,
 };
 use sophia_cli::emergency_input::{EmergencyChordAction, EmergencyChordState};
 use sophia_cli::input_proof::{PhysicalTextProof, PhysicalTextProofEvent};
@@ -4612,443 +4612,6 @@ fn production_authority_batch(
     }
 }
 
-pub(super) struct WaylandNativeSession {
-    scanout: LiveProductionNativeScanout,
-    runtime: Option<LiveProductionVisualRuntime>,
-    outputs: Vec<sophia_engine::HeadlessOutput>,
-    pending_cpu_presentations: BTreeMap<SurfaceId, u64>,
-    cursor_repaint_pending: bool,
-    awaiting_presentations: BTreeMap<SurfaceId, (u64, usize)>,
-    last_cpu_checksum: Option<u64>,
-}
-
-pub(super) struct WaylandCpuFrameSubmission {
-    pub(super) presentations: Vec<(SurfaceId, u64)>,
-    pub(super) immediate: bool,
-    /// `true` when this composition pass reached KMS submission.  The
-    /// corresponding client buffer remains held until the later page flip.
-    pub(super) frame_scheduled: bool,
-}
-
-impl WaylandNativeSession {
-    pub(super) fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let scanout = LiveProductionNativeScanout::new()?;
-        let outputs = scanout.outputs();
-        Ok(Self {
-            scanout,
-            runtime: None,
-            outputs,
-            pending_cpu_presentations: BTreeMap::new(),
-            cursor_repaint_pending: false,
-            awaiting_presentations: BTreeMap::new(),
-            last_cpu_checksum: None,
-        })
-    }
-
-    pub(super) fn primary_size(&self) -> Size {
-        self.outputs[0].size
-    }
-
-    pub(super) fn dmabuf_main_device(&self) -> Result<u64, Box<dyn std::error::Error>> {
-        Ok(self.scanout.card(0).try_clone_file()?.metadata()?.rdev())
-    }
-
-    pub(super) fn enqueue_cpu_presentation(&mut self, surface: SurfaceId, generation: u64) {
-        self.pending_cpu_presentations.insert(surface, generation);
-    }
-
-    /// A compositor-owned cursor has changed. Unlike a client commit, this
-    /// repaint must not create presentation feedback for any client surface.
-    pub(super) fn request_cpu_cursor_repaint(&mut self) {
-        self.cursor_repaint_pending = true;
-    }
-
-    pub(super) fn should_compose_cpu_frame(&self) -> bool {
-        let (in_flight, cleanup_pending) =
-            self.runtime.as_ref().map_or((false, false), |runtime| {
-                (
-                    runtime.native_scanout_in_flight(),
-                    runtime.native_cleanup_pending(),
-                )
-            });
-        cpu_frame_submission_ready(
-            !self.pending_cpu_presentations.is_empty() || self.cursor_repaint_pending,
-            in_flight,
-            cleanup_pending,
-            self.scanout
-                .heads
-                .iter()
-                .enumerate()
-                .any(|(index, _)| self.scanout.pending_frame(index)),
-        )
-    }
-
-    pub(super) fn submit_cpu_frame(
-        &mut self,
-        committed_surfaces: &[CommittedSurfaceState],
-        report: &sophia_backend_live::LiveCpuCompositionReport,
-    ) -> Result<WaylandCpuFrameSubmission, Box<dyn std::error::Error>> {
-        let presentations = self
-            .pending_cpu_presentations
-            .iter()
-            .map(|(surface, generation)| (*surface, *generation))
-            .collect::<Vec<_>>();
-        if presentations.is_empty() && !self.cursor_repaint_pending {
-            return Err(
-                "native CPU composition had no queued presentation or cursor repaint".into(),
-            );
-        }
-        if cpu_frame_matches_visible_output(
-            self.outputs.len(),
-            self.runtime.is_some(),
-            self.last_cpu_checksum,
-            report.checksum,
-        ) {
-            self.pending_cpu_presentations.clear();
-            self.cursor_repaint_pending = false;
-            return Ok(WaylandCpuFrameSubmission {
-                presentations,
-                immediate: true,
-                frame_scheduled: false,
-            });
-        }
-        let frames = self
-            .outputs
-            .iter()
-            .map(|output| native_frame_for_output(report, output.size))
-            .collect::<Vec<_>>();
-        if self.runtime.is_none() {
-            self.runtime = Some(LiveProductionVisualRuntime::new_from_committed_surfaces(
-                &self.outputs,
-                committed_surfaces,
-                Some(&mut self.scanout),
-                Some(frames),
-            )?);
-            self.pending_cpu_presentations.clear();
-            self.cursor_repaint_pending = false;
-            self.last_cpu_checksum = Some(report.checksum);
-            return Ok(WaylandCpuFrameSubmission {
-                presentations,
-                immediate: true,
-                frame_scheduled: false,
-            });
-        }
-        let runtime = self.runtime.as_mut().expect("checked above");
-        let submissions_before = self.scanout.heads[0].submissions;
-        let _ = runtime.run_wayland_maintenance_snapshot(
-            committed_surfaces,
-            Some(&mut self.scanout),
-            Some(frames),
-        )?;
-        let frame_scheduled = self.scanout.heads[0].submissions > submissions_before;
-        let required_submission = self.required_presentation_submission(submissions_before)?;
-        self.pending_cpu_presentations.clear();
-        self.cursor_repaint_pending = false;
-        for (surface, generation) in &presentations {
-            retain_latest_wayland_presentation(
-                &mut self.awaiting_presentations,
-                *surface,
-                *generation,
-                required_submission,
-            );
-        }
-        self.last_cpu_checksum = Some(report.checksum);
-        Ok(WaylandCpuFrameSubmission {
-            presentations,
-            immediate: false,
-            frame_scheduled,
-        })
-    }
-
-    pub(super) fn present_dmabuf(
-        &mut self,
-        committed_surfaces: &[CommittedSurfaceState],
-        transaction: &SurfaceTransaction,
-        generation: u64,
-        frame: &sophia_backend_live::LiveOwnedDmaBufFrame,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
-        // Direct client scanout replaces the visible CPU-composed output, so a
-        // later SHM frame cannot be elided against an older CPU checksum.
-        self.last_cpu_checksum = None;
-        // CPU cursor composition cannot safely overlay a directly scanned-out
-        // DMA-BUF. The next CPU-backed commit will re-enable cursor repaints.
-        self.cursor_repaint_pending = false;
-        if self.runtime.is_none() {
-            let blank = sophia_backend_live::compose_live_cpu_frame(self.primary_size(), &[])
-                .map_err(|error| format!("native DMA-BUF bootstrap failed: {error:?}"))?;
-            let frames = self
-                .outputs
-                .iter()
-                .map(|output| native_frame_for_output(&blank, output.size))
-                .collect::<Vec<_>>();
-            self.runtime = Some(LiveProductionVisualRuntime::new_from_committed_surfaces(
-                &self.outputs,
-                committed_surfaces,
-                Some(&mut self.scanout),
-                Some(frames),
-            )?);
-        }
-        for head in &mut self.scanout.heads {
-            head.exporter.set_pending_dmabuf_frame(frame.try_clone()?);
-        }
-        trace_native_dmabuf_lifecycle("client_frame_retained");
-        let runtime = self.runtime.as_mut().expect("initialized above");
-        let submissions_before = self.scanout.heads[0].submissions;
-        let _ = runtime.run_wayland_maintenance_snapshot(
-            committed_surfaces,
-            Some(&mut self.scanout),
-            None,
-        )?;
-        let head = &self.scanout.heads[0];
-        if head.submissions > submissions_before {
-            trace_native_dmabuf_lifecycle("kms_submitted");
-        } else if head.exporter.pending_dmabuf_frame() {
-            trace_native_dmabuf_lifecycle("kms_submission_deferred");
-        } else {
-            trace_native_dmabuf_lifecycle("kms_submission_failed");
-        }
-        self.queue_presentation(transaction.surface, generation, submissions_before)?;
-        Ok(false)
-    }
-
-    pub(super) fn service(&mut self) -> Result<Vec<(SurfaceId, u64)>, Box<dyn std::error::Error>> {
-        let Some(runtime) = self.runtime.as_mut() else {
-            return Ok(Vec::new());
-        };
-        if runtime.native_scanout_in_flight() || runtime.native_cleanup_pending() {
-            let callbacks_before = self.scanout.callback_accepted;
-            let retirements_before = self.scanout.retirements;
-            runtime.retire_native_scanout(&mut self.scanout)?;
-            if self.scanout.callback_accepted > callbacks_before {
-                trace_native_dmabuf_lifecycle("page_flip_observed");
-            }
-            if self.scanout.retirements > retirements_before {
-                trace_native_dmabuf_lifecycle("scanout_retired");
-            }
-        }
-        if !runtime.native_scanout_in_flight()
-            && self
-                .scanout
-                .heads
-                .iter()
-                .enumerate()
-                .any(|(index, _)| self.scanout.pending_frame(index))
-        {
-            let _ = runtime.run_native_idle(&mut self.scanout)?;
-        }
-        let presented_submissions = self
-            .scanout
-            .heads
-            .first()
-            .map_or(0, |head| head.presented_submissions);
-        let ready = self
-            .awaiting_presentations
-            .iter()
-            .filter(|(_, (_, required_submission))| *required_submission <= presented_submissions)
-            .map(|(surface, (generation, _))| (*surface, *generation))
-            .collect::<Vec<_>>();
-        self.awaiting_presentations
-            .retain(|_, (_, required_submission)| *required_submission > presented_submissions);
-        Ok(ready)
-    }
-
-    fn queue_presentation(
-        &mut self,
-        surface: SurfaceId,
-        generation: u64,
-        submissions_before: usize,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let required_submission = self.required_presentation_submission(submissions_before)?;
-        retain_latest_wayland_presentation(
-            &mut self.awaiting_presentations,
-            surface,
-            generation,
-            required_submission,
-        );
-        Ok(())
-    }
-
-    fn required_presentation_submission(
-        &self,
-        submissions_before: usize,
-    ) -> Result<usize, Box<dyn std::error::Error>> {
-        let head = &self.scanout.heads[0];
-        let required_submission = required_wayland_presentation_submission(
-            submissions_before,
-            head.submissions,
-            head.exporter.pending_cpu_frame() || head.exporter.pending_dmabuf_frame(),
-        )?;
-        Ok(required_submission)
-    }
-
-    pub(super) fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if let Some(runtime) = self.runtime.as_mut() {
-            runtime.drain_native_scanout(&mut self.scanout, Duration::from_secs(2))?;
-        }
-        Ok(())
-    }
-
-    pub(super) fn completion_evidence(&self) -> String {
-        let dmabuf_import_attempts = self
-            .scanout
-            .heads
-            .iter()
-            .map(|head| head.exporter.dmabuf_frame_export_attempts())
-            .sum::<usize>();
-        let dmabuf_imports = self
-            .scanout
-            .heads
-            .iter()
-            .map(|head| head.exporter.dmabuf_frame_exports())
-            .sum::<usize>();
-        let (
-            native_target_creations,
-            native_target_recreations,
-            native_pipeline_creations,
-            native_uploads,
-            native_max_upload,
-        ) = self.scanout.persistent_render_metrics();
-        let in_flight = self
-            .runtime
-            .as_ref()
-            .is_some_and(LiveProductionVisualRuntime::native_scanout_in_flight);
-        let cleanup_pending = self
-            .runtime
-            .as_ref()
-            .is_some_and(LiveProductionVisualRuntime::native_cleanup_pending);
-        format!(
-            "sophia_wayland_native schema=1 status=complete outputs={} submissions={} retirements={} callbacks={} submit_failures={} retire_failures={} callback_rejected={} dmabuf_import_attempts={} dmabuf_imports={} max_submit_to_page_flip_msec={} native_max_upload_msec={} native_target_creations={} native_target_recreations={} native_pipeline_creations={} native_frame_uploads={} in_flight={} cleanup_pending={}",
-            self.scanout.heads.len(),
-            self.scanout.submissions,
-            self.scanout.retirements,
-            self.scanout.callback_accepted,
-            self.scanout.submit_failures,
-            self.scanout.retire_failures,
-            self.scanout.callback_rejected,
-            dmabuf_import_attempts,
-            dmabuf_imports,
-            self.scanout.max_submit_to_page_flip.as_millis(),
-            native_max_upload.as_millis(),
-            native_target_creations,
-            native_target_recreations,
-            native_pipeline_creations,
-            native_uploads,
-            in_flight,
-            cleanup_pending,
-        )
-    }
-
-    pub(super) fn cancel_surface(&mut self, surface: SurfaceId) {
-        self.pending_cpu_presentations.remove(&surface);
-        self.awaiting_presentations.remove(&surface);
-    }
-}
-
-fn retain_latest_wayland_presentation(
-    pending: &mut BTreeMap<SurfaceId, (u64, usize)>,
-    surface: SurfaceId,
-    generation: u64,
-    required_submission: usize,
-) {
-    pending.insert(surface, (generation, required_submission));
-}
-
-fn cpu_frame_submission_ready(
-    has_pending_cpu_presentation: bool,
-    native_scanout_in_flight: bool,
-    native_cleanup_pending: bool,
-    native_frame_pending: bool,
-) -> bool {
-    has_pending_cpu_presentation
-        && !native_scanout_in_flight
-        && !native_cleanup_pending
-        && !native_frame_pending
-}
-
-fn cpu_frame_matches_visible_output(
-    output_count: usize,
-    runtime_exists: bool,
-    last_cpu_checksum: Option<u64>,
-    candidate_checksum: u64,
-) -> bool {
-    output_count == 1 && runtime_exists && last_cpu_checksum == Some(candidate_checksum)
-}
-
-fn required_wayland_presentation_submission(
-    submissions_before: usize,
-    submissions_after: usize,
-    frame_pending: bool,
-) -> Result<usize, &'static str> {
-    if submissions_after > submissions_before {
-        Ok(submissions_after)
-    } else if frame_pending {
-        Ok(submissions_after.saturating_add(1))
-    } else {
-        Err("native frame was neither submitted nor retained for a later submit")
-    }
-}
-
-fn trace_native_dmabuf_lifecycle(stage: &str) {
-    if std::env::var_os("SOPHIA_WAYLAND_DMABUF_DIAGNOSTIC").is_some() {
-        eprintln!(
-            "sophia_dmabuf_lifecycle schema=1 pid={} stage={stage}",
-            std::process::id()
-        );
-    }
-}
-
-fn native_frame_for_output(
-    report: &sophia_backend_live::LiveCpuCompositionReport,
-    output_size: Size,
-) -> LiveProductionComposedFrame {
-    if report.frame.size == output_size {
-        return LiveProductionComposedFrame {
-            frame: report.frame.clone(),
-            checksum: report.checksum,
-            nonzero_pixel_bytes: report.nonzero_pixel_bytes,
-        };
-    }
-    let width = usize::try_from(output_size.width).unwrap_or(0);
-    let height = usize::try_from(output_size.height).unwrap_or(0);
-    let stride = width.saturating_mul(4);
-    let mut bytes = vec![0; stride.saturating_mul(height)];
-    let source_width = usize::try_from(report.frame.size.width).unwrap_or(0);
-    let source_height = usize::try_from(report.frame.size.height).unwrap_or(0);
-    let source_stride = usize::try_from(report.frame.stride).unwrap_or(0);
-    let copy_width = width.min(source_width);
-    let copy_height = height.min(source_height);
-    for row in 0..copy_height {
-        let source = row.saturating_mul(source_stride);
-        let target = row.saturating_mul(stride);
-        let count = copy_width.saturating_mul(4);
-        if let (Some(source), Some(target)) = (
-            report.frame.bytes.get(source..source.saturating_add(count)),
-            bytes.get_mut(target..target.saturating_add(count)),
-        ) {
-            target.copy_from_slice(source);
-        }
-    }
-    let (nonzero_pixel_bytes, checksum) = bytes.iter().fold(
-        (0usize, 0xcbf2_9ce4_8422_2325u64),
-        |(nonzero, hash), byte| {
-            (
-                nonzero.saturating_add(usize::from(*byte != 0)),
-                (hash ^ u64::from(*byte)).wrapping_mul(0x100_0000_01b3),
-            )
-        },
-    );
-    LiveProductionComposedFrame {
-        frame: sophia_backend_live::LiveCpuComposedFrame {
-            size: output_size,
-            stride: u32::try_from(stride).unwrap_or(u32::MAX),
-            format: sophia_backend_live::LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
-            bytes,
-        },
-        checksum,
-        nonzero_pixel_bytes,
-    }
-}
-
 #[cfg(test)]
 fn layer_snapshots_from_committed(
     committed_surfaces: &[CommittedSurfaceState],
@@ -5578,14 +5141,12 @@ mod tests {
         LiveProductionVisualRuntime, LiveXAuthorityFile, PRIMARY_INPUT_PROOF_SCRIPT,
         PersistentXtermSessionConfig, Rect, Region, SECONDARY_POINTER_WITNESS_SCRIPT,
         SessionPointerPlacement, Size, authority_transaction_count,
-        center_geometry_without_scaling, cpu_frame_matches_visible_output,
-        cpu_frame_submission_ready, global_runtime_deadline_ends_session,
+        center_geometry_without_scaling, global_runtime_deadline_ends_session,
         layer_snapshots_from_committed, physical_input_may_route_after_primary_exit,
         physical_input_pixels_already_changed, place_pointer_event_for_routing,
-        pointer_offset_for_geometry, record_runtime_commits,
-        required_wayland_presentation_submission, retain_latest_wayland_presentation,
-        seed_missing_committed_surfaces, session_protocol_errors_are_fatal,
-        successful_primary_exit_ends_session, take_settled_input_delivery_wait,
+        pointer_offset_for_geometry, record_runtime_commits, seed_missing_committed_surfaces,
+        session_protocol_errors_are_fatal, successful_primary_exit_ends_session,
+        take_settled_input_delivery_wait,
     };
     use sophia_protocol::{
         AuthorityKind, DeviceId, InputEventKind, InputEventPacket, NamespaceCapabilities,
@@ -5593,7 +5154,6 @@ mod tests {
         SurfaceTransactionReadiness, WmSessionAction,
     };
     use sophia_x_authority::X_AUTHORITY_CPU_BUFFER_FORMAT_XRGB8888;
-    use std::collections::BTreeMap;
     use std::io::Write;
     use std::time::Instant;
 
@@ -5975,46 +5535,6 @@ mod tests {
     }
 
     #[test]
-    fn wayland_presentation_tracks_immediate_or_deferred_native_submission() {
-        assert_eq!(required_wayland_presentation_submission(3, 4, false), Ok(4));
-        assert_eq!(required_wayland_presentation_submission(4, 4, true), Ok(5));
-        assert!(required_wayland_presentation_submission(4, 4, false).is_err());
-    }
-
-    #[test]
-    fn wayland_presentation_retains_only_the_latest_generation_per_surface() {
-        let first = sophia_protocol::SurfaceId::new(1, 1);
-        let second = sophia_protocol::SurfaceId::new(2, 1);
-        let mut pending = BTreeMap::new();
-
-        retain_latest_wayland_presentation(&mut pending, first, 3, 8);
-        retain_latest_wayland_presentation(&mut pending, second, 4, 8);
-        retain_latest_wayland_presentation(&mut pending, first, 5, 9);
-
-        assert_eq!(pending.len(), 2);
-        assert_eq!(pending.get(&first), Some(&(5, 9)));
-        assert_eq!(pending.get(&second), Some(&(4, 8)));
-    }
-
-    #[test]
-    fn wayland_cpu_composition_waits_for_a_free_scanout_slot() {
-        assert!(cpu_frame_submission_ready(true, false, false, false));
-        assert!(!cpu_frame_submission_ready(false, false, false, false));
-        assert!(!cpu_frame_submission_ready(true, true, false, false));
-        assert!(!cpu_frame_submission_ready(true, false, true, false));
-        assert!(!cpu_frame_submission_ready(true, false, false, true));
-    }
-
-    #[test]
-    fn unchanged_cpu_frame_can_complete_without_another_scanout_submission() {
-        assert!(cpu_frame_matches_visible_output(1, true, Some(7), 7));
-        assert!(!cpu_frame_matches_visible_output(2, true, Some(7), 7));
-        assert!(!cpu_frame_matches_visible_output(1, false, Some(7), 7));
-        assert!(!cpu_frame_matches_visible_output(1, true, Some(7), 8));
-        assert!(!cpu_frame_matches_visible_output(1, true, None, 7));
-    }
-
-    #[test]
     fn terminal_readiness_is_scoped_to_the_focused_surface() {
         let focused = SurfaceId::new(21, 1);
         let secondary = SurfaceId::new(22, 1);
@@ -6152,7 +5672,7 @@ mod tests {
     }
 
     #[test]
-    fn committed_wayland_snapshot_preserves_surface_generation_in_render_layers() {
+    fn committed_snapshot_preserves_surface_generation_in_render_layers() {
         let layers = layer_snapshots_from_committed(&[CommittedSurfaceState {
             surface: sophia_protocol::SurfaceId::new(9, 1),
             committed_generation: 4,
@@ -6225,56 +5745,6 @@ mod tests {
     }
 
     #[test]
-    fn committed_snapshot_runtime_does_not_replay_authority_transactions() {
-        let output = sophia_engine::HeadlessOutput {
-            id: sophia_protocol::OutputId::from_raw(17),
-            size: Size {
-                width: 640,
-                height: 480,
-            },
-            scale: 1,
-        };
-        let committed = vec![CommittedSurfaceState {
-            surface: sophia_protocol::SurfaceId::new(17, 1),
-            committed_generation: 5,
-            geometry: Rect {
-                x: 0,
-                y: 0,
-                width: 640,
-                height: 480,
-            },
-            buffer: BufferSource::CpuBuffer { handle: 17 },
-            damage: Region::single(Rect {
-                x: 0,
-                y: 0,
-                width: 640,
-                height: 480,
-            }),
-        }];
-        let mut runtime = LiveProductionVisualRuntime::new_from_committed_surfaces(
-            &[output],
-            &committed,
-            None,
-            None,
-        )
-        .unwrap();
-
-        let report = runtime
-            .run_wayland_maintenance_snapshot(&committed, None, None)
-            .unwrap();
-
-        assert_eq!(runtime.committed_surfaces(), committed);
-        assert_eq!(
-            report
-                .engine
-                .runtime
-                .runtime_state
-                .authority_transactions_committed,
-            0
-        );
-    }
-
-    #[test]
     fn authority_batch_commits_once_and_fans_out_one_snapshot() {
         let outputs = [17u64, 18]
             .into_iter()
@@ -6305,8 +5775,11 @@ mod tests {
                 height: 480,
             }),
         }];
-        let mut runtime = LiveProductionVisualRuntime::new_from_committed_surfaces(
-            &outputs, &committed, None, None,
+        let mut runtime = LiveProductionVisualRuntime::new_with_committed_surfaces(
+            &outputs,
+            committed.clone(),
+            None,
+            None,
         )
         .unwrap();
         let mut divergent_projection = committed.clone();

@@ -92,9 +92,8 @@ Capabilities bound which portal operations a namespace may request or publish.
 They do not provide ambient cross-namespace access and do not replace a portal
 decision for a particular transfer.
 
-Wayland object isolation remains connection-local, but Sophia still assigns a
-namespace context so portal and metadata policy use the same trust model across
-frontends.
+A future frontend must assign every admitted client a Sophia namespace context
+so portal and metadata policy retain the same trust model across protocols.
 
 ## Admission
 

@@ -32,7 +32,7 @@ The live renderer boundary does not own:
 - output discovery;
 - input polling;
 - protocol authority parsing;
-- X11, Wayland, or namespace policy;
+- client protocol or namespace policy;
 - client metadata.
 
 ## Current Admission Rule
@@ -74,8 +74,9 @@ Standard X11 DRI3 1.2 and Present are the admitted GPU handoff. Renderer-private
 registries retain imported multi-plane DMA-BUF sources and fences; mixed CPU and
 GPU composition, controlled acquire delay and rejection recovery, KMS page-flip
 retirement, Complete-before-Idle feedback, idle-fence triggering, and exact
-cleanup pass the retained Milestone 4 X13 gate. The Wayland maintenance lane
-retains its separate controlled linear DMA-BUF proofs.
+cleanup pass the retained Milestone 4 X13 gate. The retired Wayland prototype's
+controlled linear DMA-BUF proofs are historical evidence under
+`research/wayland`.
 
 The shared lifecycle is explicit:
 

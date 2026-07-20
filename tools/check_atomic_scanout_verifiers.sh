@@ -23,23 +23,6 @@ expect_fail() {
     fi
 }
 
-expect_wayland_hardware_pass() {
-    SOPHIA_WAYLAND_REQUIRE_DMABUF=1 \
-    SOPHIA_WAYLAND_REQUIRE_INPUT=1 \
-    SOPHIA_WAYLAND_REQUIRE_RECOVERY=1 \
-        "$ROOT_DIR/tools/verify_wayland_kitty_evidence.sh" "$FIXTURE_DIR/$1" >/dev/null
-}
-
-expect_wayland_hardware_fail() {
-    if SOPHIA_WAYLAND_REQUIRE_DMABUF=1 \
-        SOPHIA_WAYLAND_REQUIRE_INPUT=1 \
-        SOPHIA_WAYLAND_REQUIRE_RECOVERY=1 \
-        "$ROOT_DIR/tools/verify_wayland_kitty_evidence.sh" "$FIXTURE_DIR/$1" >/dev/null 2>&1; then
-        echo "Wayland hardware verifier unexpectedly accepted fixture: $1" >&2
-        exit 1
-    fi
-}
-
 expect_pass tools/verify_atomic_scanout_preflight.sh atomic_scanout_preflight_pass.log
 expect_fail tools/verify_atomic_scanout_preflight.sh atomic_scanout_preflight_unavailable.log
 expect_fail tools/verify_atomic_scanout_preflight.sh atomic_scanout_preflight_impossible_counts.log
@@ -130,13 +113,6 @@ expect_fail tools/verify_qemu_session_evidence.sh qemu_session_evidence_duplicat
 expect_fail tools/verify_qemu_session_evidence.sh qemu_session_evidence_vsync_overlap.log
 expect_pass tools/verify_qemu_emergency_recovery_evidence.sh qemu_emergency_recovery_pass.log
 expect_fail tools/verify_qemu_emergency_recovery_evidence.sh qemu_emergency_recovery_missing_guard_trigger.log
-
-expect_wayland_hardware_pass wayland_kitty_hardware_pass.log
-expect_wayland_hardware_fail wayland_kitty_hardware_missing_pointer.log
-expect_wayland_hardware_fail wayland_kitty_hardware_missing_recovery.log
-expect_wayland_hardware_fail wayland_kitty_hardware_unpresented_key.log
-expect_wayland_hardware_fail wayland_kitty_hardware_dirty_native.log
-expect_wayland_hardware_fail wayland_kitty_hardware_dmabuf_disabled.log
 
 expect_pass tools/verify_vrr_hardware_evidence.sh vrr_hardware_evidence_pass.log
 expect_fail tools/verify_vrr_hardware_evidence.sh vrr_hardware_evidence_missing_fallback.log
