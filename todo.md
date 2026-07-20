@@ -31,6 +31,40 @@ active roadmap. The retired Wayland and XLibre prototypes remain under
 - [ ] Select the next measurable milestone from observed native-X daily-driver
   gaps; do not broaden X11 support without retained client evidence.
 
+## Active Follow-up: Interactive QEMU Operator Session
+
+The unattended M8 QEMU gate remains complete and unaffected. A separate manual
+Void guest launcher now exists at `tools/start_sophia_xmonad_vm.sh`, but its
+host input path is not yet usable enough to call interactive support complete.
+
+Current state (2026-07-20):
+
+- The launcher resolves its repository path through the `~/start-sophia-vm`
+  symlink and boots the current kernel-matched initramfs.
+- VNC, native-Wayland GTK, Xwayland GTK, virtio mouse, and USB HID mouse paths
+  were tried. Guest logs prove initial key and button events are observed and
+  routed, but sustained keyboard/mouse control was not visible to the operator.
+- The current launcher uses Xwayland GTK, one `virtio-vga` output, a virtio
+  keyboard, and a USB HID mouse. The one-output change is not yet verified.
+- The reused `xmonad-m8-soak` scenario is acceptance-oriented: it injects WM
+  bridge restarts, carries Firefox proof requirements, and eventually exits.
+  It must not become the permanent interactive-session contract.
+
+- [ ] Reproduce the current one-output launcher once and retain the host QEMU
+  invocation plus `/tmp/sophia-interactive.log`.
+- [ ] Add bounded input diagnostics that distinguish device discovery, key
+  transitions, button transitions, and relative pointer-motion counts without
+  logging sensitive input content.
+- [ ] Identify whether the remaining failure is host grab delivery, guest
+  evdev/libinput device selection, Engine pointer motion, or display/focus
+  targeting; fix only the evidenced boundary.
+- [ ] Add a dedicated `xmonad-interactive` guest scenario with manual shutdown,
+  no acceptance proof watchdog, and no scheduled bridge-restart injection.
+- [ ] Gate the operator session with visible pointer movement, terminal launch,
+  typed text, focus change, application close, and clean manual shutdown.
+- [ ] Document the supported local display/input backend and update the home
+  launcher instructions after the gate passes.
+
 ## Deferred
 
 - XLibre provider integration remains deferred until measured native-X gaps
