@@ -372,6 +372,10 @@ pub enum XClientReply {
         mode: u32,
         outputs: Vec<u32>,
     },
+    RandrGetCrtcGammaSize {
+        sequence: u16,
+        size: u16,
+    },
     RandrGetOutputPrimary {
         sequence: u16,
         output: u32,
@@ -391,11 +395,28 @@ pub enum XClientReply {
         server_major: u16,
         server_minor: u16,
     },
+    GlxQueryVersion {
+        sequence: u16,
+        major_version: u32,
+        minor_version: u32,
+    },
+    GlxString {
+        sequence: u16,
+        value: String,
+    },
     XkbGetMap {
         sequence: u16,
         present: u16,
         keysyms: Vec<[u32; 2]>,
         modifier_map: Vec<(u8, u8)>,
+    },
+    XkbGetCompatMap {
+        sequence: u16,
+        device_id: u8,
+    },
+    XkbGetIndicatorMap {
+        sequence: u16,
+        device_id: u8,
     },
     XkbGetState {
         sequence: u16,
@@ -409,7 +430,15 @@ pub enum XClientReply {
         which: u32,
         min_keycode: u8,
         max_keycode: u8,
-        atoms: Vec<u32>,
+        component_atoms: Vec<u32>,
+        type_atoms: Vec<u32>,
+        key_names: Vec<[u8; 4]>,
+    },
+    XkbGetDeviceInfo {
+        sequence: u16,
+        device_id: u8,
+        supported: u16,
+        unsupported: u16,
     },
     XkbPerClientFlags {
         sequence: u16,
@@ -918,6 +947,12 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             put_u16(byte_order, &mut out[14..16], max_height);
             out
         }
+        XClientReply::RandrGetCrtcGammaSize { sequence, size } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            put_u16(byte_order, &mut out[8..10], size);
+            out
+        }
         XClientReply::RandrGetScreenResources {
             sequence,
             timestamp,
@@ -1168,6 +1203,35 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             put_u16(byte_order, &mut out[10..12], server_minor);
             out
         }
+        XClientReply::GlxQueryVersion {
+            sequence,
+            major_version,
+            minor_version,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            put_u32(byte_order, &mut out[8..12], major_version);
+            put_u32(byte_order, &mut out[12..16], minor_version);
+            out
+        }
+        XClientReply::GlxString { sequence, value } => {
+            let bytes = value.as_bytes();
+            let padded = padded_len(bytes.len());
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN + padded];
+            write_reply_header(
+                byte_order,
+                &mut out,
+                sequence,
+                u32::try_from(padded / 4).unwrap_or(u32::MAX),
+            );
+            put_u32(
+                byte_order,
+                &mut out[12..16],
+                u32::try_from(bytes.len()).unwrap_or(u32::MAX),
+            );
+            out[32..32 + bytes.len()].copy_from_slice(bytes);
+            out
+        }
         XClientReply::XkbGetMap {
             sequence,
             present,
@@ -1176,7 +1240,7 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
         } => {
             let include_types = present & 1 != 0;
             let include_syms = present & 2 != 0;
-            let include_modmap = present & 0x40 != 0;
+            let include_modmap = present & 0x04 != 0;
             let mut body = Vec::new();
             if include_types {
                 for _ in 0..4 {
@@ -1190,11 +1254,19 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             }
             if include_syms {
                 for syms in &keysyms {
+                    // One group with two levels. XKB encodes the group count
+                    // directly in the low nibble of groupInfo.
                     body.extend_from_slice(&[0, 0, 0, 0, 1, 2]);
                     push_u16(byte_order, &mut body, 2);
                     push_u32(byte_order, &mut body, syms[0]);
                     push_u32(byte_order, &mut body, syms[1]);
                 }
+            }
+            if present & 0x10 != 0 {
+                // One zero action-count byte for every key in the advertised
+                // keycode range. No action records follow those counts.
+                body.resize(body.len().saturating_add(keysyms.len()), 0);
+                body.resize(padded_len(body.len()), 0);
             }
             if include_modmap {
                 for (keycode, modifiers) in &modifier_map {
@@ -1231,14 +1303,41 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             } else {
                 0
             };
-            out[31] = 8;
+            out[21] = if present & 0x10 != 0 { 8 } else { 0 };
+            out[24] = if present & 0x10 != 0 {
+                u8::try_from(keysyms.len()).unwrap_or(u8::MAX)
+            } else {
+                0
+            };
+            out[25] = if present & 0x20 != 0 { 8 } else { 0 };
+            out[28] = if present & 0x08 != 0 { 8 } else { 0 };
+            out[31] = if include_modmap { 8 } else { 0 };
             out[32] = if include_modmap { 248 } else { 0 };
             out[33] = if include_modmap {
                 u8::try_from(modifier_map.len()).unwrap_or(u8::MAX)
             } else {
                 0
             };
+            out[34] = if present & 0x80 != 0 { 8 } else { 0 };
             out.extend_from_slice(&body);
+            out
+        }
+        XClientReply::XkbGetCompatMap {
+            sequence,
+            device_id,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            out[1] = device_id;
+            out
+        }
+        XClientReply::XkbGetIndicatorMap {
+            sequence,
+            device_id,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            out[1] = device_id;
             out
         }
         XClientReply::XkbGetState {
@@ -1268,17 +1367,59 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
             which,
             min_keycode,
             max_keycode,
-            atoms,
+            component_atoms,
+            type_atoms,
+            key_names,
         } => {
+            let mut body = Vec::new();
+            for atom in component_atoms {
+                push_u32(byte_order, &mut body, atom);
+            }
+            if which & 0x40 != 0 {
+                for atom in &type_atoms {
+                    push_u32(byte_order, &mut body, *atom);
+                }
+            }
+            if which & 0x80 != 0 {
+                // Level names are optional. A zero count for every type asks
+                // libxkbcommon to install its normal unnamed-level fallback.
+                body.resize(body.len().saturating_add(type_atoms.len()), 0);
+                body.resize(padded_len(body.len()), 0);
+            }
+            if which & 0x200 != 0 {
+                for name in &key_names {
+                    body.extend_from_slice(name);
+                }
+            }
             let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
-            write_reply_header(byte_order, &mut out, sequence, atoms.len() as u32);
+            write_reply_header(
+                byte_order,
+                &mut out,
+                sequence,
+                u32::try_from(body.len() / 4).unwrap_or(u32::MAX),
+            );
             out[1] = 3;
             put_u32(byte_order, &mut out[8..12], which);
             out[12] = min_keycode;
             out[13] = max_keycode;
-            for atom in atoms {
-                push_u32(byte_order, &mut out, atom);
-            }
+            out[14] = u8::try_from(type_atoms.len()).unwrap_or(u8::MAX);
+            out[18] = min_keycode;
+            out[19] = u8::try_from(key_names.len()).unwrap_or(u8::MAX);
+            out.extend_from_slice(&body);
+            out
+        }
+        XClientReply::XkbGetDeviceInfo {
+            sequence,
+            device_id,
+            supported,
+            unsupported,
+        } => {
+            let mut out = vec![0; 36];
+            write_reply_header(byte_order, &mut out[..32], sequence, 1);
+            out[1] = device_id;
+            put_u16(byte_order, &mut out[10..12], supported);
+            put_u16(byte_order, &mut out[12..14], unsupported);
+            out[21] = 1;
             out
         }
         XClientReply::XkbPerClientFlags {

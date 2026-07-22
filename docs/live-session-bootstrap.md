@@ -76,14 +76,20 @@ backend tick, and runtime commit counts, nonzero composed pixels, and
 Run the first real xmonad-backed operator session from a dedicated TTY with:
 
 ```sh
-tools/run_sophia_xmonad_session.sh
+~/scripts/start-sophia-tty3
 ```
 
-The wrapper resolves/builds xmonad, builds Sophia and the generic X11 WM
-bridge, verifies exclusive TTY/DRM/input conditions, temporarily stops keyd,
+The TTY3 launcher verifies the operator is on `/dev/tty3`, resolves or builds
+xmonad, temporarily stops a runit-managed LightDM/Xorg session, and restores it
+on exit. When several keyboard or pointer devices exist, it asks the operator
+which ones Sophia should own before stopping LightDM. It refuses to stop an
+unknown Xorg session and retains launcher output in
+`/tmp/sophia-tty3-launch.log`. The supervised wrapper builds optimized Sophia
+and generic X11 WM bridge binaries, verifies exclusive TTY/DRM/input
+conditions, temporarily stops keyd,
 and restores it on exit. Sophia supervises the bridge as a generic WM policy
-process. Xmonad sees only a synthetic private display; the real xterm remains
-connected to Sophia X Authority. Engine validates and applies xmonad placement,
+process. Xmonad sees only a synthetic private display; Kitty remains connected
+to Sophia X Authority. Engine validates and applies xmonad placement,
 stacking, and focus, while physical input and scanout remain Sophia-owned.
 
 The live compatibility gate allows xmonad to request a real client size. Sophia
@@ -93,9 +99,9 @@ Later drawing requests carry tightly packed damage patches instead of cloning a
 fullscreen CPU buffer for every glyph. The headless xmonad proof requires one
 configure acknowledgement before layout commits.
 
-The operator wrapper launches a clean interactive `/bin/sh` so this milestone
-tests deterministic fixed-font ASCII rather than user prompt/Xft compatibility.
-Exit the shell normally, or stop the session from another TTY with:
+The operator wrapper starts with an empty xmonad desktop and registers Kitty as
+the terminal action. `Super+Enter` launches Kitty and `Super+Shift+Q` logs out.
+Stop the session from another TTY, from the Sophia checkout, with:
 
 ```sh
 tools/stop_sophia_xmonad_session.sh

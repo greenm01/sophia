@@ -1,9 +1,11 @@
 use sophia_protocol::{
     LayoutNodeCapabilities, LayoutNodeKind, LayoutNodeSnapshot, LayoutNodeState, NamespaceId,
-    OutputId, Rect, Size, SurfaceConstraints, SurfaceId, TransactionId, WmCommand,
+    OutputId, Rect, Size, SurfaceConstraints, SurfaceId, TransactionId, WmCommand, WmModifierMask,
     WmRelayoutWorkspace, WmRequestKind, WmRequestPacket, WorkspaceId,
 };
-use sophia_x11_wm_bridge::{LegacyWmRequest, SyntheticXEvent, X11WmBridgeState};
+use sophia_x11_wm_bridge::{
+    LegacyWmProfile, LegacyWmRequest, SyntheticXEvent, X11WmBridgeState, XMONAD_ACTION_TERMINAL,
+};
 
 fn node(raw: u32) -> LayoutNodeSnapshot {
     LayoutNodeSnapshot {
@@ -27,6 +29,18 @@ fn node(raw: u32) -> LayoutNodeSnapshot {
         },
         generation: 1,
     }
+}
+
+#[test]
+fn xmonad_launches_the_terminal_with_super_enter() {
+    let hello = LegacyWmProfile::Xmonad.hello();
+    let binding = hello
+        .bindings
+        .iter()
+        .find(|binding| binding.action.raw() == XMONAD_ACTION_TERMINAL)
+        .expect("xmonad terminal binding");
+    assert_eq!(binding.keycode, 28);
+    assert_eq!(binding.modifiers.bits, WmModifierMask::SUPER);
 }
 
 #[test]

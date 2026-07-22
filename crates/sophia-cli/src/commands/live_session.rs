@@ -1017,8 +1017,14 @@ impl PersistentXtermSessionConfig {
             }
         }
         if normal_session {
-            if applications.startup.is_empty() {
-                return Err("--session-mode=normal requires at least one --session-start".into());
+            if applications.startup.is_empty()
+                && applications.terminal.is_none()
+                && applications.launcher.is_none()
+                && applications.firefox.is_none()
+            {
+                return Err(
+                    "--session-mode=normal requires a startup app or session action mapping".into(),
+                );
             }
             let proof_only = args.iter().any(|arg| {
                 arg == "--secondary-terminal"
@@ -5350,6 +5356,19 @@ mod tests {
                 .unwrap()
                 .arguments,
             ["-cm"]
+        );
+
+        let blank = PersistentXtermSessionConfig::from_args(&[
+            "--session-mode=normal".to_owned(),
+            "--session-app=terminal=/usr/bin/kitty".to_owned(),
+            "--session-action-app=terminal=terminal".to_owned(),
+        ])
+        .unwrap();
+        assert!(blank.applications.startup.is_empty());
+        assert!(
+            blank
+                .application_for_action(WmSessionAction::LaunchTerminal)
+                .is_some()
         );
 
         for args in [

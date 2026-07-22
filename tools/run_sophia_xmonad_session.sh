@@ -74,8 +74,8 @@ if [[ -z "$xmonad_bin" ]]; then
 fi
 
 cd "$ROOT_DIR"
-cargo build --offline -p sophia-cli --features atomic-scanout-live
-cargo build --offline -p sophia-x11-wm-bridge
+cargo build --offline --release -p sophia-cli --features atomic-scanout-live
+cargo build --offline --release -p sophia-x11-wm-bridge
 tools/atomic_scanout_preflight.sh
 
 keyd_was_running=false
@@ -126,18 +126,26 @@ if pgrep -x keyd >/dev/null 2>&1; then
 fi
 
 echo "Starting Sophia with xmonad layout policy on $DISPLAY_NAME."
-echo "Exit xterm, or run tools/stop_sophia_xmonad_session.sh from another TTY."
+echo "Use Super+Enter for Kitty or Super+Shift+Q to log out."
+echo "Recovery remains available through tools/stop_sophia_xmonad_session.sh from another TTY."
+terminal_bin="${SOPHIA_TERMINAL_BIN:-$(command -v kitty || true)}"
+if [[ -z "$terminal_bin" || ! -x "$terminal_bin" ]]; then
+    echo "The graphical session requires Kitty; set SOPHIA_TERMINAL_BIN if it is installed elsewhere." >&2
+    exit 1
+fi
+input_devices="${SOPHIA_OPERATOR_INPUT_DEVICES:-$keyboard}"
 setsid env SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 \
-    target/debug/sophia sophia-live-session \
+    target/release/sophia sophia-live-session \
+    --session-mode=normal \
+    "--session-app=terminal=$terminal_bin" \
+    --session-action-app=terminal=terminal \
     --display="$DISPLAY_NAME" \
     --native-scanout \
-    --input-devices="$keyboard" \
-    --wm-process="$ROOT_DIR/target/debug/sophia-x11-wm-bridge" \
+    --input-devices="$input_devices" \
+    --wm-process="$ROOT_DIR/target/release/sophia-x11-wm-bridge" \
     --wm-process-arg="--wm=$xmonad_bin" \
     --wm-process-arg=--profile=xmonad \
     --wm-process-arg=--wm-private-alias=xmonad/xmonad-x86_64-linux \
-    --terminal-exec=/bin/sh \
-    --terminal-exec-arg=-i \
     "$@" &
 session_pid=$!
 set +e

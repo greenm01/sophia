@@ -23,9 +23,9 @@ resolve_program() {
 }
 
 sophia_bin="$(resolve_program "${SOPHIA_BIN:-$ROOT_DIR/target/debug/sophia}" sophia)"
-terminal_bin="$(resolve_program "${SOPHIA_TERMINAL_BIN:-}" xterm)"
+terminal_bin="$(resolve_program "${SOPHIA_TERMINAL_BIN:-}" kitty)"
 if [[ -z "$sophia_bin" || -z "$terminal_bin" ]]; then
-    echo "Sophia and xterm must be built or installed before starting a normal session." >&2
+    echo "Sophia and kitty must be built or installed before starting a normal session." >&2
     exit 1
 fi
 
@@ -59,10 +59,6 @@ session_args=(
     sophia-live-session
     --session-mode=normal
     "--session-app=terminal=$terminal_bin"
-    --session-app-arg=terminal=-cm
-    --session-app-arg=terminal=-dc
-    --session-app-arg=terminal=-title
-    "--session-app-arg=terminal=Sophia Terminal"
     --session-start=terminal
     --session-action-app=terminal=terminal
 )

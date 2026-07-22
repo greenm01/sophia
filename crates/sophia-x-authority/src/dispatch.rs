@@ -39,6 +39,31 @@ impl XDispatchResult {
     }
 }
 
+fn xkb_empty_device_reply(
+    context: XDispatchContext,
+    device_spec: u16,
+    minor_opcode: u8,
+    reply: impl FnOnce(u16, u8) -> XClientReply,
+) -> XDispatchResult {
+    const XKB_USE_CORE_KBD: u16 = 0x0100;
+    let output = if matches!(device_spec, XKB_USE_CORE_KBD | 3) {
+        XClientOutput::Reply(reply(context.sequence, 3))
+    } else {
+        XClientOutput::Error(crate::XClientError {
+            code: XErrorCode::BadValue,
+            sequence: context.sequence,
+            resource_id: u32::from(device_spec),
+            minor_code: minor_opcode.into(),
+            major_code: context.major_opcode,
+        })
+    };
+    XDispatchResult {
+        response: None,
+        outputs: vec![output],
+        metadata_candidates: Vec::new(),
+    }
+}
+
 pub fn dispatch_x11_wire_request(
     context: XDispatchContext,
     request: XWireRequest,
@@ -2242,6 +2267,28 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
+        XWireRequest::RandrGetCrtcGammaSize { crtc } => {
+            let resources = randr_resources(runtime.output_topology());
+            let client_output = if resources.crtcs.contains(&crtc) {
+                XClientOutput::Reply(XClientReply::RandrGetCrtcGammaSize {
+                    sequence: context.sequence,
+                    size: 0,
+                })
+            } else {
+                XClientOutput::Error(crate::XClientError {
+                    code: XErrorCode::BadValue,
+                    sequence: context.sequence,
+                    resource_id: crtc,
+                    minor_code: crate::X_RANDR_GET_CRTC_GAMMA_SIZE_MINOR_OPCODE.into(),
+                    major_code: context.major_opcode,
+                })
+            };
+            XDispatchResult {
+                response: None,
+                outputs: vec![client_output],
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::RandrGetOutputPrimary { window } => {
             let resources = randr_resources(runtime.output_topology());
             let primary = runtime
@@ -2344,8 +2391,48 @@ pub fn dispatch_x11_wire_request(
             })],
             metadata_candidates: Vec::new(),
         },
+        XWireRequest::GlxQueryVersion { .. } => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::GlxQueryVersion {
+                sequence: context.sequence,
+                major_version: 1,
+                minor_version: 4,
+            })],
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::GlxQueryExtensionsString => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::GlxString {
+                sequence: context.sequence,
+                value:
+                    "GLX_ARB_create_context GLX_ARB_create_context_profile GLX_EXT_framebuffer_sRGB"
+                        .to_owned(),
+            })],
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::GlxQueryServerString { name } => {
+            let value = match name {
+                1 => "Sophia",
+                2 => "1.4",
+                3 => {
+                    "GLX_ARB_create_context GLX_ARB_create_context_profile GLX_EXT_framebuffer_sRGB"
+                }
+                _ => "",
+            };
+            XDispatchResult {
+                response: None,
+                outputs: vec![XClientOutput::Reply(XClientReply::GlxString {
+                    sequence: context.sequence,
+                    value: value.to_owned(),
+                })],
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::XkbGetMap { full, partial } => {
-            let present = (full | partial) & 0x0043;
+            // Preserve every component requested by the client. Components
+            // outside Sophia's reduced types/symbols/modifier map are valid
+            // empty sections, represented by their zero counts in the reply.
+            let present = full | partial;
             let keysyms = runtime.xkb_keymap().xkb_keysyms();
             let modifier_map = runtime.xkb_keymap().modifier_map();
             XDispatchResult {
@@ -2359,6 +2446,24 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
+        XWireRequest::XkbGetCompatMap { device_spec } => xkb_empty_device_reply(
+            context,
+            device_spec,
+            crate::X_KEYBOARD_GET_COMPAT_MAP_MINOR_OPCODE,
+            |sequence, device_id| XClientReply::XkbGetCompatMap {
+                sequence,
+                device_id,
+            },
+        ),
+        XWireRequest::XkbGetIndicatorMap { device_spec } => xkb_empty_device_reply(
+            context,
+            device_spec,
+            crate::X_KEYBOARD_GET_INDICATOR_MAP_MINOR_OPCODE,
+            |sequence, device_id| XClientReply::XkbGetIndicatorMap {
+                sequence,
+                device_id,
+            },
+        ),
         XWireRequest::XkbGetState => XDispatchResult {
             response: None,
             outputs: vec![XClientOutput::Reply(XClientReply::XkbGetState {
@@ -2389,11 +2494,24 @@ pub fn dispatch_x11_wire_request(
                 (16, "complete".to_owned()),
                 (32, "complete".to_owned()),
             ];
-            let present = which & 0x3f;
-            let atoms = components
+            let present = which & 0x3fff;
+            let component_atoms = components
                 .iter()
                 .filter(|(mask, _)| present & mask != 0)
                 .filter_map(|(_, name)| atoms.intern(name, false).ok().flatten())
+                .collect();
+            let type_atoms = ["ONE_LEVEL", "TWO_LEVEL", "ALPHABETIC", "KEYPAD"]
+                .iter()
+                .filter_map(|name| atoms.intern(name, false).ok().flatten())
+                .collect();
+            let key_names = (runtime.xkb_keymap().min_keycode()
+                ..=runtime.xkb_keymap().max_keycode())
+                .map(|keycode| {
+                    let name = format!("I{keycode:03}");
+                    let mut bytes = [0; 4];
+                    bytes.copy_from_slice(name.as_bytes());
+                    bytes
+                })
                 .collect();
             XDispatchResult {
                 response: None,
@@ -2402,8 +2520,37 @@ pub fn dispatch_x11_wire_request(
                     which: present,
                     min_keycode: runtime.xkb_keymap().min_keycode(),
                     max_keycode: runtime.xkb_keymap().max_keycode(),
-                    atoms,
+                    component_atoms,
+                    type_atoms,
+                    key_names,
                 })],
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::XkbGetDeviceInfo {
+            device_spec,
+            wanted,
+        } => {
+            const XKB_USE_CORE_KBD: u16 = 0x0100;
+            let outputs = if matches!(device_spec, XKB_USE_CORE_KBD | 3) {
+                vec![XClientOutput::Reply(XClientReply::XkbGetDeviceInfo {
+                    sequence: context.sequence,
+                    device_id: 3,
+                    supported: 0,
+                    unsupported: wanted,
+                })]
+            } else {
+                vec![XClientOutput::Error(crate::XClientError {
+                    code: XErrorCode::BadValue,
+                    sequence: context.sequence,
+                    resource_id: u32::from(device_spec),
+                    minor_code: crate::X_KEYBOARD_GET_DEVICE_INFO_MINOR_OPCODE.into(),
+                    major_code: context.major_opcode,
+                })]
+            };
+            XDispatchResult {
+                response: None,
+                outputs,
                 metadata_candidates: Vec::new(),
             }
         }
@@ -3272,6 +3419,12 @@ fn extension_query_result(name: &str) -> XExtensionQueryResult {
         crate::X_XFIXES_EXTENSION_NAME => XExtensionQueryResult {
             present: true,
             major_opcode: crate::X_XFIXES_MAJOR_OPCODE,
+            first_event: 0,
+            first_error: 0,
+        },
+        crate::X_GLX_EXTENSION_NAME => XExtensionQueryResult {
+            present: true,
+            major_opcode: crate::X_GLX_MAJOR_OPCODE,
             first_event: 0,
             first_error: 0,
         },

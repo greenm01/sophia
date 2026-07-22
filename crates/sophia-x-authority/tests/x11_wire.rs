@@ -3212,7 +3212,7 @@ fn xkb_get_map_encodes_schema_aligned_types_symbols_and_modifier_map() {
     assert_eq!(&reply[8..10], &[0, 0]);
     assert_eq!(reply[10], 8);
     assert_eq!(reply[11], u8::MAX);
-    assert_eq!(read_u16(XByteOrder::LittleEndian, &reply[12..14]), 0x43);
+    assert_eq!(read_u16(XByteOrder::LittleEndian, &reply[12..14]), 0x47);
     assert_eq!(&reply[14..18], &[0, 4, 4, 8]);
     assert_eq!(read_u16(XByteOrder::LittleEndian, &reply[18..20]), 496);
     assert_eq!(reply[20], 248);

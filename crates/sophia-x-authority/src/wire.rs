@@ -103,6 +103,7 @@ pub const X_RANDR_GET_SCREEN_RESOURCES_MINOR_OPCODE: u8 = 8;
 pub const X_RANDR_GET_OUTPUT_INFO_MINOR_OPCODE: u8 = 9;
 pub const X_RANDR_GET_OUTPUT_PROPERTY_MINOR_OPCODE: u8 = 15;
 pub const X_RANDR_GET_CRTC_INFO_MINOR_OPCODE: u8 = 20;
+pub const X_RANDR_GET_CRTC_GAMMA_SIZE_MINOR_OPCODE: u8 = 22;
 pub const X_RANDR_GET_SCREEN_RESOURCES_CURRENT_MINOR_OPCODE: u8 = 25;
 pub const X_RANDR_GET_OUTPUT_PRIMARY_MINOR_OPCODE: u8 = 31;
 pub const X_RANDR_GET_PROVIDERS_MINOR_OPCODE: u8 = 32;
@@ -115,8 +116,11 @@ pub const X_KEYBOARD_SELECT_EVENTS_MINOR_OPCODE: u8 = 1;
 pub const X_KEYBOARD_GET_STATE_MINOR_OPCODE: u8 = 4;
 pub const X_KEYBOARD_GET_CONTROLS_MINOR_OPCODE: u8 = 6;
 pub const X_KEYBOARD_GET_MAP_MINOR_OPCODE: u8 = 8;
+pub const X_KEYBOARD_GET_COMPAT_MAP_MINOR_OPCODE: u8 = 10;
+pub const X_KEYBOARD_GET_INDICATOR_MAP_MINOR_OPCODE: u8 = 13;
 pub const X_KEYBOARD_GET_NAMES_MINOR_OPCODE: u8 = 17;
 pub const X_KEYBOARD_PER_CLIENT_FLAGS_MINOR_OPCODE: u8 = 21;
+pub const X_KEYBOARD_GET_DEVICE_INFO_MINOR_OPCODE: u8 = 24;
 pub const X_BIG_REQUESTS_EXTENSION_NAME: &str = "BIG-REQUESTS";
 pub const X_BIG_REQUESTS_MAJOR_OPCODE: u8 = 134;
 pub const X_BIG_REQUESTS_ENABLE_MINOR_OPCODE: u8 = 0;
@@ -163,6 +167,11 @@ pub const X_XFIXES_SELECT_SELECTION_INPUT_MINOR_OPCODE: u8 = 2;
 pub const X_XFIXES_CREATE_REGION_MINOR_OPCODE: u8 = 5;
 pub const X_XFIXES_DESTROY_REGION_MINOR_OPCODE: u8 = 10;
 pub const X_XFIXES_SET_REGION_MINOR_OPCODE: u8 = 11;
+pub const X_GLX_EXTENSION_NAME: &str = "GLX";
+pub const X_GLX_MAJOR_OPCODE: u8 = 140;
+pub const X_GLX_QUERY_VERSION_MINOR_OPCODE: u8 = 7;
+pub const X_GLX_QUERY_EXTENSIONS_STRING_MINOR_OPCODE: u8 = 18;
+pub const X_GLX_QUERY_SERVER_STRING_MINOR_OPCODE: u8 = 19;
 
 const X_CREATE_WINDOW_REQ_LEN: usize = 32;
 const X_CHANGE_WINDOW_ATTRIBUTES_REQ_LEN: usize = 12;
@@ -248,6 +257,7 @@ const X_RANDR_GET_SCREEN_RESOURCES_REQ_LEN: usize = 8;
 const X_RANDR_GET_OUTPUT_INFO_REQ_LEN: usize = 12;
 const X_RANDR_GET_OUTPUT_PROPERTY_REQ_LEN: usize = 28;
 const X_RANDR_GET_CRTC_INFO_REQ_LEN: usize = 12;
+const X_RANDR_GET_CRTC_GAMMA_SIZE_REQ_LEN: usize = 8;
 const X_RANDR_GET_OUTPUT_PRIMARY_REQ_LEN: usize = 8;
 const X_RANDR_GET_MONITORS_REQ_LEN: usize = 12;
 const X_KEYBOARD_USE_EXTENSION_REQ_LEN: usize = 8;
@@ -750,6 +760,9 @@ pub enum XWireRequest {
         crtc: u32,
         config_timestamp: u32,
     },
+    RandrGetCrtcGammaSize {
+        crtc: u32,
+    },
     RandrGetOutputPrimary {
         window: XResourceId,
     },
@@ -764,14 +777,32 @@ pub enum XWireRequest {
         wanted_major: u16,
         wanted_minor: u16,
     },
+    GlxQueryVersion {
+        major_version: u32,
+        minor_version: u32,
+    },
+    GlxQueryExtensionsString,
+    GlxQueryServerString {
+        name: u32,
+    },
     XkbGetMap {
         full: u16,
         partial: u16,
+    },
+    XkbGetCompatMap {
+        device_spec: u16,
+    },
+    XkbGetIndicatorMap {
+        device_spec: u16,
     },
     XkbGetState,
     XkbGetControls,
     XkbGetNames {
         which: u32,
+    },
+    XkbGetDeviceInfo {
+        device_spec: u16,
+        wanted: u16,
     },
     XkbSelectEvents {
         affect_which: u16,
@@ -1031,6 +1062,26 @@ pub fn decode_x11_core_request(
         X_DRI3_MAJOR_OPCODE => decode_dri3(context, bytes),
         X_PRESENT_MAJOR_OPCODE => decode_present(context, bytes),
         X_XFIXES_MAJOR_OPCODE => decode_xfixes(context, bytes),
+        X_GLX_MAJOR_OPCODE => match bytes[1] {
+            X_GLX_QUERY_VERSION_MINOR_OPCODE => {
+                require_exact_len(X_GLX_MAJOR_OPCODE, 12, bytes.len())?;
+                Ok(XWireRequest::GlxQueryVersion {
+                    major_version: context.byte_order.u32(&bytes[4..8]),
+                    minor_version: context.byte_order.u32(&bytes[8..12]),
+                })
+            }
+            X_GLX_QUERY_EXTENSIONS_STRING_MINOR_OPCODE => {
+                require_exact_len(X_GLX_MAJOR_OPCODE, 8, bytes.len())?;
+                Ok(XWireRequest::GlxQueryExtensionsString)
+            }
+            X_GLX_QUERY_SERVER_STRING_MINOR_OPCODE => {
+                require_exact_len(X_GLX_MAJOR_OPCODE, 12, bytes.len())?;
+                Ok(XWireRequest::GlxQueryServerString {
+                    name: context.byte_order.u32(&bytes[8..12]),
+                })
+            }
+            other => Err(XWireParseError::UnknownOpcode(other)),
+        },
         other => Err(XWireParseError::UnknownOpcode(other)),
     }
 }
@@ -1492,6 +1543,18 @@ fn decode_x_keyboard(
                 partial: context.byte_order.u16(&bytes[8..10]),
             })
         }
+        X_KEYBOARD_GET_COMPAT_MAP_MINOR_OPCODE => {
+            require_exact_len(X_KEYBOARD_MAJOR_OPCODE, 12, bytes.len())?;
+            Ok(XWireRequest::XkbGetCompatMap {
+                device_spec: context.byte_order.u16(&bytes[4..6]),
+            })
+        }
+        X_KEYBOARD_GET_INDICATOR_MAP_MINOR_OPCODE => {
+            require_exact_len(X_KEYBOARD_MAJOR_OPCODE, 12, bytes.len())?;
+            Ok(XWireRequest::XkbGetIndicatorMap {
+                device_spec: context.byte_order.u16(&bytes[4..6]),
+            })
+        }
         X_KEYBOARD_GET_STATE_MINOR_OPCODE => {
             require_exact_len(X_KEYBOARD_MAJOR_OPCODE, 8, bytes.len())?;
             Ok(XWireRequest::XkbGetState)
@@ -1508,6 +1571,13 @@ fn decode_x_keyboard(
             require_exact_len(X_KEYBOARD_MAJOR_OPCODE, 12, bytes.len())?;
             Ok(XWireRequest::XkbGetNames {
                 which: context.byte_order.u32(&bytes[8..12]),
+            })
+        }
+        X_KEYBOARD_GET_DEVICE_INFO_MINOR_OPCODE => {
+            require_exact_len(X_KEYBOARD_MAJOR_OPCODE, 16, bytes.len())?;
+            Ok(XWireRequest::XkbGetDeviceInfo {
+                device_spec: context.byte_order.u16(&bytes[4..6]),
+                wanted: context.byte_order.u16(&bytes[6..8]),
             })
         }
         X_KEYBOARD_SELECT_EVENTS_MINOR_OPCODE => {
@@ -1635,6 +1705,16 @@ fn decode_randr(
             Ok(XWireRequest::RandrGetCrtcInfo {
                 crtc: context.byte_order.u32(&bytes[4..8]),
                 config_timestamp: context.byte_order.u32(&bytes[8..12]),
+            })
+        }
+        X_RANDR_GET_CRTC_GAMMA_SIZE_MINOR_OPCODE => {
+            require_exact_len(
+                X_RANDR_MAJOR_OPCODE,
+                X_RANDR_GET_CRTC_GAMMA_SIZE_REQ_LEN,
+                bytes.len(),
+            )?;
+            Ok(XWireRequest::RandrGetCrtcGammaSize {
+                crtc: context.byte_order.u32(&bytes[4..8]),
             })
         }
         X_RANDR_GET_OUTPUT_PRIMARY_MINOR_OPCODE => {

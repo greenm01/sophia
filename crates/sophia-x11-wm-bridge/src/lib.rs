@@ -66,7 +66,7 @@ fn xmonad_bindings() -> Vec<WmBindingRegistration> {
         binding(XMONAD_ACTION_FOCUS_NEXT, 36, super_only),
         binding(XMONAD_ACTION_FOCUS_PREVIOUS, 37, super_only),
         binding(XMONAD_ACTION_NEXT_LAYOUT, 57, super_only),
-        binding(XMONAD_ACTION_TERMINAL, 28, super_shift),
+        binding(XMONAD_ACTION_TERMINAL, 28, super_only),
         binding(XMONAD_ACTION_CLOSE, 46, super_shift),
         binding(XMONAD_ACTION_LAUNCHER, 25, super_only),
         binding(XMONAD_ACTION_FIREFOX, 33, super_only),
