@@ -2165,3 +2165,17 @@ primary-plane repaint, and transfer it across the extended-horizontal output
 layout. Motion is coalesced, presentation latency and hardware update failures
 are reduced into the session evidence, and CPU repaint remains available only
 for CPU-buffer regression clients.
+
+## 2026-07-23: Production Input Uses Libinput Seat Discovery
+
+The guarded launcher previously guessed one keyboard and the first distinct
+mouse from `/dev/input/by-id` and `/dev/input/by-path`. That could not correctly
+represent composite receivers, multiple keyboards, touchpads, or hotplug.
+
+Backend-live now supports libinput's udev context and assigns `seat0` by
+default. Device-added events classify keyboard, pointer, and touch
+capabilities, apply tap-to-click where supported, and update bounded policy
+evidence; device-removed events maintain active counts without exposing device
+names or paths. Both the independent recovery guard and the Sophia session use
+seat discovery. Explicit `--input-devices` remains mutually exclusive with
+`--input-seat` and is retained only for deterministic hardware/QEMU proofs.

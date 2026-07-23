@@ -10,7 +10,7 @@ use crate::prelude::*;
 
 use super::{
     NativeLibinputDeviceMap, NativeLibinputOpenError, NativeLibinputPolicyReport,
-    open_native_libinput_path_poller,
+    open_native_libinput_path_poller, open_native_libinput_udev_poller,
 };
 
 const INPUT_THREAD_POLL_MSEC: i64 = 1;
@@ -30,7 +30,7 @@ pub struct ThreadedNativeInputStats {
 pub struct ThreadedNativeLibinputEventPoller {
     receiver: Receiver<QueuedInputEvent>,
     health: Receiver<Result<(), String>>,
-    policy: NativeLibinputPolicyReport,
+    policy: Arc<std::sync::Mutex<NativeLibinputPolicyReport>>,
     stop: Arc<AtomicBool>,
     queue_depth: Arc<AtomicUsize>,
     max_queue_depth: Arc<AtomicUsize>,
@@ -49,8 +49,10 @@ impl ThreadedNativeLibinputEventPoller {
         }
     }
 
-    pub const fn policy_report(&self) -> NativeLibinputPolicyReport {
+    pub fn policy_report(&self) -> NativeLibinputPolicyReport {
         self.policy
+            .lock()
+            .map_or_else(|_| NativeLibinputPolicyReport::default(), |policy| *policy)
     }
 
     fn worker_error(&self) -> io::Result<()> {
@@ -110,7 +112,39 @@ pub fn open_threaded_native_libinput_path_poller(
     if paths.len() > 16 {
         return Err(NativeLibinputOpenError::TooManyDevices);
     }
-    let paths = paths.to_vec();
+    open_threaded_native_libinput_poller(
+        NativeLibinputSource::Paths(paths.to_vec()),
+        devices,
+        max_read_per_poll,
+        queue_capacity,
+    )
+}
+
+pub fn open_threaded_native_libinput_udev_poller(
+    seat_name: &str,
+    devices: NativeLibinputDeviceMap,
+    max_read_per_poll: usize,
+    queue_capacity: usize,
+) -> Result<ThreadedNativeLibinputEventPoller, NativeLibinputOpenError> {
+    open_threaded_native_libinput_poller(
+        NativeLibinputSource::Udev(seat_name.to_owned()),
+        devices,
+        max_read_per_poll,
+        queue_capacity,
+    )
+}
+
+enum NativeLibinputSource {
+    Paths(Vec<std::path::PathBuf>),
+    Udev(String),
+}
+
+fn open_threaded_native_libinput_poller(
+    source: NativeLibinputSource,
+    devices: NativeLibinputDeviceMap,
+    max_read_per_poll: usize,
+    queue_capacity: usize,
+) -> Result<ThreadedNativeLibinputEventPoller, NativeLibinputOpenError> {
     let max_read_per_poll = max_read_per_poll.clamp(1, 256);
     let queue_capacity = queue_capacity.clamp(1, 4_096);
     let (sender, receiver) = sync_channel(queue_capacity);
@@ -125,11 +159,19 @@ pub fn open_threaded_native_libinput_path_poller(
     let worker_max_depth = Arc::clone(&max_queue_depth);
     let worker_max_gap = Arc::clone(&max_dispatch_gap_msec);
     let worker = std::thread::spawn(move || {
-        let mut poller = match open_native_libinput_path_poller(&paths, devices, max_read_per_poll)
-        {
+        let opened = match source {
+            NativeLibinputSource::Paths(paths) => {
+                open_native_libinput_path_poller(&paths, devices, max_read_per_poll)
+            }
+            NativeLibinputSource::Udev(seat) => {
+                open_native_libinput_udev_poller(&seat, devices, max_read_per_poll)
+            }
+        };
+        let mut poller = match opened {
             Ok(poller) => {
                 let policy = poller.reader().policy_report();
-                let _ = startup_sender.send(Ok(policy));
+                let handle = poller.reader().policy_handle();
+                let _ = startup_sender.send(Ok((policy, handle)));
                 poller
             }
             Err(error) => {
@@ -148,7 +190,7 @@ pub fn open_threaded_native_libinput_path_poller(
         let _ = health_sender.try_send(result);
     });
     match startup_receiver.recv_timeout(Duration::from_secs(5)) {
-        Ok(Ok(policy)) => Ok(ThreadedNativeLibinputEventPoller {
+        Ok(Ok((_policy, policy))) => Ok(ThreadedNativeLibinputEventPoller {
             receiver,
             health,
             policy,

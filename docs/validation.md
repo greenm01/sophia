@@ -243,6 +243,13 @@ cursor across both outputs, click and drag to select terminal text, type into
 Kitty, and close Kitty normally. Ctrl-Alt-Backspace remains the independent
 emergency recovery chord.
 
+The launcher uses libinput's udev backend on `seat0`. It discovers every
+keyboard, pointer, and touchpad assigned to that seat and follows device
+add/remove events. `SOPHIA_OPERATOR_INPUT_SEAT` selects another seat.
+`SOPHIA_OPERATOR_INPUT_DEVICES` remains an explicit comma-separated path
+override for deterministic diagnostics; ordinary sessions do not enumerate
+`/dev/input/by-id` in shell.
+
 The xmonad path is retained as experimental:
 
 ```sh

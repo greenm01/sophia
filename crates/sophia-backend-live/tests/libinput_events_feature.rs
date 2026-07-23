@@ -54,6 +54,26 @@ fn native_libinput_path_poller_fails_closed_without_exposing_paths() {
 }
 
 #[test]
+fn native_udev_poller_rejects_invalid_seat_names_before_discovery() {
+    let devices = NativeLibinputDeviceMap::new(SeatId::from_raw(1))
+        .with_keyboard_device(DeviceId::from_raw(2))
+        .with_pointer_device(DeviceId::from_raw(3));
+    assert_eq!(
+        sophia_backend_live::open_native_libinput_udev_poller("", devices, 64).unwrap_err(),
+        NativeLibinputOpenError::SeatAssignmentFailed
+    );
+    assert_eq!(
+        sophia_backend_live::open_native_libinput_udev_poller(
+            "seat-name-that-is-deliberately-longer-than-sixty-four-ascii-characters",
+            devices,
+            64,
+        )
+        .unwrap_err(),
+        NativeLibinputOpenError::SeatAssignmentFailed
+    );
+}
+
+#[test]
 fn native_libinput_device_paths_resolve_stable_symlinks_before_libinput_admission() {
     let root = std::env::temp_dir().join(format!(
         "sophia-backend-live-libinput-symlink-{}",
@@ -276,6 +296,7 @@ fn native_libinput_event_reader_idles_without_exposing_native_identity() {
             devices_added: 3,
             tap_capable: 1,
             tap_enabled: 1,
+            ..NativeLibinputPolicyReport::default()
         },
     );
     let mut poller = NativeLibinputEventPoller::new(reader, 4);
@@ -301,6 +322,7 @@ fn native_libinput_event_reader_idles_without_exposing_native_identity() {
             devices_added: 3,
             tap_capable: 1,
             tap_enabled: 1,
+            ..NativeLibinputPolicyReport::default()
         }
     );
 }

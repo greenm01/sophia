@@ -404,30 +404,44 @@ pub(crate) fn run_persistent_xterm_session(
         .native_scanout
         .then(LiveProductionNativeScanout::new)
         .transpose()?;
-    let mut physical_input = if config.input_devices.is_empty() {
-        None
-    } else {
+    let device_map =
+        sophia_backend_live::NativeLibinputDeviceMap::new(SeatId::from_raw(SESSION_SEAT_RAW))
+            .with_keyboard_device(DeviceId::from_raw(SESSION_KEYBOARD_DEVICE_RAW))
+            .with_pointer_device(DeviceId::from_raw(SESSION_POINTER_DEVICE_RAW));
+    let mut physical_input = if !config.input_devices.is_empty() {
         Some(SessionPhysicalInput::Threaded(
             sophia_backend_live::open_threaded_native_libinput_path_poller(
                 &config.input_devices,
-                sophia_backend_live::NativeLibinputDeviceMap::new(SeatId::from_raw(
-                    SESSION_SEAT_RAW,
-                ))
-                .with_keyboard_device(DeviceId::from_raw(SESSION_KEYBOARD_DEVICE_RAW))
-                .with_pointer_device(DeviceId::from_raw(SESSION_POINTER_DEVICE_RAW)),
+                device_map,
                 64,
                 256,
             )?,
         ))
+    } else if let Some(seat_name) = config.input_seat.as_deref() {
+        Some(SessionPhysicalInput::Threaded(
+            sophia_backend_live::open_threaded_native_libinput_udev_poller(
+                seat_name, device_map, 64, 256,
+            )?,
+        ))
+    } else {
+        None
     };
-    if !config.input_devices.is_empty() {
+    if physical_input.is_some() {
         let policy = physical_input
             .as_ref()
             .expect("configured input devices create a poller")
             .policy_report();
         println!(
-            "sophia_live_session_input_pipeline schema=2 status=poller_ready devices={} tap_capable={} tap_enabled={}",
-            policy.devices_added, policy.tap_capable, policy.tap_enabled
+            "sophia_live_session_input_pipeline schema=3 status=poller_ready source={} seat={} devices={} active={} keyboards={} pointers={} touch={} tap_capable={} tap_enabled={}",
+            if policy.udev_managed { "udev" } else { "paths" },
+            config.input_seat.as_deref().unwrap_or("explicit"),
+            policy.devices_added,
+            policy.active_devices,
+            policy.keyboards,
+            policy.pointers,
+            policy.touch_devices,
+            policy.tap_capable,
+            policy.tap_enabled
         );
         std::io::stdout().flush()?;
     }
@@ -917,6 +931,7 @@ struct PersistentXtermSessionConfig {
     expect_physical_pointer: bool,
     exit_after_input_proof: bool,
     input_devices: Vec<std::path::PathBuf>,
+    input_seat: Option<String>,
     native_scanout: bool,
     software_client_rendering: bool,
     wm_process: Option<String>,
@@ -1218,6 +1233,19 @@ impl PersistentXtermSessionConfig {
         {
             return Err("--input-devices accepts 1-16 comma-separated absolute paths".into());
         }
+        let input_seat = arg_value(args, "--input-seat");
+        if input_seat.as_ref().is_some_and(|seat| {
+            seat.is_empty()
+                || seat.len() > 64
+                || !seat
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        }) {
+            return Err("--input-seat accepts a 1-64 byte ASCII seat name".into());
+        }
+        if input_seat.is_some() && !input_devices.is_empty() {
+            return Err("--input-seat and --input-devices are mutually exclusive".into());
+        }
         if inject_text.is_some() && expect_physical_text.is_some() {
             return Err("--inject-text and --expect-physical-text are mutually exclusive".into());
         }
@@ -1257,8 +1285,8 @@ impl PersistentXtermSessionConfig {
                     .into(),
             );
         }
-        if expect_physical_text.is_some() && input_devices.is_empty() {
-            return Err("--expect-physical-text requires --input-devices".into());
+        if expect_physical_text.is_some() && input_devices.is_empty() && input_seat.is_none() {
+            return Err("--expect-physical-text requires --input-seat or --input-devices".into());
         }
         if expect_physical_pointer && expect_physical_text.is_none() {
             return Err(
@@ -1299,6 +1327,7 @@ impl PersistentXtermSessionConfig {
             expect_physical_pointer,
             exit_after_input_proof,
             input_devices,
+            input_seat,
             native_scanout,
             software_client_rendering,
             wm_process,
@@ -4358,6 +4387,19 @@ fn run_session_loop(
     let input_stats = physical_input
         .as_ref()
         .map_or_else(Default::default, |input| input.stats());
+    if let Some(input) = physical_input.as_ref() {
+        let policy = input.policy_report();
+        println!(
+            "sophia_live_session_input_devices schema=1 source={} added={} removed={} active={} keyboards={} pointers={} touch={}",
+            if policy.udev_managed { "udev" } else { "paths" },
+            policy.devices_added,
+            policy.devices_removed,
+            policy.active_devices,
+            policy.keyboards,
+            policy.pointers,
+            policy.touch_devices,
+        );
+    }
     let (
         native_target_creations,
         native_target_recreations,
@@ -5670,6 +5712,29 @@ mod tests {
         ] {
             assert!(PersistentXtermSessionConfig::from_args(&args).is_err());
         }
+    }
+
+    #[test]
+    fn production_input_seat_and_explicit_paths_are_distinct_modes() {
+        let seat = PersistentXtermSessionConfig::from_args(&[
+            "--input-seat=seat0".to_owned(),
+            "--max-ticks=1".to_owned(),
+        ])
+        .unwrap();
+        assert_eq!(seat.input_seat.as_deref(), Some("seat0"));
+        assert!(seat.input_devices.is_empty());
+
+        assert!(
+            PersistentXtermSessionConfig::from_args(&[
+                "--input-seat=seat0".to_owned(),
+                "--input-devices=/dev/input/event0".to_owned(),
+            ])
+            .is_err()
+        );
+        assert!(
+            PersistentXtermSessionConfig::from_args(&["--input-seat=../../seat0".to_owned()])
+                .is_err()
+        );
     }
 
     #[test]

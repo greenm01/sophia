@@ -37,6 +37,11 @@ grep -Fq 'sophia_tty_mode.py" "$kd_mode"' tools/run_sophia_xmonad_session.sh
 grep -Fq -- '--session-start=terminal' tools/run_sophia_xmonad_session.sh
 grep -Fq 'SOPHIA_TTY_PROFILE=kitty' tools/run_sophia_kitty_session.sh
 grep -Fq -- '--exit-when-startup-exits' tools/run_sophia_xmonad_session.sh
+grep -Fq -- '--input-seat=$input_seat' tools/run_sophia_xmonad_session.sh
+if grep -Fq -- '*-event-kbd' tools/run_sophia_xmonad_session.sh; then
+    echo "TTY launcher must use production libinput seat discovery, not path heuristics" >&2
+    exit 1
+fi
 bash -n tools/stop_sophia_xmonad_session.sh
 bash -n tools/xmonad_live_session_smoke.sh
 bash -n tools/live_session_persistent_hardware_proof.sh

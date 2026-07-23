@@ -49,24 +49,13 @@ if (( ${#active_sessions[@]} > 0 )); then
     exit 1
 fi
 
-keyboard="${SOPHIA_OPERATOR_KEYBOARD:-}"
-if [[ -z "$keyboard" ]]; then
-    mapfile -t keyboards < <(
-        find /dev/input/by-id /dev/input/by-path \
-            -maxdepth 1 -type l -name '*-event-kbd' -print 2>/dev/null \
-            | sort -u
-    )
-    if (( ${#keyboards[@]} != 1 )); then
-        echo "Expected exactly one keyboard path, found ${#keyboards[@]}." >&2
-        printf '  %s\n' "${keyboards[@]}" >&2
-        echo "Set SOPHIA_OPERATOR_KEYBOARD to the keyboard you will use." >&2
-        exit 1
-    fi
-    keyboard="${keyboards[0]}"
-fi
-if [[ ! -r "$keyboard" ]]; then
-    echo "Keyboard is not readable: $keyboard" >&2
-    exit 1
+input_seat="${SOPHIA_OPERATOR_INPUT_SEAT:-seat0}"
+input_devices="${SOPHIA_OPERATOR_INPUT_DEVICES:-}"
+input_source_args=()
+if [[ -n "$input_devices" ]]; then
+    input_source_args+=("--input-devices=$input_devices")
+else
+    input_source_args+=("--input-seat=$input_seat")
 fi
 
 xmonad_bin=""
@@ -187,7 +176,7 @@ fi
 chmod 600 "$GUARD_LOG"
 rm -f "$GUARD_ARMED_FILE" "$GUARD_TRIGGERED_FILE"
 target/release/sophia sophia-session-input-guard \
-    --input-devices="$keyboard" \
+    "${input_source_args[@]}" \
     --armed-file="$GUARD_ARMED_FILE" \
     --triggered-file="$GUARD_TRIGGERED_FILE" \
     --owner-pid="$$" >>"$GUARD_LOG" 2>&1 &
@@ -223,29 +212,6 @@ if [[ -z "$terminal_bin" || ! -x "$terminal_bin" ]]; then
     echo "The graphical session requires Kitty; set SOPHIA_TERMINAL_BIN if it is installed elsewhere." >&2
     exit 1
 fi
-input_devices="${SOPHIA_OPERATOR_INPUT_DEVICES:-}"
-if [[ -z "$input_devices" ]]; then
-    input_devices="$keyboard"
-    keyboard_target="$(readlink -f "$keyboard")"
-    while IFS= read -r pointer; do
-        pointer_target="$(readlink -f "$pointer")"
-        if [[ "$pointer_target" != "$keyboard_target" && -r "$pointer" ]]; then
-            input_devices="$input_devices,$pointer"
-            break
-        fi
-    done < <(
-        find /dev/input/by-id /dev/input/by-path \
-            -maxdepth 1 -type l -name '*-event-mouse' -print 2>/dev/null \
-            | sort -u
-    )
-else
-    session_args+=(--exit-when-startup-exits)
-fi
-if [[ "$SESSION_PROFILE" == kitty && "$input_devices" != *,* ]]; then
-    echo "Kitty input gate could not find a distinct readable pointer device." >&2
-    echo "Set SOPHIA_OPERATOR_INPUT_DEVICES to comma-separated keyboard and pointer paths." >&2
-    exit 1
-fi
 [[ ! -f "$SESSION_LOG" ]] || mv -f "$SESSION_LOG" "$SESSION_LOG.previous"
 : >"$SESSION_LOG"
 chmod 600 "$SESSION_LOG"
@@ -256,7 +222,7 @@ session_args=(
     --session-start=terminal
     --display="$DISPLAY_NAME"
     --native-scanout
-    --input-devices="$input_devices"
+    "${input_source_args[@]}"
 )
 if [[ "$SESSION_PROFILE" == xmonad ]]; then
     session_args+=(
@@ -266,6 +232,8 @@ if [[ "$SESSION_PROFILE" == xmonad ]]; then
         --wm-process-arg=--profile=xmonad
         --wm-process-arg=--wm-private-alias=xmonad/xmonad-x86_64-linux
     )
+else
+    session_args+=(--exit-when-startup-exits)
 fi
 session_args+=("$@")
 setsid env SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 \

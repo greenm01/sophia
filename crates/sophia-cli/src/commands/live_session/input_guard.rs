@@ -11,11 +11,15 @@ pub(crate) fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         .filter(|path| !path.is_empty())
         .map(std::path::PathBuf::from)
         .collect::<Vec<_>>();
-    if input_devices.is_empty()
-        || input_devices.len() > 16
-        || input_devices.iter().any(|path| !path.is_absolute())
-    {
-        return Err("sophia-session-input-guard requires 1-16 absolute input device paths".into());
+    let input_seat = arg_value(args, "--input-seat");
+    if input_devices.len() > 16 || input_devices.iter().any(|path| !path.is_absolute()) {
+        return Err("sophia-session-input-guard accepts 1-16 absolute input device paths".into());
+    }
+    if input_devices.is_empty() == input_seat.is_none() {
+        return Err(
+            "sophia-session-input-guard requires exactly one of --input-seat or --input-devices"
+                .into(),
+        );
     }
     let armed_file = required_absolute_path(args, "--armed-file")?;
     let triggered_file = required_absolute_path(args, "--triggered-file")?;
@@ -27,16 +31,22 @@ pub(crate) fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         return Err("input guard owner PID must be nonzero".into());
     }
 
-    let mut poller = sophia_backend_live::open_native_libinput_path_poller(
-        &input_devices,
+    let devices =
         sophia_backend_live::NativeLibinputDeviceMap::new(SeatId::from_raw(SESSION_SEAT_RAW))
-            .with_keyboard_device(DeviceId::from_raw(SESSION_KEYBOARD_DEVICE_RAW)),
-        64,
-    )?;
+            .with_keyboard_device(DeviceId::from_raw(SESSION_KEYBOARD_DEVICE_RAW));
+    let mut poller = if let Some(seat_name) = input_seat.as_deref() {
+        sophia_backend_live::open_native_libinput_udev_poller(seat_name, devices, 64)?
+    } else {
+        sophia_backend_live::open_native_libinput_path_poller(&input_devices, devices, 64)?
+    };
+    let policy = poller.reader().policy_report();
     let mut chord = EmergencyChordState::awaiting_arm();
     println!(
-        "sophia_session_input_guard schema=1 status=ready devices={}",
-        input_devices.len()
+        "sophia_session_input_guard schema=2 status=ready source={} seat={} devices={} keyboards={}",
+        if policy.udev_managed { "udev" } else { "paths" },
+        input_seat.as_deref().unwrap_or("explicit"),
+        policy.devices_added,
+        policy.keyboards,
     );
     std::io::stdout().flush()?;
 

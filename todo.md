@@ -62,6 +62,9 @@ Milestone 5 hardware runner.
   primary-plane content.
 - [x] Add a guarded two-output Kitty-only TTY3 profile with no external WM or
   layout-resize transaction dependency.
+- [x] Replace launcher path heuristics with production libinput/udev `seat0`
+  discovery, capability classification, tap policy, and hotplug accounting;
+  retain explicit paths only as a diagnostic override.
 - [ ] Retain a physical Kitty-only capture proving visible cursor motion within
   two 60 Hz refresh intervals, click-drag selection, typed input, clean exit,
   and emergency recovery.
