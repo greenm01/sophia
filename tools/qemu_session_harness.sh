@@ -491,7 +491,7 @@ if [[ "$SCENARIO" == xmonad-* ]]; then
                 echo "sophia_qemu_xmonad_input schema=1 status=sent chord=$chord" | tee -a "$EVIDENCE_FILE"
                 sleep 1
             done
-            send_launch_and_wait meta_l+shift+ret '^sophia_session_app schema=1 status=started id=terminal source=action' terminal-launch
+            send_launch_and_wait meta_l+ret '^sophia_session_app schema=1 status=started id=terminal source=action' terminal-launch
             send_close_and_wait terminal
             send_launch_and_wait meta_l+f '^sophia_session_app schema=1 status=started id=firefox source=action' firefox-launch
             if (( cycles == 0 )); then
@@ -510,7 +510,7 @@ if [[ "$SCENARIO" == xmonad-* ]]; then
         fi
         chords=("meta_l+shift+q")
     elif [[ "$SCENARIO" == "xmonad-m8-mix" ]]; then
-        send_launch_and_wait meta_l+shift+ret '^sophia_session_app schema=1 status=started id=terminal source=action' terminal-launch
+        send_launch_and_wait meta_l+ret '^sophia_session_app schema=1 status=started id=terminal source=action' terminal-launch
         send_close_and_wait terminal
         send_launch_and_wait meta_l+f '^sophia_session_app schema=1 status=started id=firefox source=action' firefox-launch
         run_firefox_m8_interactions
@@ -519,7 +519,7 @@ if [[ "$SCENARIO" == xmonad-* ]]; then
         send_close_and_wait launcher
         chords=("meta_l+shift+q")
     else
-        chords=("meta_l+shift+ret" "meta_l+shift+c" "meta_l+shift+q")
+        chords=("meta_l+ret" "meta_l+shift+c" "meta_l+shift+q")
     fi
     for chord in "${chords[@]}"; do
         "$ROOT_DIR/tools/qemu_qmp_chord.py" "$QMP_SOCKET" "$chord"

@@ -6,7 +6,7 @@ evidence=${1:-/tmp/sophia-qemu-xmonad-m8-launcher.log}
 
 required_chords=(
     meta_l+j meta_l+k meta_l+spc meta_l+2 meta_l+shift+1
-    meta_l+shift+ret meta_l+shift+c meta_l+shift+q
+    meta_l+ret meta_l+shift+c meta_l+shift+q
 )
 for chord in "${required_chords[@]}"; do
     grep -q "^sophia_qemu_xmonad_input schema=1 status=sent chord=$chord$" "$evidence" || {

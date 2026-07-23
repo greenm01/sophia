@@ -4,7 +4,7 @@ sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+k
 sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+spc
 sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+2
 sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+shift+1
-sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+shift+ret
+sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+ret
 sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+shift+c
 sophia_qemu_xmonad_input schema=1 status=sent chord=meta_l+shift+q
 sophia_live_wm schema=1 status=session_action_committed transaction=10 action=LaunchTerminal

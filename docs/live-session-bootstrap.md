@@ -89,9 +89,9 @@ and generic X11 WM bridge binaries, verifies exclusive TTY/DRM/input
 conditions, temporarily stops keyd, and requires one Ctrl-Alt-Backspace chord
 to arm an independent recovery guard before graphics takeover. A second chord
 terminates the session without depending on Sophia input routing. The wrapper
-restores KD mode, termios, and keyd on exit, with durable guard and recovery
-logs under `~/.local/state/sophia/xmonad-session/`. Sophia supervises the
-bridge as a generic WM policy process. Xmonad sees only a synthetic private
+restores KD mode, termios, and keyd on exit, with durable session, guard, and
+recovery logs under `~/.local/state/sophia/xmonad-session/`. Sophia supervises
+the bridge as a generic WM policy process. Xmonad sees only a synthetic private
 display; Kitty remains connected to Sophia X Authority. Engine validates and
 applies xmonad placement, stacking, and focus, while physical input and scanout
 remain Sophia-owned.
@@ -103,8 +103,12 @@ Later drawing requests carry tightly packed damage patches instead of cloning a
 fullscreen CPU buffer for every glyph. The headless xmonad proof requires one
 configure acknowledgement before layout commits.
 
-The operator wrapper starts with an empty xmonad desktop and registers Kitty as
-the terminal action. `Super+Enter` launches Kitty and `Super+Shift+Q` logs out.
+The operator wrapper starts one Kitty and registers it as the terminal action.
+`Super+Enter` launches another Kitty, including after the last application
+surface closes, and `Super+Shift+Q` logs out. Global WM shortcuts remain active
+on an otherwise empty desktop while unfocused application input remains
+suppressed.
+
 Stop the session from another TTY, from the Sophia checkout, with:
 
 ```sh

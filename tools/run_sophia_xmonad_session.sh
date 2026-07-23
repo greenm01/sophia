@@ -8,6 +8,7 @@ PID_FILE="$STATE_DIR/wrapper.pid"
 LOG_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/sophia/xmonad-session"
 GUARD_LOG="$LOG_DIR/input-guard.log"
 RECOVERY_LOG="$LOG_DIR/recovery.log"
+SESSION_LOG="$LOG_DIR/session.log"
 GUARD_ARMED_FILE="$STATE_DIR/input-guard.armed"
 GUARD_TRIGGERED_FILE="$STATE_DIR/input-guard.triggered"
 
@@ -205,10 +206,14 @@ if [[ -z "$terminal_bin" || ! -x "$terminal_bin" ]]; then
     exit 1
 fi
 input_devices="${SOPHIA_OPERATOR_INPUT_DEVICES:-$keyboard}"
+[[ ! -f "$SESSION_LOG" ]] || mv -f "$SESSION_LOG" "$SESSION_LOG.previous"
+: >"$SESSION_LOG"
+chmod 600 "$SESSION_LOG"
 setsid env SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 \
     target/release/sophia sophia-live-session \
     --session-mode=normal \
     "--session-app=terminal=$terminal_bin" \
+    --session-start=terminal \
     --session-action-app=terminal=terminal \
     --display="$DISPLAY_NAME" \
     --native-scanout \
@@ -217,7 +222,7 @@ setsid env SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 \
     --wm-process-arg="--wm=$xmonad_bin" \
     --wm-process-arg=--profile=xmonad \
     --wm-process-arg=--wm-private-alias=xmonad/xmonad-x86_64-linux \
-    "$@" &
+    "$@" > >(tee "$SESSION_LOG") 2>&1 &
 session_pid=$!
 set +e
 wait -n "$session_pid" "$guard_pid"

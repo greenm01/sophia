@@ -2069,3 +2069,15 @@ guard, a second chord stops the supervised session even if Sophia input routing
 is wedged, and cleanup restores KD mode, termios, and keyd. Guard and recovery
 records are durable under the user's state directory. Ctrl-Alt-Fn remains
 unsupported until Engine owns a correct VT/DRM suspend-and-resume boundary.
+
+The guarded rerun proved DRM ownership, two-output presentation, WM bridge
+startup, and complete emergency restoration, but also retained
+`startup_apps=0` and no live `key_observed` marker after Super-Enter. The normal
+TTY wrapper had omitted `--session-start=terminal`. Independently, a blank
+normal session represented its missing primary child as already exited; the
+post-exit proof guard then compared two absent surfaces and suppressed the
+entire physical-input poll, including global WM shortcuts. The session now
+distinguishes full application routing, shortcut-only polling, and complete
+suppression. Empty desktops admit emergency and registered WM chords without
+delivering ordinary keys or pointer events to an unfocused client, and the
+physical launcher starts Kitty by default.

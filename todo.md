@@ -40,9 +40,13 @@ Milestone 5 hardware runner.
 
 - [x] Require Ctrl-Alt-Backspace guard arming before xmonad graphics takeover.
 - [x] Restore KD mode, termios, and keyd on normal, failed, and emergency exits.
-- [ ] Reproduce the startup failure with the guarded launcher and retain the
-  launcher, input-guard, recovery, and Sophia session logs.
-- [ ] Verify the second Ctrl-Alt-Backspace chord returns to a usable tty3 before
+- [x] Diagnose the blank startup as an omitted startup application plus an
+  input gate that suppressed global shortcuts when no application was focused.
+- [x] Start Kitty automatically and preserve global WM shortcuts on an empty
+  desktop without routing unfocused application input.
+- [ ] Retain one passing physical launcher, input-guard, recovery, and Sophia
+  session capture with automatic Kitty startup.
+- [x] Verify the second Ctrl-Alt-Backspace chord returns to a usable tty3 before
   retrying interactive application input.
 
 ## Active Follow-up: Interactive QEMU Operator Session

@@ -2534,12 +2534,26 @@ fn session_protocol_errors_are_fatal(
     protocol_error_count != 0 && (normal_session || application_proof)
 }
 
-fn physical_input_may_route_after_primary_exit(
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PhysicalInputRoutingMode {
+    Suppressed,
+    ShortcutsOnly,
+    Full,
+}
+
+fn physical_input_routing_mode(
     primary_child_exited: bool,
     focused_surface: Option<SurfaceId>,
     proof_surface: Option<SurfaceId>,
-) -> bool {
-    !primary_child_exited || focused_surface != proof_surface
+    global_shortcuts_available: bool,
+) -> PhysicalInputRoutingMode {
+    if !primary_child_exited || focused_surface != proof_surface {
+        PhysicalInputRoutingMode::Full
+    } else if global_shortcuts_available {
+        PhysicalInputRoutingMode::ShortcutsOnly
+    } else {
+        PhysicalInputRoutingMode::Suppressed
+    }
 }
 
 fn authority_transaction_count(transactions: &[SurfaceTransaction]) -> usize {
@@ -2884,7 +2898,7 @@ fn run_session_loop(
     let mut pending_authority_batches = VecDeque::new();
 
     macro_rules! drain_physical_input {
-        () => {{
+        ($routing_mode:expr) => {{
             let emergency_exit = false;
             if let (Some(poller), Some(runtime)) = (physical_input.as_mut(), runtime.as_ref())
                 && (config.expect_physical_text.is_none() || physical_input_ready_at.is_some())
@@ -2908,6 +2922,7 @@ fn run_session_loop(
                         physical_pointer_buttons_routed,
                     ),
                     false,
+                    $routing_mode,
                     &mut next_input_delivery,
                     physical_text_proof.as_mut(),
                 )?;
@@ -3265,11 +3280,14 @@ fn run_session_loop(
                 break;
             }
         }
-        if physical_input_may_route_after_primary_exit(
+        let input_routing_mode = physical_input_routing_mode(
             primary_child_exited,
             focus.focused_surface(seat),
             input_surface,
-        ) && drain_physical_input!()
+            wm_session.as_ref().is_some_and(|wm| wm.shortcuts.is_some()),
+        );
+        if input_routing_mode != PhysicalInputRoutingMode::Suppressed
+            && drain_physical_input!(input_routing_mode)
         {
             break;
         }
@@ -3965,6 +3983,7 @@ fn run_session_loop(
                     false,
                     false,
                     false,
+                    PhysicalInputRoutingMode::Full,
                     &mut next_input_delivery,
                     None,
                 )?;
@@ -4883,6 +4902,7 @@ fn route_physical_input<P: NonBlockingInputPoller>(
     pointer_routing_enabled: bool,
     pointer_proof_required: bool,
     pointer_buttons_only: bool,
+    routing_mode: PhysicalInputRoutingMode,
     next_input_delivery: &mut u64,
     physical_text_proof: Option<&mut PhysicalTextProof>,
 ) -> Result<PhysicalInputRouteReport, Box<dyn std::error::Error>> {
@@ -4901,6 +4921,7 @@ fn route_physical_input<P: NonBlockingInputPoller>(
         pointer_routing_enabled,
         pointer_proof_required,
         pointer_buttons_only,
+        routing_mode,
         next_input_delivery,
         physical_text_proof,
     )
@@ -4921,6 +4942,7 @@ fn route_input_events(
     pointer_routing_enabled: bool,
     pointer_proof_required: bool,
     pointer_buttons_only: bool,
+    routing_mode: PhysicalInputRoutingMode,
     next_input_delivery: &mut u64,
     mut physical_text_proof: Option<&mut PhysicalTextProof>,
 ) -> Result<PhysicalInputRouteReport, Box<dyn std::error::Error>> {
@@ -4951,6 +4973,9 @@ fn route_input_events(
                         report.wm_actions.extend(decision.action);
                         continue;
                     }
+                }
+                if routing_mode != PhysicalInputRoutingMode::Full {
+                    continue;
                 }
                 if sophia_cli::input_proof::pointer_proof_suppresses_return(
                     pointer_proof_required,
@@ -5017,6 +5042,9 @@ fn route_input_events(
             }
             kind @ (sophia_protocol::InputEventKind::PointerMotion
             | sophia_protocol::InputEventKind::PointerButton { .. }) => {
+                if routing_mode != PhysicalInputRoutingMode::Full {
+                    continue;
+                }
                 if let Some(raw) = event.global_position {
                     pointer.observe_raw(raw);
                 }
@@ -5181,22 +5209,26 @@ mod tests {
     use super::{
         BufferSource, CommittedSurfaceState, LiveClientStdoutCapture, LiveProductionCpuScene,
         LiveProductionVisualRuntime, LiveXAuthorityFile, PRIMARY_INPUT_PROOF_SCRIPT,
-        PersistentXtermSessionConfig, Rect, Region, SECONDARY_POINTER_WITNESS_SCRIPT,
-        SessionPointerPlacement, SessionProcessGuard, Size, authority_transaction_count,
-        center_geometry_without_scaling, global_runtime_deadline_ends_session,
-        layer_snapshots_from_committed, physical_input_may_route_after_primary_exit,
-        physical_input_pixels_already_changed, place_pointer_event_for_routing,
-        pointer_offset_for_geometry, record_runtime_commits, seed_missing_committed_surfaces,
-        session_protocol_errors_are_fatal, successful_primary_exit_ends_session,
-        take_settled_input_delivery_wait,
+        PersistentXtermSessionConfig, PhysicalInputRoutingMode, Rect, Region,
+        SECONDARY_POINTER_WITNESS_SCRIPT, SessionPointerPlacement, SessionProcessGuard, Size,
+        authority_transaction_count, center_geometry_without_scaling,
+        global_runtime_deadline_ends_session, layer_snapshots_from_committed,
+        physical_input_pixels_already_changed, physical_input_routing_mode,
+        place_pointer_event_for_routing, pointer_offset_for_geometry, record_runtime_commits,
+        route_input_events, seed_missing_committed_surfaces, session_protocol_errors_are_fatal,
+        successful_primary_exit_ends_session, take_settled_input_delivery_wait,
     };
+    use sophia_engine::{InputFocusState, WmShortcutRegistry, WmShortcutRouter};
     use sophia_protocol::{
         AuthorityKind, DeviceId, InputEventKind, InputEventPacket, NamespaceCapabilities,
         NamespaceProfile, Point, SeatId, SurfaceId, SurfaceTransaction,
-        SurfaceTransactionReadiness, WmSessionAction,
+        SurfaceTransactionReadiness, WM_API_VERSION, WmActionId, WmBindingRegistration,
+        WmCapabilities, WmHello, WmModifierMask, WmSessionAction,
     };
     use sophia_x_authority::X_AUTHORITY_CPU_BUFFER_FORMAT_XRGB8888;
+    use sophia_x_authority::{XAuthorityClientSurfaceRoutes, XCoreKeyboardMapper};
     use std::io::Write;
+    use std::sync::mpsc::sync_channel;
     use std::time::Instant;
 
     #[test]
@@ -5259,24 +5291,94 @@ mod tests {
     }
 
     #[test]
-    fn physical_input_waits_for_focus_to_leave_exited_proof_surface() {
+    fn physical_input_preserves_shortcuts_without_an_application_surface() {
         let proof = SurfaceId::new(1, 1);
         let survivor = SurfaceId::new(2, 1);
-        assert!(physical_input_may_route_after_primary_exit(
+        assert_eq!(
+            physical_input_routing_mode(false, Some(proof), Some(proof), false),
+            PhysicalInputRoutingMode::Full
+        );
+        assert_eq!(
+            physical_input_routing_mode(true, Some(proof), Some(proof), false),
+            PhysicalInputRoutingMode::Suppressed
+        );
+        assert_eq!(
+            physical_input_routing_mode(true, Some(survivor), Some(proof), false),
+            PhysicalInputRoutingMode::Full
+        );
+        assert_eq!(
+            physical_input_routing_mode(true, None, None, true),
+            PhysicalInputRoutingMode::ShortcutsOnly
+        );
+        assert_eq!(
+            physical_input_routing_mode(true, Some(proof), Some(proof), true),
+            PhysicalInputRoutingMode::ShortcutsOnly
+        );
+    }
+
+    #[test]
+    fn shortcut_only_input_activates_super_enter_without_routing_unfocused_keys() {
+        let action = WmActionId::from_raw(7);
+        let registry = WmShortcutRegistry::from_hello(&WmHello {
+            api_version: WM_API_VERSION,
+            capabilities: WmCapabilities::all_supported(),
+            bindings: vec![WmBindingRegistration {
+                action,
+                keycode: 28,
+                modifiers: WmModifierMask {
+                    bits: WmModifierMask::SUPER,
+                },
+            }],
+        })
+        .unwrap();
+        let mut shortcuts = WmShortcutRouter::new(registry);
+        let events = [125, 28]
+            .into_iter()
+            .enumerate()
+            .map(|(index, keycode)| InputEventPacket {
+                serial: u64::try_from(index + 1).unwrap(),
+                seat: SeatId::from_raw(1),
+                device: DeviceId::from_raw(1),
+                time_msec: u64::try_from(index + 1).unwrap(),
+                kind: InputEventKind::Key {
+                    keycode,
+                    pressed: true,
+                },
+                global_position: None,
+                target_surface: None,
+                local_position: None,
+            })
+            .collect();
+        let (input_sender, input_receiver) = sync_channel(4);
+        let mut modifiers = XCoreKeyboardMapper::new();
+        let mut emergency = super::EmergencyChordState::awaiting_arm();
+        let mut pointer = SessionPointerPlacement::default();
+        let mut next_delivery = 1;
+
+        let report = route_input_events(
+            events,
+            &InputFocusState::new(),
+            &[],
+            &[],
+            &XAuthorityClientSurfaceRoutes::default(),
+            &input_sender,
+            &mut modifiers,
+            &mut emergency,
+            Some(&mut shortcuts),
+            &mut pointer,
             false,
-            Some(proof),
-            Some(proof)
-        ));
-        assert!(!physical_input_may_route_after_primary_exit(
-            true,
-            Some(proof),
-            Some(proof)
-        ));
-        assert!(physical_input_may_route_after_primary_exit(
-            true,
-            Some(survivor),
-            Some(proof)
-        ));
+            false,
+            false,
+            PhysicalInputRoutingMode::ShortcutsOnly,
+            &mut next_delivery,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(report.wm_actions, [action]);
+        assert_eq!(report.keys_observed, 2);
+        assert_eq!(report.keys_routed, 0);
+        assert!(input_receiver.try_recv().is_err());
     }
 
     #[test]
