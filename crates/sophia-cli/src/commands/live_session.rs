@@ -2895,6 +2895,9 @@ fn run_session_loop(
     let mut emergency_exit_requested = false;
     let mut return_suppressed_reported = false;
     let mut cursor_dirty = false;
+    let mut cursor_dirty_since: Option<Instant> = None;
+    let mut cursor_moves_coalesced = 0_u64;
+    let mut cursor_max_motion_to_submit = Duration::ZERO;
     let mut pending_authority_batches = VecDeque::new();
 
     macro_rules! drain_physical_input {
@@ -2940,7 +2943,15 @@ fn run_session_loop(
                 if !report.deliveries.is_empty() && input_proof_started_at.is_some() {
                     input_delivery_wait_started_at.get_or_insert_with(Instant::now);
                 }
-                cursor_dirty |= report.pointer_routed > 0;
+                if report.pointer_routed > 0 {
+                    if cursor_dirty {
+                        cursor_moves_coalesced =
+                            cursor_moves_coalesced.saturating_add(report.pointer_routed as u64);
+                    } else {
+                        cursor_dirty_since = Some(Instant::now());
+                    }
+                    cursor_dirty = true;
+                }
                 for action in report.wm_actions.iter().copied() {
                     let wm = wm_session
                         .as_mut()
@@ -3297,6 +3308,7 @@ fn run_session_loop(
         if cursor_dirty
             && let (Some(runtime), Some(native_scanout), Some(position)) =
                 (runtime.as_mut(), native_scanout.as_mut(), pointer.position)
+            && !runtime.native_scanout_in_flight()
         {
             let repaint = runtime.run_cpu_repaint(
                 &mut scene,
@@ -3330,6 +3342,9 @@ fn run_session_loop(
                 pointer_pixel_change = true;
             }
             backend_ticks = backend_ticks.saturating_add(1);
+            if let Some(started) = cursor_dirty_since.take() {
+                cursor_max_motion_to_submit = cursor_max_motion_to_submit.max(started.elapsed());
+            }
             cursor_dirty = false;
         }
         if let Some(candidate) = pointer_cursor_checksum
@@ -3432,7 +3447,13 @@ fn run_session_loop(
             .take()
             .or_else(|| pending_authority_batches.pop_front())
             .map_or_else(
-                || authority_receiver.recv_timeout(Duration::from_millis(25)),
+                || {
+                    authority_receiver.recv_timeout(if cursor_dirty {
+                        Duration::from_millis(1)
+                    } else {
+                        Duration::from_millis(25)
+                    })
+                },
                 Ok,
             );
         match authority_batch {
@@ -4034,6 +4055,7 @@ fn run_session_loop(
             pointer
                 .arm_at_focused_surface_center(focus.focused_surface(seat), &runtime.input_layers())
                 .ok_or("pointer proof has no focused application surface to place the cursor")?;
+            cursor_dirty_since.get_or_insert_with(Instant::now);
             cursor_dirty = true;
         }
         if application_surface_missing_since
@@ -4294,6 +4316,11 @@ fn run_session_loop(
     );
     println!(
         "sophia_live_session_scheduler schema=1 authority_batches={batches} cpu_compositions={cpu_compositions} coalesced_batches={coalesced_batches}"
+    );
+    println!(
+        "sophia_live_session_cursor schema=1 moves_coalesced={} max_motion_to_submit_msec={}",
+        cursor_moves_coalesced,
+        cursor_max_motion_to_submit.as_millis(),
     );
     println!(
         "sophia_live_session_health schema=1 status=clean protocol_errors={} pending_wm={} pending_actions={} pending_input={} wm_degraded={}",

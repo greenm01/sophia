@@ -17,7 +17,7 @@ use sophia_protocol::{
     WmRequestPacket, WmResponsePacket, WmSessionDescriptor, decode_wm_request_frame,
     decode_wm_session_descriptor_frame, encode_wm_hello_frame, encode_wm_response_frame,
 };
-use sophia_x_authority::{XByteOrder, serve_x11_setup_socket_client};
+use sophia_x_authority::{XByteOrder, serve_x11_setup_socket_client_with_root_size};
 
 use crate::{
     BridgeEngineUpdate, LegacyWmProfile, LegacyWmRequest, SYNTHETIC_ROOT_XID, SyntheticXEvent,
@@ -117,6 +117,21 @@ pub struct LegacyX11WmBridgeRuntime {
 
 impl LegacyX11WmBridgeRuntime {
     pub fn start(spec: LegacyWmLaunchSpec) -> Result<Self, BridgeRuntimeError> {
+        Self::start_with_root(
+            spec,
+            Rect {
+                x: 0,
+                y: 0,
+                width: 1280,
+                height: 720,
+            },
+        )
+    }
+
+    pub fn start_with_root(
+        spec: LegacyWmLaunchSpec,
+        initial_root: Rect,
+    ) -> Result<Self, BridgeRuntimeError> {
         let executable = resolve_executable(&spec.executable)?;
         let profile = spec.profile;
         if let Some(relative_alias) = spec.private_executable_alias.as_deref() {
@@ -190,7 +205,7 @@ impl LegacyX11WmBridgeRuntime {
         let (legacy_tx, legacy_rx) = mpsc::sync_channel(256);
         let worker = thread::spawn(move || {
             let mut stream = stream;
-            serve_legacy_wm(&mut stream, command_rx, legacy_tx)
+            serve_legacy_wm(&mut stream, command_rx, legacy_tx, initial_root)
         });
 
         Ok(Self {
@@ -475,7 +490,8 @@ pub fn run_wm_socket_server(
             )));
         }
     }
-    let mut runtime = LegacyX11WmBridgeRuntime::start(wm)?;
+    let profile = wm.profile;
+    let mut runtime: Option<LegacyX11WmBridgeRuntime> = None;
     let listener = UnixListener::bind(path).map_err(|error| {
         BridgeRuntimeError::new(format!(
             "failed to bind WM socket {}: {error}",
@@ -486,7 +502,7 @@ pub fn run_wm_socket_server(
         let mut stream = stream.map_err(|error| {
             BridgeRuntimeError::new(format!("failed to accept WM socket client: {error}"))
         })?;
-        let hello = encode_wm_hello_frame(&runtime.profile().hello()).map_err(|error| {
+        let hello = encode_wm_hello_frame(&profile.hello()).map_err(|error| {
             BridgeRuntimeError::new(format!("failed to encode WM hello: {error:?}"))
         })?;
         stream
@@ -496,10 +512,38 @@ pub fn run_wm_socket_server(
                 BridgeRuntimeError::new(format!("failed to write WM hello: {error}"))
             })?;
         let descriptor = read_wm_session_descriptor(&mut stream)?;
-        runtime.configure_session(descriptor)?;
 
         while let Some(request) = read_wm_request(&mut stream)? {
-            let response = runtime.handle_request(&request)?;
+            if runtime.is_none() {
+                let initial_root = match &request.kind {
+                    WmRequestKind::ManageSurface(manage) => Some(manage.bounds),
+                    WmRequestKind::RelayoutWorkspace(relayout) => Some(relayout.bounds),
+                    _ => None,
+                };
+                if let Some(initial_root) = initial_root {
+                    let mut started =
+                        LegacyX11WmBridgeRuntime::start_with_root(wm.clone(), initial_root)?;
+                    started.configure_session(descriptor.clone())?;
+                    runtime = Some(started);
+                }
+            }
+            let response = if let Some(runtime) = runtime.as_mut() {
+                runtime.handle_request(&request)?
+            } else if profile == LegacyWmProfile::Xmonad {
+                translate_xmonad_profile_action(&request, &descriptor)?.unwrap_or(
+                    WmResponsePacket {
+                        transaction: request.transaction,
+                        commands: Vec::new(),
+                        timeout_msec: 0,
+                    },
+                )
+            } else {
+                WmResponsePacket {
+                    transaction: request.transaction,
+                    commands: Vec::new(),
+                    timeout_msec: 0,
+                }
+            };
             let frame = encode_wm_response_frame(&response).map_err(|error| {
                 BridgeRuntimeError::new(format!("failed to encode WM response: {error:?}"))
             })?;
@@ -620,15 +664,10 @@ struct XServerState {
 }
 
 impl XServerState {
-    fn new() -> Self {
+    fn new(root: Rect) -> Self {
         Self {
             sequence: 0,
-            root: Rect {
-                x: 0,
-                y: 0,
-                width: 1280,
-                height: 720,
-            },
+            root,
             windows: BTreeMap::new(),
             atoms_by_name: BTreeMap::new(),
             atom_names: BTreeMap::new(),
@@ -643,9 +682,16 @@ fn serve_legacy_wm(
     stream: &mut UnixStream,
     commands: Receiver<ServerCommand>,
     legacy: SyncSender<LegacyWmRequest>,
+    initial_root: Rect,
 ) -> Result<(), BridgeRuntimeError> {
-    let setup = serve_x11_setup_socket_client(stream)
-        .map_err(|error| BridgeRuntimeError::new(format!("X11 setup failed: {error}")))?;
+    let setup = serve_x11_setup_socket_client_with_root_size(
+        stream,
+        sophia_protocol::Size {
+            width: initial_root.width,
+            height: initial_root.height,
+        },
+    )
+    .map_err(|error| BridgeRuntimeError::new(format!("X11 setup failed: {error}")))?;
     if setup.byte_order != XByteOrder::LittleEndian {
         return Err(BridgeRuntimeError::new(
             "private legacy WM server currently requires little-endian X11",
@@ -654,7 +700,7 @@ fn serve_legacy_wm(
     stream.set_read_timeout(Some(IO_POLL)).map_err(|error| {
         BridgeRuntimeError::new(format!("failed to configure X11 socket timeout: {error}"))
     })?;
-    let mut state = XServerState::new();
+    let mut state = XServerState::new(initial_root);
     let mut pending_focus_queries = Vec::new();
     let mut last_socket_activity = Instant::now();
     loop {
@@ -715,7 +761,10 @@ fn apply_server_command(
     command: ServerCommand,
 ) -> Result<(), BridgeRuntimeError> {
     match command {
-        ServerCommand::Root(bounds) => state.root = bounds,
+        ServerCommand::Root(bounds) => {
+            state.root = bounds;
+            write_configure_notify(stream, state.sequence, SYNTHETIC_ROOT_XID, bounds)?;
+        }
         ServerCommand::Map(window, geometry) => {
             state.windows.insert(
                 window.raw(),

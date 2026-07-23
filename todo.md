@@ -51,6 +51,16 @@ Milestone 5 hardware runner.
   session capture with automatic Kitty startup.
 - [x] Verify the second Ctrl-Alt-Backspace chord returns to a usable tty3 before
   retrying interactive application input.
+- [x] Remove connection-local Present transaction collisions, bound per-client
+  Present pressure without dropping feedback, and contain client failures so
+  one application cannot terminate the X frontend.
+- [x] Start the private xmonad X server with the first Engine-provided layout
+  bounds and notify it when those bounds change; production no longer begins
+  from the 1280x720 smoke-fixture geometry.
+- [x] Coalesce pointer repaint work, avoid submitting over an in-flight frame,
+  and retain maximum motion-to-submit latency evidence.
+- [ ] Retain a physical two-output capture proving Super-Enter, cursor motion,
+  and Present Complete-before-Idle within two 60 Hz refresh intervals.
 
 ## Active Follow-up: Interactive QEMU Operator Session
 
@@ -95,3 +105,6 @@ Current state (2026-07-20):
 - VRR activation evidence waits for hardware reporting `vrr_capable=1`.
 - Large X11 `INCR`, full Xdnd, prompt UI, FD handoff, capture streaming, URI
   launching, and notification actions follow the bounded portal reference flow.
+- Full client-selected classic X11 cursor images remain an X-frontend follow-up;
+  Engine cursor presentation stays protocol-neutral and contains no
+  application-specific policy.

@@ -18,10 +18,10 @@ use std::{
     panic::{AssertUnwindSafe, catch_unwind},
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex,
+        Arc, Condvar, Mutex,
         atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[cfg(unix)]
@@ -104,6 +104,7 @@ impl TryFrom<Vec<u8>> for X11SocketOutputRecord {
 pub struct X11SetupSocketError {
     message: String,
     client_disconnect: bool,
+    client_failure: bool,
 }
 
 impl X11SetupSocketError {
@@ -111,6 +112,7 @@ impl X11SetupSocketError {
         Self {
             message: message.into(),
             client_disconnect: false,
+            client_failure: false,
         }
     }
 
@@ -118,6 +120,15 @@ impl X11SetupSocketError {
         Self {
             message: message.into(),
             client_disconnect: true,
+            client_failure: false,
+        }
+    }
+
+    fn client_failure(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            client_disconnect: false,
+            client_failure: true,
         }
     }
 }
@@ -948,7 +959,13 @@ impl XServerFrontend {
         worker.thread.join().map_err(|_| {
             X11SetupSocketError::new("Sophia X Server Frontend client worker panicked")
         })?;
-        completion.result
+        match completion.result {
+            Err(error) if error.client_failure || error.client_disconnect => {
+                eprintln!("Sophia X Server Frontend disconnected one client: {error}");
+                Ok(())
+            }
+            result => result,
+        }
     }
 
     fn observe_worker_admissions(&mut self) -> Result<(), X11SetupSocketError> {
@@ -1498,6 +1515,7 @@ pub enum XServerFrontendRouteError {
     UnknownClient { client: XServerFrontendClientId },
     UnknownSurface { surface: SurfaceId },
     ClientQueueFull { client: XServerFrontendClientId },
+    DuplicatePresentation { transaction: TransactionId },
     ClientQueueDisconnected { client: XServerFrontendClientId },
     DuplicateClient { client: XServerFrontendClientId },
     InputDeliveryQueueFull,
@@ -1528,6 +1546,11 @@ impl core::fmt::Display for XServerFrontendRouteError {
                     client.raw()
                 )
             }
+            Self::DuplicatePresentation { transaction } => write!(
+                formatter,
+                "X11 Present transaction {} is already pending",
+                transaction.raw()
+            ),
             Self::ClientQueueDisconnected { client } => write!(
                 formatter,
                 "X11 route queue disconnected for client {}",
@@ -1676,7 +1699,7 @@ impl XServerFrontendRouteBroker {
                 surfaces: Arc::new(Mutex::new(BTreeMap::new())),
                 randr_subscriptions: Arc::new(Mutex::new(BTreeMap::new())),
                 present_subscriptions: Arc::new(Mutex::new(BTreeMap::new())),
-                pending_presentations: Arc::new(Mutex::new(BTreeMap::new())),
+                pending_presentations: Arc::new(XPendingPresentRegistry::default()),
                 pointer_state: Arc::new(Mutex::new(BTreeMap::new())),
                 input_authority: Arc::new(Mutex::new(crate::XInputAuthorityState::default())),
                 frozen_input: Arc::new(Mutex::new(VecDeque::new())),
@@ -1817,7 +1840,7 @@ struct XServerFrontendRouteRegistry {
     surfaces: Arc<Mutex<BTreeMap<SurfaceId, XServerFrontendSurfaceRoute>>>,
     randr_subscriptions: Arc<Mutex<BTreeMap<XServerFrontendClientId, (XResourceId, u16)>>>,
     present_subscriptions: Arc<Mutex<BTreeMap<XServerFrontendClientId, XPresentSubscription>>>,
-    pending_presentations: Arc<Mutex<BTreeMap<TransactionId, XPendingPresent>>>,
+    pending_presentations: Arc<XPendingPresentRegistry>,
     pointer_state: Arc<Mutex<BTreeMap<SeatId, crate::XCorePointerMapper>>>,
     input_authority: Arc<Mutex<crate::XInputAuthorityState>>,
     frozen_input: Arc<Mutex<VecDeque<XDeferredRoutedInput>>>,
@@ -1857,6 +1880,13 @@ struct XPendingPresent {
 }
 
 #[cfg(unix)]
+#[derive(Default)]
+struct XPendingPresentRegistry {
+    entries: Mutex<BTreeMap<TransactionId, XPendingPresent>>,
+    capacity_changed: Condvar,
+}
+
+#[cfg(unix)]
 #[derive(Clone, Debug)]
 struct XDeferredRoutedInput {
     client: XServerFrontendClientId,
@@ -1885,7 +1915,7 @@ struct XServerFrontendClientRouteRegistration {
     surfaces: Arc<Mutex<BTreeMap<SurfaceId, XServerFrontendSurfaceRoute>>>,
     randr_subscriptions: Arc<Mutex<BTreeMap<XServerFrontendClientId, (XResourceId, u16)>>>,
     present_subscriptions: Arc<Mutex<BTreeMap<XServerFrontendClientId, XPresentSubscription>>>,
-    pending_presentations: Arc<Mutex<BTreeMap<TransactionId, XPendingPresent>>>,
+    pending_presentations: Arc<XPendingPresentRegistry>,
     frozen_input: Arc<Mutex<VecDeque<XDeferredRoutedInput>>>,
 }
 
@@ -2099,18 +2129,40 @@ impl XServerFrontendRouteRegistry {
                 (route.client == client && route.window == window).then_some(*surface)
             })
             .ok_or(XServerFrontendRouteError::UnknownClient { client })?;
+        let deadline = Instant::now() + Duration::from_secs(2);
         let mut pending = self
             .pending_presentations
+            .entries
             .lock()
             .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?;
-        if pending.contains_key(&transaction)
-            || pending
-                .values()
-                .filter(|presentation| presentation.client == client)
-                .count()
-                >= self.per_client_queue_capacity.get()
+        if pending.contains_key(&transaction) {
+            return Err(XServerFrontendRouteError::DuplicatePresentation { transaction });
+        }
+        while pending
+            .values()
+            .filter(|presentation| presentation.client == client)
+            .count()
+            >= self.per_client_queue_capacity.get()
         {
-            return Err(XServerFrontendRouteError::ClientQueueFull { client });
+            let now = Instant::now();
+            if now >= deadline {
+                return Err(XServerFrontendRouteError::ClientQueueFull { client });
+            }
+            let (next, wait) = self
+                .pending_presentations
+                .capacity_changed
+                .wait_timeout(pending, deadline.saturating_duration_since(now))
+                .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?;
+            pending = next;
+            if wait.timed_out()
+                && pending
+                    .values()
+                    .filter(|presentation| presentation.client == client)
+                    .count()
+                    >= self.per_client_queue_capacity.get()
+            {
+                return Err(XServerFrontendRouteError::ClientQueueFull { client });
+            }
         }
         pending.insert(
             transaction,
@@ -2136,6 +2188,7 @@ impl XServerFrontendRouteRegistry {
         let presentation = {
             let mut pending = self
                 .pending_presentations
+                .entries
                 .lock()
                 .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?;
             let Some(presentation) = pending.get_mut(&transaction) else {
@@ -2173,6 +2226,16 @@ impl XServerFrontendRouteRegistry {
         Ok(true)
     }
 
+    fn cancel_present(&self, transaction: TransactionId) -> Result<(), XServerFrontendRouteError> {
+        self.pending_presentations
+            .entries
+            .lock()
+            .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
+            .remove(&transaction);
+        self.pending_presentations.capacity_changed.notify_all();
+        Ok(())
+    }
+
     fn route_present_idle(
         &self,
         transaction: TransactionId,
@@ -2180,6 +2243,7 @@ impl XServerFrontendRouteRegistry {
         let presentation = {
             let mut pending = self
                 .pending_presentations
+                .entries
                 .lock()
                 .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?;
             let Some(front) = pending.get(&transaction).copied() else {
@@ -2189,6 +2253,7 @@ impl XServerFrontendRouteRegistry {
                 return Ok(false);
             }
             pending.remove(&transaction);
+            self.pending_presentations.capacity_changed.notify_all();
             front
         };
         let subscription = self
@@ -2730,8 +2795,9 @@ impl Drop for XServerFrontendClientRouteRegistration {
         if let Ok(mut subscriptions) = self.present_subscriptions.lock() {
             subscriptions.remove(&self.client);
         }
-        if let Ok(mut pending) = self.pending_presentations.lock() {
+        if let Ok(mut pending) = self.pending_presentations.entries.lock() {
             pending.retain(|_, presentation| presentation.client != self.client);
+            self.pending_presentations.capacity_changed.notify_all();
         }
         if let Ok(mut frozen) = self.frozen_input.lock() {
             frozen.retain(|route| route.client != self.client);
@@ -3058,6 +3124,7 @@ pub struct X11CoreSocketServerState {
     atoms: Arc<Mutex<XAtomTable>>,
     properties: Arc<Mutex<XPropertyTable>>,
     clients: Arc<Mutex<X11CoreClientLeaseState>>,
+    next_transaction_id: Arc<AtomicU64>,
     render_device_provider: Option<Arc<dyn XServerFrontendRenderDeviceProvider>>,
 }
 
@@ -3070,6 +3137,10 @@ impl core::fmt::Debug for X11CoreSocketServerState {
             .field("atoms", &self.atoms)
             .field("properties", &self.properties)
             .field("clients", &self.clients)
+            .field(
+                "next_transaction_id",
+                &self.next_transaction_id.load(Ordering::Relaxed),
+            )
             .field(
                 "has_render_device_provider",
                 &self.render_device_provider.is_some(),
@@ -3101,6 +3172,7 @@ impl Default for X11CoreSocketServerState {
                 next_client_id: 1,
                 client_leases: Default::default(),
             })),
+            next_transaction_id: Arc::new(AtomicU64::new(1)),
             render_device_provider: None,
         }
     }
@@ -3110,6 +3182,16 @@ impl Default for X11CoreSocketServerState {
 impl X11CoreSocketServerState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn allocate_transaction(&self) -> Result<TransactionId, X11SetupSocketError> {
+        let raw = self
+            .next_transaction_id
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                current.checked_add(1)
+            })
+            .map_err(|_| X11SetupSocketError::new("X11 transaction identity space exhausted"))?;
+        Ok(TransactionId::from_raw(raw))
     }
 
     pub fn with_render_device_provider(
@@ -3859,9 +3941,25 @@ fn serve_x11_core_socket_listener_once_with_setup_authorization(
 pub fn serve_x11_setup_socket_client(
     stream: &mut UnixStream,
 ) -> Result<XSetupRequest, X11SetupSocketError> {
+    serve_x11_setup_socket_client_with_root_size(
+        stream,
+        Size {
+            width: i32::from(crate::X_SETUP_ROOT_WIDTH),
+            height: i32::from(crate::X_SETUP_ROOT_HEIGHT),
+        },
+    )
+}
+
+#[cfg(unix)]
+pub fn serve_x11_setup_socket_client_with_root_size(
+    stream: &mut UnixStream,
+    root_size: Size,
+) -> Result<XSetupRequest, X11SetupSocketError> {
     let authorization = XServerFrontendSetupAuthorization::default();
     serve_x11_setup_socket_client_with_setup_authorization(stream, &authorization, |_| {
-        Ok(Some(XSetupSuccess::client_compatible()))
+        let mut success = XSetupSuccess::client_compatible();
+        success.root_size = root_size;
+        Ok(Some(success))
     })?
     .map(|(request, _)| request)
     .ok_or_else(|| {
@@ -4216,6 +4314,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 std::thread::sleep(Duration::from_millis(1));
             }
             sequence = sequence.wrapping_add(1);
+            let transaction = state.allocate_transaction()?;
             let dispatch_context = XDispatchContext {
                 byte_order: setup.byte_order,
                 namespace,
@@ -4238,7 +4337,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 XWireClientContext {
                     byte_order: setup.byte_order,
                     namespace,
-                    transaction: TransactionId::from_raw(u64::from(sequence)),
+                    transaction,
                     resource_id_range: Some(resource_id_range),
                 },
                 &request,
@@ -4402,6 +4501,21 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                         }
                     }
                     request_detail = x11_core_request_trace_detail(&request);
+                    let queued_present = if let Some((window, pixmap, serial, idle_fence)) =
+                        pending_present
+                        && let Some(routing) = protocol_routing.as_ref()
+                    {
+                        routing
+                            .queue_present(transaction, client, window, pixmap, serial, idle_fence)
+                            .map_err(|error| {
+                                X11SetupSocketError::client_failure(format!(
+                                    "failed to queue Present feedback: {error}"
+                                ))
+                            })?;
+                        true
+                    } else {
+                        false
+                    };
                     let mut runtime = state.runtime.lock().map_err(|_| {
                         X11SetupSocketError::new("X11 authority runtime lock poisoned")
                     })?;
@@ -4529,28 +4643,6 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                                     ))
                                 })?;
                         }
-                        if let Some((window, pixmap, serial, idle_fence)) = pending_present
-                            && let Some(transaction) = output
-                                .response
-                                .as_ref()
-                                .map(|response| response.transaction)
-                            && let Some(routing) = protocol_routing.as_ref()
-                        {
-                            routing
-                                .queue_present(
-                                    transaction,
-                                    client,
-                                    window,
-                                    pixmap,
-                                    serial,
-                                    idle_fence,
-                                )
-                                .map_err(|error| {
-                                    X11SetupSocketError::new(format!(
-                                        "failed to queue Present feedback: {error}"
-                                    ))
-                                })?;
-                        }
                         if let Some((affect_which, clear, select_all, state)) = xkb_selection {
                             let mut details = xkb_state_details.load(Ordering::Acquire);
                             if clear & 4 != 0 {
@@ -4566,6 +4658,16 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                             }
                             xkb_state_details.store(details, Ordering::Release);
                         }
+                    }
+                    if queued_present
+                        && !dispatch_succeeded
+                        && let Some(routing) = protocol_routing.as_ref()
+                    {
+                        routing.cancel_present(transaction).map_err(|error| {
+                            X11SetupSocketError::new(format!(
+                                "failed to cancel rejected Present feedback: {error}"
+                            ))
+                        })?;
                     }
                     // The CPU update belongs to this dispatch. Keep it under
                     // the runtime lock so a simultaneous client cannot take
@@ -4876,7 +4978,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
         Ok(())
     } else {
         sequence = sequence.wrapping_add(1);
-        let transaction = TransactionId::from_raw(u64::from(sequence));
+        let transaction = state.allocate_transaction()?;
         let mut response = XAuthorityResponsePacket::accepted(transaction);
         response.removed_surfaces = release.removed_surfaces;
         let cleanup = XDispatchResult {
@@ -5753,6 +5855,22 @@ mod routing_tests {
     use super::*;
     use sophia_protocol::{DeviceId, Point};
     use std::sync::mpsc::sync_channel;
+
+    #[test]
+    fn listener_transaction_ids_are_global_across_client_workers() {
+        let state = X11CoreSocketServerState::new();
+        let first_worker = state.clone();
+        let second_worker = state.clone();
+
+        let first = first_worker.allocate_transaction().unwrap();
+        let second = second_worker.allocate_transaction().unwrap();
+        let third = first_worker.allocate_transaction().unwrap();
+
+        assert_ne!(first, second);
+        assert_ne!(second, third);
+        assert_eq!(first.raw() + 1, second.raw());
+        assert_eq!(second.raw() + 1, third.raw());
+    }
 
     #[test]
     fn routed_input_discards_another_clients_event() {
