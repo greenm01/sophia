@@ -1310,6 +1310,18 @@ impl XAuthorityRuntime {
             .ok_or(XAuthorityRuntimeError::UnknownResource)
     }
 
+    pub fn destroy_dri3_fence(
+        &mut self,
+        namespace: NamespaceId,
+        fence: crate::XResourceId,
+    ) -> Result<sophia_protocol::FenceHandle, XAuthorityRuntimeError> {
+        self.validate_dri3_fence_access(namespace, fence)?;
+        self.resources.remove(fence);
+        self.dri3_fences
+            .remove(&fence)
+            .ok_or(XAuthorityRuntimeError::UnknownResource)
+    }
+
     pub fn open_font(
         &mut self,
         namespace: NamespaceId,

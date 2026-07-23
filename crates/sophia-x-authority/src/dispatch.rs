@@ -72,9 +72,10 @@ fn glx_fb_config(id: u32, visual: u32, alpha: u32, srgb: u32) -> Vec<(u32, u32)>
         (0x3, 0),
         (0x5, 1),
         (0x6, 0),
-        (0x7, 8),
+        (0x7, 0),
         (0x8, 8),
         (0x9, 8),
+        (0xa, 8),
         (0xb, alpha),
         (0xc, 0),
         (0xd, 0),
@@ -82,9 +83,6 @@ fn glx_fb_config(id: u32, visual: u32, alpha: u32, srgb: u32) -> Vec<(u32, u32)>
         (0xf, 0),
         (0x10, 0),
         (0x11, 0),
-        (0x12, 0),
-        (0x13, 0),
-        (0x14, 0),
         (0x20, 0x8000),
         (0x23, 0x8000),
         (0x186a0, 0),
@@ -1660,6 +1658,11 @@ pub fn dispatch_x11_wire_request(
                 metadata_candidates: Vec::new(),
             }
         }
+        XWireRequest::FreeColormap { .. } => XDispatchResult {
+            response: None,
+            outputs: Vec::new(),
+            metadata_candidates: Vec::new(),
+        },
         XWireRequest::AllocNamedColor { name, .. } => {
             let black = name.eq_ignore_ascii_case("black");
             let intensity = if black { 0 } else { u16::MAX };
@@ -1974,7 +1977,7 @@ pub fn dispatch_x11_wire_request(
             depth,
             bits_per_pixel,
         } => {
-            let outputs = if depth != 24 || bits_per_pixel != 32 {
+            let outputs = if !matches!((depth, bits_per_pixel), (24 | 32, 32)) {
                 vec![XClientOutput::Error(crate::XClientError {
                     code: XErrorCode::BadValue,
                     sequence: context.sequence,
@@ -2726,6 +2729,35 @@ pub fn dispatch_x11_wire_request(
                     drawable.local.raw() as u32,
                 ))],
             };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::SyncInitialize { .. } => XDispatchResult {
+            response: None,
+            outputs: vec![XClientOutput::Reply(XClientReply::SyncInitialize {
+                sequence: context.sequence,
+                major_version: 3,
+                minor_version: 1,
+            })],
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::SyncDestroyFence { fence } => {
+            let outputs = runtime
+                .destroy_dri3_fence(context.namespace, fence)
+                .err()
+                .map(|error| {
+                    XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        u32::try_from(fence.local.raw()).unwrap_or(0),
+                    ))
+                })
+                .into_iter()
+                .collect();
             XDispatchResult {
                 response: None,
                 outputs,
@@ -3754,6 +3786,12 @@ fn extension_query_result(name: &str) -> XExtensionQueryResult {
         crate::X_GLX_EXTENSION_NAME => XExtensionQueryResult {
             present: true,
             major_opcode: crate::X_GLX_MAJOR_OPCODE,
+            first_event: 0,
+            first_error: 0,
+        },
+        crate::X_SYNC_EXTENSION_NAME => XExtensionQueryResult {
+            present: true,
+            major_opcode: crate::X_SYNC_MAJOR_OPCODE,
             first_event: 0,
             first_error: 0,
         },

@@ -420,6 +420,11 @@ pub enum XClientReply {
         sequence: u16,
         attributes: Vec<(u32, u32)>,
     },
+    SyncInitialize {
+        sequence: u16,
+        major_version: u8,
+        minor_version: u8,
+    },
     XkbGetMap {
         sequence: u16,
         present: u16,
@@ -1295,6 +1300,17 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
                 put_u32(byte_order, &mut out[offset + 4..offset + 8], value);
                 offset += 8;
             }
+            out
+        }
+        XClientReply::SyncInitialize {
+            sequence,
+            major_version,
+            minor_version,
+        } => {
+            let mut out = vec![0; X_CLIENT_OUTPUT_RECORD_LEN];
+            write_reply_header(byte_order, &mut out, sequence, 0);
+            out[8] = major_version;
+            out[9] = minor_version;
             out
         }
         XClientReply::XkbGetMap {

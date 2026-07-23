@@ -436,7 +436,8 @@ explicit and evidence-driven:
   and cursor request handling covers only retained probes.
 - Large selection transfers through `INCR` and full Xdnd execution remain
   deferred behind the bounded clipboard reference flow.
-- Render and Sync are not advertised. GLX advertises only the captured
+- Render is not advertised. Sync advertises only version negotiation and the
+  DRI3-fence teardown used by Mesa. GLX advertises only the captured
   direct-Mesa bootstrap needed by Kitty: GLVND vendor selection, deterministic
   visuals/FBConfigs, direct context/window lifecycle, and drawable attributes.
   Indirect rendering and server-side GLX buffer submission remain deferred.

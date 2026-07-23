@@ -1028,11 +1028,13 @@ fn run_x_authority_kitty_smoke()
         &[
             "--config",
             "NONE",
+            "--override",
+            "close_on_child_death=yes",
             "--title",
             "Sophia Kitty GLX proof",
             "sh",
             "-c",
-            "printf 'Sophia Kitty proof\\n'; sleep 3",
+            "printf 'Sophia Kitty proof\\n'; sleep 5",
         ],
         display,
         socket_path,
@@ -1718,6 +1720,11 @@ fn run_x_authority_external_probe_smoke(
     render_device_provider: Option<Arc<dyn XServerFrontendRenderDeviceProvider>>,
 ) -> Result<XAuthorityExternalProbeSmokeReport, Box<dyn std::error::Error>> {
     let server_path = socket_path.clone();
+    let proof_timeout = if label == "kitty" {
+        Duration::from_secs(20)
+    } else {
+        Duration::from_secs(8)
+    };
     // One X request can produce an opcode, detail, transaction, and buffer
     // update. Keep the diagnostic channel large enough that a replacement
     // update cannot be dropped while a later patch is retained.
@@ -1729,7 +1736,7 @@ fn run_x_authority_external_probe_smoke(
     let server = std::thread::spawn(move || {
         run_x11_core_socket_server_once_config_traced_with_idle_timeout(
             server_config,
-            Duration::from_secs(8),
+            proof_timeout,
             |trace| {
                 let _ = sender.try_send(ExternalProbeObservation::Opcode(trace.major_opcode));
                 if let Some(detail) = &trace.request_detail {
@@ -1796,6 +1803,13 @@ fn run_x_authority_external_probe_smoke(
                 .env("GTK_USE_PORTAL", "0")
                 .env("MOZ_ENABLE_WAYLAND", "0")
                 .env_remove("WAYLAND_DISPLAY");
+            if label == "kitty" && std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_none() {
+                // A missing address invokes dbus-launch, which opens the
+                // smoke's single X connection before Kitty. A deliberately
+                // unavailable address makes desktop integration fail quickly
+                // while leaving the graphics proof deterministic.
+                command.env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/dev/null");
+            }
         }
     }
     command
@@ -1805,7 +1819,7 @@ fn run_x_authority_external_probe_smoke(
         .stderr(std::process::Stdio::piped());
     let mut child = command.spawn()?;
 
-    let deadline = std::time::Instant::now() + Duration::from_secs(8);
+    let deadline = std::time::Instant::now() + proof_timeout;
     let mut transactions = Vec::new();
     let mut cpu_buffers = std::collections::BTreeMap::new();
     let mut cpu_buffer_updates = 0usize;
@@ -1860,12 +1874,7 @@ fn run_x_authority_external_probe_smoke(
             let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
         }
         proof_window_killed = true;
-        let status = child.wait()?;
-        std::process::Output {
-            status,
-            stdout: Vec::new(),
-            stderr: Vec::new(),
-        }
+        child.wait_with_output()?
     } else {
         child.wait_with_output()?
     };
@@ -1909,6 +1918,24 @@ fn run_x_authority_external_probe_smoke(
         .collect::<Vec<_>>()
         .join(",");
     let details = details.into_iter().collect::<Vec<_>>().join(",");
+
+    if label == "kitty" {
+        for required in [
+            "GLX:QueryServerString:name=0x20f6",
+            "GLX:GetFBConfigs:screen=0",
+            "GLX:CreateContext",
+            "GLX:CreateWindow",
+            "DRI3:PixmapFromBuffers",
+            "PRESENT:Pixmap",
+        ] {
+            if !details.contains(required) {
+                return Err(format!(
+                    "kitty trace omitted required direct-GLX stage {required} for {display}: details={details}"
+                )
+                .into());
+            }
+        }
+    }
 
     if let Some(error) = &first_error {
         return Err(format!(

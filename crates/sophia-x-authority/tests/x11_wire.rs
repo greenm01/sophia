@@ -592,6 +592,136 @@ fn glx_fb_config_reply_uses_tagged_attribute_pairs() {
 }
 
 #[test]
+fn kitty_glx_context_attribs_layout_decodes_the_28_byte_header() {
+    let byte_order = XByteOrder::LittleEndian;
+    let mut request = vec![
+        X_GLX_MAJOR_OPCODE,
+        X_GLX_CREATE_CONTEXT_ATTRIBS_ARB_MINOR_OPCODE,
+    ];
+    push_u16(&mut request, byte_order, 13);
+    push_u32(&mut request, byte_order, 0x0020_000b);
+    push_u32(&mut request, byte_order, 3);
+    push_u32(&mut request, byte_order, 0);
+    push_u32(&mut request, byte_order, 0);
+    request.extend_from_slice(&[1, 0, 0, 0]);
+    push_u32(&mut request, byte_order, 3);
+    for (attribute, value) in [(0x2091, 3), (0x2092, 1), (0x9126, 1)] {
+        push_u32(&mut request, byte_order, attribute);
+        push_u32(&mut request, byte_order, value);
+    }
+    assert_eq!(request.len(), 52);
+    assert_eq!(
+        decode_x11_core_request(context(NamespaceId::from_raw(1), 1, byte_order), &request)
+            .unwrap(),
+        XWireRequest::GlxCreateContext {
+            context: XResourceId::new(0x0020_000b, 1),
+            fbconfig: 3,
+            screen: 0,
+            share: None,
+            direct: true,
+        }
+    );
+}
+
+#[test]
+fn kitty_fbconfig_catalog_has_argb_blue_aux_and_srgb_attributes() {
+    let namespace = NamespaceId::from_raw(1);
+    let mut runtime = XAuthorityRuntime::new();
+    let mut atoms = XAtomTable::new();
+    let mut properties = XPropertyTable::new();
+    let encoded = dispatch_x11_wire_request(
+        dispatch_context(namespace, 12, XByteOrder::LittleEndian, X_GLX_MAJOR_OPCODE),
+        XWireRequest::GlxGetFbConfigs { screen: 0 },
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    )
+    .encoded_outputs(XByteOrder::LittleEndian)
+    .remove(0);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[8..12]), 3);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[12..16]), 26);
+    let pair = |config: usize, attribute: usize| 32 + (config * 26 + attribute) * 8;
+    let aux = pair(0, 10);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &encoded[aux..aux + 4]),
+        7
+    );
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &encoded[aux + 4..aux + 8]),
+        0
+    );
+    let blue = pair(0, 13);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &encoded[blue..blue + 4]),
+        10
+    );
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &encoded[blue + 4..blue + 8]),
+        8
+    );
+    let srgb = pair(2, 25);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &encoded[srgb..srgb + 4]),
+        0x20b2
+    );
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &encoded[srgb + 4..srgb + 8]),
+        1
+    );
+}
+
+#[test]
+fn kitty_sync_and_colormap_teardown_requests_decode() {
+    let namespace = NamespaceId::from_raw(1);
+    let mut initialize = vec![
+        X_SYNC_MAJOR_OPCODE,
+        X_SYNC_INITIALIZE_MINOR_OPCODE,
+        2,
+        0,
+        3,
+        1,
+        0,
+        0,
+    ];
+    initialize[2..4].copy_from_slice(&2u16.to_le_bytes());
+    assert_eq!(
+        decode_x11_core_request(context(namespace, 1, XByteOrder::LittleEndian), &initialize)
+            .unwrap(),
+        XWireRequest::SyncInitialize {
+            desired_major: 3,
+            desired_minor: 1
+        }
+    );
+    for (major, minor, expected) in [
+        (
+            X_SYNC_MAJOR_OPCODE,
+            X_SYNC_DESTROY_FENCE_MINOR_OPCODE,
+            XWireRequest::SyncDestroyFence {
+                fence: XResourceId::new(0x0020_000f, 1),
+            },
+        ),
+        (
+            79,
+            0,
+            XWireRequest::FreeColormap {
+                colormap: XResourceId::new(0x0020_0008, 1),
+            },
+        ),
+    ] {
+        let mut request = vec![major, minor, 2, 0];
+        request.extend_from_slice(&0x0020_000fu32.to_le_bytes());
+        if major == 79 {
+            request[4..8].copy_from_slice(&0x0020_0008u32.to_le_bytes());
+        }
+        assert_eq!(
+            decode_x11_core_request(context(namespace, 2, XByteOrder::LittleEndian), &request)
+                .unwrap(),
+            expected
+        );
+    }
+}
+
+#[test]
 fn x11_setup_failure_reply_encodes_native_failure() {
     let reply = encode_x11_setup_failure(
         XByteOrder::BigEndian,
@@ -2465,6 +2595,20 @@ fn dri3_get_supported_modifiers_reports_linear_and_implicit_screen_layouts() {
         read_u64(XByteOrder::LittleEndian, &encoded[0][40..48]),
         0x00ff_ffff_ffff_ffff
     );
+
+    let argb = dispatch_x11_wire_request(
+        dispatch_context(namespace, 10, XByteOrder::LittleEndian, X_DRI3_MAJOR_OPCODE),
+        XWireRequest::Dri3GetSupportedModifiers {
+            window: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
+            depth: 32,
+            bits_per_pixel: 32,
+        },
+        &mut runtime,
+        &mut atoms,
+        &mut properties,
+    )
+    .encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(argb[0][0], 1);
 
     let invalid = decode_x11_core_request(
         context(namespace, 530, XByteOrder::LittleEndian),

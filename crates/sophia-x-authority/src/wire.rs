@@ -67,6 +67,7 @@ const X_GET_IMAGE: u8 = 73;
 const X_POLY_TEXT8: u8 = 74;
 const X_IMAGE_TEXT8: u8 = 76;
 const X_CREATE_COLORMAP: u8 = 78;
+const X_FREE_COLORMAP: u8 = 79;
 const X_ALLOC_COLOR: u8 = 84;
 const X_ALLOC_NAMED_COLOR: u8 = 85;
 const X_QUERY_COLORS: u8 = 91;
@@ -184,6 +185,10 @@ pub const X_GLX_DELETE_WINDOW_MINOR_OPCODE: u8 = 32;
 pub const X_GLX_SET_CLIENT_INFO_ARB_MINOR_OPCODE: u8 = 33;
 pub const X_GLX_CREATE_CONTEXT_ATTRIBS_ARB_MINOR_OPCODE: u8 = 34;
 pub const X_GLX_SET_CLIENT_INFO_2_ARB_MINOR_OPCODE: u8 = 35;
+pub const X_SYNC_EXTENSION_NAME: &str = "SYNC";
+pub const X_SYNC_MAJOR_OPCODE: u8 = 141;
+pub const X_SYNC_INITIALIZE_MINOR_OPCODE: u8 = 0;
+pub const X_SYNC_DESTROY_FENCE_MINOR_OPCODE: u8 = 17;
 
 const X_CREATE_WINDOW_REQ_LEN: usize = 32;
 const X_CHANGE_WINDOW_ATTRIBUTES_REQ_LEN: usize = 12;
@@ -244,6 +249,7 @@ const X_PUT_IMAGE_REQ_LEN: usize = 24;
 const X_POLY_TEXT8_REQ_LEN: usize = 16;
 const X_IMAGE_TEXT8_REQ_LEN: usize = 16;
 const X_CREATE_COLORMAP_REQ_LEN: usize = 16;
+const X_FREE_COLORMAP_REQ_LEN: usize = 8;
 const X_ALLOC_COLOR_REQ_LEN: usize = 16;
 const X_ALLOC_NAMED_COLOR_REQ_LEN: usize = 12;
 const X_QUERY_COLORS_REQ_LEN: usize = 8;
@@ -526,6 +532,9 @@ pub enum XWireRequest {
         colormap: XResourceId,
         window: XResourceId,
         visual: u32,
+    },
+    FreeColormap {
+        colormap: XResourceId,
     },
     AllocColor {
         colormap: XResourceId,
@@ -828,6 +837,13 @@ pub enum XWireRequest {
     GlxGetDrawableAttributes {
         drawable: XResourceId,
     },
+    SyncInitialize {
+        desired_major: u8,
+        desired_minor: u8,
+    },
+    SyncDestroyFence {
+        fence: XResourceId,
+    },
     GlxQueryExtensionsString,
     GlxQueryServerString {
         name: u32,
@@ -1074,6 +1090,12 @@ pub fn decode_x11_core_request(
         X_POLY_TEXT8 => decode_poly_text8(context, bytes),
         X_IMAGE_TEXT8 => decode_image_text8(context, bytes),
         X_CREATE_COLORMAP => decode_create_colormap(context, bytes),
+        X_FREE_COLORMAP => {
+            require_exact_len(X_FREE_COLORMAP, X_FREE_COLORMAP_REQ_LEN, bytes.len())?;
+            Ok(XWireRequest::FreeColormap {
+                colormap: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+            })
+        }
         X_ALLOC_COLOR => decode_alloc_color(context, bytes),
         X_ALLOC_NAMED_COLOR => decode_alloc_named_color(context, bytes),
         X_QUERY_COLORS => decode_query_colors(context, bytes),
@@ -1110,6 +1132,22 @@ pub fn decode_x11_core_request(
         X_PRESENT_MAJOR_OPCODE => decode_present(context, bytes),
         X_XFIXES_MAJOR_OPCODE => decode_xfixes(context, bytes),
         X_GLX_MAJOR_OPCODE => decode_glx(context, bytes),
+        X_SYNC_MAJOR_OPCODE => match bytes[1] {
+            X_SYNC_INITIALIZE_MINOR_OPCODE => {
+                require_exact_len(X_SYNC_MAJOR_OPCODE, 8, bytes.len())?;
+                Ok(XWireRequest::SyncInitialize {
+                    desired_major: bytes[4],
+                    desired_minor: bytes[5],
+                })
+            }
+            X_SYNC_DESTROY_FENCE_MINOR_OPCODE => {
+                require_exact_len(X_SYNC_MAJOR_OPCODE, 8, bytes.len())?;
+                Ok(XWireRequest::SyncDestroyFence {
+                    fence: XResourceId::new(u64::from(context.byte_order.u32(&bytes[4..8])), 1),
+                })
+            }
+            other => Err(XWireParseError::UnknownOpcode(other)),
+        },
         other => Err(XWireParseError::UnknownOpcode(other)),
     }
 }
@@ -1179,22 +1217,22 @@ fn decode_glx(context: XWireClientContext, bytes: &[u8]) -> Result<XWireRequest,
             })
         }
         X_GLX_CREATE_CONTEXT_ATTRIBS_ARB_MINOR_OPCODE => {
-            require_len(X_GLX_MAJOR_OPCODE, 32, bytes.len())?;
-            let count = context.byte_order.u32(&bytes[28..32]) as usize;
+            require_len(X_GLX_MAJOR_OPCODE, 28, bytes.len())?;
+            let count = context.byte_order.u32(&bytes[24..28]) as usize;
             require_exact_len(
                 X_GLX_MAJOR_OPCODE,
-                32usize.saturating_add(count.saturating_mul(8)),
+                28usize.saturating_add(count.saturating_mul(8)),
                 bytes.len(),
             )?;
             let context_id = context.byte_order.u32(&bytes[4..8]);
             context.validate_new_resource_id(context_id)?;
-            let share = context.byte_order.u32(&bytes[20..24]);
+            let share = context.byte_order.u32(&bytes[16..20]);
             Ok(XWireRequest::GlxCreateContext {
                 context: XResourceId::new(u64::from(context_id), 1),
                 fbconfig: context.byte_order.u32(&bytes[8..12]),
                 screen: context.byte_order.u32(&bytes[12..16]),
                 share: (share != 0).then(|| XResourceId::new(u64::from(share), 1)),
-                direct: bytes[24] != 0,
+                direct: bytes[20] != 0,
             })
         }
         X_GLX_CREATE_WINDOW_MINOR_OPCODE => {

@@ -2097,6 +2097,15 @@ window aliases, and drawable attributes. The catalog deliberately contains
 only XRGB linear, ARGB linear, and ARGB sRGB configurations with depth/stencil
 zero. Indirect GLX rendering, server-side Render/RenderLarge, and GLX
 SwapBuffers remain unsupported; Mesa renders client-side and submits through
-DRI3/Present. `x-authority-kitty-smoke` is the real-client regression. This
-build environment has no `/dev/dri`, so its render-node run and the physical
-TTY3 capture remain operator gates.
+DRI3/Present. The first live trace additionally showed Mesa using X Sync to
+destroy DRI3 fences and GLFW freeing its ARGB colormap, so the bounded Sync
+initialization/fence teardown and core colormap teardown paths are retained as
+part of the same compatibility slice.
+
+`x-authority-kitty-smoke` now proves the exact live sequence on an AMD render
+node: GLVND vendor selection, FBConfig discovery, two direct context/window
+lifecycles, depth-32 modifier negotiation, ARGB DRI3 import, one accepted
+Present transaction, one committed runtime surface, and clean protocol state
+with `first_error=none`. The guarded physical TTY3 capture remains the session
+gate; the standalone smoke deliberately terminates its proof window after the
+first committed frame because it has no live renderer feedback loop.

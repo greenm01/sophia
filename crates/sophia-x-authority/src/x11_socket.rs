@@ -4232,6 +4232,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 dri3_fence_import,
                 present_submission,
                 released_dma_bufs,
+                released_fences,
                 mut server_reply_fds,
             ) = match decode_x11_core_request(
                 XWireClientContext {
@@ -4286,6 +4287,10 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                     };
                     let freed_pixmap = match &request {
                         crate::XWireRequest::FreePixmap { pixmap } => Some(*pixmap),
+                        _ => None,
+                    };
+                    let destroyed_fence = match &request {
+                        crate::XWireRequest::SyncDestroyFence { fence } => Some(*fence),
                         _ => None,
                     };
                     let hierarchy_create = match &request {
@@ -4413,6 +4418,8 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                             .ok()
                             .map(|descriptor| descriptor.handle)
                     });
+                    let released_fence = destroyed_fence
+                        .and_then(|fence| runtime.dri3_fence_handle(namespace, fence).ok());
                     let mut output = dispatch_x11_wire_request(
                         dispatch_context,
                         request,
@@ -4629,6 +4636,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                         dri3_fence_import,
                         present_submission,
                         released_dma_buf.into_iter().collect::<Vec<_>>(),
+                        released_fence.into_iter().collect::<Vec<_>>(),
                         server_reply_fds,
                     )
                 }
@@ -4646,6 +4654,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                         None,
                         None,
                         None,
+                        Vec::new(),
                         Vec::new(),
                         Vec::new(),
                     )
@@ -4776,7 +4785,7 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                 dri3_fence_import,
                 present_submission,
                 released_dma_bufs: &released_dma_bufs,
-                released_fences: &[],
+                released_fences: &released_fences,
                 server_reply_fd_count: server_reply_fds.len(),
             })?;
             let encoded_outputs = output.encoded_outputs(setup.byte_order);
