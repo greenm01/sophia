@@ -31,6 +31,20 @@ active roadmap. The retired Wayland and XLibre prototypes remain under
 - [ ] Select the next measurable milestone from observed native-X daily-driver
   gaps; do not broaden X11 support without retained client evidence.
 
+## Active Safety Follow-up: Physical TTY3 Recovery
+
+The first native xmonad TTY3 operator attempt reached a blank scanout and had
+no usable VT switch or local escape, forcing a reboot. The launcher had omitted
+the independent recovery guard and TTY restoration already required by the
+Milestone 5 hardware runner.
+
+- [x] Require Ctrl-Alt-Backspace guard arming before xmonad graphics takeover.
+- [x] Restore KD mode, termios, and keyd on normal, failed, and emergency exits.
+- [ ] Reproduce the startup failure with the guarded launcher and retain the
+  launcher, input-guard, recovery, and Sophia session logs.
+- [ ] Verify the second Ctrl-Alt-Backspace chord returns to a usable tty3 before
+  retrying interactive application input.
+
 ## Active Follow-up: Interactive QEMU Operator Session
 
 The unattended M8 QEMU gate remains complete and unaffected. A separate manual

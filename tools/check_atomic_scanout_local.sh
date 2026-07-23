@@ -31,6 +31,8 @@ bash -n tools/atomic_scanout_hardware_status.sh
 bash -n tools/operator_keyboard_hardware_proof.sh
 bash -n tools/finish_milestones_1_2.sh
 bash -n tools/run_sophia_xmonad_session.sh
+grep -Fq 'sophia-session-input-guard' tools/run_sophia_xmonad_session.sh
+grep -Fq 'sophia_tty_mode.py" "$kd_mode"' tools/run_sophia_xmonad_session.sh
 bash -n tools/stop_sophia_xmonad_session.sh
 bash -n tools/xmonad_live_session_smoke.sh
 bash -n tools/live_session_persistent_hardware_proof.sh

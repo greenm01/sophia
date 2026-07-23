@@ -86,11 +86,15 @@ which ones Sophia should own before stopping LightDM. It refuses to stop an
 unknown Xorg session and retains launcher output in
 `/tmp/sophia-tty3-launch.log`. The supervised wrapper builds optimized Sophia
 and generic X11 WM bridge binaries, verifies exclusive TTY/DRM/input
-conditions, temporarily stops keyd,
-and restores it on exit. Sophia supervises the bridge as a generic WM policy
-process. Xmonad sees only a synthetic private display; Kitty remains connected
-to Sophia X Authority. Engine validates and applies xmonad placement,
-stacking, and focus, while physical input and scanout remain Sophia-owned.
+conditions, temporarily stops keyd, and requires one Ctrl-Alt-Backspace chord
+to arm an independent recovery guard before graphics takeover. A second chord
+terminates the session without depending on Sophia input routing. The wrapper
+restores KD mode, termios, and keyd on exit, with durable guard and recovery
+logs under `~/.local/state/sophia/xmonad-session/`. Sophia supervises the
+bridge as a generic WM policy process. Xmonad sees only a synthetic private
+display; Kitty remains connected to Sophia X Authority. Engine validates and
+applies xmonad placement, stacking, and focus, while physical input and scanout
+remain Sophia-owned.
 
 The live compatibility gate allows xmonad to request a real client size. Sophia
 keeps the previous geometry and pixels until X Authority publishes the matching
@@ -107,8 +111,9 @@ Stop the session from another TTY, from the Sophia checkout, with:
 tools/stop_sophia_xmonad_session.sh
 ```
 
-The wrapper owns the session process group and restores `keyd` during either
-shutdown path.
+The wrapper owns the session process group and restores the text TTY and `keyd`
+during either shutdown path. Ctrl-Alt-Fn switching is not a recovery mechanism
+until Sophia implements correct VT suspend and resume.
 
 ## Native Session Evidence
 

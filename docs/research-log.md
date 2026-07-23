@@ -2055,3 +2055,17 @@ intentional bridge/xmonad restart with layout preserved, launches a second
 registered xterm through xmonad's terminal action, closes it, logs out, and
 retires two-output native presentation without cleanup debt. The frozen
 Milestone 7 two-xterm gate also passes against the same build.
+## 2026-07-22: Xmonad TTY3 Requires Independent Local Recovery
+
+The first physical native-xmonad TTY3 operator attempt produced blank scanout.
+Sophia did not provide VT suspend/resume, the wrapper had no independent input
+guard or explicit KD/termios restoration, and its documented recovery path
+incorrectly depended on switching to another TTY. The operator had to reboot,
+which also erased the `/tmp` launcher log.
+
+The xmonad wrapper now applies the established guarded TTY lifecycle before
+graphics takeover: one Ctrl-Alt-Backspace chord must arm the independent input
+guard, a second chord stops the supervised session even if Sophia input routing
+is wedged, and cleanup restores KD mode, termios, and keyd. Guard and recovery
+records are durable under the user's state directory. Ctrl-Alt-Fn remains
+unsupported until Engine owns a correct VT/DRM suspend-and-resume boundary.
