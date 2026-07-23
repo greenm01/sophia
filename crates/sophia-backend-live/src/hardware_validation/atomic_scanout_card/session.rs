@@ -12,9 +12,92 @@ pub struct RealAtomicScanoutPageFlipSession {
     outputs: Vec<OutputId>,
     pub(super) reader: NativeLibdrmPageFlipEventReader<RealAtomicScanoutCard>,
     pub(super) poller: NativeLibdrmPageFlipEventPoller,
+    #[cfg(feature = "gbm-probe")]
+    cursor_buffer: Option<drm::control::dumbbuffer::DumbBuffer>,
+    #[cfg(feature = "gbm-probe")]
+    cursor_crtc: Option<drm::control::crtc::Handle>,
 }
 
 impl RealAtomicScanoutPageFlipSession {
+    #[cfg(feature = "gbm-probe")]
+    pub fn update_classic_hardware_cursor(
+        &mut self,
+        target: Option<(LibdrmNativePrimaryPlaneSelection, i32, i32)>,
+    ) -> io::Result<bool> {
+        use drm::control::Device as _;
+
+        const EDGE: u32 = 64;
+        if self.cursor_buffer.is_none() {
+            let mut buffer =
+                self.card
+                    .create_dumb_buffer((EDGE, EDGE), drm::buffer::DrmFourcc::Argb8888, 32)?;
+            let pitch = usize::try_from(drm::buffer::Buffer::pitch(&buffer))
+                .map_err(|_| io::Error::other("cursor pitch exceeds address space"))?;
+            {
+                let mut mapping = self.card.map_dumb_buffer(&mut buffer)?;
+                mapping.fill(0);
+                const SHAPE: [&[u8]; 18] = [
+                    b"##................",
+                    b"#W#...............",
+                    b"#WW#..............",
+                    b"#WWW#.............",
+                    b"#WWWW#............",
+                    b"#WWWWW#...........",
+                    b"#WWWWWW#..........",
+                    b"#WWWWWWW#.........",
+                    b"#WWWWWWWW#........",
+                    b"#WWWWWWWWW#.......",
+                    b"#WWWWW#####.......",
+                    b"#WWW#W#...........",
+                    b"#WW#.#W#..........",
+                    b"#W#..#W#..........",
+                    b"##...#WW#.........",
+                    b"#....#WW#.........",
+                    b".....#WW#.........",
+                    b"......##..........",
+                ];
+                for (y, row) in SHAPE.iter().enumerate() {
+                    for (x, pixel) in row.iter().copied().enumerate() {
+                        let color = match pixel {
+                            b'W' => [0xff, 0xff, 0xff, 0xff],
+                            b'#' => [0x00, 0x00, 0x00, 0xff],
+                            _ => continue,
+                        };
+                        let offset = y * pitch + x * 4;
+                        mapping[offset..offset + 4].copy_from_slice(&color);
+                    }
+                }
+            }
+            self.cursor_buffer = Some(buffer);
+        }
+
+        let target = target.filter(|(selection, _, _)| {
+            self.selections
+                .iter()
+                .any(|candidate| candidate.crtc == selection.crtc)
+        });
+        if self.cursor_crtc != target.map(|(selection, _, _)| selection.crtc) {
+            if let Some(previous) = self.cursor_crtc.take() {
+                #[allow(deprecated)]
+                self.card
+                    .set_cursor::<drm::control::dumbbuffer::DumbBuffer>(previous, None)?;
+            }
+            if let Some((selection, _, _)) = target {
+                #[allow(deprecated)]
+                self.card
+                    .set_cursor2(selection.crtc, self.cursor_buffer.as_ref(), (0, 0))?;
+                self.cursor_crtc = Some(selection.crtc);
+            }
+        }
+        if let Some((selection, x, y)) = target {
+            #[allow(deprecated)]
+            self.card.move_cursor(selection.crtc, (x, y))?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     pub fn card(&self) -> &RealAtomicScanoutCard {
         &self.card
     }
@@ -182,6 +265,24 @@ impl RealAtomicScanoutPageFlipSession {
     }
 }
 
+impl Drop for RealAtomicScanoutPageFlipSession {
+    fn drop(&mut self) {
+        #[cfg(feature = "gbm-probe")]
+        {
+            use drm::control::Device as _;
+            if let Some(crtc) = self.cursor_crtc.take() {
+                #[allow(deprecated)]
+                let _ = self
+                    .card
+                    .set_cursor::<drm::control::dumbbuffer::DumbBuffer>(crtc, None);
+            }
+            if let Some(buffer) = self.cursor_buffer.take() {
+                let _ = self.card.destroy_dumb_buffer(buffer);
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct RealAtomicScanoutPageFlipSessionResult {
     pub status: RealAtomicScanoutPageFlipSessionStatus,
@@ -264,6 +365,10 @@ impl RealAtomicScanoutCardSelection {
                 outputs: vec![output],
                 reader,
                 poller,
+                #[cfg(feature = "gbm-probe")]
+                cursor_buffer: None,
+                #[cfg(feature = "gbm-probe")]
+                cursor_crtc: None,
             }),
         }
     }
@@ -337,6 +442,10 @@ impl RealAtomicScanoutSelectionSet {
                 outputs,
                 reader,
                 poller,
+                #[cfg(feature = "gbm-probe")]
+                cursor_buffer: None,
+                #[cfg(feature = "gbm-probe")]
+                cursor_crtc: None,
             });
         }
         let output_count = usize::try_from(next_output.saturating_sub(1)).unwrap_or(usize::MAX);

@@ -57,10 +57,16 @@ Milestone 5 hardware runner.
 - [x] Start the private xmonad X server with the first Engine-provided layout
   bounds and notify it when those bounds change; production no longer begins
   from the 1280x720 smoke-fixture geometry.
-- [x] Coalesce pointer repaint work, avoid submitting over an in-flight frame,
-  and retain maximum motion-to-submit latency evidence.
-- [ ] Retain a physical two-output capture proving Super-Enter, cursor motion,
-  and Present Complete-before-Idle within two 60 Hz refresh intervals.
+- [x] Stop using CPU-only cursor repaints for DMA-BUF applications; install and
+  move a compositor-owned classic hardware cursor independently of Kitty's
+  primary-plane content.
+- [x] Add a guarded two-output Kitty-only TTY3 profile with no external WM or
+  layout-resize transaction dependency.
+- [ ] Retain a physical Kitty-only capture proving visible cursor motion within
+  two 60 Hz refresh intervals, click-drag selection, typed input, clean exit,
+  and emergency recovery.
+- [ ] Re-enable xmonad only after the Kitty input gate passes and the xmonad
+  resize handshake has its own retained regression.
 
 ## Active Follow-up: Interactive QEMU Operator Session
 

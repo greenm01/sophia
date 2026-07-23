@@ -26,6 +26,8 @@ mod persistent_native_scanout {
         pub presentation_started: Instant,
         pub vsync_overlap_rejections: usize,
         pub page_flip_phase_rejections: usize,
+        pub cursor_updates: usize,
+        pub cursor_update_failures: usize,
     }
 
     pub struct LiveProductionNativeGroup {
@@ -193,7 +195,49 @@ mod persistent_native_scanout {
                 presentation_started: Instant::now(),
                 vsync_overlap_rejections: 0,
                 page_flip_phase_rejections: 0,
+                cursor_updates: 0,
+                cursor_update_failures: 0,
             })
+        }
+
+        pub fn update_classic_hardware_cursor(
+            &mut self,
+            position: sophia_protocol::Point,
+        ) -> Result<bool, Box<dyn std::error::Error>> {
+            if !position.x.is_finite() || !position.y.is_finite() {
+                return Ok(false);
+            }
+            let mut offset_x = 0_i32;
+            let mut target = None;
+            for head in &self.heads {
+                let width = head.output.size.width;
+                let height = head.output.size.height;
+                let x = position.x.floor() as i32;
+                let y = position.y.floor() as i32;
+                if x >= offset_x && x < offset_x.saturating_add(width) && y >= 0 && y < height {
+                    target = Some((head.group, head.selection, x.saturating_sub(offset_x), y));
+                    break;
+                }
+                offset_x = offset_x.saturating_add(width);
+            }
+
+            let mut visible = false;
+            for (group_index, group) in self.groups.iter_mut().enumerate() {
+                let group_target = target
+                    .filter(|(target_group, _, _, _)| *target_group == group_index)
+                    .map(|(_, selection, x, y)| (selection, x, y));
+                match group.session.update_classic_hardware_cursor(group_target) {
+                    Ok(group_visible) => visible |= group_visible,
+                    Err(error) => {
+                        self.cursor_update_failures = self.cursor_update_failures.saturating_add(1);
+                        return Err(format!("hardware cursor update failed: {error}").into());
+                    }
+                }
+            }
+            if visible {
+                self.cursor_updates = self.cursor_updates.saturating_add(1);
+            }
+            Ok(visible)
         }
 
         pub fn clone_render_device_file(&self) -> std::io::Result<std::fs::File> {

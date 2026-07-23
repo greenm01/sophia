@@ -230,7 +230,20 @@ before opening the physical keyboard and an EXIT trap restores it with
 `sudo sv up keyd` after success, failure, or interruption. There is no separate
 confirmation prompt whose Return could enter the exact input proof.
 
-The normal supervised operator path is:
+The supported physical TTY3 input path is currently the guarded Kitty-only
+profile:
+
+```sh
+tools/run_sophia_kitty_session.sh
+```
+
+It drives every connected output, starts one automatically focused Kitty, and
+keeps xmonad plus Super-Enter out of the input/presentation gate. Move the
+cursor across both outputs, click and drag to select terminal text, type into
+Kitty, and close Kitty normally. Ctrl-Alt-Backspace remains the independent
+emergency recovery chord.
+
+The xmonad path is retained as experimental:
 
 ```sh
 tools/run_sophia_session.sh --wm=xmonad

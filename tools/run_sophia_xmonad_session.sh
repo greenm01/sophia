@@ -3,9 +3,15 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DISPLAY_NAME="${SOPHIA_LIVE_SESSION_DISPLAY:-:77}"
-STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/sophia-xmonad-session-${UID}"
+SESSION_PROFILE="${SOPHIA_TTY_PROFILE:-xmonad}"
+if [[ "$SESSION_PROFILE" != xmonad && "$SESSION_PROFILE" != kitty ]]; then
+    echo "SOPHIA_TTY_PROFILE must be xmonad or kitty." >&2
+    exit 1
+fi
+SESSION_LABEL="Sophia $SESSION_PROFILE session"
+STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/sophia-${SESSION_PROFILE}-session-${UID}"
 PID_FILE="$STATE_DIR/wrapper.pid"
-LOG_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/sophia/xmonad-session"
+LOG_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/sophia/${SESSION_PROFILE}-session"
 GUARD_LOG="$LOG_DIR/input-guard.log"
 RECOVERY_LOG="$LOG_DIR/recovery.log"
 SESSION_LOG="$LOG_DIR/session.log"
@@ -19,8 +25,8 @@ chmod 700 "$LOG_DIR"
 if [[ -s "$PID_FILE" ]]; then
     previous_pid="$(<"$PID_FILE")"
     if [[ "$previous_pid" =~ ^[0-9]+$ ]] && kill -0 "$previous_pid" 2>/dev/null; then
-        echo "A Sophia xmonad session is already running (wrapper PID $previous_pid)." >&2
-        echo "Stop it with: tools/stop_sophia_xmonad_session.sh" >&2
+        echo "A $SESSION_LABEL is already running (wrapper PID $previous_pid)." >&2
+        echo "Stop it with: tools/stop_sophia_${SESSION_PROFILE}_session.sh" >&2
         exit 1
     fi
     rm -f "$PID_FILE"
@@ -63,27 +69,32 @@ if [[ ! -r "$keyboard" ]]; then
     exit 1
 fi
 
-xmonad_bin="${SOPHIA_XMONAD_BIN:-}"
-if [[ -z "$xmonad_bin" ]] && command -v xmonad >/dev/null 2>&1; then
-    xmonad_bin="$(command -v xmonad)"
-fi
-if [[ -z "$xmonad_bin" ]]; then
-    xmonad_source="${SOPHIA_XMONAD_SOURCE:-$HOME/src/xmonad}"
-    xmonad_out="${SOPHIA_XMONAD_NIX_OUT:-/tmp/sophia-xmonad}"
-    if [[ ! -x "$xmonad_out/bin/xmonad" ]]; then
-        if [[ ! -f "$xmonad_source/flake.nix" ]]; then
-            echo "xmonad not found; set SOPHIA_XMONAD_BIN or SOPHIA_XMONAD_SOURCE." >&2
-            exit 1
-        fi
-        nix build "$xmonad_source#defaultPackage.x86_64-linux" \
-            --out-link "$xmonad_out"
+xmonad_bin=""
+if [[ "$SESSION_PROFILE" == xmonad ]]; then
+    xmonad_bin="${SOPHIA_XMONAD_BIN:-}"
+    if [[ -z "$xmonad_bin" ]] && command -v xmonad >/dev/null 2>&1; then
+        xmonad_bin="$(command -v xmonad)"
     fi
-    xmonad_bin="$xmonad_out/bin/xmonad"
+    if [[ -z "$xmonad_bin" ]]; then
+        xmonad_source="${SOPHIA_XMONAD_SOURCE:-$HOME/src/xmonad}"
+        xmonad_out="${SOPHIA_XMONAD_NIX_OUT:-/tmp/sophia-xmonad}"
+        if [[ ! -x "$xmonad_out/bin/xmonad" ]]; then
+            if [[ ! -f "$xmonad_source/flake.nix" ]]; then
+                echo "xmonad not found; set SOPHIA_XMONAD_BIN or SOPHIA_XMONAD_SOURCE." >&2
+                exit 1
+            fi
+            nix build "$xmonad_source#defaultPackage.x86_64-linux" \
+                --out-link "$xmonad_out"
+        fi
+        xmonad_bin="$xmonad_out/bin/xmonad"
+    fi
 fi
 
 cd "$ROOT_DIR"
 cargo build --offline --release -p sophia-cli --features atomic-scanout-live
-cargo build --offline --release -p sophia-x11-wm-bridge
+if [[ "$SESSION_PROFILE" == xmonad ]]; then
+    cargo build --offline --release -p sophia-x11-wm-bridge
+fi
 tools/atomic_scanout_preflight.sh
 
 keyd_was_running=false
@@ -117,7 +128,7 @@ cleanup() {
     cleanup_done=true
     local emergency=false
     [[ ! -s "$GUARD_TRIGGERED_FILE" ]] || emergency=true
-    [[ -z "$session_pid" ]] || terminate_bounded "-$session_pid" "Sophia xmonad session"
+    [[ -z "$session_pid" ]] || terminate_bounded "-$session_pid" "$SESSION_LABEL"
     session_pid=""
     [[ -z "$guard_pid" ]] || terminate_bounded "$guard_pid" "Sophia input guard"
     guard_pid=""
@@ -141,7 +152,8 @@ cleanup() {
         local restored_kd restored_termios
         restored_kd="$(python3 "$ROOT_DIR/tools/sophia_tty_mode.py" get 2>/dev/null || echo unavailable)"
         restored_termios="$(stty -g 2>/dev/null || echo unavailable)"
-        printf 'sophia_xmonad_tty_recovery schema=1 kd_mode_before=%s kd_mode_after=%s termios_restored=%s emergency=%s\n' \
+        printf 'sophia_tty_recovery schema=2 profile=%s kd_mode_before=%s kd_mode_after=%s termios_restored=%s emergency=%s\n' \
+            "$SESSION_PROFILE" \
             "$kd_mode" "$restored_kd" \
             "$([[ "$restored_termios" == "$tty_state" ]] && echo true || echo false)" \
             "$emergency" >>"$RECOVERY_LOG"
@@ -196,33 +208,68 @@ done
 }
 echo "Emergency input guard armed."
 
-echo "Starting Sophia with xmonad layout policy on $DISPLAY_NAME."
-echo "Use Super+Enter for Kitty or Super+Shift+Q to log out."
+if [[ "$SESSION_PROFILE" == xmonad ]]; then
+    echo "Starting Sophia with experimental xmonad layout policy on $DISPLAY_NAME."
+    echo "Use Super+Enter for Kitty or Super+Shift+Q to log out."
+else
+    echo "Starting the supported Kitty-only Sophia input session on $DISPLAY_NAME."
+    echo "xmonad and Super+Enter are intentionally disabled for this input gate."
+    echo "Exit Kitty normally to return to tty3."
+fi
 echo "Press Ctrl-Alt-Backspace for local emergency recovery."
-echo "The outside control plane may also run tools/stop_sophia_xmonad_session.sh."
+echo "The outside control plane may also run tools/stop_sophia_${SESSION_PROFILE}_session.sh."
 terminal_bin="${SOPHIA_TERMINAL_BIN:-$(command -v kitty || true)}"
 if [[ -z "$terminal_bin" || ! -x "$terminal_bin" ]]; then
     echo "The graphical session requires Kitty; set SOPHIA_TERMINAL_BIN if it is installed elsewhere." >&2
     exit 1
 fi
-input_devices="${SOPHIA_OPERATOR_INPUT_DEVICES:-$keyboard}"
+input_devices="${SOPHIA_OPERATOR_INPUT_DEVICES:-}"
+if [[ -z "$input_devices" ]]; then
+    input_devices="$keyboard"
+    keyboard_target="$(readlink -f "$keyboard")"
+    while IFS= read -r pointer; do
+        pointer_target="$(readlink -f "$pointer")"
+        if [[ "$pointer_target" != "$keyboard_target" && -r "$pointer" ]]; then
+            input_devices="$input_devices,$pointer"
+            break
+        fi
+    done < <(
+        find /dev/input/by-id /dev/input/by-path \
+            -maxdepth 1 -type l -name '*-event-mouse' -print 2>/dev/null \
+            | sort -u
+    )
+else
+    session_args+=(--exit-when-startup-exits)
+fi
+if [[ "$SESSION_PROFILE" == kitty && "$input_devices" != *,* ]]; then
+    echo "Kitty input gate could not find a distinct readable pointer device." >&2
+    echo "Set SOPHIA_OPERATOR_INPUT_DEVICES to comma-separated keyboard and pointer paths." >&2
+    exit 1
+fi
 [[ ! -f "$SESSION_LOG" ]] || mv -f "$SESSION_LOG" "$SESSION_LOG.previous"
 : >"$SESSION_LOG"
 chmod 600 "$SESSION_LOG"
+session_args=(
+    sophia-live-session
+    --session-mode=normal
+    "--session-app=terminal=$terminal_bin"
+    --session-start=terminal
+    --display="$DISPLAY_NAME"
+    --native-scanout
+    --input-devices="$input_devices"
+)
+if [[ "$SESSION_PROFILE" == xmonad ]]; then
+    session_args+=(
+        --session-action-app=terminal=terminal
+        --wm-process="$ROOT_DIR/target/release/sophia-x11-wm-bridge"
+        --wm-process-arg="--wm=$xmonad_bin"
+        --wm-process-arg=--profile=xmonad
+        --wm-process-arg=--wm-private-alias=xmonad/xmonad-x86_64-linux
+    )
+fi
+session_args+=("$@")
 setsid env SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 \
-    target/release/sophia sophia-live-session \
-    --session-mode=normal \
-    "--session-app=terminal=$terminal_bin" \
-    --session-start=terminal \
-    --session-action-app=terminal=terminal \
-    --display="$DISPLAY_NAME" \
-    --native-scanout \
-    --input-devices="$input_devices" \
-    --wm-process="$ROOT_DIR/target/release/sophia-x11-wm-bridge" \
-    --wm-process-arg="--wm=$xmonad_bin" \
-    --wm-process-arg=--profile=xmonad \
-    --wm-process-arg=--wm-private-alias=xmonad/xmonad-x86_64-linux \
-    "$@" > >(tee "$SESSION_LOG") 2>&1 &
+    target/release/sophia "${session_args[@]}" > >(tee "$SESSION_LOG") 2>&1 &
 session_pid=$!
 set +e
 wait -n "$session_pid" "$guard_pid"

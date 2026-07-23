@@ -907,6 +907,7 @@ struct PersistentXtermSessionConfig {
     expect_client_stdout: Option<String>,
     require_client_normal_exit: bool,
     normal_session: bool,
+    exit_when_startup_exits: bool,
     applications: SessionApplicationConfig,
     secondary_terminal: bool,
     max_runtime: Option<Duration>,
@@ -938,6 +939,7 @@ impl PersistentXtermSessionConfig {
         let display = arg_value(args, "--display").unwrap_or_else(|| ":77".to_owned());
         let display_number = parse_display_number(&display)?;
         let normal_session = args.iter().any(|arg| arg == "--session-mode=normal");
+        let exit_when_startup_exits = args.iter().any(|arg| arg == "--exit-when-startup-exits");
         let mut applications = SessionApplicationConfig::default();
         for value in args
             .iter()
@@ -1050,6 +1052,12 @@ impl PersistentXtermSessionConfig {
                         .into(),
                 );
             }
+            if exit_when_startup_exits && applications.startup.len() != 1 {
+                return Err(
+                    "--exit-when-startup-exits requires exactly one normal-session startup app"
+                        .into(),
+                );
+            }
         } else if !applications.applications.is_empty()
             || !applications.startup.is_empty()
             || applications.terminal.is_some()
@@ -1057,6 +1065,8 @@ impl PersistentXtermSessionConfig {
             || applications.firefox.is_some()
         {
             return Err("session application options require --session-mode=normal".into());
+        } else if exit_when_startup_exits {
+            return Err("--exit-when-startup-exits requires --session-mode=normal".into());
         }
         let max_runtime = arg_value(args, "--max-runtime-ms")
             .as_deref()
@@ -1281,6 +1291,7 @@ impl PersistentXtermSessionConfig {
             secondary_terminal,
             max_runtime,
             normal_session,
+            exit_when_startup_exits,
             applications,
             max_ticks,
             inject_text,
@@ -2898,6 +2909,7 @@ fn run_session_loop(
     let mut cursor_dirty_since: Option<Instant> = None;
     let mut cursor_moves_coalesced = 0_u64;
     let mut cursor_max_motion_to_submit = Duration::ZERO;
+    let mut hardware_cursor_unavailable_reported = false;
     let mut pending_authority_batches = VecDeque::new();
 
     macro_rules! drain_physical_input {
@@ -3155,6 +3167,9 @@ fn run_session_loop(
                     );
                 }
                 primary_child_exited = true;
+                if config.exit_when_startup_exits {
+                    break;
+                }
             } else {
                 if status.success()
                     && successful_primary_exit_ends_session(config.input_proof_requested())
@@ -3305,10 +3320,49 @@ fn run_session_loop(
         if let (Some(runtime), Some(native_scanout)) = (runtime.as_mut(), native_scanout.as_mut()) {
             let _ = runtime.service_native(native_scanout)?;
         }
+        let mut hardware_cursor_presented = false;
         if cursor_dirty
+            && let (Some(native_scanout), Some(position)) =
+                (native_scanout.as_mut(), pointer.position)
+        {
+            match native_scanout.update_classic_hardware_cursor(position) {
+                Ok(true) => {
+                    hardware_cursor_presented = true;
+                    pointer_pixel_change |= physical_pointer_routed > 0;
+                    if let Some(started) = cursor_dirty_since.take() {
+                        cursor_max_motion_to_submit =
+                            cursor_max_motion_to_submit.max(started.elapsed());
+                    }
+                    cursor_dirty = false;
+                    if pointer_checksum.is_none() {
+                        pointer_checksum = Some(0);
+                        println!(
+                            "sophia_live_session_pointer schema=2 status=visible source=hardware_cursor"
+                        );
+                    }
+                }
+                Ok(false) => {
+                    cursor_dirty = false;
+                }
+                Err(error) => {
+                    cursor_dirty = false;
+                    if !hardware_cursor_unavailable_reported {
+                        eprintln!(
+                            "sophia_live_session_pointer schema=2 status=unavailable source=hardware_cursor error={error}"
+                        );
+                        hardware_cursor_unavailable_reported = true;
+                    }
+                }
+            }
+        }
+        if cursor_dirty
+            && !hardware_cursor_presented
             && let (Some(runtime), Some(native_scanout), Some(position)) =
                 (runtime.as_mut(), native_scanout.as_mut(), pointer.position)
-            && !runtime.native_scanout_in_flight()
+            && runtime
+                .committed_surfaces()
+                .iter()
+                .all(|surface| matches!(surface.buffer, BufferSource::CpuBuffer { .. }))
         {
             let repaint = runtime.run_cpu_repaint(
                 &mut scene,
@@ -4318,9 +4372,16 @@ fn run_session_loop(
         "sophia_live_session_scheduler schema=1 authority_batches={batches} cpu_compositions={cpu_compositions} coalesced_batches={coalesced_batches}"
     );
     println!(
-        "sophia_live_session_cursor schema=1 moves_coalesced={} max_motion_to_submit_msec={}",
+        "sophia_live_session_cursor schema=2 moves_coalesced={} max_motion_to_submit_msec={} buttons_routed={} hardware_updates={} hardware_failures={}",
         cursor_moves_coalesced,
         cursor_max_motion_to_submit.as_millis(),
+        physical_pointer_buttons_routed,
+        native_scanout
+            .as_ref()
+            .map_or(0, |scanout| scanout.cursor_updates),
+        native_scanout
+            .as_ref()
+            .map_or(0, |scanout| scanout.cursor_update_failures),
     );
     println!(
         "sophia_live_session_health schema=1 status=clean protocol_errors={} pending_wm={} pending_actions={} pending_input={} wm_degraded={}",
@@ -5585,6 +5646,30 @@ mod tests {
             "--proof".to_owned(),
         ]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn kitty_only_session_can_exit_with_its_single_startup_app() {
+        let config = PersistentXtermSessionConfig::from_args(&[
+            "--session-mode=normal".to_owned(),
+            "--session-app=terminal=/usr/bin/kitty".to_owned(),
+            "--session-start=terminal".to_owned(),
+            "--exit-when-startup-exits".to_owned(),
+        ])
+        .unwrap();
+        assert!(config.exit_when_startup_exits);
+
+        for args in [
+            vec!["--exit-when-startup-exits".to_owned()],
+            vec![
+                "--session-mode=normal".to_owned(),
+                "--session-app=terminal=/usr/bin/kitty".to_owned(),
+                "--session-action-app=terminal=terminal".to_owned(),
+                "--exit-when-startup-exits".to_owned(),
+            ],
+        ] {
+            assert!(PersistentXtermSessionConfig::from_args(&args).is_err());
+        }
     }
 
     #[test]
