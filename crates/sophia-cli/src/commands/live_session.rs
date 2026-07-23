@@ -2763,8 +2763,33 @@ fn run_session_loop(
         require_startup_focus.then_some(output.size),
     );
     let mut committed_session_actions = VecDeque::new();
-    let mut runtime: Option<LiveProductionVisualRuntime> = None;
     let present_observer = Arc::new(Mutex::new(XPresentSessionObserver::new(protocol_router)));
+    let mut runtime = if blank_normal_session {
+        Some(
+            LiveProductionVisualRuntime::new(
+                &outputs,
+                &[],
+                native_scanout.as_mut(),
+                Some(scene.frames_for_outputs(&outputs)?),
+            )?
+            .with_present_feedback_sink({
+                let observer = Arc::clone(&present_observer);
+                move |outcome| {
+                    observer
+                        .lock()
+                        .expect("X Present observer mutex was poisoned")
+                        .observe_feedback(outcome);
+                }
+            })
+            .with_m4_proof_controls(
+                config.m4_first_acquire_delay,
+                config.m4_reject_first_present,
+                config.m4_diagnose_first_mixed_export,
+            ),
+        )
+    } else {
+        None
+    };
     let mut last_authority_update = started;
     let mut injection_checksum = None;
     let mut physical_input_ready_at: Option<Instant> = None;
