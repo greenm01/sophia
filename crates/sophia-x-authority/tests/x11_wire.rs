@@ -518,11 +518,77 @@ fn x11_setup_success_reply_can_advertise_minimal_root_screen() {
 
     assert_eq!(reply[0], 1);
     assert_eq!(reply[28], 1);
-    assert_eq!(reply[29], 1);
-    assert_eq!(read_u32(XByteOrder::LittleEndian, &reply[56..60]), 0x20);
-    assert_eq!(read_u32(XByteOrder::LittleEndian, &reply[88..92]), 0x22);
-    assert_eq!(reply[94], 24);
-    assert_eq!(reply[95], 1);
+    assert_eq!(reply[29], 2);
+    assert_eq!(reply[48], 24);
+    assert_eq!(reply[56], 32);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &reply[64..68]), 0x20);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &reply[96..100]), 0x22);
+    assert_eq!(reply[102], 24);
+    assert_eq!(reply[103], 2);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &reply[112..116]), 0x22);
+    assert_eq!(reply[136], 32);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &reply[144..148]), 0x23);
+}
+
+#[test]
+fn glx_vendor_string_is_nul_terminated_even_at_four_bytes() {
+    let encoded = encode_x_client_output(
+        XByteOrder::LittleEndian,
+        XClientOutput::Reply(XClientReply::GlxString {
+            sequence: 9,
+            value: "mesa".to_owned(),
+        }),
+    );
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[12..16]), 5);
+    assert_eq!(&encoded[32..37], b"mesa\0");
+    assert_eq!(encoded.len(), 40);
+}
+
+#[test]
+fn glx_config_requests_decode_in_both_byte_orders() {
+    for byte_order in [XByteOrder::LittleEndian, XByteOrder::BigEndian] {
+        for (minor, expected) in [
+            (
+                X_GLX_GET_VISUAL_CONFIGS_MINOR_OPCODE,
+                XWireRequest::GlxGetVisualConfigs { screen: 0 },
+            ),
+            (
+                X_GLX_GET_FB_CONFIGS_MINOR_OPCODE,
+                XWireRequest::GlxGetFbConfigs { screen: 0 },
+            ),
+        ] {
+            let mut request = vec![X_GLX_MAJOR_OPCODE, minor, 0, 0, 0, 0, 0, 0];
+            match byte_order {
+                XByteOrder::LittleEndian => request[2..4].copy_from_slice(&2u16.to_le_bytes()),
+                XByteOrder::BigEndian => request[2..4].copy_from_slice(&2u16.to_be_bytes()),
+            }
+            assert_eq!(
+                decode_x11_core_request(context(NamespaceId::from_raw(1), 1, byte_order), &request)
+                    .unwrap(),
+                expected
+            );
+        }
+    }
+}
+
+#[test]
+fn glx_fb_config_reply_uses_tagged_attribute_pairs() {
+    let configs = vec![vec![(0x8013, 3), (0x800b, X_SETUP_ARGB_VISUAL)]];
+    let encoded = encode_x_client_output(
+        XByteOrder::BigEndian,
+        XClientOutput::Reply(XClientReply::GlxFbConfigs {
+            sequence: 11,
+            configs,
+        }),
+    );
+    assert_eq!(read_u32(XByteOrder::BigEndian, &encoded[8..12]), 1);
+    assert_eq!(read_u32(XByteOrder::BigEndian, &encoded[12..16]), 2);
+    assert_eq!(read_u32(XByteOrder::BigEndian, &encoded[32..36]), 0x8013);
+    assert_eq!(read_u32(XByteOrder::BigEndian, &encoded[36..40]), 3);
+    assert_eq!(
+        read_u32(XByteOrder::BigEndian, &encoded[44..48]),
+        X_SETUP_ARGB_VISUAL
+    );
 }
 
 #[test]
@@ -589,6 +655,7 @@ fn x11_core_decoder_maps_create_and_map_to_authority_packets() {
         event_mask,
         do_not_propagate_mask,
         parent,
+        ..
     } = create
     else {
         panic!("expected create-window request");

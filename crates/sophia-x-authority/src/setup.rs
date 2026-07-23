@@ -81,6 +81,7 @@ pub const X_SETUP_DEFAULT_MAX_REQUEST_UNITS: u16 = u16::MAX;
 pub const X_SETUP_DEFAULT_ROOT: u32 = 0x20;
 pub const X_SETUP_DEFAULT_COLORMAP: u32 = 0x21;
 pub const X_SETUP_DEFAULT_VISUAL: u32 = 0x22;
+pub const X_SETUP_ARGB_VISUAL: u32 = 0x23;
 pub const X_SETUP_ROOT_WIDTH: u16 = 1280;
 pub const X_SETUP_ROOT_HEIGHT: u16 = 720;
 
@@ -142,7 +143,7 @@ impl XSetupSuccess {
     pub fn client_compatible() -> Self {
         Self {
             roots: 1,
-            formats: 1,
+            formats: 2,
             ..Self::minimal()
         }
     }
@@ -296,7 +297,7 @@ pub fn encode_x11_setup_success(
     }
 
     let root_section_len = usize::from(setup.roots)
-        .checked_mul(X_SETUP_ROOT_LEN + X_SETUP_DEPTH_LEN + X_SETUP_VISUAL_LEN)
+        .checked_mul(X_SETUP_ROOT_LEN + 2 * (X_SETUP_DEPTH_LEN + X_SETUP_VISUAL_LEN))
         .ok_or(XSetupParseError::ReplyFieldTooLarge {
             field: "setup_roots",
             len: usize::MAX,
@@ -344,8 +345,8 @@ pub fn encode_x11_setup_success(
     byte_order.push_u32(&mut out, 0);
     out.extend_from_slice(&setup.vendor);
     pad_to_four(&mut out);
-    for _ in 0..setup.formats {
-        encode_pixmap_format(&mut out);
+    for index in 0..setup.formats {
+        encode_pixmap_format(&mut out, if index == 0 { 24 } else { 32 });
     }
     for _ in 0..setup.roots {
         encode_root(byte_order, &mut out, setup.root_size);
@@ -403,8 +404,8 @@ fn pad_to_four(out: &mut Vec<u8>) {
     out.resize(padded_len(out.len()), 0);
 }
 
-fn encode_pixmap_format(out: &mut Vec<u8>) {
-    out.push(X_SETUP_ROOT_DEPTH);
+fn encode_pixmap_format(out: &mut Vec<u8>, depth: u8) {
+    out.push(depth);
     out.push(32);
     out.push(32);
     out.extend_from_slice(&[0; 5]);
@@ -426,7 +427,7 @@ fn encode_root(byte_order: XByteOrder, out: &mut Vec<u8>, root_size: Size) {
     out.push(0);
     out.push(0);
     out.push(X_SETUP_ROOT_DEPTH);
-    out.push(1);
+    out.push(2);
 
     out.push(X_SETUP_ROOT_DEPTH);
     out.push(0);
@@ -434,6 +435,20 @@ fn encode_root(byte_order: XByteOrder, out: &mut Vec<u8>, root_size: Size) {
     byte_order.push_u32(out, 0);
 
     byte_order.push_u32(out, X_SETUP_DEFAULT_VISUAL);
+    out.push(X_SETUP_TRUE_COLOR);
+    out.push(8);
+    byte_order.push_u16(out, 256);
+    byte_order.push_u32(out, 0x00ff_0000);
+    byte_order.push_u32(out, 0x0000_ff00);
+    byte_order.push_u32(out, 0x0000_00ff);
+    byte_order.push_u32(out, 0);
+
+    out.push(32);
+    out.push(0);
+    byte_order.push_u16(out, 1);
+    byte_order.push_u32(out, 0);
+
+    byte_order.push_u32(out, X_SETUP_ARGB_VISUAL);
     out.push(X_SETUP_TRUE_COLOR);
     out.push(8);
     byte_order.push_u16(out, 256);

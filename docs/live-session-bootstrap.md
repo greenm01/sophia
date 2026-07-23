@@ -107,7 +107,11 @@ The operator wrapper starts one Kitty and registers it as the terminal action.
 `Super+Enter` launches another Kitty, including after the last application
 surface closes, and `Super+Shift+Q` logs out. Global WM shortcuts remain active
 on an otherwise empty desktop while unfocused application input remains
-suppressed.
+suppressed. Kitty's X11 backend requires Sophia's bounded direct-Mesa GLX
+bootstrap before its DRI3/Present buffers exist; a GLFW-window failure is an
+application-startup failure, not proof of a blank compositor session. Keep the
+physical capture gate open until automatic Kitty startup, typing, relaunch,
+emergency exit, normal logout, and KD/termios recovery all pass together.
 
 Stop the session from another TTY, from the Sophia checkout, with:
 

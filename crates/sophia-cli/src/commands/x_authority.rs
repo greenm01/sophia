@@ -13,6 +13,12 @@ use std::os::unix::process::CommandExt;
 use std::sync::Arc;
 
 pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
+    if args.iter().any(|arg| arg == "x-authority-kitty-smoke") {
+        let report = run_x_authority_kitty_smoke()?;
+        print_external_probe_smoke_report("x-authority-kitty-smoke", &report);
+        return Ok(true);
+    }
+
     if args
         .iter()
         .any(|arg| arg == "x-authority-zenity-render-smoke")
@@ -1003,6 +1009,37 @@ fn run_x_authority_vkcube_smoke()
         false,
         ExternalProbePixelProof::None,
         true,
+        false,
+        Some(provider),
+    )
+}
+
+fn run_x_authority_kitty_smoke()
+-> Result<XAuthorityExternalProbeSmokeReport, Box<dyn std::error::Error>> {
+    let command = resolve_external_probe_binary("kitty", "kitty")?;
+    let provider = Arc::new(ExternalProbeRenderDeviceProvider {
+        device: first_openable_render_node()?,
+    });
+    let (display, socket_path) = temp_xauthority_display(6690)?;
+    run_x_authority_external_probe_smoke(
+        "kitty",
+        &command,
+        ExternalProbeDisplayMode::Environment,
+        &[
+            "--config",
+            "NONE",
+            "--title",
+            "Sophia Kitty GLX proof",
+            "sh",
+            "-c",
+            "printf 'Sophia Kitty proof\\n'; sleep 3",
+        ],
+        display,
+        socket_path,
+        NamespaceId::from_raw(62),
+        true,
+        ExternalProbePixelProof::None,
+        false,
         false,
         Some(provider),
     )

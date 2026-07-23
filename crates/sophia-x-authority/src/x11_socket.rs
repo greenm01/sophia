@@ -6362,6 +6362,29 @@ fn x11_core_request_trace_detail(request: &crate::XWireRequest) -> Option<String
             width,
             height
         )),
+        crate::XWireRequest::GlxQueryServerString { name } => {
+            Some(format!("GLX:QueryServerString:name={name:#x}"))
+        }
+        crate::XWireRequest::GlxGetVisualConfigs { screen } => {
+            Some(format!("GLX:GetVisualConfigs:screen={screen}"))
+        }
+        crate::XWireRequest::GlxGetFbConfigs { screen } => {
+            Some(format!("GLX:GetFBConfigs:screen={screen}"))
+        }
+        crate::XWireRequest::GlxCreateContext {
+            context, fbconfig, ..
+        } => Some(format!(
+            "GLX:CreateContext:context={:#x}:fbconfig={fbconfig}",
+            context.local.raw()
+        )),
+        crate::XWireRequest::GlxCreateWindow {
+            glx_window,
+            fbconfig,
+            ..
+        } => Some(format!(
+            "GLX:CreateWindow:window={:#x}:fbconfig={fbconfig}",
+            glx_window.local.raw()
+        )),
         crate::XWireRequest::InternAtom { name, .. } => Some(format!("InternAtom:{name}")),
         crate::XWireRequest::ChangeWindowAttributes { window, .. } => Some(format!(
             "ChangeWindowAttributes:window={:#x}",

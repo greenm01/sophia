@@ -2081,3 +2081,22 @@ distinguishes full application routing, shortcut-only polling, and complete
 suppression. Empty desktops admit emergency and registered WM chords without
 delivering ordinary keys or pointer events to an unfocused client, and the
 physical launcher starts Kitty by default.
+
+## 2026-07-22: Kitty Requires A Direct-Mesa GLX Bootstrap
+
+The guarded physical rerun reached xmonad and input recovery, then Kitty 0.48.0
+failed with `failed to create GLFW window`. Sophia advertised GLX 1.4 but no
+FBConfigs and omitted `GLX_EXT_libglvnd`; libglvnd therefore selected its
+indirect vendor instead of Mesa and never reached the already implemented
+DRI3/Present path.
+
+Sophia now exposes a depth-32 ARGB TrueColor visual, maps GLVND's vendor query
+to `mesa`, and implements a bounded direct-rendering GLX bootstrap: visual and
+FBConfig catalogs, client-info negotiation, direct context lifecycle, GLX
+window aliases, and drawable attributes. The catalog deliberately contains
+only XRGB linear, ARGB linear, and ARGB sRGB configurations with depth/stencil
+zero. Indirect GLX rendering, server-side Render/RenderLarge, and GLX
+SwapBuffers remain unsupported; Mesa renders client-side and submits through
+DRI3/Present. `x-authority-kitty-smoke` is the real-client regression. This
+build environment has no `/dev/dri`, so its render-node run and the physical
+TTY3 capture remain operator gates.

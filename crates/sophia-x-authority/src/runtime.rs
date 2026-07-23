@@ -35,6 +35,8 @@ pub struct XAuthorityClientResourceRelease {
     pub released_cursors: usize,
     pub released_graphics_contexts: usize,
     pub released_shm_segments: usize,
+    pub released_glx_contexts: usize,
+    pub released_glx_windows: usize,
     /// Renderer-visible DRI3 sources released by disconnect cleanup.
     pub released_dma_bufs: Vec<sophia_protocol::BufferHandle>,
     /// Renderer-visible xshmfences released by disconnect cleanup.
@@ -59,6 +61,9 @@ pub struct XAuthorityRuntime {
     next_fence_handle: u64,
     graphics_contexts: XGraphicsContextTable,
     window_background_pixels: BTreeMap<crate::XResourceId, u32>,
+    window_visuals: BTreeMap<crate::XResourceId, (u8, u32, crate::XResourceId)>,
+    glx_contexts: BTreeMap<crate::XResourceId, (NamespaceId, u32, bool)>,
+    glx_windows: BTreeMap<crate::XResourceId, (NamespaceId, crate::XResourceId, u32)>,
     last_cpu_buffer_update: Option<XAuthorityCpuBufferUpdate>,
     output_topology: OutputTopologySnapshot,
     input_focus: BTreeMap<NamespaceId, (crate::XResourceId, u8)>,
@@ -85,6 +90,9 @@ impl Default for XAuthorityRuntime {
             next_fence_handle: 1,
             graphics_contexts: Default::default(),
             window_background_pixels: Default::default(),
+            window_visuals: Default::default(),
+            glx_contexts: Default::default(),
+            glx_windows: Default::default(),
             last_cpu_buffer_update: None,
             output_topology: OutputTopologySnapshot::deterministic(),
             input_focus: Default::default(),
@@ -714,6 +722,113 @@ impl XAuthorityRuntime {
             .ok_or(XAuthorityRuntimeError::UnknownResource)
     }
 
+    pub fn set_window_visual(
+        &mut self,
+        window: crate::XResourceId,
+        depth: u8,
+        visual: u32,
+        colormap: crate::XResourceId,
+    ) {
+        self.window_visuals
+            .insert(window, (depth, visual, colormap));
+    }
+
+    pub fn window_visual(&self, window: crate::XResourceId) -> (u8, u32, crate::XResourceId) {
+        self.window_visuals.get(&window).copied().unwrap_or((
+            24,
+            crate::X_SETUP_DEFAULT_VISUAL,
+            crate::XResourceId::new(u64::from(crate::X_SETUP_DEFAULT_COLORMAP), 1),
+        ))
+    }
+
+    pub fn create_glx_context(
+        &mut self,
+        namespace: NamespaceId,
+        context: crate::XResourceId,
+        fbconfig: u32,
+        direct: bool,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        if self.resources.get(context).is_some()
+            || self.glx_contexts.contains_key(&context)
+            || self.glx_windows.contains_key(&context)
+        {
+            return Err(XAuthorityRuntimeError::InvalidResource);
+        }
+        self.glx_contexts
+            .insert(context, (namespace, fbconfig, direct));
+        Ok(())
+    }
+
+    pub fn glx_context(
+        &self,
+        namespace: NamespaceId,
+        context: crate::XResourceId,
+    ) -> Result<(u32, bool), XAuthorityRuntimeError> {
+        self.glx_contexts
+            .get(&context)
+            .filter(|(owner, _, _)| *owner == namespace)
+            .map(|(_, config, direct)| (*config, *direct))
+            .ok_or(XAuthorityRuntimeError::UnknownResource)
+    }
+
+    pub fn destroy_glx_context(
+        &mut self,
+        namespace: NamespaceId,
+        context: crate::XResourceId,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        self.glx_context(namespace, context)?;
+        self.glx_contexts.remove(&context);
+        Ok(())
+    }
+
+    pub fn create_glx_window(
+        &mut self,
+        namespace: NamespaceId,
+        glx_window: crate::XResourceId,
+        window: crate::XResourceId,
+        fbconfig: u32,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        self.validate_window_access(namespace, window)?;
+        if self.resources.get(glx_window).is_some()
+            || self.glx_contexts.contains_key(&glx_window)
+            || self.glx_windows.contains_key(&glx_window)
+        {
+            return Err(XAuthorityRuntimeError::InvalidResource);
+        }
+        self.glx_windows
+            .insert(glx_window, (namespace, window, fbconfig));
+        Ok(())
+    }
+
+    pub fn glx_drawable(
+        &self,
+        namespace: NamespaceId,
+        drawable: crate::XResourceId,
+    ) -> Result<(crate::XResourceId, u32), XAuthorityRuntimeError> {
+        if let Some((owner, window, config)) = self.glx_windows.get(&drawable) {
+            return (*owner == namespace)
+                .then_some((*window, *config))
+                .ok_or(XAuthorityRuntimeError::UnknownResource);
+        }
+        self.validate_window_access(namespace, drawable)?;
+        let config = if self.window_visual(drawable).1 == crate::X_SETUP_ARGB_VISUAL {
+            3
+        } else {
+            1
+        };
+        Ok((drawable, config))
+    }
+
+    pub fn destroy_glx_window(
+        &mut self,
+        namespace: NamespaceId,
+        glx_window: crate::XResourceId,
+    ) -> Result<(), XAuthorityRuntimeError> {
+        self.glx_drawable(namespace, glx_window)?;
+        self.glx_windows.remove(&glx_window);
+        Ok(())
+    }
+
     pub fn configure_window_geometry(
         &mut self,
         namespace: NamespaceId,
@@ -761,6 +876,9 @@ impl XAuthorityRuntime {
         self.resources.remove(window);
         self.software_buffers.remove(window);
         self.window_background_pixels.remove(&window);
+        self.window_visuals.remove(&window);
+        self.glx_windows
+            .retain(|_, (_, underlying, _)| *underlying != window);
         if self
             .input_focus
             .get(&namespace)
@@ -785,6 +903,22 @@ impl XAuthorityRuntime {
         }
 
         let mut release = XAuthorityClientResourceRelease::default();
+        self.glx_contexts.retain(|id, (owner, _, _)| {
+            let owned = *owner == namespace
+                && u32::try_from(id.local.raw()).is_ok_and(|raw| range.owns_new_resource(raw));
+            if owned {
+                release.released_glx_contexts = release.released_glx_contexts.saturating_add(1);
+            }
+            !owned
+        });
+        self.glx_windows.retain(|id, (owner, _, _)| {
+            let owned = *owner == namespace
+                && u32::try_from(id.local.raw()).is_ok_and(|raw| range.owns_new_resource(raw));
+            if owned {
+                release.released_glx_windows = release.released_glx_windows.saturating_add(1);
+            }
+            !owned
+        });
         for gc in self
             .graphics_contexts
             .ids_for_namespace_in_client_range(namespace, range)

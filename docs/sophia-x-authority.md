@@ -222,7 +222,8 @@ Required baseline:
 - SHM for software-backed pixmap/image updates;
 - DRI3/Present for GPU-backed buffer handoff;
 - RandR surface/output facts enough for clients to observe screen size;
-- selected GLX compatibility only after DRI3/Present semantics are clear.
+- bounded direct-Mesa GLX bootstrap for clients that render through the proven
+  DRI3/Present path.
 
 Deferred unless a real app requires them:
 
@@ -435,8 +436,10 @@ explicit and evidence-driven:
   and cursor request handling covers only retained probes.
 - Large selection transfers through `INCR` and full Xdnd execution remain
   deferred behind the bounded clipboard reference flow.
-- Render, Sync, and selected GLX compatibility are not advertised. Add them only
-  when a captured application trace supplies a focused request and regression.
+- Render and Sync are not advertised. GLX advertises only the captured
+  direct-Mesa bootstrap needed by Kitty: GLVND vendor selection, deterministic
+  visuals/FBConfigs, direct context/window lifecycle, and drawable attributes.
+  Indirect rendering and server-side GLX buffer submission remain deferred.
 - RandR provides Engine-derived observation and notifications, not general
   client-controlled mode management. MIT-SHM intentionally copies admitted
   image ranges and does not expose shared pixmaps.

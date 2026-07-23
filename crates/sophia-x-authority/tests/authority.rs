@@ -322,6 +322,17 @@ fn client_resource_range_release_reclaims_only_its_supported_resources() {
     runtime
         .attach_shm_segment(namespace, XResourceId::new(0x0020_0006, 1), 10, false, 1)
         .unwrap();
+    runtime
+        .create_glx_context(namespace, XResourceId::new(0x0020_0007, 1), 3, true)
+        .unwrap();
+    runtime
+        .create_glx_window(
+            namespace,
+            XResourceId::new(0x0020_0008, 1),
+            departing_window,
+            3,
+        )
+        .unwrap();
 
     let release = runtime
         .release_client_resource_range(
@@ -340,6 +351,8 @@ fn client_resource_range_release_reclaims_only_its_supported_resources() {
     assert_eq!(release.released_cursors, 1);
     assert_eq!(release.released_graphics_contexts, 1);
     assert_eq!(release.released_shm_segments, 1);
+    assert_eq!(release.released_glx_contexts, 1);
+    assert_eq!(release.released_glx_windows, 1);
     assert_eq!(runtime.window_count(), 1);
     assert_eq!(runtime.resource_count(), 1);
     assert_eq!(runtime.shm_segment_count(), 0);

@@ -1,7 +1,7 @@
 use crate::{
     X_ATOM_NONE, X_BIG_REQUESTS_EXTENSION_NAME, X_BIG_REQUESTS_MAJOR_OPCODE,
     X_MIT_SHM_EXTENSION_NAME, X_MIT_SHM_MAJOR_OPCODE, X_RANDR_EXTENSION_NAME, X_RANDR_MAJOR_OPCODE,
-    X_SETUP_DEFAULT_COLORMAP, X_SETUP_DEFAULT_ROOT, X_SETUP_DEFAULT_VISUAL,
+    X_SETUP_ARGB_VISUAL, X_SETUP_DEFAULT_COLORMAP, X_SETUP_DEFAULT_ROOT, X_SETUP_DEFAULT_VISUAL,
     X_SOPHIA_PRESENT_EXTENSION_NAME, X_SOPHIA_PRESENT_MAJOR_OPCODE, XAtomTable,
     XAuthorityRequestKind, XAuthorityResponseOutcome, XAuthorityResponsePacket, XAuthorityRuntime,
     XAuthorityRuntimeError, XByteOrder, XClientEvent, XClientOutput, XClientReply, XErrorCode,
@@ -13,6 +13,103 @@ use crate::{
 use sophia_protocol::{NamespaceId, OutputTopologySnapshot, Rect, Region, TransactionId};
 
 const DRM_FORMAT_MOD_INVALID: u64 = 0x00ff_ffff_ffff_ffff;
+const GLX_EXTENSIONS: &str = "GLX_EXT_libglvnd GLX_ARB_create_context GLX_ARB_create_context_profile GLX_ARB_framebuffer_sRGB GLX_EXT_framebuffer_sRGB";
+
+fn glx_visual_configs() -> Vec<[u32; 18]> {
+    vec![
+        [
+            X_SETUP_DEFAULT_VISUAL,
+            4,
+            1,
+            8,
+            8,
+            8,
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            24,
+            0,
+            0,
+            0,
+            0,
+        ],
+        [
+            X_SETUP_ARGB_VISUAL,
+            4,
+            1,
+            8,
+            8,
+            8,
+            8,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            32,
+            0,
+            0,
+            0,
+            0,
+        ],
+    ]
+}
+
+fn glx_fb_config(id: u32, visual: u32, alpha: u32, srgb: u32) -> Vec<(u32, u32)> {
+    vec![
+        (0x8013, id),
+        (0x800b, visual),
+        (0x8012, 1),
+        (0x8010, 0x3),
+        (0x8011, 0x1),
+        (0x22, 0x8002),
+        (0x2, 24 + alpha),
+        (0x3, 0),
+        (0x5, 1),
+        (0x6, 0),
+        (0x7, 8),
+        (0x8, 8),
+        (0x9, 8),
+        (0xb, alpha),
+        (0xc, 0),
+        (0xd, 0),
+        (0xe, 0),
+        (0xf, 0),
+        (0x10, 0),
+        (0x11, 0),
+        (0x12, 0),
+        (0x13, 0),
+        (0x14, 0),
+        (0x20, 0x8000),
+        (0x23, 0x8000),
+        (0x186a0, 0),
+        (0x186a1, 0),
+        (0x20b2, srgb),
+    ]
+}
+
+fn glx_fb_configs() -> Vec<Vec<(u32, u32)>> {
+    vec![
+        glx_fb_config(1, X_SETUP_DEFAULT_VISUAL, 0, 0),
+        glx_fb_config(2, X_SETUP_ARGB_VISUAL, 8, 0),
+        glx_fb_config(3, X_SETUP_ARGB_VISUAL, 8, 1),
+    ]
+}
+
+fn glx_bad_value(context: &XDispatchContext, value: u32, minor: u8) -> XClientOutput {
+    XClientOutput::Error(crate::XClientError {
+        code: XErrorCode::BadValue,
+        sequence: context.sequence,
+        resource_id: value,
+        minor_code: u16::from(minor),
+        major_code: context.major_opcode,
+    })
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct XDispatchContext {
@@ -76,6 +173,9 @@ pub fn dispatch_x11_wire_request(
         XWireRequest::CreateWindow {
             packet,
             background_pixel,
+            depth,
+            visual,
+            colormap,
             ..
         } => {
             let kind = packet.kind.clone();
@@ -88,6 +188,26 @@ pub fn dispatch_x11_wire_request(
                     namespace,
                     *window,
                     background_pixel.unwrap_or(0),
+                );
+                let resolved_visual = if visual == 0 {
+                    X_SETUP_DEFAULT_VISUAL
+                } else {
+                    visual
+                };
+                let resolved_depth = if depth == 0 {
+                    if resolved_visual == X_SETUP_ARGB_VISUAL {
+                        32
+                    } else {
+                        24
+                    }
+                } else {
+                    depth
+                };
+                runtime.set_window_visual(
+                    *window,
+                    resolved_depth,
+                    resolved_visual,
+                    colormap.unwrap_or(XResourceId::new(u64::from(X_SETUP_DEFAULT_COLORMAP), 1)),
                 );
             }
             let outputs = outputs_from_authority_response(context.clone(), &kind, &response);
@@ -154,10 +274,11 @@ pub fn dispatch_x11_wire_request(
                     u32::try_from(window.local.raw()).unwrap_or(0),
                 ))
             } else {
+                let (_, visual, colormap) = runtime.window_visual(window);
                 XClientOutput::Reply(XClientReply::GetWindowAttributes {
                     sequence: context.sequence,
-                    visual: X_SETUP_DEFAULT_VISUAL,
-                    colormap: XResourceId::new(u64::from(X_SETUP_DEFAULT_COLORMAP), 1),
+                    visual,
+                    colormap,
                     map_state: 2,
                     override_redirect: false,
                 })
@@ -368,7 +489,7 @@ pub fn dispatch_x11_wire_request(
                 match runtime.window_geometry(context.namespace, drawable) {
                     Ok(geometry) => XClientOutput::Reply(XClientReply::GetGeometry {
                         sequence: context.sequence,
-                        depth: 24,
+                        depth: runtime.window_visual(drawable).0,
                         root: XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1),
                         geometry,
                         border_width: 0,
@@ -2400,13 +2521,222 @@ pub fn dispatch_x11_wire_request(
             })],
             metadata_candidates: Vec::new(),
         },
+        XWireRequest::GlxGetVisualConfigs { screen } => {
+            let outputs = if screen == 0 {
+                vec![XClientOutput::Reply(XClientReply::GlxVisualConfigs {
+                    sequence: context.sequence,
+                    configs: glx_visual_configs(),
+                })]
+            } else {
+                vec![glx_bad_value(
+                    &context,
+                    screen,
+                    crate::X_GLX_GET_VISUAL_CONFIGS_MINOR_OPCODE,
+                )]
+            };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::GlxGetFbConfigs { screen } => {
+            let outputs = if screen == 0 {
+                vec![XClientOutput::Reply(XClientReply::GlxFbConfigs {
+                    sequence: context.sequence,
+                    configs: glx_fb_configs(),
+                })]
+            } else {
+                vec![glx_bad_value(
+                    &context,
+                    screen,
+                    crate::X_GLX_GET_FB_CONFIGS_MINOR_OPCODE,
+                )]
+            };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::GlxClientInfo => XDispatchResult {
+            response: None,
+            outputs: Vec::new(),
+            metadata_candidates: Vec::new(),
+        },
+        XWireRequest::GlxCreateContext {
+            context: id,
+            fbconfig,
+            screen,
+            share,
+            direct,
+        } => {
+            let valid = screen == 0
+                && (1..=3).contains(&fbconfig)
+                && share.map_or(true, |share| {
+                    runtime.glx_context(context.namespace, share).is_ok()
+                });
+            let outputs = if valid {
+                runtime
+                    .create_glx_context(context.namespace, id, fbconfig, direct)
+                    .err()
+                    .map(|error| {
+                        XClientOutput::Error(x_error_from_runtime(
+                            error,
+                            context.sequence,
+                            context.major_opcode,
+                            id.local.raw() as u32,
+                        ))
+                    })
+                    .into_iter()
+                    .collect()
+            } else {
+                vec![glx_bad_value(
+                    &context,
+                    fbconfig,
+                    crate::X_GLX_CREATE_CONTEXT_ATTRIBS_ARB_MINOR_OPCODE,
+                )]
+            };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::GlxDestroyContext { context: id } => {
+            let outputs = runtime
+                .destroy_glx_context(context.namespace, id)
+                .err()
+                .map(|error| {
+                    XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        id.local.raw() as u32,
+                    ))
+                })
+                .into_iter()
+                .collect();
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::GlxIsDirect { context: id } => {
+            let outputs = match runtime.glx_context(context.namespace, id) {
+                Ok((_, direct)) => vec![XClientOutput::Reply(XClientReply::GlxIsDirect {
+                    sequence: context.sequence,
+                    direct,
+                })],
+                Err(error) => vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    id.local.raw() as u32,
+                ))],
+            };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::GlxCreateWindow {
+            screen,
+            fbconfig,
+            window,
+            glx_window,
+        } => {
+            let visual = runtime.window_visual(window).1;
+            let compatible = matches!(
+                (fbconfig, visual),
+                (1, X_SETUP_DEFAULT_VISUAL) | (2 | 3, X_SETUP_ARGB_VISUAL)
+            );
+            let outputs = if screen == 0 && compatible {
+                runtime
+                    .create_glx_window(context.namespace, glx_window, window, fbconfig)
+                    .err()
+                    .map(|error| {
+                        XClientOutput::Error(x_error_from_runtime(
+                            error,
+                            context.sequence,
+                            context.major_opcode,
+                            glx_window.local.raw() as u32,
+                        ))
+                    })
+                    .into_iter()
+                    .collect()
+            } else {
+                vec![glx_bad_value(
+                    &context,
+                    fbconfig,
+                    crate::X_GLX_CREATE_WINDOW_MINOR_OPCODE,
+                )]
+            };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::GlxDeleteWindow { glx_window } => {
+            let outputs = runtime
+                .destroy_glx_window(context.namespace, glx_window)
+                .err()
+                .map(|error| {
+                    XClientOutput::Error(x_error_from_runtime(
+                        error,
+                        context.sequence,
+                        context.major_opcode,
+                        glx_window.local.raw() as u32,
+                    ))
+                })
+                .into_iter()
+                .collect();
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
+        XWireRequest::GlxGetDrawableAttributes { drawable } => {
+            let outputs = match runtime.glx_drawable(context.namespace, drawable).and_then(
+                |(window, config)| {
+                    runtime
+                        .window_geometry(context.namespace, window)
+                        .map(|geometry| (geometry, config))
+                },
+            ) {
+                Ok((geometry, config)) => {
+                    vec![XClientOutput::Reply(XClientReply::GlxDrawableAttributes {
+                        sequence: context.sequence,
+                        attributes: vec![
+                            (0x801D, geometry.width as u32),
+                            (0x801E, geometry.height as u32),
+                            (0x8013, config),
+                            (0x800C, 0),
+                        ],
+                    })]
+                }
+                Err(error) => vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    drawable.local.raw() as u32,
+                ))],
+            };
+            XDispatchResult {
+                response: None,
+                outputs,
+                metadata_candidates: Vec::new(),
+            }
+        }
         XWireRequest::GlxQueryExtensionsString => XDispatchResult {
             response: None,
             outputs: vec![XClientOutput::Reply(XClientReply::GlxString {
                 sequence: context.sequence,
-                value:
-                    "GLX_ARB_create_context GLX_ARB_create_context_profile GLX_EXT_framebuffer_sRGB"
-                        .to_owned(),
+                value: GLX_EXTENSIONS.to_owned(),
             })],
             metadata_candidates: Vec::new(),
         },
@@ -2414,9 +2744,8 @@ pub fn dispatch_x11_wire_request(
             let value = match name {
                 1 => "Sophia",
                 2 => "1.4",
-                3 => {
-                    "GLX_ARB_create_context GLX_ARB_create_context_profile GLX_EXT_framebuffer_sRGB"
-                }
+                3 => GLX_EXTENSIONS,
+                0x20f6 => "mesa",
                 _ => "",
             };
             XDispatchResult {

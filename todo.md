@@ -41,9 +41,12 @@ Milestone 5 hardware runner.
 - [x] Require Ctrl-Alt-Backspace guard arming before xmonad graphics takeover.
 - [x] Restore KD mode, termios, and keyd on normal, failed, and emergency exits.
 - [x] Diagnose the blank startup as an omitted startup application plus an
-  input gate that suppressed global shortcuts when no application was focused.
-- [x] Start Kitty automatically and preserve global WM shortcuts on an empty
-  desktop without routing unfocused application input.
+  input gate that suppressed global shortcuts when no application was focused;
+  the subsequent Kitty launch failure was GLVND selecting the indirect vendor
+  because Sophia exposed no Mesa mapping or framebuffer configurations.
+- [x] Start Kitty automatically, preserve global WM shortcuts on an empty
+  desktop, and implement the bounded direct-Mesa GLX visual/FBConfig/context/
+  drawable path needed before DRI3/Present rendering.
 - [ ] Retain one passing physical launcher, input-guard, recovery, and Sophia
   session capture with automatic Kitty startup.
 - [x] Verify the second Ctrl-Alt-Backspace chord returns to a usable tty3 before
