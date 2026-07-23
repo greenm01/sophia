@@ -1,5 +1,6 @@
 use sophia_protocol::{Point, Rect, Size};
 use sophia_renderer_live::{
+    CLASSIC_X11_CURSOR_EDGE, CLASSIC_X11_CURSOR_HOTSPOT, CLASSIC_X11_CURSOR_SHAPE,
     LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888, LiveCpuBufferSource, LiveCpuBufferSourceRef,
     LiveCpuCompositionLayer, LiveCpuCompositionLayerRef, compose_live_cpu_frame,
     compose_live_cpu_frame_ref, compose_live_cpu_frame_ref_with_cursor,
@@ -192,9 +193,20 @@ fn borrowed_composition_draws_a_high_contrast_software_cursor() {
         compose_live_cpu_frame_ref_with_cursor(size, &[layer], Some(Point { x: 2.8, y: 3.2 }))
             .unwrap();
 
-    let white = (3 * 16 + 2) * 4;
-    let outline = (3 * 16 + 1) * 4;
+    let outline = (3 * 16 + 2) * 4;
+    let white = (4 * 16 + 3) * 4;
     assert_eq!(&report.frame.bytes[white..white + 4], &[0xff; 4]);
     assert_eq!(&report.frame.bytes[outline..outline + 4], &[0, 0, 0, 0xff]);
     assert_ne!(report.checksum, baseline.checksum);
+}
+
+#[test]
+fn classic_cursor_asset_has_stable_x11_dimensions_and_hotspot() {
+    assert_eq!(CLASSIC_X11_CURSOR_EDGE, 16);
+    assert_eq!(CLASSIC_X11_CURSOR_HOTSPOT, (0, 0));
+    assert_eq!(CLASSIC_X11_CURSOR_SHAPE.len(), CLASSIC_X11_CURSOR_EDGE);
+    assert!(CLASSIC_X11_CURSOR_SHAPE.iter().all(|row| {
+        row.len() == CLASSIC_X11_CURSOR_EDGE
+            && row.iter().all(|pixel| matches!(pixel, b'.' | b'#' | b'W'))
+    }));
 }

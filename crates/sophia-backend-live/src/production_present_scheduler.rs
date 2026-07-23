@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 #[derive(Clone, Debug)]
 pub struct LiveProductionQueuedPresent {
     pub submission: LivePresentationSubmission,
+    pub surface: sophia_protocol::SurfaceId,
     pub transactions: Vec<SurfaceTransaction>,
     pub cpu_background: Option<LiveCpuComposedFrame>,
     pub target: Rect,
@@ -21,6 +22,7 @@ pub struct LiveProductionQueuedPresent {
 #[derive(Clone, Debug)]
 pub struct LiveProductionSubmittedPresent {
     pub transaction: TransactionId,
+    pub surface: sophia_protocol::SurfaceId,
     pub prepared: PreparedSurfaceCommit,
 }
 
@@ -66,10 +68,11 @@ impl LiveProductionPresentScheduler {
         now: Instant,
     ) -> Result<(), Box<dyn Error>> {
         for submission in &batch.present_submissions {
+            let surface = submission.surface;
             let transaction = batch
                 .transactions
                 .iter()
-                .find(|transaction| transaction.surface == submission.surface)
+                .find(|transaction| transaction.surface == surface)
                 .ok_or("Present submission has no matching Engine transaction")?;
             let submission = LivePresentationSubmission {
                 transaction: submission.transaction,
@@ -88,6 +91,7 @@ impl LiveProductionPresentScheduler {
             let not_before = now + acquire_delay;
             self.queued.push_back(LiveProductionQueuedPresent {
                 submission,
+                surface,
                 transactions: batch.transactions.clone(),
                 cpu_background: cpu_background.clone(),
                 target: transaction.target_geometry,

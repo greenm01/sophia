@@ -1,9 +1,9 @@
 use super::prelude::*;
 
 use sophia_backend_live::{
-    LiveProductionAuthorityBatch, LiveProductionCpuScene, LiveProductionDmaBufRegistration,
-    LiveProductionFenceRegistration, LiveProductionNativeScanout, LiveProductionPresentSubmission,
-    LiveProductionVisualRuntime,
+    ClassicHardwareCursorUpdate, LiveProductionAuthorityBatch, LiveProductionCpuScene,
+    LiveProductionDmaBufRegistration, LiveProductionFenceRegistration, LiveProductionNativeScanout,
+    LiveProductionPresentSubmission, LiveProductionVisualRuntime,
 };
 use sophia_cli::emergency_input::{EmergencyChordAction, EmergencyChordState};
 use sophia_cli::input_proof::{PhysicalTextProof, PhysicalTextProofEvent};
@@ -2615,6 +2615,52 @@ fn physical_input_routing_mode(
     }
 }
 
+fn reconcile_initial_session_focus(
+    runtime: &LiveProductionVisualRuntime,
+    focus: &mut InputFocusState,
+    seat: SeatId,
+    wm_session_present: bool,
+    layout: &PersistentLiveLayout,
+    control_sender: &SyncSender<XAuthorityClientControlCommand>,
+    next_focus_control_transaction: &mut u64,
+    focused_client_control: &mut Option<(TransactionId, SurfaceId)>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if focus.focused_surface(seat).is_some() {
+        return Ok(());
+    }
+    let Some(surface) = runtime.committed_surfaces().first() else {
+        return Ok(());
+    };
+    if focus.focus_surface(seat, surface.surface, runtime.committed_surfaces())
+        != InputFocusDecision::Focused
+        || wm_session_present
+    {
+        return Ok(());
+    }
+    let client = layout
+        .client_routes
+        .client_for_surface(surface.surface)
+        .ok_or("initial X11 focus has no client route")?;
+    let transaction = TransactionId::from_raw(*next_focus_control_transaction);
+    *next_focus_control_transaction = next_focus_control_transaction
+        .checked_add(1)
+        .ok_or("initial X11 focus transaction exhausted")?;
+    control_sender
+        .try_send(XAuthorityClientControlCommand {
+            client,
+            command: XAuthorityControlCommand::FocusSurface {
+                transaction,
+                surface: surface.surface,
+            },
+        })
+        .map_err(|error| match error {
+            TrySendError::Full(_) => "initial X11 focus control queue is full",
+            TrySendError::Disconnected(_) => "initial X11 focus control queue is disconnected",
+        })?;
+    *focused_client_control = Some((transaction, surface.surface));
+    Ok(())
+}
+
 fn authority_transaction_count(transactions: &[SurfaceTransaction]) -> usize {
     transactions.len()
 }
@@ -2965,11 +3011,11 @@ fn run_session_loop(
     let mut cursor_dirty_since = cursor_dirty.then_some(Instant::now());
     let mut cursor_moves_coalesced = 0_u64;
     let mut cursor_max_motion_to_submit = Duration::ZERO;
-    let mut hardware_cursor_unavailable_reported = false;
     let startup_ready_deadline = config
         .startup_ready_timeout
         .map(|timeout| started + timeout);
     let mut startup_required_submissions: Option<Vec<usize>> = None;
+    let mut retired_present_surfaces = BTreeSet::new();
     let mut startup_ready_reported = false;
     let mut pending_authority_batches = VecDeque::new();
 
@@ -3389,7 +3435,27 @@ fn run_session_loop(
             break;
         }
         if let (Some(runtime), Some(native_scanout)) = (runtime.as_mut(), native_scanout.as_mut()) {
-            let _ = runtime.service_native(native_scanout)?;
+            let service = runtime.service_native(native_scanout)?;
+            if let Some(retired) = service.retired_present {
+                retired_present_surfaces.insert(retired.surface);
+                println!(
+                    "sophia_live_session_present schema=1 status=retired transaction={} surface={}",
+                    retired.transaction.raw(),
+                    retired.surface.index(),
+                );
+            }
+            runtime_surfaces =
+                u64::try_from(runtime.committed_surfaces().len()).unwrap_or(u64::MAX);
+            reconcile_initial_session_focus(
+                runtime,
+                &mut focus,
+                seat,
+                wm_session.is_some(),
+                &layout,
+                control_sender,
+                &mut next_focus_control_transaction,
+                &mut focused_client_control,
+            )?;
         }
         let mut hardware_cursor_presented = false;
         if cursor_dirty
@@ -3397,7 +3463,7 @@ fn run_session_loop(
                 (native_scanout.as_mut(), pointer.position)
         {
             match native_scanout.update_classic_hardware_cursor(position) {
-                Ok(true) => {
+                Ok(ClassicHardwareCursorUpdate::Visible) => {
                     hardware_cursor_presented = true;
                     pointer_pixel_change |= physical_pointer_routed > 0;
                     if let Some(started) = cursor_dirty_since.take() {
@@ -3412,17 +3478,20 @@ fn run_session_loop(
                         );
                     }
                 }
-                Ok(false) => {
+                Ok(ClassicHardwareCursorUpdate::Hidden) => {
                     cursor_dirty = false;
                 }
+                Ok(ClassicHardwareCursorUpdate::Deferred) => {
+                    hardware_cursor_presented = true;
+                }
                 Err(error) => {
-                    cursor_dirty = false;
-                    if !hardware_cursor_unavailable_reported {
-                        eprintln!(
-                            "sophia_live_session_pointer schema=2 status=unavailable source=hardware_cursor error={error}"
-                        );
-                        hardware_cursor_unavailable_reported = true;
-                    }
+                    eprintln!(
+                        "sophia_live_session_pointer schema=2 status=unavailable source=hardware_cursor error={error}"
+                    );
+                    return Err(format!(
+                        "native session cannot provide an owned atomic cursor: {error}"
+                    )
+                    .into());
                 }
             }
         }
@@ -3491,21 +3560,45 @@ fn run_session_loop(
             std::io::stdout().flush()?;
         }
 
-        let startup_frame_presented = native_scanout.as_ref().is_none_or(|native| {
-            startup_required_submissions
-                .as_ref()
-                .is_some_and(|required| {
-                    native
-                        .heads
-                        .iter()
-                        .zip(required)
-                        .next()
-                        .is_some_and(|(head, required)| head.presented_submissions >= *required)
-                })
-        });
+        if let (Some(runtime), Some(surface)) = (runtime.as_ref(), focus.focused_surface(seat))
+            && let Some(committed) = runtime
+                .committed_surfaces()
+                .iter()
+                .find(|committed| committed.surface == surface)
+        {
+            let cpu_visual_detail =
+                scene.surface_has_visual_detail(runtime.committed_surfaces(), surface);
+            let retired_gpu_detail = retired_present_surfaces.contains(&surface)
+                && matches!(committed.buffer, BufferSource::DmaBuf { .. });
+            if !startup_content_ready && (cpu_visual_detail || retired_gpu_detail) {
+                startup_content_ready = true;
+                println!(
+                    "sophia_live_session_startup schema=1 status=content_ready source={}",
+                    if retired_gpu_detail {
+                        "present_retirement"
+                    } else {
+                        "cpu_visual_detail"
+                    }
+                );
+                std::io::stdout().flush()?;
+            }
+        }
+        let focused_surface = focus.focused_surface(seat);
+        let startup_frame_presented =
+            native_scanout.as_ref().is_none_or(|native| {
+                focused_surface.is_some_and(|surface| retired_present_surfaces.contains(&surface))
+                    || startup_required_submissions
+                        .as_ref()
+                        .is_some_and(|required| {
+                            native.heads.iter().zip(required).next().is_some_and(
+                                |(head, required)| head.presented_submissions >= *required,
+                            )
+                        })
+            });
         if !startup_ready_reported
             && config.startup_ready_timeout.is_some()
             && focus.focused_surface(seat).is_some()
+            && focused_client_ready
             && startup_content_ready
             && startup_frame_presented
         {
@@ -3521,17 +3614,49 @@ fn run_session_loop(
         {
             let stage = if layout.layers.is_empty() {
                 "no_surface"
-            } else if focus.focused_surface(seat).is_none() {
+            } else if runtime
+                .as_ref()
+                .is_none_or(|runtime| runtime.committed_surfaces().is_empty())
+            {
                 "not_committed"
+            } else if focus.focused_surface(seat).is_none() {
+                "not_focused"
+            } else if !focused_client_ready {
+                "focus_control_pending"
             } else if !startup_content_ready {
                 "no_visual_detail"
             } else {
                 "not_presented"
             };
+            if let Some(native) = native_scanout.as_ref() {
+                for head in &native.heads {
+                    if let Some(report) = head.last_submit_report {
+                        eprintln!("{}", report.reduced_log_line());
+                    }
+                }
+            }
             eprintln!(
-                "sophia_live_session_startup schema=2 status=failed stage={stage} elapsed_msec={} authority_batches={batches} transactions={transactions} layout_surfaces={} runtime_surfaces={runtime_surfaces} dma_buf_registrations={dma_buf_registrations_observed} fence_registrations={fence_registrations_observed} present_submissions={present_submissions_observed} protocol_errors={protocol_error_count}",
+                "sophia_live_session_startup schema=3 status=failed stage={stage} elapsed_msec={} authority_batches={batches} transactions={transactions} layout_surfaces={} runtime_surfaces={runtime_surfaces} focus={} focus_control_ready={focused_client_ready} retired_present_surfaces={} dma_buf_registrations={dma_buf_registrations_observed} fence_registrations={fence_registrations_observed} present_submissions={present_submissions_observed} native_submissions={} native_submit_failures={} native_retirements={} native_callbacks={} native_state={} protocol_errors={protocol_error_count}",
                 started.elapsed().as_millis(),
-                layout.layers.len()
+                layout.layers.len(),
+                focus.focused_surface(seat).is_some(),
+                retired_present_surfaces.len(),
+                native_scanout
+                    .as_ref()
+                    .map_or(0, |native| native.submissions),
+                native_scanout
+                    .as_ref()
+                    .map_or(0, |native| native.submit_failures),
+                native_scanout
+                    .as_ref()
+                    .map_or(0, |native| native.retirements),
+                native_scanout
+                    .as_ref()
+                    .map_or(0, |native| native.callback_accepted),
+                runtime.as_ref().map_or_else(
+                    || "none".to_owned(),
+                    LiveProductionVisualRuntime::native_diagnostic
+                ),
             );
             return Err(format!(
                 "startup application was not visibly presented within {} milliseconds: stage={stage}",
@@ -3848,7 +3973,7 @@ fn run_session_loop(
                     .iter()
                     .map(renderer_cpu_buffer_update)
                     .collect::<Vec<_>>();
-                let (tick, report, committed_surfaces, composed, compose_elapsed) =
+                let (_tick, report, committed_surfaces, composed, compose_elapsed) =
                     if batch.present_submissions.is_empty() {
                         let (submission, committed_surfaces) = runtime.run_cpu_production_cycle(
                             &production_batch,
@@ -3928,7 +4053,8 @@ fn run_session_loop(
                     runtime_committed,
                     authority_transaction_count(&batch.transactions),
                 );
-                runtime_surfaces = tick.engine.runtime.runtime_state.authority_surfaces_applied;
+                runtime_surfaces =
+                    u64::try_from(runtime.committed_surfaces().len()).unwrap_or(u64::MAX);
                 for surface in removed_surfaces {
                     if config.application_proof_requested()
                         && physical_pointer_buttons_routed == 0
@@ -3950,38 +4076,16 @@ fn run_session_loop(
                     application_surface_missing_since = None;
                     application_surface_gone_at = None;
                 }
-                if focus.focused_surface(seat).is_none()
-                    && let Some(surface) = runtime.committed_surfaces().first()
-                {
-                    if focus.focus_surface(seat, surface.surface, runtime.committed_surfaces())
-                        == InputFocusDecision::Focused
-                        && wm_session.is_none()
-                    {
-                        let client = layout
-                            .client_routes
-                            .client_for_surface(surface.surface)
-                            .ok_or("initial X11 focus has no client route")?;
-                        let transaction = TransactionId::from_raw(next_focus_control_transaction);
-                        next_focus_control_transaction = next_focus_control_transaction
-                            .checked_add(1)
-                            .ok_or("initial X11 focus transaction exhausted")?;
-                        control_sender
-                            .try_send(XAuthorityClientControlCommand {
-                                client,
-                                command: XAuthorityControlCommand::FocusSurface {
-                                    transaction,
-                                    surface: surface.surface,
-                                },
-                            })
-                            .map_err(|error| match error {
-                                TrySendError::Full(_) => "initial X11 focus control queue is full",
-                                TrySendError::Disconnected(_) => {
-                                    "initial X11 focus control queue is disconnected"
-                                }
-                            })?;
-                        focused_client_control = Some((transaction, surface.surface));
-                    }
-                }
+                reconcile_initial_session_focus(
+                    runtime,
+                    &mut focus,
+                    seat,
+                    wm_session.is_some(),
+                    &layout,
+                    control_sender,
+                    &mut next_focus_control_transaction,
+                    &mut focused_client_control,
+                )?;
                 if let Some((transaction, surface)) = layout.focus_to_apply.take() {
                     let decision = focus.focus_surface(seat, surface, runtime.committed_surfaces());
                     if decision == InputFocusDecision::Focused && wm_session.is_some() {
@@ -4027,11 +4131,7 @@ fn run_session_loop(
                 if let Some(surface) = focus.focused_surface(seat) {
                     let cpu_visual_detail =
                         scene.surface_has_visual_detail(runtime.committed_surfaces(), surface);
-                    let gpu_present_detail = batch
-                        .present_submissions
-                        .iter()
-                        .any(|submission| submission.surface == surface);
-                    if !startup_content_ready && (cpu_visual_detail || gpu_present_detail) {
+                    if !startup_content_ready && cpu_visual_detail {
                         startup_content_ready = true;
                         startup_required_submissions = native_scanout.as_ref().map(|native| {
                             native
@@ -4044,12 +4144,7 @@ fn run_session_loop(
                                 .collect()
                         });
                         println!(
-                            "sophia_live_session_startup schema=1 status=content_ready source={}",
-                            if gpu_present_detail {
-                                "present"
-                            } else {
-                                "cpu_visual_detail"
-                            }
+                            "sophia_live_session_startup schema=1 status=content_ready source=cpu_visual_detail"
                         );
                         std::io::stdout().flush()?;
                     }
@@ -4090,11 +4185,30 @@ fn run_session_loop(
                     (runtime.as_mut(), native_scanout.as_mut())
                 {
                     let service = runtime.service_native(native_scanout)?;
+                    if let Some(retired) = service.retired_present {
+                        retired_present_surfaces.insert(retired.surface);
+                        println!(
+                            "sophia_live_session_present schema=1 status=retired transaction={} surface={}",
+                            retired.transaction.raw(),
+                            retired.surface.index(),
+                        );
+                    }
                     if let Some(tick) = service.tick {
                         backend_ticks = backend_ticks.saturating_add(1);
-                        runtime_surfaces =
-                            tick.engine.runtime.runtime_state.authority_surfaces_applied;
+                        let _ = tick;
                     }
+                    runtime_surfaces =
+                        u64::try_from(runtime.committed_surfaces().len()).unwrap_or(u64::MAX);
+                    reconcile_initial_session_focus(
+                        runtime,
+                        &mut focus,
+                        seat,
+                        wm_session.is_some(),
+                        &layout,
+                        control_sender,
+                        &mut next_focus_control_transaction,
+                        &mut focused_client_control,
+                    )?;
                 }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {

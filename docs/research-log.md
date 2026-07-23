@@ -2209,9 +2209,30 @@ keyboard and pointer-button events remain unrouted. This removes the prior
 first-surface dependency from cursor feedback without introducing an
 application-specific branch in Engine.
 
-The first centered-cursor run exposed an inherited-cursor edge case: greetd
-could leave a legacy cursor installed on another owned CRTC, while Sophia knew
-only about the cursor it installed itself. Backend-live now clears the legacy
-cursor on every selected CRTC before the first Sophia cursor update and again
-during teardown, preventing a frozen inherited pointer beside the moving
-compositor pointer.
+The first centered-cursor repair was insufficient. A physical rerun still
+showed a frozen inherited pointer beside Sophia's moving pointer because the
+atomic display owner attempted to clear cursor state through deprecated legacy
+cursor ioctls and discarded every error. Backend-live now discovers cursor
+planes compatible with every selected CRTC, atomically detaches them before
+first use, retains an ARGB cursor framebuffer, and performs coalesced atomic
+attach/move commits. Hardware and software paths share one canonical classic
+X11 pointer raster.
+
+The same rerun proved that input discovery was not the keyboard failure:
+libinput observed a key and routed pointer motion plus a button. Kitty created
+and mapped a surface and submitted one DRI3/Present frame, but no later
+authority batch arrived after asynchronous KMS retirement. Initial focus and
+startup-content reconciliation lived only in the authority-batch branch, so
+the retired surface never gained focus and keyboard delivery remained gated.
+Present retirement now carries its transaction and surface back to the session
+loop; the shared reconciliation path runs after both authority work and KMS
+service, sends X11 focus control, and recognizes the retired frame without
+requiring a second Present. Startup diagnostics now report actual committed
+surfaces, focus/control state, Present retirement, native submission failures,
+callbacks, and per-output in-flight state.
+
+Finally, the physical gate had not actually matched the passing Kitty smoke:
+it still loaded the normal user configuration. The guarded profile now uses
+`--config NONE` with only the forced X11, opaque-background, and diagnostic
+title arguments. Normal Kitty configuration compatibility remains outside the
+minimal input gate.

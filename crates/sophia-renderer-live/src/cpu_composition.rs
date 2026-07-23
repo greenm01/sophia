@@ -153,21 +153,25 @@ pub fn compose_live_cpu_frame_ref_with_cursor(
     })
 }
 
-const SOFTWARE_CURSOR_SHAPE: [&[u8]; 14] = [
-    b"#.........",
-    b"##........",
-    b"###.......",
-    b"####......",
-    b"#####.....",
-    b"######....",
-    b"#######...",
-    b"########..",
-    b"#########.",
-    b"####......",
-    b"###.#.....",
-    b"##..#.....",
-    b"#...#.....",
-    b"....#.....",
+pub const CLASSIC_X11_CURSOR_EDGE: usize = 16;
+pub const CLASSIC_X11_CURSOR_HOTSPOT: (i32, i32) = (0, 0);
+pub const CLASSIC_X11_CURSOR_SHAPE: [&[u8]; CLASSIC_X11_CURSOR_EDGE] = [
+    b"##..............",
+    b"#W#.............",
+    b"#WW#............",
+    b"#WWW#...........",
+    b"#WWWW#..........",
+    b"#WWWWW#.........",
+    b"#WWWWWW#........",
+    b"#WWWWWWW#.......",
+    b"#WWWWWWWW#......",
+    b"#WWWWW#####.....",
+    b"#WWW#W#.........",
+    b"#WW#.#W#........",
+    b"#W#..#W#........",
+    b"##...#WW#.......",
+    b"#....#WW#.......",
+    b".....#WW#.......",
 ];
 
 fn compose_software_cursor(frame: &mut LiveCpuComposedFrame, position: Point) {
@@ -183,30 +187,16 @@ fn compose_software_cursor(frame: &mut LiveCpuComposedFrame, position: Point) {
     let origin_x = position.x.floor() as i32;
     let origin_y = position.y.floor() as i32;
 
-    // Draw the outline first so the white pointer remains legible over both
-    // Kitty's dark terminal background and a light client surface.
-    for (row, pixels) in SOFTWARE_CURSOR_SHAPE.iter().enumerate() {
+    for (row, pixels) in CLASSIC_X11_CURSOR_SHAPE.iter().enumerate() {
         for (column, pixel) in pixels.iter().enumerate() {
-            if *pixel != b'#' {
-                continue;
-            }
+            let color = match pixel {
+                b'W' => [0xff, 0xff, 0xff, 0xff],
+                b'#' => [0, 0, 0, 0xff],
+                _ => continue,
+            };
             let x = origin_x.saturating_add(i32::try_from(column).unwrap_or(i32::MAX));
             let y = origin_y.saturating_add(i32::try_from(row).unwrap_or(i32::MAX));
-            for outline_y in y.saturating_sub(1)..=y.saturating_add(1) {
-                for outline_x in x.saturating_sub(1)..=x.saturating_add(1) {
-                    put_pixel(frame, outline_x, outline_y, [0, 0, 0, 0xff]);
-                }
-            }
-        }
-    }
-    for (row, pixels) in SOFTWARE_CURSOR_SHAPE.iter().enumerate() {
-        for (column, pixel) in pixels.iter().enumerate() {
-            if *pixel != b'#' {
-                continue;
-            }
-            let x = origin_x.saturating_add(i32::try_from(column).unwrap_or(i32::MAX));
-            let y = origin_y.saturating_add(i32::try_from(row).unwrap_or(i32::MAX));
-            put_pixel(frame, x, y, [0xff, 0xff, 0xff, 0xff]);
+            put_pixel(frame, x, y, color);
         }
     }
 }

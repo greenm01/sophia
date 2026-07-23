@@ -325,6 +325,7 @@ impl LiveProductionVisualRuntime {
             .present_scheduler
             .front()
             .ok_or("ready Present gate has no queued presentation")?;
+        let queued_surface = queued.surface;
 
         let prepared = self
             .production
@@ -416,6 +417,7 @@ impl LiveProductionVisualRuntime {
                 self.present_scheduler
                     .mark_submitted(LiveProductionSubmittedPresent {
                         transaction,
+                        surface: queued_surface,
                         prepared,
                     });
             }
@@ -723,7 +725,7 @@ impl LiveProductionVisualRuntime {
     pub fn retire_native_scanout(
         &mut self,
         native_scanout: &mut LiveProductionNativeScanout,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<Option<LiveProductionRetiredPresent>, Box<dyn std::error::Error>> {
         let output_count = self.outputs.output_count();
         let production = &self.production;
         let outputs = &mut self.outputs;
@@ -745,18 +747,18 @@ impl LiveProductionVisualRuntime {
         if let Some(primary) = self.outputs.primary_output()
             && let Some((ust, msc)) = native_scanout.take_presentation_feedback(primary)
         {
-            self.finalize_gpu_page_flip(ust, msc)?;
+            return self.finalize_gpu_page_flip(ust, msc);
         }
-        Ok(())
+        Ok(None)
     }
 
     pub fn finalize_gpu_page_flip(
         &mut self,
         ust: u64,
         msc: u64,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<Option<LiveProductionRetiredPresent>, Box<dyn std::error::Error>> {
         let Some(submitted) = self.present_scheduler.take_submitted() else {
-            return Ok(());
+            return Ok(None);
         };
         let (production, outputs, presentation_feedback) = (
             &mut self.production,
@@ -771,7 +773,10 @@ impl LiveProductionVisualRuntime {
         outputs.project_committed(&completion.committed_surfaces);
         let outcome = completion.evidence;
         self.route_present_feedback(outcome);
-        Ok(())
+        Ok(Some(LiveProductionRetiredPresent {
+            transaction: submitted.transaction,
+            surface: submitted.surface,
+        }))
     }
 
     pub fn native_scanout_in_flight(&self) -> bool {
@@ -898,8 +903,15 @@ impl LiveProductionVisualRuntime {
 }
 
 #[derive(Debug)]
+pub struct LiveProductionRetiredPresent {
+    pub transaction: TransactionId,
+    pub surface: SurfaceId,
+}
+
+#[derive(Debug)]
 pub struct LiveProductionNativeServiceReport {
     pub tick: Option<LiveBackendRuntimeTickReport>,
+    pub retired_present: Option<LiveProductionRetiredPresent>,
     pub retirement_polled: bool,
     pub present_polled: bool,
     pub pending_frame_polled: bool,
@@ -912,6 +924,7 @@ impl LiveProductionVisualRuntime {
     ) -> Result<LiveProductionNativeServiceReport, Box<dyn std::error::Error>> {
         let mut coordinator = ProductionAsyncServiceCoordinator::new();
         let mut tick = None;
+        let mut retired_present = None;
         let mut retirement_polled = false;
         let mut present_polled = false;
         let mut pending_frame_polled = false;
@@ -926,7 +939,7 @@ impl LiveProductionVisualRuntime {
             match phase {
                 Some(ProductionAsyncServicePhase::KmsRetire) => {
                     retirement_polled = true;
-                    self.retire_native_scanout(native_scanout)?;
+                    retired_present = self.retire_native_scanout(native_scanout)?;
                 }
                 Some(ProductionAsyncServicePhase::SchedulePresent) => {
                     present_polled = true;
@@ -941,6 +954,7 @@ impl LiveProductionVisualRuntime {
         }
         Ok(LiveProductionNativeServiceReport {
             tick,
+            retired_present,
             retirement_polled,
             present_polled,
             pending_frame_polled,

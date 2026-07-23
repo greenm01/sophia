@@ -56,6 +56,7 @@ mod persistent_native_scanout {
         pub retirements: usize,
         pub callback_accepted: usize,
         pub nonzero_exports: usize,
+        pub last_submit_report: Option<crate::LiveTrackedRenderedPrimaryPlaneScanoutSubmitReport>,
     }
 
     impl LiveProductionNativeScanout {
@@ -165,6 +166,7 @@ mod persistent_native_scanout {
                         retirements: 0,
                         callback_accepted: 0,
                         nonzero_exports: 0,
+                        last_submit_report: None,
                     });
                 }
                 let (sender, receiver) = sync_channel(64);
@@ -203,9 +205,9 @@ mod persistent_native_scanout {
         pub fn update_classic_hardware_cursor(
             &mut self,
             position: sophia_protocol::Point,
-        ) -> Result<bool, Box<dyn std::error::Error>> {
+        ) -> Result<crate::ClassicHardwareCursorUpdate, Box<dyn std::error::Error>> {
             if !position.x.is_finite() || !position.y.is_finite() {
-                return Ok(false);
+                return Ok(crate::ClassicHardwareCursorUpdate::Hidden);
             }
             let mut offset_x = 0_i32;
             let mut target = None;
@@ -222,12 +224,15 @@ mod persistent_native_scanout {
             }
 
             let mut visible = false;
+            let mut deferred = false;
             for (group_index, group) in self.groups.iter_mut().enumerate() {
                 let group_target = target
                     .filter(|(target_group, _, _, _)| *target_group == group_index)
                     .map(|(_, selection, x, y)| (selection, x, y));
                 match group.session.update_classic_hardware_cursor(group_target) {
-                    Ok(group_visible) => visible |= group_visible,
+                    Ok(crate::ClassicHardwareCursorUpdate::Visible) => visible = true,
+                    Ok(crate::ClassicHardwareCursorUpdate::Deferred) => deferred = true,
+                    Ok(crate::ClassicHardwareCursorUpdate::Hidden) => {}
                     Err(error) => {
                         self.cursor_update_failures = self.cursor_update_failures.saturating_add(1);
                         return Err(format!("hardware cursor update failed: {error}").into());
@@ -237,7 +242,13 @@ mod persistent_native_scanout {
             if visible {
                 self.cursor_updates = self.cursor_updates.saturating_add(1);
             }
-            Ok(visible)
+            Ok(if deferred {
+                crate::ClassicHardwareCursorUpdate::Deferred
+            } else if visible {
+                crate::ClassicHardwareCursorUpdate::Visible
+            } else {
+                crate::ClassicHardwareCursorUpdate::Hidden
+            })
         }
 
         pub fn clone_render_device_file(&self) -> std::io::Result<std::fs::File> {
@@ -304,6 +315,7 @@ mod persistent_native_scanout {
             }
             self.observe_callbacks(index, report.page_flip_callbacks);
             if let Some(submit) = report.rendered_primary_plane_scanout_submit {
+                self.heads[index].last_submit_report = Some(submit);
                 use crate::LiveTrackedRenderedPrimaryPlaneScanoutSubmitStatus as Status;
                 match submit.status {
                     Status::SubmittedWaitingForPageFlip => {

@@ -242,17 +242,21 @@ manager, drives every connected output, starts one automatically focused
 Kitty, and restores the display manager on exit. The Kitty profile removes
 Wayland display variables and disables desktop-service bus activation so
 portal, notification, and settings helpers cannot delay X11 window creation.
-It also forces opaque X11 rendering because no compositing manager is present.
+It also uses Kitty's `--config NONE` profile, forces opaque X11 rendering
+because no compositing manager is present, and leaves an interactive shell
+running under a fixed diagnostic title.
 Startup must reach a focused,
 visibly presented surface within eight seconds or the wrapper fails closed
 and restores the TTY. Launcher output is retained in
 `/tmp/sophia-kitty-tty3-launch.log`.
 
 The initial classic hardware cursor is centered on the primary output before
-the first application surface. Move it across both outputs, click and drag to
-select terminal text, type into Kitty, and close Kitty normally. xmonad and
-Super-Enter remain outside this gate. Ctrl-Alt-Backspace remains the
-independent emergency recovery chord.
+the first application surface. Sophia atomically detaches inherited cursor
+planes before attaching its canonical X11 `left_ptr`; legacy cursor ioctls are
+not mixed with atomic primary-plane ownership. Move it across both outputs,
+click and drag to select terminal text, type into Kitty, and close Kitty
+normally. xmonad and Super-Enter remain outside this gate.
+Ctrl-Alt-Backspace remains the independent emergency recovery chord.
 
 The launcher uses libinput's udev backend on `seat0`. It discovers every
 keyboard, pointer, and touchpad assigned to that seat and follows device

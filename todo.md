@@ -70,6 +70,14 @@ Milestone 5 hardware runner.
   application frame is presented.
 - [x] Initialize and move the classic hardware cursor before the first
   application surface without routing unfocused keyboard or button events.
+- [x] Reconcile the first GPU Present after asynchronous KMS retirement even
+  when Kitty sends no later authority batch; apply X11 focus before enabling
+  keyboard routing and do not require a second frame for startup readiness.
+- [x] Replace best-effort legacy cursor cleanup with checked atomic cursor-plane
+  detach/attach/move commits and use the same classic pointer raster in
+  hardware and software paths.
+- [x] Make the minimal Kitty gate use `--config NONE` rather than the operator's
+  normal Kitty configuration.
 - [ ] Retain a physical Kitty-only capture proving visible cursor motion within
   two 60 Hz refresh intervals, click-drag selection, typed input, clean exit,
   and emergency recovery.

@@ -234,10 +234,14 @@ if [[ "$SESSION_PROFILE" == xmonad ]]; then
     )
 else
     session_args+=(
+        --session-app-arg=terminal=--config
+        --session-app-arg=terminal=NONE
         --session-app-arg=terminal=--override
         --session-app-arg=terminal=linux_display_server=x11
         --session-app-arg=terminal=--override
         --session-app-arg=terminal=background_opacity=1
+        --session-app-arg=terminal=--title
+        "--session-app-arg=terminal=Sophia Kitty TTY3"
         --exit-when-startup-exits
         --startup-ready-timeout-ms=8000
     )
@@ -247,6 +251,7 @@ session_environment=(SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1)
 if [[ "$SESSION_PROFILE" == kitty ]]; then
     session_environment+=(
         DBUS_SESSION_BUS_ADDRESS=unix:path=/dev/null
+        SOPHIA_LIVE_SESSION_DIAGNOSTIC=1
         SOPHIA_X11_AUTHORITY_TRACE=1
     )
 fi

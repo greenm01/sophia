@@ -226,6 +226,10 @@ fn production_present_scheduler_owns_delay_and_controlled_rejection_gates() {
             now,
         )
         .unwrap();
+    assert_eq!(
+        scheduler.front().map(|queued| queued.surface),
+        Some(surface)
+    );
 
     assert_eq!(
         scheduler.poll_gate(&mut resources, now).unwrap(),
