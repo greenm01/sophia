@@ -65,6 +65,10 @@ Milestone 5 hardware runner.
 - [x] Replace launcher path heuristics with production libinput/udev `seat0`
   discovery, capability classification, tap policy, and hotplug accounting;
   retain explicit paths only as a diagnostic override.
+- [x] Bound Kitty-only startup at eight seconds, isolate its session bus, and
+  restore TTY3 automatically when no focused application frame is presented.
+- [x] Initialize and move the classic hardware cursor before the first
+  application surface without routing unfocused keyboard or button events.
 - [ ] Retain a physical Kitty-only capture proving visible cursor motion within
   two 60 Hz refresh intervals, click-drag selection, typed input, clean exit,
   and emergency recovery.

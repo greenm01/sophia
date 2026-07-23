@@ -32,7 +32,7 @@ pub(crate) fn print(verbose: bool) {
     println!("commands: x-authority-present-pixmap-smoke");
     #[cfg(feature = "atomic-scanout-live")]
     println!(
-        "commands: sophia-live-session [--session-mode=normal --session-app=ID=/PATH --session-app-arg=ID=ARG ... --session-start=ID ... --session-action-app=terminal|launcher|firefox=ID --exit-when-startup-exits] [--client-backend=sophia-x] [--client=PATH] [--client-arg=ARG ...] [--display=:77] [--terminal=xterm] [--terminal-exec=PATH] [--terminal-exec-arg=ARG ...] [--secondary-terminal] [--namespace-profile=classic|confined] [--input-seat=seat0|--input-devices=/dev/input/eventN,...] [--native-scanout] [--wm-process=PATH] [--wm-process-arg=ARG ...] [--max-runtime-ms=N] [--max-ticks=N] [--inject-text=lowercase|--expect-physical-text=lowercase] [--expect-physical-pointer] [--exit-after-input-proof] [--proof]"
+        "commands: sophia-live-session [--session-mode=normal --session-app=ID=/PATH --session-app-arg=ID=ARG ... --session-start=ID ... --session-action-app=terminal|launcher|firefox=ID --exit-when-startup-exits --startup-ready-timeout-ms=8000] [--client-backend=sophia-x] [--client=PATH] [--client-arg=ARG ...] [--display=:77] [--terminal=xterm] [--terminal-exec=PATH] [--terminal-exec-arg=ARG ...] [--secondary-terminal] [--namespace-profile=classic|confined] [--input-seat=seat0|--input-devices=/dev/input/eventN,...] [--native-scanout] [--wm-process=PATH] [--wm-process-arg=ARG ...] [--max-runtime-ms=N] [--max-ticks=N] [--inject-text=lowercase|--expect-physical-text=lowercase] [--expect-physical-pointer] [--exit-after-input-proof] [--proof]"
     );
     #[cfg(feature = "atomic-scanout-live")]
     println!(

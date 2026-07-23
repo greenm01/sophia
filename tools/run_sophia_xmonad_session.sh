@@ -233,11 +233,28 @@ if [[ "$SESSION_PROFILE" == xmonad ]]; then
         --wm-process-arg=--wm-private-alias=xmonad/xmonad-x86_64-linux
     )
 else
-    session_args+=(--exit-when-startup-exits)
+    session_args+=(
+        --exit-when-startup-exits
+        --startup-ready-timeout-ms=8000
+    )
 fi
 session_args+=("$@")
-setsid env SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1 \
-    target/release/sophia "${session_args[@]}" > >(tee "$SESSION_LOG") 2>&1 &
+session_command=(
+    env
+    -u WAYLAND_DISPLAY
+    -u WAYLAND_SOCKET
+    SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1
+    target/release/sophia
+    "${session_args[@]}"
+)
+if [[ "$SESSION_PROFILE" == kitty ]]; then
+    if ! command -v dbus-run-session >/dev/null 2>&1; then
+        echo "The Kitty profile requires dbus-run-session for deterministic startup." >&2
+        exit 1
+    fi
+    session_command=(dbus-run-session -- "${session_command[@]}")
+fi
+setsid "${session_command[@]}" > >(tee "$SESSION_LOG") 2>&1 &
 session_pid=$!
 set +e
 wait -n "$session_pid" "$guard_pid"

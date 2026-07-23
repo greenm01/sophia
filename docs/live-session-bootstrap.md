@@ -71,52 +71,33 @@ Passing evidence reports `status=bounded_complete`, matching authority batch,
 backend tick, and runtime commit counts, nonzero composed pixels, and
 `input_pixel_change=true`.
 
-## Real Legacy-WM Policy Session
+## Guarded Kitty-Only TTY3 Session
 
-Run the first real xmonad-backed operator session from a dedicated TTY with:
+Run the supported physical operator session from TTY3 with:
 
 ```sh
-~/scripts/start-sophia-tty3
+~/dev/sophia-stack/tools/start_sophia_kitty_tty3.sh
 ```
 
-The TTY3 launcher verifies the operator is on `/dev/tty3`, resolves or builds
-xmonad, temporarily stops a runit-managed LightDM/Xorg session, and restores it
-on exit. When several keyboard or pointer devices exist, it asks the operator
-which ones Sophia should own before stopping LightDM. It refuses to stop an
-unknown Xorg session and retains launcher output in
-`/tmp/sophia-tty3-launch.log`. The supervised wrapper builds optimized Sophia
-and generic X11 WM bridge binaries, verifies exclusive TTY/DRM/input
-conditions, temporarily stops keyd, and requires one Ctrl-Alt-Backspace chord
-to arm an independent recovery guard before graphics takeover. A second chord
-terminates the session without depending on Sophia input routing. The wrapper
-restores KD mode, termios, and keyd on exit, with durable session, guard, and
-recovery logs under `~/.local/state/sophia/xmonad-session/`. Sophia supervises
-the bridge as a generic WM policy process. Xmonad sees only a synthetic private
-display; Kitty remains connected to Sophia X Authority. Engine validates and
-applies xmonad placement, stacking, and focus, while physical input and scanout
-remain Sophia-owned.
+The launcher verifies `/dev/tty3`, temporarily stops the active runit display
+manager, and restores it on exit. The supervised wrapper builds optimized
+Sophia, verifies exclusive TTY/DRM/input conditions, temporarily stops keyd,
+and requires one Ctrl-Alt-Backspace chord to arm the independent recovery
+guard. A second chord terminates the session without depending on Sophia input
+routing.
 
-The live compatibility gate allows xmonad to request a real client size. Sophia
-keeps the previous geometry and pixels until X Authority publishes the matching
-replacement buffer, then commits the resized pixels and placement together.
-Later drawing requests carry tightly packed damage patches instead of cloning a
-fullscreen CPU buffer for every glyph. The headless xmonad proof requires one
-configure acknowledgement before layout commits.
-
-The operator wrapper starts one Kitty and registers it as the terminal action.
-`Super+Enter` launches another Kitty, including after the last application
-surface closes, and `Super+Shift+Q` logs out. Global WM shortcuts remain active
-on an otherwise empty desktop while unfocused application input remains
-suppressed. Kitty's X11 backend requires Sophia's bounded direct-Mesa GLX
-bootstrap before its DRI3/Present buffers exist; a GLFW-window failure is an
-application-startup failure, not proof of a blank compositor session. Keep the
-physical capture gate open until automatic Kitty startup, typing, relaunch,
-emergency exit, normal logout, and KD/termios recovery all pass together.
+The profile starts one Kitty without xmonad, uses libinput `seat0`, and runs
+inside a private session bus with Wayland variables removed. The first focused
+application frame must reach native presentation within eight seconds; failure
+automatically restores KD mode, termios, keyd, the display manager, and TTY3.
+Durable session, guard, and recovery logs remain under
+`~/.local/state/sophia/kitty-session/`, with launcher output in
+`/tmp/sophia-kitty-tty3-launch.log`.
 
 Stop the session from another TTY, from the Sophia checkout, with:
 
 ```sh
-tools/stop_sophia_xmonad_session.sh
+tools/stop_sophia_kitty_session.sh
 ```
 
 The wrapper owns the session process group and restores the text TTY and `keyd`

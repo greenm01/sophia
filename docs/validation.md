@@ -234,14 +234,23 @@ The supported physical TTY3 input path is currently the guarded Kitty-only
 profile:
 
 ```sh
-tools/run_sophia_kitty_session.sh
+tools/start_sophia_kitty_tty3.sh
 ```
 
-It drives every connected output, starts one automatically focused Kitty, and
-keeps xmonad plus Super-Enter out of the input/presentation gate. Move the
-cursor across both outputs, click and drag to select terminal text, type into
-Kitty, and close Kitty normally. Ctrl-Alt-Backspace remains the independent
-emergency recovery chord.
+Run it after switching to `/dev/tty3`. It stops the active runit display
+manager, drives every connected output, starts one automatically focused
+Kitty, and restores the display manager on exit. The Kitty profile owns a
+private session bus and removes Wayland display variables so desktop portal
+discovery cannot delay X11 window creation. Startup must reach a focused,
+visibly presented surface within eight seconds or the wrapper fails closed
+and restores the TTY. Launcher output is retained in
+`/tmp/sophia-kitty-tty3-launch.log`.
+
+The initial classic hardware cursor is centered on the primary output before
+the first application surface. Move it across both outputs, click and drag to
+select terminal text, type into Kitty, and close Kitty normally. xmonad and
+Super-Enter remain outside this gate. Ctrl-Alt-Backspace remains the
+independent emergency recovery chord.
 
 The launcher uses libinput's udev backend on `seat0`. It discovers every
 keyboard, pointer, and touchpad assigned to that seat and follows device

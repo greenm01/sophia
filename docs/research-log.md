@@ -2179,3 +2179,28 @@ evidence; device-removed events maintain active counts without exposing device
 names or paths. Both the independent recovery guard and the Sophia session use
 seat discovery. Explicit `--input-devices` remains mutually exclusive with
 `--input-seat` and is retained only for deterministic hardware/QEMU proofs.
+
+## 2026-07-23: Kitty Startup Is Bounded Before the First Surface
+
+The first Kitty-only `seat0` run acquired both outputs and discovered fourteen
+libinput devices, but remained blank until the independent guard restored the
+TTY. The session log contained no focused or committed application surface.
+Kitty's desktop-settings request failed after 10.389 seconds because a bare TTY
+had no usable portal service; emergency recovery was requested at the same
+boundary. The separate non-modesetting Kitty trace still passed 207 X requests,
+one DRI3/Present transaction, one runtime surface, and `first_error=none`, so
+the direct-Mesa GLX path was not the failing boundary.
+
+The Kitty profile now runs inside a private `dbus-run-session` with Wayland
+display variables removed. The live session accepts a generic bounded startup
+deadline and succeeds only after a focused CPU-detail or DRI3/Present surface
+crosses actual native presentation. A missing surface, missing visual content,
+or unpresented frame reports a distinct reduced stage and returns through the
+normal TTY cleanup path after eight seconds.
+
+Native normal sessions initialize an empty output runtime immediately. Physical
+pointer motion is polled before a client surface exists, the compositor-owned
+classic hardware cursor begins at the primary-output center, and unfocused
+keyboard and pointer-button events remain unrouted. This removes the prior
+first-surface dependency from cursor feedback without introducing an
+application-specific branch in Engine.

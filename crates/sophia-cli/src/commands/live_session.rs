@@ -922,6 +922,7 @@ struct PersistentXtermSessionConfig {
     require_client_normal_exit: bool,
     normal_session: bool,
     exit_when_startup_exits: bool,
+    startup_ready_timeout: Option<Duration>,
     applications: SessionApplicationConfig,
     secondary_terminal: bool,
     max_runtime: Option<Duration>,
@@ -955,6 +956,16 @@ impl PersistentXtermSessionConfig {
         let display_number = parse_display_number(&display)?;
         let normal_session = args.iter().any(|arg| arg == "--session-mode=normal");
         let exit_when_startup_exits = args.iter().any(|arg| arg == "--exit-when-startup-exits");
+        let startup_ready_timeout = arg_value(args, "--startup-ready-timeout-ms")
+            .as_deref()
+            .map(parse_u64)
+            .transpose()?
+            .map(Duration::from_millis);
+        if startup_ready_timeout.is_some_and(|timeout| {
+            timeout < Duration::from_millis(100) || timeout > Duration::from_secs(60)
+        }) {
+            return Err("--startup-ready-timeout-ms accepts 100-60000 milliseconds".into());
+        }
         let mut applications = SessionApplicationConfig::default();
         for value in args
             .iter()
@@ -1073,6 +1084,11 @@ impl PersistentXtermSessionConfig {
                         .into(),
                 );
             }
+            if startup_ready_timeout.is_some() && applications.startup.is_empty() {
+                return Err(
+                    "--startup-ready-timeout-ms requires at least one startup application".into(),
+                );
+            }
         } else if !applications.applications.is_empty()
             || !applications.startup.is_empty()
             || applications.terminal.is_some()
@@ -1082,6 +1098,8 @@ impl PersistentXtermSessionConfig {
             return Err("session application options require --session-mode=normal".into());
         } else if exit_when_startup_exits {
             return Err("--exit-when-startup-exits requires --session-mode=normal".into());
+        } else if startup_ready_timeout.is_some() {
+            return Err("--startup-ready-timeout-ms requires --session-mode=normal".into());
         }
         let max_runtime = arg_value(args, "--max-runtime-ms")
             .as_deref()
@@ -1320,6 +1338,7 @@ impl PersistentXtermSessionConfig {
             max_runtime,
             normal_session,
             exit_when_startup_exits,
+            startup_ready_timeout,
             applications,
             max_ticks,
             inject_text,
@@ -2803,13 +2822,15 @@ fn run_session_loop(
     let started = Instant::now();
     let deadline = config.max_runtime.map(|duration| started + duration);
     let blank_normal_session = config.normal_session && config.applications.startup.is_empty();
+    let initialize_empty_runtime =
+        blank_normal_session || (config.normal_session && native_scanout.is_some());
     let outputs = native_scanout
         .as_ref()
         .map(LiveProductionNativeScanout::outputs)
         .unwrap_or_else(|| vec![sophia_engine::HeadlessOutput::deterministic()]);
     let output = outputs[0];
     let mut scene = LiveProductionCpuScene::new(output.size);
-    if blank_normal_session {
+    if initialize_empty_runtime {
         scene.compose(&[], None, None)?;
     }
     let mut layout = PersistentLiveLayout::new(
@@ -2818,7 +2839,7 @@ fn run_session_loop(
     );
     let mut committed_session_actions = VecDeque::new();
     let present_observer = Arc::new(Mutex::new(XPresentSessionObserver::new(protocol_router)));
-    let mut runtime = if blank_normal_session {
+    let mut runtime = if initialize_empty_runtime {
         Some(
             LiveProductionVisualRuntime::new(
                 &outputs,
@@ -2874,7 +2895,7 @@ fn run_session_loop(
     let mut batches = 0usize;
     let mut transactions = 0usize;
     let mut cpu_buffer_updates = 0usize;
-    let mut cpu_compositions = usize::from(blank_normal_session);
+    let mut cpu_compositions = usize::from(initialize_empty_runtime);
     let mut coalesced_batches = 0usize;
     let mut input_batch_baseline = None;
     let mut input_cpu_update_baseline = None;
@@ -2885,6 +2906,9 @@ fn run_session_loop(
     let mut modifiers = XCoreKeyboardMapper::new();
     let mut emergency_chord = EmergencyChordState::armed();
     let mut pointer = SessionPointerPlacement::default();
+    if native_scanout.is_some() {
+        pointer.center_on_primary_output(output.size);
+    }
     let mut physical_events = 0usize;
     let mut physical_keys_routed = 0usize;
     let mut physical_pointer_events = 0usize;
@@ -2918,8 +2942,8 @@ fn run_session_loop(
     let mut post_input_deadline: Option<Instant> = None;
     let mut application_surface_gone_at: Option<Instant> = None;
     let mut terminal_content_ready = blank_normal_session;
+    let mut startup_content_ready = blank_normal_session;
     let mut startup_ready_msec = blank_normal_session.then_some(0);
-    let mut terminal_content_ready_reported = blank_normal_session;
     let mut input_text_match = false;
     let mut primary_child_exited = child.is_none();
     let mut primary_exit_status = None;
@@ -2934,24 +2958,36 @@ fn run_session_loop(
     let mut first_protocol_error = None;
     let mut emergency_exit_requested = false;
     let mut return_suppressed_reported = false;
-    let mut cursor_dirty = false;
-    let mut cursor_dirty_since: Option<Instant> = None;
+    let mut cursor_dirty = pointer.position.is_some();
+    let mut cursor_dirty_since = cursor_dirty.then_some(Instant::now());
     let mut cursor_moves_coalesced = 0_u64;
     let mut cursor_max_motion_to_submit = Duration::ZERO;
     let mut hardware_cursor_unavailable_reported = false;
+    let startup_ready_deadline = config
+        .startup_ready_timeout
+        .map(|timeout| started + timeout);
+    let mut startup_required_submissions: Option<Vec<usize>> = None;
+    let mut startup_ready_reported = false;
     let mut pending_authority_batches = VecDeque::new();
 
     macro_rules! drain_physical_input {
         ($routing_mode:expr) => {{
             let emergency_exit = false;
-            if let (Some(poller), Some(runtime)) = (physical_input.as_mut(), runtime.as_ref())
+            if let Some(poller) = physical_input.as_mut()
                 && (config.expect_physical_text.is_none() || physical_input_ready_at.is_some())
             {
+                let empty_committed = [];
+                let committed_surfaces = runtime
+                    .as_ref()
+                    .map_or(&empty_committed[..], |runtime| runtime.committed_surfaces());
+                let input_layers = runtime
+                    .as_ref()
+                    .map_or_else(Vec::new, |runtime| runtime.input_layers());
                 let report = route_physical_input(
                     poller,
                     &focus,
-                    runtime.committed_surfaces(),
-                    &runtime.input_layers(),
+                    committed_surfaces,
+                    &input_layers,
                     &layout.client_routes,
                     wm_session
                         .as_mut()
@@ -2984,10 +3020,13 @@ fn run_session_loop(
                 if !report.deliveries.is_empty() && input_proof_started_at.is_some() {
                     input_delivery_wait_started_at.get_or_insert_with(Instant::now);
                 }
-                if report.pointer_routed > 0 {
+                let pointer_motions_observed = report
+                    .pointer_events
+                    .saturating_sub(report.pointer_buttons_observed);
+                if pointer_motions_observed > 0 && pointer.position.is_some() {
                     if cursor_dirty {
                         cursor_moves_coalesced =
-                            cursor_moves_coalesced.saturating_add(report.pointer_routed as u64);
+                            cursor_moves_coalesced.saturating_add(pointer_motions_observed as u64);
                     } else {
                         cursor_dirty_since = Some(Instant::now());
                     }
@@ -3447,6 +3486,55 @@ fn run_session_loop(
                 "sophia_live_session_pointer schema=1 status=ready source=physical action=select"
             );
             std::io::stdout().flush()?;
+        }
+
+        let startup_frame_presented = native_scanout.as_ref().is_none_or(|native| {
+            startup_required_submissions
+                .as_ref()
+                .is_some_and(|required| {
+                    native
+                        .heads
+                        .iter()
+                        .zip(required)
+                        .next()
+                        .is_some_and(|(head, required)| head.presented_submissions >= *required)
+                })
+        });
+        if !startup_ready_reported
+            && config.startup_ready_timeout.is_some()
+            && focus.focused_surface(seat).is_some()
+            && startup_content_ready
+            && startup_frame_presented
+        {
+            startup_ready_reported = true;
+            println!(
+                "sophia_live_session_startup schema=1 status=ready elapsed_msec={} surface=true visual_detail=true presented=true",
+                started.elapsed().as_millis()
+            );
+            std::io::stdout().flush()?;
+        }
+        if !startup_ready_reported
+            && startup_ready_deadline.is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            let stage = if focus.focused_surface(seat).is_none() {
+                "no_surface"
+            } else if !startup_content_ready {
+                "no_visual_detail"
+            } else {
+                "not_presented"
+            };
+            eprintln!(
+                "sophia_live_session_startup schema=1 status=failed stage={stage} elapsed_msec={} authority_batches={batches} transactions={transactions} runtime_surfaces={runtime_surfaces} protocol_errors={protocol_error_count}",
+                started.elapsed().as_millis()
+            );
+            return Err(format!(
+                "startup application was not visibly presented within {} milliseconds: stage={stage}",
+                config
+                    .startup_ready_timeout
+                    .expect("startup deadline requires a timeout")
+                    .as_millis()
+            )
+            .into());
         }
 
         let input_baseline_presented_before_wait = scene.last_report().is_some_and(|report| {
@@ -3924,18 +4012,42 @@ fn run_session_loop(
                     focus_ready_reported = true;
                     focus_ready_at = Some(Instant::now());
                 }
-                if !terminal_content_ready
-                    && let Some(surface) = focus.focused_surface(seat)
-                    && scene.surface_has_visual_detail(runtime.committed_surfaces(), surface)
-                {
-                    terminal_content_ready = true;
-                    startup_ready_msec = Some(started.elapsed().as_millis());
-                    if !terminal_content_ready_reported {
+                if let Some(surface) = focus.focused_surface(seat) {
+                    let cpu_visual_detail =
+                        scene.surface_has_visual_detail(runtime.committed_surfaces(), surface);
+                    let gpu_present_detail = batch
+                        .present_submissions
+                        .iter()
+                        .any(|submission| submission.surface == surface);
+                    if !startup_content_ready && (cpu_visual_detail || gpu_present_detail) {
+                        startup_content_ready = true;
+                        startup_required_submissions = native_scanout.as_ref().map(|native| {
+                            native
+                                .heads
+                                .iter()
+                                .map(|head| {
+                                    head.submissions
+                                        .max(head.presented_submissions.saturating_add(1))
+                                })
+                                .collect()
+                        });
+                        println!(
+                            "sophia_live_session_startup schema=1 status=content_ready source={}",
+                            if gpu_present_detail {
+                                "present"
+                            } else {
+                                "cpu_visual_detail"
+                            }
+                        );
+                        std::io::stdout().flush()?;
+                    }
+                    if !terminal_content_ready && cpu_visual_detail {
+                        terminal_content_ready = true;
+                        startup_ready_msec = Some(started.elapsed().as_millis());
                         println!(
                             "sophia_live_session_input_pipeline schema=1 status=terminal_content_ready"
                         );
                         std::io::stdout().flush()?;
-                        terminal_content_ready_reported = true;
                     }
                 }
             }
@@ -4952,6 +5064,17 @@ fn pointer_offset_for_geometry(raw: Point, geometry: Rect) -> Point {
 }
 
 impl SessionPointerPlacement {
+    fn center_on_primary_output(&mut self, size: Size) -> Point {
+        let center = Point {
+            x: f64::from(size.width.max(1)) / 2.0,
+            y: f64::from(size.height.max(1)) / 2.0,
+        };
+        self.raw_position = Some(Point::default());
+        self.offset = Some(center);
+        self.position = Some(center);
+        center
+    }
+
     fn observe_raw(&mut self, raw: Point) {
         self.raw_position = Some(raw);
     }
@@ -5359,7 +5482,7 @@ mod tests {
     use sophia_x_authority::{XAuthorityClientSurfaceRoutes, XCoreKeyboardMapper};
     use std::io::Write;
     use std::sync::mpsc::sync_channel;
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn blank_normal_session_process_guard_has_no_primary_child() {
@@ -5558,6 +5681,65 @@ mod tests {
     }
 
     #[test]
+    fn physical_pointer_can_move_before_an_application_surface_exists() {
+        let mut pointer = SessionPointerPlacement::default();
+        assert_eq!(
+            pointer.center_on_primary_output(Size {
+                width: 2560,
+                height: 1440,
+            }),
+            Point {
+                x: 1280.0,
+                y: 720.0,
+            }
+        );
+        let events = vec![InputEventPacket {
+            serial: 1,
+            seat: SeatId::from_raw(1),
+            device: DeviceId::from_raw(2),
+            time_msec: 1,
+            kind: InputEventKind::PointerMotion,
+            global_position: Some(Point { x: 12.0, y: -8.0 }),
+            target_surface: None,
+            local_position: None,
+        }];
+        let (input_sender, input_receiver) = sync_channel(1);
+        let mut modifiers = XCoreKeyboardMapper::new();
+        let mut emergency = super::EmergencyChordState::awaiting_arm();
+        let mut next_delivery = 1;
+        let report = route_input_events(
+            events,
+            &InputFocusState::new(),
+            &[],
+            &[],
+            &XAuthorityClientSurfaceRoutes::default(),
+            &input_sender,
+            &mut modifiers,
+            &mut emergency,
+            None,
+            &mut pointer,
+            true,
+            false,
+            false,
+            PhysicalInputRoutingMode::Full,
+            &mut next_delivery,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(report.pointer_events, 1);
+        assert_eq!(report.pointer_routed, 0);
+        assert_eq!(
+            pointer.position,
+            Some(Point {
+                x: 1292.0,
+                y: 712.0,
+            })
+        );
+        assert!(input_receiver.try_recv().is_err());
+    }
+
+    #[test]
     fn interactive_pointer_proof_routes_motion_after_placement() {
         let mut pointer = SessionPointerPlacement {
             raw_position: None,
@@ -5708,6 +5890,39 @@ mod tests {
                 "--session-app=terminal=/usr/bin/kitty".to_owned(),
                 "--session-action-app=terminal=terminal".to_owned(),
                 "--exit-when-startup-exits".to_owned(),
+            ],
+        ] {
+            assert!(PersistentXtermSessionConfig::from_args(&args).is_err());
+        }
+    }
+
+    #[test]
+    fn startup_readiness_timeout_is_bounded_and_requires_a_startup_app() {
+        let config = PersistentXtermSessionConfig::from_args(&[
+            "--session-mode=normal".to_owned(),
+            "--session-app=terminal=/usr/bin/kitty".to_owned(),
+            "--session-start=terminal".to_owned(),
+            "--startup-ready-timeout-ms=8000".to_owned(),
+        ])
+        .unwrap();
+        assert_eq!(
+            config.startup_ready_timeout,
+            Some(Duration::from_millis(8_000))
+        );
+
+        for args in [
+            vec!["--startup-ready-timeout-ms=8000".to_owned()],
+            vec![
+                "--session-mode=normal".to_owned(),
+                "--session-app=terminal=/usr/bin/kitty".to_owned(),
+                "--session-action-app=terminal=terminal".to_owned(),
+                "--startup-ready-timeout-ms=8000".to_owned(),
+            ],
+            vec![
+                "--session-mode=normal".to_owned(),
+                "--session-app=terminal=/usr/bin/kitty".to_owned(),
+                "--session-start=terminal".to_owned(),
+                "--startup-ready-timeout-ms=99".to_owned(),
             ],
         ] {
             assert!(PersistentXtermSessionConfig::from_args(&args).is_err());
