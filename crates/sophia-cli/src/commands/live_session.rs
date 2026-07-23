@@ -2895,6 +2895,9 @@ fn run_session_loop(
     let mut batches = 0usize;
     let mut transactions = 0usize;
     let mut cpu_buffer_updates = 0usize;
+    let mut dma_buf_registrations_observed = 0usize;
+    let mut fence_registrations_observed = 0usize;
+    let mut present_submissions_observed = 0usize;
     let mut cpu_compositions = usize::from(initialize_empty_runtime);
     let mut coalesced_batches = 0usize;
     let mut input_batch_baseline = None;
@@ -3516,16 +3519,19 @@ fn run_session_loop(
         if !startup_ready_reported
             && startup_ready_deadline.is_some_and(|deadline| Instant::now() >= deadline)
         {
-            let stage = if focus.focused_surface(seat).is_none() {
+            let stage = if layout.layers.is_empty() {
                 "no_surface"
+            } else if focus.focused_surface(seat).is_none() {
+                "not_committed"
             } else if !startup_content_ready {
                 "no_visual_detail"
             } else {
                 "not_presented"
             };
             eprintln!(
-                "sophia_live_session_startup schema=1 status=failed stage={stage} elapsed_msec={} authority_batches={batches} transactions={transactions} runtime_surfaces={runtime_surfaces} protocol_errors={protocol_error_count}",
-                started.elapsed().as_millis()
+                "sophia_live_session_startup schema=2 status=failed stage={stage} elapsed_msec={} authority_batches={batches} transactions={transactions} layout_surfaces={} runtime_surfaces={runtime_surfaces} dma_buf_registrations={dma_buf_registrations_observed} fence_registrations={fence_registrations_observed} present_submissions={present_submissions_observed} protocol_errors={protocol_error_count}",
+                started.elapsed().as_millis(),
+                layout.layers.len()
             );
             return Err(format!(
                 "startup application was not visibly presented within {} milliseconds: stage={stage}",
@@ -3706,6 +3712,12 @@ fn run_session_loop(
                     transactions.saturating_add(authority_transaction_count(&batch.transactions));
                 cpu_buffer_updates =
                     cpu_buffer_updates.saturating_add(batch.cpu_buffer_updates.len());
+                dma_buf_registrations_observed = dma_buf_registrations_observed
+                    .saturating_add(batch.dma_buf_registrations.len());
+                fence_registrations_observed =
+                    fence_registrations_observed.saturating_add(batch.fence_registrations.len());
+                present_submissions_observed =
+                    present_submissions_observed.saturating_add(batch.present_submissions.len());
                 let removed_surfaces = batch.removed_surfaces.clone();
                 if let Some(wm_session) = wm_session.as_mut() {
                     for surface in &removed_surfaces {

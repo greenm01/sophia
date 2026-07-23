@@ -239,9 +239,11 @@ tools/start_sophia_kitty_tty3.sh
 
 Run it after switching to `/dev/tty3`. It stops the active runit display
 manager, drives every connected output, starts one automatically focused
-Kitty, and restores the display manager on exit. The Kitty profile owns a
-private session bus and removes Wayland display variables so desktop portal
-discovery cannot delay X11 window creation. Startup must reach a focused,
+Kitty, and restores the display manager on exit. The Kitty profile removes
+Wayland display variables and disables desktop-service bus activation so
+portal, notification, and settings helpers cannot delay X11 window creation.
+It also forces opaque X11 rendering because no compositing manager is present.
+Startup must reach a focused,
 visibly presented surface within eight seconds or the wrapper fails closed
 and restores the TTY. Launcher output is retained in
 `/tmp/sophia-kitty-tty3-launch.log`.

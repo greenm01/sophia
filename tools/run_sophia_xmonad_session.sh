@@ -234,26 +234,30 @@ if [[ "$SESSION_PROFILE" == xmonad ]]; then
     )
 else
     session_args+=(
+        --session-app-arg=terminal=--override
+        --session-app-arg=terminal=linux_display_server=x11
+        --session-app-arg=terminal=--override
+        --session-app-arg=terminal=background_opacity=1
         --exit-when-startup-exits
         --startup-ready-timeout-ms=8000
     )
 fi
 session_args+=("$@")
+session_environment=(SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1)
+if [[ "$SESSION_PROFILE" == kitty ]]; then
+    session_environment+=(
+        DBUS_SESSION_BUS_ADDRESS=unix:path=/dev/null
+        SOPHIA_X11_AUTHORITY_TRACE=1
+    )
+fi
 session_command=(
     env
     -u WAYLAND_DISPLAY
     -u WAYLAND_SOCKET
-    SOPHIA_RUN_REAL_ATOMIC_SCANOUT_SMOKE=1
+    "${session_environment[@]}"
     target/release/sophia
     "${session_args[@]}"
 )
-if [[ "$SESSION_PROFILE" == kitty ]]; then
-    if ! command -v dbus-run-session >/dev/null 2>&1; then
-        echo "The Kitty profile requires dbus-run-session for deterministic startup." >&2
-        exit 1
-    fi
-    session_command=(dbus-run-session -- "${session_command[@]}")
-fi
 setsid "${session_command[@]}" > >(tee "$SESSION_LOG") 2>&1 &
 session_pid=$!
 set +e

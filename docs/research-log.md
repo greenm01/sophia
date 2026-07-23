@@ -2191,12 +2191,16 @@ boundary. The separate non-modesetting Kitty trace still passed 207 X requests,
 one DRI3/Present transaction, one runtime surface, and `first_error=none`, so
 the direct-Mesa GLX path was not the failing boundary.
 
-The Kitty profile now runs inside a private `dbus-run-session` with Wayland
-display variables removed. The live session accepts a generic bounded startup
-deadline and succeeds only after a focused CPU-detail or DRI3/Present surface
-crosses actual native presentation. A missing surface, missing visual content,
-or unpresented frame reports a distinct reduced stage and returns through the
-normal TTY cleanup path after eight seconds.
+The first private-bus attempt activated the host notification and XFCE settings
+services without a usable desktop display, adding another nondeterministic
+startup path. The Kitty gate now matches the passing standalone trace instead:
+Wayland variables are removed, desktop-service bus activation is disabled, and
+the no-WM profile forces opaque X11 rendering. The live session accepts a
+generic bounded startup deadline and succeeds only after a focused CPU-detail
+or DRI3/Present surface crosses actual native presentation. A missing surface,
+uncommitted surface, missing visual content, or unpresented frame reports a
+distinct reduced stage and returns through the normal TTY cleanup path after
+eight seconds.
 
 Native normal sessions initialize an empty output runtime immediately. Physical
 pointer motion is polled before a client surface exists, the compositor-owned
@@ -2204,3 +2208,10 @@ classic hardware cursor begins at the primary-output center, and unfocused
 keyboard and pointer-button events remain unrouted. This removes the prior
 first-surface dependency from cursor feedback without introducing an
 application-specific branch in Engine.
+
+The first centered-cursor run exposed an inherited-cursor edge case: greetd
+could leave a legacy cursor installed on another owned CRTC, while Sophia knew
+only about the cursor it installed itself. Backend-live now clears the legacy
+cursor on every selected CRTC before the first Sophia cursor update and again
+during teardown, preventing a frozen inherited pointer beside the moving
+compositor pointer.

@@ -16,6 +16,8 @@ pub struct RealAtomicScanoutPageFlipSession {
     cursor_buffer: Option<drm::control::dumbbuffer::DumbBuffer>,
     #[cfg(feature = "gbm-probe")]
     cursor_crtc: Option<drm::control::crtc::Handle>,
+    #[cfg(feature = "gbm-probe")]
+    cursor_crtcs_sanitized: bool,
 }
 
 impl RealAtomicScanoutPageFlipSession {
@@ -27,6 +29,15 @@ impl RealAtomicScanoutPageFlipSession {
         use drm::control::Device as _;
 
         const EDGE: u32 = 64;
+        if !self.cursor_crtcs_sanitized {
+            for selection in &self.selections {
+                #[allow(deprecated)]
+                let _ = self
+                    .card
+                    .set_cursor::<drm::control::dumbbuffer::DumbBuffer>(selection.crtc, None);
+            }
+            self.cursor_crtcs_sanitized = true;
+        }
         if self.cursor_buffer.is_none() {
             let mut buffer =
                 self.card
@@ -270,11 +281,12 @@ impl Drop for RealAtomicScanoutPageFlipSession {
         #[cfg(feature = "gbm-probe")]
         {
             use drm::control::Device as _;
-            if let Some(crtc) = self.cursor_crtc.take() {
+            self.cursor_crtc = None;
+            for selection in &self.selections {
                 #[allow(deprecated)]
                 let _ = self
                     .card
-                    .set_cursor::<drm::control::dumbbuffer::DumbBuffer>(crtc, None);
+                    .set_cursor::<drm::control::dumbbuffer::DumbBuffer>(selection.crtc, None);
             }
             if let Some(buffer) = self.cursor_buffer.take() {
                 let _ = self.card.destroy_dumb_buffer(buffer);
@@ -369,6 +381,8 @@ impl RealAtomicScanoutCardSelection {
                 cursor_buffer: None,
                 #[cfg(feature = "gbm-probe")]
                 cursor_crtc: None,
+                #[cfg(feature = "gbm-probe")]
+                cursor_crtcs_sanitized: false,
             }),
         }
     }
@@ -446,6 +460,8 @@ impl RealAtomicScanoutSelectionSet {
                 cursor_buffer: None,
                 #[cfg(feature = "gbm-probe")]
                 cursor_crtc: None,
+                #[cfg(feature = "gbm-probe")]
+                cursor_crtcs_sanitized: false,
             });
         }
         let output_count = usize::try_from(next_output.saturating_sub(1)).unwrap_or(usize::MAX);

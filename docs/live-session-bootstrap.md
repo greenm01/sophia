@@ -86,9 +86,10 @@ and requires one Ctrl-Alt-Backspace chord to arm the independent recovery
 guard. A second chord terminates the session without depending on Sophia input
 routing.
 
-The profile starts one Kitty without xmonad, uses libinput `seat0`, and runs
-inside a private session bus with Wayland variables removed. The first focused
-application frame must reach native presentation within eight seconds; failure
+The profile starts one Kitty without xmonad, uses libinput `seat0`, removes
+Wayland variables, and disables desktop-service bus activation for this
+single-application gate. The first focused application frame must reach native
+presentation within eight seconds; failure
 automatically restores KD mode, termios, keyd, the display manager, and TTY3.
 Durable session, guard, and recovery logs remain under
 `~/.local/state/sophia/kitty-session/`, with launcher output in

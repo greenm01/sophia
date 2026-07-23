@@ -36,7 +36,9 @@ grep -Fq 'sophia-session-input-guard' tools/run_sophia_xmonad_session.sh
 grep -Fq 'sophia_tty_mode.py" "$kd_mode"' tools/run_sophia_xmonad_session.sh
 grep -Fq -- '--session-start=terminal' tools/run_sophia_xmonad_session.sh
 grep -Fq 'SOPHIA_TTY_PROFILE=kitty' tools/run_sophia_kitty_session.sh
-grep -Fq 'dbus-run-session --' tools/run_sophia_xmonad_session.sh
+grep -Fq 'DBUS_SESSION_BUS_ADDRESS=unix:path=/dev/null' tools/run_sophia_xmonad_session.sh
+grep -Fq 'linux_display_server=x11' tools/run_sophia_xmonad_session.sh
+grep -Fq 'background_opacity=1' tools/run_sophia_xmonad_session.sh
 grep -Fq -- '--startup-ready-timeout-ms=8000' tools/run_sophia_xmonad_session.sh
 grep -Fq 'tools/run_sophia_kitty_session.sh' tools/start_sophia_kitty_tty3.sh
 grep -Fq -- '--exit-when-startup-exits' tools/run_sophia_xmonad_session.sh
