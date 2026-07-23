@@ -498,96 +498,102 @@ pub(crate) fn run_persistent_xterm_session(
     let input_proof_result = (config.input_proof_requested() && config.client.is_none())
         .then(|| LiveInputProofResult::create(display_number))
         .transpose()?;
-    let normal_primary = config.normal_session.then(|| {
-        config
-            .applications
-            .applications
-            .get(&config.applications.startup[0])
-            .expect("normal session startup application was validated")
-    });
+    let normal_primary = config
+        .normal_session
+        .then(|| {
+            config.applications.startup.first().map(|id| {
+                config
+                    .applications
+                    .applications
+                    .get(id)
+                    .expect("normal session startup application was validated")
+            })
+        })
+        .flatten();
     let mut terminal_command = match (normal_primary, config.client.as_deref()) {
-        (Some(app), _) => std::process::Command::new(&app.executable),
-        (None, Some(client)) => application_client_command(client),
-        (None, None) => {
-            std::process::Command::new(terminal.as_deref().expect("xterm executable is resolved"))
-        }
+        (Some(app), _) => Some(std::process::Command::new(&app.executable)),
+        (None, _) if config.normal_session => None,
+        (None, Some(client)) => Some(application_client_command(client)),
+        (None, None) => Some(std::process::Command::new(
+            terminal.as_deref().expect("xterm executable is resolved"),
+        )),
     };
-    terminal_command
-        .env("DISPLAY", &config.display)
-        .env("XAUTHORITY", xauthority.path())
-        .env_remove("ENV")
-        .env_remove("BASH_ENV")
-        .stdin(Stdio::null())
-        .stderr(Stdio::inherit());
     let (client_stdout_capture, client_stdout_file) = if config.client.is_some() {
         let (capture, file) = LiveClientStdoutCapture::create(display_number)?;
         (Some(capture), Some(file))
     } else {
         (None, None)
     };
-    if let Some(app) = normal_primary {
+    if let Some(terminal_command) = terminal_command.as_mut() {
         terminal_command
-            .args(&app.arguments)
-            .process_group(0)
-            .stdout(Stdio::inherit());
-    } else if config.client.is_some() {
-        terminal_command
-            .env("GDK_BACKEND", "x11")
-            .env("GTK_USE_PORTAL", "0")
-            .env_remove("WAYLAND_DISPLAY")
-            .args(&config.client_args)
-            .stdout(Stdio::from(
-                client_stdout_file.expect("application stdout file was created"),
-            ));
-    } else {
-        terminal_command
-            .args([
-                "-cm",
-                "-dc",
-                "-geometry",
-                "120x36+80+60",
-                "-title",
-                "Sophia Terminal",
-            ])
-            .stdout(Stdio::inherit());
-    }
-    if config.client.is_none()
-        && let Some(proof_text) = config
-            .inject_text
-            .as_deref()
-            .or(config.expect_physical_text.as_deref())
-    {
-        terminal_command
-            .args([
-                "-e",
-                "sh",
-                "-c",
-                PRIMARY_INPUT_PROOF_SCRIPT,
-                "sophia-input-proof",
-            ])
-            .arg(proof_text)
-            .arg(
-                input_proof_result
-                    .as_ref()
-                    .expect("input proof result exists with proof text")
-                    .path(),
-            );
-    } else if let Some(program) = config.terminal_exec.as_deref() {
-        terminal_command
+            .env("DISPLAY", &config.display)
+            .env("XAUTHORITY", xauthority.path())
             .env_remove("ENV")
             .env_remove("BASH_ENV")
-            .arg("-e")
-            .arg(program)
-            .args(&config.terminal_exec_args);
+            .stdin(Stdio::null())
+            .stderr(Stdio::inherit());
         if let Some(app) = normal_primary {
-            println!(
-                "sophia_session_app schema=1 status=started id={} source=startup",
-                app.id
-            );
+            terminal_command
+                .args(&app.arguments)
+                .process_group(0)
+                .stdout(Stdio::inherit());
+        } else if config.client.is_some() {
+            terminal_command
+                .env("GDK_BACKEND", "x11")
+                .env("GTK_USE_PORTAL", "0")
+                .env_remove("WAYLAND_DISPLAY")
+                .args(&config.client_args)
+                .stdout(Stdio::from(
+                    client_stdout_file.expect("application stdout file was created"),
+                ));
+        } else {
+            terminal_command
+                .args([
+                    "-cm",
+                    "-dc",
+                    "-geometry",
+                    "120x36+80+60",
+                    "-title",
+                    "Sophia Terminal",
+                ])
+                .stdout(Stdio::inherit());
+        }
+        if config.client.is_none()
+            && let Some(proof_text) = config
+                .inject_text
+                .as_deref()
+                .or(config.expect_physical_text.as_deref())
+        {
+            terminal_command
+                .args([
+                    "-e",
+                    "sh",
+                    "-c",
+                    PRIMARY_INPUT_PROOF_SCRIPT,
+                    "sophia-input-proof",
+                ])
+                .arg(proof_text)
+                .arg(
+                    input_proof_result
+                        .as_ref()
+                        .expect("input proof result exists with proof text")
+                        .path(),
+                );
+        } else if let Some(program) = config.terminal_exec.as_deref() {
+            terminal_command
+                .env_remove("ENV")
+                .env_remove("BASH_ENV")
+                .arg("-e")
+                .arg(program)
+                .args(&config.terminal_exec_args);
         }
     }
-    let child = terminal_command.spawn()?;
-    if let Some(app) = normal_primary {
+    let child = terminal_command
+        .map(|mut command| command.spawn())
+        .transpose()?;
+    if child.is_some()
+        && let Some(app) = normal_primary
+    {
         println!(
             "sophia_session_app schema=1 status=started id={} source=startup",
             app.id
@@ -744,6 +750,9 @@ pub(crate) fn run_persistent_xterm_session(
         config.namespace_capabilities.request_bits(),
         config.namespace_capabilities.publish_bits(),
     );
+    if config.normal_session && config.applications.startup.is_empty() {
+        println!("sophia_live_session schema=1 status=desktop_ready startup_apps=0");
+    }
     if let Some(native_scanout) = native_scanout.as_ref() {
         println!(
             "sophia_live_outputs schema=2 status=ready discovered={} presentation={} native_owned={} multi_output_scanout=enabled layout=extended_horizontal",
@@ -753,7 +762,7 @@ pub(crate) fn run_persistent_xterm_session(
         );
     }
 
-    let (primary_child, secondary_children) = process.children_mut()?;
+    let (primary_child, secondary_children) = process.children_mut();
     let result = run_session_loop(
         &config,
         &authority_receiver,
@@ -2724,7 +2733,7 @@ fn run_session_loop(
     control_sender: &SyncSender<XAuthorityClientControlCommand>,
     control_ack_receiver: &Receiver<XAuthorityClientControlAck>,
     input_delivery_receiver: &Receiver<XAuthorityClientInputDelivery>,
-    child: &mut Child,
+    mut child: Option<&mut Child>,
     secondary_children: &mut Vec<ManagedSessionChild>,
     xauthority: &std::path::Path,
     physical_input: &mut Option<SessionPhysicalInput>,
@@ -2739,12 +2748,16 @@ fn run_session_loop(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let started = Instant::now();
     let deadline = config.max_runtime.map(|duration| started + duration);
+    let blank_normal_session = config.normal_session && config.applications.startup.is_empty();
     let outputs = native_scanout
         .as_ref()
         .map(LiveProductionNativeScanout::outputs)
         .unwrap_or_else(|| vec![sophia_engine::HeadlessOutput::deterministic()]);
     let output = outputs[0];
     let mut scene = LiveProductionCpuScene::new(output.size);
+    if blank_normal_session {
+        scene.compose(&[], None, None)?;
+    }
     let mut layout = PersistentLiveLayout::new(
         wm_session.is_some(),
         require_startup_focus.then_some(output.size),
@@ -2782,7 +2795,7 @@ fn run_session_loop(
     let mut batches = 0usize;
     let mut transactions = 0usize;
     let mut cpu_buffer_updates = 0usize;
-    let mut cpu_compositions = 0usize;
+    let mut cpu_compositions = usize::from(blank_normal_session);
     let mut coalesced_batches = 0usize;
     let mut input_batch_baseline = None;
     let mut input_cpu_update_baseline = None;
@@ -2825,11 +2838,11 @@ fn run_session_loop(
     let mut input_flush_latency: Option<Duration> = None;
     let mut post_input_deadline: Option<Instant> = None;
     let mut application_surface_gone_at: Option<Instant> = None;
-    let mut terminal_content_ready = false;
-    let mut startup_ready_msec = None;
-    let mut terminal_content_ready_reported = false;
+    let mut terminal_content_ready = blank_normal_session;
+    let mut startup_ready_msec = blank_normal_session.then_some(0);
+    let mut terminal_content_ready_reported = blank_normal_session;
     let mut input_text_match = false;
-    let mut primary_child_exited = false;
+    let mut primary_child_exited = child.is_none();
     let mut primary_exit_status = None;
     let mut application_surface_missing_since: Option<Instant> = None;
     let mut client_stdout = Vec::new();
@@ -3052,7 +3065,10 @@ fn run_session_loop(
     }
 
     loop {
-        if !primary_child_exited && let Some(status) = child.try_wait()? {
+        if !primary_child_exited
+            && let Some(primary_child) = child.as_deref_mut()
+            && let Some(status) = primary_child.try_wait()?
+        {
             primary_exit_status = Some(status);
             if status.success()
                 && config.expect_physical_pointer
@@ -3082,10 +3098,11 @@ fn run_session_loop(
                 }
             }
             if config.normal_session {
-                println!(
-                    "sophia_session_app schema=1 status=exited id={} source=startup exit_status={status}",
-                    config.applications.startup[0],
-                );
+                if let Some(id) = config.applications.startup.first() {
+                    println!(
+                        "sophia_session_app schema=1 status=exited id={id} source=startup exit_status={status}",
+                    );
+                }
                 primary_child_exited = true;
             } else {
                 if status.success()
@@ -5088,27 +5105,21 @@ fn terminate_session_child(
 
 impl SessionProcessGuard {
     fn new(
-        child: Child,
+        child: Option<Child>,
         secondary_children: Vec<ManagedSessionChild>,
         socket_path: std::path::PathBuf,
         grouped: bool,
     ) -> Self {
         Self {
-            child: Some(child),
+            child,
             secondary_children,
             socket_path: Some(socket_path),
             grouped,
         }
     }
 
-    fn children_mut(
-        &mut self,
-    ) -> Result<(&mut Child, &mut Vec<ManagedSessionChild>), Box<dyn std::error::Error>> {
-        let child = self
-            .child
-            .as_mut()
-            .ok_or_else(|| -> Box<dyn std::error::Error> { "xterm child missing".into() })?;
-        Ok((child, &mut self.secondary_children))
+    fn children_mut(&mut self) -> (Option<&mut Child>, &mut Vec<ManagedSessionChild>) {
+        (self.child.as_mut(), &mut self.secondary_children)
     }
 
     fn add_secondary_child(&mut self, id: Option<String>, child: Child) {
@@ -5146,7 +5157,7 @@ mod tests {
         BufferSource, CommittedSurfaceState, LiveClientStdoutCapture, LiveProductionCpuScene,
         LiveProductionVisualRuntime, LiveXAuthorityFile, PRIMARY_INPUT_PROOF_SCRIPT,
         PersistentXtermSessionConfig, Rect, Region, SECONDARY_POINTER_WITNESS_SCRIPT,
-        SessionPointerPlacement, Size, authority_transaction_count,
+        SessionPointerPlacement, SessionProcessGuard, Size, authority_transaction_count,
         center_geometry_without_scaling, global_runtime_deadline_ends_session,
         layer_snapshots_from_committed, physical_input_may_route_after_primary_exit,
         physical_input_pixels_already_changed, place_pointer_event_for_routing,
@@ -5162,6 +5173,20 @@ mod tests {
     use sophia_x_authority::X_AUTHORITY_CPU_BUFFER_FORMAT_XRGB8888;
     use std::io::Write;
     use std::time::Instant;
+
+    #[test]
+    fn blank_normal_session_process_guard_has_no_primary_child() {
+        let mut guard = SessionProcessGuard {
+            child: None,
+            secondary_children: Vec::new(),
+            socket_path: None,
+            grouped: true,
+        };
+        let (primary, secondary) = guard.children_mut();
+        assert!(primary.is_none());
+        assert!(secondary.is_empty());
+        guard.terminate().unwrap();
+    }
 
     #[test]
     fn client_stdout_capture_reads_without_waiting_for_inherited_writer_close() {
