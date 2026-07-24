@@ -359,12 +359,17 @@ pub fn dispatch_x11_wire_request(
                             let window = XResourceId {
                                 local: surface.local_id,
                             };
-                            [
+                            vec![
                                 XClientOutput::Event(XClientEvent::MapNotify {
                                     sequence: context.sequence,
                                     event: window,
                                     window,
                                     override_redirect: false,
+                                }),
+                                XClientOutput::Event(XClientEvent::VisibilityNotify {
+                                    sequence: context.sequence,
+                                    window,
+                                    state: 0,
                                 }),
                                 XClientOutput::Event(XClientEvent::Expose {
                                     sequence: context.sequence,
@@ -4087,6 +4092,11 @@ fn outputs_from_authority_response(
                 window: *window,
                 override_redirect: false,
             })];
+            outputs.push(XClientOutput::Event(XClientEvent::VisibilityNotify {
+                sequence: context.sequence,
+                window: *window,
+                state: 0,
+            }));
             if let Some(surface) = response.surfaces.iter().find(|surface| surface.mapped) {
                 outputs.push(XClientOutput::Event(XClientEvent::Expose {
                     sequence: context.sequence,

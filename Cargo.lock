@@ -401,6 +401,7 @@ dependencies = [
  "sophia-runtime",
  "sophia-wm-demo",
  "sophia-x-authority",
+ "sophia-xshmfence",
  "tracing",
  "x11rb",
 ]

@@ -1153,6 +1153,7 @@ fn run_x_authority_kitty_input_smoke()
         let mut present_before_input = 0usize;
         let presentation_started = Instant::now();
         let mut pending_present_feedback = None;
+        let mut present_fences = BTreeMap::new();
         while std::time::Instant::now() < deadline
             && (client.is_none() || surface.is_none() || present_before_input < 2)
         {
@@ -1169,6 +1170,12 @@ fn run_x_authority_kitty_input_smoke()
             if let Some(candidate) = batch.client {
                 client = Some(candidate);
             }
+            for registration in batch.fence_registrations {
+                present_fences.insert(registration.handle, registration.fd);
+            }
+            for released in batch.released_fences {
+                present_fences.remove(&released);
+            }
             if let Some(transaction) = batch.transactions.first() {
                 surface = Some(transaction.surface);
             }
@@ -1179,10 +1186,13 @@ fn run_x_authority_kitty_input_smoke()
                     route_kitty_smoke_present_feedback(
                         &protocol_router,
                         submission.transaction,
+                        submission.idle_fence,
+                        &present_fences,
                         presentation_started,
                     )?;
                 } else {
-                    pending_present_feedback = Some(submission.transaction);
+                    pending_present_feedback =
+                        Some((submission.transaction, submission.idle_fence));
                 }
             }
             ensure_kitty_input_client_alive(&mut child)?;
@@ -1203,11 +1213,14 @@ fn run_x_authority_kitty_input_smoke()
             client.raw(),
             surface.index(),
         );
+        let (transaction, idle_fence) = pending_present_feedback
+            .take()
+            .ok_or("Kitty input smoke omitted its second Present")?;
         route_kitty_smoke_present_feedback(
             &protocol_router,
-            pending_present_feedback
-                .take()
-                .ok_or("Kitty input smoke omitted its second Present")?,
+            transaction,
+            idle_fence,
+            &present_fences,
             presentation_started,
         )?;
 
@@ -1218,11 +1231,19 @@ fn run_x_authority_kitty_input_smoke()
         while Instant::now() < readiness_deadline {
             match transaction_receiver.recv_timeout(Duration::from_millis(25)) {
                 Ok(batch) => {
+                    for registration in batch.fence_registrations {
+                        present_fences.insert(registration.handle, registration.fd);
+                    }
+                    for released in batch.released_fences {
+                        present_fences.remove(&released);
+                    }
                     for submission in batch.present_submissions {
                         present_before_input = present_before_input.saturating_add(1);
                         route_kitty_smoke_present_feedback(
                             &protocol_router,
                             submission.transaction,
+                            submission.idle_fence,
+                            &present_fences,
                             presentation_started,
                         )?;
                     }
@@ -1256,6 +1277,48 @@ fn run_x_authority_kitty_input_smoke()
         }
         eprintln!("sophia_kitty_input_smoke schema=1 stage=focus_delivered");
 
+        let focus_settle_deadline = Instant::now() + Duration::from_secs(3);
+        let mut last_focus_present = Instant::now();
+        let mut focus_presents = 0usize;
+        while Instant::now() < focus_settle_deadline {
+            match transaction_receiver.recv_timeout(Duration::from_millis(25)) {
+                Ok(batch) => {
+                    for registration in batch.fence_registrations {
+                        present_fences.insert(registration.handle, registration.fd);
+                    }
+                    for released in batch.released_fences {
+                        present_fences.remove(&released);
+                    }
+                    for submission in batch.present_submissions {
+                        focus_presents = focus_presents.saturating_add(1);
+                        present_before_input = present_before_input.saturating_add(1);
+                        route_kitty_smoke_present_feedback(
+                            &protocol_router,
+                            submission.transaction,
+                            submission.idle_fence,
+                            &present_fences,
+                            presentation_started,
+                        )?;
+                        last_focus_present = Instant::now();
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                    if last_focus_present.elapsed() >= Duration::from_millis(150) =>
+                {
+                    break;
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err("Kitty input transaction channel disconnected".into());
+                }
+            }
+            ensure_kitty_input_client_alive(&mut child)?;
+        }
+        eprintln!(
+            "sophia_kitty_input_smoke schema=1 stage=focus_settled presents={focus_presents} quiet_msec={}",
+            last_focus_present.elapsed().as_millis(),
+        );
+
         let mut time_msec = x11_monotonic_time_msec()?;
         let mut next_delivery = 1u64;
         let deliveries = send_xterm_text_to_client(
@@ -1275,11 +1338,19 @@ fn run_x_authority_kitty_input_smoke()
         let mut present_after_input = 0usize;
         while std::time::Instant::now() < input_deadline {
             while let Ok(batch) = transaction_receiver.try_recv() {
+                for registration in batch.fence_registrations {
+                    present_fences.insert(registration.handle, registration.fd);
+                }
+                for released in batch.released_fences {
+                    present_fences.remove(&released);
+                }
                 for submission in batch.present_submissions {
                     present_after_input = present_after_input.saturating_add(1);
                     route_kitty_smoke_present_feedback(
                         &protocol_router,
                         submission.transaction,
+                        submission.idle_fence,
+                        &present_fences,
                         presentation_started,
                     )?;
                 }
@@ -1340,6 +1411,8 @@ fn run_x_authority_kitty_input_smoke()
 fn route_kitty_smoke_present_feedback(
     router: &sophia_x_authority::XServerFrontendProtocolRouter,
     transaction: TransactionId,
+    idle_fence: Option<sophia_protocol::FenceHandle>,
+    present_fences: &BTreeMap<sophia_protocol::FenceHandle, Arc<std::os::fd::OwnedFd>>,
     presentation_started: Instant,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Match a real scanout boundary rather than completing re-entrantly while
@@ -1352,6 +1425,17 @@ fn route_kitty_smoke_present_feedback(
     let msc = 7_000_000_u64.saturating_add(ust / 16_667);
     let complete =
         router.route_present_complete(transaction, ust, msc, XPresentCompletionMode::Flip)?;
+    if let Some(handle) = idle_fence {
+        let fence = present_fences
+            .get(&handle)
+            .ok_or("Kitty input smoke omitted its registered idle fence")?;
+        sophia_xshmfence::trigger(fence)?;
+        eprintln!(
+            "sophia_kitty_input_smoke schema=1 stage=idle_fence_triggered transaction={} fence={}",
+            transaction.raw(),
+            handle.raw(),
+        );
+    }
     let idle = router.route_present_idle(transaction)?;
     eprintln!(
         "sophia_kitty_input_smoke schema=1 stage=present_feedback transaction={} complete_routed={complete} idle_routed={idle}",

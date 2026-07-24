@@ -161,10 +161,10 @@ fn present_complete_and_idle_notifications_use_xge_packed_layouts() {
                 mode: 1,
             },
         );
-        assert_eq!(complete.len(), 44);
+        assert_eq!(complete.len(), 40);
         assert_eq!(complete[0], 35);
         assert_eq!(complete[1], X_PRESENT_MAJOR_OPCODE);
-        assert_eq!(read_u32(byte_order, &complete[4..8]), 3);
+        assert_eq!(read_u32(byte_order, &complete[4..8]), 2);
         assert_eq!(read_u16(byte_order, &complete[8..10]), 1);
         assert_eq!(complete[10], 0);
         assert_eq!(complete[11], 1);
@@ -172,7 +172,7 @@ fn present_complete_and_idle_notifications_use_xge_packed_layouts() {
         assert_eq!(read_u32(byte_order, &complete[16..20]), 0x220901);
         assert_eq!(read_u32(byte_order, &complete[20..24]), 77);
         assert_eq!(read_u64(byte_order, &complete[24..32]), 123_456);
-        assert_eq!(read_u64(byte_order, &complete[36..44]), 42);
+        assert_eq!(read_u64(byte_order, &complete[32..40]), 42);
 
         let idle = encode_x_client_event(
             byte_order,
@@ -185,13 +185,32 @@ fn present_complete_and_idle_notifications_use_xge_packed_layouts() {
                 idle_fence: Some(XResourceId::new(0x220903, 1)),
             },
         );
-        assert_eq!(idle.len(), 36);
+        assert_eq!(idle.len(), 32);
         assert_eq!(idle[0], 35);
         assert_eq!(idle[1], X_PRESENT_MAJOR_OPCODE);
-        assert_eq!(read_u32(byte_order, &idle[4..8]), 1);
+        assert_eq!(read_u32(byte_order, &idle[4..8]), 0);
         assert_eq!(read_u16(byte_order, &idle[8..10]), 2);
         assert_eq!(read_u32(byte_order, &idle[24..28]), 0x220902);
         assert_eq!(read_u32(byte_order, &idle[28..32]), 0x220903);
+    }
+}
+
+#[test]
+fn visibility_notify_uses_the_core_x11_layout() {
+    for byte_order in [XByteOrder::LittleEndian, XByteOrder::BigEndian] {
+        let event = encode_x_client_event(
+            byte_order,
+            XClientEvent::VisibilityNotify {
+                sequence: 0x1234,
+                window: XResourceId::new(0x220901, 1),
+                state: 0,
+            },
+        );
+        assert_eq!(event.len(), X_CLIENT_OUTPUT_RECORD_LEN);
+        assert_eq!(event[0], 15);
+        assert_eq!(read_u16(byte_order, &event[2..4]), 0x1234);
+        assert_eq!(read_u32(byte_order, &event[4..8]), 0x220901);
+        assert_eq!(event[8], 0);
     }
 }
 
@@ -4889,13 +4908,17 @@ fn x11_dispatch_emits_configure_map_property_and_selection_failure_outputs() {
         &mut atoms,
         &mut properties,
     );
-    assert_eq!(map.outputs.len(), 2);
+    assert_eq!(map.outputs.len(), 3);
     assert_eq!(
         encode_x_client_output(XByteOrder::LittleEndian, map.outputs[0].clone())[0],
         19
     );
     assert_eq!(
         encode_x_client_output(XByteOrder::LittleEndian, map.outputs[1].clone())[0],
+        15
+    );
+    assert_eq!(
+        encode_x_client_output(XByteOrder::LittleEndian, map.outputs[2].clone())[0],
         12
     );
 
@@ -4965,13 +4988,17 @@ fn x11_dispatch_emits_configure_map_property_and_selection_failure_outputs() {
         &mut atoms,
         &mut properties,
     );
-    assert_eq!(map_subwindows.outputs.len(), 2);
+    assert_eq!(map_subwindows.outputs.len(), 3);
     assert_eq!(
         encode_x_client_output(XByteOrder::LittleEndian, map_subwindows.outputs[0].clone())[0],
         19
     );
     assert_eq!(
         encode_x_client_output(XByteOrder::LittleEndian, map_subwindows.outputs[1].clone())[0],
+        15
+    );
+    assert_eq!(
+        encode_x_client_output(XByteOrder::LittleEndian, map_subwindows.outputs[2].clone())[0],
         12
     );
 

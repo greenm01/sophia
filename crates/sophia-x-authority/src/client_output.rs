@@ -15,6 +15,7 @@ const X_MOTION_NOTIFY: u8 = 6;
 const X_FOCUS_IN: u8 = 9;
 const X_FOCUS_OUT: u8 = 10;
 const X_EXPOSE: u8 = 12;
+const X_VISIBILITY_NOTIFY: u8 = 15;
 const X_MAP_NOTIFY: u8 = 19;
 const X_CONFIGURE_NOTIFY: u8 = 22;
 const X_PROPERTY_NOTIFY: u8 = 28;
@@ -116,6 +117,11 @@ pub enum XClientEvent {
         width: u16,
         height: u16,
         count: u16,
+    },
+    VisibilityNotify {
+        sequence: u16,
+        window: XResourceId,
+        state: u8,
     },
     MapNotify {
         sequence: u16,
@@ -2064,6 +2070,15 @@ pub fn encode_x_client_event(byte_order: XByteOrder, event: XClientEvent) -> Vec
             put_u16(byte_order, &mut out[14..16], height);
             put_u16(byte_order, &mut out[16..18], count);
         }
+        XClientEvent::VisibilityNotify {
+            sequence,
+            window,
+            state,
+        } => {
+            write_event_header(byte_order, &mut out, X_VISIBILITY_NOTIFY, 0, sequence);
+            put_resource(byte_order, &mut out[4..8], window);
+            out[8] = state;
+        }
         XClientEvent::MapNotify {
             sequence,
             event,
@@ -2194,11 +2209,14 @@ pub fn encode_x_client_event(byte_order: XByteOrder, event: XClientEvent) -> Vec
             msc,
             mode,
         } => {
-            out.resize(44, 0);
+            // XCB appends full_sequence to its in-memory event structure.
+            // It is not part of the Present XGE wire record described by
+            // present.xml.
+            out.resize(40, 0);
             out[0] = 35;
             out[1] = crate::X_PRESENT_MAJOR_OPCODE;
             put_u16(byte_order, &mut out[2..4], sequence);
-            put_u32(byte_order, &mut out[4..8], 3);
+            put_u32(byte_order, &mut out[4..8], 2);
             put_u16(byte_order, &mut out[8..10], 1);
             out[10] = 0;
             out[11] = mode;
@@ -2206,8 +2224,7 @@ pub fn encode_x_client_event(byte_order: XByteOrder, event: XClientEvent) -> Vec
             put_resource(byte_order, &mut out[16..20], window);
             put_u32(byte_order, &mut out[20..24], serial);
             put_u64(byte_order, &mut out[24..32], ust);
-            put_u32(byte_order, &mut out[32..36], u32::from(sequence));
-            put_u64(byte_order, &mut out[36..44], msc);
+            put_u64(byte_order, &mut out[32..40], msc);
         }
         XClientEvent::PresentIdleNotify {
             sequence,
@@ -2217,11 +2234,9 @@ pub fn encode_x_client_event(byte_order: XByteOrder, event: XClientEvent) -> Vec
             pixmap,
             idle_fence,
         } => {
-            out.resize(36, 0);
             out[0] = 35;
             out[1] = crate::X_PRESENT_MAJOR_OPCODE;
             put_u16(byte_order, &mut out[2..4], sequence);
-            put_u32(byte_order, &mut out[4..8], 1);
             put_u16(byte_order, &mut out[8..10], 2);
             put_resource(byte_order, &mut out[12..16], event_id);
             put_resource(byte_order, &mut out[16..20], window);
@@ -2232,7 +2247,6 @@ pub fn encode_x_client_event(byte_order: XByteOrder, event: XClientEvent) -> Vec
                 &mut out[28..32],
                 idle_fence.unwrap_or(XResourceId::NONE),
             );
-            put_u32(byte_order, &mut out[32..36], u32::from(sequence));
         }
         XClientEvent::RandrScreenChange {
             sequence,

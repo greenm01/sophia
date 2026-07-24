@@ -4206,6 +4206,12 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
         X11SetupSocketError::new("Sophia X Server Frontend did not retain a setup client lease")
     })?;
     let client = client_lease.client;
+    if std::env::var_os("SOPHIA_X11_AUTHORITY_TRACE").is_some() {
+        eprintln!(
+            "sophia_x11_client_route schema=1 stage=accepted client={}",
+            client.raw()
+        );
+    }
     let resource_id_range = client_lease.resource_id_range;
     let mut sequence = 0u16;
     let event_sequence = Arc::new(AtomicU16::new(0));
@@ -5244,6 +5250,18 @@ fn spawn_x11_protocol_event_writer(
                 .map_err(|_| X11SetupSocketError::new("X11 output socket lock poisoned"))?;
             set_x11_protocol_event_sequence(&mut event, sequence.load(Ordering::Acquire));
             let record = encode_x_client_event(byte_order, event);
+            if std::env::var_os("SOPHIA_X11_AUTHORITY_TRACE").is_some() {
+                use std::os::fd::AsRawFd;
+                eprintln!(
+                    "sophia_x11_socket_write schema=1 writer=protocol fd={} bytes={} head={:02x}{:02x}{:02x}{:02x}",
+                    stream.as_raw_fd(),
+                    record.len(),
+                    record[0],
+                    record[1],
+                    record[2],
+                    record[3],
+                );
+            }
             if let Err(error) = stream.write_all(&record) {
                 if is_x11_client_disconnect(&error) {
                     return Ok(());
@@ -5537,6 +5555,18 @@ fn spawn_x11_control_writer(
             let event_sequence = sequence.load(Ordering::Acquire);
             for mut record in records {
                 write_xi_u16(byte_order, &mut record[2..4], event_sequence);
+                if std::env::var_os("SOPHIA_X11_AUTHORITY_TRACE").is_some() {
+                    use std::os::fd::AsRawFd;
+                    eprintln!(
+                        "sophia_x11_socket_write schema=1 writer=control fd={} bytes={} head={:02x}{:02x}{:02x}{:02x}",
+                        stream.as_raw_fd(),
+                        record.len(),
+                        record[0],
+                        record[1],
+                        record[2],
+                        record[3],
+                    );
+                }
                 if let Err(error) = stream.write_all(&record) {
                     if is_x11_client_disconnect(&error) {
                         return Ok(());
@@ -5638,7 +5668,8 @@ fn spawn_x11_input_event_writer(
                 && let XAuthorityInputEvent::Key(key) = event
             {
                 eprintln!(
-                    "sophia_x11_key_delivery schema=2 stage=target_resolved keycode={} pressed={} focus_window={:#x} routed_window={} keyboard_selected={} xi_event_type={} wait_msec={}",
+                    "sophia_x11_key_delivery schema=2 stage=target_resolved client={} keycode={} pressed={} focus_window={:#x} routed_window={} keyboard_selected={} xi_event_type={} xi_transition_mask={:#x} wait_msec={}",
+                    client.raw(),
                     key.keycode,
                     key.pressed,
                     focused_window.local.raw(),
@@ -5649,6 +5680,7 @@ fn spawn_x11_input_event_writer(
                     xi_event_type
                         .map(|event_type| event_type.to_string())
                         .unwrap_or_else(|| "none".to_owned()),
+                    xi_transition_mask,
                     keyboard_wait_started.elapsed().as_millis(),
                 );
             }
@@ -5836,6 +5868,18 @@ fn spawn_x11_input_event_writer(
                         ))
                     }
                 })?;
+                if std::env::var_os("SOPHIA_X11_AUTHORITY_TRACE").is_some() {
+                    use std::os::fd::AsRawFd;
+                    eprintln!(
+                        "sophia_x11_socket_write schema=1 writer=input fd={} bytes={} head={:02x}{:02x}{:02x}{:02x}",
+                        stream.as_raw_fd(),
+                        record.len(),
+                        record[0],
+                        record[1],
+                        record[2],
+                        record[3],
+                    );
+                }
                 if std::env::var_os("SOPHIA_X11_AUTHORITY_TRACE").is_some()
                     && let XAuthorityInputEvent::Key(key) = event
                 {
