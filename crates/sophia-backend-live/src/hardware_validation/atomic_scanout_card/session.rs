@@ -51,6 +51,11 @@ pub enum ClassicHardwareCursorUpdate {
     Deferred,
 }
 
+fn nonblocking_atomic_cursor_commit_is_deferred(error: &io::Error) -> bool {
+    const LINUX_EBUSY: i32 = 16;
+    error.kind() == io::ErrorKind::WouldBlock || error.raw_os_error() == Some(LINUX_EBUSY)
+}
+
 impl RealAtomicScanoutPageFlipSession {
     #[cfg(feature = "gbm-probe")]
     fn discover_atomic_cursor_planes(&self) -> io::Result<Vec<RealAtomicCursorPlane>> {
@@ -132,7 +137,7 @@ impl RealAtomicScanoutPageFlipSession {
         };
         match self.card.atomic_commit(flags, request) {
             Ok(()) => Ok(ClassicHardwareCursorUpdate::Hidden),
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+            Err(error) if nonblocking && nonblocking_atomic_cursor_commit_is_deferred(&error) => {
                 Ok(ClassicHardwareCursorUpdate::Deferred)
             }
             Err(error) => Err(error),
@@ -303,7 +308,7 @@ impl RealAtomicScanoutPageFlipSession {
                 self.cursor_crtc = Some(selection.crtc);
                 Ok(ClassicHardwareCursorUpdate::Visible)
             }
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+            Err(error) if nonblocking_atomic_cursor_commit_is_deferred(&error) => {
                 Ok(ClassicHardwareCursorUpdate::Deferred)
             }
             Err(error) => Err(error),
@@ -474,6 +479,25 @@ impl RealAtomicScanoutPageFlipSession {
     ) -> LibdrmNativeReadAndPollReport {
         self.poller
             .read_and_poll_page_flip_events(&mut self.reader, sender, max_read, max_emit)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::nonblocking_atomic_cursor_commit_is_deferred;
+    use std::io;
+
+    #[test]
+    fn nonblocking_cursor_commit_defers_would_block_and_linux_ebusy() {
+        assert!(nonblocking_atomic_cursor_commit_is_deferred(
+            &io::Error::from(io::ErrorKind::WouldBlock)
+        ));
+        assert!(nonblocking_atomic_cursor_commit_is_deferred(
+            &io::Error::from_raw_os_error(16)
+        ));
+        assert!(!nonblocking_atomic_cursor_commit_is_deferred(
+            &io::Error::from_raw_os_error(22)
+        ));
     }
 }
 

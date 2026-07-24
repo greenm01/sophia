@@ -102,6 +102,8 @@ Milestone 5 hardware runner.
   Complete/Idle subscription.
 - [x] Reactivate the launcher’s originating VT after restoring greetd instead
   of leaving the display manager’s VT active.
+- [x] Treat `EBUSY` from a nonblocking atomic cursor-plane commit as deferred
+  work instead of terminating an otherwise healthy interactive session.
 - [ ] Retain a physical Kitty-only capture proving visible cursor motion within
   two 60 Hz refresh intervals, click-drag selection, typed input, clean exit,
   and emergency recovery.

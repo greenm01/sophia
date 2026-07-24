@@ -2392,3 +2392,13 @@ greetd's VT because restarting the service activated its console. The guarded
 TTY3 launcher now records its originating VT, restores the display manager,
 reactivates that VT with `chvt`, and records the resulting active VT for both
 normal and emergency cleanup.
+
+The next physical run reached a visible Kitty command line, routed typed keys,
+and continued retiring rendered Present frames with Complete/Idle feedback.
+The session terminated only after pointer motion attempted a nonblocking atomic
+cursor-plane update while another KMS commit was still in flight. Linux
+returned `EBUSY`; the cursor path recognized only `EAGAIN`/`WouldBlock` as
+transient and escalated `EBUSY` into a fatal session error. Nonblocking cursor
+attach, move, and detach now classify both results as deferred and retry from
+the existing dirty-cursor loop after scanout progresses. Other atomic errors
+remain fatal.
