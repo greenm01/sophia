@@ -149,6 +149,12 @@ impl LiveProductionOutputRuntimeSet {
         self.outputs.keys().next().copied()
     }
 
+    pub fn output_index(&self, output: OutputId) -> Option<usize> {
+        self.outputs
+            .keys()
+            .position(|candidate| *candidate == output)
+    }
+
     pub fn output_count(&self) -> usize {
         self.outputs.len()
     }

@@ -11,6 +11,16 @@ use sophia_renderer_live::{
 };
 
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
+enum PendingRenderedFrame {
+    Cpu {
+        frame: LiveCpuComposedFrame,
+        checksum: u64,
+    },
+    DmaBuf(sophia_renderer_live::LiveOwnedDmaBufFrame),
+    Mixed(sophia_renderer_live::LiveOwnedMixedCompositionFrame),
+}
+
+#[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
 pub struct NativeGbmRenderedScanoutBufferDiscoveryExporter<R>
 where
     R: RenderDeviceDiscoveryBackend,
@@ -24,10 +34,7 @@ where
     last_target: Option<LiveGbmEglFrameTargetRecord>,
     last_target_lifecycle: Option<LiveGbmEglFrameTargetLifecycleReport>,
     last_export_status: Option<LiveRendererScanoutBufferExportStatus>,
-    pending_cpu_frame: Option<LiveCpuComposedFrame>,
-    pending_dmabuf_frame: Option<sophia_renderer_live::LiveOwnedDmaBufFrame>,
-    pending_mixed_frame: Option<sophia_renderer_live::LiveOwnedMixedCompositionFrame>,
-    pending_cpu_frame_checksum: Option<u64>,
+    pending_frame: Option<PendingRenderedFrame>,
     cpu_frame_export_attempts: usize,
     dmabuf_frame_export_attempts: usize,
     dmabuf_frame_exports: usize,
@@ -53,10 +60,7 @@ where
             last_target: None,
             last_target_lifecycle: None,
             last_export_status: None,
-            pending_cpu_frame: None,
-            pending_dmabuf_frame: None,
-            pending_mixed_frame: None,
-            pending_cpu_frame_checksum: None,
+            pending_frame: None,
             cpu_frame_export_attempts: 0,
             dmabuf_frame_export_attempts: 0,
             dmabuf_frame_exports: 0,
@@ -125,31 +129,34 @@ where
         frame: LiveCpuComposedFrame,
         checksum: u64,
     ) {
-        self.pending_cpu_frame_checksum = Some(checksum);
-        self.pending_cpu_frame = Some(frame);
+        self.pending_frame = Some(PendingRenderedFrame::Cpu { frame, checksum });
     }
 
     pub const fn pending_cpu_frame(&self) -> bool {
-        self.pending_cpu_frame.is_some()
+        matches!(self.pending_frame, Some(PendingRenderedFrame::Cpu { .. }))
     }
 
     pub fn set_pending_dmabuf_frame(&mut self, frame: sophia_renderer_live::LiveOwnedDmaBufFrame) {
-        self.pending_dmabuf_frame = Some(frame);
+        self.pending_frame = Some(PendingRenderedFrame::DmaBuf(frame));
     }
 
     pub const fn pending_dmabuf_frame(&self) -> bool {
-        self.pending_dmabuf_frame.is_some()
+        matches!(self.pending_frame, Some(PendingRenderedFrame::DmaBuf(_)))
     }
 
     pub fn set_pending_mixed_frame(
         &mut self,
         frame: sophia_renderer_live::LiveOwnedMixedCompositionFrame,
     ) {
-        self.pending_mixed_frame = Some(frame);
+        self.pending_frame = Some(PendingRenderedFrame::Mixed(frame));
     }
 
     pub const fn pending_mixed_frame(&self) -> bool {
-        self.pending_mixed_frame.is_some()
+        matches!(self.pending_frame, Some(PendingRenderedFrame::Mixed(_)))
+    }
+
+    pub const fn pending_frame(&self) -> bool {
+        self.pending_frame.is_some()
     }
 
     pub const fn cpu_frame_export_attempts(&self) -> usize {
@@ -240,8 +247,8 @@ where
             );
         };
 
-        let report = match self.pending_mixed_frame.take() {
-            Some(frame) => {
+        let report = match self.pending_frame.take() {
+            Some(PendingRenderedFrame::Mixed(frame)) => {
                 self.mixed_frame_export_attempts =
                     self.mixed_frame_export_attempts.saturating_add(1);
                 match context.export_owned_mixed_frame_with_modifiers(
@@ -262,39 +269,34 @@ where
                     ),
                 }
             }
-            None => match self.pending_dmabuf_frame.take() {
-                Some(frame) => {
-                    self.dmabuf_frame_export_attempts =
-                        self.dmabuf_frame_export_attempts.saturating_add(1);
-                    let report = context.export_dmabuf_owned_scanout_buffer_with_modifiers(
-                        target,
-                        frame.as_frame(),
-                        &self.preferred_modifiers,
-                    );
-                    if report.status == LiveRendererScanoutBufferExportStatus::Exported {
-                        self.dmabuf_frame_exports = self.dmabuf_frame_exports.saturating_add(1);
-                    }
-                    report
+            Some(PendingRenderedFrame::DmaBuf(frame)) => {
+                self.dmabuf_frame_export_attempts =
+                    self.dmabuf_frame_export_attempts.saturating_add(1);
+                let report = context.export_dmabuf_owned_scanout_buffer_with_modifiers(
+                    target,
+                    frame.as_frame(),
+                    &self.preferred_modifiers,
+                );
+                if report.status == LiveRendererScanoutBufferExportStatus::Exported {
+                    self.dmabuf_frame_exports = self.dmabuf_frame_exports.saturating_add(1);
                 }
-                None => match self.pending_cpu_frame.take() {
-                    Some(frame) => {
-                        self.cpu_frame_export_attempts =
-                            self.cpu_frame_export_attempts.saturating_add(1);
-                        self.last_cpu_frame_checksum = self.pending_cpu_frame_checksum.take();
-                        let report = context.export_xrgb8888_owned_scanout_buffer_with_modifiers(
-                            target,
-                            &frame,
-                            &self.preferred_modifiers,
-                        );
-                        self.last_cpu_frame_export_status = Some(report.status);
-                        report
-                    }
-                    None => context.export_rendered_owned_scanout_buffer_with_modifiers(
-                        target,
-                        &self.preferred_modifiers,
-                    ),
-                },
-            },
+                report
+            }
+            Some(PendingRenderedFrame::Cpu { frame, checksum }) => {
+                self.cpu_frame_export_attempts = self.cpu_frame_export_attempts.saturating_add(1);
+                self.last_cpu_frame_checksum = Some(checksum);
+                let report = context.export_xrgb8888_owned_scanout_buffer_with_modifiers(
+                    target,
+                    &frame,
+                    &self.preferred_modifiers,
+                );
+                self.last_cpu_frame_export_status = Some(report.status);
+                report
+            }
+            None => context.export_rendered_owned_scanout_buffer_with_modifiers(
+                target,
+                &self.preferred_modifiers,
+            ),
         };
         let descriptor = report.buffer.as_ref().map(|buffer| buffer.descriptor());
         self.last_export_status = Some(report.status);

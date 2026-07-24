@@ -89,9 +89,11 @@ use sophia_backend_live::{
 };
 #[cfg(feature = "gbm-probe")]
 use sophia_backend_live::{
-    LiveCpuComposedFrame, LiveGbmEglFrameTargetStatus,
+    LiveCpuComposedFrame, LiveGbmEglFrameTargetStatus, LiveProductionCursorPresentation,
+    LiveProductionOutputRuntimeSet, LiveProductionScanoutContent,
     NativeGbmRenderedScanoutBufferDiscoveryExporter, NativeGbmRenderedScanoutContextStatus,
     RealAtomicScanoutSmokeConfig, RenderDeviceDiscoveryBackend,
+    live_production_scanout_is_stable_present,
 };
 #[cfg(feature = "gbm-probe")]
 use sophia_backend_live::{
@@ -1528,6 +1530,104 @@ impl RenderDeviceDiscoveryBackend for MissingRenderDevice {
             "test render device unavailable",
         ))
     }
+}
+
+#[cfg(feature = "gbm-probe")]
+#[test]
+fn pending_rendered_frame_is_a_latest_frame_wins_slot() {
+    let mut exporter = NativeGbmRenderedScanoutBufferDiscoveryExporter::new(MissingRenderDevice);
+    exporter.set_pending_cpu_frame(LiveCpuComposedFrame {
+        size: Size {
+            width: 2,
+            height: 2,
+        },
+        stride: 8,
+        format: LIVE_RENDERER_SCANOUT_FORMAT_XRGB8888,
+        bytes: vec![0; 16],
+    });
+    assert!(exporter.pending_cpu_frame());
+
+    exporter.set_pending_mixed_frame(sophia_renderer_live::LiveOwnedMixedCompositionFrame {
+        layers: Vec::new(),
+    });
+    assert!(!exporter.pending_cpu_frame());
+    assert!(exporter.pending_mixed_frame());
+    assert!(exporter.pending_frame());
+}
+
+#[cfg(feature = "gbm-probe")]
+#[test]
+fn hardware_cursor_mode_never_enters_cpu_composition() {
+    let position = sophia_protocol::Point { x: 12.0, y: 34.0 };
+
+    assert_eq!(
+        LiveProductionCursorPresentation::HardwarePlane.composition_position(),
+        None
+    );
+    assert_eq!(
+        LiveProductionCursorPresentation::Software(Some(position)).composition_position(),
+        Some(position)
+    );
+}
+
+#[cfg(feature = "gbm-probe")]
+#[test]
+fn stable_present_requires_exact_displayed_transaction_and_an_empty_queue() {
+    let transaction = TransactionId::from_raw(41);
+    let displayed = Some(LiveProductionScanoutContent::Mixed { transaction });
+
+    assert!(live_production_scanout_is_stable_present(
+        displayed,
+        None,
+        false,
+        transaction,
+    ));
+    assert!(!live_production_scanout_is_stable_present(
+        displayed,
+        Some(LiveProductionScanoutContent::Cpu { checksum: 9 }),
+        false,
+        transaction,
+    ));
+    assert!(!live_production_scanout_is_stable_present(
+        displayed,
+        None,
+        true,
+        transaction,
+    ));
+    assert!(!live_production_scanout_is_stable_present(
+        displayed,
+        None,
+        false,
+        TransactionId::from_raw(42),
+    ));
+}
+
+#[cfg(feature = "gbm-probe")]
+#[test]
+fn production_output_runtime_resolves_primary_by_output_identity() {
+    let outputs = [
+        sophia_engine::HeadlessOutput {
+            id: OutputId::from_raw(9),
+            size: Size {
+                width: 1920,
+                height: 1080,
+            },
+            scale: 1,
+        },
+        sophia_engine::HeadlessOutput {
+            id: OutputId::from_raw(3),
+            size: Size {
+                width: 2560,
+                height: 1440,
+            },
+            scale: 1,
+        },
+    ];
+    let runtimes = LiveProductionOutputRuntimeSet::new(&outputs, &[], None, None).unwrap();
+
+    assert_eq!(runtimes.primary_output(), Some(OutputId::from_raw(3)));
+    assert_eq!(runtimes.output_index(OutputId::from_raw(3)), Some(0));
+    assert_eq!(runtimes.output_index(OutputId::from_raw(9)), Some(1));
 }
 
 impl FakeRenderedScanoutExporter {

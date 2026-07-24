@@ -2,8 +2,9 @@ use super::prelude::*;
 
 use sophia_backend_live::{
     ClassicHardwareCursorUpdate, LiveProductionAuthorityBatch, LiveProductionCpuScene,
-    LiveProductionDmaBufRegistration, LiveProductionFenceRegistration, LiveProductionNativeScanout,
-    LiveProductionPresentSubmission, LiveProductionVisualRuntime,
+    LiveProductionCursorPresentation, LiveProductionDmaBufRegistration,
+    LiveProductionFenceRegistration, LiveProductionNativeScanout, LiveProductionPresentSubmission,
+    LiveProductionVisualRuntime,
 };
 use sophia_cli::emergency_input::{EmergencyChordAction, EmergencyChordState};
 use sophia_cli::input_proof::{PhysicalTextProof, PhysicalTextProofEvent};
@@ -3015,7 +3016,7 @@ fn run_session_loop(
         .startup_ready_timeout
         .map(|timeout| started + timeout);
     let mut startup_required_submissions: Option<Vec<usize>> = None;
-    let mut retired_present_surfaces = BTreeSet::new();
+    let mut retired_present_surfaces = BTreeMap::new();
     let mut startup_ready_reported = false;
     let mut pending_authority_batches = VecDeque::new();
 
@@ -3437,11 +3438,18 @@ fn run_session_loop(
         if let (Some(runtime), Some(native_scanout)) = (runtime.as_mut(), native_scanout.as_mut()) {
             let service = runtime.service_native(native_scanout)?;
             if let Some(retired) = service.retired_present {
-                retired_present_surfaces.insert(retired.surface);
+                let stable = runtime.stable_present(native_scanout, retired.transaction);
+                retired_present_surfaces.insert(retired.surface, retired.transaction);
                 println!(
                     "sophia_live_session_present schema=1 status=retired transaction={} surface={}",
                     retired.transaction.raw(),
                     retired.surface.index(),
+                );
+                println!(
+                    "sophia_live_session_scanout schema=1 status={} kind=mixed transaction={} pending_primary={}",
+                    if stable { "stable" } else { "superseded" },
+                    retired.transaction.raw(),
+                    !stable,
                 );
             }
             runtime_surfaces =
@@ -3457,14 +3465,12 @@ fn run_session_loop(
                 &mut focused_client_control,
             )?;
         }
-        let mut hardware_cursor_presented = false;
         if cursor_dirty
             && let (Some(native_scanout), Some(position)) =
                 (native_scanout.as_mut(), pointer.position)
         {
             match native_scanout.update_classic_hardware_cursor(position) {
                 Ok(ClassicHardwareCursorUpdate::Visible) => {
-                    hardware_cursor_presented = true;
                     pointer_pixel_change |= physical_pointer_routed > 0;
                     if let Some(started) = cursor_dirty_since.take() {
                         cursor_max_motion_to_submit =
@@ -3481,9 +3487,7 @@ fn run_session_loop(
                 Ok(ClassicHardwareCursorUpdate::Hidden) => {
                     cursor_dirty = false;
                 }
-                Ok(ClassicHardwareCursorUpdate::Deferred) => {
-                    hardware_cursor_presented = true;
-                }
+                Ok(ClassicHardwareCursorUpdate::Deferred) => {}
                 Err(error) => {
                     eprintln!(
                         "sophia_live_session_pointer schema=2 status=unavailable source=hardware_cursor error={error}"
@@ -3494,52 +3498,6 @@ fn run_session_loop(
                     .into());
                 }
             }
-        }
-        if cursor_dirty
-            && !hardware_cursor_presented
-            && let (Some(runtime), Some(native_scanout), Some(position)) =
-                (runtime.as_mut(), native_scanout.as_mut(), pointer.position)
-            && runtime
-                .committed_surfaces()
-                .iter()
-                .all(|surface| matches!(surface.buffer, BufferSource::CpuBuffer { .. }))
-        {
-            let repaint = runtime.run_cpu_repaint(
-                &mut scene,
-                focus.focused_surface(seat),
-                Some(position),
-                &outputs,
-                native_scanout,
-            )?;
-            let report = &repaint.composition;
-            if pointer_checksum.is_some()
-                && config.application_proof_requested()
-                && !sophia_cli::input_proof::cursor_repaint_preserves_application(
-                    report.layers_composed,
-                    report.nonzero_pixel_bytes,
-                )
-            {
-                return Err(format!(
-                    "cursor repaint lost application content: layers={} nonzero_bytes={}",
-                    report.layers_composed, report.nonzero_pixel_bytes
-                )
-                .into());
-            }
-            max_compose = max_compose.max(repaint.compose_elapsed);
-            cpu_compositions = cpu_compositions.saturating_add(1);
-            if pointer_cursor_checksum.is_none() && pointer_checksum.is_none() {
-                pointer_cursor_checksum = Some(report.checksum);
-            }
-            if pointer_checksum.is_some_and(|baseline| baseline != report.checksum)
-                && physical_pointer_routed > 0
-            {
-                pointer_pixel_change = true;
-            }
-            backend_ticks = backend_ticks.saturating_add(1);
-            if let Some(started) = cursor_dirty_since.take() {
-                cursor_max_motion_to_submit = cursor_max_motion_to_submit.max(started.elapsed());
-            }
-            cursor_dirty = false;
         }
         if let Some(candidate) = pointer_cursor_checksum
             && native_scanout.as_ref().is_none_or(|native| {
@@ -3568,14 +3526,21 @@ fn run_session_loop(
         {
             let cpu_visual_detail =
                 scene.surface_has_visual_detail(runtime.committed_surfaces(), surface);
-            let retired_gpu_detail = retired_present_surfaces.contains(&surface)
-                && matches!(committed.buffer, BufferSource::DmaBuf { .. });
+            let retired_gpu_detail =
+                retired_present_surfaces
+                    .get(&surface)
+                    .is_some_and(|transaction| {
+                        matches!(committed.buffer, BufferSource::DmaBuf { .. })
+                            && native_scanout
+                                .as_ref()
+                                .is_some_and(|native| runtime.stable_present(native, *transaction))
+                    });
             if !startup_content_ready && (cpu_visual_detail || retired_gpu_detail) {
                 startup_content_ready = true;
                 println!(
                     "sophia_live_session_startup schema=1 status=content_ready source={}",
                     if retired_gpu_detail {
-                        "present_retirement"
+                        "stable_present_scanout"
                     } else {
                         "cpu_visual_detail"
                     }
@@ -3584,17 +3549,26 @@ fn run_session_loop(
             }
         }
         let focused_surface = focus.focused_surface(seat);
-        let startup_frame_presented =
-            native_scanout.as_ref().is_none_or(|native| {
-                focused_surface.is_some_and(|surface| retired_present_surfaces.contains(&surface))
-                    || startup_required_submissions
-                        .as_ref()
-                        .is_some_and(|required| {
-                            native.heads.iter().zip(required).next().is_some_and(
-                                |(head, required)| head.presented_submissions >= *required,
-                            )
-                        })
-            });
+        let startup_frame_presented = native_scanout.as_ref().is_none_or(|native| {
+            focused_surface.is_some_and(|surface| {
+                retired_present_surfaces
+                    .get(&surface)
+                    .is_some_and(|transaction| {
+                        runtime
+                            .as_ref()
+                            .is_some_and(|runtime| runtime.stable_present(native, *transaction))
+                    })
+            }) || startup_required_submissions
+                .as_ref()
+                .is_some_and(|required| {
+                    native
+                        .heads
+                        .iter()
+                        .zip(required)
+                        .next()
+                        .is_some_and(|(head, required)| head.presented_submissions >= *required)
+                })
+        });
         if !startup_ready_reported
             && config.startup_ready_timeout.is_some()
             && focus.focused_surface(seat).is_some()
@@ -3973,6 +3947,11 @@ fn run_session_loop(
                     .iter()
                     .map(renderer_cpu_buffer_update)
                     .collect::<Vec<_>>();
+                let cursor_presentation = if native_scanout.is_some() {
+                    LiveProductionCursorPresentation::HardwarePlane
+                } else {
+                    LiveProductionCursorPresentation::Software(pointer.position)
+                };
                 let (_tick, report, committed_surfaces, composed, compose_elapsed) =
                     if batch.present_submissions.is_empty() {
                         let (submission, committed_surfaces) = runtime.run_cpu_production_cycle(
@@ -3980,7 +3959,7 @@ fn run_session_loop(
                             &mut scene,
                             updates,
                             raised_surface,
-                            pointer.position,
+                            cursor_presentation,
                             defer_cpu_frame,
                             &outputs,
                             if defer_cpu_frame {
@@ -4003,7 +3982,7 @@ fn run_session_loop(
                             &mut scene,
                             updates,
                             raised_surface,
-                            pointer.position,
+                            cursor_presentation,
                             defer_cpu_frame,
                             &outputs,
                             if defer_cpu_frame {
@@ -4186,11 +4165,18 @@ fn run_session_loop(
                 {
                     let service = runtime.service_native(native_scanout)?;
                     if let Some(retired) = service.retired_present {
-                        retired_present_surfaces.insert(retired.surface);
+                        let stable = runtime.stable_present(native_scanout, retired.transaction);
+                        retired_present_surfaces.insert(retired.surface, retired.transaction);
                         println!(
                             "sophia_live_session_present schema=1 status=retired transaction={} surface={}",
                             retired.transaction.raw(),
                             retired.surface.index(),
+                        );
+                        println!(
+                            "sophia_live_session_scanout schema=1 status={} kind=mixed transaction={} pending_primary={}",
+                            if stable { "stable" } else { "superseded" },
+                            retired.transaction.raw(),
+                            !stable,
                         );
                     }
                     if let Some(tick) = service.tick {

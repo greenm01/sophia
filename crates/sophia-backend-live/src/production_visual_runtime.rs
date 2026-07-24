@@ -14,6 +14,21 @@ pub struct LiveProductionVisualRuntime {
     present_feedback_sink: Box<dyn FnMut(crate::LivePresentFeedbackOutcome)>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum LiveProductionCursorPresentation {
+    HardwarePlane,
+    Software(Option<Point>),
+}
+
+impl LiveProductionCursorPresentation {
+    pub const fn composition_position(self) -> Option<Point> {
+        match self {
+            Self::HardwarePlane => None,
+            Self::Software(position) => position,
+        }
+    }
+}
+
 impl LiveProductionVisualRuntime {
     pub fn new(
         outputs: &[sophia_engine::HeadlessOutput],
@@ -64,6 +79,16 @@ impl LiveProductionVisualRuntime {
             .initialize_native_scanout(native_scanout, frames)
     }
 
+    pub fn stable_present(
+        &self,
+        native_scanout: &LiveProductionNativeScanout,
+        transaction: TransactionId,
+    ) -> bool {
+        self.outputs
+            .primary_output()
+            .is_some_and(|output| native_scanout.stable_present(output, transaction))
+    }
+
     pub fn with_present_feedback_sink(
         mut self,
         sink: impl FnMut(crate::LivePresentFeedbackOutcome) + 'static,
@@ -92,7 +117,7 @@ impl LiveProductionVisualRuntime {
         scene: &mut LiveProductionCpuScene,
         updates: Vec<crate::LiveCpuBufferUpdate>,
         raised_surface: Option<SurfaceId>,
-        cursor_position: Option<Point>,
+        cursor_presentation: LiveProductionCursorPresentation,
         defer_frame: bool,
         output_descriptors: &[sophia_engine::HeadlessOutput],
         native_scanout: Option<&mut LiveProductionNativeScanout>,
@@ -111,6 +136,22 @@ impl LiveProductionVisualRuntime {
         for transaction in &batch.transactions {
             self.layers.insert(transaction.surface, transaction.clone());
         }
+        let preserve_gpu_scanout = native_scanout.is_some()
+            && (self
+                .production
+                .committed_surfaces()
+                .iter()
+                .any(|surface| matches!(surface.buffer, BufferSource::DmaBuf { .. }))
+                || self
+                    .layers
+                    .values()
+                    .any(|surface| matches!(surface.target_buffer, BufferSource::DmaBuf { .. })));
+        let defer_frame = defer_frame || preserve_gpu_scanout;
+        let native_scanout = if preserve_gpu_scanout {
+            None
+        } else {
+            native_scanout
+        };
         let active_transactions = self.layers.values().cloned().collect::<Vec<_>>();
         if batch.transactions.iter().any(|transaction| {
             !self
@@ -136,7 +177,7 @@ impl LiveProductionVisualRuntime {
             scene,
             updates,
             raised_surface,
-            cursor_position,
+            cursor_presentation.composition_position(),
             defer_frame,
             create_native_frames,
             output_descriptors,
@@ -202,7 +243,7 @@ impl LiveProductionVisualRuntime {
         scene: &mut LiveProductionCpuScene,
         updates: Vec<crate::LiveCpuBufferUpdate>,
         raised_surface: Option<SurfaceId>,
-        cursor_position: Option<Point>,
+        cursor_presentation: LiveProductionCursorPresentation,
         defer_frame: bool,
         output_descriptors: &[sophia_engine::HeadlessOutput],
         mut native_scanout: Option<&mut LiveProductionNativeScanout>,
@@ -219,7 +260,11 @@ impl LiveProductionVisualRuntime {
                 .ok_or("software redraw coalescing has no prior composed frame")?
         } else {
             scene
-                .compose(&committed_surfaces, raised_surface, cursor_position)?
+                .compose(
+                    &committed_surfaces,
+                    raised_surface,
+                    cursor_presentation.composition_position(),
+                )?
                 .clone()
         };
         let native_frames = if defer_frame {
@@ -335,6 +380,17 @@ impl LiveProductionVisualRuntime {
             self.reject_gpu_presentation(transaction, 0, 0);
             return self.run_observation_tick();
         }
+        let primary_output = self
+            .outputs
+            .primary_output()
+            .ok_or("persistent backend runtime has no primary output")?;
+        let primary_index = self
+            .outputs
+            .output_index(primary_output)
+            .ok_or("persistent backend primary output was not registered")?;
+        if native_scanout.output_index(primary_output) != Some(primary_index) {
+            return Err("persistent backend and native primary output ordering diverged".into());
+        }
         let mixed = self.presentation_feedback.resources().build_mixed_frame(
             transaction,
             queued.cpu_background.clone(),
@@ -355,7 +411,7 @@ impl LiveProductionVisualRuntime {
                             (cpu, dmabuf.saturating_add(1))
                         }
                     });
-            let (status, detail) = native_scanout.diagnose_mixed_frame(0, mixed);
+            let (status, detail) = native_scanout.diagnose_mixed_frame(primary_index, mixed);
             self.present_scheduler.pop_front();
             let _ = self
                 .presentation_feedback
@@ -372,27 +428,26 @@ impl LiveProductionVisualRuntime {
                 live_transactions: self.presentation_feedback.resources().presentation_count(),
             }));
         }
-        native_scanout.queue_mixed_frame(0, mixed);
+        native_scanout.queue_mixed_frame(primary_index, transaction, mixed);
 
         let transactions = self.layers.values().cloned().collect::<Vec<_>>();
         let production = &self.production;
         let outputs = &mut self.outputs;
         let mut adapter = crate::LiveProductionOutputRuntimeAdapter::new(
             1,
-            |index, committed: &[CommittedSurfaceState]| -> Result<_, Box<dyn std::error::Error>> {
-                let output = outputs
-                    .values_mut()
-                    .nth(index)
-                    .ok_or("production output index was not registered")?;
-                output
-                    .runtime
-                    .assembly_mut()
-                    .replace_committed_surfaces(committed.to_vec());
-                Ok(native_scanout.run_tick(
-                    index,
-                    &mut output.runtime,
-                    compositor_tick_input(&transactions, 0, Vec::new(), None),
-                )?)
+            |invocation,
+             committed: &[CommittedSurfaceState]|
+             -> Result<_, Box<dyn std::error::Error>> {
+                if invocation != 0 {
+                    return Err("GPU presentation invoked more than one primary output".into());
+                }
+                outputs.run_output(primary_index, committed, |runtime| {
+                    Ok(native_scanout.run_tick(
+                        primary_index,
+                        runtime,
+                        compositor_tick_input(&transactions, 0, Vec::new(), None),
+                    )?)
+                })
             },
         );
         let report = production

@@ -2,9 +2,26 @@
 mod persistent_native_scanout {
     use crate::*;
     use sophia_engine::CompositorBackendTickInput;
-    use sophia_protocol::OutputId;
+    use sophia_protocol::{OutputId, TransactionId};
     use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
     use std::time::{Duration, Instant};
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum LiveProductionScanoutContent {
+        Cpu { checksum: u64 },
+        Mixed { transaction: TransactionId },
+    }
+
+    pub fn live_production_scanout_is_stable_present(
+        presented: Option<LiveProductionScanoutContent>,
+        submitted: Option<LiveProductionScanoutContent>,
+        pending: bool,
+        transaction: TransactionId,
+    ) -> bool {
+        presented == Some(LiveProductionScanoutContent::Mixed { transaction })
+            && submitted.is_none()
+            && !pending
+    }
 
     pub struct LiveProductionNativeScanout {
         pub groups: Vec<LiveProductionNativeGroup>,
@@ -50,6 +67,9 @@ mod persistent_native_scanout {
         pub last_checksum: u64,
         pub submitted_checksum: Option<u64>,
         pub submitted_sequence: Option<usize>,
+        pub pending_content: Option<LiveProductionScanoutContent>,
+        pub submitted_content: Option<LiveProductionScanoutContent>,
+        pub presented_content: Option<LiveProductionScanoutContent>,
         pub presented_checksum: u64,
         pub presented_submissions: usize,
         pub submissions: usize,
@@ -160,6 +180,9 @@ mod persistent_native_scanout {
                         last_checksum: 0,
                         submitted_checksum: None,
                         submitted_sequence: None,
+                        pending_content: None,
+                        submitted_content: None,
+                        presented_content: None,
                         presented_checksum: 0,
                         presented_submissions: 0,
                         submissions: 0,
@@ -264,6 +287,10 @@ mod persistent_native_scanout {
             self.heads.iter().map(|head| head.output).collect()
         }
 
+        pub fn output_index(&self, output: OutputId) -> Option<usize> {
+            self.heads.iter().position(|head| head.output.id == output)
+        }
+
         pub fn selection(&self, index: usize) -> crate::LibdrmNativePrimaryPlaneSelection {
             self.heads[index].selection
         }
@@ -287,9 +314,10 @@ mod persistent_native_scanout {
         ) -> Result<crate::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
             let group = self.heads[index].group;
             self.poll_group_callbacks(group)?;
-            let (report, exported_nonzero) = {
+            let (report, exported_nonzero, queued_content) = {
                 let groups = &mut self.groups;
                 let head = &mut self.heads[index];
+                let queued_content = head.pending_content;
                 let export_attempts_before = head.exporter.cpu_frame_export_attempts();
                 let report = runtime
                     .run_tick_with_native_gbm_rendered_primary_plane_scanout_exporter_with(
@@ -303,7 +331,10 @@ mod persistent_native_scanout {
                 if !head.exporter.pending_cpu_frame() {
                     head.pending_nonzero_pixel_bytes = 0;
                 }
-                (report, exported_nonzero)
+                if !head.exporter.pending_frame() {
+                    head.pending_content = None;
+                }
+                (report, exported_nonzero, queued_content)
             };
             if exported_nonzero {
                 self.nonzero_exports = self.nonzero_exports.saturating_add(1);
@@ -327,6 +358,7 @@ mod persistent_native_scanout {
                         self.heads[index].submitted_checksum =
                             Some(self.heads[index].last_checksum);
                         self.heads[index].submitted_sequence = Some(self.heads[index].submissions);
+                        self.heads[index].submitted_content = queued_content;
                         let output = self.heads[index].output.id;
                         let cycle =
                             u64::try_from(self.heads[index].submissions).unwrap_or(u64::MAX);
@@ -439,6 +471,7 @@ mod persistent_native_scanout {
                 if let Some(submission) = self.heads[index].submitted_sequence.take() {
                     self.heads[index].presented_submissions = submission;
                 }
+                self.heads[index].presented_content = self.heads[index].submitted_content.take();
                 let output = self.heads[index].output.id;
                 if let Some(kernel_sequence) = report
                     .last_accepted
@@ -500,6 +533,7 @@ mod persistent_native_scanout {
             head.submissions = head.submissions.saturating_add(1);
             head.presented_checksum = head.last_checksum;
             head.presented_submissions = head.submissions;
+            head.presented_content = head.pending_content.take();
             Ok(())
         }
 
@@ -507,6 +541,9 @@ mod persistent_native_scanout {
             let head = &mut self.heads[index];
             head.pending_nonzero_pixel_bytes = frame.nonzero_pixel_bytes;
             head.last_checksum = frame.checksum;
+            head.pending_content = Some(LiveProductionScanoutContent::Cpu {
+                checksum: frame.checksum,
+            });
             head.exporter
                 .set_pending_cpu_frame_with_checksum(frame.frame, frame.checksum);
         }
@@ -514,9 +551,19 @@ mod persistent_native_scanout {
         pub fn queue_mixed_frame(
             &mut self,
             index: usize,
+            transaction: TransactionId,
             frame: crate::LiveOwnedMixedCompositionFrame,
         ) {
-            self.heads[index].exporter.set_pending_mixed_frame(frame);
+            let head = &mut self.heads[index];
+            if let Some(superseded) = head.pending_content {
+                eprintln!(
+                    "sophia_live_native_scanout schema=1 status=superseded output={} old={superseded:?} new=Mixed({})",
+                    head.output.id.raw(),
+                    transaction.raw(),
+                );
+            }
+            head.pending_content = Some(LiveProductionScanoutContent::Mixed { transaction });
+            head.exporter.set_pending_mixed_frame(frame);
         }
 
         pub fn diagnose_mixed_frame(
@@ -550,9 +597,20 @@ mod persistent_native_scanout {
         }
 
         pub fn pending_frame(&self, index: usize) -> bool {
-            self.heads[index].exporter.pending_cpu_frame()
-                || self.heads[index].exporter.pending_dmabuf_frame()
-                || self.heads[index].exporter.pending_mixed_frame()
+            self.heads[index].exporter.pending_frame()
+        }
+
+        pub fn stable_present(&self, output: OutputId, transaction: TransactionId) -> bool {
+            let Some(index) = self.output_index(output) else {
+                return false;
+            };
+            let head = &self.heads[index];
+            live_production_scanout_is_stable_present(
+                head.presented_content,
+                head.submitted_content,
+                head.exporter.pending_frame(),
+                transaction,
+            )
         }
 
         pub fn export_attempts(&self) -> usize {
@@ -640,7 +698,10 @@ mod persistent_native_scanout {
 }
 
 #[cfg(all(feature = "libdrm-events", feature = "gbm-probe"))]
-pub use persistent_native_scanout::{LiveProductionNativeHead, LiveProductionNativeScanout};
+pub use persistent_native_scanout::{
+    LiveProductionNativeHead, LiveProductionNativeScanout, LiveProductionScanoutContent,
+    live_production_scanout_is_stable_present,
+};
 
 #[derive(Debug)]
 pub struct LiveNativeMixedDiagnosticComplete {

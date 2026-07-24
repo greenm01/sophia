@@ -78,6 +78,13 @@ Milestone 5 hardware runner.
   hardware and software paths.
 - [x] Make the minimal Kitty gate use `--config NONE` rather than the operator's
   normal Kitty configuration.
+- [x] Make pending native frames latest-wins per output so a stale CPU frame
+  cannot follow and replace a mixed DRI3/Present frame.
+- [x] Enforce one cursor owner in native sessions: hardware-cursor scanout never
+  includes software-cursor pixels, and CPU-only frames cannot replace retained
+  DMA-BUF application content.
+- [x] Bind mixed presentation and readiness to the explicit primary output and
+  exact displayed Present transaction rather than generic retirement.
 - [ ] Retain a physical Kitty-only capture proving visible cursor motion within
   two 60 Hz refresh intervals, click-drag selection, typed input, clean exit,
   and emergency recovery.
