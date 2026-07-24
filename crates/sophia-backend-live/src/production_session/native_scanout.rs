@@ -362,6 +362,12 @@ mod persistent_native_scanout {
                         let output = self.heads[index].output.id;
                         let cycle =
                             u64::try_from(self.heads[index].submissions).unwrap_or(u64::MAX);
+                        eprintln!(
+                            "sophia_live_native_page_flip schema=1 status=submitted output={} submission={} content={:?}",
+                            output.raw(),
+                            cycle,
+                            queued_content,
+                        );
                         if self.production_page_flips.submit(output, cycle).is_err() {
                             self.vsync_overlap_rejections =
                                 self.vsync_overlap_rejections.saturating_add(1);
@@ -440,6 +446,13 @@ mod persistent_native_scanout {
             match retire.status {
                 Status::RetiredAfterPageFlip => {
                     trace_live_native_lifecycle("kms_buffer_retired");
+                    eprintln!(
+                        "sophia_live_native_page_flip schema=1 status=retired output={} submission={}",
+                        self.heads[index].output.id.raw(),
+                        self.heads[index]
+                            .submitted_sequence
+                            .unwrap_or(self.heads[index].submissions),
+                    );
                     self.retirements = self.retirements.saturating_add(1);
                     self.heads[index].retirements = self.heads[index].retirements.saturating_add(1);
                     if let Some(submitted_at) = self.heads[index].submitted_at.take() {
@@ -465,6 +478,15 @@ mod persistent_native_scanout {
                 .saturating_add(report.accepted);
             if report.accepted > 0 {
                 trace_live_native_lifecycle("page_flip_callback_accepted");
+                eprintln!(
+                    "sophia_live_native_page_flip schema=1 status=callback_accepted output={} callbacks={} kernel_sequence={}",
+                    self.heads[index].output.id.raw(),
+                    report.accepted,
+                    report
+                        .last_accepted
+                        .and_then(|accepted| accepted.event.frame_serial)
+                        .map_or_else(|| "none".to_owned(), |serial| serial.to_string()),
+                );
                 if let Some(checksum) = self.heads[index].submitted_checksum.take() {
                     self.heads[index].presented_checksum = checksum;
                 }

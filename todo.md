@@ -85,6 +85,9 @@ Milestone 5 hardware runner.
   DMA-BUF application content.
 - [x] Bind mixed presentation and readiness to the explicit primary output and
   exact displayed Present transaction rather than generic retirement.
+- [x] Remove multi-output Present head-of-line blocking: retire all outputs,
+  gate Present only on its primary output, and submit pending frames only on
+  individually idle outputs.
 - [ ] Retain a physical Kitty-only capture proving visible cursor motion within
   two 60 Hz refresh intervals, click-drag selection, typed input, clean exit,
   and emergency recovery.

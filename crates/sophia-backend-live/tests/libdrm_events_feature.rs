@@ -90,10 +90,10 @@ use sophia_backend_live::{
 #[cfg(feature = "gbm-probe")]
 use sophia_backend_live::{
     LiveCpuComposedFrame, LiveGbmEglFrameTargetStatus, LiveProductionCursorPresentation,
-    LiveProductionOutputRuntimeSet, LiveProductionScanoutContent,
+    LiveProductionOutputRuntimeSet, LiveProductionOutputServiceState, LiveProductionScanoutContent,
     NativeGbmRenderedScanoutBufferDiscoveryExporter, NativeGbmRenderedScanoutContextStatus,
     RealAtomicScanoutSmokeConfig, RenderDeviceDiscoveryBackend,
-    live_production_scanout_is_stable_present,
+    live_production_scanout_is_stable_present, reduce_live_production_async_service_observation,
 };
 #[cfg(feature = "gbm-probe")]
 use sophia_backend_live::{
@@ -1628,6 +1628,65 @@ fn production_output_runtime_resolves_primary_by_output_identity() {
     assert_eq!(runtimes.primary_output(), Some(OutputId::from_raw(3)));
     assert_eq!(runtimes.output_index(OutputId::from_raw(3)), Some(0));
     assert_eq!(runtimes.output_index(OutputId::from_raw(9)), Some(1));
+}
+
+#[cfg(feature = "gbm-probe")]
+#[test]
+fn output_scoped_service_retires_secondary_without_blocking_primary_present() {
+    let observation = reduce_live_production_async_service_observation(
+        &[
+            LiveProductionOutputServiceState {
+                output: OutputId::from_raw(9),
+                primary: false,
+                in_flight: true,
+                cleanup_pending: false,
+                frame_pending: true,
+            },
+            LiveProductionOutputServiceState {
+                output: OutputId::from_raw(3),
+                primary: true,
+                in_flight: false,
+                cleanup_pending: false,
+                frame_pending: false,
+            },
+        ],
+        true,
+    )
+    .unwrap();
+
+    assert!(observation.retirement_required);
+    assert!(!observation.present_output_blocked);
+    assert!(observation.present_queued);
+    assert!(!observation.pending_output_ready);
+}
+
+#[cfg(feature = "gbm-probe")]
+#[test]
+fn output_scoped_service_selects_idle_pending_output_while_primary_is_blocked() {
+    let observation = reduce_live_production_async_service_observation(
+        &[
+            LiveProductionOutputServiceState {
+                output: OutputId::from_raw(3),
+                primary: true,
+                in_flight: true,
+                cleanup_pending: false,
+                frame_pending: false,
+            },
+            LiveProductionOutputServiceState {
+                output: OutputId::from_raw(9),
+                primary: false,
+                in_flight: false,
+                cleanup_pending: false,
+                frame_pending: true,
+            },
+        ],
+        false,
+    )
+    .unwrap();
+
+    assert!(observation.retirement_required);
+    assert!(observation.present_output_blocked);
+    assert!(observation.pending_output_ready);
 }
 
 impl FakeRenderedScanoutExporter {

@@ -1174,29 +1174,84 @@ fn production_async_service_coordinator_owns_dynamic_kms_phase_order() {
     let mut coordinator = ProductionAsyncServiceCoordinator::new();
     assert_eq!(
         coordinator.next_phase(ProductionAsyncServiceObservation {
-            native_in_flight: true,
-            cleanup_pending: false,
+            retirement_required: true,
+            present_output_blocked: true,
             present_queued: true,
-            pending_frame: true,
+            pending_output_ready: false,
         }),
         Some(ProductionAsyncServicePhase::KmsRetire)
     );
     assert_eq!(
         coordinator.next_phase(ProductionAsyncServiceObservation {
-            native_in_flight: false,
-            cleanup_pending: false,
+            retirement_required: false,
+            present_output_blocked: false,
             present_queued: true,
-            pending_frame: true,
+            pending_output_ready: true,
         }),
         Some(ProductionAsyncServicePhase::SchedulePresent)
     );
     assert_eq!(
         coordinator.next_phase(ProductionAsyncServiceObservation {
-            native_in_flight: true,
-            cleanup_pending: false,
+            retirement_required: true,
+            present_output_blocked: true,
             present_queued: false,
-            pending_frame: true,
+            pending_output_ready: false,
         }),
         None
+    );
+}
+
+#[test]
+fn production_async_service_does_not_block_primary_present_on_secondary_retirement() {
+    let mut coordinator = ProductionAsyncServiceCoordinator::new();
+    assert_eq!(
+        coordinator.next_phase(ProductionAsyncServiceObservation {
+            retirement_required: true,
+            present_output_blocked: false,
+            present_queued: true,
+            pending_output_ready: false,
+        }),
+        Some(ProductionAsyncServicePhase::KmsRetire)
+    );
+    assert_eq!(
+        coordinator.next_phase(ProductionAsyncServiceObservation {
+            retirement_required: true,
+            present_output_blocked: false,
+            present_queued: true,
+            pending_output_ready: true,
+        }),
+        Some(ProductionAsyncServicePhase::SchedulePresent)
+    );
+    assert_eq!(
+        coordinator.next_phase(ProductionAsyncServiceObservation {
+            retirement_required: true,
+            present_output_blocked: true,
+            present_queued: false,
+            pending_output_ready: true,
+        }),
+        Some(ProductionAsyncServicePhase::SubmitPendingFrame)
+    );
+}
+
+#[test]
+fn production_async_service_can_submit_an_idle_output_while_another_is_in_flight() {
+    let mut coordinator = ProductionAsyncServiceCoordinator::new();
+    assert_eq!(
+        coordinator.next_phase(ProductionAsyncServiceObservation {
+            retirement_required: true,
+            present_output_blocked: false,
+            present_queued: false,
+            pending_output_ready: true,
+        }),
+        Some(ProductionAsyncServicePhase::KmsRetire)
+    );
+    assert_eq!(
+        coordinator.next_phase(ProductionAsyncServiceObservation {
+            retirement_required: true,
+            present_output_blocked: false,
+            present_queued: false,
+            pending_output_ready: true,
+        }),
+        Some(ProductionAsyncServicePhase::SubmitPendingFrame)
     );
 }

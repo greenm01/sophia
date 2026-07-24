@@ -155,6 +155,10 @@ impl LiveProductionOutputRuntimeSet {
             .position(|candidate| *candidate == output)
     }
 
+    pub fn output_id(&self, index: usize) -> Option<OutputId> {
+        self.outputs.keys().nth(index).copied()
+    }
+
     pub fn output_count(&self) -> usize {
         self.outputs.len()
     }
@@ -163,6 +167,21 @@ impl LiveProductionOutputRuntimeSet {
         self.outputs
             .values()
             .any(|output| output.runtime.rendered_primary_plane_scanout_in_flight())
+    }
+
+    pub fn output_native_scanout_in_flight(&self, index: usize) -> Option<bool> {
+        self.outputs
+            .values()
+            .nth(index)
+            .map(|output| output.runtime.rendered_primary_plane_scanout_in_flight())
+    }
+
+    pub fn output_native_cleanup_pending(&self, index: usize) -> Option<bool> {
+        self.outputs.values().nth(index).map(|output| {
+            output
+                .runtime
+                .rendered_primary_plane_scanout_cleanup_pending()
+        })
     }
 
     pub fn native_cleanup_pending(&self) -> bool {

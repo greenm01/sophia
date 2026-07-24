@@ -288,10 +288,10 @@ impl ProductionSessionCoordinator {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ProductionAsyncServiceObservation {
-    pub native_in_flight: bool,
-    pub cleanup_pending: bool,
+    pub retirement_required: bool,
+    pub present_output_blocked: bool,
     pub present_queued: bool,
-    pub pending_frame: bool,
+    pub pending_output_ready: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -328,19 +328,19 @@ impl ProductionAsyncServiceCoordinator {
             match self.cursor {
                 ProductionAsyncServiceCursor::Retirement => {
                     self.cursor = ProductionAsyncServiceCursor::Present;
-                    if observation.native_in_flight || observation.cleanup_pending {
+                    if observation.retirement_required {
                         return Some(ProductionAsyncServicePhase::KmsRetire);
                     }
                 }
                 ProductionAsyncServiceCursor::Present => {
                     self.cursor = ProductionAsyncServiceCursor::PendingFrame;
-                    if observation.present_queued && !observation.native_in_flight {
+                    if observation.present_queued && !observation.present_output_blocked {
                         return Some(ProductionAsyncServicePhase::SchedulePresent);
                     }
                 }
                 ProductionAsyncServiceCursor::PendingFrame => {
                     self.cursor = ProductionAsyncServiceCursor::Complete;
-                    if observation.pending_frame && !observation.native_in_flight {
+                    if observation.pending_output_ready {
                         return Some(ProductionAsyncServicePhase::SubmitPendingFrame);
                     }
                 }

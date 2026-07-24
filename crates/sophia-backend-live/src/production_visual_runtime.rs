@@ -759,7 +759,12 @@ impl LiveProductionVisualRuntime {
                     .runtime
                     .assembly_mut()
                     .replace_committed_surfaces(committed.to_vec());
-                if !native_scanout.pending_frame(index) {
+                if output.runtime.rendered_primary_plane_scanout_in_flight()
+                    || output
+                        .runtime
+                        .rendered_primary_plane_scanout_cleanup_pending()
+                    || !native_scanout.pending_frame(index)
+                {
                     return Ok(None);
                 }
                 Ok(Some(native_scanout.run_tick(
@@ -972,7 +977,70 @@ pub struct LiveProductionNativeServiceReport {
     pub pending_frame_polled: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LiveProductionOutputServiceState {
+    pub output: OutputId,
+    pub primary: bool,
+    pub in_flight: bool,
+    pub cleanup_pending: bool,
+    pub frame_pending: bool,
+}
+
+pub fn reduce_live_production_async_service_observation(
+    outputs: &[LiveProductionOutputServiceState],
+    present_queued: bool,
+) -> Result<ProductionAsyncServiceObservation, &'static str> {
+    if outputs.iter().filter(|output| output.primary).count() != 1 {
+        return Err("production async service requires exactly one primary output");
+    }
+    let primary = outputs
+        .iter()
+        .find(|output| output.primary)
+        .expect("validated above");
+    Ok(ProductionAsyncServiceObservation {
+        retirement_required: outputs
+            .iter()
+            .any(|output| output.in_flight || output.cleanup_pending),
+        present_output_blocked: primary.in_flight || primary.cleanup_pending,
+        present_queued,
+        pending_output_ready: outputs
+            .iter()
+            .any(|output| output.frame_pending && !output.in_flight && !output.cleanup_pending),
+    })
+}
+
 impl LiveProductionVisualRuntime {
+    pub fn native_output_service_states(
+        &self,
+        native_scanout: &LiveProductionNativeScanout,
+    ) -> Result<Vec<LiveProductionOutputServiceState>, Box<dyn std::error::Error>> {
+        let primary = self
+            .outputs
+            .primary_output()
+            .ok_or("persistent backend runtime has no primary output")?;
+        (0..self.output_count())
+            .map(|index| {
+                let output = self
+                    .outputs
+                    .output_id(index)
+                    .ok_or("production output index was not registered")?;
+                Ok(LiveProductionOutputServiceState {
+                    output,
+                    primary: output == primary,
+                    in_flight: self
+                        .outputs
+                        .output_native_scanout_in_flight(index)
+                        .ok_or("production output in-flight state was not registered")?,
+                    cleanup_pending: self
+                        .outputs
+                        .output_native_cleanup_pending(index)
+                        .ok_or("production output cleanup state was not registered")?,
+                    frame_pending: native_scanout.pending_frame(index),
+                })
+            })
+            .collect()
+    }
+
     pub fn service_native(
         &mut self,
         native_scanout: &mut LiveProductionNativeScanout,
@@ -984,13 +1052,12 @@ impl LiveProductionVisualRuntime {
         let mut present_polled = false;
         let mut pending_frame_polled = false;
         loop {
-            let phase = coordinator.next_phase(ProductionAsyncServiceObservation {
-                native_in_flight: self.native_scanout_in_flight(),
-                cleanup_pending: self.native_cleanup_pending(),
-                present_queued: self.diagnostics().present_queued,
-                pending_frame: (0..self.output_count())
-                    .any(|index| native_scanout.pending_frame(index)),
-            });
+            let output_states = self.native_output_service_states(native_scanout)?;
+            let observation = reduce_live_production_async_service_observation(
+                &output_states,
+                self.diagnostics().present_queued,
+            )?;
+            let phase = coordinator.next_phase(observation);
             match phase {
                 Some(ProductionAsyncServicePhase::KmsRetire) => {
                     retirement_polled = true;
