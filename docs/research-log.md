@@ -2340,3 +2340,22 @@ layer. ARGB composition also uses premultiplied source-over blending (`ONE`,
 `ONE_MINUS_SRC_ALPHA`) instead of multiplying source RGB by alpha twice. These
 changes remain application-agnostic and preserve Engine's protocol-neutral
 authority boundary.
+
+The first attempted diagnostic capture contained no pixel-evidence records, so
+it could not classify the blank frame. Until the Kitty-only physical gate
+passes, that profile now enables the bounded one-shot trace directly rather
+than depending on an operator choosing a separate wrapper. An explicit
+`status=enabled` record distinguishes missing activation from a failed GL
+readback.
+
+The resulting physical capture localized the blank screen further. The CPU
+background and the framebuffer after the first Kitty DMA-BUF layer had the
+same checksum and zero nonzero RGB pixels, while scanout retired the mixed
+transaction normally. Kitty submitted that initial Present before mapping its
+top-level window, then allocated a second DRI3 pixmap but submitted no second
+Present. This is consistent with the client waiting for Present
+Complete/Idle feedback before exposing its rendered window, not with a KMS,
+cursor, keyboard-routing, or terminal-shell failure. The Kitty gate now traces
+whether each backend completion was actually routed into the X frontend so the
+next physical capture can distinguish feedback routing from client-side
+consumption.

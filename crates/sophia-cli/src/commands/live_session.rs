@@ -4920,6 +4920,9 @@ struct XPresentSessionObserver {
     complete_flip: usize,
     complete_skip: usize,
     idle: usize,
+    complete_routed: usize,
+    idle_routed: usize,
+    route_failures: usize,
     idle_fence_triggers: usize,
     disconnect_sources: usize,
     disconnect_fences: usize,
@@ -4933,6 +4936,9 @@ impl XPresentSessionObserver {
             complete_flip: 0,
             complete_skip: 0,
             idle: 0,
+            complete_routed: 0,
+            idle_routed: 0,
+            route_failures: 0,
             idle_fence_triggers: 0,
             disconnect_sources: 0,
             disconnect_fences: 0,
@@ -4962,13 +4968,49 @@ impl XPresentSessionObserver {
                             XPresentCompletionMode::Skip
                         }
                     };
-                    let _ = self
+                    match self
                         .router
-                        .route_present_complete(transaction, ust, msc, mode);
+                        .route_present_complete(transaction, ust, msc, mode)
+                    {
+                        Ok(routed) => {
+                            self.complete_routed =
+                                self.complete_routed.saturating_add(usize::from(routed));
+                            if std::env::var_os("SOPHIA_LIVE_SESSION_DIAGNOSTIC").is_some() {
+                                eprintln!(
+                                    "sophia_live_session_present_feedback schema=1 kind=complete transaction={} routed={routed} mode={mode:?} ust={ust} msc={msc}",
+                                    transaction.raw(),
+                                );
+                            }
+                        }
+                        Err(error) => {
+                            self.route_failures = self.route_failures.saturating_add(1);
+                            eprintln!(
+                                "sophia_live_session_present_feedback schema=1 kind=complete transaction={} routed=false error={error}",
+                                transaction.raw(),
+                            );
+                        }
+                    }
                 }
                 sophia_backend_live::LivePresentProtocolFeedback::Idle { transaction } => {
                     self.idle = self.idle.saturating_add(1);
-                    let _ = self.router.route_present_idle(transaction);
+                    match self.router.route_present_idle(transaction) {
+                        Ok(routed) => {
+                            self.idle_routed = self.idle_routed.saturating_add(usize::from(routed));
+                            if std::env::var_os("SOPHIA_LIVE_SESSION_DIAGNOSTIC").is_some() {
+                                eprintln!(
+                                    "sophia_live_session_present_feedback schema=1 kind=idle transaction={} routed={routed}",
+                                    transaction.raw(),
+                                );
+                            }
+                        }
+                        Err(error) => {
+                            self.route_failures = self.route_failures.saturating_add(1);
+                            eprintln!(
+                                "sophia_live_session_present_feedback schema=1 kind=idle transaction={} routed=false error={error}",
+                                transaction.raw(),
+                            );
+                        }
+                    }
                 }
             }
         }

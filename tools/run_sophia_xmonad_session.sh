@@ -252,6 +252,7 @@ if [[ "$SESSION_PROFILE" == kitty ]]; then
     session_environment+=(
         DBUS_SESSION_BUS_ADDRESS=unix:path=/dev/null
         SOPHIA_LIVE_SESSION_DIAGNOSTIC=1
+        SOPHIA_NATIVE_COMPOSITION_PIXEL_TRACE=1
         SOPHIA_X11_AUTHORITY_TRACE=1
     )
 fi

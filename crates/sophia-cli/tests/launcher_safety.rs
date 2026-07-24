@@ -31,3 +31,8 @@ fn graphical_takeover_saves_and_restores_exact_tty_state() {
     );
     assert!(SESSION_LAUNCHER.contains("stty \"$tty_state\""));
 }
+
+#[test]
+fn kitty_gate_always_retains_one_shot_composition_pixel_evidence() {
+    assert!(SESSION_LAUNCHER.contains("SOPHIA_NATIVE_COMPOSITION_PIXEL_TRACE=1"));
+}

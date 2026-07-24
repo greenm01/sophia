@@ -1476,6 +1476,14 @@ fn render_persistent_target_composition<T: std::os::fd::AsFd>(
         && PIXEL_TRACE_CLAIMED
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok();
+    if trace_pixels {
+        eprintln!(
+            "sophia_native_composition_pixels schema=1 status=enabled width={} height={} layers={}",
+            frame.width,
+            frame.height,
+            frame.layers.len(),
+        );
+    }
     let mut draw_result = Ok(());
     for (layer_index, layer) in frame.layers.iter().enumerate() {
         if draw_result.is_err() {
