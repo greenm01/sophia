@@ -48,8 +48,15 @@ cargo run --offline -q -p sophia-cli -- x-authority-xterm-smoke
 cargo run --offline -q -p sophia-cli -- x-authority-xterm-render-smoke
 cargo run --offline -q -p sophia-cli -- x-authority-xterm-input-smoke
 cargo run --offline -q -p sophia-cli -- x-authority-xterm-two-client-smoke
+cargo run --offline -q -p sophia-cli -- x-authority-kitty-input-smoke
 dbus-run-session -- cargo run --offline -q -p sophia-cli -- x-authority-zenity-smoke
 ```
+
+The Kitty input smoke is a strict promotion gate. It launches unconfigured
+Kitty, waits for two DRI3/Present submissions, verifies the client-visible XKB
+mapping, focuses the mapped surface, routes `ll` plus Return, and requires both
+the exact shell result and a later Present. A failure is actionable evidence;
+do not replace it with a wire-write-only assertion.
 
 Milestone 5 uses one unattended local QEMU acceptance command. It boots a
 diskless, networkless Linux guest that owns virtio DRM/KMS, guest console state,

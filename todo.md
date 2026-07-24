@@ -109,6 +109,12 @@ Milestone 5 hardware runner.
   race without application-specific policy.
 - [x] Put the originating VT keyboard in `K_OFF` during graphical ownership
   and restore its exact prior mode so console input cannot leak into the shell.
+- [x] Add a real-Kitty automated input gate that requires an exact shell result
+  and a post-input Present, with XKB, focus, event-selection, and wire-delivery
+  diagnostics.
+- [ ] Fix the evidenced Kitty X11/Present consumption boundary until
+  `x-authority-kitty-input-smoke` passes; do not resume physical TTY3 testing
+  or re-enable xmonad before this gate is green.
 - [ ] Retain a physical Kitty-only capture proving visible cursor motion within
   two 60 Hz refresh intervals, click-drag selection, typed input, clean exit,
   and emergency recovery.

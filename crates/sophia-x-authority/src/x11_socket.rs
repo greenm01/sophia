@@ -5607,8 +5607,9 @@ fn spawn_x11_input_event_writer(
             // loop installs KeyPress/KeyReleaseMask. Keep physical keys
             // boundedly pending across that startup race instead of writing
             // core events which the client has not selected and will ignore.
-            let keyboard_deadline = std::time::Instant::now() + Duration::from_secs(5);
-            let (focused_window, routed_keyboard_window) = loop {
+            let keyboard_wait_started = std::time::Instant::now();
+            let keyboard_deadline = keyboard_wait_started + Duration::from_secs(5);
+            let (focused_window, routed_keyboard_window, keyboard_selected) = loop {
                 let selections = core_event_selections.lock().map_err(|_| {
                     X11SetupSocketError::new("X11 core event selection lock poisoned")
                 })?;
@@ -5628,10 +5629,29 @@ fn spawn_x11_input_event_writer(
                     break (
                         focused_selected.unwrap_or(focused_fallback),
                         routed_selected.or(routed_fallback),
+                        focused_selected.is_some() || routed_selected.is_some(),
                     );
                 }
                 std::thread::sleep(Duration::from_millis(5));
             };
+            if std::env::var_os("SOPHIA_X11_AUTHORITY_TRACE").is_some()
+                && let XAuthorityInputEvent::Key(key) = event
+            {
+                eprintln!(
+                    "sophia_x11_key_delivery schema=2 stage=target_resolved keycode={} pressed={} focus_window={:#x} routed_window={} keyboard_selected={} xi_event_type={} wait_msec={}",
+                    key.keycode,
+                    key.pressed,
+                    focused_window.local.raw(),
+                    routed_keyboard_window
+                        .map(|window| format!("{:#x}", window.local.raw()))
+                        .unwrap_or_else(|| "none".to_owned()),
+                    keyboard_selected,
+                    xi_event_type
+                        .map(|event_type| event_type.to_string())
+                        .unwrap_or_else(|| "none".to_owned()),
+                    keyboard_wait_started.elapsed().as_millis(),
+                );
+            }
             if let XAuthorityInputEvent::Key(_) = event
                 && routed_keyboard_window.is_some_and(|window| window != focused_window)
             {
@@ -5816,6 +5836,16 @@ fn spawn_x11_input_event_writer(
                         ))
                     }
                 })?;
+                if std::env::var_os("SOPHIA_X11_AUTHORITY_TRACE").is_some()
+                    && let XAuthorityInputEvent::Key(key) = event
+                {
+                    eprintln!(
+                        "sophia_x11_key_delivery schema=2 stage=wire_flushed keycode={} pressed={} window={:#x} sequence={sequence}",
+                        key.keycode,
+                        key.pressed,
+                        delivered_window.local.raw(),
+                    );
+                }
                 if let XAuthorityInputEvent::Key(key) = event {
                     let previous = xkb_modifiers.swap(key.state, Ordering::AcqRel);
                     let changed = previous ^ key.state;

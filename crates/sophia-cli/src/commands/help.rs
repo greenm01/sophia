@@ -29,6 +29,7 @@ pub(crate) fn print(verbose: bool) {
     println!("commands: x-authority-xterm-two-client-smoke");
     println!("commands: x-authority-zenity-smoke");
     println!("commands: x-authority-kitty-smoke");
+    println!("commands: x-authority-kitty-input-smoke");
     println!("commands: x-authority-present-pixmap-smoke");
     #[cfg(feature = "atomic-scanout-live")]
     println!(

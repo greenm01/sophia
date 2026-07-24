@@ -1,8 +1,10 @@
 use super::prelude::*;
 use sophia_x_authority::{
-    XAuthorityClientInputEvent, XAuthorityClientSurfaceRoutes, XAuthorityInputDeliveryId,
-    XAuthorityInputDeliveryOutcome, XServerFrontendConfig, XServerFrontendRenderDeviceError,
-    XServerFrontendRenderDeviceProvider, XServerFrontendRouteBroker, XServerFrontendServiceCommand,
+    XAuthorityClientControlCommand, XAuthorityClientInputEvent, XAuthorityClientSurfaceRoutes,
+    XAuthorityControlCommand, XAuthorityControlOutcome, XAuthorityInputDeliveryId,
+    XAuthorityInputDeliveryOutcome, XPresentCompletionMode, XServerFrontendConfig,
+    XServerFrontendRenderDeviceError, XServerFrontendRenderDeviceProvider,
+    XServerFrontendRouteBroker, XServerFrontendServiceCommand,
     run_x_server_frontend_routed_until_stopped,
     run_x11_core_socket_server_once_config_traced_with_idle_timeout,
 };
@@ -11,8 +13,25 @@ use std::num::NonZeroUsize;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::CommandExt;
 use std::sync::Arc;
+use std::time::Instant;
 
 pub(crate) fn try_run(args: &[String]) -> Result<bool, Box<dyn std::error::Error>> {
+    if args
+        .iter()
+        .any(|arg| arg == "x-authority-kitty-input-smoke")
+    {
+        let report = run_x_authority_kitty_input_smoke()?;
+        println!(
+            "x-authority-kitty-input-smoke display={} routed_keys={} present_before_input={} present_after_input={} text_match={}",
+            report.display,
+            report.routed_keys,
+            report.present_before_input,
+            report.present_after_input,
+            report.text_match,
+        );
+        return Ok(true);
+    }
+
     if args.iter().any(|arg| arg == "x-authority-kitty-smoke") {
         let report = run_x_authority_kitty_smoke()?;
         print_external_probe_smoke_report("x-authority-kitty-smoke", &report);
@@ -331,6 +350,15 @@ pub(crate) struct XAuthorityXtermInputSmokeReport {
 
 struct XtermInputResultFile {
     path: std::path::PathBuf,
+}
+
+#[derive(Clone, Debug)]
+struct XAuthorityKittyInputSmokeReport {
+    display: String,
+    routed_keys: usize,
+    present_before_input: usize,
+    present_after_input: usize,
+    text_match: bool,
 }
 
 impl Drop for XtermInputResultFile {
@@ -1047,6 +1075,317 @@ fn run_x_authority_kitty_smoke()
     )
 }
 
+fn run_x_authority_kitty_input_smoke()
+-> Result<XAuthorityKittyInputSmokeReport, Box<dyn std::error::Error>> {
+    let command = resolve_external_probe_binary("kitty", "kitty")?;
+    let provider = Arc::new(ExternalProbeRenderDeviceProvider {
+        device: first_openable_render_node()?,
+    });
+    let (display, socket_path) = temp_xauthority_display(6692)?;
+    let result_file = XtermInputResultFile {
+        path: std::env::temp_dir().join(format!(
+            "sophia-kitty-input-{}-{}",
+            std::process::id(),
+            display.trim_start_matches(':')
+        )),
+    };
+    let _result = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&result_file.path)?;
+
+    let (transaction_sender, transaction_receiver) = sync_channel(4_096);
+    let (control_ack_sender, control_ack_receiver) = sync_channel(64);
+    let (input_delivery_sender, input_delivery_receiver) = sync_channel(64);
+    let broker = XServerFrontendRouteBroker::with_control_and_input_delivery_senders(
+        NonZeroUsize::new(64).expect("Kitty input smoke route capacity is nonzero"),
+        control_ack_sender,
+        input_delivery_sender,
+    );
+    let input_sender = broker.input_sender();
+    let control_sender = broker.control_sender();
+    let protocol_router = broker.protocol_router();
+    let (service_sender, service_receiver) = sync_channel(1);
+    let config = XServerFrontendConfig::new(&socket_path, NamespaceId::from_raw(63))?
+        .with_render_device_provider(provider);
+    let server = std::thread::spawn(move || {
+        run_x_server_frontend_routed_until_stopped(
+            config,
+            transaction_sender,
+            broker,
+            service_receiver,
+        )
+    });
+    wait_for_socket_path(&socket_path)?;
+
+    let mut child = std::process::Command::new(command)
+        .env("DISPLAY", &display)
+        .env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/dev/null")
+        .env_remove("WAYLAND_DISPLAY")
+        .args([
+            "--config",
+            "NONE",
+            "--override",
+            "close_on_child_death=yes",
+            "--override",
+            "linux_display_server=x11",
+            "--override",
+            "sync_to_monitor=no",
+            "--debug-keyboard",
+            "--title",
+            "Sophia Kitty input proof",
+            "sh",
+            "-c",
+            "printf 'type ll then Return: '; IFS= read -r line; umask 077; printf '%s' \"$line\" > \"$1\"; sleep 2",
+            "sophia-kitty-input",
+        ])
+        .arg(&result_file.path)
+        .process_group(0)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+
+    let result = (|| {
+        let deadline = std::time::Instant::now() + Duration::from_secs(12);
+        let mut client = None;
+        let mut surface = None;
+        let mut present_before_input = 0usize;
+        let presentation_started = Instant::now();
+        let mut pending_present_feedback = None;
+        while std::time::Instant::now() < deadline
+            && (client.is_none() || surface.is_none() || present_before_input < 2)
+        {
+            let batch = match transaction_receiver.recv_timeout(Duration::from_millis(100)) {
+                Ok(batch) => batch,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    ensure_kitty_input_client_alive(&mut child)?;
+                    continue;
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err("Kitty input transaction channel disconnected".into());
+                }
+            };
+            if let Some(candidate) = batch.client {
+                client = Some(candidate);
+            }
+            if let Some(transaction) = batch.transactions.first() {
+                surface = Some(transaction.surface);
+            }
+            for submission in batch.present_submissions {
+                surface = Some(submission.surface);
+                present_before_input = present_before_input.saturating_add(1);
+                if present_before_input == 1 {
+                    route_kitty_smoke_present_feedback(
+                        &protocol_router,
+                        submission.transaction,
+                        presentation_started,
+                    )?;
+                } else {
+                    pending_present_feedback = Some(submission.transaction);
+                }
+            }
+            ensure_kitty_input_client_alive(&mut child)?;
+        }
+        let client = client.ok_or("Kitty input smoke observed no routed X11 client")?;
+        let surface = surface.ok_or("Kitty input smoke observed no mapped surface")?;
+        let keymap = run_xkbcommon_x11_probe(&display)?;
+        let keymap_text = String::from_utf8_lossy(&keymap.stdout);
+        eprintln!(
+            "sophia_kitty_input_smoke schema=1 stage=xkb_snapshot status={} bytes={} has_l={} stderr={}",
+            keymap.status,
+            keymap.stdout.len(),
+            keymap_text.contains("keysym=l"),
+            String::from_utf8_lossy(&keymap.stderr).trim(),
+        );
+        eprintln!(
+            "sophia_kitty_input_smoke schema=1 stage=present_ready client={} surface={} presents={present_before_input}",
+            client.raw(),
+            surface.index(),
+        );
+        route_kitty_smoke_present_feedback(
+            &protocol_router,
+            pending_present_feedback
+                .take()
+                .ok_or("Kitty input smoke omitted its second Present")?,
+            presentation_started,
+        )?;
+
+        // Two buffers prove GLX/DRI3 startup, but not that Kitty has finished
+        // installing its terminal-window callbacks. Keep servicing Present
+        // during a bounded readiness interval before injecting the proof.
+        let readiness_deadline = Instant::now() + Duration::from_secs(1);
+        while Instant::now() < readiness_deadline {
+            match transaction_receiver.recv_timeout(Duration::from_millis(25)) {
+                Ok(batch) => {
+                    for submission in batch.present_submissions {
+                        present_before_input = present_before_input.saturating_add(1);
+                        route_kitty_smoke_present_feedback(
+                            &protocol_router,
+                            submission.transaction,
+                            presentation_started,
+                        )?;
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err("Kitty input transaction channel disconnected".into());
+                }
+            }
+            ensure_kitty_input_client_alive(&mut child)?;
+        }
+        eprintln!(
+            "sophia_kitty_input_smoke schema=1 stage=input_ready presents={present_before_input}"
+        );
+
+        let focus_transaction = TransactionId::from_raw(9_000_001);
+        control_sender.send(XAuthorityClientControlCommand {
+            client,
+            command: XAuthorityControlCommand::FocusSurface {
+                transaction: focus_transaction,
+                surface,
+            },
+        })?;
+        let acknowledgement = control_ack_receiver.recv_timeout(Duration::from_secs(2))?;
+        if acknowledgement.client != client
+            || acknowledgement.acknowledgement.transaction != focus_transaction
+            || acknowledgement.acknowledgement.surface != surface
+            || acknowledgement.acknowledgement.outcome != XAuthorityControlOutcome::Delivered
+        {
+            return Err("Kitty input smoke focus control was not delivered".into());
+        }
+        eprintln!("sophia_kitty_input_smoke schema=1 stage=focus_delivered");
+
+        let mut time_msec = x11_monotonic_time_msec()?;
+        let mut next_delivery = 1u64;
+        let deliveries = send_xterm_text_to_client(
+            &input_sender,
+            client,
+            b"ll",
+            &mut time_msec,
+            &mut next_delivery,
+        )?;
+        eprintln!(
+            "sophia_kitty_input_smoke schema=1 stage=input_queued events={}",
+            deliveries.len()
+        );
+        wait_for_xterm_input_deliveries(&input_delivery_receiver, &deliveries)?;
+        eprintln!("sophia_kitty_input_smoke schema=1 stage=input_flushed");
+        let input_deadline = std::time::Instant::now() + Duration::from_secs(8);
+        let mut present_after_input = 0usize;
+        while std::time::Instant::now() < input_deadline {
+            while let Ok(batch) = transaction_receiver.try_recv() {
+                for submission in batch.present_submissions {
+                    present_after_input = present_after_input.saturating_add(1);
+                    route_kitty_smoke_present_feedback(
+                        &protocol_router,
+                        submission.transaction,
+                        presentation_started,
+                    )?;
+                }
+            }
+            if std::fs::read(&result_file.path)? == b"ll" && present_after_input != 0 {
+                eprintln!(
+                    "sophia_kitty_input_smoke schema=1 stage=proof_complete presents={present_after_input}"
+                );
+                return Ok(XAuthorityKittyInputSmokeReport {
+                    display: display.clone(),
+                    routed_keys: deliveries.len(),
+                    present_before_input,
+                    present_after_input,
+                    text_match: true,
+                });
+            }
+            ensure_kitty_input_client_alive(&mut child)?;
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        Err(format!(
+            "Kitty did not consume routed input: received_bytes={} post_input_presents={present_after_input}",
+            std::fs::read(&result_file.path)?.len(),
+        )
+        .into())
+    })();
+
+    if child.try_wait()?.is_none() {
+        if let Some(group) = rustix::process::Pid::from_raw(child.id() as i32) {
+            let _ = rustix::process::kill_process_group(group, rustix::process::Signal::TERM);
+            std::thread::sleep(Duration::from_millis(50));
+            if child.try_wait()?.is_none() {
+                let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
+            }
+        }
+    }
+    eprintln!("sophia_kitty_input_smoke schema=1 stage=client_stopping");
+    let output = child.wait_with_output()?;
+    let _ = service_sender.send(XServerFrontendServiceCommand::StopAccepting);
+    drop(service_sender);
+    drop(input_sender);
+    drop(control_sender);
+    eprintln!("sophia_kitty_input_smoke schema=1 stage=server_stopping");
+    let server_result = server
+        .join()
+        .map_err(|_| "Kitty input smoke server thread panicked")?;
+    let _ = std::fs::remove_file(&socket_path);
+    server_result.map_err(|error| format!("Kitty input smoke server failed: {error}"))?;
+    result.map_err(|error: Box<dyn std::error::Error>| {
+        format!(
+            "{error}; kitty_status={} stderr={}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim(),
+        )
+        .into()
+    })
+}
+
+fn route_kitty_smoke_present_feedback(
+    router: &sophia_x_authority::XServerFrontendProtocolRouter,
+    transaction: TransactionId,
+    presentation_started: Instant,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Match a real scanout boundary rather than completing re-entrantly while
+    // the worker is still unwinding the Present request dispatch.
+    std::thread::sleep(Duration::from_millis(250));
+    // Production scanout reports UST relative to the graphics-session start.
+    // Using host uptime here creates a discontinuity large enough for a client
+    // to stop scheduling frames before it consumes the injected keyboard data.
+    let ust = presentation_started.elapsed().as_micros() as u64;
+    let msc = 7_000_000_u64.saturating_add(ust / 16_667);
+    let complete =
+        router.route_present_complete(transaction, ust, msc, XPresentCompletionMode::Flip)?;
+    let idle = router.route_present_idle(transaction)?;
+    eprintln!(
+        "sophia_kitty_input_smoke schema=1 stage=present_feedback transaction={} complete_routed={complete} idle_routed={idle}",
+        transaction.raw(),
+    );
+    if !complete || !idle {
+        return Err(format!(
+            "Kitty input smoke Present feedback was not routed: transaction={} complete={complete} idle={idle}",
+            transaction.raw(),
+        )
+        .into());
+    }
+    Ok(())
+}
+
+fn x11_monotonic_time_msec() -> Result<u32, Box<dyn std::error::Error>> {
+    let uptime = std::fs::read_to_string("/proc/uptime")?;
+    let seconds = uptime
+        .split_whitespace()
+        .next()
+        .ok_or("/proc/uptime omitted monotonic uptime")?
+        .parse::<f64>()?;
+    Ok((seconds * 1_000.0) as u32)
+}
+
+fn ensure_kitty_input_client_alive(
+    child: &mut std::process::Child,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(status) = child.try_wait()? {
+        return Err(format!("Kitty input client exited before proof: {status}").into());
+    }
+    Ok(())
+}
+
 fn first_openable_render_node() -> Result<std::fs::File, Box<dyn std::error::Error>> {
     let mut candidates = std::fs::read_dir("/dev/dri")?
         .filter_map(Result::ok)
@@ -1574,7 +1913,11 @@ fn wait_for_xterm_input_deliveries(
     deliveries: &[XAuthorityInputDeliveryId],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut pending = deliveries.iter().copied().collect::<BTreeSet<_>>();
-    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    // GL clients can expose their first Present before their event loop
+    // installs the core keyboard mask. The frontend keeps those startup keys
+    // boundedly pending for up to five seconds, so the proof acknowledgement
+    // must cover that same readiness window.
+    let deadline = std::time::Instant::now() + Duration::from_secs(7);
     while !pending.is_empty() && std::time::Instant::now() < deadline {
         match receiver.recv_timeout(Duration::from_millis(50)) {
             Ok(delivery) if pending.remove(&delivery.delivery) => {
@@ -2760,6 +3103,38 @@ fn run_compiled_xlib_probe(
     Ok(output)
 }
 
+fn run_xkbcommon_x11_probe(
+    display: &str,
+) -> Result<std::process::Output, Box<dyn std::error::Error>> {
+    let source_path = std::env::temp_dir().join(format!(
+        "sophia-xkbcommon-x11-{}-{}.c",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    ));
+    let binary_path = source_path.with_extension("bin");
+    std::fs::write(&source_path, XKBCOMMON_X11_PROBE_SOURCE)?;
+    let compile = std::process::Command::new("gcc")
+        .arg(&source_path)
+        .arg("-o")
+        .arg(&binary_path)
+        .args(["-lxkbcommon-x11", "-lxkbcommon", "-lxcb", "-lxcb-xkb"])
+        .output()?;
+    if !compile.status.success() {
+        let _ = std::fs::remove_file(&source_path);
+        return Err(format!(
+            "failed to compile xkbcommon-x11 probe: {}",
+            String::from_utf8_lossy(&compile.stderr).trim()
+        )
+        .into());
+    }
+    let output = std::process::Command::new(&binary_path)
+        .env("DISPLAY", display)
+        .output()?;
+    let _ = std::fs::remove_file(&source_path);
+    let _ = std::fs::remove_file(&binary_path);
+    Ok(output)
+}
+
 fn xlib_smoke_title_bytes(stdout: &str) -> Option<usize> {
     xlib_smoke_field(stdout, "title_bytes")
 }
@@ -2789,6 +3164,38 @@ pub(crate) fn wait_for_socket_path(
     )
     .into())
 }
+
+const XKBCOMMON_X11_PROBE_SOURCE: &str = r#"
+#include <stdio.h>
+#include <xcb/xcb.h>
+#include <xkbcommon/xkbcommon.h>
+#include <xkbcommon/xkbcommon-x11.h>
+
+int main(void) {
+    xcb_connection_t *connection = xcb_connect(NULL, NULL);
+    if (!connection || xcb_connection_has_error(connection)) return 2;
+    if (!xkb_x11_setup_xkb_extension(
+            connection, 1, 0, XKB_X11_SETUP_XKB_EXTENSION_NO_FLAGS,
+            NULL, NULL, NULL, NULL)) return 3;
+    int32_t device = xkb_x11_get_core_keyboard_device_id(connection);
+    if (device < 0) return 4;
+    struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+    struct xkb_keymap *keymap = xkb_x11_keymap_new_from_device(
+        context, connection, device, XKB_KEYMAP_COMPILE_NO_FLAGS);
+    if (!keymap) return 5;
+    struct xkb_state *state = xkb_x11_state_new_from_device(keymap, connection, device);
+    if (!state) return 6;
+    xkb_keysym_t sym = xkb_state_key_get_one_sym(state, 46);
+    char name[64] = {0};
+    xkb_keysym_get_name(sym, name, sizeof(name));
+    printf("device=%d keycode=46 keysym=%s raw=%u\n", device, name, sym);
+    xkb_state_unref(state);
+    xkb_keymap_unref(keymap);
+    xkb_context_unref(context);
+    xcb_disconnect(connection);
+    return 0;
+}
+"#;
 
 const XLIB_SMOKE_SOURCE: &str = r#"
 #include <X11/Xlib.h>
