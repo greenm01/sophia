@@ -97,6 +97,11 @@ Milestone 5 hardware runner.
 - [x] Preserve the server-global transaction identity from standard X Present
   decode through Engine retirement and frontend Complete/Idle routing; do not
   replace it with a connection-local X sequence number.
+- [x] Retain Present selections independently by client and event ID so
+  clearing a toolkit bootstrap window cannot delete the active window's
+  Complete/Idle subscription.
+- [x] Reactivate the launcher’s originating VT after restoring greetd instead
+  of leaving the display manager’s VT active.
 - [ ] Retain a physical Kitty-only capture proving visible cursor motion within
   two 60 Hz refresh intervals, click-drag selection, typed input, clean exit,
   and emergency recovery.

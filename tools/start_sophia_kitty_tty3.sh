@@ -9,6 +9,8 @@ if [[ ! -t 0 || "$(tty)" != /dev/tty3 ]]; then
     echo "  $ROOT_DIR/tools/start_sophia_kitty_tty3.sh" >&2
     exit 1
 fi
+origin_tty="$(tty)"
+origin_vt="${origin_tty#/dev/tty}"
 
 exec > >(tee "$LAUNCH_LOG") 2>&1
 echo "Retaining complete launcher output in $LAUNCH_LOG"
@@ -26,6 +28,18 @@ restore_display_manager() {
     if [[ -n "$display_manager" ]]; then
         echo "Restoring $display_manager..."
         sudo sv up "$display_manager" || status=1
+        if ! sudo chvt "$origin_vt"; then
+            echo "WARNING: could not reactivate $origin_tty after restoring $display_manager." >&2
+            status=1
+        else
+            active_vt="$(fgconsole 2>/dev/null || true)"
+            printf 'sophia_tty_activation schema=1 requested=%s active=%s display_manager=%s\n' \
+                "$origin_vt" "${active_vt:-unknown}" "$display_manager"
+            if [[ -n "$active_vt" && "$active_vt" != "$origin_vt" ]]; then
+                echo "WARNING: active VT is $active_vt rather than originating VT $origin_vt." >&2
+                status=1
+            fi
+        fi
     fi
     return "$status"
 }

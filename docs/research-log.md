@@ -2371,3 +2371,24 @@ feedback registry key and avoiding cross-client sequence collisions. A wire
 regression uses deliberately different request-sequence and global-transaction
 values and requires the resulting surface transaction to retain the global
 value.
+
+The first capture after that change still reported `routed=false`, proving the
+single-client run did not depend on the transaction distinction. The request
+order exposed the actual feedback loss: Kitty selected Present events for a
+bootstrap window, selected them again for its main window, then cleared the
+bootstrap selection. The frontend stored only one selection per client, so
+clearing the old event ID removed the newer main-window selection. Complete
+marked the pending presentation finished but found no subscriber; Idle then
+removed it without notifying Kitty. Kitty consequently never mapped its main
+window or submitted the rendered follow-up pixmap.
+
+Present selections are now retained per client and event ID, and a zero mask
+removes only that selection. Complete and Idle route to every matching
+window/mask selection. A regression preserves Kitty's observed bootstrap/main/
+clear ordering and requires both events on the main event ID.
+
+The same capture confirmed exact KD and termios restoration but returned to
+greetd's VT because restarting the service activated its console. The guarded
+TTY3 launcher now records its originating VT, restores the display manager,
+reactivates that VT with `chvt`, and records the resulting active VT for both
+normal and emergency cleanup.

@@ -1839,7 +1839,8 @@ struct XServerFrontendRouteRegistry {
     clients: Arc<Mutex<BTreeMap<XServerFrontendClientId, XServerFrontendClientRouteSenders>>>,
     surfaces: Arc<Mutex<BTreeMap<SurfaceId, XServerFrontendSurfaceRoute>>>,
     randr_subscriptions: Arc<Mutex<BTreeMap<XServerFrontendClientId, (XResourceId, u16)>>>,
-    present_subscriptions: Arc<Mutex<BTreeMap<XServerFrontendClientId, XPresentSubscription>>>,
+    present_subscriptions:
+        Arc<Mutex<BTreeMap<(XServerFrontendClientId, XResourceId), XPresentSubscription>>>,
     pending_presentations: Arc<XPendingPresentRegistry>,
     pointer_state: Arc<Mutex<BTreeMap<SeatId, crate::XCorePointerMapper>>>,
     input_authority: Arc<Mutex<crate::XInputAuthorityState>>,
@@ -1914,7 +1915,8 @@ struct XServerFrontendClientRouteRegistration {
     clients: Arc<Mutex<BTreeMap<XServerFrontendClientId, XServerFrontendClientRouteSenders>>>,
     surfaces: Arc<Mutex<BTreeMap<SurfaceId, XServerFrontendSurfaceRoute>>>,
     randr_subscriptions: Arc<Mutex<BTreeMap<XServerFrontendClientId, (XResourceId, u16)>>>,
-    present_subscriptions: Arc<Mutex<BTreeMap<XServerFrontendClientId, XPresentSubscription>>>,
+    present_subscriptions:
+        Arc<Mutex<BTreeMap<(XServerFrontendClientId, XResourceId), XPresentSubscription>>>,
     pending_presentations: Arc<XPendingPresentRegistry>,
     frozen_input: Arc<Mutex<VecDeque<XDeferredRoutedInput>>>,
 }
@@ -2097,11 +2099,12 @@ impl XServerFrontendRouteRegistry {
             .present_subscriptions
             .lock()
             .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?;
+        let key = (client, event_id);
         if mask == 0 {
-            subscriptions.remove(&client);
+            subscriptions.remove(&key);
         } else {
             subscriptions.insert(
-                client,
+                key,
                 XPresentSubscription {
                     event_id,
                     window,
@@ -2200,29 +2203,35 @@ impl XServerFrontendRouteRegistry {
             presentation.completed = true;
             *presentation
         };
-        let subscription = self
+        let subscriptions = self
             .present_subscriptions
             .lock()
             .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
-            .get(&presentation.client)
-            .copied();
-        let Some(subscription) = subscription.filter(|subscription| {
-            subscription.window == presentation.window && subscription.mask & (1 << 1) != 0
-        }) else {
+            .iter()
+            .filter_map(|((client, _), subscription)| {
+                (*client == presentation.client
+                    && subscription.window == presentation.window
+                    && subscription.mask & (1 << 1) != 0)
+                    .then_some(*subscription)
+            })
+            .collect::<Vec<_>>();
+        if subscriptions.is_empty() {
             return Ok(false);
-        };
-        self.route_protocol(
-            presentation.client,
-            XClientEvent::PresentCompleteNotify {
-                sequence: 0,
-                event_id: subscription.event_id,
-                window: presentation.window,
-                serial: presentation.serial,
-                ust,
-                msc,
-                mode: mode as u8,
-            },
-        )?;
+        }
+        for subscription in subscriptions {
+            self.route_protocol(
+                presentation.client,
+                XClientEvent::PresentCompleteNotify {
+                    sequence: 0,
+                    event_id: subscription.event_id,
+                    window: presentation.window,
+                    serial: presentation.serial,
+                    ust,
+                    msc,
+                    mode: mode as u8,
+                },
+            )?;
+        }
         Ok(true)
     }
 
@@ -2256,28 +2265,34 @@ impl XServerFrontendRouteRegistry {
             self.pending_presentations.capacity_changed.notify_all();
             front
         };
-        let subscription = self
+        let subscriptions = self
             .present_subscriptions
             .lock()
             .map_err(|_| XServerFrontendRouteError::RegistryPoisoned)?
-            .get(&presentation.client)
-            .copied();
-        let Some(subscription) = subscription.filter(|subscription| {
-            subscription.window == presentation.window && subscription.mask & (1 << 2) != 0
-        }) else {
+            .iter()
+            .filter_map(|((client, _), subscription)| {
+                (*client == presentation.client
+                    && subscription.window == presentation.window
+                    && subscription.mask & (1 << 2) != 0)
+                    .then_some(*subscription)
+            })
+            .collect::<Vec<_>>();
+        if subscriptions.is_empty() {
             return Ok(false);
-        };
-        self.route_protocol(
-            presentation.client,
-            XClientEvent::PresentIdleNotify {
-                sequence: 0,
-                event_id: subscription.event_id,
-                window: presentation.window,
-                serial: presentation.serial,
-                pixmap: presentation.pixmap,
-                idle_fence: presentation.idle_fence,
-            },
-        )?;
+        }
+        for subscription in subscriptions {
+            self.route_protocol(
+                presentation.client,
+                XClientEvent::PresentIdleNotify {
+                    sequence: 0,
+                    event_id: subscription.event_id,
+                    window: presentation.window,
+                    serial: presentation.serial,
+                    pixmap: presentation.pixmap,
+                    idle_fence: presentation.idle_fence,
+                },
+            )?;
+        }
         Ok(true)
     }
 
@@ -2793,7 +2808,7 @@ impl Drop for XServerFrontendClientRouteRegistration {
             subscriptions.remove(&self.client);
         }
         if let Ok(mut subscriptions) = self.present_subscriptions.lock() {
-            subscriptions.remove(&self.client);
+            subscriptions.retain(|(client, _), _| *client != self.client);
         }
         if let Ok(mut pending) = self.pending_presentations.entries.lock() {
             pending.retain(|_, presentation| presentation.client != self.client);
@@ -6059,6 +6074,147 @@ mod routing_tests {
         assert_eq!(
             broker.route_pending(),
             Err(XServerFrontendRouteError::UnknownClient { client })
+        );
+    }
+
+    #[test]
+    fn clearing_old_present_selection_preserves_active_window_feedback() {
+        let namespace = NamespaceId::from_raw(10);
+        let client = XServerFrontendClientId(9);
+        let surface = SurfaceId::new(11, 1);
+        let bootstrap_window = XResourceId::new(0x200009, 1);
+        let bootstrap_event = XResourceId::new(0x20000d, 1);
+        let main_window = XResourceId::new(0x200010, 1);
+        let main_event = XResourceId::new(0x200014, 1);
+        let pixmap = XResourceId::new(0x200015, 1);
+        let idle_fence = XResourceId::new(0x200016, 1);
+        let transaction = TransactionId::from_raw(202);
+        let broker = XServerFrontendRouteBroker::new(NonZeroUsize::new(8).unwrap());
+        let (_registration, channels) = broker.registry.register_client(client).unwrap();
+        broker
+            .registry
+            .register_surface(client, namespace, surface, main_window)
+            .unwrap();
+
+        broker
+            .registry
+            .select_present_input(client, bootstrap_event, bootstrap_window, 7)
+            .unwrap();
+        broker
+            .registry
+            .select_present_input(client, main_event, main_window, 7)
+            .unwrap();
+        broker
+            .registry
+            .select_present_input(client, bootstrap_event, bootstrap_window, 0)
+            .unwrap();
+        broker
+            .registry
+            .queue_present(
+                transaction,
+                client,
+                main_window,
+                pixmap,
+                1,
+                Some(idle_fence),
+            )
+            .unwrap();
+
+        assert_eq!(
+            broker.route_present_complete(
+                transaction,
+                1_188_203,
+                7_668_086,
+                XPresentCompletionMode::Flip,
+            ),
+            Ok(true)
+        );
+        assert_eq!(
+            channels.protocol.recv().unwrap(),
+            XClientEvent::PresentCompleteNotify {
+                sequence: 0,
+                event_id: main_event,
+                window: main_window,
+                serial: 1,
+                ust: 1_188_203,
+                msc: 7_668_086,
+                mode: XPresentCompletionMode::Flip as u8,
+            }
+        );
+        assert_eq!(broker.route_present_idle(transaction), Ok(true));
+        assert_eq!(
+            channels.protocol.recv().unwrap(),
+            XClientEvent::PresentIdleNotify {
+                sequence: 0,
+                event_id: main_event,
+                window: main_window,
+                serial: 1,
+                pixmap,
+                idle_fence: Some(idle_fence),
+            }
+        );
+    }
+
+    #[test]
+    fn present_feedback_reaches_every_matching_event_selection() {
+        let namespace = NamespaceId::from_raw(10);
+        let client = XServerFrontendClientId(10);
+        let surface = SurfaceId::new(12, 1);
+        let window = XResourceId::new(0x300010, 1);
+        let first_event = XResourceId::new(0x300014, 1);
+        let second_event = XResourceId::new(0x300015, 1);
+        let pixmap = XResourceId::new(0x300016, 1);
+        let transaction = TransactionId::from_raw(203);
+        let broker = XServerFrontendRouteBroker::new(NonZeroUsize::new(8).unwrap());
+        let (registration, channels) = broker.registry.register_client(client).unwrap();
+        broker
+            .registry
+            .register_surface(client, namespace, surface, window)
+            .unwrap();
+        for event_id in [first_event, second_event] {
+            broker
+                .registry
+                .select_present_input(client, event_id, window, 7)
+                .unwrap();
+        }
+        broker
+            .registry
+            .queue_present(transaction, client, window, pixmap, 2, None)
+            .unwrap();
+
+        assert_eq!(
+            broker.route_present_complete(transaction, 10, 20, XPresentCompletionMode::Flip),
+            Ok(true)
+        );
+        for event_id in [first_event, second_event] {
+            assert!(matches!(
+                channels.protocol.recv().unwrap(),
+                XClientEvent::PresentCompleteNotify {
+                    event_id: routed_event,
+                    ..
+                } if routed_event == event_id
+            ));
+        }
+        assert_eq!(broker.route_present_idle(transaction), Ok(true));
+        for event_id in [first_event, second_event] {
+            assert!(matches!(
+                channels.protocol.recv().unwrap(),
+                XClientEvent::PresentIdleNotify {
+                    event_id: routed_event,
+                    ..
+                } if routed_event == event_id
+            ));
+        }
+
+        let disconnected = TransactionId::from_raw(204);
+        broker
+            .registry
+            .queue_present(disconnected, client, window, pixmap, 3, None)
+            .unwrap();
+        drop(registration);
+        assert_eq!(
+            broker.route_present_complete(disconnected, 30, 40, XPresentCompletionMode::Flip,),
+            Ok(false)
         );
     }
 
