@@ -13,6 +13,9 @@ wins when prose disagrees.
 
 - [Architecture](architecture.md) defines process ownership and the boundaries
   between Engine, protocol authorities, runtime, WM, portals, and chrome.
+- [Compositor Graphics](compositor-graphics.md) defines the renderer-neutral
+  display list, native primitive lowering, cached text strategy, damage rules,
+  and Niri architectural reference for compositor-owned content.
 - [Namespaces and Portals](namespaces-and-portals.md) defines session identity,
   admission, isolation profiles, capabilities, portal lifecycle, and
   cross-namespace failure behavior.
