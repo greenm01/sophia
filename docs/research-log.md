@@ -2402,3 +2402,14 @@ transient and escalated `EBUSY` into a fatal session error. Nonblocking cursor
 attach, move, and detach now classify both results as deferred and retry from
 the existing dirty-cursor loop after scanout progresses. Other atomic errors
 remain fatal.
+
+The following run stayed healthy but did not echo `ll`. Its ordering identified
+a separate startup race: Sophia declared focus ready and forwarded the physical
+keys roughly one second before GLFW changed the mapped window's core event mask
+to include KeyPress and KeyRelease. The X frontend previously fell back to the
+focused window even when no window in its ancestor chain had selected keyboard
+events, so the client ignored those early records. The input writer now keeps a
+physical key boundedly pending for up to five seconds while the focused route
+has no keyboard selection, then targets the selected window as soon as the
+client installs its mask. This is based solely on standard X11 event selection;
+it contains no Kitty-specific policy.

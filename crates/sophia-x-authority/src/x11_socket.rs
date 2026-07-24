@@ -5158,8 +5158,28 @@ impl XCoreEventSelectionState {
     }
 
     fn keyboard_target(&self, focused: XResourceId) -> XResourceId {
+        self.selected_keyboard_target(focused)
+            .unwrap_or_else(|| self.keyboard_fallback(focused))
+    }
+
+    fn selected_keyboard_target(&self, focused: XResourceId) -> Option<XResourceId> {
+        let mut candidate = self.keyboard_fallback(focused);
+        for _ in 0..64 {
+            if self
+                .windows
+                .get(&candidate)
+                .is_some_and(|selection| selection.mask & Self::KEY_MASKS != 0)
+            {
+                return Some(candidate);
+            }
+            candidate = self.parents.get(&candidate).copied()?;
+        }
+        None
+    }
+
+    fn keyboard_fallback(&self, focused: XResourceId) -> XResourceId {
         let root = XResourceId::new(u64::from(X_SETUP_DEFAULT_ROOT), 1);
-        let mut candidate = if focused == root {
+        if focused == root {
             self.stacking
                 .iter()
                 .rev()
@@ -5168,22 +5188,7 @@ impl XCoreEventSelectionState {
                 .unwrap_or(self.fallback_mapped_window)
         } else {
             focused
-        };
-        let fallback = candidate;
-        for _ in 0..64 {
-            if self
-                .windows
-                .get(&candidate)
-                .is_some_and(|selection| selection.mask & Self::KEY_MASKS != 0)
-            {
-                return candidate;
-            }
-            let Some(parent) = self.parents.get(&candidate).copied() else {
-                return fallback;
-            };
-            candidate = parent;
         }
-        fallback
     }
 
     fn ancestors(&self, window: XResourceId) -> Vec<XResourceId> {
@@ -5598,16 +5603,35 @@ fn spawn_x11_input_event_writer(
                     Err(RecvTimeoutError::Timeout) => continue,
                     Err(RecvTimeoutError::Disconnected) => return Ok(()),
                 };
-            let selections = core_event_selections
-                .lock()
-                .map_err(|_| X11SetupSocketError::new("X11 core event selection lock poisoned"))?;
-            let focused_window = selections.keyboard_target(XResourceId::new(
-                focused_surface_window.load(Ordering::Acquire),
-                1,
-            ));
-            let routed_keyboard_window =
-                target_window.map(|window| selections.keyboard_target(window));
-            drop(selections);
+            // A mapped GL client can expose its first frame before its event
+            // loop installs KeyPress/KeyReleaseMask. Keep physical keys
+            // boundedly pending across that startup race instead of writing
+            // core events which the client has not selected and will ignore.
+            let keyboard_deadline = std::time::Instant::now() + Duration::from_secs(5);
+            let (focused_window, routed_keyboard_window) = loop {
+                let selections = core_event_selections.lock().map_err(|_| {
+                    X11SetupSocketError::new("X11 core event selection lock poisoned")
+                })?;
+                let focused = XResourceId::new(focused_surface_window.load(Ordering::Acquire), 1);
+                let focused_selected = selections.selected_keyboard_target(focused);
+                let routed_selected =
+                    target_window.and_then(|window| selections.selected_keyboard_target(window));
+                let focused_fallback = selections.keyboard_target(focused);
+                let routed_fallback =
+                    target_window.map(|window| selections.keyboard_target(window));
+                drop(selections);
+                if !matches!(event, XAuthorityInputEvent::Key(_))
+                    || focused_selected.is_some()
+                    || routed_selected.is_some()
+                    || std::time::Instant::now() >= keyboard_deadline
+                {
+                    break (
+                        focused_selected.unwrap_or(focused_fallback),
+                        routed_selected.or(routed_fallback),
+                    );
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            };
             if let XAuthorityInputEvent::Key(_) = event
                 && routed_keyboard_window.is_some_and(|window| window != focused_window)
             {
@@ -6484,9 +6508,11 @@ mod routing_tests {
         let parent = XResourceId::new(0x200007, 1);
         let child = XResourceId::new(0x200001, 1);
         selections.register(child, parent);
+        assert_eq!(selections.selected_keyboard_target(child), None);
         selections.update(parent, Some(1), None);
 
         assert_eq!(selections.keyboard_target(child), parent);
+        assert_eq!(selections.selected_keyboard_target(child), Some(parent));
 
         assert_eq!(
             selections.keyboard_target(XResourceId::new(0x200009, 1)),

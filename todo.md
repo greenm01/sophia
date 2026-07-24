@@ -104,6 +104,9 @@ Milestone 5 hardware runner.
   of leaving the display manager’s VT active.
 - [x] Treat `EBUSY` from a nonblocking atomic cursor-plane commit as deferred
   work instead of terminating an otherwise healthy interactive session.
+- [x] Hold startup key events boundedly until the focused X11 window selects
+  KeyPress/KeyRelease, closing the visible-first-frame versus GLFW-event-loop
+  race without application-specific policy.
 - [ ] Retain a physical Kitty-only capture proving visible cursor motion within
   two 60 Hz refresh intervals, click-drag selection, typed input, clean exit,
   and emergency recovery.
