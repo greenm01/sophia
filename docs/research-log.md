@@ -2413,3 +2413,11 @@ physical key boundedly pending for up to five seconds while the focused route
 has no keyboard selection, then targets the selected window as soon as the
 client installs its mask. This is based solely on standard X11 event selection;
 it contains no Kitty-specific policy.
+
+The next operator observation showed `ll` on tty3 only after emergency teardown.
+That proves the VT input queue was still receiving the physical keyboard:
+`stty raw -echo` disabled canonical processing and echo but did not disconnect
+the Linux console keyboard from the VT. The guarded launcher now saves the
+console keyboard mode with `KDGKBMODE`, selects `K_OFF` while Sophia owns the
+graphical VT, and restores the exact saved mode during every cleanup path.
+Evdev remains available to libinput and the independent emergency guard.

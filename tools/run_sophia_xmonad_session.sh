@@ -89,6 +89,7 @@ tools/atomic_scanout_preflight.sh
 keyd_was_running=false
 tty_state=""
 kd_mode=""
+keyboard_mode=""
 guard_pid=""
 session_pid=""
 cleanup_done=false
@@ -124,6 +125,9 @@ cleanup() {
     rm -f "$PID_FILE"
     if [[ -n "$kd_mode" ]]; then
         python3 "$ROOT_DIR/tools/sophia_tty_mode.py" "$kd_mode" 2>/dev/null || status=1
+    fi
+    if [[ -n "$keyboard_mode" ]]; then
+        python3 "$ROOT_DIR/tools/sophia_tty_mode.py" "keyboard-$keyboard_mode" 2>/dev/null || status=1
     fi
     if [[ -n "$tty_state" ]]; then
         stty "$tty_state" 2>/dev/null || status=1
@@ -163,6 +167,7 @@ printf '%s\n' "$$" >"$PID_FILE"
 
 tty_state="$(stty -g)"
 kd_mode="$(python3 "$ROOT_DIR/tools/sophia_tty_mode.py" get)"
+keyboard_mode="$(python3 "$ROOT_DIR/tools/sophia_tty_mode.py" get-keyboard)"
 
 if pgrep -x keyd >/dev/null 2>&1; then
     echo "Temporarily stopping keyd so Sophia can own the keyboard..."
@@ -265,6 +270,7 @@ session_command=(
     "${session_args[@]}"
 )
 python3 "$ROOT_DIR/tools/sophia_tty_mode.py" graphics
+python3 "$ROOT_DIR/tools/sophia_tty_mode.py" keyboard-off
 stty raw -echo
 setsid "${session_command[@]}" > >(tee "$SESSION_LOG") 2>&1 &
 session_pid=$!

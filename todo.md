@@ -107,6 +107,8 @@ Milestone 5 hardware runner.
 - [x] Hold startup key events boundedly until the focused X11 window selects
   KeyPress/KeyRelease, closing the visible-first-frame versus GLFW-event-loop
   race without application-specific policy.
+- [x] Put the originating VT keyboard in `K_OFF` during graphical ownership
+  and restore its exact prior mode so console input cannot leak into the shell.
 - [ ] Retain a physical Kitty-only capture proving visible cursor motion within
   two 60 Hz refresh intervals, click-drag selection, typed input, clean exit,
   and emergency recovery.
