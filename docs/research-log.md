@@ -2359,3 +2359,15 @@ cursor, keyboard-routing, or terminal-shell failure. The Kitty gate now traces
 whether each backend completion was actually routed into the X frontend so the
 next physical capture can distinguish feedback routing from client-side
 consumption.
+
+The next physical capture made that distinction: Complete and Idle were both
+generated for the retired frame, but both reported `routed=false`. Standard
+Present decode retained the X server frontend's globally allocated transaction
+for its pending-feedback registry, while dispatch replaced the transaction
+sent to Engine with the client's 16-bit request sequence. Retirement therefore
+could not match the pending entry. Standard Present now carries the global
+transaction explicitly through decode and dispatch, matching the existing
+feedback registry key and avoiding cross-client sequence collisions. A wire
+regression uses deliberately different request-sequence and global-transaction
+values and requires the resulting surface transaction to retain the global
+value.

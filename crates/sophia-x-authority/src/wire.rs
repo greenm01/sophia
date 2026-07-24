@@ -694,6 +694,7 @@ pub enum XWireRequest {
         minor_version: u32,
     },
     PresentPixmap {
+        transaction: TransactionId,
         window: XResourceId,
         pixmap: XResourceId,
         serial: u32,
@@ -1472,6 +1473,7 @@ fn decode_present(
                 })
                 .collect();
             Ok(XWireRequest::PresentPixmap {
+                transaction: context.transaction,
                 window: resource(4),
                 pixmap: resource(8),
                 serial: raw_resource(12),

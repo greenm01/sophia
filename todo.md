@@ -94,6 +94,9 @@ Milestone 5 hardware runner.
   transiently deferred mixed submit cannot be starved by recurring CPU frames.
 - [x] Add one-shot aggregate pixel evidence at the native mixed-composition
   boundary and correct ARGB layers to premultiplied source-over blending.
+- [x] Preserve the server-global transaction identity from standard X Present
+  decode through Engine retirement and frontend Complete/Idle routing; do not
+  replace it with a connection-local X sequence number.
 - [ ] Retain a physical Kitty-only capture proving visible cursor motion within
   two 60 Hz refresh intervals, click-drag selection, typed input, clean exit,
   and emergency recovery.

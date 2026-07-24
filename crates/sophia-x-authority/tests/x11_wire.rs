@@ -2820,7 +2820,12 @@ fn standard_present_pixmap_reduces_dri3_pixmap_to_dmabuf_transaction() {
     );
     assert!(result.outputs.is_empty());
     let response = result.response.unwrap();
+    assert_eq!(response.transaction, TransactionId::from_raw(532));
     assert_eq!(response.transactions.len(), 1);
+    assert_eq!(
+        response.transactions[0].transaction,
+        TransactionId::from_raw(532)
+    );
     assert_eq!(
         response.transactions[0].target_buffer,
         BufferSource::DmaBuf {

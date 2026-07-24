@@ -2080,6 +2080,7 @@ pub fn dispatch_x11_wire_request(
             }
         }
         XWireRequest::PresentPixmap {
+            transaction,
             window,
             pixmap,
             valid_region,
@@ -2170,7 +2171,6 @@ pub fn dispatch_x11_wire_request(
                     metadata_candidates: Vec::new(),
                 };
             }
-            let transaction = TransactionId::from_raw(u64::from(context.sequence));
             let response =
                 runtime.present_standard_pixmap(transaction, context.namespace, window, pixmap);
             let outputs = match response.outcome {
