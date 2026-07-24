@@ -2279,3 +2279,59 @@ another exporter to run or prevent useful work. Submit, callback, and
 retirement diagnostics now carry output identity and submission provenance.
 The next guarded Kitty-only capture must prove the primary Present commits
 while secondary retirement remains independent.
+
+## 2026-07-24: Present Driver And VT Must Share Output-Scoped Ownership
+
+The next physical run still showed only the hardware cursor. Output-correlated
+logs proved the async coordinator retired the primary independently, but the
+Present driver retained a second global in-flight early return. The secondary
+output therefore continued to veto mixed composition after the coordinator had
+correctly admitted it.
+
+The same run left typed `ll` in tty3's input queue, where it appeared after
+greetd returned. The Kitty launcher saved and restored KD and termios state but
+never entered KD graphics or raw/no-echo mode. That left the console line
+discipline active underneath native scanout.
+
+The Present driver now consumes the same tested output-state reduction as the
+service coordinator and blocks only on primary in-flight or cleanup state.
+After the independent emergency guard is armed and immediately before starting
+Sophia, the launcher switches to KD graphics and `stty raw -echo`; its existing
+cleanup restores the exact saved KD and termios state on normal, failed, signal,
+and emergency exits. Regression tests retain the guard-before-takeover order
+and exact restoration commands.
+
+## 2026-07-24: Queued Present Must Reserve The Primary Output
+
+The first physical run after VT takeover showed one working hardware cursor but
+no Kitty pixels. The capture proved Kitty created and mapped its 2540x1390
+window, submitted Present transaction 1, and routed pointer motion and button
+events. It also proved exact KD and termios recovery. Mixed scanout never
+submitted: after a primary CPU frame retired, the async service repeatedly
+submitted another CPU frame until the startup watchdog expired.
+
+The async coordinator orders Present before pending frames, but a Present phase
+is an attempt rather than proof of submission. If that attempt observes a
+transiently blocked primary, advancing to the pending-frame phase can fill the
+same primary immediately and starve Present indefinitely. A queued Present now
+reserves the primary from pending CPU submission. Idle secondary outputs remain
+eligible, preserving independent multi-output progress. Regression coverage
+proves both the primary reservation and secondary eligibility.
+
+## 2026-07-24: Opaque sRGB Clients Need An Opaque GLX Configuration
+
+The next physical run proved mixed scanout and input were functional despite
+the display still appearing black. Present transaction 202 reached mixed KMS
+scanout, retired, became stable in 708 milliseconds, and accepted the user's
+`exit` input. The failure was therefore the content of the imported client
+layer rather than scheduling, focus, or VT ownership.
+
+The GLX catalog exposed sRGB capability only on a 32-bit ARGB visual. An
+application requesting an sRGB framebuffer was consequently forced onto the
+translucent visual even when it wanted a normal opaque window. Sophia then
+imported and blended its DRI3 pixmap as ARGB. The catalog now includes a
+24-bit opaque sRGB framebuffer configuration and orders it before translucent
+sRGB alternatives, matching the app-agnostic capability shape applications
+expect from a normal X server. Context and GLX-window validation accept the new
+configuration, and wire regression coverage proves its visual, capability,
+and ordering.

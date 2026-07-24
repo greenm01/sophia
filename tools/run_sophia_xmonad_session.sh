@@ -263,6 +263,8 @@ session_command=(
     target/release/sophia
     "${session_args[@]}"
 )
+python3 "$ROOT_DIR/tools/sophia_tty_mode.py" graphics
+stty raw -echo
 setsid "${session_command[@]}" > >(tee "$SESSION_LOG") 2>&1 &
 session_pid=$!
 set +e

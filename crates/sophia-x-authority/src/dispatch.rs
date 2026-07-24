@@ -94,6 +94,10 @@ fn glx_fb_config(id: u32, visual: u32, alpha: u32, srgb: u32) -> Vec<(u32, u32)>
 fn glx_fb_configs() -> Vec<Vec<(u32, u32)>> {
     vec![
         glx_fb_config(1, X_SETUP_DEFAULT_VISUAL, 0, 0),
+        // Opaque sRGB must precede translucent sRGB. Applications that ask
+        // for an sRGB-capable default framebuffer must not be forced onto an
+        // ARGB visual merely because the opaque visual lacked that capability.
+        glx_fb_config(4, X_SETUP_DEFAULT_VISUAL, 0, 1),
         glx_fb_config(2, X_SETUP_ARGB_VISUAL, 8, 0),
         glx_fb_config(3, X_SETUP_ARGB_VISUAL, 8, 1),
     ]
@@ -2575,7 +2579,7 @@ pub fn dispatch_x11_wire_request(
             direct,
         } => {
             let valid = screen == 0
-                && (1..=3).contains(&fbconfig)
+                && (1..=4).contains(&fbconfig)
                 && share.map_or(true, |share| {
                     runtime.glx_context(context.namespace, share).is_ok()
                 });
@@ -2654,7 +2658,7 @@ pub fn dispatch_x11_wire_request(
             let visual = runtime.window_visual(window).1;
             let compatible = matches!(
                 (fbconfig, visual),
-                (1, X_SETUP_DEFAULT_VISUAL) | (2 | 3, X_SETUP_ARGB_VISUAL)
+                (1 | 4, X_SETUP_DEFAULT_VISUAL) | (2 | 3, X_SETUP_ARGB_VISUAL)
             );
             let outputs = if screen == 0 && compatible {
                 runtime

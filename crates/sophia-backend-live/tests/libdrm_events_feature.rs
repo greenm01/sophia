@@ -1689,6 +1689,64 @@ fn output_scoped_service_selects_idle_pending_output_while_primary_is_blocked() 
     assert!(observation.pending_output_ready);
 }
 
+#[cfg(feature = "gbm-probe")]
+#[test]
+fn queued_present_reserves_idle_primary_from_pending_cpu_frame() {
+    let observation = reduce_live_production_async_service_observation(
+        &[
+            LiveProductionOutputServiceState {
+                output: OutputId::from_raw(3),
+                primary: true,
+                in_flight: false,
+                cleanup_pending: false,
+                frame_pending: true,
+            },
+            LiveProductionOutputServiceState {
+                output: OutputId::from_raw(9),
+                primary: false,
+                in_flight: true,
+                cleanup_pending: false,
+                frame_pending: false,
+            },
+        ],
+        true,
+    )
+    .unwrap();
+
+    assert!(observation.present_queued);
+    assert!(!observation.present_output_blocked);
+    assert!(!observation.pending_output_ready);
+}
+
+#[cfg(feature = "gbm-probe")]
+#[test]
+fn queued_present_still_allows_idle_secondary_pending_frame() {
+    let observation = reduce_live_production_async_service_observation(
+        &[
+            LiveProductionOutputServiceState {
+                output: OutputId::from_raw(3),
+                primary: true,
+                in_flight: false,
+                cleanup_pending: false,
+                frame_pending: true,
+            },
+            LiveProductionOutputServiceState {
+                output: OutputId::from_raw(9),
+                primary: false,
+                in_flight: false,
+                cleanup_pending: false,
+                frame_pending: true,
+            },
+        ],
+        true,
+    )
+    .unwrap();
+
+    assert!(observation.present_queued);
+    assert!(!observation.present_output_blocked);
+    assert!(observation.pending_output_ready);
+}
+
 impl FakeRenderedScanoutExporter {
     fn exported(size: Size) -> Self {
         Self {

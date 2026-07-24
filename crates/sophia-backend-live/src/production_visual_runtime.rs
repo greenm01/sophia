@@ -363,9 +363,6 @@ impl LiveProductionVisualRuntime {
             self.reject_gpu_presentation(transaction, 0, 0);
             return self.run_observation_tick();
         };
-        if self.native_scanout_in_flight() {
-            return self.run_observation_tick();
-        }
         let queued = self
             .present_scheduler
             .front()
@@ -390,6 +387,12 @@ impl LiveProductionVisualRuntime {
             .ok_or("persistent backend primary output was not registered")?;
         if native_scanout.output_index(primary_output) != Some(primary_index) {
             return Err("persistent backend and native primary output ordering diverged".into());
+        }
+        let output_states = self.native_output_service_states(native_scanout)?;
+        if reduce_live_production_async_service_observation(&output_states, true)?
+            .present_output_blocked
+        {
+            return self.run_observation_tick();
         }
         let mixed = self.presentation_feedback.resources().build_mixed_frame(
             transaction,
@@ -744,8 +747,21 @@ impl LiveProductionVisualRuntime {
         &mut self,
         native_scanout: &mut LiveProductionNativeScanout,
     ) -> Result<crate::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
+        self.run_native_idle_with_primary_reservation(native_scanout, false)
+    }
+
+    fn run_native_idle_with_primary_reservation(
+        &mut self,
+        native_scanout: &mut LiveProductionNativeScanout,
+        reserve_primary: bool,
+    ) -> Result<crate::LiveBackendRuntimeTickReport, Box<dyn std::error::Error>> {
         let transactions = self.layers.values().cloned().collect::<Vec<_>>();
         let output_count = self.outputs.output_count();
+        let primary_index = self
+            .outputs
+            .primary_output()
+            .and_then(|output| self.outputs.output_index(output))
+            .ok_or("persistent backend runtime has no primary output")?;
         let production = &self.production;
         let outputs = &mut self.outputs;
         let mut adapter = crate::LiveProductionOutputRuntimeAdapter::new(
@@ -759,7 +775,8 @@ impl LiveProductionVisualRuntime {
                     .runtime
                     .assembly_mut()
                     .replace_committed_surfaces(committed.to_vec());
-                if output.runtime.rendered_primary_plane_scanout_in_flight()
+                if (reserve_primary && index == primary_index)
+                    || output.runtime.rendered_primary_plane_scanout_in_flight()
                     || output
                         .runtime
                         .rendered_primary_plane_scanout_cleanup_pending()
@@ -1003,9 +1020,12 @@ pub fn reduce_live_production_async_service_observation(
             .any(|output| output.in_flight || output.cleanup_pending),
         present_output_blocked: primary.in_flight || primary.cleanup_pending,
         present_queued,
-        pending_output_ready: outputs
-            .iter()
-            .any(|output| output.frame_pending && !output.in_flight && !output.cleanup_pending),
+        pending_output_ready: outputs.iter().any(|output| {
+            output.frame_pending
+                && !output.in_flight
+                && !output.cleanup_pending
+                && (!present_queued || !output.primary)
+        }),
     })
 }
 
@@ -1069,7 +1089,10 @@ impl LiveProductionVisualRuntime {
                 }
                 Some(ProductionAsyncServicePhase::SubmitPendingFrame) => {
                     pending_frame_polled = true;
-                    tick = Some(self.run_native_idle(native_scanout)?);
+                    tick = Some(self.run_native_idle_with_primary_reservation(
+                        native_scanout,
+                        self.diagnostics().present_queued,
+                    )?);
                 }
                 None => break,
             }

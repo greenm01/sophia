@@ -88,6 +88,12 @@ Milestone 5 hardware runner.
 - [x] Remove multi-output Present head-of-line blocking: retire all outputs,
   gate Present only on its primary output, and submit pending frames only on
   individually idle outputs.
+- [x] Remove the duplicate global in-flight veto inside the Present driver and
+  put tty3 into KD graphics plus raw/no-echo mode for graphical ownership.
+- [x] Reserve the primary output for a queued Present transaction so a
+  transiently deferred mixed submit cannot be starved by recurring CPU frames.
+- [x] Advertise opaque 24-bit sRGB GLX framebuffer configurations before
+  translucent ARGB alternatives so opaque clients retain XRGB semantics.
 - [ ] Retain a physical Kitty-only capture proving visible cursor motion within
   two 60 Hz refresh intervals, click-drag selection, typed input, clean exit,
   and emergency recovery.
