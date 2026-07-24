@@ -2318,7 +2318,7 @@ reserves the primary from pending CPU submission. Idle secondary outputs remain
 eligible, preserving independent multi-output progress. Regression coverage
 proves both the primary reservation and secondary eligibility.
 
-## 2026-07-24: Opaque sRGB Clients Need An Opaque GLX Configuration
+## 2026-07-24: The Opaque sRGB Hypothesis Was Disproved
 
 The next physical run proved mixed scanout and input were functional despite
 the display still appearing black. Present transaction 202 reached mixed KMS
@@ -2326,12 +2326,17 @@ scanout, retired, became stable in 708 milliseconds, and accepted the user's
 `exit` input. The failure was therefore the content of the imported client
 layer rather than scheduling, focus, or VT ownership.
 
-The GLX catalog exposed sRGB capability only on a 32-bit ARGB visual. An
-application requesting an sRGB framebuffer was consequently forced onto the
-translucent visual even when it wanted a normal opaque window. Sophia then
-imported and blended its DRI3 pixmap as ARGB. The catalog now includes a
-24-bit opaque sRGB framebuffer configuration and orders it before translucent
-sRGB alternatives, matching the app-agnostic capability shape applications
-expect from a normal X server. Context and GLX-window validation accept the new
-configuration, and wire regression coverage proves its visual, capability,
-and ordering.
+Adding an opaque sRGB framebuffer configuration did not change the client
+selection: the next retained request stream still selected FBConfig 3, created
+depth-32 windows, and exported ARGB8888 pixmaps. Both physical outputs remained
+blank even though the mixed frame retired and keyboard input reached the
+client. The speculative configuration and its compatibility claim are removed.
+
+The remaining boundary is pixel content. Native mixed composition now has an
+opt-in, one-shot readback that reports only aggregate counts and checksums after
+the CPU background and after the DMA-BUF layer. The verifier distinguishes an
+unchanged framebuffer, no visible RGB delta, and a visibly changed client
+layer. ARGB composition also uses premultiplied source-over blending (`ONE`,
+`ONE_MINUS_SRC_ALPHA`) instead of multiplying source RGB by alpha twice. These
+changes remain application-agnostic and preserve Engine's protocol-neutral
+authority boundary.

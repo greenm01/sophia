@@ -5,6 +5,8 @@ use std::{
 };
 
 use crate::NativeEglDrawSmokeStatus;
+#[cfg(feature = "gbm-platform")]
+use crate::{NativeCompositionPixelMetrics, native_composition_pixel_metrics};
 
 #[cfg(feature = "gbm-platform")]
 const FULLSCREEN_QUAD_VERTICES: [f32; 16] = [
@@ -396,6 +398,37 @@ impl PersistentXrgb8888GlPipeline {
         Ok(())
     }
 
+    pub(crate) fn read_composition_pixels(
+        &self,
+    ) -> Result<NativeCompositionPixelMetrics, NativeEglDrawSmokeStatus> {
+        let byte_len = usize::try_from(self.width)
+            .ok()
+            .and_then(|width| {
+                usize::try_from(self.height)
+                    .ok()
+                    .and_then(|height| width.checked_mul(height))
+            })
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or(NativeEglDrawSmokeStatus::GlUnavailable)?;
+        let mut rgba = vec![0; byte_len];
+        unsafe {
+            self.gl.finish();
+            self.gl.read_pixels(
+                0,
+                0,
+                self.width as i32,
+                self.height as i32,
+                glow::RGBA,
+                glow::UNSIGNED_BYTE,
+                glow::PixelPackData::Slice(Some(&mut rgba)),
+            );
+            if self.gl.get_error() != glow::NO_ERROR {
+                return Err(NativeEglDrawSmokeStatus::GlUnavailable);
+            }
+        }
+        Ok(native_composition_pixel_metrics(&rgba))
+    }
+
     fn draw_bound_texture(
         &self,
         target: GlCompositionRect,
@@ -423,8 +456,7 @@ impl PersistentXrgb8888GlPipeline {
         unsafe {
             if has_alpha || alpha < 1.0 {
                 self.gl.enable(glow::BLEND);
-                self.gl
-                    .blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+                self.gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
             } else {
                 self.gl.disable(glow::BLEND);
             }
@@ -680,7 +712,8 @@ uniform sampler2D frame;
 uniform float opacity;
 varying vec2 texture_position;
 void main() {
-    gl_FragColor = texture2D(frame, texture_position) * opacity;
+    vec4 color = texture2D(frame, texture_position);
+    gl_FragColor = vec4(color.rgb * opacity, color.a * opacity);
 }
 "#;
 

@@ -92,8 +92,8 @@ Milestone 5 hardware runner.
   put tty3 into KD graphics plus raw/no-echo mode for graphical ownership.
 - [x] Reserve the primary output for a queued Present transaction so a
   transiently deferred mixed submit cannot be starved by recurring CPU frames.
-- [x] Advertise opaque 24-bit sRGB GLX framebuffer configurations before
-  translucent ARGB alternatives so opaque clients retain XRGB semantics.
+- [x] Add one-shot aggregate pixel evidence at the native mixed-composition
+  boundary and correct ARGB layers to premultiplied source-over blending.
 - [ ] Retain a physical Kitty-only capture proving visible cursor motion within
   two 60 Hz refresh intervals, click-drag selection, typed input, clean exit,
   and emergency recovery.

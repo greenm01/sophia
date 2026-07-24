@@ -624,7 +624,7 @@ fn kitty_glx_context_attribs_layout_decodes_the_28_byte_header() {
 }
 
 #[test]
-fn fbconfig_catalog_offers_opaque_srgb_before_argb_srgb() {
+fn kitty_fbconfig_catalog_has_argb_blue_aux_and_srgb_attributes() {
     let namespace = NamespaceId::from_raw(1);
     let mut runtime = XAuthorityRuntime::new();
     let mut atoms = XAtomTable::new();
@@ -638,7 +638,7 @@ fn fbconfig_catalog_offers_opaque_srgb_before_argb_srgb() {
     )
     .encoded_outputs(XByteOrder::LittleEndian)
     .remove(0);
-    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[8..12]), 4);
+    assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[8..12]), 3);
     assert_eq!(read_u32(XByteOrder::LittleEndian, &encoded[12..16]), 26);
     let pair = |config: usize, attribute: usize| 32 + (config * 26 + attribute) * 8;
     let aux = pair(0, 10);
@@ -659,44 +659,14 @@ fn fbconfig_catalog_offers_opaque_srgb_before_argb_srgb() {
         read_u32(XByteOrder::LittleEndian, &encoded[blue + 4..blue + 8]),
         8
     );
-    let opaque_srgb_config = pair(1, 0);
+    let srgb = pair(2, 25);
     assert_eq!(
-        read_u32(
-            XByteOrder::LittleEndian,
-            &encoded[opaque_srgb_config + 4..opaque_srgb_config + 8]
-        ),
-        4
-    );
-    let opaque_srgb_visual = pair(1, 1);
-    assert_eq!(
-        read_u32(
-            XByteOrder::LittleEndian,
-            &encoded[opaque_srgb_visual + 4..opaque_srgb_visual + 8]
-        ),
-        X_SETUP_DEFAULT_VISUAL
-    );
-    let opaque_srgb = pair(1, 25);
-    assert_eq!(
-        read_u32(
-            XByteOrder::LittleEndian,
-            &encoded[opaque_srgb..opaque_srgb + 4]
-        ),
+        read_u32(XByteOrder::LittleEndian, &encoded[srgb..srgb + 4]),
         0x20b2
     );
     assert_eq!(
-        read_u32(
-            XByteOrder::LittleEndian,
-            &encoded[opaque_srgb + 4..opaque_srgb + 8]
-        ),
+        read_u32(XByteOrder::LittleEndian, &encoded[srgb + 4..srgb + 8]),
         1
-    );
-    let argb_srgb_visual = pair(3, 1);
-    assert_eq!(
-        read_u32(
-            XByteOrder::LittleEndian,
-            &encoded[argb_srgb_visual + 4..argb_srgb_visual + 8]
-        ),
-        X_SETUP_ARGB_VISUAL
     );
 }
 

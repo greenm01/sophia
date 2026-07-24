@@ -2,6 +2,7 @@ use std::{
     ffi::c_void,
     os::fd::{AsRawFd, BorrowedFd, OwnedFd},
     process, ptr,
+    sync::atomic::{AtomicBool, Ordering},
     time::Duration,
     time::Instant,
 };
@@ -1470,8 +1471,13 @@ fn render_persistent_target_composition<T: std::os::fd::AsFd>(
     trace_native_lifecycle("composition_surface_current");
     target.pipeline.begin_composition();
     trace_native_lifecycle("composition_started");
+    static PIXEL_TRACE_CLAIMED: AtomicBool = AtomicBool::new(false);
+    let trace_pixels = std::env::var_os("SOPHIA_NATIVE_COMPOSITION_PIXEL_TRACE").is_some()
+        && PIXEL_TRACE_CLAIMED
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok();
     let mut draw_result = Ok(());
-    for layer in frame.layers {
+    for (layer_index, layer) in frame.layers.iter().enumerate() {
         if draw_result.is_err() {
             break;
         }
@@ -1493,6 +1499,17 @@ fn render_persistent_target_composition<T: std::os::fd::AsFd>(
                     .map_err(|_| NativeGbmScanoutBufferExportDetail::CpuLayerUploadFailed);
                 if result.is_ok() {
                     trace_native_lifecycle("composition_cpu_layer_finished");
+                    if trace_pixels {
+                        trace_composition_pixels(
+                            &target.pipeline,
+                            "cpu",
+                            layer_index,
+                            layer.target,
+                            layer.format,
+                            u64::MAX,
+                            layer.stride,
+                        );
+                    }
                 }
                 result
             }
@@ -1501,6 +1518,17 @@ fn render_persistent_target_composition<T: std::os::fd::AsFd>(
                 let result = draw_composition_dmabuf_layer(egl, display, &target.pipeline, *layer);
                 if result.is_ok() {
                     trace_native_lifecycle("composition_dmabuf_layer_finished");
+                    if trace_pixels {
+                        trace_composition_pixels(
+                            &target.pipeline,
+                            "dmabuf",
+                            layer_index,
+                            layer.target,
+                            layer.frame.format,
+                            layer.frame.modifier,
+                            layer.frame.planes[0].map_or(0, |plane| plane.stride),
+                        );
+                    }
                 }
                 result
             }
@@ -1532,6 +1560,36 @@ fn render_persistent_target_composition<T: std::os::fd::AsFd>(
         });
     let _ = egl.make_current(display, None, None, None);
     retain_egl_surface_until_scanout_release(egl, display, egl_surface, result)
+}
+
+fn trace_composition_pixels(
+    pipeline: &PersistentXrgb8888GlPipeline,
+    stage: &str,
+    layer: usize,
+    target: NativeCompositionRect,
+    format: u32,
+    modifier: u64,
+    stride: u32,
+) {
+    match pipeline.read_composition_pixels() {
+        Ok(metrics) => eprintln!(
+            "sophia_native_composition_pixels schema=1 status=read stage={stage} layer={layer} target={}x{}_{}_{} format={format:#x} modifier={modifier:#x} stride={stride} pixels={} nonzero_rgb_pixels={} alpha_zero_pixels={} alpha_partial_pixels={} alpha_opaque_pixels={} checksum={}",
+            target.width,
+            target.height,
+            target.x,
+            target.y,
+            metrics.pixels,
+            metrics.nonzero_rgb_pixels,
+            metrics.alpha_zero_pixels,
+            metrics.alpha_partial_pixels,
+            metrics.alpha_opaque_pixels,
+            metrics.checksum,
+        ),
+        Err(_) => eprintln!(
+            "sophia_native_composition_pixels schema=1 status=unavailable stage={stage} layer={layer} target={}x{}_{}_{} format={format:#x} modifier={modifier:#x} stride={stride}",
+            target.width, target.height, target.x, target.y,
+        ),
+    }
 }
 
 fn draw_composition_dmabuf_layer(
