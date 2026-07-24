@@ -1485,19 +1485,38 @@ pub fn dispatch_x11_wire_request(
         XWireRequest::SetInputFocus {
             focus, revert_to, ..
         } => {
-            let outputs = runtime
-                .set_input_focus(context.namespace, focus, revert_to)
-                .err()
-                .map(|error| {
-                    XClientOutput::Error(x_error_from_runtime(
-                        error,
-                        context.sequence,
-                        context.major_opcode,
-                        u32::try_from(focus.local.raw()).unwrap_or(0),
-                    ))
-                })
-                .into_iter()
-                .collect();
+            let (previous, _) = runtime.input_focus(context.namespace);
+            let outputs = match runtime.set_input_focus(context.namespace, focus, revert_to) {
+                Err(error) => vec![XClientOutput::Error(x_error_from_runtime(
+                    error,
+                    context.sequence,
+                    context.major_opcode,
+                    u32::try_from(focus.local.raw()).unwrap_or(0),
+                ))],
+                Ok(()) if previous == focus => Vec::new(),
+                Ok(()) => {
+                    let mut outputs = Vec::with_capacity(2);
+                    if previous.local.raw() != 0 {
+                        outputs.push(XClientOutput::Event(XClientEvent::Focus {
+                            sequence: context.sequence,
+                            focused: false,
+                            detail: 3,
+                            event: previous,
+                            mode: 0,
+                        }));
+                    }
+                    if focus.local.raw() != 0 {
+                        outputs.push(XClientOutput::Event(XClientEvent::Focus {
+                            sequence: context.sequence,
+                            focused: true,
+                            detail: 3,
+                            event: focus,
+                            mode: 0,
+                        }));
+                    }
+                    outputs
+                }
+            };
             XDispatchResult {
                 response: None,
                 outputs,
@@ -3785,19 +3804,19 @@ fn extension_query_result(name: &str) -> XExtensionQueryResult {
         crate::X_XFIXES_EXTENSION_NAME => XExtensionQueryResult {
             present: true,
             major_opcode: crate::X_XFIXES_MAJOR_OPCODE,
-            first_event: 0,
+            first_event: crate::X_XFIXES_FIRST_EVENT,
             first_error: 0,
         },
         crate::X_GLX_EXTENSION_NAME => XExtensionQueryResult {
             present: true,
             major_opcode: crate::X_GLX_MAJOR_OPCODE,
-            first_event: 0,
+            first_event: crate::X_GLX_FIRST_EVENT,
             first_error: 0,
         },
         crate::X_SYNC_EXTENSION_NAME => XExtensionQueryResult {
             present: true,
             major_opcode: crate::X_SYNC_MAJOR_OPCODE,
-            first_event: 0,
+            first_event: crate::X_SYNC_FIRST_EVENT,
             first_error: 0,
         },
         X_RANDR_EXTENSION_NAME => XExtensionQueryResult {

@@ -37,15 +37,25 @@ if [[ ! -t 0 ]]; then
     exit 1
 fi
 
+live_named_processes() {
+    local name pid state
+    for name in "$@"; do
+        while read -r pid; do
+            [[ -n "$pid" ]] || continue
+            state="$(ps -o stat= -p "$pid" 2>/dev/null || true)"
+            [[ "$state" == Z* ]] || printf '%s:%s\n' "$name" "$pid"
+        done < <(pgrep -x "$name" 2>/dev/null || true)
+    done
+}
 active_sessions=()
 for process in river niri sway Hyprland kwin_wayland Xorg; do
-    if pgrep -x "$process" >/dev/null 2>&1; then
-        active_sessions+=("$process")
-    fi
+    while read -r active; do
+        [[ -n "$active" ]] && active_sessions+=("$active")
+    done < <(live_named_processes "$process")
 done
 if (( ${#active_sessions[@]} > 0 )); then
     echo "Refusing to take over a TTY while a graphical session is active." >&2
-    echo "Still active: ${active_sessions[*]}" >&2
+    echo "Still active (process:pid): ${active_sessions[*]}" >&2
     exit 1
 fi
 

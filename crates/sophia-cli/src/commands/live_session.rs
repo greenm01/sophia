@@ -3577,6 +3577,7 @@ fn run_session_loop(
             && startup_frame_presented
         {
             startup_ready_reported = true;
+            startup_ready_msec.get_or_insert_with(|| started.elapsed().as_millis());
             println!(
                 "sophia_live_session_startup schema=1 status=ready elapsed_msec={} surface=true visual_detail=true presented=true",
                 started.elapsed().as_millis()

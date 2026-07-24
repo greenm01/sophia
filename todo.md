@@ -112,12 +112,17 @@ Milestone 5 hardware runner.
 - [x] Add a real-Kitty automated input gate that requires an exact shell result
   and a post-input Present, with XKB, focus, event-selection, and wire-delivery
   diagnostics.
-- [ ] Fix the evidenced Kitty X11/Present consumption boundary until
+- [x] Fix the evidenced Kitty X11/Present consumption boundary until
   `x-authority-kitty-input-smoke` passes; do not resume physical TTY3 testing
-  or re-enable xmonad before this gate is green.
-- [ ] Retain a physical Kitty-only capture proving visible cursor motion within
+  or re-enable xmonad before this gate is green. The root cause was GLX
+  advertising event base zero: libX11 installed GLX wire converters over core
+  KeyPress/KeyRelease slots and discarded otherwise valid keyboard events.
+- [x] Retain a physical Kitty-only capture proving visible cursor motion within
   two 60 Hz refresh intervals, click-drag selection, typed input, clean exit,
-  and emergency recovery.
+  and emergency recovery. The 2026-07-24 TTY3 run reached readiness in 798 ms,
+  routed keyboard input and two pointer-button transitions, bounded cursor
+  motion-to-submit at 13 ms, exited Kitty with status zero, and restored the
+  originating TTY without emergency recovery.
 - [ ] Re-enable xmonad only after the Kitty input gate passes and the xmonad
   resize handshake has its own retained regression.
 

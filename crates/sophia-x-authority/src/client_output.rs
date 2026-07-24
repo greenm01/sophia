@@ -1468,10 +1468,16 @@ pub fn encode_x_client_reply(byte_order: XByteOrder, reply: XClientReply) -> Vec
                 }
             }
             if which & 0x80 != 0 {
-                // Level names are optional. A zero count for every type asks
-                // libxkbcommon to install its normal unnamed-level fallback.
-                body.resize(body.len().saturating_add(type_atoms.len()), 0);
+                // The count for each type must match the numLevels advertised
+                // by XkbGetMap. Atom None is a valid unnamed-level fallback,
+                // but omitting the level slots makes the two replies
+                // structurally inconsistent and strict xkbcommon rejects the
+                // entire keymap.
+                body.extend(std::iter::repeat_n(2, type_atoms.len()));
                 body.resize(padded_len(body.len()), 0);
+                for _ in 0..type_atoms.len().saturating_mul(2) {
+                    push_u32(byte_order, &mut body, 0);
+                }
             }
             if which & 0x200 != 0 {
                 for name in &key_names {

@@ -3241,6 +3241,71 @@ fn x11_dispatch_advertises_probe_backed_xkeyboard_extension() {
 }
 
 #[test]
+fn extension_event_ranges_do_not_replace_core_or_each_other() {
+    let ranges = [
+        ("RANDR", X_RANDR_FIRST_EVENT, 2_u8),
+        ("XFIXES", X_XFIXES_FIRST_EVENT, 2),
+        ("SYNC", X_SYNC_FIRST_EVENT, 2),
+        ("XKEYBOARD", X_KEYBOARD_FIRST_EVENT, 1),
+        ("GLX", X_GLX_FIRST_EVENT, 17),
+        ("XInputExtension", X_INPUT_FIRST_EVENT, 17),
+        ("MIT-SHM", X_MIT_SHM_FIRST_EVENT, 1),
+    ];
+    let mut owners = std::collections::BTreeMap::new();
+    for (name, first, count) in ranges {
+        assert!(
+            first > 35,
+            "{name} event base {first} collides with core X11 events"
+        );
+        for event_type in first..first + count {
+            assert!(
+                owners.insert(event_type, name).is_none(),
+                "{name} event type {event_type} overlaps another extension"
+            );
+        }
+
+        let namespace = NamespaceId::from_raw(46);
+        let query = decode_x11_core_request(
+            context(namespace, u64::from(first), XByteOrder::LittleEndian),
+            &query_extension_request(XByteOrder::LittleEndian, name),
+        )
+        .unwrap();
+        let encoded = dispatch_x11_wire_request(
+            dispatch_context(namespace, 1, XByteOrder::LittleEndian, 98),
+            query,
+            &mut XAuthorityRuntime::new(),
+            &mut XAtomTable::new(),
+            &mut XPropertyTable::new(),
+        )
+        .encoded_outputs(XByteOrder::LittleEndian);
+        assert_eq!(
+            encoded[0][10], first,
+            "{name} did not advertise its allocated event base"
+        );
+    }
+}
+
+#[test]
+fn x11_dispatch_advertises_non_core_glx_event_base() {
+    let namespace = NamespaceId::from_raw(46);
+    let query = decode_x11_core_request(
+        context(namespace, 547, XByteOrder::LittleEndian),
+        &query_extension_request(XByteOrder::LittleEndian, X_GLX_EXTENSION_NAME),
+    )
+    .unwrap();
+    let result = dispatch_x11_wire_request(
+        dispatch_context(namespace, 1, XByteOrder::LittleEndian, 98),
+        query,
+        &mut XAuthorityRuntime::new(),
+        &mut XAtomTable::new(),
+        &mut XPropertyTable::new(),
+    );
+    let encoded = result.encoded_outputs(XByteOrder::LittleEndian);
+    assert_eq!(encoded[0][9], X_GLX_MAJOR_OPCODE);
+    assert_eq!(encoded[0][10], X_GLX_FIRST_EVENT);
+}
+
+#[test]
 fn xkb_state_names_and_state_subscription_use_standard_wire_layouts() {
     let namespace = NamespaceId::from_raw(45);
     let order = XByteOrder::LittleEndian;
@@ -7569,6 +7634,12 @@ fn x11_core_socket_smoke_round_trips_atom_property_and_window_events() {
     let map = read_x_record(&mut stream);
     assert_eq!(map[0], 19);
     assert_eq!(read_u32(XByteOrder::LittleEndian, &map[8..12]), 0x220201);
+    let visibility = read_x_record(&mut stream);
+    assert_eq!(visibility[0], 15);
+    assert_eq!(
+        read_u32(XByteOrder::LittleEndian, &visibility[4..8]),
+        0x220201
+    );
     let expose = read_x_record(&mut stream);
     assert_eq!(expose[0], 12);
     assert_eq!(read_u32(XByteOrder::LittleEndian, &expose[4..8]), 0x220201);

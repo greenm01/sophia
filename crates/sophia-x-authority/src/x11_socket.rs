@@ -4478,6 +4478,10 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                         _ => None,
                     };
                     let xkb_get_state = matches!(request, crate::XWireRequest::XkbGetState);
+                    let requested_input_focus = match &request {
+                        crate::XWireRequest::SetInputFocus { focus, .. } => Some(*focus),
+                        _ => None,
+                    };
                     let mapped_window = match &request {
                         crate::XWireRequest::Authority(crate::XAuthorityRequestPacket {
                             kind: crate::XAuthorityRequestKind::MapWindow { window, .. },
@@ -4621,6 +4625,9 @@ fn serve_x11_core_socket_client_with_trace_observer_and_input(
                         .iter()
                         .any(|output| matches!(output, crate::XClientOutput::Error(_)));
                     if dispatch_succeeded {
+                        if let Some(focus) = requested_input_focus {
+                            focused_surface_window.store(focus.local.raw(), Ordering::Release);
+                        }
                         let mut selections = core_event_selections.lock().map_err(|_| {
                             X11SetupSocketError::new("X11 core event selection lock poisoned")
                         })?;
@@ -5499,30 +5506,42 @@ fn spawn_x11_control_writer(
                     )]
                 }
                 XAuthorityControlCommand::FocusSurface { .. } => {
-                    if runtime
-                        .lock()
-                        .map_err(|_| {
+                    let previous = {
+                        let mut runtime = runtime.lock().map_err(|_| {
                             X11SetupSocketError::new("X11 authority runtime lock poisoned")
-                        })?
-                        .set_input_focus(namespace, window, 1)
-                        .is_err()
-                    {
+                        })?;
+                        let (previous, _) = runtime.input_focus(namespace);
+                        if runtime.set_input_focus(namespace, window, 1).is_err() {
+                            channels.send_ack(
+                                client,
+                                XAuthorityControlAck {
+                                    transaction,
+                                    surface,
+                                    outcome: XAuthorityControlOutcome::AuthorityRejected,
+                                },
+                            )?;
+                            continue;
+                        }
+                        previous
+                    };
+                    let previous_routed = XResourceId::new(
+                        focused_surface_window.swap(window.local.raw(), Ordering::AcqRel),
+                        1,
+                    );
+                    if previous == window && previous_routed == window {
                         channels.send_ack(
                             client,
                             XAuthorityControlAck {
                                 transaction,
                                 surface,
-                                outcome: XAuthorityControlOutcome::AuthorityRejected,
+                                outcome: XAuthorityControlOutcome::Delivered,
                             },
                         )?;
                         continue;
                     }
-                    let previous = XResourceId::new(
-                        focused_surface_window.swap(window.local.raw(), Ordering::AcqRel),
-                        1,
-                    );
                     let mut records = Vec::with_capacity(2);
-                    if previous != window && previous.local.raw() != u64::from(X_SETUP_DEFAULT_ROOT)
+                    if previous_routed != window
+                        && previous_routed.local.raw() != u64::from(X_SETUP_DEFAULT_ROOT)
                     {
                         records.push(encode_x_client_event(
                             byte_order,
@@ -5530,7 +5549,7 @@ fn spawn_x11_control_writer(
                                 sequence: event_sequence,
                                 focused: false,
                                 detail: 3,
-                                event: previous,
+                                event: previous_routed,
                                 mode: 0,
                             },
                         ));
@@ -5707,6 +5726,11 @@ fn spawn_x11_input_event_writer(
                 ),
             };
             let delivered_focus = delivered_window;
+            if matches!(event, XAuthorityInputEvent::Key(_))
+                && focused_surface_window.load(Ordering::Acquire) == delivered_focus.local.raw()
+            {
+                focus_sent_to = Some(delivered_focus);
+            }
             let mut record = encode_x_client_event(
                 byte_order,
                 match event {

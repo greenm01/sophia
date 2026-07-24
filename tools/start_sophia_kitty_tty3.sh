@@ -16,6 +16,29 @@ exec > >(tee "$LAUNCH_LOG") 2>&1
 echo "Retaining complete launcher output in $LAUNCH_LOG"
 
 display_manager=""
+graphical_processes=(river niri sway Hyprland kwin_wayland Xorg)
+live_named_processes() {
+    local name pid state
+    for name in "$@"; do
+        while read -r pid; do
+            [[ -n "$pid" ]] || continue
+            state="$(ps -o stat= -p "$pid" 2>/dev/null || true)"
+            [[ "$state" == Z* ]] || printf '%s:%s\n' "$name" "$pid"
+        done < <(pgrep -x "$name" 2>/dev/null || true)
+    done
+}
+terminate_named_processes() {
+    local record pid
+    while read -r record; do
+        [[ -n "$record" ]] || continue
+        pid="${record##*:}"
+        [[ "$pid" =~ ^[0-9]+$ ]] || continue
+        echo "Stopping lingering graphical process $record..."
+        if ! kill -TERM "$pid" 2>/dev/null; then
+            sudo kill -TERM "$pid"
+        fi
+    done < <(live_named_processes "$@")
+}
 for candidate in lightdm greetd; do
     if [[ -e "/var/service/$candidate" ]] && sudo sv status "$candidate" 2>/dev/null | grep -q '^run:'; then
         display_manager="$candidate"
@@ -48,12 +71,22 @@ trap restore_display_manager EXIT
 if [[ -n "$display_manager" ]]; then
     echo "Stopping $display_manager so Sophia can own DRM..."
     sudo sv down "$display_manager"
-    for _ in {1..50}; do
-        pgrep -x Xorg >/dev/null 2>&1 || break
+    for _ in {1..100}; do
+        [[ -n "$(live_named_processes "${graphical_processes[@]}")" ]] || break
         sleep 0.1
     done
-    if pgrep -x Xorg >/dev/null 2>&1; then
-        echo "Xorg remained active after $display_manager stopped; refusing takeover." >&2
+    remaining_graphics="$(live_named_processes "${graphical_processes[@]}")"
+    if [[ -n "$remaining_graphics" ]]; then
+        terminate_named_processes "${graphical_processes[@]}"
+        for _ in {1..50}; do
+            [[ -n "$(live_named_processes "${graphical_processes[@]}")" ]] || break
+            sleep 0.1
+        done
+        remaining_graphics="$(live_named_processes "${graphical_processes[@]}")"
+    fi
+    if [[ -n "$remaining_graphics" ]]; then
+        echo "A graphical session remained active after $display_manager stopped; refusing takeover." >&2
+        printf 'Still active (process:pid):\n%s\n' "$remaining_graphics" >&2
         exit 1
     fi
 fi
